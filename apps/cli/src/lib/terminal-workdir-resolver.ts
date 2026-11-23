@@ -1,3 +1,4 @@
+import { projectGroupDirectory } from '@/session/worktree/project-worktrees';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -88,6 +89,11 @@ async function resolveTerminalWorkdirForSession(
   const isDirectory = options.isDirectory ?? defaultIsDirectory;
   const homeDir = options.homeDir ?? os.homedir();
   const project = meta.project;
+  if (meta.projectRun)
+    return requireExistingDirectory(
+      path.join(projectGroupDirectory(meta.projectRun), 'worktrees', sessionId),
+      isDirectory
+    );
 
   if (project?.kind === 'local') {
     const rootPath = await options.resolveLocalProjectRootPath(project.localProjectId);

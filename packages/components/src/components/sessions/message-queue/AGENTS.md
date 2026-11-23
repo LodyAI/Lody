@@ -1,0 +1,72 @@
+# sessions/message-queue — queued turns
+
+`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+
+Read the parent [sessions AGENTS.md](../AGENTS.md) first. This scope renders the
+queued-turn list (`message-queue-display.tsx`, `message-queue-row.tsx`,
+`queued-image-preview.tsx`, `use-message-queue-editing.ts`) that
+`session-chat-interface.tsx` mounts through the composer info bar's queue slot. Submission routing into the queue lives in
+`../session-message-submit-route.ts` and is described in
+[.agents/docs/sessions-live-status.md](../../../../../../.agents/docs/sessions-live-status.md).
+
+Composer routing and queued-row native steering share one capability predicate.
+Native acknowledged steering is available only when the
+authoritative ACP capability cache advertises it. Never infer steering support
+from built-in/custom config type or agent identity. Every row offers Send while idle. Stop retains queued drafts as paused, and only
+an explicit Send/Steer reissues the selected paused draft under a fresh input id.
+While working, native steering serves every row. Without it, unpaused rows keep
+only the first-row interrupt fallback; a paused row can explicitly submit its new
+input and interrupt the current turn without releasing its paused siblings.
+
+The queue intentionally stays OUT of the composer info bar's items
+([.agents/docs/sessions-info-bar.md](../../../../../../.agents/docs/sessions-info-bar.md)).
+It renders through the bar's `queue` slot as an inset sheet (composer fill, rounded
+top, square bottom) sitting directly on the bar, or on the composer when the bar
+has nothing to show; never with a gap, and never inside the input area.
+
+Rows are inset tiles without hairline dividers; desktop rows share a 16 px index
+gutter, mobile rows drop it. Actions always end the row and stay on the message line, because a separate action
+line looked detached and cost a full row per item. Mobile rows, and any sheet
+narrower than 520 px, fold them into one More button (a real 40 × 36 px box on 36 px touch rows)
+whose menu preserves Steer, move-to-top, edit and delete when applicable. One-line
+previews use ellipsis, not `display: -webkit-box`: that display ignores the clamp
+inside the touch grid on iOS and the sheet paints the extra height black. The
+scroll fade is a mask on a non-scrolling wrapper around the scroller. Never put
+the mask on the overflow element, and never emit a zero-length `transparent` /
+`#000` stop for an edge that does not overflow — WKWebView fills that layer black.
+Prior intent:
+[queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
+
+Queue-bound sends held in memory (`runtime.pendingSends`) while attachments
+prepare render here as local rows (`pending-queue-row.tsx`) after the real items,
+never in `mq` and never in the conversation stream. They are display-only (retry
+and cancel only; no drag, edit or steer) and are hidden by `userTurnId` once the
+real item exists. A failed local row shows its failure reason under its text, so
+the sender can see what failed and what to do before choosing Continue sending.
+Continue sending replaces the button with a loading status for at least a short
+interval, so a retry that fails again at once still visibly registers; a
+same-machine preparation failure names that step and the local agent, without
+falling back to a cloud transfer. Upload progress is subscribed only inside the sheet; the page
+reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../../.agents/notes/implemented/feature/2026-09-28-local-queue-pending-rows.md),
+[in-memory held sends](../../../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
+
+Only the latest edit operation may change the local editor or pending state;
+an earlier blur-save acknowledgement must preserve the next row's draft and focus.
+Starting, saving and cancelling an edit complete after the local write, including
+for the first row; remote synchronization must never gate the editor or confirmation.
+[Decision](../../../../../../.agents/notes/implemented/bug-fix/2026-10-13-queued-edit-operation-ownership.md).
+
+The queue disclosure is local display state, initially expanded, never shared or
+persisted. Keep its editing rows mounted while folded; focusing the disclosure must
+not commit or discard a row draft. Pressing its header therefore moves focus to the
+header, which bypasses ordinary blur-save and keeps an unfinished edit as a draft. Folded summaries retain pending/failed-send awareness. Intent:
+[queue presentation](../../../../../../specs/message-queue.md).
+
+Production passes a separate `scheduledItems` view model; never fake a
+`MessageQueueItem` for a reservation. Keep dedicated rows after ordinary and
+local-pending rows, ordered by send time, in a `Scheduled` section without index,
+drag, steer or move-to-top. They reuse the queued row layout: the send time leads
+the text inline and opens the time editor; details open the in-chat message
+editor and cancel ends the row. Row text is the scheduled message's content; its
+schedule title is never shown. Never fake a scheduled row through a queue item
+or add a time field to durable `mq`.

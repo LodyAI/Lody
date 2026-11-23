@@ -186,3 +186,27 @@ export const getPreferredWorkspaceSlug = (
   )?.slug;
   return fallback ?? null;
 };
+
+type ReturnCandidate = { slug?: string | null; contentMode?: string };
+const isOrdinaryWithSlug = (
+  workspace: ReturnCandidate | null | undefined
+): workspace is ReturnCandidate & { slug: string } =>
+  typeof workspace?.slug === 'string' && workspace.contentMode !== 'e2ee';
+
+/**
+ * The workspace a "back to workspaces" exit opens: the preferred ORDINARY one.
+ * Workspace lists merge encrypted workspaces in, and the selected one is often
+ * active, but an encrypted workspace's chat route sends a device whose runtime
+ * is not open straight back to its control page — so an exit that lands there
+ * loops. `null` means there is no such workspace and no back exit to offer.
+ */
+export const getPreferredOrdinaryWorkspaceSlug = (
+  activeWorkspace: ReturnCandidate | null | undefined,
+  workspaces: readonly ReturnCandidate[] | null | undefined,
+  preferredWorkspaceSlug: string | null
+): string | null =>
+  getPreferredWorkspaceSlug(
+    isOrdinaryWithSlug(activeWorkspace) ? activeWorkspace : null,
+    workspaces?.filter(isOrdinaryWithSlug),
+    preferredWorkspaceSlug
+  );

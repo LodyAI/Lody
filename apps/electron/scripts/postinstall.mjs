@@ -25,16 +25,26 @@ if (!canResolve('electron')) {
   process.exit(0)
 }
 
-const binName = process.platform === 'win32' ? 'electron-builder.cmd' : 'electron-builder'
-const electronBuilderBin = path.join(process.cwd(), 'node_modules', '.bin', binName)
-
-if (!fs.existsSync(electronBuilderBin)) {
-  process.exit(0)
+// Electron 42+ no longer downloads its binary from its own postinstall, but
+// electron-vite dev/preview and the Playwright E2E harness launch it through
+// `electron/path.txt`. The package's installer is idempotent: it returns without
+// downloading when `dist/version` and `path.txt` already match.
+const electronInstaller = path.join(path.dirname(require.resolve('electron')), 'install.js')
+const electronInstall = spawnSync(process.execPath, [electronInstaller], { stdio: 'inherit' })
+if (electronInstall.status !== 0) {
+  process.exit(electronInstall.status ?? 1)
 }
 
-const result = spawnSync(electronBuilderBin, ['install-app-deps'], {
-  stdio: 'inherit',
-  shell: process.platform === 'win32'
-})
+// Match electron-builder.yml's npmRebuild: false. SQLite and the embedded CLI
+// native dependencies use platform/architecture N-API prebuilds; install-app-deps
+// ignores that setting and unnecessarily asks node-abi for an Electron ABI.
+// Sparkle owns its separate macOS build, both here and in package-electron.mjs.
+if (process.platform === 'darwin') {
+  const sparkleBin = path.join(process.cwd(), 'node_modules', '.bin', 'electron-sparkle-updater')
+  if (fs.existsSync(sparkleBin)) {
+    const sparkleRebuild = spawnSync(sparkleBin, ['rebuild'], { stdio: 'inherit' })
+    process.exit(sparkleRebuild.status ?? 1)
+  }
+}
 
-process.exit(result.status ?? 1)
+process.exit(0)

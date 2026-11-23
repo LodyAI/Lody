@@ -1,3 +1,4 @@
+import { createDaemonLossTasks } from './e2ee/client-loss-observer';
 import { type LocalSessionControlRequestValidated, SessionId } from '@lody/shared';
 import { Logger } from '@/utils/logger';
 import { EventEmitter } from 'eventemitter3';
@@ -21,7 +22,19 @@ interface ProcessorEvents {
  */
 export class MessageProcessor extends EventEmitter<ProcessorEvents> {
   private readonly queue: ConcurrentQueue<MessageQueueKey>;
+  private readonly historyReads: ConcurrentQueue<MessageQueueKey>;
+  private readonly historySubscriptions = new ConcurrentQueue<MessageQueueKey>(128);
+  private historySubscriptionOrdinal = 0;
   private isStopped = false;
+  private readonly clientLossTasks = createDaemonLossTasks();
+  inspectClientLoss() {
+    const active = this.getActiveSessions();
+    return {
+      stopped: this.isStopped,
+      active,
+      queued: Math.max(0, this.clientLossTasks.size - active),
+    };
+  }
   private static readonly QUEUE_WAIT_WARNING_MS = 10_000;
   private static readonly PROCESSING_WARNING_MS = 30_000;
 
@@ -31,6 +44,9 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
   ) {
     super();
     this.queue = new ConcurrentQueue<MessageQueueKey>(maxConcurrentSessions);
+    this.historyReads = new ConcurrentQueue<MessageQueueKey>(
+      Math.max(1, Math.min(8, maxConcurrentSessions))
+    );
   }
 
   /**
@@ -69,7 +85,13 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       } waiting=${this.queue.waiting}`
     );
 
-    void this.queue.enqueue(queueKey, async () => {
+    const queue =
+      message.type === 'session/history-subscription' && message.subscription.action === 'open'
+        ? this.historySubscriptions
+        : message.type === 'session/history-read' || message.type === 'session/history-subscription'
+          ? this.historyReads
+          : this.queue;
+    const queued = queue.enqueue(queueKey, async () => {
       const startTime = Date.now();
       started = true;
       clearInterval(waitWarning);
@@ -119,20 +141,21 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
         clearInterval(processingWarning);
       }
     });
+    void this.clientLossTasks.track(queued);
   }
 
   /**
    * 获取当前活跃的 session 数量
    */
   getActiveSessions(): number {
-    return this.queue.active;
+    return this.queue.active + this.historyReads.active + this.historySubscriptions.active;
   }
 
   /**
    * 获取队列中等待的任务数量
    */
   getQueueSize(): number {
-    return this.queue.waiting;
+    return this.queue.waiting + this.historyReads.waiting + this.historySubscriptions.waiting;
   }
 
   /**
@@ -151,7 +174,11 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       `Draining MessageProcessor: active=${this.queue.active} waiting=${this.queue.waiting}`
     );
 
-    await this.queue.drain();
+    await Promise.all([
+      this.queue.drain(),
+      this.historyReads.drain(),
+      this.historySubscriptions.drain(),
+    ]);
     this.emit('queue:drained');
   }
 
@@ -164,7 +191,13 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       `Draining MessageProcessor (timeout=${timeoutMs}ms): active=${this.queue.active} waiting=${this.queue.waiting}`
     );
 
-    const completed = await this.queue.drainWithTimeout(timeoutMs);
+    const completed = (
+      await Promise.all([
+        this.queue.drainWithTimeout(timeoutMs),
+        this.historyReads.drainWithTimeout(timeoutMs),
+        this.historySubscriptions.drainWithTimeout(timeoutMs),
+      ])
+    ).every(Boolean);
 
     if (completed) {
       this.emit('queue:drained');
@@ -181,7 +214,9 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       case 'session/create':
       case 'session/chat':
       case 'session/image-upload':
-      case 'session/code-collab-host-start':
+      case 'session/history-read':
+      case 'session/history-write':
+      case 'session/history-subscription':
       case 'session/preview-candidate-report':
       case 'session/preview-create':
       case 'session/preview-revoke':
@@ -199,22 +234,53 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    * Most session work shares the main lane so create/chat ordering stays intact.
    * Image uploads intentionally use a dedicated lane per session to avoid deadlocking when a
    * running prompt invokes the Lody MCP upload tool and waits for the response.
+   *
+   * ACP authentication `start` blocks until the provider's login process exits (or the
+   * authentication timeout fires), so it gets its own lane; `cancel`/`submit-*` share a
+   * control lane that bypasses the in-flight start, otherwise a cancel could never take
+   * effect while the login it targets is still running.
    */
   private extractQueueKey(message: QueuedControlMessage): MessageQueueKey | null {
     switch (message.type) {
       case 'session/create':
       case 'session/chat':
         return `session:${message.sessionId}:main`;
+      case 'session/history-subscription':
+        return `history-subscription:${this.historySubscriptionOrdinal++}`;
+      case 'session/history-read':
+        return `session:${message.sessionId}:history-read`;
+      case 'session/history-write':
+        // History requests must not wait behind a long-running ACP prompt.
+        // Roost streaming is machine-owned and the renderer observes it while
+        // that prompt is still active.
+        return `session:${message.sessionId}:history`;
       case 'session/image-upload':
         return `session:${message.sessionId}:image-upload`;
-      case 'session/code-collab-host-start':
-        return `session:${message.sessionId}:code-collab`;
       case 'session/preview-candidate-report':
       case 'session/preview-create':
       case 'session/preview-revoke':
         return `session:${message.sessionId}:preview`;
+      case 'machine/acp-authenticate':
+        return message.action === 'start'
+          ? 'machine:acp-authenticate:start'
+          : 'machine:acp-authenticate:control';
       case 'session/cancel':
-        return null;
+        return `session:${message.sessionId}:cancel`;
+      case 'machine/status':
+        return 'machine:status';
+      case 'machine/ping':
+        return 'machine:ping';
+      case 'machine/acp-capabilities-refresh':
+        return `machine:acp-capabilities-refresh:${message.configId}`;
+      case 'machine/provider-rate-limits-refresh':
+        return `machine:provider-rate-limits-refresh:${message.configId}`;
+      case 'machine/acp-binary-status':
+        return 'machine:acp-binary-status';
+      case 'machine/acp-binary-install':
+        return `machine:acp-binary-install:${message.agentType}`;
+      case 'machine/restart':
+      case 'machine/upgrade':
+        return 'machine:lifecycle';
       default:
         return null;
     }

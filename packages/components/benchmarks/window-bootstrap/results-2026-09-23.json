@@ -1,0 +1,230 @@
+{
+  "environment": {
+    "electron": "39.5.1",
+    "chrome": "142.0.7444.265",
+    "cpu": "Apple M4 Max",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "repeats": 50,
+  "productionCommit": "a151b82a16c65a9bf2c2e432d1f1bdeb7d3efc52",
+  "baseline": "Previous cache-only acquisition reproduced in the harness; same current history reader",
+  "results": [
+    {
+      "entries": 100,
+      "bytes": 88831,
+      "scenario": "disk-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.4,
+            "p95Ms": 0.6
+          },
+          "readableMs": {
+            "medianMs": 3.4,
+            "p95Ms": 4.4
+          }
+        },
+        "after": {
+          "acquiredMs": {
+            "medianMs": 0.4,
+            "p95Ms": 0.6
+          },
+          "readableMs": {
+            "medianMs": 3.45,
+            "p95Ms": 4.3
+          }
+        }
+      }
+    },
+    {
+      "entries": 100,
+      "bytes": 88831,
+      "scenario": "peer-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.3
+          },
+          "readableMs": null
+        },
+        "after": {
+          "acquiredMs": {
+            "medianMs": 0.4,
+            "p95Ms": 0.6
+          },
+          "readableMs": {
+            "medianMs": 3.1,
+            "p95Ms": 3.4
+          }
+        }
+      }
+    },
+    {
+      "entries": 100,
+      "bytes": 88831,
+      "scenario": "miss",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.5,
+            "p95Ms": 1
+          },
+          "readableMs": null
+        },
+        "after": {
+          "acquiredMs": {
+            "medianMs": 151.6,
+            "p95Ms": 152.1
+          },
+          "readableMs": null
+        }
+      }
+    },
+    {
+      "entries": 1000,
+      "bytes": 930931,
+      "scenario": "disk-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.6,
+            "p95Ms": 15
+          },
+          "readableMs": {
+            "medianMs": 14.05,
+            "p95Ms": 30.1
+          }
+        },
+        "after": {
+          "acquiredMs": {
+            "medianMs": 0.7,
+            "p95Ms": 4.5
+          },
+          "readableMs": {
+            "medianMs": 14.2,
+            "p95Ms": 21.1
+          }
+        }
+      }
+    },
+    {
+      "entries": 1000,
+      "bytes": 930931,
+      "scenario": "peer-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.3
+          },
+          "readableMs": null
+        },
+        "after": {
+          "acquiredMs": {
+            "medianMs": 1.5,
+            "p95Ms": 6.1
+          },
+          "readableMs": {
+            "medianMs": 14.95,
+            "p95Ms": 23.9
+          }
+        }
+      }
+    },
+    {
+      "entries": 1000,
+      "bytes": 930931,
+      "scenario": "miss",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.65,
+            "p95Ms": 2.1
+          },
+          "readableMs": null
+        },
+        "after": {
+          "acquiredMs": {
+            "medianMs": 151.5,
+            "p95Ms": 152
+          },
+          "readableMs": null
+        }
+      }
+    },
+    {
+      "entries": 3000,
+      "bytes": 2822233,
+      "scenario": "disk-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.9,
+            "p95Ms": 24.2
+          },
+          "readableMs": {
+            "medianMs": 39.95,
+            "p95Ms": 69.2
+          }
+        },
+        "after": {
+          "acquiredMs": {
+            "medianMs": 1.1,
+            "p95Ms": 26.2
+          },
+          "readableMs": {
+            "medianMs": 40.6,
+            "p95Ms": 354.2
+          }
+        }
+      }
+    },
+    {
+      "entries": 3000,
+      "bytes": 2822233,
+      "scenario": "peer-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.2,
+            "p95Ms": 18.1
+          },
+          "readableMs": null
+        },
+        "after": {
+          "acquiredMs": {
+            "medianMs": 3.9,
+            "p95Ms": 10.6
+          },
+          "readableMs": {
+            "medianMs": 42.4,
+            "p95Ms": 56.1
+          }
+        }
+      }
+    },
+    {
+      "entries": 3000,
+      "bytes": 2822233,
+      "scenario": "miss",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.65,
+            "p95Ms": 1.4
+          },
+          "readableMs": null
+        },
+        "after": {
+          "acquiredMs": {
+            "medianMs": 151.6,
+            "p95Ms": 152.1
+          },
+          "readableMs": null
+        }
+      }
+    }
+  ]
+}

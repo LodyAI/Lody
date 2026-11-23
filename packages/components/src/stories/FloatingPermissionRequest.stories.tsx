@@ -1,11 +1,20 @@
+import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import {
   FloatingPermissionRequest,
   type FloatingPermissionRequestProps,
 } from '@/components/sessions/floating-permission-request';
-import { runtimeAtom } from '@/atoms';
-import { getServerNow, type SessionId, type SessionDoc } from '@lody/shared';
+import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
+import {
+  getServerNow,
+  type SessionId,
+  type SessionDoc,
+  type WorkspaceId,
+  type PermissionOutcome,
+  type MessageContent,
+} from '@lody/shared';
 
 // Stub runtime so usePermissionResponse reports isReady=true in stories;
 // click handlers throw if exercised, but screenshots show the active design.
@@ -465,4 +474,152 @@ export const NoHistory: Story = {
       </p>
     </div>
   ),
+};
+
+const questionJourneyHistory: SessionDoc['history'] = [
+  {
+    id: 'turn-questions',
+    $cid: 'turn-questions',
+    role: 'assistant',
+    timestamp: '2026-10-13T00:00:00Z',
+    items: [
+      ...['approach', 'constraints'].map((id) => ({
+        type: 'tool_call',
+        toolCallId: `tool-${id}`,
+        status: 'in_progress',
+        kind: 'think',
+        permissionRequest: {
+          requestId: `request-${id}`,
+          options: [
+            { optionId: 'answer', name: 'Submit answers', kind: 'allow_once' },
+            { optionId: 'cancel', name: 'Cancel', kind: 'reject_once' },
+          ],
+          _meta: {
+            lody: {
+              elicitation: {
+                version: 1,
+                questions: [
+                  {
+                    id,
+                    header: id,
+                    question:
+                      id === 'approach'
+                        ? 'Which approach should we use?'
+                        : 'Which constraints matter?',
+                    options:
+                      id === 'approach'
+                        ? [{ label: 'Small change' }, { label: 'Refactor' }]
+                        : [{ label: 'Offline' }, { label: 'Compatibility' }],
+                    multiSelect: id === 'constraints',
+                    allowCustomAnswer: true,
+                    note: { fieldId: `${id}_note`, title: 'Additional context' },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      })),
+    ],
+  },
+] as unknown as SessionDoc['history'];
+
+function QuestionJourney({
+  failFirstAnswer = false,
+  includePermission = false,
+}: {
+  failFirstAnswer?: boolean;
+  includePermission?: boolean;
+}) {
+  const [history, setHistory] = useState(() =>
+    includePermission
+      ? ([
+          {
+            ...questionJourneyHistory[0],
+            items: [
+              questionJourneyHistory[0]!.items![0],
+              makeHistory(ALLOW_DENY_OPTIONS)[0]!.items![0],
+              questionJourneyHistory[0]!.items![1],
+            ],
+          },
+        ] as SessionDoc['history'])
+      : questionJourneyHistory
+  );
+  const [store] = useState(() => {
+    const journeyStore = createStore();
+    journeyStore.set(currentWorkspaceIdAtom, 'question-workspace' as WorkspaceId);
+    journeyStore.set(currentWorkspaceSlugAtom, 'question-workspace');
+    let shouldFail = failFirstAnswer;
+    journeyStore.set(runtimeAtom, {
+      workspaceId: 'question-workspace',
+      workspaceSlug: 'question-workspace',
+      writer: {
+        respondSessionPermission: async (
+          _sessionId: SessionId,
+          requestId: string,
+          outcome: PermissionOutcome
+        ) => {
+          if (shouldFail) {
+            shouldFail = false;
+            window.dispatchEvent(
+              new CustomEvent('storybook:question-write', {
+                detail: { requestId, accepted: false },
+              })
+            );
+            throw new Error('Synthetic question write failure');
+          }
+          setHistory(
+            (current) =>
+              current.map((turn) => ({
+                ...turn,
+                items: ((turn.items ?? []) as MessageContent[]).map((item) =>
+                  item.type === 'tool_call' && item.permissionRequest?.requestId === requestId
+                    ? { ...item, permissionRequest: { ...item.permissionRequest, outcome } }
+                    : item
+                ),
+              })) as SessionDoc['history']
+          );
+          window.dispatchEvent(
+            new CustomEvent('storybook:question-write', {
+              detail: { requestId, accepted: true, outcome },
+            })
+          );
+        },
+      },
+    } as unknown as WorkspaceRuntime);
+    return journeyStore;
+  });
+  return (
+    <Provider store={store}>
+      <FloatingPermissionRequest
+        sessionId={SESSION_ID}
+        sessionStatus={{ type: 'requestPermission' }}
+        sessionHistory={history}
+      />
+    </Provider>
+  );
+}
+
+/** Exercises the real response hook through a rejected write followed by acceptance. */
+const questionJourneyArgs: FloatingPermissionRequestProps = {
+  sessionId: SESSION_ID,
+  sessionStatus: { type: 'requestPermission' },
+  sessionHistory: questionJourneyHistory,
+};
+
+export const QuestionSendRecovery: Story = {
+  args: questionJourneyArgs,
+  render: () => <QuestionJourney failFirstAnswer />,
+};
+
+/** Independent pending requests, each with a choice, replacement answer, and optional note. */
+export const ParallelQuestions: Story = {
+  args: questionJourneyArgs,
+  render: () => <QuestionJourney />,
+};
+
+/** Question drafts survive an ordinary permission request between them. */
+export const MixedRequests: Story = {
+  args: questionJourneyArgs,
+  render: () => <QuestionJourney includePermission />,
 };

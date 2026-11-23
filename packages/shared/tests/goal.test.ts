@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   isSessionGoalComplete,
   isSessionGoalPaused,
+  isSessionGoalResumable,
   isSessionGoalActive,
-  isSessionGoalWorking,
   resolveLatestSessionGoalFromHistory,
   resolveVisibleSessionGoal,
   sanitizeGoalObjective,
@@ -61,10 +61,6 @@ describe('sanitizeGoalObjective', () => {
       )
     ).toBe('say hi');
   });
-
-  it('leaves normal goal objectives unchanged except surrounding whitespace', () => {
-    expect(sanitizeGoalObjective('  ship the release  ')).toBe('ship the release');
-  });
 });
 
 describe('session goal state helpers', () => {
@@ -106,12 +102,12 @@ describe('session goal state helpers', () => {
   it('maps goal statuses to active/paused/complete states', () => {
     expect(isSessionGoalActive(goal)).toBe(true);
     expect(isSessionGoalPaused({ ...goal, status: 'paused' })).toBe(true);
+    expect(isSessionGoalResumable({ ...goal, status: 'paused' })).toBe(true);
+    expect(isSessionGoalResumable({ ...goal, status: 'blocked' })).toBe(true);
+    expect(isSessionGoalResumable({ ...goal, status: 'budgetLimited' })).toBe(false);
+    expect(isSessionGoalResumable({ ...goal, status: 'complete' })).toBe(false);
     expect(isSessionGoalComplete({ ...goal, status: 'complete' })).toBe(true);
     expect(isSessionGoalActive({ ...goal, status: 'complete' })).toBe(false);
-  });
-
-  it('keeps the legacy working helper as an active-state compatibility alias', () => {
-    expect(isSessionGoalWorking(goal)).toBe(isSessionGoalActive(goal));
   });
 
   it('shows a new goal on the same Codex thread after dismissing the cleared snapshot', () => {

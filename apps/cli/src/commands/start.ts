@@ -1,3 +1,18 @@
+import { ManagedDaemonUpgradeOptionsSchema } from '@lody/shared';
+import { EXIT_CODE_REMOTE_UPGRADE } from '@/lib/machine-lifecycle';
+import {
+  confirmManagedProcessTreesGone,
+  pruneManagedProcessTrees,
+  getManagedWorkerLaunchContext,
+} from '@/lib/managed-process-observation';
+import { Effect } from 'effect';
+import { requestManagedPreparation } from '@/lib/managed-daemon-ipc';
+import {
+  pauseMachineTurnsIfIdle,
+  pauseMachineTurnsForUpdate,
+  resumeMachineTurns,
+} from '@/session/machine-turn-admission';
+import { closeLoginShellApplicationLegacy } from '@/agent/login-shell-env';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import os from 'os';
@@ -32,6 +47,14 @@ import {
 } from '@/lib/cli-platform';
 import { normalizeCurrentProcessResourceProfile } from '@/utils/process-resource-profile';
 import { startEventLoopLagMonitor } from '@/utils/event-loop-lag-monitor';
+import {
+  installWasmFaultMonitor,
+  resolveLoroWasmMemory,
+  startWasmHeapMonitor,
+} from '@/lib/loro/wasm-runtime-health';
+import { startEventLoopStallProfiler } from '@/utils/event-loop-stall-profiler';
+import { registerProcessExitTrace } from '@/utils/process-exit-trace';
+import { LODY_LOG_DIR } from '@/utils/log-retention';
 import { flushTelemetry } from '@/instrument';
 import { getRuntimeDiagnostics } from '@/utils/runtime-diagnostics';
 import {
@@ -69,8 +92,13 @@ import { createLocalCloudPort, type CloudPort, type PlatformKind } from '@lody/p
 import { createCloudCliPort } from '@/lib/cloud-cli-port';
 import { configureManagedAgentRuntimeManager } from '@/agent/managed-agent-runtime';
 import { configureManagedRuntimeUpdateCoordinator } from '@/agent/managed-runtime-update-coordinator';
+import { hasBuiltinAgentCredentials } from './builtin-agent-credentials';
+
+const { protocol: managedDaemonProtocol, candidate: managedCandidate } =
+  getManagedWorkerLaunchContext();
 
 type StartAuthMethod =
+  | 'e2ee_machine_service'
   | 'api_key'
   | 'machine_pairing'
   | 'device_auth'
@@ -84,6 +112,7 @@ interface StartOptions {
   machineName?: string;
   heartbeatLog?: boolean;
   auth?: string;
+  pairedWorkspace?: string;
 }
 
 const EXIT_CODE_ALREADY_RUNNING = 3;
@@ -114,10 +143,22 @@ export const startCommand = new Command('start')
   )
   .option('--debug', 'enable debug output')
   .option('--heartbeat-log', 'output current timestamp every 5 seconds')
+  .option(
+    '--paired-workspace <account/workspace>',
+    'Run only an already paired encrypted workspace, without account login'
+  )
   .option('--auth <credential>', 'Connect with a CLI API key or machine connection token')
   .action(async (options: StartOptions) => {
     createHybridLogger({ level: options.debug ? 'debug' : 'info' });
     const logger = getLogger('start');
+    registerProcessExitTrace({ scope: 'start' });
+    // Armed before startup work and never stopped: its unref'd worker watches
+    // startup and shutdown stalls too, and ends with the process.
+    startEventLoopStallProfiler({
+      logger,
+      logDir: LODY_LOG_DIR,
+      label: 'lody start',
+    });
     const commandActionStartedAt = Date.now();
     logger.debug(
       `[startup] Start action entered processUptimeMs=${Math.round(process.uptime() * 1_000)}`
@@ -131,8 +172,23 @@ export const startCommand = new Command('start')
     }
     const supervisorIdentity =
       identityResolution.status === 'supervised' ? identityResolution.identity : null;
+    if (managedCandidate) pauseMachineTurnsIfIdle();
+    if (supervisorIdentity?.launchMode === 'daemon' && getCliPlatformKind() === 'cloud') {
+      const { applyPendingMachineIdentityRestore, machineIdentityRestoreStartupExitCode } =
+        await import('@/lib/machine-identity-restore');
+      try {
+        await applyPendingMachineIdentityRestore({ readOnly: managedCandidate });
+      } catch (error) {
+        logger.error(
+          'Machine identity restore could not finish. Its intent and available recovery files are retained; inspect this error before changing credentials.',
+          error
+        );
+        process.exit(machineIdentityRestoreStartupExitCode(error));
+      }
+    }
     const machineLifecycleCapability = resolveMachineLifecycleCapability(
-      supervisorIdentity?.launchMode
+      supervisorIdentity?.launchMode,
+      { managed: managedDaemonProtocol, encrypted: !!options.pairedWorkspace }
     );
     const unregisterStartupSupervisorControl = registerLocalSupervisorControl({
       identity: supervisorIdentity,
@@ -194,14 +250,10 @@ export const startCommand = new Command('start')
       logger.info('Starting in local platform mode (no account, no cloud services).');
     }
 
-    const startupTimeSync =
-      platformKind !== 'local' && LODY_SERVER_URL
-        ? syncCliServerTime(logger, LODY_SERVER_URL)
-        : undefined;
-
     const machineNameOverride = options.machineName?.trim();
     const defaultMachineName = machineNameOverride || os.hostname();
-    const authClient = platformKind === 'cloud' ? new AuthClient(logger) : null;
+    const authClient =
+      platformKind === 'cloud' && !options.pairedWorkspace ? new AuthClient(logger) : null;
     const requireCloudAuthClient = (): AuthClient => {
       if (!authClient) {
         throw new Error('Cloud authentication is not available on the local platform');
@@ -211,6 +263,8 @@ export const startCommand = new Command('start')
     const authFailureExitCode = supervisorIdentity ? EXIT_CODE_AUTH_FAILURE : 1;
     const runtimeStateReporter = new CliRuntimeStateReporter({
       supervisor: toRuntimeSupervisorIdentity(supervisorIdentity),
+      trackBackendConnectionAge: platformKind === 'cloud',
+      cliVersion: version,
     });
     runtimeStateReporter.setStartupStage('bootstrap');
     const electronManaged = supervisorIdentity?.launchMode === 'electron';
@@ -220,8 +274,11 @@ export const startCommand = new Command('start')
 
     const cliDetectionStartedAt = Date.now();
     const cliAvailability = {
-      kimi: 'managed-runtime',
-      grok: 'managed-runtime',
+      kimi: hasBuiltinAgentCredentials('kimi') && 'configured',
+      antigravity: 'managed-runtime',
+      pi: 'managed-runtime',
+      grok: hasBuiltinAgentCredentials('grok') && 'configured',
+      devin: 'managed-runtime',
       claude: checkClaude(),
       codex: checkCodex(),
     };
@@ -230,8 +287,8 @@ export const startCommand = new Command('start')
     );
     logCliDetectionResults(logger, cliAvailability);
     captureAgentServiceEvent('agent_service_cli_detection', {
-      kimi_available: true,
-      grok_available: true,
+      kimi_available: Boolean(cliAvailability.kimi),
+      grok_available: Boolean(cliAvailability.grok),
       claude_available: Boolean(cliAvailability.claude),
       codex_available: Boolean(cliAvailability.codex),
     });
@@ -322,7 +379,11 @@ export const startCommand = new Command('start')
     let machineId: string;
     let machineName: string;
     let authMethod: StartAuthMethod = 'existing_credentials';
-    const existingAuth = authClient?.getAuthInfo() ?? null;
+    const existingAuth = options.pairedWorkspace ? null : (authClient?.getAuthInfo() ?? null);
+    if (options.pairedWorkspace && (platformKind !== 'cloud' || options.auth !== undefined))
+      throw new Error(
+        'Paired workspace mode requires cloud composition and cannot use account authentication.'
+      );
 
     if (options.auth !== undefined && !providedAuth) {
       logger.error('Missing credential for --auth.');
@@ -333,7 +394,15 @@ export const startCommand = new Command('start')
       process.exit(1);
     }
 
-    if (platformKind === 'local') {
+    if (options.pairedWorkspace) {
+      const { loadCliE2eeMachineBootstrapLegacy } = await import('@/lib/e2ee/workspace-legacy');
+      machineId = await getOrCreateStableMachineIdAsync();
+      const paired = await loadCliE2eeMachineBootstrapLegacy(options.pairedWorkspace, machineId);
+      token = '';
+      userId = paired.bootstrap.accountId;
+      machineName = defaultMachineName;
+      authMethod = 'e2ee_machine_service';
+    } else if (platformKind === 'local') {
       // No account exists on the local platform: author everything under the
       // persisted synthetic identity. The empty token is safe because every
       // cloud endpoint env was blanked above, so token consumers are inert.
@@ -431,6 +500,12 @@ export const startCommand = new Command('start')
     );
 
     const recoverRejectedCredential = async (): Promise<RejectedCredentialRecovery> => {
+      if (options.pairedWorkspace) {
+        logger.error(
+          'Machine access was revoked or its protected credential is unavailable. Pair the machine again.'
+        );
+        return { exitCode: authFailureExitCode, reason: 'Machine access revoked; pair again' };
+      }
       const cleanup = requireCloudAuthClient().clearRejectedToken(token);
       const recovery = resolveRejectedCredentialRecovery({
         cleanup,
@@ -451,6 +526,10 @@ export const startCommand = new Command('start')
       return recovery;
     };
 
+    const startupTimeSync =
+      !options.pairedWorkspace && platformKind !== 'local' && LODY_SERVER_URL
+        ? syncCliServerTime(logger, LODY_SERVER_URL)
+        : undefined;
     try {
       await startAgentService(
         options,
@@ -471,6 +550,7 @@ export const startCommand = new Command('start')
         platformKind
       );
     } catch (error) {
+      await startupTimeSync?.stop();
       captureAgentServiceEvent('agent_service_startup_failed', {
         failure_stage: runtimeStateReporter.snapshot().startupStage ?? 'unknown',
       });
@@ -502,7 +582,7 @@ async function startAgentService(
   logger: Logger,
   runtimeStateReporter: CliRuntimeStateReporter,
   authMethod: StartAuthMethod,
-  startupTimeSync: Promise<void> | undefined,
+  startupTimeSync: ReturnType<typeof syncCliServerTime> | undefined,
   recoverRejectedCredential: () => Promise<RejectedCredentialRecovery>,
   foregroundHostLease: LocalCliHostLease | null,
   supervisorIdentity: LocalSupervisorIdentity | null,
@@ -540,7 +620,24 @@ async function startAgentService(
     null;
 
   let cloudPort: CloudPort;
-  if (platformKind === 'local') {
+  if (options.pairedWorkspace) {
+    if (!LODY_SERVER_URL) {
+      throw new Error('Cloud platform startup requires LODY_SERVER_URL');
+    }
+    const { loadCliE2eeMachineBootstrapLegacy } = await import('@/lib/e2ee/workspace-legacy');
+    const paired = await loadCliE2eeMachineBootstrapLegacy(options.pairedWorkspace, machineId);
+    const { createCloudE2eeMachinePort } = await import('@/lib/cloud-cli-port');
+    cloudPort = createCloudE2eeMachinePort({
+      accountId: userId,
+      workspaceId: paired.bootstrap.workspaceId,
+      genesisHash: paired.bootstrap.genesisHash,
+      machineId,
+      credential: paired.credential,
+      authBaseUrl: paired.bootstrap.deploymentUrl,
+      serverBaseUrl: LODY_SERVER_URL,
+      logger,
+    });
+  } else if (platformKind === 'local') {
     cloudPort = createLocalCloudPort({
       identity: { userId },
       workspaces: [],
@@ -559,7 +656,6 @@ async function startAgentService(
       authBaseUrl: LODY_AUTH_URL,
       authSiteUrl: LODY_AUTH_SITE_URL,
       serverBaseUrl: LODY_SERVER_URL,
-      previewGatewayUrl: process.env.LODY_PREVIEW_GATEWAY_URL,
       runtimeArtifactsBaseUrl: process.env.LODY_RUNTIME_BASE_URL,
       logger,
     });
@@ -586,8 +682,14 @@ async function startAgentService(
       machineName,
       runtimeStateReporter,
       cloudPort,
-      startupTimeSync,
+      ...(options.pairedWorkspace ? { localFirstBootstrap: false } : {}),
+      startupTimeSync: startupTimeSync?.ready,
       machineLifecycleCapability,
+      prepareManagedUpgrade:
+        supervisorIdentity && machineLifecycleCapability.canRemoteUpgrade
+          ? (requestId, target, upgrade) =>
+              requestManagedPreparation(requestId, target, supervisorIdentity.token, upgrade)
+          : undefined,
       onFatalAuthFailure: (error) => triggerFatalAuthShutdown?.(error),
       onProcessLifecycleAction: (action) => triggerProcessLifecycleAction?.(action),
     });
@@ -596,16 +698,56 @@ async function startAgentService(
     await cloudPort.dispose();
     throw error;
   }
+  const treeObservationTimer = managedDaemonProtocol
+    ? setInterval(() => {
+        void Effect.runPromise(pruneManagedProcessTrees()).catch((error) =>
+          logger.debug('Process ownership observation remains unknown', error)
+        );
+      }, 60_000).unref()
+    : undefined;
   const eventLoopLagMonitor = startEventLoopLagMonitor(logger, { label: 'lody start' });
+  await resolveLoroWasmMemory().catch((error: unknown) => {
+    logger.debug(`[wasm-heap] Loro WebAssembly memory unavailable: ${formatErrorMessage(error)}`);
+  });
+  const wasmHeapMonitor = startWasmHeapMonitor(logger);
   const closeForegroundHostLease = async () => {
     const lease = foregroundHostLease;
     foregroundHostLease = null;
     await lease?.close();
   };
+  const stopDaemonAndApplication = async () => {
+    if (treeObservationTimer) clearInterval(treeObservationTimer);
+    await fleet.prepareForShutdown();
+    const failures: unknown[] = [];
+    for (const stop of [
+      () => startupTimeSync?.stop(),
+      () => managedRuntimeUpdates.shutdown(),
+      () => fleet.shutdown(),
+      closeLoginShellApplicationLegacy,
+    ]) {
+      try {
+        await stop();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length === 0 && managedDaemonProtocol && process.send) {
+      await Effect.runPromise(confirmManagedProcessTreesGone);
+      await new Promise<void>((resolve, reject) =>
+        process.send?.(
+          { type: 'lody/managed-drained', instanceId: supervisorIdentity?.instanceId },
+          (error) => (error ? reject(error) : resolve())
+        )
+      );
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, 'Daemon and application cleanup failed');
+  };
   registerProcessCleanup(async () => {
     eventLoopLagMonitor.stop();
-    await managedRuntimeUpdates.shutdown();
-    await fleet.shutdown();
+    wasmHeapMonitor.stop();
+    await stopDaemonAndApplication();
     await closeForegroundHostLease();
   });
   const shutdownSignals: NodeJS.Signals[] =
@@ -622,8 +764,8 @@ async function startAgentService(
       unregisterProcessCleanup();
       stopActivePing();
       eventLoopLagMonitor.stop();
-      await managedRuntimeUpdates.shutdown();
-      await fleet.shutdown();
+      wasmHeapMonitor.stop();
+      await stopDaemonAndApplication();
       await closeForegroundHostLease();
     },
     flushTelemetry: async () => {
@@ -636,6 +778,15 @@ async function startAgentService(
     exit: (code) => process.exit(code),
   });
   shutdownController.register();
+  // A trapped WebAssembly instance stays broken for every later call, so restart
+  // through the ordinary shutdown (agent processes stopped first) instead of
+  // limping on until an unguarded caller throws.
+  const uninstallWasmFaultMonitor = installWasmFaultMonitor((fault) => {
+    logger.error(
+      `WebAssembly runtime fault (${fault.source}); shutting down for restart: ${fault.detail}`
+    );
+    void shutdownController.shutdown({ exitCode: 1, reason: 'WebAssembly runtime fault' });
+  });
   unregisterSupervisorControl = registerLocalSupervisorControl({
     identity: supervisorIdentity,
     logger,
@@ -670,16 +821,93 @@ async function startAgentService(
       });
   };
 
+  if (supervisorIdentity && managedDaemonProtocol) {
+    process.on('message', (message: unknown) => {
+      if (typeof message !== 'object' || message === null) return;
+      if (
+        'type' in message &&
+        message.type === 'lody/managed-resume' &&
+        'token' in message &&
+        message.token === supervisorIdentity.token
+      )
+        resumeMachineTurns();
+      if (
+        'type' in message &&
+        message.type === 'lody/managed-local-upgrade' &&
+        'token' in message &&
+        message.token === supervisorIdentity.token &&
+        'requestId' in message &&
+        typeof message.requestId === 'string' &&
+        'upgrade' in message
+      ) {
+        const upgrade = ManagedDaemonUpgradeOptionsSchema.safeParse(message.upgrade);
+        if (upgrade.success)
+          triggerProcessLifecycleAction?.({
+            action: 'upgrade',
+            exitCode: EXIT_CODE_REMOTE_UPGRADE,
+            requestId: message.requestId,
+            switchPolicy: upgrade.data.switchPolicy,
+            expiresAtMs: Date.now() + 24 * 60 * 60_000,
+          });
+      }
+    });
+  }
   triggerProcessLifecycleAction = (action) => {
     if (processLifecycleTriggered || fatalAuthTriggered) return;
     processLifecycleTriggered = true;
-    logger.info(
-      `Machine lifecycle ${action.action} requested; shutting down worker with exit code ${action.exitCode}.`
-    );
-    void shutdownController.shutdown({
-      exitCode: action.exitCode,
-      reason: `machine ${action.action} requested`,
-    });
+    const cancelPreparedUpdate = () => {
+      if (action.action === 'upgrade') action.onAbandoned?.();
+      if (action.action === 'upgrade' && process.connected && supervisorIdentity)
+        process.send?.(
+          {
+            type: 'lody/managed-cancel',
+            requestId: action.requestId,
+            supervisorToken: supervisorIdentity.token,
+          },
+          () => {}
+        );
+    };
+    const switchWhenIdle = async (): Promise<void> => {
+      if (
+        action.action === 'upgrade' &&
+        action.expiresAtMs !== undefined &&
+        Date.now() >= action.expiresAtMs
+      ) {
+        cancelPreparedUpdate();
+        processLifecycleTriggered = false;
+        logger.warn('Prepared update expired; old daemon remains running.');
+        return;
+      }
+      if (
+        action.action === 'upgrade' &&
+        action.switchPolicy !== 'immediate' &&
+        !pauseMachineTurnsIfIdle()
+      ) {
+        setTimeout(() => void switchWhenIdle(), 1000);
+        return;
+      }
+      if (action.action === 'upgrade' && action.switchPolicy === 'immediate')
+        pauseMachineTurnsForUpdate();
+      try {
+        if (action.action === 'upgrade' && action.revalidate && !(await action.revalidate())) {
+          resumeMachineTurns();
+          cancelPreparedUpdate();
+          processLifecycleTriggered = false;
+          logger.warn('Update authorization expired or was revoked; old daemon remains running.');
+          return;
+        }
+        await shutdownController.shutdown({
+          exitCode: action.exitCode,
+          reason: `machine ${action.action} requested`,
+        });
+      } catch (error) {
+        resumeMachineTurns();
+        cancelPreparedUpdate();
+        processLifecycleTriggered = false;
+        logger.error('Managed update could not switch', error);
+      }
+    };
+    void switchWhenIdle();
   };
 
   try {
@@ -725,6 +953,7 @@ async function startAgentService(
     // 保持进程活跃
     await new Promise<void>(() => {});
   } catch (error) {
+    let failure = error;
     unregisterSupervisorControl();
     runtimeStateReporter.upsertIssue({
       code: 'agent_service_failed',
@@ -733,18 +962,21 @@ async function startAgentService(
       message: formatErrorMessage(error),
     });
     shutdownController.unregister();
+    uninstallWasmFaultMonitor();
     unregisterProcessCleanup();
     stopActivePing();
     eventLoopLagMonitor.stop();
-    await managedRuntimeUpdates.shutdown();
-    await fleet.shutdown().catch((err: unknown) => {
-      logger.error('Cleanup failed:', err);
-    });
+    wasmHeapMonitor.stop();
+    try {
+      await stopDaemonAndApplication();
+    } catch (cleanupError) {
+      failure = new AggregateError([error, cleanupError], 'Startup and resource cleanup failed');
+    }
     await closeForegroundHostLease();
-    await reportError('start:agent', error, {
+    await reportError('start:agent', failure, {
       message: 'Agent service failed to start',
       logger,
     });
-    throw error;
+    throw failure;
   }
 }

@@ -1,7 +1,8 @@
-import { IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { ProductWindowIpcService } from '../product-window-ipc-service'
+import { IpcMethod } from 'electron-ipc-decorator'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
-export class UpdaterIpc extends IpcService {
+export class UpdaterIpc extends ProductWindowIpcService {
   static override readonly groupName = 'updater'
 
   @IpcMethod()
@@ -16,6 +17,6 @@ export class UpdaterIpc extends IpcService {
 
   @IpcMethod()
   async quitAndInstall() {
-    return getIpcServiceDeps().appUpdaterService.quitAndInstall()
+    return await getIpcServiceDeps().appUpdaterService.quitAndInstall()
   }
 }

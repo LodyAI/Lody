@@ -18,41 +18,39 @@ export function buildFileTreeFromFileWorkspaceProviderEntries(
         .map((entry) => entry.path)
     )
   );
+  const directoriesByChildren = new WeakMap<FileTreeItem[], Map<string, FileTreeItem>>();
+  const changedChildren = new Set<FileTreeItem[]>();
   for (const entry of entries) {
     if (entry.entryType !== 'lazy-directory' || !entry.directoryId) continue;
-    ensureLazyDirectoryTreeItem(tree, entry.path, entry.directoryId);
+    const segments = entry.path.split('/').filter(Boolean);
+    let current = tree;
+    for (let index = 0; index < segments.length; index += 1) {
+      const path = segments.slice(0, index + 1).join('/');
+      let directories = directoriesByChildren.get(current);
+      if (!directories) {
+        directories = new Map(
+          current.filter((item) => item.type === 'directory').map((item) => [item.path, item])
+        );
+        directoriesByChildren.set(current, directories);
+      }
+      let item = directories.get(path);
+      if (!item) {
+        item = { path, type: 'directory', children: [] };
+        current.push(item);
+        directories.set(path, item);
+        changedChildren.add(current);
+      }
+      if (index === segments.length - 1) item.lazyDirectoryId = entry.directoryId;
+      item.children ??= [];
+      current = item.children;
+    }
   }
+  for (const children of changedChildren) children.sort(compareFileTreeItems);
   return tree;
 }
 
 export const buildFileTreeFromSessionFileProviderEntries =
   buildFileTreeFromFileWorkspaceProviderEntries;
-
-function ensureLazyDirectoryTreeItem(
-  tree: FileTreeItem[],
-  directoryPath: string,
-  directoryId: string
-): void {
-  const segments = directoryPath.split('/').filter(Boolean);
-  if (segments.length === 0) return;
-  let current = tree;
-  for (let index = 0; index < segments.length; index += 1) {
-    const path = segments.slice(0, index + 1).join('/');
-    let item = current.find(
-      (candidate) => candidate.type === 'directory' && candidate.path === path
-    );
-    if (!item) {
-      item = { path, type: 'directory', children: [] };
-      current.push(item);
-      current.sort(compareFileTreeItems);
-    }
-    if (index === segments.length - 1) {
-      item.lazyDirectoryId = directoryId;
-    }
-    item.children ??= [];
-    current = item.children;
-  }
-}
 
 function compareFileTreeItems(left: FileTreeItem, right: FileTreeItem): number {
   if (left.type !== right.type) return left.type === 'directory' ? -1 : 1;

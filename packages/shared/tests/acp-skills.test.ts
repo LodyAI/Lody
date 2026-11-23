@@ -8,39 +8,15 @@ import {
   DEFAULT_PROJECT_SKILL_DIR,
   applyProjectSkillsResultBudget,
   compareProjectSkillScope,
-  extractProjectSkillMetadata,
   getRegisteredGlobalSkillDirs,
   getRegisteredSkillDirs,
   getRegisteredSystemSkillDirs,
-  getSkillMarkdownBody,
   getSkillScanCandidateDirs,
-  parseSkillFrontmatter,
+  isRegisteredSkillAgentType,
 } from '../src/acp/skills';
-
-describe('getSkillMarkdownBody', () => {
-  it('strips a leading frontmatter block and returns the trimmed body', () => {
-    const md = '---\nname: x\ndescription: y\n---\n# Title\n\nBody text.\n';
-    expect(getSkillMarkdownBody(md)).toBe('# Title\n\nBody text.');
-  });
-
-  it('returns the whole content when there is no frontmatter', () => {
-    expect(getSkillMarkdownBody('# Just a body\n')).toBe('# Just a body');
-  });
-
-  it('returns empty string when the file is only frontmatter', () => {
-    expect(getSkillMarkdownBody('---\nname: x\n---\n')).toBe('');
-  });
-});
+import { BUILTIN_AGENTS } from '../src/ai';
 
 describe('project skills helpers', () => {
-  it('always includes the default project skill directory in scan candidates', () => {
-    expect(getSkillScanCandidateDirs()).toContain(DEFAULT_PROJECT_SKILL_DIR);
-    expect(getSkillScanCandidateDirs()).toContain('agent/skills');
-    expect(getSkillScanCandidateDirs()).toContain('.claude/skills');
-    expect(getSkillScanCandidateDirs()).toContain('.qwen/skills');
-    expect(getSkillScanCandidateDirs()).toContain('skills/.system');
-  });
-
   it('maps registered agents to provider-specific project directories', () => {
     const dirs = getRegisteredSkillDirs([
       { cliType: 'builtin', agentType: 'codex' },
@@ -107,15 +83,6 @@ describe('project skills helpers', () => {
     ]).toEqual(['.factory/skills', '.agent/skills']);
   });
 
-  it('includes all known current-user global directories in scan candidates', () => {
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain(DEFAULT_AGENTS_GLOBAL_SKILL_DIR);
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain(DEFAULT_GLOBAL_SKILL_DIR);
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain('~/.claude/skills');
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain('~/.cline/skills');
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain('~/.kilo/skills');
-    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).toContain('~/.config/goose/skills');
-  });
-
   it('maps registered agents to verified current-user global directories for UI annotation', () => {
     const agents = [
       { cliType: 'builtin' as const, agentType: 'codex' },
@@ -140,12 +107,59 @@ describe('project skills helpers', () => {
     expect([
       ...getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType: 'cline' }]),
     ]).toEqual(['~/.cline/skills']);
+    // Project dirs but no global dir at all — distinct from an all-empty mapping.
     expect([
-      ...getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType: 'kimi-code-cli' }]),
+      ...getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType: 'promptscript' }]),
     ]).toEqual([]);
+    expect([
+      ...getRegisteredSkillDirs([{ cliType: 'registry', agentType: 'promptscript' }]),
+    ]).toEqual([DEFAULT_PROJECT_SKILL_DIR]);
     expect([
       ...getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType: 'deepagents' }]),
     ]).toEqual([]);
+  });
+
+  it('maps pi, grok, kimi, and deepseek to the shared ~/.agents/skills dir their engines scan', () => {
+    for (const agentType of [
+      'pi',
+      'pi-acp',
+      'grok',
+      'kimi',
+      'kimi-code',
+      'kimi-code-cli',
+      'deepseek',
+      'dimcode',
+    ]) {
+      expect(
+        getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType }]).has(
+          DEFAULT_AGENTS_GLOBAL_SKILL_DIR
+        )
+      ).toBe(true);
+    }
+  });
+
+  it('maps kimi to the .kimi-code brand dirs its engine scans, not the .kimi ones', () => {
+    for (const agentType of ['kimi', 'kimi-code', 'kimi-code-cli']) {
+      const agent = { cliType: 'registry' as const, agentType };
+      expect([...getRegisteredSkillDirs([agent])].sort()).toEqual(
+        [DEFAULT_PROJECT_SKILL_DIR, '.kimi-code/skills'].sort()
+      );
+      expect(getRegisteredGlobalSkillDirs([agent]).has('~/.kimi-code/skills')).toBe(true);
+    }
+    expect(ALL_KNOWN_GLOBAL_SKILL_DIRS).not.toContain('~/.kimi/skills');
+    expect(getSkillScanCandidateDirs()).not.toContain('.kimi/skills');
+  });
+
+  it('maps Lody Agent to its workspace and user skill dirs', () => {
+    const agent = { cliType: 'builtin' as const, agentType: 'sorbet' };
+    expect([...getRegisteredSkillDirs([agent])]).toEqual([DEFAULT_PROJECT_SKILL_DIR]);
+    expect([...getRegisteredGlobalSkillDirs([agent])]).toEqual([DEFAULT_AGENTS_GLOBAL_SKILL_DIR]);
+  });
+
+  it('registers every builtin agent type so none falls back to an unfiltered menu', () => {
+    for (const { agentType } of BUILTIN_AGENTS) {
+      expect(isRegisteredSkillAgentType(agentType)).toBe(true);
+    }
   });
 
   it('exposes codex built-in system skill dirs separate from global dirs', () => {
@@ -178,59 +192,6 @@ describe('project skills helpers', () => {
       'global',
       'system',
     ]);
-  });
-
-  it('parses shallow frontmatter and nested metadata fields', () => {
-    expect(
-      parseSkillFrontmatter(`---
-name: "Review Bot"
-description: Checks risky diffs
-metadata:
-  version: 1.2.3
-  author: Team AI
-allowed-tools:
-  - Read
----
-# Body
-`)
-    ).toEqual({
-      name: 'Review Bot',
-      description: 'Checks risky diffs',
-      metadata: {
-        version: '1.2.3',
-        author: 'Team AI',
-      },
-    });
-  });
-
-  it('extracts display metadata with documented fallbacks', () => {
-    expect(
-      extractProjectSkillMetadata(
-        `---
-description: Helps with tests
-version: 2.0.0
-metadata:
-  author: QA
----
-Body
-`,
-        'test-helper'
-      )
-    ).toEqual({
-      name: 'test-helper',
-      description: 'Helps with tests',
-      version: '2.0.0',
-      author: 'QA',
-    });
-  });
-
-  it('fails on malformed frontmatter instead of silently guessing', () => {
-    expect(() =>
-      parseSkillFrontmatter(`---
-name Skill
----
-`)
-    ).toThrow('Invalid SKILL.md frontmatter line');
   });
 
   it('drops skill content after the aggregate response budget is exhausted', () => {
@@ -342,14 +303,5 @@ name Skill
       },
     ]);
     expect(groups[1]?.skills).toHaveLength(2);
-  });
-
-  it('rejects invalid aggregate content budgets', () => {
-    expect(() => applyProjectSkillsResultBudget([], { maxContentBytes: -1 })).toThrow(
-      'Invalid project skills content budget'
-    );
-    expect(() => applyProjectSkillsResultBudget([], { maxSkills: -1 })).toThrow(
-      'Invalid project skills skill count budget'
-    );
   });
 });

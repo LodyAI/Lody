@@ -1,0 +1,304 @@
+# Composer info bar: canonical cluster + fixed stage
+
+`info-chip.tsx`, `session-info-chips.tsx`, and `session-info-bar.tsx` — the desktop/mobile bar glued above the composer.
+
+Scope: `packages/components/src/components/sessions`. Binding rules and the
+pointer to this page live in
+[that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
+this page is the full text of the rules summarised there.
+
+## Composer contracts
+
+- Keep cluster order and one nonempty stage when items exist. Hide only without
+  items or ambient content. Machine (desktop name/mobile icon) stays unstaged;
+  ownership appears only in details. Scheduled drafts live in the composer, never the bar.
+- Stage icons stay inert; reserve colour for genuine status; no pulses.
+- Reported preview requests enable simulator actions. One platform opens directly;
+  iOS + Android share a chooser on desktop and mobile, targeting the main conversation.
+- Open preview stays gated on a real reported target; repository actions are
+  priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
+  below the reply.
+- Workspace diff presence follows the complete changed-file count when available,
+  with line-count fallback for older daemons. Display positive text totals normally
+  and file counts for zero-line changes.
+
+The execution-machine control sits before the canonical cluster and never
+takes the stage. `session-machine-info.tsx` shows a monitor icon and machine name
+on desktop, or a compact icon-only button on mobile (`compactMachineInfo`).
+Its tap/click popover (also hover on desktop) exposes ownership from machine
+metadata, device identity when known, and connection status. Unknown presence
+stays neutral, while confirmed offline presence tints the control. Unknown local
+identity omits the device row.
+Below a 360px bar the desktop control also drops its name (icon only), and the
+bar's leading inset is trimmed so the machine glyph sits where a chip's would.
+Under squeeze nothing leaves the bar: summary text truncates first, then the
+repository action label, and the ±diff chip clips last inside itself.
+Mobile controls remain in the same 32px row. With only machine information the bar
+is a transparent row; existing items and actions retain the raised bar surface. The
+[draft Spec](../../specs/composer-machine-owner.md) owns the presentation intent.
+The parent passes already-resolved metadata and presence without new subscriptions.
+The workspace diff entry uses the complete changed-path count (`diffStats.allChange.files`)
+when supplied, including binary, empty-file and permission changes. Positive text
+additions/deletions remain the visible summary for text-only and mixed comparisons;
+zero-line comparisons show the localized file count. Older daemons without `files`
+retain their positive-line-count behavior. Counts come from the complete comparison,
+not the bounded shared index; per-turn edited-file cards keep their independent scope.
+After a live Changes list completes, its totals supply the bar's workspace summary.
+If that list has unknown line counts, the bar shows its file count. Initial rendering
+uses durable session statistics. Project Member selection retains its Member scope.
+
+Scheduled-message drafts must not add an info-bar item. Their state is the
+composer's secondary action beside Send; the bar only carries machine, status,
+goal, schedule, and context. This is distinct from the pending Agent task countdown
+and the schedule that created the conversation.
+With the compact mobile control, a private-access label collapses to its lock icon
+at container widths up to 420px, leaving room for repository actions. Its full
+access description remains in the accessible name/title, and tap still opens
+sharing when permitted.
+
+- `info-chip.tsx` + `session-info-chips.tsx` + `session-info-bar.tsx`: the
+  info bar follows the "canonical cluster + fixed stage" model. Cluster =
+  collapsed items as uniform icon chips in CONSTANT order (status > goal >
+  schedule > task > context/PR; items return to their own slot — never
+  MRU-reshuffle). The `task` chip appears only on a Session linked to a Task and
+  is the way back to it; a new item picks a fixed slot in that list rather than
+  appending, and must never reorder the others. Note the separate, deliberately
+  different order in `session-info-bar.tsx` for choosing which item opens on the
+  stage (context first, as the most informative default) — that is stage
+  preference, not cluster order, and the two are not meant to match. Stage = the rightmost item.
+  The bar hides only when items, actions, private-access status, machine information
+  and ambient sync are all absent. With items, EXACTLY one is always expanded on the stage (there is no
+  fully-collapsed state, and the stage never empties). Click semantics
+  (researched; do not overload a second click): cluster chip = promote onto
+  stage; stage ICON = inert marker (NOT a button — clicking the rightmost
+  item must never collapse or relayout; no persistent highlight bg — the
+  cluster│stage divider alone conveys activation); stage SUMMARY + resting ↗
+  = the item's single detail surface (popover or action). The deliberate
+  multi-action exception is the context stage: its PR marker opens PR details,
+  branch text copies `SessionMeta.branchName`, and ±diff selects the fixed All Changes
+  side-panel tab (it must never create a duplicate `diff:all-changes` viewer tab); the
+  repository name stays inert. A session with an on-disk location also renders
+  its location glyph as a `LocationControl` copy button (StageChip
+  `iconOverride` when no PR, else in the `leading` slot). The glyph reflects the
+  session's identity, NOT just its on-disk layout: a GitHub session
+  (`workspaceLocation.kind === 'github-worktree'`, set when `repoFullName` is
+  present) shows the GitHub mark — GitHub projects are ALWAYS worktrees, so the
+  worktree mark there is redundant noise (mirrors the sidebar, which suppresses
+  its worktree badge for GitHub rows). A LOCAL worktree shows the worktree mark
+  and a local folder the folder mark (symmetric); worktree-ness is only
+  informative for local sessions. Hover tooltip "GitHub/Worktree/Folder · click
+  to copy path", click copies the resolved path (`resolveSessionWorkspacePath`,
+  threaded as `workspaceLocation = {kind, path}`; a `github-worktree` still
+  copies the worktree checkout path) + toasts. Remote/repo-only sessions have no
+  local path → `workspaceLocation` is null and the leading icon stays an inert
+  branch glyph.
+  The bar also takes an ambient `syncing` prop (desktop only — mobile shows
+  catch-up in its header instead): a plain `SessionSyncingIndicator` pinned
+  to the bar's RIGHT edge, outside the cluster/stage model; it must never
+  become a cluster item or steal stage focus. Its label hides below a 560px
+  container width (spinner stays, via `SessionSyncingIndicator
+labelClassName`) so the stage diffstat never clips. Wired from
+  `session-chat-interface.tsx` as `!isMobile && effectiveTitleSyncing` (the
+  same `isSyncingRoomSyncState` + 400ms `useDelayedFlag` signal the mobile
+  header uses). Syncing can render the bar on a context-less chat
+  session (no staged item, no divider; the spinner keeps its right-edge pin
+  via an `ml-auto` wrapper). Regression coverage:
+  `tests/session-info-bar-syncing.test.tsx` + the `SyncOnly` /
+  `EmptyNotSyncingHidden` stories.
+  The control has a HOVER bg only (not persistent) and never relayouts, so it
+  respects the no-collapse spirit while adding the copy affordance. CI is NOT its own
+  cluster item: the `PrCiPill` (a "CI" text pill tinted by verdict, "done/
+  total" while running) rides inside the context item's expanded stage
+  content, right after the PR number, so it is only visible when the PR is
+  expanded; one click toggles its check-run popover (`PrCiRun[]` is
+  presentational; production maps the active PR's live GitHub check-run fetch
+  into it via `mapGitHubCheckRunToPrCiRun`; live runs only list checks, while the
+  PR status mark, CI verdict and action gating read session metadata through the
+  same [read model](../notes/implemented/architecture/2026-11-02-session-pr-read-model.md)
+  as the sidebar). When live runs are listed, their summary reads only the newest
+  attempt of each check (`selectLatestCheckRuns` keys by app + name, highest id
+  wins), so a re-run that went green clears an earlier failure; cancelled/stale
+  runs render as `cancelled` and never make CI "failed" nor enter the Fix CI
+  snapshot. The same shared summary feeds the PR tab: its verdict ignores
+  cancelled/stale runs unless nothing else ran, and PR-cache entries read back
+  from IndexedDB are re-derived with `normalizeCheckRunsSummary`. Color budget: ambient
+  chips (status/goal/schedule) render NEUTRAL (goal state reads from its
+  pulse + popover, not an inline tint); color is reserved for genuine
+  status — the expanded PR status icon and the ±diff counts.
+  No pulsing/blinking anywhere in the bar (goal active + CI running used to
+  pulse; removed — the row must stay visually still). Context chip: the
+  COLLAPSED chip is ALWAYS a neutral branch icon with NO "#1234" label (that
+  variable-width number was the source of the hand-off layout jump); the
+  EXPANDED chip's icon reflects PR state (open/merged/closed) or a branch
+  icon when there is no PR, and carries "#1234" + CI pill there. Its action:
+  the PR marker opens the PR tab, branch copies the current branch, and ±diff
+  opens the existing fixed All Changes side-panel tab; file-row and comment-reference
+  actions may still create a diff viewer because they carry a precise file/comment focus.
+  A conversation can hold several PRs, including ones in other repositories and
+  ones its agent created on another branch. When the Session's links are manageable,
+  the PR marker keeps showing the primary PR and opens the linked-PR list
+  (`resolveSessionPullRequestLinkList`): the primary first, other associations newest
+  first, then links GitHub has not confirmed with their reason. The primary row opens
+  the PR tab; other rows open on GitHub because the PR tab is bound to the primary PR.
+  Each row's menu opens it on GitHub, copies its link, or unlinks it; the renderer
+  writes only unlink `prLink:*` records. Links come from the `gh` shim and agents,
+  not from a UI entry ([decision](../notes/implemented/feature/2026-11-21-session-explicit-pr-links.md)).
+  The context stage is also the single owner of agent-driven GitHub/worktree actions:
+  a changed GitHub-capable workspace without a PR shows `Create PR` + `Commit & Push`,
+  including a direct Local Project with a resolved GitHub repository. For an open
+  associated PR, `resolveSessionInfoBarGitHubActionIds` returns EVERY applicable
+  action in priority order rather than picking one, because the collapse below keeps
+  the rest reachable. `Commit & Push` is the TOP priority whenever the session has
+  UNPUBLISHED WORK — ahead of `Resolve Conflicts`, `Fix CI Errors`,
+  `Ready for review`, and Merge. That ranking is load-bearing, not cosmetic: turn
+  finalization no longer commits or pushes on the session's behalf (see
+  `apps/cli/src/session/turn-post-processing-service.ts`), so unpublished work means
+  the PR head is NOT the author's latest work, and this action item is the only signal
+  that stops a user from merging or reviewing a stale PR.
+  "Unpublished" is `SessionMeta.workspaceDirty` OR `workspaceUnpushed`, both surfaced
+  raw by `getSessionGitHubState` and OR-ed at the one point of use. BOTH are required
+  and neither is redundant: `workspaceDirty` comes from `git status --porcelain`, so it goes false the
+  instant the agent commits, while a commit whose push failed leaves the PR head a
+  commit behind. Gating this action on `workspaceDirty` alone drops it exactly there
+  and promotes Merge against a stale remote head. `workspaceDirty` alone still gates
+  the no-PR `Commit & Push`, where there is no remote branch to be behind. Below it, conflicts show
+  `Resolve Conflicts` (an immediate agent prompt), failed/error CI shows
+  `Fix CI Errors` (an immediate agent prompt naming only the PR; the agent reads the
+  failing checks itself). Quick-action prompts carry only the request and facts
+  ([decision](../notes/implemented/simplification/2026-11-11-agent-prompts-without-workflow.md));
+  Create PR keeps a one-sentence per-turn upkeep instruction, with the Commit & Push
+  ranking as its fallback
+  ([why](../notes/implemented/architecture/2026-09-12-pr-branch-upkeep-without-auto-commit.md)), and any merge state GitHub would accept (clean, or unstable:
+  checks still running or failing but not required) shows the shared Merge
+  split-button, so it appears while CI runs; blocked, behind, conflicting or unknown
+  states do not. List "ready to merge" indicators keep the stricter readiness. Its
+  dropdown selects merge/squash/rebase without merging; the primary half performs the
+  selected method. A terminal (merged/closed) PR offers nothing. Do not infer that PR
+  review comments are actionable, so there is no automatic `Fix PR Comments` action.
+  The action array is priority ordered:
+  the first action renders as the single explicit TEXT button in the `StageChip` trailing slot;
+  when more actions exist, a small chevron beside it opens the remaining actions in an
+  upward-opening menu. A DEMOTED merge action must stay in that menu (as one item that
+  performs the already-selected method) instead of being filtered out — dropping it
+  would make Merge unreachable on exactly the dirty sessions that rank
+  Commit & Push first. Regression coverage: `tests/session-info-bar-actions.test.tsx`
+  - the `DirtyWorktreeOutranksMerge` story. The primary action + chevron form one subtle, borderless background
+    surface with a low-contrast internal divider (single actions use the same surface without the chevron). Neither half
+    leaves an external focus outline/ring; keyboard focus stays visible as an internal background tint.
+    Under 420px,
+    compact chip values/PR number and the CI pill yield their
+    space so the primary action stays fully visible. Actions must not be duplicated below the
+    assistant response. Reply-specific
+    decisions such as Implement plan / Continue discussing stay with
+    that reply because they are not repository actions. Open preview is a plain
+    `ActionChip` at the end of the cluster (emerald MonitorPlay, no stage
+    form, opts out of promote/recency) — it replaced the desktop toolbar
+    Browser button AND the mobile header preview + PR badge (both removed;
+    mobile reaches Files/PR/Browser via the tab sheet's viewer entries). That
+    chip is AGENT-DRIVEN and must stay gated on the session actually having a
+    preview target (`hasReportedPreviewTarget` over the `SessionMeta` preview
+    summary: a `lody_report_preview_candidate` candidate, or a still-live
+    connection). It is not a generic "open the Browser panel" button — rendering
+    it on every session promised a preview that did not exist and landed on the
+    no-candidate empty state; the side-panel launcher / `+` menu (and the mobile
+    tab sheet) remain the unconditional way in. Because this standalone action can
+    be the only info-bar content in a context-less Session, it must keep the bar
+    rendered without a staged item. Focus is recency-driven
+    (item appears/changes → takes the stage); stage content leaves only by
+    promoting another item or its data disappearing. NO hand-off animation —
+    the stage remounts per item, so any fade/slide reads as jitter; stage
+    content appears instantly. Radix gotcha: popover anchors use PopoverAnchor (not Trigger) and
+    must preventDefault onPointerDownOutside when the target is the anchor,
+    or dismiss + click-toggle cancel out. GoalChip's popover reuses
+    `GoalActionButton`/`formatTokensCompact` from `session-goal-banner.tsx`.
+    Goal controls are transport-gated by the agent's advertised Core goal capability
+    (`apps/cli/src/agent/goal-control.ts`: the `_lody/session/goal` request, a
+    `_meta.lody.goalControl` prompt, or the older `/goal …` bridge); goals from an agent
+    that advertises no control stay read-only, and Stop must never synthesize `pause`
+    for it. Paused and blocked Codex goals both expose
+    Resume; a blocked goal is waiting for explicit user continuation, not terminal.
+    An `active` goal is persistent session state,
+    not proof that an ACP prompt is running: current busy/running UI, message queue routing,
+    and completion prompts must use live turn presence only. Active goal state may still
+    gate destructive history rewrites and expose an explicit Codex Pause control.
+    ScheduleChip reuses `useResolvedScheduledTasks`/`ScheduledTaskList` from
+    `scheduled-tasks-panel.tsx` (same adaptive countdown clock, cannot drift).
+    The message queue intentionally stays OUT of the bar's items; the bar only
+    hosts it in the `queue` slot above the pill (or alone, glued to the composer,
+    when the bar is otherwise empty), because only the bar knows whether it renders.
+    The bar renders on
+    BOTH desktop and mobile from `session-chat-interface.tsx` (status + goal +
+    schedule + context); it fully replaced the sticky `SessionGoalBanner`, the
+    in-composer `ScheduledTasksPanel`, the mobile `SessionStatusStrip`
+    instance, and the `create-pr` quick action — none of those render in
+    production anymore (SessionStatusStrip stays exported for its story only).
+    Production CI detail is fetched only for the active associated PR through
+    `useGitHubPrDetails`; compact `pullRequestState` remains the cheap sidebar/action
+    decision feed. An inactive proven-ready session replaces its sidebar diff stat
+    with the green bordered Mergeable pill; the active row hides both because the
+    Info Bar owns the merge control.
+
+## Related-Sessions chip
+
+`session-relations-chip.tsx` renders a `MessagesSquare` chip in the info bar's
+cluster zone, via the bar's `relations` slot, whenever the current Session sits
+in an opened-by tree (`lib/session-relation-tree.ts`). Like Preview it is a
+plain action, never staged: one click toggles `PopoverActionChip`'s popover,
+which anchors to the pill (the `@lody/ui` Popover `anchor` resolving the enclosing
+`[data-info-bar-surface]`) and takes its width.
+
+The popover shows the complete tree: every ancestor from the topmost live
+opener down, and every descendant. Edges connect rows (root Sessions); a Tab
+opener resolves to its root like the sidebar tree, without the sidebar's depth
+cap. A row is its root Session plus its top Tabs as equal pills; closed Tabs
+are hidden unless current. Each pill is agent icon, live title, and the sidebar's
+`SessionRowStatusIndicator` (waiting > working > unread); the current Session is
+highlighted. Tab pills navigate with root + exact tab ids. The page reads only
+a boolean (`useHasSessionRelations`); the chip builds the tree in the leaf.
+Decision: [relations note](../notes/implemented/feature/2026-09-24-session-relations-chip.md).
+
+The tree header provides **Stop all conversation collaboration**, with a nested
+confirmation popover and Cancel/Confirm actions. The user-owned stop flag is
+persisted across the authoritative tree (including hidden descendants); the root
+is stopped first and restored last. All participating machines must advertise
+`sessionCollaborationControl`. Runtime entry and MCP delegation check inherited
+flags, active turns are canceled, and late completions are recorded without waking
+the requester. **Restore collaboration** explicitly removes the barrier. Offline
+machines act after metadata sync; this is not an instantaneous cross-machine stop.
+The scope follows creation/containment edges, not every unrelated session that
+has exchanged a message. See the [decision](../notes/implemented/feature/2026-10-11-stop-conversation-tree.md).
+
+## Repositories panel and the active repository
+
+`session-project-members-chip.tsx` renders a multi-repository conversation's
+Repositories chip through the bar's `projectMembers` slot. Like Relations it is a
+plain cluster action, never staged. Its popover lists every frozen Member in
+placement order (each root followed by its submodules, siblings in snapshot
+order), indented by depth, with the repository identity, directory, branch or
+registered absolute directory for an in-place local Member, and current PR when one exists.
+The directory comes from the matching machine/project catalog; absent metadata keeps
+the in-place label. The full path and non-isolation notice remain in its hover title
+and accessible selection label. A repository without a PR
+leaves the slot empty, and unpublished work gets no separate dot. CI is the PR
+glyph's tone (green passing, red failing, amber running) while its shape keeps
+the PR status. Clicking a row selects that repository and closes the panel.
+
+Selection is view state in `atoms/session-project-member-selection.ts`, keyed by
+the workspace-owner Session so a child tab and its root agree. The context stage,
+the PR tab, live PR details/actions, and the diff stat describe the selected
+Member. With no selection the legacy first-Member projection is used, preserving
+existing conversations. A Member with no GitHub remote explicitly clears the
+repository/PR/actions instead of borrowing another Member's PR. Create PR and
+Commit & Push remain conversation-scoped because their prompt publishes every
+changed Member.
+
+## Type
+
+The bar is chrome, one tier below the conversation. `info-bar-type.ts` exports the
+footnote role (`INFO_BAR_TEXT_CLASS`) for the bar, its chips and the popovers they
+open, and the body role (`INFO_BAR_PROSE_CLASS`) only for a goal's objective, which a
+person wrote. Do not add a Tailwind size utility or a `text-[Npx]` here: both ignore
+the Appearance setting, and a caption step one pixel under the footnote reads as noise.
+A role sets size and leading only; an element takes one role. Hierarchy rules:
+[Workspace visual hierarchy](../../specs/workspace-visual-hierarchy.md) (draft);
+decision: [note](../notes/proposed/architecture/2026-10-16-workspace-visual-hierarchy.md).

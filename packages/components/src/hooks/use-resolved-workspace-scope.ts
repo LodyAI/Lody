@@ -2,7 +2,7 @@ import { useAtomValue } from 'jotai';
 import type { WorkspaceId } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
-import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { activeWorkspaceRuntimeAtom, workspaceRuntimeInitFailureAtom } from '@/atoms/runtime';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
@@ -22,6 +22,7 @@ export function useResolvedWorkspaceScope(options: WorkspaceScopeOptions = {}): 
   const routeTargetSlug = useWorkspaceRouteTargetSlug();
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const runtimeInitFailure = useAtomValue(workspaceRuntimeInitFailureAtom);
   const docMetaScope = useAtomValue(docMetaCacheScopeAtom);
   const requestedEnabled = options.enabled ?? true;
 
@@ -35,6 +36,7 @@ export function useResolvedWorkspaceScope(options: WorkspaceScopeOptions = {}): 
   const scope = resolveWorkspaceDataScope({
     targetSlug: routeTargetSlug,
     runtime,
+    runtimeInitFailure,
     docMetaScope,
     organizationsReady: currentWorkspaceId !== null,
     expectedWorkspaceId: currentWorkspaceId,

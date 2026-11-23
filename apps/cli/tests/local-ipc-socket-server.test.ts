@@ -1,3 +1,11 @@
+import {
+  getLocalIpcServerCredentials,
+  LOCAL_IPC_TOKEN_HEADER,
+} from '@lody/shared/node/local-ipc-auth';
+import {
+  type LocalE2eePrepareReply,
+  type LocalE2eePrepareResponse,
+} from '@lody/shared/e2ee-local-pairing';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -5,7 +13,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Effect } from 'effect';
-import type { LocalSessionControlRequest, LocalSessionControlResponse } from '@lody/shared';
+import {
+  LOCAL_MACHINE_RPC_PATH,
+  type LocalSessionControlRequest,
+  type LocalSessionControlResponse,
+} from '@lody/shared';
 import {
   LOCAL_CONTROL_HEADER,
   LOCAL_SESSION_CONTROL_PATH,
@@ -25,6 +37,7 @@ const tempDirs: string[] = [];
 
 const logger: Logger = {
   debug: vi.fn(),
+  trace: vi.fn(),
   error: vi.fn(),
   warn: vi.fn(),
   info: vi.fn(),
@@ -123,6 +136,7 @@ function postOversizedControlBody(
         method: 'POST',
         headers: {
           [LOCAL_CONTROL_HEADER]: '1',
+          [LOCAL_IPC_TOKEN_HEADER]: getLocalIpcServerCredentials().token,
           'Content-Type': 'application/json',
         },
       },
@@ -159,6 +173,78 @@ describe('local IPC socket server', () => {
     vi.clearAllMocks();
   });
 
+  it('refuses missing and incorrect tokens before dispatch, and accepts the published token', async () => {
+    const paths = makePaths();
+    const config = makeServerConfig(paths);
+    const run = await startLocalIpcSocketServers(config);
+    for (const token of ['', 'b'.repeat(64)]) {
+      const result = await Effect.runPromise(
+        Effect.flip(
+          makeLocalControlClientSocket({
+            socketPath: paths.controlSocketPath,
+            token,
+          }).sessionControl(createSessionRequest())
+        )
+      );
+      expect(result).toMatchObject({ _tag: 'IpcProtocolError', status: 401 });
+    }
+    const responses = await Effect.runPromise(
+      makeLocalControlClientSocket({ runFilePath: paths.runFilePath }).sessionControl(
+        createSessionRequest()
+      )
+    );
+    expect(responses.at(-1)).toMatchObject({ type: 'session/create_response', success: true });
+    expect(run.token).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('aborts an in-flight machine RPC when the local socket disconnects', async () => {
+    const paths = makePaths();
+    const config = makeServerConfig(paths);
+    let markStarted: (() => void) | undefined;
+    let markAborted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const aborted = new Promise<void>((resolve) => {
+      markAborted = resolve;
+    });
+    await startLocalIpcSocketServers({
+      ...config,
+      control: {
+        ...config.control,
+        dispatchMachineRpc: async (_message, signal) => {
+          markStarted?.();
+          if (signal?.aborted) markAborted?.();
+          else signal?.addEventListener('abort', () => markAborted?.(), { once: true });
+          await aborted;
+          return { ok: false, error: 'cancelled' };
+        },
+      },
+    });
+    const request = http.request({
+      socketPath: paths.controlSocketPath,
+      path: LOCAL_MACHINE_RPC_PATH,
+      method: 'POST',
+      headers: {
+        [LOCAL_CONTROL_HEADER]: '1',
+        [LOCAL_IPC_TOKEN_HEADER]: getLocalIpcServerCredentials().token,
+        'Content-Type': 'application/json',
+      },
+    });
+    request.on('error', () => {});
+    request.end(
+      JSON.stringify({
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1',
+        method: 'sorbet/credentials-logout',
+        params: { configId: 'provider', providerId: 'example' },
+      })
+    );
+    await started;
+    request.destroy();
+    await aborted;
+  });
+
   it('serves probe and control requests over sockets and cleans the run-file', async () => {
     const paths = makePaths();
     await startLocalIpcSocketServers(makeServerConfig(paths));
@@ -171,7 +257,7 @@ describe('local IPC socket server', () => {
     });
 
     await expect(
-      Effect.runPromise(makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health())
+      Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
     ).resolves.toMatchObject({
       ok: true,
       machineId: 'machine-1',
@@ -182,7 +268,7 @@ describe('local IPC socket server', () => {
     await expect(
       Effect.runPromise(
         makeLocalControlClientSocket({
-          socketPath: paths.controlSocketPath,
+          runFilePath: paths.runFilePath,
         }).sessionControl(createSessionRequest())
       )
     ).resolves.toEqual([
@@ -214,7 +300,7 @@ describe('local IPC socket server', () => {
       version: first.version,
     });
     await expect(
-      Effect.runPromise(makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health())
+      Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
     ).resolves.toMatchObject({ machineId: 'machine-1' });
   });
 
@@ -237,9 +323,7 @@ describe('local IPC socket server', () => {
       await startLocalIpcSocketServers(makeServerConfig(paths));
 
       await expect(
-        Effect.runPromise(
-          makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health()
-        )
+        Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
       ).resolves.toMatchObject({ machineId: 'machine-1' });
     }
   );
@@ -294,7 +378,7 @@ describe('local IPC socket server', () => {
     await startLocalIpcSocketServers(makeServerConfig(paths));
 
     await expect(
-      Effect.runPromise(makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health())
+      Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
     ).resolves.toMatchObject({ machineId: 'machine-1' });
   });
 
@@ -335,17 +419,161 @@ describe('local IPC socket server', () => {
 
     await startLocalIpcSocketServers(makeServerConfig(paths));
     await expect(
-      Effect.runPromise(makeLocalProbeClientSocket({ socketPath: paths.probeSocketPath }).health())
+      Effect.runPromise(makeLocalProbeClientSocket({ runFilePath: paths.runFilePath }).health())
     ).resolves.toMatchObject({ machineId: 'machine-1', pid: process.pid });
   });
 
   it('enforces the control request body limit over sockets', async () => {
     const paths = makePaths();
-    await startLocalIpcSocketServers(makeServerConfig(paths));
+    const config = makeServerConfig(paths);
+    const bytes = Buffer.alloc(20 * 1024 * 1024, 42);
+    config.control.dispatchSession.mockImplementation(async (message, options) => {
+      expect(message.type).toBe('session/image-prepare-local');
+      expect(Buffer.from(message.source.base64, 'base64').equals(bytes)).toBe(true);
+      const response: LocalSessionControlResponse = {
+        type: 'session/image-prepare-local_response',
+        sessionId: 'session-1',
+        success: true,
+      };
+      options?.onResponse?.(response);
+      return [response];
+    });
+    await startLocalIpcSocketServers(config);
+    await expect(
+      Effect.runPromise(
+        makeLocalControlClientSocket({ runFilePath: paths.runFilePath }).sessionControl({
+          type: 'session/image-prepare-local',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          sessionId: 'session-1',
+          imageId: '11111111-1111-4111-8111-111111111111',
+          fileName: 'image.png',
+          mimeType: 'image/png',
+          source: { base64: bytes.toString('base64') },
+        })
+      )
+    ).resolves.toContainEqual({
+      type: 'session/image-prepare-local_response',
+      sessionId: 'session-1',
+      success: true,
+    });
 
     await expect(postOversizedControlBody(paths.controlSocketPath)).resolves.toEqual({
       status: 413,
       payload: { ok: false, error: 'payload_too_large' },
     });
+  });
+});
+
+describe('local E2EE pairing transport', () => {
+  afterEach(async () => {
+    await stopLocalIpcSocketServers();
+    for (const directory of tempDirs.splice(0))
+      fs.rmSync(directory, { recursive: true, force: true });
+  });
+  it('carries only the explicit superseded receipt over the real local prepare route', async () => {
+    const paths = makePaths();
+    const config = makeServerConfig(paths);
+    const receipt = {
+      ok: true as const,
+      type: 'prepare-superseded' as const,
+      machineId: 'machine-1',
+      pairingSessionId: '12'.repeat(16),
+    };
+    let reply: LocalE2eePrepareReply = receipt;
+    let calls = 0;
+    await startLocalIpcSocketServers({
+      ...config,
+      control: {
+        ...config.control,
+        dispatchE2eePairing: async (message) => {
+          expect(message.type).toBe('prepare');
+          calls++;
+          return reply;
+        },
+      },
+    });
+    const client = makeLocalControlClientSocket({ runFilePath: paths.runFilePath });
+    const request = {
+      type: 'prepare' as const,
+      machineId: 'machine-1',
+      accountId: 'account',
+      workspaceId: 'workspace',
+      genesisHash: '78'.repeat(32),
+      genesisRecordHex: '01',
+      membershipId: '89'.repeat(16),
+      pairingSessionId: receipt.pairingSessionId,
+      frontendSigningPublicKey: 'ab'.repeat(32),
+    };
+    expect(await Effect.runPromise(client.e2eePrepare(request))).toEqual(receipt);
+    expect(calls).toBe(1);
+
+    // A material-shaped or malformed response cannot become a retirement receipt.
+    reply = Object.assign({}, receipt, { credentialHash: '67'.repeat(32) });
+    expect((await Effect.runPromise(Effect.result(client.e2eePrepare(request))))._tag).toBe(
+      'Failure'
+    );
+    reply = { ...receipt, pairingSessionId: 'not-a-session' };
+    expect((await Effect.runPromise(Effect.result(client.e2eePrepare(request))))._tag).toBe(
+      'Failure'
+    );
+    expect(calls).toBe(3);
+  });
+  it('exchanges public pairing evidence and activation only over the same-user socket', async () => {
+    const paths = makePaths();
+    const config = makeServerConfig(paths);
+    const material: LocalE2eePrepareResponse = {
+      ok: true,
+      type: 'prepare',
+      machineId: 'machine-1',
+      pairingSessionId: '12'.repeat(16),
+      signingPublicKey: '23'.repeat(32),
+      encryptionPublicKey: '34'.repeat(32),
+      possessionSignature: '45'.repeat(64),
+      bindingSignature: '56'.repeat(64),
+      credentialHash: '67'.repeat(32),
+      protection: 'file',
+    };
+    let activated = false;
+    await startLocalIpcSocketServers({
+      ...config,
+      control: {
+        ...config.control,
+        dispatchE2eePairing: async (message) => {
+          if (message.type === 'prepare') return material;
+          activated = true;
+          return { ok: true, type: 'activate' };
+        },
+      },
+    });
+    const client = makeLocalControlClientSocket({ runFilePath: paths.runFilePath });
+    const request = {
+      type: 'prepare' as const,
+      machineId: 'machine-1',
+      accountId: 'account',
+      workspaceId: 'workspace',
+      genesisHash: '78'.repeat(32),
+      genesisRecordHex: '01',
+      membershipId: '89'.repeat(16),
+      pairingSessionId: material.pairingSessionId,
+      frontendSigningPublicKey: 'ab'.repeat(32),
+    };
+    expect(await Effect.runPromise(client.e2eePrepare(request))).toEqual(material);
+    expect(activated).toBe(false);
+    const { genesisRecordHex: _genesis, membershipId: _member, ...activation } = request;
+    expect(
+      await Effect.runPromise(
+        client.e2eeActivate({
+          ...activation,
+          type: 'activate',
+          signingPublicKey: material.signingPublicKey,
+        })
+      )
+    ).toEqual({ ok: true, type: 'activate' });
+    expect(activated).toBe(true);
+    const mismatch = await Effect.runPromise(
+      Effect.result(client.e2eePrepare({ ...request, machineId: 'different-machine' }))
+    );
+    expect(mismatch._tag).toBe('Failure');
   });
 });

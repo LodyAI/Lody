@@ -1,27 +1,23 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Archive, Bot, FolderPlus, Search, SlidersHorizontal } from 'lucide-react';
 import type { LocalProjectId, MachineId, SessionId, SessionMeta } from '@lody/shared';
 import { SessionStatusFactory } from '@lody/shared';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 import {
   ArchivedSessionGroupSection,
   type ArchivedSessionGroup,
 } from '@/components/archive/archive-view';
 import { WebArchiveScreen } from '@/components/archive/web-archive-screen';
-import {
-  LocalProjectItem,
-  RemoveLocalProjectDialog,
-  type LocalProjectRemovalState,
-} from '@/components/loro-app-sidebar';
+import { LocalProjectItem, type LocalProjectRemovalState } from '@/components/loro-app-sidebar';
 import { LoroSidebar, type LoroSidebarNavKey } from '@/components/loro-sidebar';
 import { MobileHomeScreen } from '@/components/mobile/mobile-home-screen';
-import { MobileRemoveLocalProjectSheet } from '@/components/mobile/mobile-remove-local-project-sheet';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Toaster } from '@/ui/sonner';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Toast } from '@lody/ui';
+import { toastManager } from '@/lib/toast';
 
 const now = Date.now();
 const machineId = 'machine-mac-studio' as MachineId;
@@ -65,9 +61,9 @@ function ProjectRow({ state }: { state?: LocalProjectRemovalState }) {
       machineName={state === 'removing' ? 'Mac Studio' : 'MacBook Pro'}
       project={project}
       canRemoveProject
-      canNavigateProject
       removalState={state ?? null}
       collapsed={false}
+      revealedRows={0}
       isSelected={false}
       sessionsForProject={activeProjectSessions}
       childSessionsByParent={new Map()}
@@ -87,6 +83,8 @@ function ProjectRow({ state }: { state?: LocalProjectRemovalState }) {
       collapsedOpenedBySessionIds={{}}
       onToggleOpenedBySessions={() => {}}
       onToggleCollapsed={() => {}}
+      onShowMore={() => {}}
+      onShowLess={() => {}}
       onRequestRemoval={() => {}}
     />
   );
@@ -116,7 +114,6 @@ function DesktopSidebar({
           <SidebarSectionHeader
             label="本地项目"
             collapsed={false}
-            count={2}
             isMobile={false}
             toggleLabel="展开或收起本地项目"
             onToggleCollapsed={() => {}}
@@ -124,9 +121,9 @@ function DesktopSidebar({
               <button
                 type="button"
                 className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted/30 hover:text-foreground"
-                aria-label="添加本地项目"
+                aria-label="添加文件夹"
               >
-                <FolderPlus className="h-4 w-4" />
+                <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
               </button>
             }
           />
@@ -141,8 +138,8 @@ function DesktopSidebar({
               createdAtMs: now - 172_800_000,
             }}
             canRemoveProject
-            canNavigateProject
             collapsed
+            revealedRows={0}
             isSelected={!state}
             sessionsForProject={[]}
             childSessionsByParent={new Map()}
@@ -162,6 +159,8 @@ function DesktopSidebar({
             collapsedOpenedBySessionIds={{}}
             onToggleOpenedBySessions={() => {}}
             onToggleCollapsed={() => {}}
+            onShowMore={() => {}}
+            onShowLess={() => {}}
             onRequestRemoval={() => {}}
           />
         </div>
@@ -198,11 +197,11 @@ function ProjectConversationPane() {
           <div className="rounded-2xl border border-border bg-card p-3 shadow-sm">
             <p className="min-h-12 text-sm text-muted-foreground">继续讨论这个项目…</p>
             <div className="mt-2 flex items-center justify-between">
-              <Button variant="ghost" size="sm" className="text-muted-foreground">
-                <FolderPlus className="h-4 w-4" />
+              <Button variant="ghost" size="small">
+                <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
                 Lody Desktop
               </Button>
-              <Button size="sm">发送</Button>
+              <Button size="small">发送</Button>
             </div>
           </div>
         </div>
@@ -216,50 +215,6 @@ function DesktopApp({ state }: { state?: LocalProjectRemovalState }) {
     <div className="flex h-screen min-h-0 w-full overflow-hidden bg-background text-foreground">
       <DesktopSidebar state={state} />
       <ProjectConversationPane />
-    </div>
-  );
-}
-
-function DesktopConfirmation() {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="relative h-screen">
-      <DesktopApp />
-      <RemoveLocalProjectDialog
-        open={open}
-        target={{
-          machineId,
-          localProjectId: projectId,
-          name: project.name,
-          pathLabel: project.rootPath,
-          conversationCount: 12,
-          runningSessionCount: 2,
-        }}
-        isRemote
-        machineName="MacBook Pro"
-        deviceOnline
-        canCleanupWorktrees
-        isRemoving={false}
-        onOpenChange={setOpen}
-        onPreflightCleanup={async () => ({
-          clean: [
-            {
-              sessionId: 'session-clean' as SessionId,
-              title: '完善移除项目的 UX',
-              path: '/tmp/session-clean',
-            },
-          ],
-          dirty: [
-            {
-              sessionId: 'session-dirty' as SessionId,
-              title: '清理本地 worktree',
-              path: '/tmp/session-dirty',
-            },
-          ],
-          failed: [],
-        })}
-        onConfirm={() => {}}
-      />
     </div>
   );
 }
@@ -305,44 +260,6 @@ function MobileProjectHome({ waiting = false }: { waiting?: boolean }) {
       onAddLocalProject={() => {}}
       onAddGitHubRepository={() => {}}
     />
-  );
-}
-
-function MobileConfirmation() {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="h-dvh overflow-hidden bg-background">
-      <MobileProjectHome />
-      <MobileRemoveLocalProjectSheet
-        open={open}
-        onOpenChange={setOpen}
-        projectName={project.name}
-        pathLabel={project.rootPath}
-        deviceName="MacBook Pro"
-        deviceOnline
-        conversationCount={12}
-        runningSessionCount={2}
-        canCleanupWorktrees
-        onPreflightCleanup={async () => ({
-          clean: [
-            {
-              sessionId: 'session-clean' as SessionId,
-              title: '完善移除项目的 UX',
-              path: '/tmp/session-clean',
-            },
-          ],
-          dirty: [
-            {
-              sessionId: 'session-dirty' as SessionId,
-              title: '清理本地 worktree',
-              path: '/tmp/session-dirty',
-            },
-          ],
-          failed: [],
-        })}
-        onConfirm={async () => true}
-      />
-    </div>
   );
 }
 
@@ -403,42 +320,44 @@ function RemovedProjectArchive() {
           onRequestBulkDelete={() => {}}
           dialogs={null}
         >
-          <div className="mx-auto w-full max-w-5xl px-8 py-6">
-            <div className="mb-5 flex items-center gap-2">
-              <div className="relative max-w-sm flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input className="pl-9" placeholder="搜索归档对话" />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-5xl px-8 py-6">
+              <div className="mb-5 flex items-center gap-2">
+                <div className="relative max-w-sm flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" placeholder="搜索归档对话" />
+                </div>
+                <Button variant="secondary" aria-label="筛选归档对话" icon>
+                  <SlidersHorizontal className="h-4 w-4" strokeWidth={1.8} />
+                </Button>
               </div>
-              <Button variant="outline" size="icon" aria-label="筛选归档对话">
-                <SlidersHorizontal className="h-4 w-4" />
-              </Button>
+              <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+                <Archive className="h-4 w-4" />
+                <span>较早</span>
+              </div>
+              <ArchivedSessionGroupSection
+                group={removedProjectGroup}
+                now={new Date(now)}
+                onRestore={() => {}}
+                onDelete={() => {}}
+                onNavigate={() => {}}
+                onToggleCollapse={() => {}}
+                restoreLabel="恢复"
+                restoreUnavailableLabel="重新添加此本地项目后即可恢复其中的对话。"
+                removedProjectLabel="项目已移除"
+                restoreActionLabel="恢复"
+                deleteLabel="永久删除"
+                deleteActionLabel="删除"
+                chatLabel="对话"
+                isMobile={false}
+                isMultiSelectMode={false}
+                selectedIds={new Set()}
+                onToggleSelect={() => {}}
+                onToggleGroupSelect={() => {}}
+                onEnterMultiSelect={() => {}}
+                membersByUserId={new Map()}
+              />
             </div>
-            <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-              <Archive className="h-4 w-4" />
-              <span>较早</span>
-            </div>
-            <ArchivedSessionGroupSection
-              group={removedProjectGroup}
-              now={new Date(now)}
-              onRestore={() => {}}
-              onDelete={() => {}}
-              onNavigate={() => {}}
-              onToggleCollapse={() => {}}
-              restoreLabel="恢复"
-              restoreUnavailableLabel="重新添加此本地项目后即可恢复其中的对话。"
-              removedProjectLabel="项目已移除"
-              restoreActionLabel="恢复"
-              deleteLabel="永久删除"
-              deleteActionLabel="删除"
-              chatLabel="对话"
-              isMobile={false}
-              isMultiSelectMode={false}
-              selectedIds={new Set()}
-              onToggleSelect={() => {}}
-              onToggleGroupSelect={() => {}}
-              onEnterMultiSelect={() => {}}
-              membersByUserId={new Map()}
-            />
           </div>
         </WebArchiveScreen>
       </div>
@@ -462,7 +381,7 @@ function CleanupResult() {
   return (
     <>
       <RemovedProjectArchive />
-      <Toaster />
+      <Toast.Provider manager={toastManager} />
     </>
   );
 }
@@ -471,17 +390,13 @@ type RemovalUxPreviewProps = {
   surface:
     | 'project-removing'
     | 'project-waiting'
-    | 'desktop-confirmation'
     | 'mobile-project-waiting'
-    | 'mobile-confirmation'
     | 'cleanup-result'
     | 'archive';
 };
 
 function RemovalUxPreview({ surface }: RemovalUxPreviewProps) {
-  if (surface === 'desktop-confirmation') return <DesktopConfirmation />;
   if (surface === 'mobile-project-waiting') return <MobileProjectHome waiting />;
-  if (surface === 'mobile-confirmation') return <MobileConfirmation />;
   if (surface === 'cleanup-result') return <CleanupResult />;
   if (surface === 'archive') return <RemovedProjectArchive />;
   return <DesktopApp state={surface === 'project-waiting' ? 'waiting_for_device' : 'removing'} />;
@@ -499,10 +414,8 @@ type Story = StoryObj<typeof meta>;
 
 export const ProjectRemoving: Story = { args: { surface: 'project-removing' } };
 export const ProjectWaitingForDevice: Story = { args: { surface: 'project-waiting' } };
-export const DesktopRemoveConfirmation: Story = { args: { surface: 'desktop-confirmation' } };
 export const MobileProjectWaitingForDevice: Story = {
   args: { surface: 'mobile-project-waiting' },
 };
-export const MobileRemoveConfirmation: Story = { args: { surface: 'mobile-confirmation' } };
 export const CleanupResultVisible: Story = { args: { surface: 'cleanup-result' } };
 export const RemovedProjectInArchive: Story = { args: { surface: 'archive' } };

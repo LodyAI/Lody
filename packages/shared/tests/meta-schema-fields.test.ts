@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveActiveAssistantTurnId, type MachineMeta, type SessionMeta } from '../src/schema';
+import { resolveActiveAssistantTurnId, type SessionMeta } from '../src/schema';
 import {
   MACHINE_PROTOCOL_CAPABILITIES,
   getMachineProtocolCapabilityVersion,
@@ -8,45 +8,6 @@ import {
 } from '../src/machine-protocol-capabilities';
 
 describe('meta schema fields', () => {
-  it('keeps legacy session meta shape readable', () => {
-    const legacy: SessionMeta = {
-      id: 'session-1',
-      machineId: 'machine-1',
-      createdAt: '2026-03-19T00:00:00.000Z',
-      userId: 'user-1',
-      cliType: 'builtin',
-      agentType: 'codex',
-    };
-
-    expect(legacy.latestUserMsgId).toBeUndefined();
-    expect(legacy.lastCanceledTurn).toBeUndefined();
-    expect(legacy.lastHandledUserMsgId).toBeUndefined();
-    expect(legacy.processingUserMsgId).toBeUndefined();
-    expect(legacy.lastMissingHistoryUserMsgId).toBeUndefined();
-  });
-
-  it('accepts dispatch-driven session meta fields', () => {
-    const meta: SessionMeta = {
-      id: 'session-2',
-      machineId: 'machine-2',
-      createdAt: '2026-03-19T00:00:00.000Z',
-      userId: 'user-2',
-      cliType: 'builtin',
-      agentType: 'codex',
-      latestUserMsgId: 'turn-2',
-      lastCanceledTurn: 'assistant-turn-2',
-      lastHandledUserMsgId: 'turn-1',
-      processingUserMsgId: 'turn-2',
-      lastMissingHistoryUserMsgId: 'turn-missing',
-    };
-
-    expect(meta.latestUserMsgId).toBe('turn-2');
-    expect(meta.lastCanceledTurn).toBe('assistant-turn-2');
-    expect(meta.lastHandledUserMsgId).toBe('turn-1');
-    expect(meta.processingUserMsgId).toBe('turn-2');
-    expect(meta.lastMissingHistoryUserMsgId).toBe('turn-missing');
-  });
-
   it('keeps deleted bulky legacy fields out of writable session meta', () => {
     const base = {
       id: 'session-legacy',
@@ -114,19 +75,6 @@ describe('meta schema fields', () => {
         },
       ])
     ).toBeUndefined();
-  });
-
-  it('accepts machine rpc capability fields', () => {
-    const machine: MachineMeta = {
-      id: 'machine-1',
-      name: 'Machine',
-      cliVersion: '0.0.0',
-      os: 'linux',
-      sessions: [],
-      rpcVersion: '0',
-    };
-
-    expect(machine.rpcVersion).toBe('0');
   });
 
   it('negotiates versioned machine protocols without relying on CLI versions', () => {

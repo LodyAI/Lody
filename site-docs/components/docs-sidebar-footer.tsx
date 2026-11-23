@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Docs sidebar bottom bar: Discord / X + a single sliding theme toggle.
+ * Docs sidebar bottom bar: Discord / X / GitHub + a single sliding theme toggle.
  *
  * Replaces fumadocs' default "icon links + dual sun/moon segment" footer.
  * Socials sit quietly on the left; theme control matches the site-nav toggle.
@@ -9,6 +9,10 @@
 
 import { useEffect, useState } from 'react';
 import { useTheme } from 'fumadocs-ui/provider/base';
+
+import { GITHUB_REPO_URL } from '@site/lib/github';
+
+import { GithubMark } from './github-mark';
 
 const DISCORD_HREF = 'https://discord.gg/E8mZtMu38s';
 const X_HREF = 'https://x.com/lody_ai';
@@ -112,6 +116,16 @@ export function DocsSidebarFooter() {
           title="X"
         >
           <XIcon />
+        </a>
+        <a
+          className="docs-sidebar-footer__link"
+          href={GITHUB_REPO_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub"
+          title="GitHub"
+        >
+          <GithubMark />
         </a>
       </div>
       <ThemeToggle />

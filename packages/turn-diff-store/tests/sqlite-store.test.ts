@@ -20,6 +20,54 @@ afterEach(() => {
 });
 
 describe('SqliteTurnDiffStore', () => {
+  it('reads exact descriptor-addressed bytes through a read-only store without crossing owners or retention', () => {
+    const dbPath = createDbPath();
+    const text = '\uFEFF原始内容\r\n🙂\r\n'.repeat(10_000);
+    const writer = new SqliteTurnDiffStore({ dbPath, retentionDays: 1 });
+    writer.recordTurn({
+      ownerId: 'a',
+      turnId: 'first',
+      capturedAtMs: 1000,
+      recordedAtMs: 1000,
+      events: [event('a.txt', text, 'new text', 1, 1)],
+    });
+    writer.recordTurn({
+      ownerId: 'b',
+      turnId: 'other',
+      capturedAtMs: 1000,
+      recordedAtMs: 1000,
+      events: [event('a.txt', 'other owner', 'other text', 1, 1)],
+    });
+    const reader = new SqliteTurnDiffStore({ dbPath, readOnly: true, retentionDays: 1 });
+    try {
+      const descriptor = reader.getSnapshotDescriptor({ ownerId: 'a', path: 'a.txt', nowMs: 1000 });
+      expect(descriptor.status).toBe('ready');
+      if (descriptor.status !== 'ready' || descriptor.snapshot === null)
+        throw new Error('Expected a stored snapshot.');
+      const hash = descriptor.snapshot.hash;
+      expect(descriptor.snapshot.rawBytes).toBe(Buffer.byteLength(text));
+      expect(reader.getSnapshotBytes({ ownerId: 'a', path: 'a.txt', hash, nowMs: 1000 })).toEqual({
+        status: 'ready',
+        bytes: Buffer.from(text),
+      });
+      expect(reader.getSnapshotBytes({ ownerId: 'b', path: 'a.txt', hash, nowMs: 1000 })).toEqual({
+        status: 'unavailable',
+      });
+      expect(
+        reader.getSnapshotBytes({ ownerId: 'a', path: 'a.txt', hash, nowMs: 1000, maxRawBytes: 1 })
+      ).toMatchObject({ status: 'too_large' });
+      expect(
+        reader.getSnapshotBytes({ ownerId: 'a', path: 'a.txt', hash, nowMs: DAY_MS + 1001 })
+      ).toEqual({ status: 'unavailable' });
+      expect(() => reader.allocateHeadProof()).toThrow(/read-only/);
+      expect(reader.shouldRunGc(DAY_MS + 1001)).toBe(false);
+      expect(reader.stats().files).toBe(2);
+    } finally {
+      reader.close();
+      writer.close();
+    }
+  });
+
   it('reconstructs exact snapshots and reuses FastCDC chunks across turns', () => {
     const dbPath = createDbPath();
     const firstText = deterministicText(17, 384 * 1024);
@@ -506,15 +554,18 @@ describe('SqliteTurnDiffStore', () => {
 
   it('limits each incremental GC step to one turn batch', () => {
     const store = new SqliteTurnDiffStore({ dbPath: createDbPath(), retentionDays: 1 });
-    for (let index = 0; index < 129; index += 1) {
-      store.recordTurn({
-        ownerId: 'session-a',
-        turnId: `turn-${index}`,
-        capturedAtMs: 0,
-        recordedAtMs: 0,
-        events: [event(`${index}.txt`, null, 'same snapshot', 1, 0)],
-      });
-    }
+    const database = (store as unknown as { readonly db: Database.Database }).db;
+    database.transaction(() => {
+      for (let index = 0; index < 129; index += 1) {
+        store.recordTurn({
+          ownerId: 'session-a',
+          turnId: `turn-${index}`,
+          capturedAtMs: 0,
+          recordedAtMs: 0,
+          events: [event(`${index}.txt`, null, 'same snapshot', 1, 0)],
+        });
+      }
+    })();
 
     const cursor = store.beginGc(DAY_MS + 1);
     expect(store.gcStep(cursor)).toBeNull();
@@ -844,6 +895,26 @@ describe('TurnDiffStore worker client', () => {
           nowMs: 1_000,
         })
       ).resolves.toEqual({ status: 'ready', oldText: null, newText: 'from worker' });
+      const descriptor = await store.getSnapshotDescriptor({
+        ownerId: 'session-a',
+        turnId: 'turn-1',
+        path: 'worker.txt',
+        side: 'new',
+        maxRawBytes: 100,
+      });
+      expect(descriptor).toMatchObject({ status: 'ready', snapshot: { rawBytes: 11 } });
+      if (descriptor.status !== 'ready' || !descriptor.snapshot)
+        throw new Error('Expected a descriptor.');
+      expect(
+        await store.getSnapshotBytes({
+          ownerId: 'session-a',
+          turnId: 'turn-1',
+          path: 'worker.txt',
+          side: 'new',
+          hash: descriptor.snapshot.hash,
+          maxRawBytes: 100,
+        })
+      ).toEqual({ status: 'ready', bytes: new Uint8Array(Buffer.from('from worker')) });
       await expect(store.stats()).resolves.toMatchObject({
         turns: 1,
         files: 1,

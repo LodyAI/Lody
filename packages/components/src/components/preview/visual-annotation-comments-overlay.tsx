@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react';
 import { Check, SendHorizontal, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Badge } from '@lody/ui/badge';
 
 import type { PreviewVisualComment } from '@lody/shared/preview-comment-types';
 import type { VisualAnnotationResolvedAnchor } from '@lody/shared/visual-annotation-types';
@@ -242,6 +244,7 @@ function OpenComment({
   onToggleResolved,
   onSendToChat,
 }: OpenCommentProps) {
+  const { t } = useTranslation();
   const layout = getOpenLayout(comment, viewport, index, resolvedAnchor);
   const isDraft = comment.status === 'completed';
 
@@ -295,14 +298,12 @@ function OpenComment({
             <p className="flex items-center gap-1.5 text-xs font-semibold leading-4 text-popover-foreground">
               <span className="truncate">{comment.authorName ?? 'Reviewer'}</span>
               {isDraft ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
-                  Draft
-                </span>
+                <Badge tone="warning">
+                  {t('sessions.preview.annotation.statusDraft', 'Draft')}
+                </Badge>
               ) : null}
               {isSubmitted ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Sent
-                </span>
+                <Badge>{t('sessions.preview.annotation.statusSent', 'Sent')}</Badge>
               ) : null}
             </p>
             <p className="mt-1 whitespace-pre-line break-words text-[13px] leading-5 text-popover-foreground/80">
@@ -313,7 +314,7 @@ function OpenComment({
             <button
               type="button"
               aria-label="Collapse comment"
-              className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-popover-foreground"
+              className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-popover-foreground"
               onClick={(event) => {
                 event.stopPropagation();
                 onCollapse(comment.id);
@@ -335,7 +336,7 @@ function OpenComment({
                     ? 'cursor-default text-muted-foreground'
                     : isStaged
                       ? 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10'
-                      : 'text-muted-foreground hover:bg-muted hover:text-popover-foreground'
+                      : 'text-muted-foreground hover:bg-hover hover:text-popover-foreground'
                 )}
                 disabled={isSubmitted}
                 onClick={(event) => {

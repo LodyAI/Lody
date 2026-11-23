@@ -1,0 +1,32 @@
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -627,1 +627,8 @@
+-	}
++	}
++	recordBoundary(bucketId, streamId, offset) {
++        return this.db.transaction(() => {
++            const stream = this.getStream(bucketId, streamId);
++            if (!stream) throw new StoreError(404, "stream not found");
++            return { boundary: this.isBoundary(stream.id, offset), notAfterHead: offset <= stream.nextOffset, head: stream.nextOffset };
++        }).deferred();
++    }
+@@ -846,1 +853,2 @@
+-	"bootstrap"
++	"bootstrap",
++	"record-boundary"
+@@ -916,1 +924,3 @@
+-	const tail = parts[3];
++	const tail = parts[3];
++    if (tail === "record-boundary" && parts.length === 4) return { kind: "record-boundary", bucketId, streamId, surface: "ds", publicPath: `${streamPath}/record-boundary` };
++
+@@ -1344,1 +1354,9 @@
+-			else if (!store.bucketExists(route.bucketId)) throw new HttpError(404, "bucket not found");
++			else if (!store.bucketExists(route.bucketId)) throw new HttpError(404, "bucket not found");
++            if (route.kind === "record-boundary") {
++                if (request.method !== "GET") throw new HttpError(405, "method not allowed");
++                const offset = url.searchParams.get("offset");
++                if (offset === null || !/^\d{20}$/.test(offset) || !Number.isSafeInteger(Number(offset))) throw new HttpError(400, "invalid offset");
++                const result = store.recordBoundary(route.bucketId, route.streamId, Number(offset));
++                writeJsonBody(response, 200, { offset, boundary: result.boundary, notAfterHead: result.notAfterHead, head: encodeOffset(result.head) });
++                return;
++            }

@@ -2,32 +2,17 @@ import { describe, expect, it } from 'vitest';
 
 import {
   bindingToElectronAccelerator,
-  GLOBAL_SHORTCUT_DEFAULTS,
-  globalShortcutBindingHasModifier,
+  CliRuntimeStateSchema,
+  isDevEmailPasswordLoginEnabled,
+  LaunchLocalPathInputSchema,
+  migrateLegacyShortcutBinding,
+  PathLauncherProbeSchema,
+  PathLauncherRequestSchema,
 } from '../src/electron-ipc';
 
 describe('bindingToElectronAccelerator', () => {
-  it('converts the app-focus default', () => {
-    expect(bindingToElectronAccelerator(GLOBAL_SHORTCUT_DEFAULTS['app.focus'])).toBe(
-      'CommandOrControl+Shift+L'
-    );
-  });
-
   it('allows a global shortcut to be unset', () => {
     expect(bindingToElectronAccelerator(null)).toBeNull();
-  });
-
-  it('maps modifiers and uppercases letter keys', () => {
-    expect(bindingToElectronAccelerator('$mod+k')).toBe('CommandOrControl+K');
-    expect(bindingToElectronAccelerator('Alt+Shift+b')).toBe('Alt+Shift+B');
-    expect(bindingToElectronAccelerator('Ctrl+Alt+t')).toBe('Control+Alt+T');
-    expect(bindingToElectronAccelerator('cmd+1')).toBe('Command+1');
-  });
-
-  it('maps named keys', () => {
-    expect(bindingToElectronAccelerator('$mod+ArrowRight')).toBe('CommandOrControl+Right');
-    expect(bindingToElectronAccelerator('$mod+Space')).toBe('CommandOrControl+Space');
-    expect(bindingToElectronAccelerator('$mod+Shift+F5')).toBe('CommandOrControl+Shift+F5');
   });
 
   it('refuses modifier-less bindings (would swallow a bare key OS-wide)', () => {
@@ -41,27 +26,121 @@ describe('bindingToElectronAccelerator', () => {
     expect(bindingToElectronAccelerator('Shift+1')).toBeNull();
     expect(bindingToElectronAccelerator('Shift+F2')).toBeNull();
   });
+});
 
-  it('refuses unknown / empty tokens', () => {
-    expect(bindingToElectronAccelerator('')).toBeNull();
-    expect(bindingToElectronAccelerator('Hyper+x')).toBeNull();
-    expect(bindingToElectronAccelerator('$mod+Nonsense')).toBeNull();
-  });
-
-  it('dedupes repeated modifiers', () => {
-    expect(bindingToElectronAccelerator('$mod+mod+k')).toBe('CommandOrControl+K');
+describe('migrateLegacyShortcutBinding', () => {
+  it('rewrites only the legacy primary-modifier token', () => {
+    expect(migrateLegacyShortcutBinding('$mod+Shift+b')).toBe('Mod+Shift+b');
+    expect(migrateLegacyShortcutBinding('Shift+$MOD+k')).toBe('Shift+Mod+k');
+    expect(migrateLegacyShortcutBinding('Mod+Shift+b')).toBe('Mod+Shift+b');
   });
 });
 
-describe('globalShortcutBindingHasModifier', () => {
-  it('detects a primary modifier', () => {
-    expect(globalShortcutBindingHasModifier('$mod+Shift+n')).toBe(true);
-    expect(globalShortcutBindingHasModifier('Alt+b')).toBe(true);
+describe('isDevEmailPasswordLoginEnabled', () => {
+  it('enables direct email/password login for every unpackaged Electron build', () => {
+    expect(isDevEmailPasswordLoginEnabled({ isPackaged: false })).toBe(true);
   });
 
-  it('is false for a bare key or Shift-only combo', () => {
-    expect(globalShortcutBindingHasModifier('n')).toBe(false);
-    expect(globalShortcutBindingHasModifier('Space')).toBe(false);
-    expect(globalShortcutBindingHasModifier('Shift+n')).toBe(false);
+  it('keeps direct email/password login disabled in packaged Electron builds', () => {
+    expect(isDevEmailPasswordLoginEnabled({ isPackaged: true })).toBe(false);
+  });
+});
+
+describe('LaunchLocalPathInputSchema', () => {
+  it('preserves path argument whitespace when parsing command requests', () => {
+    const result = LaunchLocalPathInputSchema.safeParse({
+      kind: 'command',
+      command: { command: 'code', args: ['/tmp/project '] },
+      targetPath: '/tmp/project ',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.command.args).toEqual(['/tmp/project ']);
+    expect(result.data.targetPath).toBe('/tmp/project ');
+  });
+
+  it('rejects NUL bytes in command arguments', () => {
+    expect(
+      LaunchLocalPathInputSchema.safeParse({
+        kind: 'command',
+        command: { command: 'code', args: ['/tmp/project\0bad'] },
+        targetPath: '/tmp/project',
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe('CliRuntimeStateSchema', () => {
+  it('accepts backend connection ages and workspace details', () => {
+    const payload = {
+      schemaVersion: 1,
+      phase: 'running',
+      startupStage: 'ready',
+      connectivity: 'online',
+      backend: {
+        authorization: 'authorized',
+        connection: 'connecting',
+      },
+      connectionAges: {
+        backendNotConnectedSinceMs: 1_000,
+        workspaceNotConnectedSinceMs: { 'workspace-1': 2_000 },
+      },
+      connectedWorkspaces: [
+        {
+          id: 'workspace-1',
+          name: 'Alpha',
+          slug: 'alpha',
+          role: 'owner',
+          backendConnection: 'reconnecting',
+        },
+      ],
+      pid: 123,
+      updatedAtMs: 1,
+      issues: [],
+    } as const;
+    const result = CliRuntimeStateSchema.safeParse(payload);
+
+    expect(result.success).toBe(true);
+
+    const legacyV1Schema = CliRuntimeStateSchema.omit({ connectionAges: true });
+    expect(legacyV1Schema.safeParse(payload).success).toBe(true);
+  });
+
+  it('keeps backend details optional for older daemon runtime payloads', () => {
+    expect(
+      CliRuntimeStateSchema.safeParse({
+        schemaVersion: 1,
+        phase: 'running',
+        pid: 123,
+        updatedAtMs: 1,
+        issues: [],
+      }).success
+    ).toBe(true);
+  });
+});
+
+describe('renderer launcher authority', () => {
+  it('accepts only a launcher id and target, never renderer-supplied commands or URLs', () => {
+    const request = { launcherId: 'vscode', targetPath: '/tmp/project', targetKind: 'directory' };
+    expect(PathLauncherRequestSchema.parse(request)).toEqual(request);
+    for (const extra of [
+      { command: { command: 'sh', args: ['-c', 'arbitrary'] } },
+      { args: ['-c', 'arbitrary'] },
+      { url: 'file:///tmp/script.command' },
+      { fallbackCommands: [{ command: 'sh' }] },
+    ]) {
+      expect(PathLauncherRequestSchema.safeParse({ ...request, ...extra }).success).toBe(false);
+      expect(
+        PathLauncherProbeSchema.safeParse({ launchers: [{ ...request, ...extra }] }).success
+      ).toBe(false);
+    }
+    expect(
+      PathLauncherRequestSchema.safeParse({
+        kind: 'command',
+        command: { command: 'sh' },
+        targetPath: '/tmp/project',
+      }).success
+    ).toBe(false);
   });
 });

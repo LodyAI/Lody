@@ -22,6 +22,12 @@ import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sam
  * ACP process killed, Loro documents cleaned, session object deleted.
  * Periodic sweep runs every `sweepIntervalMs` (default: 1 minute) to find and clean idle sessions.
  *
+ * Idle means idle for the native agent too, not only for Lody's turns. A session whose agent is
+ * `running` outside a turn (a model turn it started itself) is never cleaned. One whose agent is
+ * only waiting on live background tasks (a `run_in_background` shell, a Monitor) is spared by the
+ * idle sweep for up to `nativeBackgroundMaxIdleMs`, because cleaning it kills those tasks before
+ * they can wake the model; memory pressure may still evict it.
+ *
  * ## Memory Pressure Eviction
  *
  * Before starting a new session, call `evictForMemoryPressure()`. It produces two independent
@@ -51,6 +57,11 @@ export interface SessionGCConfig {
   idleTimeoutMs: number;
   /** Interval to run GC sweep (default: 1 min) */
   sweepIntervalMs: number;
+  /**
+   * How long the idle sweep spares a session whose agent still has live background tasks
+   * (default: 24 hours). Bounded so a forgotten background dev server cannot pin a session forever.
+   */
+  nativeBackgroundMaxIdleMs: number;
   /** Enable GC (default: true) */
   enabled: boolean;
   /** Memory threshold in bytes; below this, memory pressure eviction kicks in (default: 1 GB) */
@@ -72,6 +83,15 @@ export interface SessionGCConfig {
   pressureRecheckAttempts: number;
   /** Delay between those re-samples (default: 500ms). */
   pressureRecheckDelayMs: number;
+  /**
+   * Loro WebAssembly heap size at which the idle sweep shortens its timeout to
+   * `wasmPressureIdleTimeoutMs` (default: 3 GiB of the 4 GiB limit). Host memory
+   * says nothing about this heap: it fills on a 128 GiB machine while host
+   * pressure never fires.
+   */
+  wasmPressureHeapBytes: number;
+  /** Idle timeout once the WebAssembly heap is past `wasmPressureHeapBytes` (default: 2 minutes). */
+  wasmPressureIdleTimeoutMs: number;
 }
 
 export type MemoryPressureReason =
@@ -91,8 +111,14 @@ export interface MemoryPressureVerdict {
   reason: MemoryPressureReason | null;
 }
 
+/** Native agent work outside Lody's turns; see `AgentClient.getNativeWork`. */
+export type SessionNativeWork = 'running' | 'background' | null;
+
+type CleanupPurpose = 'idle' | 'memory_pressure';
+
 export interface SessionGCDeps {
   getSessionLastActivity: (sessionId: SessionId) => number | undefined;
+  getNativeWork: (sessionId: SessionId) => SessionNativeWork;
   /** Whether the session has an active turn (prompting or finalizing) */
   hasActiveTurn: (sessionId: SessionId) => boolean;
   /** Whether the session has an active background goal that still needs its ACP runtime */
@@ -103,6 +129,12 @@ export interface SessionGCDeps {
   cleanSession: (sessionId: SessionId) => Promise<void>;
   getSessionIds: () => SessionId[];
   memoryPressure: MemoryPressureSnapshotSource;
+  /**
+   * Current Loro WebAssembly heap size, or `null` when unknown. WebAssembly memory
+   * never shrinks, so once past the threshold the sweep stays aggressive until
+   * the process restarts; freed space is reused for later documents.
+   */
+  readWasmHeapBytes?: () => number | null;
   logger: Logger;
   /** Injectable so the pressure re-check backoff never needs a real sleep in tests. */
   sleep?: (ms: number) => Promise<void>;
@@ -163,6 +195,10 @@ export function loadGCConfig(): SessionGCConfig {
   return {
     idleTimeoutMs: readEnvNumber('LODY_SESSION_GC_IDLE_TIMEOUT_MS', 20 * 60 * 1000), // 20 minutes
     sweepIntervalMs: readEnvNumber('LODY_SESSION_GC_SWEEP_INTERVAL_MS', 60 * 1000),
+    nativeBackgroundMaxIdleMs: readEnvNumber(
+      'LODY_SESSION_GC_NATIVE_BACKGROUND_MAX_IDLE_MS',
+      24 * 60 * 60 * 1000
+    ),
     enabled: process.env.LODY_SESSION_GC_ENABLED !== 'false',
     memoryThresholdBytes: readEnvNumber(
       'LODY_SESSION_GC_MEMORY_THRESHOLD_BYTES',
@@ -179,6 +215,11 @@ export function loadGCConfig(): SessionGCConfig {
     pressureRecheckDelayMs: readEnvNumber(
       'LODY_SESSION_GC_PRESSURE_RECHECK_DELAY_MS',
       DEFAULT_PRESSURE_RECHECK_DELAY_MS
+    ),
+    wasmPressureHeapBytes: readEnvNumber('LODY_SESSION_GC_WASM_HEAP_BYTES', 3 * GIB),
+    wasmPressureIdleTimeoutMs: readEnvNumber(
+      'LODY_SESSION_GC_WASM_PRESSURE_IDLE_TIMEOUT_MS',
+      2 * 60 * 1000
     ),
   };
 }
@@ -308,8 +349,38 @@ export function evaluateMemoryPressure(
   return { evict: reason !== null, block: reason !== null, reason };
 }
 
+/** One population of sessions GC may collect, with its own idle clock. */
+export interface GCSessionSource {
+  sessionIds(): SessionId[];
+  has(sessionId: SessionId): boolean;
+  lastActivityMs(sessionId: SessionId): number | undefined;
+}
+
+/**
+ * GC candidates are tracked sessions plus every cached Session doc. MCP reads,
+ * parent-owner lookups, previews and automations adopt docs into the document
+ * manager's cache without creating tracking state, and nothing else unloads them.
+ * A tracked session keeps its turn-activity clock, so a reader of its doc cannot
+ * keep its agent process alive; a doc that is only cached is idle from its last
+ * hand-out to any caller.
+ */
+export function combineGCSessionSources(
+  tracked: GCSessionSource,
+  cachedDocs: Omit<GCSessionSource, 'has'>
+): Pick<SessionGCDeps, 'getSessionIds' | 'getSessionLastActivity'> {
+  return {
+    getSessionIds: () => Array.from(new Set([...tracked.sessionIds(), ...cachedDocs.sessionIds()])),
+    getSessionLastActivity: (sessionId) =>
+      tracked.has(sessionId)
+        ? tracked.lastActivityMs(sessionId)
+        : cachedDocs.lastActivityMs(sessionId),
+  };
+}
+
 export class SessionGCManager {
   private sweepInterval: NodeJS.Timeout | null = null;
+  private wasmPressureLogged = false;
+  private memoryReclamation: Promise<MemoryPressureEvictionResult | null> | null = null;
 
   constructor(
     private config: SessionGCConfig,
@@ -353,7 +424,8 @@ export class SessionGCManager {
    */
   async sweep(): Promise<void> {
     const sweepStart = Date.now();
-    const candidates = await this.getIdleCandidates();
+    const idleTimeoutMs = this.currentIdleTimeoutMs();
+    const candidates = await this.getIdleCandidates(idleTimeoutMs);
 
     if (candidates.length === 0) {
       return;
@@ -365,7 +437,7 @@ export class SessionGCManager {
     let cleaned = 0;
     let skipped = 0;
     for (const { sessionId } of candidates) {
-      if (!(await this.isStillEligibleForGC(sessionId))) {
+      if (!(await this.isStillEligibleForGC(sessionId, idleTimeoutMs))) {
         skipped++;
         continue;
       }
@@ -401,6 +473,67 @@ export class SessionGCManager {
    * @param excludeSessionId - Session to exclude from eviction (e.g. the session being started)
    */
   async evictForMemoryPressure(
+    excludeSessionId?: SessionId
+  ): Promise<MemoryPressureEvictionResult> {
+    const ongoing = this.memoryReclamation;
+    if (!ongoing) {
+      const reclamation = this.collectForMemoryPressure(excludeSessionId).catch(() => {
+        this.deps.logger.warn('[GC] Reclamation failed; continuing with current memory pressure');
+        return null;
+      });
+      this.memoryReclamation = reclamation;
+      void reclamation
+        .finally(() => {
+          if (this.memoryReclamation === reclamation) this.memoryReclamation = null;
+        })
+        .catch(() => {});
+    }
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const result = ongoing
+      ? null
+      : await Promise.race([
+          this.memoryReclamation,
+          new Promise<null>((resolve) => {
+            timeout = setTimeout(() => {
+              this.deps.logger.warn('[GC] Reclamation exceeded 10s; continuing in background');
+              resolve(null);
+            }, 10_000);
+          }),
+        ]).finally(() => clearTimeout(timeout));
+    if (result) return result;
+
+    // Cleanup completion never decides refusal; retain the existing live-probe and recheck rules.
+    const thresholdBytes = this.config.memoryThresholdBytes;
+    const commitThresholdBytes = getWindowsCommitThresholdBytes(thresholdBytes);
+    const thresholds: MemoryPressureThresholds = {
+      platform: this.platform,
+      thresholdBytes,
+      commitThresholdBytes,
+      psiStallAvg10: DEFAULT_PSI_STALL_AVG10,
+      cgroupHardFloorBytes: DEFAULT_CGROUP_HARD_FLOOR_BYTES,
+    };
+    let snapshot = await this.deps.memoryPressure.refresh();
+    let verdict = evaluateMemoryPressure(snapshot, thresholds);
+    for (
+      let attempt = 0;
+      verdict.block && attempt < this.config.pressureRecheckAttempts;
+      attempt++
+    ) {
+      await this.sleep(this.config.pressureRecheckDelayMs);
+      snapshot = await this.deps.memoryPressure.refresh();
+      verdict = evaluateMemoryPressure(snapshot, thresholds);
+    }
+    return this.buildEvictionResult({
+      snapshot,
+      thresholdBytes,
+      commitThresholdBytes,
+      hadMemoryPressure: verdict.evict,
+      verdict: this.config.enabled ? verdict : { evict: false, block: false, reason: null },
+      evictedSessionIds: [],
+    });
+  }
+
+  private async collectForMemoryPressure(
     excludeSessionId?: SessionId
   ): Promise<MemoryPressureEvictionResult> {
     const thresholdBytes = this.config.memoryThresholdBytes;
@@ -462,7 +595,7 @@ export class SessionGCManager {
         continue;
       }
 
-      if (!(await this.isEligibleForCleanup(sessionId))) {
+      if (!(await this.isEligibleForCleanup(sessionId, 'memory_pressure', idleMs))) {
         continue;
       }
 
@@ -616,19 +749,40 @@ export class SessionGCManager {
     );
   }
 
+  /** The idle timeout for this sweep: shortened while the WebAssembly heap is near its limit. */
+  private currentIdleTimeoutMs(): number {
+    const heapBytes = this.deps.readWasmHeapBytes?.() ?? null;
+    if (heapBytes === null || heapBytes < this.config.wasmPressureHeapBytes) {
+      return this.config.idleTimeoutMs;
+    }
+    if (!this.wasmPressureLogged) {
+      this.wasmPressureLogged = true;
+      this.deps.logger.warn(
+        `[GC] Loro WebAssembly heap is ${Math.round(heapBytes / 1024 / 1024)}MB; ` +
+          `collecting sessions idle for ${Math.round(this.config.wasmPressureIdleTimeoutMs / 1000)}s ` +
+          'until restart'
+      );
+    }
+    return Math.min(this.config.idleTimeoutMs, this.config.wasmPressureIdleTimeoutMs);
+  }
+
   /**
    * Get idle sessions eligible for cleanup, sorted by idle time (longest idle first).
    */
-  private async getIdleCandidates(): Promise<Array<{ sessionId: SessionId; idleMs: number }>> {
+  private async getIdleCandidates(
+    idleTimeoutMs: number
+  ): Promise<Array<{ sessionId: SessionId; idleMs: number }>> {
     const sessions = this.getSessionsWithIdleTime();
     const candidates: Array<{ sessionId: SessionId; idleMs: number }> = [];
 
     for (const session of sessions) {
-      if (session.idleMs < this.config.idleTimeoutMs) {
+      if (session.idleMs < idleTimeoutMs) {
         continue;
       }
 
-      if (!(await this.isEligibleForCleanup(session.sessionId))) {
+      if (
+        !(await this.isEligibleForCleanup(session.sessionId, 'idle', session.idleMs, idleTimeoutMs))
+      ) {
         continue;
       }
 
@@ -660,11 +814,42 @@ export class SessionGCManager {
 
   /**
    * Check if a session is eligible for cleanup.
-   * A session is NOT eligible if it has an active turn, active goal,
-   * pending updates, pending user work, or archive in flight.
+   * A session is NOT eligible if it has an active turn, native agent work (see the class doc),
+   * an active goal, pending updates, pending user work, or archive in flight.
    */
-  private async isEligibleForCleanup(sessionId: SessionId): Promise<boolean> {
+  private async isEligibleForCleanup(
+    sessionId: SessionId,
+    purpose: CleanupPurpose,
+    idleMs: number,
+    idleTimeoutMs = this.config.idleTimeoutMs
+  ): Promise<boolean> {
+    try {
+      return await this.checkCleanupEligibility(sessionId, purpose, idleMs, idleTimeoutMs);
+    } catch {
+      this.deps.logger.warn(`[GC] Eligibility check failed for ${sessionId}; retaining session`);
+      return false;
+    }
+  }
+
+  private async checkCleanupEligibility(
+    sessionId: SessionId,
+    purpose: CleanupPurpose,
+    idleMs: number,
+    idleTimeoutMs: number
+  ): Promise<boolean> {
     if (this.deps.hasActiveTurn(sessionId)) {
+      return false;
+    }
+
+    const nativeWork = this.deps.getNativeWork(sessionId);
+    if (nativeWork === 'running') {
+      return false;
+    }
+    if (
+      nativeWork === 'background' &&
+      purpose === 'idle' &&
+      idleMs < this.config.nativeBackgroundMaxIdleMs
+    ) {
       return false;
     }
 
@@ -684,6 +869,18 @@ export class SessionGCManager {
       return false;
     }
 
+    if (this.deps.hasActiveTurn(sessionId)) return false;
+    const currentWork = this.deps.getNativeWork(sessionId);
+    if (currentWork === 'running') return false;
+    if (purpose === 'idle') {
+      const lastActivity = this.deps.getSessionLastActivity(sessionId);
+      if (lastActivity === undefined) return false;
+      const currentIdleMs = Date.now() - lastActivity;
+      if (currentIdleMs < idleTimeoutMs) return false;
+      if (currentWork === 'background' && currentIdleMs < this.config.nativeBackgroundMaxIdleMs) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -691,19 +888,17 @@ export class SessionGCManager {
    * Re-check eligibility right before cleanup to guard against races.
    * Also verifies the session hasn't become active since candidate selection.
    */
-  private async isStillEligibleForGC(sessionId: SessionId): Promise<boolean> {
-    if (!(await this.isEligibleForCleanup(sessionId))) {
+  private async isStillEligibleForGC(
+    sessionId: SessionId,
+    idleTimeoutMs: number
+  ): Promise<boolean> {
+    const lastActivity = this.deps.getSessionLastActivity(sessionId);
+    // No activity record: treat it as just created (idle 0), as candidate selection does.
+    const idleMs = lastActivity === undefined ? 0 : Date.now() - lastActivity;
+    if (lastActivity !== undefined && idleMs < idleTimeoutMs) {
       return false;
     }
 
-    const lastActivity = this.deps.getSessionLastActivity(sessionId);
-    if (lastActivity !== undefined) {
-      const idleMs = Date.now() - lastActivity;
-      if (idleMs < this.config.idleTimeoutMs) {
-        return false;
-      }
-    }
-
-    return true;
+    return await this.isEligibleForCleanup(sessionId, 'idle', idleMs, idleTimeoutMs);
   }
 }

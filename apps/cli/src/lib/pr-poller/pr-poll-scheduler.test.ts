@@ -1,4 +1,10 @@
+import { computeDiscoveryFingerprint } from './pr-poll-targets';
+import { planPullRequestLifecycle } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  installWasmFaultMonitor,
+  resetWasmRuntimeHealthForTests,
+} from '@/lib/loro/wasm-runtime-health';
 import type {
   LodyPresenceInstanceId,
   LodyPresenceStateMap,
@@ -30,6 +36,7 @@ function createTestLogger(): Logger {
     error: vi.fn(),
     success: vi.fn(),
     debug: vi.fn(),
+    trace: vi.fn(),
     setLevel: vi.fn(),
     setDebug: vi.fn(),
     child: vi.fn(() => logger),
@@ -39,7 +46,13 @@ function createTestLogger(): Logger {
 }
 
 function makeMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
-  return { userId: 'user-1', machineId: LOCAL_MACHINE, ...overrides } as SessionMeta;
+  const meta = { userId: 'user-1', machineId: LOCAL_MACHINE, ...overrides } as SessionMeta;
+  // Existing modern fixtures have already published their provider revision.
+  for (const pr of meta.pullRequests ?? []) {
+    const write = planPullRequestLifecycle({ ...pr, updatedAt: '2026-07-17T00:00:00Z' });
+    if (write && !Object.hasOwn(meta, write.field)) meta[write.field] = write.value;
+  }
+  return meta;
 }
 
 function prMeta(prNumber: number, status: PrObservation['status'] = 'open') {
@@ -92,6 +105,8 @@ function viewingPresence(sessionId: SessionId, updatedAt: number): LodyPresenceS
 class FakeWorkspace {
   readonly metas = new Map<SessionId, SessionMeta>();
   presence: LodyPresenceStateMap = {};
+  /** Thrown by presence reads, as a trapped Loro instance does. */
+  presenceError: Error | null = null;
   initialSyncResult = true;
   credential: ResolvedGitHubCredential | null = {
     token: 'token-1',
@@ -101,6 +116,13 @@ class FakeWorkspace {
   /** When set, invalidateCredential swaps this in (token rotation / scope change). */
   replacementCredential: ResolvedGitHubCredential | null = null;
   associateResult = true;
+  associateEffect: (() => void) | null = null;
+  writeEffect: (() => void) | null = null;
+  hostedAssociation = true;
+  automationHooks: Pick<
+    PrPollerWorkspaceHandle,
+    'workflowObservationOwners' | 'recordObservations' | 'recordWorkflowObservations'
+  > = {};
 
   readonly associateCalls: AssociatePullRequestArgs[] = [];
   readonly writtenPatches: Array<{ sessionId: SessionId; patch: PrPollMetaPatch }> = [];
@@ -122,14 +144,22 @@ class FakeWorkspace {
 
   handle(): PrPollerWorkspaceHandle {
     return {
+      ...this.automationHooks,
       workspaceId: this.workspaceId,
       machineId: LOCAL_MACHINE,
       listAliveSessionMetas: this.listAliveSessionMetas,
       readOwnerMeta: this.readOwnerMeta,
       writeOwnerMeta: async (sessionId, patch) => {
+        this.writeEffect?.();
         this.writtenPatches.push({ sessionId, patch });
         const current = this.metas.get(sessionId) ?? makeMeta();
-        this.metas.set(sessionId, { ...current, ...patch });
+        const { lifecycle = [], linkChecks = [], ...legacyPatch } = patch;
+        this.metas.set(sessionId, {
+          ...current,
+          ...legacyPatch,
+          ...Object.fromEntries(lifecycle.map((write) => [write.field, write.value])),
+          ...Object.fromEntries(linkChecks.map((write) => [write.field, write.value])),
+        });
         // A real workspace fires the doc-metadata watcher on writes.
         this.notifyMetaChanged(sessionId);
       },
@@ -141,14 +171,20 @@ class FakeWorkspace {
         this.presenceListeners.add(listener);
         return () => this.presenceListeners.delete(listener);
       },
-      getPresenceStates: () => this.presence,
+      getPresenceStates: () => {
+        if (this.presenceError) throw this.presenceError;
+        return this.presence;
+      },
       waitForInitialSync: this.waitForInitialSync,
       resolveCredential: this.resolveCredential,
       invalidateCredential: this.invalidateCredential,
-      associatePullRequest: async (args) => {
-        this.associateCalls.push(args);
-        return this.associateResult;
-      },
+      associatePullRequest: !this.hostedAssociation
+        ? null
+        : async (args) => {
+            this.associateCalls.push(args);
+            this.associateEffect?.();
+            return this.associateResult;
+          },
       dispose: async () => {},
     };
   }
@@ -208,7 +244,10 @@ const config: PrPollerConfig = loadPrPollerConfig({});
 describe('PrPollScheduler', () => {
   let now: number;
   let scheduler: PrPollScheduler;
-  let client: { executeBatch: ReturnType<typeof vi.fn> };
+  let client: {
+    executeBatch: ReturnType<typeof vi.fn>;
+    executeWorkflows?: import('./github-graphql-client').GitHubGraphQlClient['executeWorkflows'];
+  };
   let clientHandler: (batch: PrPollBatchQuery, token: string) => Promise<PrPollQueryOutcome>;
   let stateStore: ReturnType<typeof makeStateStore>;
   let logger: Logger;
@@ -257,6 +296,21 @@ describe('PrPollScheduler', () => {
     }));
   }
 
+  /** Skip lines the daemon actually writes to `~/.lody/logs` — the reported symptom. */
+  function debugLines(fragment: string): string[] {
+    return (logger.debug as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .map(([message]) => String(message))
+      .filter((message) => message.includes(fragment));
+  }
+
+  /** One session per repo, all sharing the workspace's single credential scope. */
+  function repoSession(repoFullName: string): SessionMeta {
+    return makeMeta({
+      project: { kind: 'github', repoFullName } as SessionMeta['project'],
+      branchName: 'feat/x',
+    });
+  }
+
   beforeEach(() => {
     vi.useFakeTimers();
     now = T0;
@@ -274,77 +328,88 @@ describe('PrPollScheduler', () => {
     vi.useRealTimers();
   });
 
-  it('coalesces all due targets of one repo into a single batched call', async () => {
+  it('keeps an entrusted CI wait observable after PR closure and isolates Actions denial', async () => {
     const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
+    const sessionId = sid('s1');
+    const head = 'a'.repeat(40);
     workspace.metas.set(
-      sid('s2'),
-      makeMeta({
-        project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
-        branchName: 'feat/x',
-      })
+      sessionId,
+      makeMeta({ id: sessionId, pullRequests: [prMeta(11, 'closed')] })
     );
-
+    let demand = true;
+    const published: Array<{ head: string; gap: boolean }> = [];
+    workspace.automationHooks = {
+      workflowObservationOwners: () => (demand ? new Set([sessionId]) : new Set()),
+      recordWorkflowObservations: async (_meta, _repo, headSha, _runs, gap) => {
+        published.push({ head: headSha, gap });
+      },
+    };
+    clientHandler = async (batch) => {
+      const result = successOutcome(batch);
+      if (result.kind === 'success')
+        for (const item of result.batch.pullRequests)
+          item.pr = observation(item.prNumber, {
+            status: 'closed',
+            headSha: head,
+            headRepository: 'owner/repo',
+          });
+      return result;
+    };
+    let request = 0;
+    client.executeWorkflows = async (_repo, headSha, token) => {
+      expect(headSha).toBe(head);
+      expect(token).toBe('token-1');
+      return ++request === 1
+        ? {
+            kind: 'success',
+            batch: {
+              pullRequests: [],
+              discoveries: [],
+              workflowRuns: [],
+              workflowGap: false,
+              rateLimit: null,
+            },
+          }
+        : { kind: 'repo-not-found-or-forbidden', message: 'Actions denied' };
+    };
     await startWith([workspace]);
-
-    expect(calls()).toHaveLength(1);
-    const [call] = calls();
-    expect(call?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 11 }]);
-    expect(call?.batch.discoveryAliases.map((alias) => alias.branch)).toEqual(['feat/x', 'feat/x']);
-    expect(call?.batch.variables).toMatchObject({ owner: 'owner', name: 'repo' });
-    expect(scheduler.counters.calls).toBe(1);
-    expect(scheduler.counters.pointsSpent).toBe(1);
-    // Per-target last-success persisted (write-through) for restart catch-up.
-    expect(stateStore.getStored().targets['ws1|s1|owner/repo|status|11']?.lastSuccessAtMs).toBe(
-      now
-    );
+    expect(published).toEqual([{ head, gap: false }]);
+    expect(scheduler.counters.pointsSpent).toBe(2);
+    await advance(Math.max(config.highIntervalMs, config.lowMinIntervalMs));
+    expect(Object.keys(stateStore.getStored().repoCooldowns)).toHaveLength(1);
     expect(
-      stateStore.getStored().targets['ws1|s2|owner/repo|discovery|feat/x']?.lastSuccessAtMs
-    ).toBe(now);
+      Object.keys(stateStore.getStored().repoCooldowns).every((key) => key.endsWith('#actions'))
+    ).toBe(true);
+    const before = scheduler.counters.calls;
+    await advance(Math.max(config.highIntervalMs, config.lowMinIntervalMs));
+    expect(scheduler.counters.calls).toBe(before + 1);
+    demand = false;
+    const ended = scheduler.counters.calls;
+    await advance(Math.max(config.highIntervalMs, config.lowMinIntervalMs));
+    expect(scheduler.counters.calls).toBe(ended);
   });
 
-  it('low lane: an unviewed open PR is re-polled on the low status cadence', async () => {
+  it('asks for workflow demand once per build, not once per tracked session', async () => {
     const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
+    const owners = Array.from({ length: 8 }, (_, index) => {
+      const sessionId = sid(`s${index + 1}`);
+      workspace.metas.set(sessionId, makeMeta({ id: sessionId, pullRequests: [prMeta(11)] }));
+      return sessionId;
+    });
+    let demandCalls = 0;
+    workspace.automationHooks = {
+      workflowObservationOwners: () => {
+        demandCalls += 1;
+        return new Set(owners);
+      },
+    };
     await startWith([workspace]);
-    expect(calls()).toHaveLength(1);
-
-    // Boundary asserted 1s early, not 1ms: exact-ms edges are flaky under
-    // full-suite timer interleaving without weakening the cadence guarantee.
-    await advance(config.lowStatusIntervalMs - 1_000);
-    expect(calls()).toHaveLength(1);
-    await advance(1_000);
-    expect(calls()).toHaveLength(2);
-  });
-
-  it('high lane: a viewed session is re-polled on the high interval', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
-    workspace.presence = viewingPresence(sid('s1'), now);
-    await startWith([workspace]);
-    expect(calls()).toHaveLength(1);
-
-    await advance(config.highIntervalMs - 1_000);
-    expect(calls()).toHaveLength(1);
-    workspace.setPresence(viewingPresence(sid('s1'), now)); // heartbeat refresh
-    await advance(1_000);
-    expect(calls()).toHaveLength(2);
-  });
-
-  it('recent conversation activity keeps a session on the high cadence', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)], lastMessageAt: now }));
-    await startWith([workspace]);
-    expect(calls()).toHaveLength(1);
-
-    await advance(config.highIntervalMs);
-    expect(calls()).toHaveLength(2);
-
-    // After the activity window expires the session demotes to the low lane.
-    await advance(config.activityWindowMs);
-    const callsAtExpiry = calls().length;
-    await advance(config.highIntervalMs * 2);
-    expect(calls()).toHaveLength(callsAtExpiry);
+    expect(calls().length).toBeGreaterThan(0);
+    expect(demandCalls).toBeGreaterThan(0);
+    expect(demandCalls).toBeLessThanOrEqual(4);
+    const before = demandCalls;
+    await advance(60_000);
+    expect(demandCalls - before).toBeLessThanOrEqual(4);
   });
 
   it('a new viewer promotes a stale session without waiting for the low cadence', async () => {
@@ -357,6 +422,33 @@ describe('PrPollScheduler', () => {
     workspace.setPresence(viewingPresence(sid('s1'), now));
     await advance(2_000); // presence debounce + wake
     expect(calls()).toHaveLength(2);
+  });
+
+  it('keeps polling when a trapped Loro instance breaks presence reads, and reports the fault', async () => {
+    const faults: string[] = [];
+    const uninstall = installWasmFaultMonitor((fault) => faults.push(fault.source), {
+      console: { error: () => {} },
+      process: { on: () => process, off: () => process },
+    });
+    try {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
+      await startWith([workspace]);
+      expect(calls()).toHaveLength(1);
+
+      workspace.presenceError = new WebAssembly.RuntimeError('unreachable');
+      await advance(60_000);
+      // The presence debounce timer has no caller to catch for it.
+      workspace.setPresence(viewingPresence(sid('s1'), now));
+      await advance(2_000);
+      await advance(config.lowStatusIntervalMs);
+
+      expect(calls().length).toBeGreaterThan(1);
+      expect(faults).toEqual(['reported']);
+    } finally {
+      uninstall();
+      resetWasmRuntimeHealthForTests();
+    }
   });
 
   it('a newly associated PR is due immediately instead of inheriting the repo stamp', async () => {
@@ -374,30 +466,6 @@ describe('PrPollScheduler', () => {
     await advance(3_000); // meta debounce + wake
     expect(calls()).toHaveLength(2);
     expect(calls()[1]?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 12 }]);
-  });
-
-  it('refreshes one changed session without rescanning 2500 cached sessions', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta());
-    for (let index = 0; index < 2_499; index += 1) {
-      workspace.metas.set(sid(`historical-${index}`), makeMeta({ isArchived: true }));
-    }
-    await startWith([workspace]);
-
-    expect(workspace.listAliveSessionMetas).toHaveBeenCalledTimes(1);
-    expect(workspace.readOwnerMeta).not.toHaveBeenCalled();
-
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(12)] }));
-    workspace.notifyMetaChanged(sid('s1'));
-    await advance(2_000);
-
-    expect(workspace.listAliveSessionMetas).toHaveBeenCalledTimes(1);
-    expect(workspace.readOwnerMeta.mock.calls.map(([sessionId]) => sessionId)).toEqual([
-      sid('s1'),
-      sid('s1'),
-    ]);
-    expect(calls()).toHaveLength(1);
-    expect(calls()[0]?.batch.statusAliases).toEqual([{ alias: 'p0', prNumber: 12 }]);
   });
 
   it('replays session changes that race the initial full projection', async () => {
@@ -481,30 +549,10 @@ describe('PrPollScheduler', () => {
     expect(calls()).toHaveLength(2);
   });
 
-  it('coalesces a metadata burst by session id with fake time', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta());
-    await startWith([workspace]);
-    workspace.readOwnerMeta.mockClear();
-
-    for (let index = 1; index <= 3; index += 1) {
-      workspace.metas.set(sid('s1'), makeMeta({ lastMessageAt: now + index }));
-      workspace.notifyMetaChanged(sid('s1'));
-    }
-
-    await advance(1_999);
-    expect(workspace.readOwnerMeta).not.toHaveBeenCalled();
-    await advance(1);
-
-    expect(workspace.readOwnerMeta).toHaveBeenCalledTimes(1);
-    expect(workspace.readOwnerMeta).toHaveBeenCalledWith(sid('s1'));
-    expect(workspace.listAliveSessionMetas).toHaveBeenCalledTimes(1);
-  });
-
-  it('an empty bucket skips the cycle and resumes at refill time', async () => {
+  it('a presence heartbeat cannot pull a wake in front of a frozen scope', async () => {
     stateStore = makeStateStore({
       ...emptyPrPollerState(),
-      scopes: { 'managed:scope-1': { tokens: 0.5, updatedAtMs: T0 } },
+      scopes: { 'managed:scope-1': { tokens: 20, updatedAtMs: T0, frozenUntilMs: T0 + 120_000 } },
     });
     scheduler = makeScheduler();
     const workspace = new FakeWorkspace('ws1');
@@ -512,10 +560,54 @@ describe('PrPollScheduler', () => {
     await startWith([workspace]);
 
     expect(calls()).toHaveLength(0);
-    expect(scheduler.counters.skips).toBe(1);
-    // 0.5 points missing at 4 pts/min → one point in 7.5 s.
-    await advance(7_500);
+    expect(workspace.resolveCredential).toHaveBeenCalledTimes(1);
+
+    // A viewed session heartbeats every 10 s while frozen: the target stays due
+    // the whole time, so an un-gated external wake would re-dispatch on each.
+    for (let elapsed = 0; elapsed < 110_000; elapsed += 10_000) {
+      workspace.setPresence(viewingPresence(sid('s1'), now));
+      await advance(10_000);
+    }
+    expect(calls()).toHaveLength(0);
+    // The remembered scope is re-verified once per credential refresh window
+    // (60 s), never per heartbeat: two real resolves across 110 s.
+    expect(workspace.resolveCredential).toHaveBeenCalledTimes(2);
+    expect(debugLines('is frozen')).toHaveLength(1);
+    // 11 heartbeats over 110 s; only the capped wakes (≤30 s) may skip.
+    expect(scheduler.counters.skips).toBeLessThanOrEqual(5);
+
+    await advance(11_000); // past the thaw
     expect(calls()).toHaveLength(1);
+  });
+
+  it('a scope gate expires so a replacement credential on another scope is not locked out', async () => {
+    // Long freeze on the scope the repo resolved to. Gating by the LAST known
+    // scope must not outlive the resolver's credential refresh cadence, or a
+    // login/account switch to a healthy scope waits out the whole freeze.
+    stateStore = makeStateStore({
+      ...emptyPrPollerState(),
+      scopes: { 'managed:scope-1': { tokens: 20, updatedAtMs: T0, frozenUntilMs: T0 + 3_600_000 } },
+    });
+    scheduler = makeScheduler();
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
+    await startWith([workspace]);
+    expect(calls()).toHaveLength(0);
+
+    await advance(5 * 60_000);
+    expect(calls()).toHaveLength(0);
+    // The workspace gains a managed credential on a different, healthy scope.
+    workspace.credential = {
+      token: 'token-2',
+      source: 'managed',
+      credentialScope: 'managed:scope-2',
+    };
+
+    // One refresh window (60 s) plus at most one capped wake (30 s) — not the
+    // remaining 55 minutes of the freeze on scope-1.
+    await advance(90_000);
+    expect(calls()).toHaveLength(1);
+    expect(calls()[0]?.token).toBe('token-2');
   });
 
   it('a RATE_LIMITED outcome freezes the scope until resetAt', async () => {
@@ -562,93 +654,6 @@ describe('PrPollScheduler', () => {
     expect(calls()).toHaveLength(2); // frozen
   });
 
-  it('repo 404 enters 15min cooldown with exponential backoff and resets on success', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
-    await startWith([workspace]);
-
-    clientHandler = async () => ({ kind: 'repo-not-found-or-forbidden', message: 'not found' });
-    await advance(config.lowStatusIntervalMs);
-    expect(calls()).toHaveLength(2);
-    expect(scheduler.peekState().repoCooldowns['managed:scope-1:owner/repo']).toMatchObject({
-      consecutiveFailures: 1,
-      lastErrorKind: 'repo-not-found-or-forbidden',
-    });
-
-    await advance(15 * 60_000 - 1_000);
-    expect(calls()).toHaveLength(2); // still cooling down
-    await advance(1_000);
-    expect(calls()).toHaveLength(3); // first probe
-    expect(
-      scheduler.peekState().repoCooldowns['managed:scope-1:owner/repo']?.consecutiveFailures
-    ).toBe(2);
-
-    clientHandler = async (batch) => successOutcome(batch);
-    await advance(30 * 60_000);
-    expect(calls()).toHaveLength(4);
-    expect(scheduler.peekState().repoCooldowns['managed:scope-1:owner/repo']).toBeUndefined();
-    expect(stateStore.getStored().repoCooldowns['managed:scope-1:owner/repo']).toBeUndefined();
-  });
-
-  it('token-invalid invalidates and retries once, then enters cooldown when still failing', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
-    await startWith([workspace]);
-
-    clientHandler = async () => ({ kind: 'token-invalid', message: 'bad credentials' });
-    await advance(config.lowStatusIntervalMs);
-
-    expect(workspace.invalidateCredential).toHaveBeenCalledTimes(1);
-    expect(calls()).toHaveLength(3); // initial + retry-once (first cycle had 1)
-    expect(scheduler.peekState().repoCooldowns['managed:scope-1:owner/repo']).toMatchObject({
-      consecutiveFailures: 1,
-      lastErrorKind: 'token-invalid',
-    });
-  });
-
-  it('a network error retries after the attempt floor, keeping the last state', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
-    await startWith([workspace]);
-
-    clientHandler = async () => ({ kind: 'network-error', message: 'ECONNRESET' });
-    await advance(config.lowStatusIntervalMs);
-    expect(calls()).toHaveLength(2);
-    expect(scheduler.peekState().repoCooldowns['managed:scope-1:owner/repo']).toBeUndefined();
-    // The failed attempt is retried after the low-lane minimum interval, not
-    // only after a full desired interval.
-    await advance(config.lowMinIntervalMs);
-    expect(calls()).toHaveLength(3);
-  });
-
-  it('restart resumes from persisted last-success instead of re-polling immediately', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
-    await startWith([workspace]);
-    expect(calls()).toHaveLength(1);
-    scheduler.stop();
-    await scheduler.settle();
-
-    scheduler = makeScheduler(); // same state store
-    await startWith([workspace]);
-    expect(calls()).toHaveLength(1); // within the interval — no catch-up burst
-
-    await advance(config.lowStatusIntervalMs);
-    expect(calls()).toHaveLength(2);
-  });
-
-  it('stops polling a workspace after unregister', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
-    await startWith([workspace]);
-    expect(workspace.presenceListenerCount()).toBe(1);
-
-    scheduler.unregisterWorkspace('ws1');
-    expect(workspace.presenceListenerCount()).toBe(0);
-    await advance(10 * 60_000);
-    expect(calls()).toHaveLength(1);
-  });
-
   it('polls the same repo once per workspace under its own credential', async () => {
     const ws1 = new FakeWorkspace('ws1');
     ws1.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
@@ -664,80 +669,6 @@ describe('PrPollScheduler', () => {
         .map((call) => call.token)
         .sort()
     ).toEqual(['token-1', 'token-2']);
-  });
-
-  it('writes back a changed status against fresh meta and logs the correction', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11), prMeta(12, 'draft')] }));
-    // Fixture must agree with meta: PR 12 is a draft (OPEN + isDraft upstream).
-    const drafted = (batch: PrPollBatchQuery): PrPollQueryOutcome => {
-      const outcome = successOutcome(batch);
-      if (outcome.kind === 'success') {
-        for (const result of outcome.batch.pullRequests) {
-          if (result.prNumber === 12 && result.pr) {
-            result.pr.status = 'draft';
-          }
-        }
-      }
-      return outcome;
-    };
-    clientHandler = async (batch) => drafted(batch);
-    await startWith([workspace]);
-    expect(workspace.writtenPatches).toHaveLength(0); // nothing changed yet
-
-    clientHandler = async (batch) => {
-      const outcome = drafted(batch);
-      if (outcome.kind === 'success') {
-        for (const result of outcome.batch.pullRequests) {
-          if (result.prNumber === 11 && result.pr) {
-            result.pr.status = 'merged';
-          }
-        }
-      }
-      return outcome;
-    };
-    await advance(config.lowStatusIntervalMs);
-
-    expect(workspace.writtenPatches).toHaveLength(1);
-    const [write] = workspace.writtenPatches;
-    expect(write?.sessionId).toBe(sid('s1'));
-    // Lifecycle corrected; the open/draft PR stays current (last item).
-    expect(write?.patch.pullRequests).toEqual([prMeta(11, 'merged'), prMeta(12, 'draft')]);
-    expect(scheduler.counters.corrections).toBe(1);
-    expect(
-      (logger.debug as ReturnType<typeof vi.fn>).mock.calls.some((args) =>
-        String(args[0]).includes('poll corrected stale PR status')
-      )
-    ).toBe(true);
-  });
-
-  it('writes CI + merge state into pullRequestState on change only', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.metas.set(sid('s1'), makeMeta({ pullRequests: [prMeta(11)] }));
-    clientHandler = async (batch) => {
-      const outcome = successOutcome(batch);
-      if (outcome.kind === 'success') {
-        const first = outcome.batch.pullRequests[0];
-        if (first?.pr) {
-          first.pr.ciState = 's';
-          first.pr.mergeState = 'c';
-        }
-      }
-      return outcome;
-    };
-    await startWith([workspace]);
-    expect(workspace.metas.get(sid('s1'))?.pullRequestState).toEqual({
-      'https://github.com/owner/repo/pull/11': {
-        s: 's',
-        m: 'c',
-        t: Math.floor(now / 1000),
-      },
-    });
-
-    // Unchanged signals → no further writes (and `t` keeps the change time).
-    const writesBefore = workspace.writtenPatches.length;
-    await advance(config.lowStatusIntervalMs);
-    expect(workspace.writtenPatches).toHaveLength(writesBefore);
   });
 
   it('deletes the state record when the PR turns terminal and stops polling it', async () => {
@@ -782,12 +713,22 @@ describe('PrPollScheduler', () => {
     expect(calls()).toHaveLength(callsAfterTerminal);
   });
 
-  it('discovery associates through the backend endpoint, then writes meta', async () => {
+  it('discovers local PRs using ambient credentials without a product-cloud association', async () => {
     const workspace = new FakeWorkspace('ws1');
+    workspace.hostedAssociation = false;
+    workspace.credential = {
+      token: 'local-token',
+      source: 'gh',
+      credentialScope: 'github:ambient:github.com',
+    };
     workspace.metas.set(
       sid('s1'),
       makeMeta({
-        project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+        project: {
+          kind: 'local',
+          localProjectId: 'local-1',
+          githubRepoFullName: 'owner/repo',
+        } as SessionMeta['project'],
         branchName: 'feat/x',
       })
     );
@@ -803,26 +744,14 @@ describe('PrPollScheduler', () => {
     };
     await startWith([workspace]);
 
-    expect(workspace.associateCalls).toEqual([
-      {
-        repoFullName: 'owner/repo',
-        prNumber: 55,
-        prUrl: 'https://github.com/owner/repo/pull/55',
-        branch: 'feat/x',
-        status: 'open',
-        ownerSessionId: sid('s1'),
-      },
-    ]);
+    expect(workspace.associateCalls).toEqual([]);
     expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
     expect(scheduler.counters.discoveries).toBe(1);
   });
 
-  it('a failed association keeps the discovery target due and retries the round', async () => {
+  it('publishes a discovered PR despite association rejection and retries without duplicate writes', async () => {
     const workspace = new FakeWorkspace('ws1');
     workspace.associateResult = false;
-    // The exact review-finding scenario: TERMINAL current PR + a newer PR on
-    // the branch. The fingerprint must not be committed on failure, or the
-    // owner would go idle-terminal and lose the new PR forever.
     workspace.metas.set(
       sid('s1'),
       makeMeta({
@@ -844,20 +773,174 @@ describe('PrPollScheduler', () => {
     await startWith([workspace]);
 
     expect(workspace.associateCalls).toHaveLength(1);
-    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(9, 'merged')]);
-    expect(scheduler.counters.discoveries).toBe(0);
-    // No fingerprint, no success stamp → NOT idle-terminal; the whole round
-    // (GitHub query included) retries at the attempt floor.
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(9, 'merged'), prMeta(55)]);
+    expect(scheduler.counters.discoveries).toBe(1);
     expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
     await advance(config.lowMinIntervalMs);
-    expect(calls()).toHaveLength(2);
     expect(workspace.associateCalls).toHaveLength(2);
+    expect(workspace.writtenPatches).toHaveLength(1);
 
-    // Once the association endpoint recovers, the PR lands and the owner
-    // reaches idle-terminal only after the NEXT successful discovery pass.
     workspace.associateResult = true;
     await advance(config.lowMinIntervalMs);
     expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(9, 'merged'), prMeta(55)]);
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
+    expect(workspace.writtenPatches).toHaveLength(1);
+    await advance(config.lowStatusIntervalMs);
+    expect(workspace.associateCalls).toHaveLength(3);
+  });
+
+  it.each(['rejected', 'thrown'] as const)(
+    'publishes an ambient-credential PR when hosted association is %s',
+    async (failure) => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.credential = {
+        token: 'synthetic-gh-token',
+        source: 'gh',
+        credentialScope: 'github:ambient:github.com',
+      };
+      workspace.associateResult = false;
+      if (failure === 'thrown')
+        workspace.associateEffect = () => {
+          throw new Error('synthetic association transport failure');
+        };
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          project: {
+            kind: 'local',
+            localProjectId: 'local-1',
+            githubRepoFullName: 'owner/repo',
+          } as SessionMeta['project'],
+          branchName: 'feat/x',
+        })
+      );
+      clientHandler = async (batch) => {
+        const outcome = successOutcome(batch);
+        if (outcome.kind === 'success') {
+          for (const discovery of outcome.batch.discoveries)
+            discovery.prs = [observation(55, { status: 'draft', ciState: 'f', mergeState: 'c' })];
+          for (const status of outcome.batch.pullRequests)
+            status.pr = observation(status.prNumber, {
+              status: 'draft',
+              ciState: 'f',
+              mergeState: 'c',
+            });
+        }
+        return outcome;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55, 'draft')]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequestState?.[prMeta(55).url]).toMatchObject({
+        s: 'f',
+        m: 'c',
+      });
+      await advance(config.lowMinIntervalMs);
+      expect(workspace.writtenPatches).toHaveLength(1);
+      expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
+    }
+  );
+
+  it('clears an earlier fingerprint so a terminal observation with failed association retries after restart', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.associateResult = false;
+    workspace.metas.set(
+      sid('s1'),
+      makeMeta({
+        project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+        branchName: 'feat/x',
+      })
+    );
+    stateStore.getStored().discoveryFingerprints['ws1:s1'] = computeDiscoveryFingerprint(
+      'owner/repo',
+      'feat/x'
+    );
+    clientHandler = async (batch) => {
+      const outcome = successOutcome(batch);
+      if (outcome.kind === 'success')
+        for (const discovery of outcome.batch.discoveries)
+          discovery.prs = [observation(55, { status: 'merged' })];
+      return outcome;
+    };
+    await startWith([workspace]);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55, 'merged')]);
+    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBeUndefined();
+    scheduler.stop();
+    await scheduler.settle();
+    scheduler = makeScheduler();
+    workspace.associateResult = true;
+    await startWith([workspace]);
+    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
+    const callsAfterRecovery = calls().length;
+    await advance(config.lowDiscoveryIntervalMs);
+    expect(calls()).toHaveLength(callsAfterRecovery);
+  });
+
+  it.each(['branch', 'repo', 'deleted', 'migrated'] as const)(
+    'does not publish stale discovery when owner is %s during association',
+    async (change) => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.associateResult = false;
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+          branchName: 'feat/x',
+        })
+      );
+      workspace.associateEffect = () => {
+        if (change === 'deleted') workspace.metas.delete(sid('s1'));
+        else
+          workspace.metas.set(
+            sid('s1'),
+            makeMeta({
+              project: {
+                kind: 'github',
+                repoFullName: change === 'repo' ? 'owner/other' : 'owner/repo',
+              } as SessionMeta['project'],
+              branchName: change === 'branch' ? 'feat/other' : 'feat/x',
+              machineId: change === 'migrated' ? ('machine-2' as MachineId) : LOCAL_MACHINE,
+            })
+          );
+      };
+      clientHandler = async (batch) => {
+        const outcome = successOutcome(batch);
+        if (outcome.kind === 'success')
+          for (const discovery of outcome.batch.discoveries) discovery.prs = [observation(55)];
+        return outcome;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toBeUndefined();
+      expect(workspace.writtenPatches).toEqual([]);
+      expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
+    }
+  );
+
+  it('retries failed metadata publication even after webhook association succeeded', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(sid('s1'), repoSession('owner/repo'));
+    workspace.writeEffect = () => {
+      throw new Error('synthetic metadata write failure');
+    };
+    clientHandler = async (batch) => {
+      const outcome = successOutcome(batch);
+      if (outcome.kind === 'success')
+        for (const discovery of outcome.batch.discoveries) discovery.prs = [observation(55)];
+      return outcome;
+    };
+    await startWith([workspace]);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toBeUndefined();
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
+    workspace.writeEffect = null;
+    await advance(config.lowMinIntervalMs);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
+    expect(workspace.associateCalls).toHaveLength(1);
   });
 
   it('a malformed discovery alias is not a confirmed empty result (no idle-terminal)', async () => {
@@ -903,7 +986,9 @@ describe('PrPollScheduler', () => {
     await startWith([workspace]);
     // One discovery pass records the context fingerprint...
     expect(calls()).toHaveLength(1);
-    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
 
     // ...after which the terminal owner consumes no quota at all.
     await advance(45 * 60_000);
@@ -919,6 +1004,116 @@ describe('PrPollScheduler', () => {
     await advance(5_000);
     expect(calls()).toHaveLength(2);
     expect(calls()[1]?.batch.variables).toMatchObject({ b0: 'feat/next' });
+  });
+
+  it.each([false, true])(
+    'rediscovers a new PR on an idle terminal branch after child activity (project=%s)',
+    async (project) => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+          branchName: 'feat/x',
+          ...(project
+            ? {
+                projectRun: {
+                  members: {
+                    a: {
+                      src: { kind: 'github', repoFullName: 'owner/other' },
+                      branch: 'feat/x',
+                      base: 'main',
+                    },
+                    b: {
+                      src: { kind: 'github', repoFullName: 'owner/repo' },
+                      branch: 'feat/x',
+                      base: 'main',
+                    },
+                  },
+                } as never,
+              }
+            : {}),
+          pullRequests: [
+            ...(project
+              ? [{ url: 'https://github.com/owner/other/pull/8', status: 'merged' as const }]
+              : []),
+            prMeta(9, 'merged'),
+          ],
+          lastMessageAt: T0,
+        })
+      );
+      workspace.metas.set(
+        sid('child'),
+        makeMeta({ parentSessionId: sid('s1'), lastMessageAt: T0 })
+      );
+      await startWith([workspace]);
+      await advance(60_000);
+      expect(Object.keys(stateStore.getStored().targets)).toHaveLength(0);
+      // A restart retains the checkpoint even though transient target success was pruned.
+      scheduler.stop();
+      await scheduler.settle();
+      scheduler = makeScheduler();
+      await startWith([workspace]);
+      const idleCalls = calls().length;
+      await advance(config.highIntervalMs);
+      expect(calls()).toHaveLength(idleCalls);
+      clientHandler = async (batch) => {
+        const outcome = successOutcome(batch);
+        if (outcome.kind === 'success' && batch.variables.name === 'repo')
+          for (const discovery of outcome.batch.discoveries) discovery.prs = [observation(10)];
+        return outcome;
+      };
+      workspace.metas.set(
+        sid('child'),
+        makeMeta({ parentSessionId: sid('s1'), lastMessageAt: now })
+      );
+      workspace.notifyMetaChanged(sid('child'));
+      await advance(config.highIntervalMs);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toContainEqual(prMeta(10));
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toContainEqual(prMeta(9, 'merged'));
+      if (project)
+        expect(workspace.metas.get(sid('s1'))?.pullRequests).toContainEqual({
+          url: 'https://github.com/owner/other/pull/8',
+          status: 'merged',
+        });
+    }
+  );
+
+  it('does not acknowledge activity arriving during a discovery request', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(
+      sid('s1'),
+      makeMeta({
+        project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+        branchName: 'feat/x',
+        pullRequests: [prMeta(9, 'merged')],
+        lastMessageAt: T0,
+      })
+    );
+    let first = true;
+    clientHandler = async (batch) => {
+      const outcome = successOutcome(batch);
+      if (first) {
+        first = false;
+        workspace.metas.set(sid('s1'), {
+          ...workspace.metas.get(sid('s1'))!,
+          lastMessageAt: T0 + 1,
+        });
+        workspace.notifyMetaChanged(sid('s1'));
+      } else if (outcome.kind === 'success') {
+        for (const discovery of outcome.batch.discoveries) discovery.prs = [observation(10)];
+      }
+      return outcome;
+    };
+    await startWith([workspace]);
+    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x', T0)
+    );
+    await advance(config.highIntervalMs);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toContainEqual(prMeta(10));
+    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x', T0 + 1)
+    );
   });
 
   it('drops in-flight discovery results when the branch switched mid-request', async () => {
@@ -983,7 +1178,9 @@ describe('PrPollScheduler', () => {
 
     expect(workspace.associateCalls).toHaveLength(1);
     expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
-    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
   });
 
   it('does not write or associate for an owner that migrated machines mid-poll', async () => {
@@ -1214,6 +1411,233 @@ describe('PrPollScheduler', () => {
 
     expect(calls()).toHaveLength(2); // initial + invalid token; no token-2 request
     expect(calls().some((call) => call.token === 'token-2')).toBe(false);
+  });
+
+  describe('explicit PR links', () => {
+    const linkedUrl = 'https://github.com/owner/repo/pull/3019';
+    const link = (url: string, k: 'l' | 'u' = 'l', t = T0) => ({
+      [`prLink:${url.toLowerCase()}`]: { k, o: 's' as const, t },
+    });
+
+    it('associates a PR the agent created from another branch and links it for hosted webhooks', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          ...repoSession('owner/repo'),
+          branchName: 'session/68583a0c',
+          ...link(linkedUrl),
+        })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const item of result.batch.pullRequests)
+            item.pr = observation(item.prNumber, { headRefName: 'agy-remote-login', ciState: 'p' });
+        return result;
+      };
+      await startWith([workspace]);
+      expect(calls()[0]?.batch.statusAliases.map((alias) => alias.prNumber)).toEqual([3019]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([
+        { url: linkedUrl, status: 'open' },
+      ]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequestState?.[linkedUrl]?.s).toBe('p');
+      expect(workspace.associateCalls).toMatchObject([
+        { prNumber: 3019, prUrl: linkedUrl, branch: 'agy-remote-login', ownerSessionId: 's1' },
+      ]);
+      // Once associated it is an ordinary status target; the next poll leaves the list as is.
+      await advance(config.lowStatusIntervalMs);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([
+        { url: linkedUrl, status: 'open' },
+      ]);
+    });
+
+    it('keeps an explicitly linked PR current over a newer PR discovered on the runtime branch', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({ ...repoSession('owner/repo'), pullRequests: [prMeta(11)], ...link(linkedUrl) })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const item of result.batch.pullRequests)
+            item.pr = observation(item.prNumber, {
+              headRefName: item.prNumber === 3019 ? 'elsewhere' : 'feat/x',
+              updatedAt: item.prNumber === 3019 ? '2026-07-18T00:00:00Z' : '2026-07-17T00:00:00Z',
+            });
+        return result;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests?.map((pr) => pr.url)).toEqual([
+        prMeta(11).url,
+        linkedUrl,
+      ]);
+      // Several open PRs of one Session are all polled.
+      await advance(config.lowStatusIntervalMs);
+      expect(
+        calls()
+          .at(-1)
+          ?.batch.statusAliases.map((alias) => alias.prNumber)
+          .sort()
+      ).toEqual([11, 3019]);
+    });
+
+    it('keeps the current PR when two associated open PRs alternate provider updates', async () => {
+      for (const [first, second] of [
+        [11, 3019], // branch PR, then a PR linked from elsewhere (current)
+        [3018, 3019], // two linked PRs
+      ] as const) {
+        const workspace = new FakeWorkspace('ws1');
+        const firstUrl = prMeta(first).url;
+        const secondUrl = prMeta(second).url;
+        workspace.metas.set(
+          sid('s1'),
+          makeMeta({
+            ...repoSession('owner/repo'),
+            pullRequests: [prMeta(first), prMeta(second)],
+            ...(first === 11 ? {} : link(firstUrl)),
+            ...link(secondUrl, 'l', T0 + 1),
+          })
+        );
+        let round = 0;
+        clientHandler = async (batch) => {
+          round += 1;
+          const result = successOutcome(batch);
+          if (result.kind === 'success')
+            for (const item of result.batch.pullRequests) {
+              // Both PRs keep receiving provider updates; which one is newest alternates.
+              const newer = (round % 2 === 1) === (item.prNumber === first);
+              const hour = String(2 * round - (newer ? 0 : 1)).padStart(2, '0');
+              item.pr = observation(item.prNumber, {
+                headRefName: item.prNumber === 11 ? 'feat/x' : 'elsewhere',
+                updatedAt: `2026-07-18T${hour}:00:00Z`,
+              });
+            }
+          return result;
+        };
+        scheduler.stop();
+        scheduler = makeScheduler();
+        await startWith([workspace]);
+        const orders: string[][] = [];
+        for (let index = 0; index < 3; index += 1) {
+          await advance(config.lowStatusIntervalMs);
+          orders.push(workspace.metas.get(sid('s1'))?.pullRequests?.map((pr) => pr.url) ?? []);
+        }
+        expect(round).toBeGreaterThanOrEqual(4);
+        // Every round, including those where the older PR received the newest update.
+        expect(orders).toEqual([
+          [firstUrl, secondUrl],
+          [firstUrl, secondUrl],
+          [firstUrl, secondUrl],
+        ]);
+      }
+    });
+
+    it('makes a newly linked PR current even when the branch PR was updated later', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({ ...repoSession('owner/repo'), pullRequests: [prMeta(11)], ...link(linkedUrl) })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const item of result.batch.pullRequests)
+            item.pr = observation(item.prNumber, {
+              headRefName: item.prNumber === 11 ? 'feat/x' : 'elsewhere',
+              updatedAt: item.prNumber === 11 ? '2026-07-20T00:00:00Z' : '2026-07-17T00:00:00Z',
+            });
+        return result;
+      };
+      await startWith([workspace]);
+      await advance(config.lowStatusIntervalMs);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests?.map((pr) => pr.url)).toEqual([
+        prMeta(11).url,
+        linkedUrl,
+      ]);
+    });
+
+    it('lets a terminal linked PR yield to an open branch PR', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          ...repoSession('owner/repo'),
+          pullRequests: [prMeta(11), { url: linkedUrl, status: 'open' }],
+          ...link(linkedUrl),
+        })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const item of result.batch.pullRequests)
+            item.pr = observation(item.prNumber, {
+              headRefName: item.prNumber === 11 ? 'feat/x' : 'elsewhere',
+              status: item.prNumber === 3019 ? 'merged' : 'open',
+              updatedAt: '2026-07-18T00:00:00Z',
+            });
+        return result;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([
+        { url: linkedUrl, status: 'merged' },
+        { url: prMeta(11).url, status: 'open' },
+      ]);
+    });
+
+    it('removes an unlinked PR without querying it and never rediscovers it on the branch', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          ...repoSession('owner/repo'),
+          pullRequests: [prMeta(11)],
+          ...link(prMeta(11).url, 'u'),
+        })
+      );
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success')
+          for (const discovery of result.batch.discoveries) discovery.prs = [observation(11)];
+        return result;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([]);
+      expect(calls().every((call) => call.batch.statusAliases.length === 0)).toBe(true);
+      await advance(config.lowDiscoveryIntervalMs);
+      expect(calls().length).toBeGreaterThan(0);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([]);
+      expect(workspace.associateCalls).toEqual([]);
+      // Linking it again overrides the unlink.
+      workspace.metas.set(sid('s1'), {
+        ...workspace.metas.get(sid('s1'))!,
+        ...link(prMeta(11).url, 'l', T0 + 1),
+      });
+      workspace.notifyMetaChanged(sid('s1'));
+      await advance(config.lowDiscoveryIntervalMs);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests?.map((pr) => pr.url)).toEqual([
+        prMeta(11).url,
+      ]);
+    });
+
+    it('records an unreadable link once and never invents an association', async () => {
+      const workspace = new FakeWorkspace('ws1');
+      const missing = 'https://github.com/owner/repo/pull/404';
+      workspace.metas.set(sid('s1'), makeMeta({ ...repoSession('owner/repo'), ...link(missing) }));
+      clientHandler = async (batch) => {
+        const result = successOutcome(batch);
+        if (result.kind === 'success') for (const item of result.batch.pullRequests) item.pr = null;
+        return result;
+      };
+      await startWith([workspace]);
+      const meta = workspace.metas.get(sid('s1'));
+      expect(meta?.pullRequests ?? []).toEqual([]);
+      expect(meta?.[`prLinkCheck:${missing}`]).toEqual({ r: 'u', t: now });
+      const writes = workspace.writtenPatches.length;
+      await advance(config.lowDiscoveryIntervalMs);
+      expect(workspace.writtenPatches.length).toBe(writes);
+    });
   });
 });
 

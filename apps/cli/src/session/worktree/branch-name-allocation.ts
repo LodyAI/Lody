@@ -1,14 +1,9 @@
-import { resolveGitBranchName, type SessionExec } from '@/lib/git/resolve-git-branch-name';
-
 const DEFAULT_MAX_CANDIDATES = 1_000;
 
 export type AvailableBranchNameOptions = {
   maxLength?: number;
   maxCandidates?: number;
 };
-
-export const isManagedWorktreeBranchName = (branchName: string): boolean =>
-  branchName.startsWith('session/') || branchName.startsWith('lody/');
 
 const normalizeBranchNameForLength = (branchName: string, maxLength?: number): string => {
   const trimmed = branchName.trim();
@@ -91,68 +86,34 @@ export const resolveAvailableBranchName = (
   throw new Error(`Unable to find an available branch name for ${desiredBranchName}`);
 };
 
-const listLocalBranchNames = async (exec: SessionExec, workdir: string): Promise<Set<string>> => {
-  const output = await exec(
-    'git',
-    ['for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads'],
-    workdir,
-    false
-  );
-  return new Set(
-    output
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-  );
+/** The allocation scheme is shared by creation and first-task prompt eligibility. */
+export const getAllocatedSessionBranchName = (sessionId: string, localShared: boolean): string => {
+  if (!localShared) return `session/${sessionId.slice(0, 8)}`;
+  const shortId = sessionId
+    .slice(0, 12)
+    .replace(/[^A-Za-z0-9_-]/g, '')
+    .slice(0, 12);
+  return `lody/${shortId || sessionId.slice(0, 8)}`;
 };
 
-/**
- * Rename a managed placeholder branch without ever attaching to an existing ref.
- *
- * Session.exec intentionally does not reject non-zero command exits, so success is
- * verified by reading HEAD. If another creator wins the candidate between the ref
- * scan and rename, refresh the refs and allocate the next suffix.
- */
-export const renameBranchWithAvailableSuffix = async (options: {
-  exec: SessionExec;
-  workdir: string;
-  currentBranch: string;
-  desiredBranchName: string;
-  maxLength?: number;
-  maxCandidates?: number;
-}): Promise<string | null> => {
-  const unavailable = await listLocalBranchNames(options.exec, options.workdir);
-  const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
+const matchesAllocatedPart = (actual: string, allocated: string): boolean => {
+  if (actual === allocated) return true;
+  if (!actual.startsWith(`${allocated}-`)) return false;
+  const suffix = actual.slice(allocated.length + 1);
+  return /^[1-9]\d*$/.test(suffix) && Number(suffix) >= 2;
+};
 
-  for (let attempt = 0; attempt < maxCandidates; attempt += 1) {
-    const candidate = resolveAvailableBranchName(options.desiredBranchName, unavailable, {
-      maxLength: options.maxLength,
-      maxCandidates,
-    });
-    await options.exec(
-      'git',
-      ['branch', '-m', options.currentBranch, candidate],
-      options.workdir,
-      false
+export const isAllocatedSessionBranchName = (branchName: string, sessionId: string): boolean => {
+  const parts = branchName.split('/');
+  const [actualNamespace, actualName] = parts;
+  if (parts.length !== 2 || !actualNamespace || !actualName) return false;
+  return [false, true].some((localShared) => {
+    const [namespace, name] = getAllocatedSessionBranchName(sessionId, localShared).split('/');
+    return (
+      namespace !== undefined &&
+      name !== undefined &&
+      matchesAllocatedPart(actualNamespace, namespace) &&
+      matchesAllocatedPart(actualName, name)
     );
-
-    const actualBranch = await resolveGitBranchName(options.exec, options.workdir);
-    if (actualBranch === candidate) {
-      return candidate;
-    }
-    if (actualBranch !== options.currentBranch) {
-      return null;
-    }
-
-    const refreshed = await listLocalBranchNames(options.exec, options.workdir);
-    if (!hasLocalBranchNameConflict(candidate, refreshed)) {
-      return null;
-    }
-    for (const branchName of refreshed) {
-      unavailable.add(branchName);
-    }
-    unavailable.add(candidate);
-  }
-
-  throw new Error(`Unable to rename ${options.currentBranch} to an available branch name`);
+  });
 };

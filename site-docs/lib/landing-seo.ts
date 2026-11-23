@@ -147,7 +147,7 @@ export function landingJsonLd(locale: LandingSeoLocale): Record<string, unknown>
       '@type': 'Offer',
       price: '0',
       priceCurrency: 'USD',
-      description: isZh ? '提供免费版与 Plus 早鸟年付等方案' : 'Free tier and Plus plans available',
+      description: isZh ? '提供免费版与 Plus 等方案' : 'Free tier and Plus plans available',
     },
     featureList: features.map((f) => f.name),
     about: features.map((f) => ({

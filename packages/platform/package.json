@@ -13,6 +13,12 @@
     "./react": {
       "types": "./src/react.ts",
       "import": "./src/react.ts"
+    },
+    "./telemetry": "./src/telemetry.ts",
+    "./e2ee-passkey": "./src/e2ee-passkey.ts",
+    "./host-keys": {
+      "types": "./src/host-keys.ts",
+      "import": "./src/host-keys.ts"
     }
   },
   "scripts": {
@@ -22,13 +28,15 @@
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {
-    "@lody/shared": "workspace:*"
+    "@lody/shared": "workspace:*",
+    "effect": "catalog:",
+    "@lody/cloud-api": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "react": "catalog:",
     "typescript": "catalog:",
-    "vitest": "^3.2.4"
+    "vitest": "catalog:"
   }
 }

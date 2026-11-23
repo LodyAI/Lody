@@ -1,10 +1,16 @@
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { collectFileDownload } from '@/lib/file-download';
+import { useWorkspaceFeatureReason } from './use-workspace-feature';
+import { useSessionWorkspacePath } from './use-session-workspace-path';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import {
   getSessionRoomId,
+  encodeSessionFilePath,
   getCodeCollabFileIndexFlockDocId,
   codeCollabFileIndexToSharedState,
+  type CodeCollabAllChangesScope,
   type CodeCollabFileSourceState,
   type CodeCollabRole,
   type CodeCollabV2AllChangesState,
@@ -17,6 +23,15 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import {
+  buildSessionFileRootMounts,
+  EMPTY_SESSION_FILE_ROOT_MOUNTS,
+  getSessionFileRootMountsKey,
+  remapSessionFileRecord,
+  toSessionFileRequestPath,
+  toSessionFileDisplayPath,
+  type SessionFileRootMounts,
+} from '@/lib/session-file-root-mounts';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import {
   type CodeCollabFileIndexCache,
@@ -81,12 +96,15 @@ const disabledResult: UseCodeCollabSessionFileProviderResult = {
 export type CodeCollabV2MaterializedSharedState = {
   readonly fileTree: CodeCollabV2FileTreeState;
   readonly allChanges: CodeCollabV2AllChangesState;
+  readonly generations?: Readonly<Record<string, string>>;
   readonly files: readonly SessionFileProviderEntry[];
   readonly filesByPath: ReadonlyMap<string, SessionFileProviderEntry>;
   readonly version: number;
   readonly snapshotVersion: number;
   readonly sourceState: CodeCollabFileSourceState;
   readonly updatedAtMs?: number;
+  /** Which member mounts the display paths above were built with. */
+  readonly mountsKey?: string;
 };
 
 function entriesByPath(
@@ -102,22 +120,31 @@ function sortedEntriesFromMap(
 }
 
 export function materializeCodeCollabV2FileIndexForFileProvider(args: {
+  readonly generations?: Readonly<Record<string, string>>;
   readonly fileIndex?: CodeCollabV2FileIndexState | null;
   readonly revision: number;
   readonly updatedAtMs?: number;
   readonly sourceState: CodeCollabFileSourceState;
   readonly previous?: CodeCollabV2MaterializedSharedState | null;
+  /** Project group members outside the main directory, shown at their directory. */
+  readonly mounts?: SessionFileRootMounts;
 }): CodeCollabV2MaterializedSharedState | null {
   if (!args.fileIndex) return null;
+  const mounts = args.mounts ?? EMPTY_SESSION_FILE_ROOT_MOUNTS;
+  const mountsKey = getSessionFileRootMountsKey(mounts);
   if (
     args.previous?.snapshotVersion === args.revision &&
     args.previous.sourceState === args.sourceState &&
-    args.previous.updatedAtMs === args.updatedAtMs
+    args.previous.updatedAtMs === args.updatedAtMs &&
+    args.previous.mountsKey === mountsKey
   ) {
     return args.previous;
   }
 
-  const { fileTree, allChanges } = codeCollabFileIndexToSharedState(args.fileIndex);
+  const shared = codeCollabFileIndexToSharedState(args.fileIndex);
+  // Member roots arrive as encoded keys; every surface below speaks display paths.
+  const fileTree = remapSessionFileRecord(shared.fileTree, mounts);
+  const allChanges = remapSessionFileRecord(shared.allChanges, mounts);
   const filesByPath = entriesByPath(
     codeCollabFileTreeToSessionFileEntries(fileTree, args.sourceState)
   );
@@ -125,12 +152,14 @@ export function materializeCodeCollabV2FileIndexForFileProvider(args: {
   return {
     fileTree,
     allChanges,
+    generations: args.generations ? remapSessionFileRecord(args.generations, mounts) : undefined,
     files,
     filesByPath,
     version: args.revision,
     snapshotVersion: args.revision,
     sourceState: args.sourceState,
     updatedAtMs: args.updatedAtMs,
+    mountsKey,
   };
 }
 
@@ -176,8 +205,8 @@ function codeCollabFileIndexErrorMessage(error: unknown): string {
   return error instanceof Error
     ? error.message
     : typeof codeCollabError.message === 'string'
-    ? codeCollabError.message
-    : CODE_COLLAB_UNSUPPORTED_SESSION_MESSAGE;
+      ? codeCollabError.message
+      : CODE_COLLAB_UNSUPPORTED_SESSION_MESSAGE;
 }
 
 function useCodeCollabFileIndexLoadState(args: {
@@ -327,6 +356,9 @@ function useCodeCollabFileIndexLoadState(args: {
 export function useCodeCollabSessionFileProvider(
   options: UseCodeCollabSessionFileProviderOptions
 ): UseCodeCollabSessionFileProviderResult {
+  const indexReason = useWorkspaceFeatureReason('code-collab-index');
+  const indexAllowed = !indexReason;
+  const localMachineId = useAtomValue(localMachineIdAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const sessionId = options.sessionId as SessionId;
   const sessionRoomId = getSessionRoomId(sessionId);
@@ -337,6 +369,31 @@ export function useCodeCollabSessionFileProvider(
     )
   );
   const ownerSessionId = (parentSessionId ?? sessionId) as SessionId;
+  const ownerMeta = useAtomValue(
+    useMemo(
+      () =>
+        selectAtom(
+          sessionMetaAtomFamily(getSessionRoomId(ownerSessionId)),
+          (meta) => meta,
+          (a, b) =>
+            a?.id === b?.id &&
+            a?.machineId === b?.machineId &&
+            a?.parentSessionId === b?.parentSessionId &&
+            a?.project === b?.project &&
+            a?.isWorktree === b?.isWorktree &&
+            a?.repoFullName === b?.repoFullName &&
+            a?.projectRun === b?.projectRun
+        ),
+      [ownerSessionId]
+    )
+  );
+  // Project group members outside the main directory (additional directory or
+  // link) are separate roots; they are shown, searched and opened at their
+  // directory name and split back into `rootId` at the transport.
+  const ownerProjectRun = ownerMeta?.projectRun;
+  const mounts = useMemo(() => buildSessionFileRootMounts(ownerProjectRun), [ownerProjectRun]);
+  const desktopPreview = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
+  const workspaceRoot = useSessionWorkspacePath(desktopPreview ? ownerMeta : null);
   const workspaceId = options.workspaceId ?? runtime?.workspaceId ?? null;
   const machineId = options.machineId as MachineId | null | undefined;
   const textStateRef = useRef<ProviderTextStateRef | null>(null);
@@ -351,6 +408,17 @@ export function useCodeCollabSessionFileProvider(
     };
   }
   const providerTextState = textStateRef.current.state;
+  useEffect(
+    () => () => {
+      providerTextState.diffBlobCache.clear();
+    },
+    [providerTextState]
+  );
+  useEffect(() => {
+    if (options.enabled === false || !indexAllowed) {
+      providerTextState.diffBlobCache.clear();
+    }
+  }, [providerTextState, options.enabled, indexAllowed]);
   const role = options.requestedRole ?? 'write';
   const sourceState = resolveCodeCollabSessionFileProviderSourceState(role);
   const prepareFileIndexTarget = useMemo(
@@ -373,7 +441,7 @@ export function useCodeCollabSessionFileProvider(
     [machineId, ownerSessionId, runtime, sessionId]
   );
   const fileIndexLoadState = useCodeCollabFileIndexLoadState({
-    enabled: options.enabled !== false && !!machineId,
+    enabled: indexAllowed && options.enabled !== false && !!machineId,
     cache: runtime?.codeCollabFileIndexCache ?? null,
     workspaceId,
     ownerSessionId,
@@ -391,11 +459,13 @@ export function useCodeCollabSessionFileProvider(
       ? sharedStateRef.current.state
       : null;
   const materializedSharedState = materializeCodeCollabV2FileIndexForFileProvider({
+    generations: fileIndexSnapshot?.generations,
     fileIndex: fileIndexSnapshot?.fileIndex ?? null,
     revision: fileIndexSnapshot?.revision ?? 0,
     updatedAtMs: fileIndexSnapshot?.updatedAtMs,
     sourceState,
     previous: previousSharedState,
+    mounts,
   });
   sharedStateRef.current = {
     key: sharedStateKey,
@@ -406,20 +476,147 @@ export function useCodeCollabSessionFileProvider(
   const rpcRuntime = useMemo<CodeCollabSessionFileProviderRuntime | undefined>(() => {
     if (!runtime || !machineId) return undefined;
     const requestedByUserId = options.requestedByUserId?.trim();
+    const at = (path: string) => {
+      const request = toSessionFileRequestPath(path, mounts);
+      return request.rootId === undefined
+        ? { path: request.path }
+        : { path: request.path, rootId: request.rootId };
+    };
+    let nextIndexActivation = 0;
+    let indexActivation: Promise<void> | undefined;
+    const activateDiffIndex = async () => {
+      // Index publication is an existing writer action, separate from pure blob reads.
+      // Repeated diff activity renews its ten-minute watch without scanning per file.
+      if (role === 'read' || Date.now() < nextIndexActivation) return;
+      if (!indexActivation) {
+        nextIndexActivation = Date.now() + 5_000;
+        indexActivation = (async () => {
+          const roots = [undefined, ...mounts.map((mount) => mount.rootId)];
+          const results = await Promise.allSettled(
+            roots.map((rootId) =>
+              runtime.requestCodeCollabInitDirectory(
+                machineId,
+                { sessionId, path: '.', ...(rootId ? { rootId } : {}) },
+                { ownerSessionId }
+              )
+            )
+          );
+          if (
+            results.every(
+              (result) => result.status === 'fulfilled' && result.value?.status === 'ok'
+            )
+          )
+            nextIndexActivation = Date.now() + 5 * 60_000;
+          else
+            warnCodeCollab('diff-index-activation', {
+              sessionId,
+              message: 'Index activation failed.',
+            });
+        })().finally(() => {
+          nextIndexActivation = Math.max(nextIndexActivation, Date.now() + 5_000);
+          indexActivation = undefined;
+        });
+      }
+      await indexActivation;
+    };
     return {
       sessionId,
+      diffBlobTransportOptions: async () => {
+        const config = await runtime.getDiffBlobTransportOptions(machineId);
+        if (config.supported)
+          void activateDiffIndex().catch((error: unknown) =>
+            warnCodeCollab('diff-index-activation', {
+              sessionId,
+              ...describeCodeCollabError(error),
+            })
+          );
+        return config;
+      },
+      openDiffManifest: async (request) => {
+        const selected = request.path ?? request.focusPath;
+        const target = selected === undefined ? undefined : at(selected);
+        const result = await runtime.requestCodeCollabOpenDiffManifest(
+          machineId,
+          {
+            sessionId,
+            ...request,
+            ...(target === undefined
+              ? {}
+              : {
+                  rootId:
+                    request.path !== undefined && 'rootId' in target ? target.rootId : undefined,
+                  ...(request.path === undefined
+                    ? {
+                        focusPath:
+                          'rootId' in target && target.rootId
+                            ? encodeSessionFilePath({
+                                rootId: target.rootId,
+                                relativePath: target.path,
+                              })
+                            : target.path,
+                      }
+                    : { path: target.path }),
+                }),
+          },
+          { ownerSessionId }
+        );
+        if (result?.status === 'ok')
+          return {
+            ...result,
+            entries: result.entries.map((entry) => ({
+              ...entry,
+              path: toSessionFileDisplayPath(
+                entry.path.startsWith('\0')
+                  ? entry.path
+                  : request.path !== undefined && target && 'rootId' in target && target.rootId
+                    ? encodeSessionFilePath({ rootId: target.rootId, relativePath: entry.path })
+                    : entry.path,
+                mounts
+              ),
+            })),
+          };
+        return result;
+      },
+      readDiffBlob: async (key, offset, length, filePath) => {
+        const target = at(filePath);
+        return await runtime.requestCodeCollabReadBlob(
+          machineId,
+          {
+            sessionId,
+            key,
+            offset,
+            length,
+            ...('rootId' in target ? { rootId: target.rootId } : {}),
+          },
+          { ownerSessionId }
+        );
+      },
+      downloadFile: (path, signal) =>
+        collectFileDownload(
+          (range) =>
+            runtime.requestFileDownloadChunk(
+              machineId,
+              { sessionId, ...at(path), ...range },
+              ownerSessionId
+            ),
+          signal
+        ),
       previewFile: async (path, knownDigest) =>
         await runtime.requestFilePreview(
           machineId,
-          { sessionId, path, ...(knownDigest === undefined ? {} : { knownDigest }) },
-          { ownerSessionId }
+          { sessionId, ...at(path), ...(knownDigest === undefined ? {} : { knownDigest }) },
+          { ownerSessionId, workspaceRoot }
         ),
       openText: async (path) =>
-        await runtime.requestCodeCollabOpenText(machineId, { sessionId, path }, { ownerSessionId }),
+        await runtime.requestCodeCollabOpenText(
+          machineId,
+          { sessionId, ...at(path) },
+          { ownerSessionId }
+        ),
       refreshText: async (path, digest) =>
         await runtime.requestCodeCollabRefreshText(
           machineId,
-          { sessionId, path, digest },
+          { sessionId, ...at(path), digest },
           { ownerSessionId }
         ),
       saveText: async (path, baseDigest, text, format) =>
@@ -429,7 +626,7 @@ export function useCodeCollabSessionFileProvider(
               {
                 sessionId,
                 requestedByUserId,
-                path,
+                ...at(path),
                 baseDigest,
                 text,
                 ...(format === undefined ? {} : { format }),
@@ -441,63 +638,121 @@ export function useCodeCollabSessionFileProvider(
               code: 'permission_denied',
               message: 'Code Collab save requires a signed-in user.',
             },
-      openCurrentDiff: async (path) =>
+      openCurrentDiff: async (path, scope: CodeCollabAllChangesScope | undefined) =>
         await runtime.requestCodeCollabOpenCurrentDiff(
           machineId,
-          { sessionId, path },
+          { sessionId, ...at(path), ...(scope === undefined ? {} : { scope }) },
           { ownerSessionId }
         ),
-      openAllChangesDiff: async (focusPath) =>
-        await runtime.requestCodeCollabOpenAllChangesDiff(
-          machineId,
-          { sessionId, ...(focusPath === undefined ? {} : { focusPath }) },
-          { ownerSessionId }
-        ),
+      openAllChangesDiff: async (focusPath, scope: CodeCollabAllChangesScope | undefined) => {
+        const focus = focusPath === undefined ? undefined : at(focusPath);
+        const rootIds = [undefined, ...mounts.map((mount) => mount.rootId)];
+        const responses = await Promise.all(
+          rootIds.map((rootId) =>
+            runtime.requestCodeCollabOpenAllChangesDiff(
+              machineId,
+              {
+                sessionId,
+                ...(rootId === undefined ? {} : { rootId }),
+                ...(scope === undefined ? {} : { scope }),
+                ...(focus && focus.rootId === rootId ? { focusPath: focus.path } : {}),
+              },
+              { ownerSessionId }
+            )
+          )
+        );
+        const primary = responses[0];
+        if (!primary || primary.status !== 'ok') return primary ?? null;
+        const entries: typeof primary.entries = [];
+        let truncated = false;
+        for (const [index, response] of responses.entries()) {
+          const rootId = rootIds[index];
+          if (
+            rootId &&
+            scope === 'uncommitted' &&
+            response?.status === 'unavailable' &&
+            (response.reason === 'not_a_git_worktree' || response.reason === 'no_commits')
+          )
+            continue;
+          if (!response || response.status !== 'ok') return response;
+          for (const entry of response.entries) {
+            const path = rootId
+              ? encodeSessionFilePath({ rootId, relativePath: entry.path })
+              : entry.path;
+            entries.push({ ...entry, path: toSessionFileDisplayPath(path, mounts) });
+          }
+          truncated ||= response.truncated;
+        }
+        return { ...primary, entries, truncated };
+      },
       openTurnDiff: async (path, turnId) =>
         await runtime.requestCodeCollabOpenTurnDiff(
           machineId,
-          { sessionId, turnId, path },
+          { sessionId, turnId, ...at(path) },
           { ownerSessionId }
         ),
       initDirectory: async (path) =>
         await runtime.requestCodeCollabInitDirectory(
           machineId,
-          { sessionId, path },
+          { sessionId, ...at(path) },
           { ownerSessionId }
         ),
       lspDefinition: async (path, position) =>
         await runtime.requestCodeCollabLspDefinition(
           machineId,
-          { sessionId, path, ...position },
+          { sessionId, ...at(path), ...position },
           { ownerSessionId }
         ),
       lspReferences: async (path, position) =>
         await runtime.requestCodeCollabLspReferences(
           machineId,
-          { sessionId, path, ...position },
+          { sessionId, ...at(path), ...position },
           { ownerSessionId }
         ),
     };
-  }, [machineId, options.requestedByUserId, ownerSessionId, runtime, sessionId]);
+  }, [
+    machineId,
+    mounts,
+    options.requestedByUserId,
+    role,
+    ownerSessionId,
+    runtime,
+    sessionId,
+    workspaceRoot,
+  ]);
 
   const provider = useMemo<SessionFileProvider | null>(() => {
     const sharedState = materializedSharedState;
-    if (!sharedState || !rpcRuntime) return null;
+    if (!indexAllowed && !(desktopPreview && machineId && machineId === localMachineId))
+      return null;
+    if (!rpcRuntime || (!sharedState && !desktopPreview)) return null;
     return new CodeCollabSessionFileProvider({
       runtime: rpcRuntime,
       role,
       sourceState,
-      files: sharedState.files,
-      allChanges: sharedState.allChanges,
-      updatedAtMs: sharedState.updatedAtMs,
+      files: sharedState?.files ?? [],
+      allChanges: sharedState?.allChanges ?? {},
+      updatedAtMs: sharedState?.updatedAtMs,
       textState: providerTextState,
+      generations: sharedState?.generations,
     });
-  }, [materializedSharedState, providerTextState, role, rpcRuntime, sourceState]);
+  }, [
+    indexAllowed,
+    machineId,
+    localMachineId,
+    desktopPreview,
+    materializedSharedState,
+    providerTextState,
+    role,
+    rpcRuntime,
+    sourceState,
+  ]);
 
   return useMemo<UseCodeCollabSessionFileProviderResult>(() => {
     if (options.enabled === false) {
       return disabledResult;
     }
+    if (indexReason) return { provider, status: 'unavailable', space: null, message: indexReason };
     if (!runtime) {
       return {
         provider: null,
@@ -526,7 +781,7 @@ export function useCodeCollabSessionFileProvider(
     }
     if (fileIndexLoadState.status === 'error') {
       return {
-        provider: null,
+        provider,
         status: 'error',
         space: null,
         error: fileIndexLoadState.error,
@@ -535,12 +790,13 @@ export function useCodeCollabSessionFileProvider(
     }
 
     return {
-      provider: null,
+      provider,
       status: fileIndexLoadState.status === 'loading' ? 'loading' : 'checking',
       space: null,
       message: CODE_COLLAB_SHARED_STATE_LOADING_MESSAGE,
     };
   }, [
+    indexReason,
     fileIndexLoadState,
     machineId,
     materializedSharedState,

@@ -34,10 +34,9 @@ export interface PrStatusPollerShape {
   counters(): PrPollSchedulerCounters;
 }
 
-export class PrStatusPoller extends Context.Tag('lody/PrStatusPoller')<
-  PrStatusPoller,
-  PrStatusPollerShape
->() {}
+export class PrStatusPoller extends Context.Service<PrStatusPoller, PrStatusPollerShape>()(
+  'lody/PrStatusPoller'
+) {}
 
 export type PrStatusPollerDeps = {
   config: PrPollerConfig;

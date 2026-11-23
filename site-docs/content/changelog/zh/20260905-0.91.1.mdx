@@ -1,0 +1,16 @@
+---
+title: '20260905-0.91.1'
+version: 0.91.1
+date: 2026-09-05
+description: 新增 Claude Fable 专属周额度显示，并修复 Codex 模型的 Max、Ultra 推理选项。
+---
+
+版本 0.91.1
+
+### ✨ 新功能
+
+- Claude 用量面板新增 Fable 专属周额度，与共享周额度和 5 小时额度分别显示（[#407](https://github.com/LodyAI/Lody/pull/407)、[Claude ACP #25](https://github.com/LodyAI/acp-extension-claude/pull/25)、[Core #3](https://github.com/LodyAI/acp-extension-core/pull/3)）。
+
+### 🐛 修复与改进
+
+- 修复 GPT-6 Astra 缺少 Max、Ultra 推理选项的问题，并按模型能力显示可用档位，避免为 Luna 提供不支持的 Ultra 选项（[#406](https://github.com/LodyAI/Lody/pull/406)）。

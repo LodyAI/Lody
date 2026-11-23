@@ -94,9 +94,255 @@ for (const storyId of CODE_COLLAB_STORY_IDS) {
     await page.waitForLoadState('networkidle', { timeout: 20_000 });
 
     const fatal = collector.events.filter((event) => event.level !== 'warning').filter(notIgnored);
-    const summary = fatal
-      .map((event) => `[${event.level}] ${event.text}`)
-      .join('\n');
+    const summary = fatal.map((event) => `[${event.level}] ${event.text}`).join('\n');
     expect(fatal, `Story ${storyId} produced console error(s):\n${summary}`).toEqual([]);
   });
 }
+
+// Regression coverage for #716.
+test('keeps the narrow Monaco Find tooltip clear of its action button', async ({ page }) => {
+  test.setTimeout(60_000);
+
+  const storyId = 'sessions-codecollabmonacoeditor--realtime-status-bar-narrow';
+  const response = await page.goto(`/iframe.html?id=${storyId}&viewMode=story`);
+  expect(response?.ok(), `Story iframe did not return 2xx for ${storyId}`).toBeTruthy();
+
+  const editor = page.locator('.monaco-editor').first();
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+f');
+
+  const closeButton = page.getByLabel('Close (Escape)');
+  await expect(closeButton).toBeVisible();
+  await closeButton.hover();
+
+  const tooltip = page.locator('.workbench-hover-container').filter({ hasText: 'Close (Escape)' });
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip.locator('.hover-contents')).toHaveCSS('white-space', 'nowrap');
+
+  const buttonBounds = await closeButton.boundingBox();
+  const tooltipBounds = await tooltip.boundingBox();
+  expect(buttonBounds).not.toBeNull();
+  expect(tooltipBounds).not.toBeNull();
+  if (buttonBounds && tooltipBounds) {
+    const overlaps =
+      tooltipBounds.x < buttonBounds.x + buttonBounds.width &&
+      tooltipBounds.x + tooltipBounds.width > buttonBounds.x &&
+      tooltipBounds.y < buttonBounds.y + buttonBounds.height &&
+      tooltipBounds.y + tooltipBounds.height > buttonBounds.y;
+    expect(overlaps, 'Find tooltip must not overlap its originating action').toBe(false);
+  }
+
+  await closeButton.click();
+  await expect(page.locator('.find-widget.visible')).toHaveCount(0);
+});
+
+test('file line links reveal and highlight their range on first open and later navigation', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto('/iframe.html?id=sessions-codecollabmonacoeditor--line-anchors&viewMode=story');
+  const editor = page.locator('.monaco-editor');
+  await expect(editor).toHaveCount(0);
+
+  const expectHighlightedLine = async (line: number) => {
+    const row = editor.locator('.view-line').filter({ hasText: `// synthetic line ${line}:` });
+    await expect(row).toBeInViewport();
+    await expect
+      .poll(() =>
+        row.evaluate((element) => {
+          const target = element.getBoundingClientRect();
+          return Array.from(
+            element.closest('.monaco-editor')!.querySelectorAll('.rangeHighlight')
+          ).some((highlight) => {
+            const rect = highlight.getBoundingClientRect();
+            const color = getComputedStyle(highlight).backgroundColor;
+            return (
+              rect.top <= target.top + 1 &&
+              rect.bottom >= target.bottom - 1 &&
+              rect.width > 0 &&
+              color !== 'transparent' &&
+              color !== 'rgba(0, 0, 0, 0)'
+            );
+          });
+        })
+      )
+      .toBe(true);
+  };
+
+  const farLink = page.getByRole('link', { name: 'source.ts:6303-6305', exact: true });
+  await farLink.click();
+  await expect(page.getByLabel('Caret line', { exact: true })).toHaveText('6303');
+  await expectHighlightedLine(6303);
+  await expectHighlightedLine(6305);
+
+  await page.setViewportSize({ width: 920, height: 700 });
+  await expect
+    .poll(
+      async () => (await editor.locator('.monaco-scrollable-element').boundingBox())?.width ?? 0
+    )
+    .toBeGreaterThan(800);
+  await expectHighlightedLine(6303);
+
+  await page.getByRole('link', { name: 'source.ts:47-47', exact: true }).click();
+  await expectHighlightedLine(47);
+  await farLink.click();
+  await expectHighlightedLine(6303);
+
+  const isMac = await page.evaluate(() => /Mac/.test(navigator.platform));
+  await editor
+    .getByRole('textbox', { name: 'Code file preview', exact: true })
+    .press(isMac ? 'Meta+ArrowUp' : 'Control+Home');
+  await expect(
+    editor.locator('.view-line').filter({ hasText: '// synthetic line 1:' })
+  ).toBeInViewport();
+  await expect(
+    editor.locator('.view-line').filter({ hasText: '// synthetic line 6303:' })
+  ).toHaveCount(0);
+  await farLink.click();
+  await expectHighlightedLine(6303);
+  await expectHighlightedLine(6305);
+});
+
+// Storage is synthetic; the editor, undo stack, save hook and toolbar are real.
+test('undo to saved text clears dirty state, redo restores it, and Save advances the baseline', async ({
+  page,
+}) => {
+  await page.goto(
+    '/iframe.html?id=sessions-codecollabmonacoeditor--undo-to-saved-text&viewMode=story'
+  );
+  const original = 'QA_STARTED_20261004';
+  const draft = `${original}_UNSAVED_QA`;
+  const editorText = page.locator('.view-lines');
+  const editor = page.getByRole('textbox', { name: 'Code file editor' });
+  const save = page.getByRole('button', { name: 'Save', exact: true });
+  const refresh = page.getByRole('button', { name: 'Refresh', exact: true });
+  const modifier = await page.evaluate(() =>
+    navigator.platform.includes('Mac') ? 'Meta' : 'Control'
+  );
+  const protectedFromUnload = () =>
+    page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })));
+  await expect(editorText).toHaveText(original);
+  await expect(save).toBeDisabled();
+  await expect(refresh).toBeEnabled();
+  // Monaco uses EditContext on current Chromium; click its visible line rather
+  // than its hidden IME textarea before sending real keyboard events.
+  await page.locator('.view-line').click();
+  await editor.press(modifier === 'Meta' ? 'Meta+ArrowRight' : 'End');
+  await page.keyboard.insertText('_UNSAVED_QA');
+  await expect(editorText).toHaveText(draft);
+  await expect(save).toBeEnabled();
+  expect(await protectedFromUnload()).toBe(true);
+  const closeCanceled = new Promise<void>((resolve, reject) => {
+    page.once('dialog', async (dialog) => {
+      try {
+        expect(dialog.type()).toBe('beforeunload');
+        await dialog.dismiss();
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+  await page.close({ runBeforeUnload: true });
+  await closeCanceled;
+  await expect(editorText).toHaveText(draft);
+  await editor.press(`${modifier}+z`);
+  await expect(editorText).toHaveText(original);
+  await expect(page.getByText('Unsaved', { exact: true })).toHaveCount(0);
+  await expect(save).toBeDisabled();
+  await expect(refresh).toBeEnabled();
+  expect(await protectedFromUnload()).toBe(false);
+  await editor.press(modifier === 'Meta' ? 'Meta+Shift+z' : 'Control+y');
+  await expect(editorText).toHaveText(draft);
+  await expect(save).toBeEnabled();
+  await expect(refresh).toBeDisabled();
+  expect(await protectedFromUnload()).toBe(true);
+  await save.click();
+  await expect(save).toBeDisabled();
+  await expect(refresh).toBeEnabled();
+  expect(await protectedFromUnload()).toBe(false);
+  await editor.press(`${modifier}+z`);
+  await expect(editorText).toHaveText(original);
+  await expect(save).toBeEnabled();
+  await editor.press(modifier === 'Meta' ? 'Meta+Shift+z' : 'Control+y');
+  await expect(editorText).toHaveText(draft);
+  await expect(save).toBeDisabled();
+  await expect(refresh).toBeEnabled();
+  await refresh.click();
+  await expect(editorText).toHaveText(draft);
+});
+
+const IOS_SAFARI_USER_AGENT =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+
+// Chromium runs model iOS WebKit: no credentialless frames and a WebKit user agent.
+const emulateWebKitHtmlPreviewEngine = async (page: Page) => {
+  await page.addInitScript((userAgent) => {
+    delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+      .credentialless;
+    Object.defineProperty(Navigator.prototype, 'userAgent', {
+      configurable: true,
+      get: () => userAgent,
+    });
+  }, IOS_SAFARI_USER_AGENT);
+};
+
+test('mobile HTML on WebKit stays read-only until scripts are explicitly run', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await emulateWebKitHtmlPreviewEngine(page);
+  await page.goto('/iframe.html?id=sessions-codecollabhtmlpreview--mobile-preview&viewMode=story');
+  const readOnly = page.frameLocator('iframe[title="Preview"]');
+  await expect(readOnly.getByRole('heading', { name: 'Self-contained HTML preview' })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.locator('iframe[title="Preview"]')).toHaveAttribute('sandbox', '');
+  await readOnly.getByRole('button', { name: 'Clicked 0 times' }).click();
+  await expect(readOnly.getByRole('button', { name: 'Clicked 0 times' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Run scripts', exact: true }).click();
+  const scripted = page.frameLocator('iframe[title="Managed preview"]');
+  await expect(page.locator('iframe[title="Managed preview"]')).toHaveAttribute(
+    'sandbox',
+    'allow-scripts'
+  );
+  await scripted.getByRole('button', { name: 'Clicked 0 times' }).click();
+  await expect(scripted.getByRole('button', { name: 'Clicked 1 times' })).toBeVisible();
+
+  // Navigation leaves rendered mode instead of loading another page in place.
+  await scripted.getByText('Try blocked navigation').click();
+  await expect(page.locator('iframe[title="Managed preview"]')).toHaveCount(0);
+  await expect(page.locator('.monaco-editor')).toBeVisible();
+
+  // The opt-in does not survive leaving rendered mode.
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(
+    readOnly.getByRole('heading', { name: 'Self-contained HTML preview' })
+  ).toBeVisible();
+  await expect(page.locator('iframe[title="Managed preview"]')).toHaveCount(0);
+});
+
+test('mobile project HTML stays read-only until scripts are explicitly run', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await emulateWebKitHtmlPreviewEngine(page);
+  await page.goto('/iframe.html?id=files-mobileprojectfilebrowser--default&viewMode=story');
+  await page.getByRole('button', { name: 'preview.html', exact: true }).click();
+  const readOnly = page.frameLocator('iframe[title="Preview"]');
+  await expect(readOnly.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
+  await expect(readOnly.locator('body')).not.toHaveAttribute('data-executed', 'yes');
+
+  await page.getByRole('button', { name: 'Run scripts', exact: true }).click();
+  const scripted = page.frameLocator('iframe[title="HTML preview (scripts running)"]');
+  await expect(scripted.locator('body')).toHaveAttribute('data-executed', 'yes');
+  await scripted.getByRole('button', { name: 'Run script' }).click();
+  await expect(scripted.getByRole('button', { name: 'Script ran' })).toBeVisible();
+
+  await scripted.getByText('External link').click();
+  await expect(page.locator('iframe[title="HTML preview (scripts running)"]')).toHaveCount(0);
+  await expect(readOnly.getByRole('heading', { name: 'Mobile HTML report' })).toBeVisible();
+  await expect(readOnly.locator('body')).not.toHaveAttribute('data-executed', 'yes');
+
+  await page.getByRole('button', { name: 'Hide preview', exact: true }).click();
+  await expect(page.locator('iframe[title="Preview"]')).toHaveCount(0);
+  await expect(page.locator('.monaco-editor')).toBeVisible();
+});

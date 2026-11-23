@@ -1,0 +1,340 @@
+import type { SessionHistory } from '@lody/shared';
+import { isUnloadedTurnId, type ConversationView, type TurnIndexRow } from './types';
+
+/**
+ * A per-turn fact table over a `ConversationView`, for the readers that used
+ * to scan the whole materialized history ("the latest goal item anywhere",
+ * "every scheduled-task tool call", "every turn's file diffs").
+ *
+ * Facts are derived once per turn object: turns the renderer or the tail
+ * already hold are derived from the view's change events, and everything
+ * else is filled by one background pass that hydrates a chunk, derives, and
+ * releases it, from the tail backwards so the newest facts land first. A turn
+ * that changes is re-derived because its object identity changes.
+ */
+export type ConversationDerivation<F> = {
+  /** Facts by turn id. Read after `subscribe` fired or `version` changed. */
+  readonly facts: ReadonlyMap<string, F>;
+  /** True once every turn present when the pass finished has a fact. */
+  readonly complete: boolean;
+  readonly version: number;
+  subscribe(listener: () => void): () => void;
+  /**
+   * Run or hold the background pass. Facts and view subscription survive a
+   * hold, so a table that is re-acquired resumes instead of starting over.
+   */
+  setActive(active: boolean): void;
+  dispose(): void;
+};
+
+export type DeriveTurnFact<F> = (
+  turn: SessionHistory,
+  row: TurnIndexRow,
+  index: number,
+  previous?: F
+) => F;
+
+export type CreateConversationDerivationOptions = {
+  /** Turns hydrated per background chunk. */
+  chunkSize?: number;
+  /** Yield between chunks; defaults to a macrotask. */
+  yieldToEventLoop?: () => Promise<void>;
+};
+
+/** Yield to idle time; the timeout preserves progress on a busy page. */
+const defaultYield = (): Promise<void> =>
+  typeof requestIdleCallback === 'function'
+    ? new Promise((resolve) => {
+        requestIdleCallback(() => resolve(), { timeout: 200 });
+      })
+    : new Promise((resolve) => setTimeout(resolve, 0));
+
+export function createConversationDerivation<F>(
+  view: ConversationView,
+  derive: DeriveTurnFact<F>,
+  options: CreateConversationDerivationOptions = {}
+): ConversationDerivation<F> {
+  const chunkSize = options.chunkSize ?? 32;
+  const yieldToEventLoop = options.yieldToEventLoop ?? defaultYield;
+  const facts = new Map<string, F>();
+  // Identity is only a reuse hint, never ownership of a released turn.
+  const derivedFrom = new Map<string, WeakRef<SessionHistory>>();
+  const listeners = new Set<() => void>();
+  let version = 0;
+  let complete = false;
+  let disposed = false;
+  let active = true;
+  let passRunning = false;
+  let passRequested = false;
+  let activeRange: ReturnType<ConversationView['acquireRange']> | undefined;
+  let directoryLease: ReturnType<NonNullable<ConversationView['acquireDirectory']>> | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = 250;
+
+  const notify = () => {
+    version += 1;
+    for (const listener of listeners) listener();
+  };
+
+  /** Derive hydrated turns; only reported changes may drop an evicted turn's
+   * stale fact and request backfill. A speculative tail window preserves it. */
+  const deriveRange = (from: number, to: number, dropStale = false): boolean => {
+    let changed = false;
+    for (let i = Math.max(0, from); i < Math.min(to, view.turnCount); i += 1) {
+      const row = view.index(i);
+      if (!row) continue;
+      // Reverse-paged views keep absolute slots with sentinel rows until the
+      // older page arrives.  A sentinel has no body or facts to derive.
+      if (isUnloadedTurnId(row.id)) continue;
+      const turn = view.turn(i);
+      if (turn) {
+        if (derivedFrom.get(row.id)?.deref() === turn) continue;
+        const previous = facts.get(row.id);
+        const next = derive(turn, row, i, previous);
+        facts.set(row.id, next);
+        derivedFrom.set(row.id, new WeakRef(turn));
+        changed = next !== previous || changed;
+      } else if (dropStale && facts.delete(row.id)) {
+        derivedFrom.delete(row.id);
+        changed = true;
+        requestPass();
+      }
+    }
+    return changed;
+  };
+
+  const pruneRemoved = (): boolean => {
+    let changed = false;
+    for (const id of facts.keys()) {
+      if (view.indexOf(id) >= 0) continue;
+      facts.delete(id);
+      derivedFrom.delete(id);
+      changed = true;
+    }
+    return changed;
+  };
+
+  const unsubscribe = view.subscribe((change) => {
+    if (disposed) return;
+    if (!active) {
+      if (change.kind === 'changed' && change.ids.length === 0) return;
+      // Retain unchanged facts; invalidate hidden edits without reading bodies.
+      if (change.kind === 'structure') {
+        pruneRemoved();
+        for (let i = change.from; i < Math.min(change.to, view.turnCount); i++) {
+          const id = view.index(i)?.id;
+          if (id !== undefined) {
+            facts.delete(id);
+            derivedFrom.delete(id);
+          }
+        }
+      } else {
+        for (const id of change.ids) {
+          facts.delete(id);
+          derivedFrom.delete(id);
+        }
+      }
+      complete = false;
+      passRequested = true;
+      version += 1;
+      return;
+    }
+    let changed = false;
+    if (change.kind === 'structure') {
+      changed = pruneRemoved();
+      changed = deriveRange(change.from ?? 0, change.to ?? view.turnCount, true) || changed;
+      requestPass();
+    } else {
+      for (const id of change.ids) {
+        derivedFrom.delete(id);
+        const position = view.indexOf(id);
+        if (position >= 0 && view.isHydrated(position)) {
+          // Keep the previous small fact only during this synchronous derive.
+          // A derivation may reuse it when a text delta changed no business fact.
+          changed = deriveRange(position, position + 1) || changed;
+        } else {
+          changed = facts.delete(id) || changed;
+          if (position >= 0) requestPass();
+        }
+      }
+    }
+    if (changed) notify();
+  });
+
+  const runBackgroundPass = async () => {
+    // Let the returning interface paint before the first optional history batch.
+    await yieldToEventLoop();
+    if (disposed || !active) return;
+    directoryLease ??= view.acquireDirectory?.();
+    let end = view.turnCount;
+    while (end > 0) {
+      if (disposed || !active) return;
+      // Next chunk of turns (from the tail backwards) that still lack a fact.
+      const pending: number[] = [];
+      let cursor = end;
+      let items = 0;
+      while (cursor > 0 && pending.length < chunkSize) {
+        const position = cursor - 1;
+        const row = view.index(position);
+        if (row && !isUnloadedTurnId(row.id) && !facts.has(row.id)) {
+          const weight = Math.max(1, row.itemCount ?? 0);
+          if (pending.length > 0 && items + weight > 320) break;
+          pending.push(position);
+          items += weight;
+        } else if (pending.length > 0) {
+          // Never hydrate the already-derived gap between sparse missing facts.
+          break;
+        }
+        cursor = position;
+      }
+      end = cursor;
+      if (pending.length === 0) continue;
+      const lo = pending[pending.length - 1]!;
+      const hi = pending[0]! + 1;
+      // Acquire pins before awaiting; release even after disposal so warm views
+      // never retain an abandoned range.
+      const range = view.acquireRange(lo, hi);
+      activeRange = range;
+      try {
+        await range.ready;
+        if (disposed || !active) return;
+        if (deriveRange(lo, hi)) notify();
+      } finally {
+        range.release();
+        activeRange = undefined;
+      }
+      await yieldToEventLoop();
+    }
+  };
+
+  /**
+   * Run background passes until no invalidation is outstanding. A pass that
+   * finishes while another was requested (a turn's fact was dropped while it
+   * ran) starts over rather than declaring the table complete.
+   */
+  const runPasses = async () => {
+    if (passRunning) return;
+    passRunning = true;
+    try {
+      while (passRequested) {
+        // Recheck disposal and consumer ownership after every await.
+        if (disposed || !active) return;
+        passRequested = false;
+        await runBackgroundPass();
+        // A pass that stopped because it was held has not covered everything.
+        if (!active) {
+          passRequested = true;
+          return;
+        }
+      }
+      if (disposed) return;
+      // A finished pass covers loaded rows only; the unloaded prefix remains
+      // unknown until reverse pagination reaches the beginning.
+      complete = view.hasMoreOlder !== true;
+      retryDelay = 250;
+      notify();
+    } catch (error) {
+      // A failed page/body read is incomplete coverage, never an empty fact
+      // table. A later view change or renewed lease retries the pass.
+      passRequested = true;
+      console.error('Failed to derive conversation history', error);
+      if (!disposed && active && !retryTimer) {
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          if (active && !disposed) void runPasses();
+        }, retryDelay);
+        retryDelay = Math.min(2_000, retryDelay * 2);
+      }
+    } finally {
+      passRunning = false;
+    }
+  };
+
+  function requestPass(): void {
+    passRequested = true;
+    complete = false;
+    if (active && !passRunning && !disposed) void runPasses();
+  }
+
+  // Backfill after yielding; live changes still update hydrated facts synchronously.
+  requestPass();
+
+  return {
+    get facts() {
+      return facts;
+    },
+    get complete() {
+      return complete;
+    },
+    get version() {
+      return version;
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    setActive: (next: boolean) => {
+      if (active === next || disposed) return;
+      active = next;
+      if (!active) {
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = undefined;
+        directoryLease?.release();
+        directoryLease = undefined;
+        activeRange?.release();
+      }
+      if (active && (!complete || passRequested)) requestPass();
+    },
+    dispose: () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      directoryLease?.release();
+      activeRange?.release();
+      unsubscribe();
+      listeners.clear();
+      facts.clear();
+      derivedFrom.clear();
+    },
+  };
+}
+
+const sharedDerivations = new WeakMap<
+  ConversationView,
+  Map<object, { table: ConversationDerivation<unknown>; users: number }>
+>();
+
+/**
+ * Borrow a fact table; hold its background scan after the last consumer.
+ *
+ * The table is NOT disposed on the last release. Deriving a fact needs the
+ * turn's body, so a table that discarded its facts re-materialized the whole
+ * conversation the next time the session was opened — which is what closing
+ * and reopening a tab does. It stays keyed by the view instead, so it is
+ * collected with the view when the session store evicts it, and a re-acquire
+ * resumes with the facts it already has.
+ */
+export function acquireConversationDerivation<F>(
+  view: ConversationView,
+  derive: DeriveTurnFact<F>
+) {
+  let tables = sharedDerivations.get(view);
+  if (!tables) sharedDerivations.set(view, (tables = new Map()));
+  let entry = tables.get(derive);
+  if (!entry) {
+    entry = { table: createConversationDerivation(view, derive), users: 0 };
+    tables.set(derive, entry);
+  }
+  entry.users++;
+  entry.table.setActive(true);
+  let held = true;
+  return {
+    table: entry.table as ConversationDerivation<F>,
+    release() {
+      if (!held) return;
+      held = false;
+      if (--entry.users === 0) entry.table.setActive(false);
+    },
+  };
+}

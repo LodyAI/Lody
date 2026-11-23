@@ -1,22 +1,26 @@
-import { useDeferredValue, useMemo, useRef, useState, type ReactNode } from 'react';
+import { compareUnifiedProjectOptions } from './chat-landing-derived';
+import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   ArrowUpRight,
-  Check,
+  Folders,
+  ChevronDown,
   CircleSlash2,
   FolderOpen,
   FolderPlus,
   Github,
   LockKeyhole,
-  Search,
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
+import { composerSurface } from '@/components/shared/composer-surface';
 import { getSessionSharingDescription, ProjectShareDialog } from '@/components/session-sharing';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import {
@@ -27,32 +31,49 @@ import {
 import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
 import type { VisibleLocalProjectIndex } from '@/lib/visible-local-project-index';
 import { cn } from '@/lib/utils';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import { Input } from '@/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { withClassName } from '@/lib/stylex';
+import { contextPill } from './context-pill-class';
+import { Menu, MenuSearchInput } from '@/ui/menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { Button } from '@lody/ui/button';
 
-function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
+const ownerAvatarStyles = stylex.create({
+  frame: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: space[4],
+    height: space[4],
+    flexShrink: 0,
+  },
+});
+
+export function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
   const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
-  const [failed, setFailed] = useState(false);
+  const [loadedOwner, setLoadedOwner] = useState<string | null>(null);
+  const [failedOwner, setFailedOwner] = useState<string | null>(null);
 
-  if (!ownerHandle || failed) {
+  if (!ownerHandle || failedOwner === ownerHandle) {
     return <Github className="h-4 w-4 shrink-0 opacity-70" />;
   }
 
   return (
-    <CachedAvatarImg
-      src={getGitHubOwnerAvatarUrl(ownerHandle)}
-      alt=""
-      aria-hidden="true"
-      className="h-4 w-4 shrink-0 rounded-sm object-cover"
-      onError={() => setFailed(true)}
-    />
+    <span {...stylex.props(ownerAvatarStyles.frame)}>
+      {loadedOwner !== ownerHandle && <Github className="h-4 w-4 opacity-70" />}
+      <CachedAvatarImg
+        key={ownerHandle}
+        src={getGitHubOwnerAvatarUrl(ownerHandle)}
+        alt=""
+        aria-hidden="true"
+        className={cn(
+          'absolute inset-0 h-4 w-4 rounded-sm object-cover',
+          loadedOwner !== ownerHandle && 'opacity-0'
+        )}
+        onLoad={() => setLoadedOwner(ownerHandle)}
+        onError={() => setFailedOwner(ownerHandle)}
+      />
+    </span>
   );
 }
 
@@ -64,7 +85,21 @@ export interface LocalProjectSelection {
 export type UnifiedProjectSelection =
   | { kind: 'none' }
   | ({ kind: 'local' } & LocalProjectSelection)
-  | { kind: 'github'; repoFullName: string };
+  | { kind: 'github'; repoFullName: string }
+  | { kind: 'group'; projectId: string };
+
+/** A Project group offered beside single projects. */
+export type UnifiedProjectGroupOption = {
+  projectId: string;
+  name: string;
+  /** Number of repositories, shown as the option's description. */
+  memberCount: number;
+  lastUsedAt?: number;
+  /** Why this group cannot start a conversation on the selected machine. */
+  disabledReason?: string;
+  /** What the selected machine lacks, e.g. "2 cloned on start". */
+  availability?: string;
+};
 
 type UnifiedProjectOption = {
   value: string;
@@ -74,6 +109,7 @@ type UnifiedProjectOption = {
   selection: Exclude<UnifiedProjectSelection, { kind: 'none' }>;
   lastUsedAt?: number;
   sharing?: SessionSharingState;
+  disabledReason?: string;
 };
 
 export const UNIFIED_PROJECT_OPTION_RENDER_LIMIT = 20;
@@ -88,28 +124,11 @@ export type UnifiedLocalProjectOption = {
   sharing?: SessionSharingState;
 };
 
-export function compareUnifiedProjectOptions(
-  left: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>,
-  right: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>
-): number {
-  if (left.lastUsedAt !== undefined && right.lastUsedAt !== undefined) {
-    if (left.lastUsedAt !== right.lastUsedAt) return right.lastUsedAt - left.lastUsedAt;
-  } else if (left.lastUsedAt !== undefined) {
-    return -1;
-  } else if (right.lastUsedAt !== undefined) {
-    return 1;
-  }
-  const labelComparison = left.label.localeCompare(right.label);
-  return labelComparison !== 0 ? labelComparison : left.value.localeCompare(right.value);
-}
+export { compareUnifiedProjectOptions } from './chat-landing-derived';
 
 function selectUnifiedProjectOptionsForRender<
   TOption extends Pick<UnifiedProjectOption, 'label' | 'description' | 'selection'>,
->(
-  options: readonly TOption[],
-  query: string,
-  limit?: number
-): TOption[] {
+>(options: readonly TOption[], query: string, limit?: number): TOption[] {
   if (limit !== undefined && limit <= 0) return [];
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visible: TOption[] = [];
@@ -231,12 +250,13 @@ export function buildUnifiedLocalProjectOptions({
   return visible;
 }
 
-export interface UnifiedProjectSelectorViewProps
-  extends Omit<
-    UnifiedProjectSelectorProps,
-    'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
-  > {
+export interface UnifiedProjectSelectorViewProps extends Omit<
+  UnifiedProjectSelectorProps,
+  'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
+> {
   localProjects: ReadonlyArray<UnifiedLocalProjectOption>;
+  /** Project groups; omitted by surfaces that cannot start multi-repository work. */
+  projectGroups?: ReadonlyArray<UnifiedProjectGroupOption>;
   onShareLocalProjectWithTeam?: (selection: LocalProjectSelection) => Promise<void>;
   getShareErrorMessage?: (error: unknown, fallback: string) => string;
   /**
@@ -259,6 +279,10 @@ export interface UnifiedProjectSelectorViewProps
    * available source, while search still evaluates the complete option list.
    */
   renderLimit?: number;
+  /** Opens the project creator; omitted by surfaces that cannot start multi-repository work. */
+  onCreateProject?: () => void;
+  /** Opens a project group in the editor; the group rows offer it on hover. */
+  onEditProjectGroup?: (projectId: string) => void;
 }
 
 function ProjectAccessStatus({
@@ -282,19 +306,20 @@ function ProjectAccessStatus({
   const isAction = variant === 'trigger' && Boolean(onShare);
   const sharedClassName = cn(
     'inline-flex shrink-0 select-none items-center gap-1 text-muted-foreground',
-    variant === 'trigger' &&
-      'h-6 rounded-r-md border-l border-border/60 bg-input/60 px-2 text-[0.66rem] font-medium transition-colors dark:bg-foreground/[0.08]',
-    variant === 'option' && 'text-[0.68rem] font-medium',
+    variant === 'trigger' && ['h-6 rounded-r-md px-2 text-[0.8em] transition-colors'],
+    variant === 'option' && 'text-[0.8em]',
     'text-foreground/75',
-    isAction &&
-      'cursor-pointer hover:bg-input hover:text-foreground dark:hover:bg-foreground/[0.12]',
+    isAction && 'cursor-pointer hover:text-foreground',
     variant === 'trigger' &&
       'outline-hidden focus-visible:relative focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring/50'
   );
   const content = isAction ? (
     <button
       type="button"
-      className={sharedClassName}
+      {...withClassName(
+        stylex.props(contextPill.surface, contextPill.interactive),
+        sharedClassName
+      )}
       aria-label={`${title}: ${description}. ${t(
         'workspace.projects.shareProjectAction',
         'Share project'
@@ -305,23 +330,29 @@ function ProjectAccessStatus({
       <span>{label}</span>
     </button>
   ) : (
-    <span tabIndex={variant === 'trigger' ? 0 : undefined} className={sharedClassName}>
+    <span
+      tabIndex={variant === 'trigger' ? 0 : undefined}
+      {...withClassName(
+        stylex.props(variant === 'trigger' && contextPill.surface),
+        sharedClassName
+      )}
+    >
       <LockKeyhole className="h-3 w-3" aria-hidden="true" />
       <span>{label}</span>
     </span>
   );
 
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>{content}</TooltipTrigger>
-      <TooltipContent
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={content} />
+      <Tooltip.Content
         side={variant === 'trigger' ? 'top' : 'right'}
         className="max-w-72 px-2.5 py-2"
       >
         <div className="font-medium">{title}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
-      </TooltipContent>
-    </Tooltip>
+        <div className="mt-0.5 text-[0.8em] text-muted-foreground">{description}</div>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -331,6 +362,8 @@ function getSelectionValue(selection: UnifiedProjectSelection): string | null {
       return `local:${selection.machineId}:${selection.localProjectId}`;
     case 'github':
       return `github:${selection.repoFullName}`;
+    case 'group':
+      return `group:${selection.projectId}`;
     case 'none':
       return null;
   }
@@ -382,6 +415,7 @@ export function UnifiedProjectSelectorView({
   value,
   onChange,
   localProjects,
+  projectGroups,
   repositories,
   className,
   latestMessageAtByRepo,
@@ -394,6 +428,8 @@ export function UnifiedProjectSelectorView({
   contentClassName,
   contentStyle,
   renderLimit,
+  onCreateProject,
+  onEditProjectGroup,
 }: UnifiedProjectSelectorViewProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -401,10 +437,29 @@ export function UnifiedProjectSelectorView({
   const [pendingProjectShare, setPendingProjectShare] = useState<UnifiedProjectOption | null>(null);
   const [isSharingProject, setIsSharingProject] = useState(false);
   const deferredQuery = useDeferredValue(query);
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const options = useMemo<UnifiedProjectOption[]>(() => {
     const combined: UnifiedProjectOption[] = [];
+    for (const group of projectGroups ?? []) {
+      combined.push({
+        value: `group:${group.projectId}`,
+        label: group.name,
+        description:
+          group.disabledReason ??
+          [
+            t('chat.projectPicker.groupMembers', '{{count}} repositories', {
+              count: group.memberCount,
+            }),
+            group.availability,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        icon: <Folders className="h-4 w-4 shrink-0 opacity-70" />,
+        selection: { kind: 'group', projectId: group.projectId },
+        lastUsedAt: group.lastUsedAt,
+        disabledReason: group.disabledReason,
+      });
+    }
     for (const project of localProjects) {
       combined.push({
         value: `local:${project.machineId}:${project.localProjectId}`,
@@ -431,7 +486,7 @@ export function UnifiedProjectSelectorView({
       });
     }
     return combined.sort(compareUnifiedProjectOptions);
-  }, [latestMessageAtByRepo, localProjects, repositories]);
+  }, [latestMessageAtByRepo, localProjects, projectGroups, repositories, t]);
 
   const selectedValue = getSelectionValue(value);
   const selectedOption = useMemo(
@@ -448,6 +503,8 @@ export function UnifiedProjectSelectorView({
     selectedOption?.icon ??
     (value.kind === 'github' ? (
       <GitHubOwnerAvatarIcon repoFullName={value.repoFullName} />
+    ) : value.kind === 'group' ? (
+      <Folders className="h-4 w-4 opacity-70" />
     ) : (
       <FolderOpen className="h-4 w-4 opacity-70" />
     ));
@@ -457,7 +514,9 @@ export function UnifiedProjectSelectorView({
       ? value.repoFullName
       : value.kind === 'local'
         ? value.localProjectId
-        : placeholder);
+        : value.kind === 'group'
+          ? t('chat.projectPicker.removedGroup', 'Removed project group')
+          : placeholder);
   const selectedSharing =
     selectedOption?.selection.kind === 'local' ? selectedOption.sharing : undefined;
   const selectedPrivateSharing = shouldShowPrivateSharingStatus(selectedSharing)
@@ -465,19 +524,16 @@ export function UnifiedProjectSelectorView({
     : undefined;
   const canShareSelectedProject = Boolean(
     selectedOption &&
-      selectedPrivateSharing?.canManage &&
-      selectedPrivateSharing.privateReason !== 'machine-not-registered' &&
-      onShareLocalProjectWithTeam
+    selectedPrivateSharing?.canManage &&
+    selectedPrivateSharing.privateReason !== 'machine-not-registered' &&
+    onShareLocalProjectWithTeam
   );
 
   const isPropertyRow = triggerVariant === 'property-row';
 
   return (
     <div
-      className={cn(
-        'group/project relative flex min-w-0 items-center',
-        isPropertyRow && 'w-full'
-      )}
+      className={cn('group/project relative flex min-w-0 items-center', isPropertyRow && 'w-full')}
     >
       {value.kind !== 'none' && !isPropertyRow ? (
         <button
@@ -496,37 +552,85 @@ export function UnifiedProjectSelectorView({
           <X className="h-3 w-3" />
         </button>
       ) : null}
-      <DropdownMenu
+      <Menu.Root
         open={open}
         onOpenChange={(nextOpen) => {
           setOpen(nextOpen);
-          if (nextOpen) {
-            requestAnimationFrame(() => searchInputRef.current?.focus());
-          } else {
-            setQuery('');
-          }
+          if (!nextOpen) setQuery('');
         }}
       >
-        <DropdownMenuTrigger asChild>
+        <Menu.Trigger
+          render={
+            <button
+              type="button"
+              {...withClassName(
+                stylex.props(
+                  !isPropertyRow && contextPill.surface,
+                  !isPropertyRow && composerSurface.contextLabel,
+                  !isPropertyRow && contextPill.interactive,
+                  !isPropertyRow && open && contextPill.open
+                ),
+                cn(
+                  isPropertyRow
+                    ? [
+                        'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
+                        'text-[1em] font-normal transition-colors',
+                        'bg-transparent text-foreground hover:bg-hover',
+                        'data-[state=open]:bg-hover',
+                        '[&_svg]:text-current [&_svg]:opacity-70',
+                        value.kind === 'none' && 'text-muted-foreground',
+                      ]
+                    : [
+                        'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
+                        'text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                        'hover:text-foreground',
+                        selectedPrivateSharing && 'rounded-r-none',
+                      ],
+                  className
+                )
+              )}
+            >
+              <span
+                className={cn(
+                  'flex h-4 w-4 shrink-0 items-center justify-center',
+                  !isPropertyRow &&
+                    value.kind !== 'none' &&
+                    'transition-opacity group-hover/project:opacity-0 group-focus-within/project:opacity-0'
+                )}
+              >
+                {triggerIcon}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-left">{triggerLabel}</span>
+            </button>
+          }
+        >
           <button
             type="button"
-            className={cn(
-              isPropertyRow
-                ? [
-                    'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
-                    'text-[13px] font-normal transition-colors',
-                    'bg-transparent text-foreground hover:bg-hover',
-                    'data-[state=open]:bg-hover',
-                    '[&_svg]:text-current [&_svg]:opacity-70',
-                    value.kind === 'none' && 'text-muted-foreground',
-                  ]
-                : [
-                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md bg-input/60 px-2 dark:bg-foreground/[0.08]',
-                    'text-xs font-normal text-foreground/80 transition-colors hover:bg-input hover:text-foreground dark:hover:bg-foreground/[0.12] [&_svg]:text-current [&_svg]:opacity-100',
-                    'data-[state=open]:bg-input data-[state=open]:text-foreground dark:data-[state=open]:bg-foreground/[0.12]',
-                    selectedPrivateSharing && 'rounded-r-none',
-                  ],
-              className
+            {...withClassName(
+              stylex.props(
+                !isPropertyRow && contextPill.surface,
+                !isPropertyRow && composerSurface.contextLabel,
+                !isPropertyRow && contextPill.interactive,
+                !isPropertyRow && open && contextPill.open
+              ),
+              cn(
+                isPropertyRow
+                  ? [
+                      'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
+                      'text-[1em] font-normal transition-colors',
+                      'bg-transparent text-foreground hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08]',
+                      'data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]',
+                      '[&_svg]:text-current [&_svg]:opacity-70',
+                      value.kind === 'none' && 'text-muted-foreground',
+                    ]
+                  : [
+                      'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
+                      'text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                      'hover:text-foreground',
+                      selectedPrivateSharing && 'rounded-r-none',
+                    ],
+                className
+              )
             )}
           >
             <span
@@ -540,104 +644,140 @@ export function UnifiedProjectSelectorView({
               {triggerIcon}
             </span>
             <span className="min-w-0 flex-1 truncate text-left">{triggerLabel}</span>
+            {isPropertyRow ? (
+              <ChevronDown className="size-3.5 shrink-0 !opacity-50" aria-hidden="true" />
+            ) : null}
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
+        </Menu.Trigger>
+        <Menu.Content
           side={contentSide}
           align="start"
-          avoidCollisions={contentSide === 'bottom'}
+          collisionAvoidance={
+            contentSide === 'bottom'
+              ? undefined
+              : { side: 'none', align: 'none', fallbackAxisSide: 'none' }
+          }
           className={cn('w-[min(20rem,calc(100vw-2rem))]', contentClassName)}
           style={contentStyle}
         >
-          <div className="relative mb-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              ref={searchInputRef}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Escape') event.stopPropagation();
-              }}
-              placeholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
-              className="h-8 border-border/50 bg-background/45 pl-8 text-xs shadow-none"
-            />
-          </div>
+          <MenuSearchInput
+            value={query}
+            onValueChange={setQuery}
+            placeholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
+            className="mb-1 h-8 rounded-md border border-border/50 bg-input-field py-0"
+          />
           <div className="scrollbar-pro max-h-[min(50vh,13rem)] overflow-y-auto">
             {filteredOptions.length > 0 ? (
-              filteredOptions.map((option) => {
-                // Local projects show only the name; the path lives in a hover
-                // tooltip. GitHub repos keep their inline description line.
-                const localPath =
-                  option.selection.kind === 'local' ? option.description : undefined;
-                const inlineDescription =
-                  option.selection.kind === 'github' ? option.description : undefined;
-                const labelNode = (
-                  <span className={cn('truncate', option.value === selectedValue && 'font-medium')}>
-                    {option.label}
-                  </span>
-                );
-                return (
-                  <DropdownMenuItem
-                    key={option.value}
-                    onSelect={() => onChange(option.selection)}
-                    className={cn(
-                      'gap-2 py-1.5',
-                      inlineDescription ? 'items-start' : 'items-center'
-                    )}
-                  >
-                    <span className={cn('shrink-0', inlineDescription && 'mt-0.5')}>
-                      {option.icon}
+              <Menu.RadioGroup
+                value={selectedValue ?? ''}
+                onValueChange={(nextValue) => {
+                  const target = filteredOptions.find((option) => option.value === nextValue);
+                  if (target) onChange(target.selection);
+                }}
+              >
+                {filteredOptions.map((option) => {
+                  // Local and GitHub projects show only the name; local paths
+                  // live in a hover tooltip. Groups keep their member summary.
+                  const localPath =
+                    option.selection.kind === 'local' ? option.description : undefined;
+                  const inlineDescription =
+                    option.selection.kind === 'group' ? option.description : undefined;
+                  const editProjectId =
+                    option.selection.kind === 'group' && onEditProjectGroup
+                      ? option.selection.projectId
+                      : undefined;
+                  const labelNode = (
+                    <span
+                      className={cn('truncate', option.value === selectedValue && 'font-medium')}
+                    >
+                      {option.label}
                     </span>
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      {localPath ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>{labelNode}</TooltipTrigger>
-                          <TooltipContent side="right" className="max-w-[22rem] break-all">
-                            {localPath}
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        labelNode
-                      )}
-                      {inlineDescription ? (
-                        <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
-                          {inlineDescription}
-                        </span>
+                  );
+                  return (
+                    <Menu.RadioItem
+                      key={option.value}
+                      value={option.value}
+                      disabled={option.disabledReason !== undefined}
+                      indicator="check"
+                      indicatorSide="end"
+                      className="group/option items-center gap-2 py-1.5"
+                      endContent={
+                        editProjectId !== undefined ? (
+                          <Button
+                            variant="ghost"
+                            size="mini"
+                            tabIndex={-1}
+                            aria-label={t('chat.projectPicker.editGroup', 'Edit {{name}}', {
+                              name: option.label,
+                            })}
+                            className={cn(
+                              'opacity-0 focus-visible:opacity-100',
+                              'group-hover/option:opacity-100 group-data-[highlighted]/option:opacity-100'
+                            )}
+                            // The row selects on press; the button only edits.
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onMouseUp={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setOpen(false);
+                              onEditProjectGroup?.(editProjectId);
+                            }}
+                          >
+                            {t('common.edit', 'Edit')}
+                          </Button>
+                        ) : null
+                      }
+                    >
+                      <span className="shrink-0">{option.icon}</span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        {localPath ? (
+                          <Tooltip.Root>
+                            <Tooltip.Trigger render={labelNode} />
+                            <Tooltip.Content side="right" className="max-w-[22rem] break-all">
+                              {localPath}
+                            </Tooltip.Content>
+                          </Tooltip.Root>
+                        ) : (
+                          labelNode
+                        )}
+                        {inlineDescription ? (
+                          <span className="line-clamp-2 text-[0.8em] leading-snug text-muted-foreground">
+                            {inlineDescription}
+                          </span>
+                        ) : null}
+                      </span>
+                      {shouldShowPrivateSharingStatus(option.sharing) ? (
+                        <ProjectAccessStatus state={option.sharing} variant="option" />
                       ) : null}
-                    </span>
-                    {shouldShowPrivateSharingStatus(option.sharing) ? (
-                      <ProjectAccessStatus state={option.sharing} variant="option" />
-                    ) : null}
-                    {option.value === selectedValue ? (
-                      <Check
-                        className={cn('h-3.5 w-3.5 shrink-0', inlineDescription && 'mt-0.5')}
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                  </DropdownMenuItem>
-                );
-              })
+                    </Menu.RadioItem>
+                  );
+                })}
+              </Menu.RadioGroup>
             ) : (
-              <div className="px-2.5 py-5 text-center text-xs text-muted-foreground">
+              <div className="px-2.5 py-5 text-center text-[0.9em] text-muted-foreground">
                 {t('chat.projectPicker.emptyText', 'No projects found')}
               </div>
             )}
           </div>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => onChange({ kind: 'none' })}>
-            <CircleSlash2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span>{clearLabel}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onAddLocalProject}>
-            <FolderPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span>{t('chat.contextSwitch.addProject', 'Add a local project')}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onConnectGitRepo}>
-            <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span>{t('repos.connectMore', 'Connect more GitHub projects')}</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          <Menu.Separator />
+          <Menu.Item icon={CircleSlash2} onClick={() => onChange({ kind: 'none' })}>
+            {clearLabel}
+          </Menu.Item>
+          {onCreateProject ? (
+            <Menu.Item icon={Folders} onClick={onCreateProject}>
+              {t('chat.projectPicker.createProject', 'Create project')}
+            </Menu.Item>
+          ) : null}
+          <Menu.Item icon={FolderPlus} onClick={onAddLocalProject}>
+            {t('chat.contextSwitch.addProject', 'Add a folder')}
+          </Menu.Item>
+          <Menu.Item icon={ArrowUpRight} onClick={onConnectGitRepo}>
+            {t('repos.connectMore', 'Connect more GitHub projects')}
+          </Menu.Item>
+        </Menu.Content>
+      </Menu.Root>
       {selectedPrivateSharing ? (
         <ProjectAccessStatus
           state={selectedPrivateSharing}

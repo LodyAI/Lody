@@ -1,89 +1,126 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowUpRight, Users } from 'lucide-react';
-import { COMMUNITY_WECHAT_QR_API_PATH, buildSessionImageApiUrl } from '@lody/shared';
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/ui';
-import { API_BASE_URL } from '@/lib';
+import { Users } from 'lucide-react';
+import { SiDiscord } from 'react-icons/si';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { Button, Dialog } from '@/ui';
 import { LODY_DISCORD_URL } from '@/lib/lody-urls';
 import { openExternalUrl } from '@/lib/native-browser';
+// The Feishu group QR ships with the app rather than being fetched from the
+// server worker: About must render it on a desktop or mobile client that is
+// offline or signed out, and the OSS desktop entry makes no product-cloud
+// requests at all. Rotating the invite therefore means replacing this file.
+import communityFeishuQrUrl from '@/assets/community-feishu-qr.png';
 
-// The server worker serves the ops-managed WeChat group QR image (see
-// packages/shared/src/community.ts); a missing upload surfaces as the
-// onError fallback below instead of a broken image.
-const DEFAULT_WECHAT_QR_URL = buildSessionImageApiUrl(API_BASE_URL, COMMUNITY_WECHAT_QR_API_PATH);
+/**
+ * Two ways in, side by side on the panel: each is a region of the modal, a fill
+ * with no edge, and the Discord one answers the pointer because it is pressed.
+ */
+const styles = stylex.create({
+  options: {
+    display: 'grid',
+    gridTemplateColumns: { default: '1fr', '@media (min-width: 640px)': 'repeat(2, 1fr)' },
+    gap: space[3],
+  },
+  option: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[3],
+    minHeight: '160px',
+    margin: 0,
+    padding: space[4],
+    borderWidth: 0,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+    color: colors.label,
+    fontFamily: 'inherit',
+    textAlign: 'center',
+  },
+  optionPressable: {
+    backgroundColor: {
+      default: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 7%)`,
+    },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
+    outlineStyle: 'none',
+    cursor: 'pointer',
+    transitionProperty: 'background-color, box-shadow',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  // The white plate is not decoration: a QR inverted by a dark theme does not scan.
+  qr: {
+    width: '160px',
+    height: '160px',
+    objectFit: 'contain',
+    backgroundColor: 'white',
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+  },
+  discordGlyph: { width: '32px', height: '32px', color: colors.secondaryLabel },
+  optionText: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  optionTitle: { margin: 0, fontSize: text.bodySize, fontWeight: 400, color: colors.label },
+  optionHint: { margin: 0, fontSize: text.footnoteSize, color: colors.secondaryLabel },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+});
 
+/**
+ * The Join-community dialog itself: controlled, trigger-less, and mounted by
+ * whichever surface opens it — the About settings button (`JoinCommunityButton`)
+ * and the sidebar help menu (`JoinCommunityDialogContainer`) share this one
+ * component so both routes look identical.
+ */
 export function JoinCommunityDialog({
   open,
   onOpenChange,
-  wechatQrUrl = DEFAULT_WECHAT_QR_URL,
+  qrImageUrl = communityFeishuQrUrl,
 }: {
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-  wechatQrUrl?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Overridable so Storybook can pin a fixture instead of the bundled asset. */
+  qrImageUrl?: string;
 }) {
   const { t } = useTranslation();
-  const [internalOpen, setInternalOpen] = useState(false);
-  const [qrLoadFailed, setQrLoadFailed] = useState(false);
-  const isOpen = open ?? internalOpen;
-  const setIsOpen = onOpenChange ?? setInternalOpen;
 
   const handleJoinDiscord = () => {
     void openExternalUrl(LODY_DISCORD_URL);
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 px-2.5">
-          <Users className="mr-1 h-3.5 w-3.5" />
-          {t('settings.about.joinCommunity', 'Join community')}
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content>
+        <Dialog.Header>
+          <Dialog.Title>
             {t('settings.about.communityDialogTitle', 'Join the Lody community')}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {t(
               'settings.about.communityDialogDescription',
               'Chat with the team and other users, get help, and share feedback.'
             )}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="flex flex-col items-center gap-3 rounded-lg border border-border/70 bg-card/70 p-4">
-            {qrLoadFailed ? (
-              <div className="flex h-48 w-48 items-center justify-center rounded-md border border-dashed border-border/70 px-4 text-center text-xs text-muted-foreground">
-                {t(
-                  'settings.about.wechatQrUnavailable',
-                  'The QR code is unavailable right now. Please try again later.'
-                )}
-              </div>
-            ) : (
-              <img
-                src={wechatQrUrl}
-                alt={t('settings.about.wechatGroupQrAlt', 'Lody WeChat group QR code')}
-                className="h-48 w-48 rounded-md bg-white object-contain"
-                onError={() => setQrLoadFailed(true)}
-              />
-            )}
-            <div className="text-center">
-              <p className="text-sm font-medium text-foreground">
-                {t('settings.about.wechatGroup', 'WeChat group')}
+          </Dialog.Description>
+        </Dialog.Header>
+        <div {...stylex.props(styles.options)}>
+          <div {...stylex.props(styles.option)}>
+            <img
+              src={qrImageUrl}
+              alt={t('settings.about.feishuGroupQrAlt', 'Lody Feishu group QR code')}
+              {...stylex.props(styles.qr)}
+            />
+            <div {...stylex.props(styles.optionText)}>
+              <p {...stylex.props(styles.optionTitle)}>
+                {t('settings.about.feishuGroup', 'Feishu group')}
               </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
+              <p {...stylex.props(styles.optionHint)}>
                 {t(
-                  'settings.about.wechatGroupHint',
-                  'Scan the QR code with WeChat to join the group.'
+                  'settings.about.feishuGroupHint',
+                  'Scan the QR code with Feishu (Lark) to join the group.'
                 )}
               </p>
             </div>
@@ -91,20 +128,40 @@ export function JoinCommunityDialog({
           <button
             type="button"
             onClick={handleJoinDiscord}
-            className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-border/70 bg-card/70 p-4 transition-colors hover:bg-hover"
+            {...stylex.props(styles.option, styles.optionPressable)}
           >
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-              <ArrowUpRight className="h-6 w-6 text-muted-foreground" />
-            </span>
-            <span className="text-sm font-medium text-foreground">
-              {t('settings.about.joinDiscord', 'Join Discord')}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {t('settings.about.joinDiscordHint', 'Opens discord.gg in your browser.')}
+            <SiDiscord {...stylex.props(styles.discordGlyph)} />
+            <span {...stylex.props(styles.optionText)}>
+              <span {...stylex.props(styles.optionTitle)}>
+                {t('settings.about.joinDiscord', 'Join Discord')}
+              </span>
+              <span {...stylex.props(styles.optionHint)}>
+                {t('settings.about.joinDiscordHint', 'Opens discord.gg in your browser.')}
+              </span>
             </span>
           </button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
+/**
+ * Settings → About → Community entry. Highlighted (primary) rather than the
+ * outline used by the neighbouring link rows, because it is the row we want
+ * people to notice.
+ */
+export function JoinCommunityButton() {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button size="small" onClick={() => setOpen(true)}>
+        <Users {...stylex.props(styles.icon)} />
+        {t('settings.about.joinCommunity', 'Join community')}
+      </Button>
+      <JoinCommunityDialog open={open} onOpenChange={setOpen} />
+    </>
   );
 }

@@ -1,7 +1,12 @@
+import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
+import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
+import { acceptSessionUserTurn } from '../lib/session-send-admission';
+import { replaceQueueItem } from '../lib/session-send-delivery';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
   getServerNow,
+  normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
   type MessageQueueItem,
   type MessageQueueItemInput,
@@ -18,6 +23,7 @@ import {
 import { browserOnlineAtom } from '@/atoms/control-connection';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { subscribeLatestOnAnimationFrame } from '@/lib/latest-frame-subscription';
+import { subscribeOnFrame, type ConversationView } from '@/lib/conversation-view';
 
 declare global {
   interface Window {
@@ -29,21 +35,46 @@ declare global {
 
 export type PushMessageQueueInput = Omit<
   MessageQueueItemInput,
-  '$cid' | 'timestamp' | 'userTurnId' | 'isEditing' | 'editingStartedAt'
+  | '$cid'
+  | 'timestamp'
+  | 'userTurnId'
+  | 'operationId'
+  | 'isEditing'
+  | 'editingStartedAt'
+  | 'e2eeIntent'
 > & {
+  /** Signed by the send path itself in encrypted workspaces, never by the composer. */
+  e2eeIntent?: string;
   isEditing?: boolean;
   editingStartedAt?: number;
   timestamp?: string;
   userTurnId?: string;
+  operationId?: string;
+  attachments?: SessionAttachmentDraft[];
 };
 
 export type UseSessionDocResult = {
+  loadError?: boolean;
+  /** Control-plane state (session, queue, preview, fork, cursor, runtime config). */
   doc: SessionDocState;
+  /**
+   * Windowed access to the turns; null until the store is loaded. Components
+   * must read history only through this view.
+   */
+  history: ConversationView | null;
   addHistory: (
     history: Omit<SessionHistoryInput, 'id'> & { id?: string },
-    options?: { dispatch?: boolean }
+    options?: {
+      dispatch?: boolean;
+      guideExpectedTurnId?: string;
+      attachments?: SessionAttachmentDraft[];
+      onAccepted?: () => void;
+    }
   ) => Promise<{ entry: SessionHistory }>;
-  pushMessageQueue: (item: PushMessageQueueInput) => Promise<void>;
+  pushMessageQueue: (
+    item: PushMessageQueueInput,
+    options?: { onAccepted?: () => void }
+  ) => Promise<void>;
   removeMessageQueueItem: (cid: string) => Promise<void>;
   updateMessageQueueItem: (
     cid: string,
@@ -88,18 +119,6 @@ export function sessionMetaSuggestsHistory(session: SessionHistoryHint | null | 
   );
 }
 
-const updateOnlyChangesHistory = (
-  previous: SessionDocState | undefined,
-  next: SessionDocState
-): boolean =>
-  previous !== undefined &&
-  previous.history !== next.history &&
-  previous.session === next.session &&
-  previous.mq === next.mq &&
-  previous.forkOperation === next.forkOperation &&
-  previous.preview === next.preview &&
-  previous.externalHistoryCursor === next.externalHistoryCursor;
-
 export function useSessionDoc(
   sessionId: SessionId,
   options: UseSessionDocOptions = {}
@@ -108,23 +127,38 @@ export function useSessionDoc(
   const syncEnabled = options.syncEnabled ?? enabled;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const browserOnline = useAtomValue(browserOnlineAtom);
-  const [loadedStore, setLoadedStore] = useState<SessionDocStore | null>(null);
-  const [ready, setReady] = useState(false);
-  const [syncState, setSyncState] = useState<RoomSyncState>('idle');
   const fallbackDoc = useMemo<SessionDocInput>(
     () => ({
       session: { id: sessionId },
-      history: [],
       mq: [],
+      humanInputReceipts: {},
+      rpcDispatchOriginals: {},
+      queueDispatchOriginals: {},
+      cancelRequest: undefined,
       forkOperation: undefined,
+      notification: undefined,
       preview: undefined,
       externalHistoryCursor: undefined,
+      acpRuntimeConfig: undefined,
     }),
     [sessionId]
   );
-  const [state, setState] = useState<SessionDocState>(fallbackDoc as SessionDocState);
+  // An already-open store renders in the first commit: switching to a cached
+  // conversation must not paint an empty frame while a promise settles.
+  const [loadedStore, setLoadedStore] = useState<SessionDocStore | null>(
+    () => (enabled && runtime?.peekSessionStore?.(sessionId)) || null
+  );
+  const [ready, setReady] = useState(() => loadedStore !== null);
+  const [loadError, setLoadError] = useState(false);
+  const [syncState, setSyncState] = useState<RoomSyncState>(
+    () => loadedStore?.getSyncState() ?? 'idle'
+  );
+  const [state, setState] = useState<SessionDocState>(
+    () => loadedStore?.getState() ?? (fallbackDoc as SessionDocState)
+  );
   useEffect(() => {
     let cancelled = false;
+    setLoadError(false);
     let acquiredStore = false;
     let unsubscribe: (() => void) | null = null;
     let unsubscribeSyncState: (() => void) | null = null;
@@ -132,9 +166,18 @@ export function useSessionDoc(
     // effect instance published so cleanup only clears its own values.
     let debugStore: SessionDocStore | null = null;
     let debugSessionState: SessionDocState | null = null;
-    setReady(false);
-    setSyncState('idle');
-    setState(fallbackDoc as SessionDocState);
+    const openStore = enabled && runtime ? runtime.peekSessionStore?.(sessionId) : undefined;
+    if (openStore) {
+      // Show the open store now; the acquire below only takes the reference.
+      setLoadedStore(openStore);
+      setState(openStore.getState());
+      setSyncState(openStore.getSyncState());
+      setReady(true);
+    } else {
+      setReady(false);
+      setSyncState('idle');
+      setState(fallbackDoc as SessionDocState);
+    }
 
     if (!enabled) {
       setLoadedStore(null);
@@ -178,7 +221,8 @@ export function useSessionDoc(
         unsubscribe = subscribeLatestOnAnimationFrame<SessionDocState>({
           subscribe: (listener) => store.subscribe(listener),
           initialValue: initialState,
-          shouldDefer: updateOnlyChangesHistory,
+          // Control-plane updates are small and rare; publish them right away.
+          shouldDefer: () => false,
           onValue: (nextState) => {
             if (cancelled) return;
             setState((prev) => (prev === nextState ? prev : nextState));
@@ -189,6 +233,7 @@ export function useSessionDoc(
           },
         });
       } catch (error) {
+        if (!cancelled) setLoadError(true);
         console.error('Failed to load session doc', { sessionId, error });
       }
     })();
@@ -227,6 +272,8 @@ export function useSessionDoc(
     return loadedStore.acquireSync();
   }, [enabled, loadedStore, syncEnabled]);
 
+  const history = loadedStore?.history ?? null;
+
   const withStore = useCallback(
     async <T>(fn: (store: SessionDocStore) => Promise<T> | T): Promise<T> => {
       if (!runtime) {
@@ -244,12 +291,32 @@ export function useSessionDoc(
   const addHistory = useCallback(
     async (
       item: Omit<SessionHistoryInput, 'id'> & { id?: string },
-      writeOptions?: { dispatch?: boolean }
+      writeOptions?: {
+        dispatch?: boolean;
+        guideExpectedTurnId?: string;
+        attachments?: SessionAttachmentDraft[];
+        onAccepted?: () => void;
+      }
     ) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
       const entry = { ...item, id: item.id ?? uuidv4() } as SessionHistory;
+      if (entry.role === 'user') {
+        await acceptSessionUserTurn(
+          runtime,
+          sessionId,
+          entry,
+          writeOptions?.guideExpectedTurnId
+            ? { kind: 'guide', expectedTurnId: writeOptions.guideExpectedTurnId }
+            : { kind: writeOptions?.dispatch ? 'dispatch' : 'history' },
+          undefined,
+          undefined,
+          writeOptions?.attachments,
+          writeOptions?.onAccepted
+        );
+        return { entry };
+      }
       if (writeOptions?.dispatch) {
         const inputConfig = normalizeSessionTurnInputConfig(entry.inputConfig);
         const userId = entry.userId?.trim();
@@ -257,21 +324,14 @@ export function useSessionDoc(
         if (!userId || !timestamp || !inputConfig) {
           throw new Error(`Cannot dispatch invalid user history entry (sessionId=${sessionId})`);
         }
-        await runtime.writer.appendSessionTurn(
-          sessionId,
-          entry as unknown as Record<string, unknown>,
-          {
-            userTurnId: entry.id,
-            userId,
-            timestamp,
-            inputConfig: inputConfig as unknown as Record<string, unknown>,
-          }
-        );
+        await runtime.writer.appendSessionTurn(sessionId, entry, {
+          userTurnId: entry.id,
+          userId,
+          timestamp,
+          inputConfig: inputConfig as unknown as Record<string, unknown>,
+        });
       } else {
-        await runtime.writer.appendSessionHistory(
-          sessionId,
-          entry as unknown as Record<string, unknown>
-        );
+        await runtime.writer.appendSessionHistory(sessionId, entry);
       }
       return { entry };
     },
@@ -279,10 +339,11 @@ export function useSessionDoc(
   );
 
   const pushMessageQueue = useCallback(
-    async (item: PushMessageQueueInput) => {
+    async (item: PushMessageQueueInput, writeOptions?: { onAccepted?: () => void }) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      const userTurnId = item.userTurnId ?? uuidv4();
       const entry: Omit<MessageQueueItemInput, '$cid' | 'timestamp' | 'isEditing'> & {
         isEditing: boolean;
         timestamp: string;
@@ -290,13 +351,40 @@ export function useSessionDoc(
         ...item,
         isEditing: item.isEditing ?? false,
         editingStartedAt: item.editingStartedAt,
-        userTurnId: item.userTurnId ?? undefined,
+        userTurnId,
+        operationId: item.operationId ?? `queue:${userTurnId}`,
         timestamp: item.timestamp ?? new Date(getServerNow()).toISOString(),
+        e2eeIntent: item.e2eeIntent,
       };
 
-      await runtime.writer.enqueueSessionMessage(
+      const inputConfig = normalizeSessionTurnInputConfig(entry.acpSessionConfig);
+      const { attachments, ...wireEntry } = {
+        ...entry,
+        userTurnId,
+        attachments: item.attachments,
+      };
+      const pendingTurn = buildDraftUserHistoryEntry(
+        {
+          userId: entry.userId,
+          inputBlocks: normalizeSessionInputBlocks(
+            inputConfig?.inputBlocks,
+            entry.acpSessionConfig?.prompt ?? (attachments?.length ? '' : entry.task)
+          ),
+          timestamp: entry.timestamp,
+          inputConfig,
+        },
+        attachments
+      );
+      if (!pendingTurn) throw new Error('Queued message has no effective input');
+      await acceptSessionUserTurn(
+        runtime,
         sessionId,
-        entry as unknown as Record<string, unknown>
+        { ...pendingTurn, id: userTurnId } as SessionHistory,
+        { kind: 'queue' },
+        undefined,
+        { ...wireEntry, userTurnId },
+        attachments,
+        writeOptions?.onAccepted
       );
     },
     [runtime, sessionId]
@@ -333,11 +421,7 @@ export function useSessionDoc(
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      await runtime.writer.updateSessionMessage(
-        sessionId,
-        cid,
-        next as unknown as Record<string, unknown>
-      );
+      await replaceQueueItem(runtime, sessionId, cid, current, next);
     },
     [withStore, runtime, sessionId]
   );
@@ -367,24 +451,18 @@ export function useSessionDoc(
   const updateHistoryEntry = useCallback(
     async (historyId: string, updater: (entry: SessionHistoryInput) => SessionHistoryInput) => {
       // The updater is a function that can't cross the intent wire; resolve it to
-      // the concrete replacement entry against the current snapshot and send that
+      // the concrete replacement entry against the current turn and send that
       // through the writer seam. Preserve the "not found → no-op" short-circuit.
-      const history = await withStore(
-        (store) => (store.getState().history ?? []) as SessionHistoryInput[]
-      );
-      const index = history.findIndex((entry) => entry.id === historyId);
-      if (index < 0) {
+      const read = await withStore((store) => store.sessionData.history.readTurn(historyId));
+      const current = read.state === 'ready' ? read.turn : undefined;
+      if (!current) {
         return;
       }
-      const nextEntry = updater(history[index] as SessionHistoryInput);
+      const nextEntry = updater(current as unknown as SessionHistoryInput);
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      await runtime.writer.updateSessionHistory(
-        sessionId,
-        historyId,
-        nextEntry as unknown as Record<string, unknown>
-      );
+      await runtime.writer.updateSessionHistory(sessionId, historyId, nextEntry);
     },
     [withStore, runtime, sessionId]
   );
@@ -395,6 +473,8 @@ export function useSessionDoc(
 
   return {
     doc: state,
+    loadError,
+    history,
     addHistory,
     pushMessageQueue,
     removeMessageQueueItem,
@@ -445,19 +525,22 @@ export function useSessionDocSyncState(
           return;
         }
 
-        const readHasLocalHistory = (state: SessionDocState) => (state.history?.length ?? 0) > 0;
-        setHasLocalHistory(readHasLocalHistory(store.getState()));
+        const readHasLocalHistory = () => store.history.turnCount > 0;
+        setHasLocalHistory(readHasLocalHistory());
         setSyncState(store.getSyncState());
         setReady(true);
         releaseSync = store.acquireSync();
-        unsubscribeStore = store.subscribe((nextState) => {
-          if (!cancelled) {
-            const nextHasLocalHistory = readHasLocalHistory(nextState);
-            setHasLocalHistory((prev) =>
-              prev === nextHasLocalHistory ? prev : nextHasLocalHistory
-            );
+        unsubscribeStore = subscribeOnFrame(
+          (listener) => store.history.subscribe(listener),
+          () => {
+            if (!cancelled) {
+              const nextHasLocalHistory = readHasLocalHistory();
+              setHasLocalHistory((prev) =>
+                prev === nextHasLocalHistory ? prev : nextHasLocalHistory
+              );
+            }
           }
-        });
+        );
         unsubscribeSyncState = store.subscribeSyncState((nextState) => {
           if (!cancelled) {
             setSyncState((prev) => (prev === nextState ? prev : nextState));

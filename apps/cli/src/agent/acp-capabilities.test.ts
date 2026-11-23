@@ -1,5 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, rmSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import type { CodexProfileExecution } from './codex-profile-runtime';
+import type { StartLocalAcpAgentOptions } from './acp-runner';
 
+import type { SessionId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 
 const mocks = vi.hoisted(() => ({
@@ -17,8 +24,17 @@ vi.mock('./acp-authentication', () => ({
   probeBuiltinAuthentication: mocks.probeBuiltinAuthentication,
 }));
 
-import { fetchAcpCapabilities } from './acp-capabilities';
-import { AcpAuthenticationRequiredError } from './agent-client';
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, mkdtemp: vi.fn(actual.mkdtemp), rm: vi.fn(actual.rm) };
+});
+
+import {
+  ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS,
+  ACP_PROBE_COMMANDS_WAIT_MS,
+  fetchAcpCapabilities,
+} from './acp-capabilities';
+import { AcpAuthenticationRequiredError, AgentClient } from './agent-client';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -26,16 +42,26 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
+  setDebug: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
 });
 
-function createSuccessfulStartupResult(sessionResponse?: Record<string, unknown>) {
+function createSuccessfulStartupResult(
+  sessionResponse?: Record<string, unknown>,
+  authMethods: readonly Record<string, unknown>[] = []
+) {
   return {
     agentProcess: {} as never,
     client: {
+      supportsSessionTitleGeneration: () => false,
+      getRateLimitsCapability: () => undefined,
       supportsAcknowledgedSteer: () => false,
+      getGoalCapability: () => undefined,
+      getAuthMethods: () => authMethods,
+      waitForAvailableCommands: async () => undefined,
     } as never,
     acpSessionId: 'acp-session-1' as never,
     sessionResponse: sessionResponse ?? {
@@ -68,30 +94,131 @@ function mockStartupWithSessionResponse(sessionResponse: Record<string, unknown>
 }
 
 describe('fetchAcpCapabilities', () => {
+  const probeDirectories = new Set<string>();
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const directory of probeDirectories) {
+      // A regression may pass cwd instead: never delete it from test teardown.
+      if (/^lody-(acp-capabilities|test-profile)-/.test(path.basename(directory))) {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+    probeDirectories.clear();
+  });
+
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.probeBuiltinAuthentication.mockResolvedValue({ status: 'unknown' });
     mocks.startLocalAcpAgent.mockImplementation(async () => createSuccessfulStartupResult());
   });
 
-  it('defers builtin Codex authentication to ACP session creation', async () => {
-    const result = await fetchAcpCapabilities('builtin', 'codex', createSilentLogger());
+  it('projects the official registry Antigravity quota reader without enabling custom namesakes', async () => {
+    const official = await fetchAcpCapabilities(
+      'registry',
+      'antigravity-acp',
+      createSilentLogger()
+    );
+    const builtin = await fetchAcpCapabilities('builtin', 'antigravity', createSilentLogger());
+    expect(builtin.rateLimits).toEqual({ version: 1, query: true });
+    const custom = await fetchAcpCapabilities('custom', 'antigravity-acp', createSilentLogger());
+    const other = await fetchAcpCapabilities('registry', 'another-agent', createSilentLogger());
+    expect(official.rateLimits).toEqual({ version: 1, query: true });
+    expect(custom.rateLimits).toBeUndefined();
+    expect(other.rateLimits).toBeUndefined();
+  });
 
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledTimes(1);
-    expect(mocks.probeBuiltinAuthentication).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'builtin',
-        agentType: 'codex',
-      })
+  it('discovers authentication methods only for the Sorbet probe', async () => {
+    mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) =>
+      createSuccessfulStartupResult(
+        undefined,
+        options.discoverAuthenticationMethods
+          ? [{ id: 'sorbet:example:oauth', name: 'Example OAuth' }]
+          : []
+      )
     );
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'builtin',
-        agentType: 'codex',
-        runtimeOverrides: undefined,
-      })
+    const sorbet = await fetchAcpCapabilities('builtin', 'sorbet', createSilentLogger());
+    const other = await fetchAcpCapabilities('builtin', 'bub', createSilentLogger());
+    expect(sorbet.authMethods).toEqual([{ id: 'sorbet:example:oauth', name: 'Example OAuth' }]);
+    expect(other.authMethods).toEqual([]);
+  });
+
+  it('advertises the Provider session defaults as the probe session current values', async () => {
+    const state = { model: 'a/fast', thought_level: 'low', permission_mode: 'ask' };
+    const options = () => [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select' as const,
+        currentValue: state.model,
+        options: [
+          { value: 'a/fast', name: 'Fast' },
+          { value: 'a/deep', name: 'Deep' },
+        ],
+      },
+      {
+        id: 'thought_level',
+        name: 'Thinking',
+        category: 'thought_level',
+        type: 'select' as const,
+        currentValue: state.thought_level,
+        options: (state.model === 'a/deep' ? ['low', 'high'] : ['low']).map((value) => ({
+          value,
+          name: value,
+        })),
+      },
+      {
+        id: 'permission_mode',
+        name: 'Permissions',
+        type: 'select' as const,
+        currentValue: state.permission_mode,
+        options: ['ask', 'auto', 'full-access'].map((value) => ({ value, name: value })),
+      },
+    ];
+    mocks.startLocalAcpAgent.mockImplementation(async () => {
+      const started = createSuccessfulStartupResult({
+        sessionId: 'acp-session-1',
+        configOptions: options(),
+      });
+      Object.assign(started.client as object, {
+        setSessionConfigOption: async (_session: string, id: string, value: string) => {
+          if (id === 'thought_level' && !options()[1]!.options.some((o) => o.value === value))
+            throw new Error('unsupported level for this model');
+          (state as Record<string, string>)[id] = value;
+          return options();
+        },
+      });
+      return started;
+    });
+
+    const probed = await fetchAcpCapabilities(
+      'builtin',
+      'sorbet',
+      createSilentLogger(),
+      {},
+      undefined,
+      undefined,
+      {
+        sessionDefaults: {
+          configOptionValues: {
+            // Listed before the model on purpose: `high` exists only once the model is `a/deep`.
+            thought_level: 'high',
+            model: 'a/deep',
+            permission_mode: 'full-access',
+            sandbox: 'off',
+          },
+        },
+      }
     );
-    expect(result.models.map((model) => model.modelId)).toEqual(['claude-sonnet']);
+
+    const current = Object.fromEntries(
+      (probed.configOptions ?? []).map((option) => [option.id, option.currentValue])
+    );
+    expect(current).toEqual({
+      model: 'a/deep',
+      thought_level: 'high',
+      permission_mode: 'full-access',
+    });
   });
 
   it('reports missing builtin credentials before starting the ACP adapter', async () => {
@@ -115,73 +242,332 @@ describe('fetchAcpCapabilities', () => {
     expect(mocks.startLocalAcpAgent).not.toHaveBeenCalled();
   });
 
-  it('uses the current working directory for capability probing', async () => {
-    const result = await fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger());
+  it.each(['registry', 'custom', 'builtin'] as const)(
+    'uses a writable isolated workspace for %s probes even when daemon cwd is root',
+    async (cliType) => {
+      const inheritedCwd = path.parse(process.cwd()).root;
+      vi.spyOn(process, 'cwd').mockReturnValue(inheritedCwd);
+      let workdir = '';
+      mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) => {
+        workdir = options.workdir;
+        probeDirectories.add(workdir);
+        expect(path.isAbsolute(workdir)).toBe(true);
+        expect(workdir).not.toBe(inheritedCwd);
+        await mkdir(path.join(workdir, '.gemini', 'skills'), { recursive: true });
+        await writeFile(path.join(workdir, '.gemini', 'skills', 'probe'), 'workspace ready');
+        return createSuccessfulStartupResult();
+      });
+      mocks.shutdownLocalAcpAgent.mockImplementation(async () => {
+        expect(await readFile(path.join(workdir, '.gemini', 'skills', 'probe'), 'utf8')).toBe(
+          'workspace ready'
+        );
+      });
 
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledTimes(1);
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'registry',
-        agentType: 'probe-agent',
-        workdir: process.cwd(),
-      })
-    );
-    expect(result.availableCommands).toEqual([{ name: '/help', description: 'Help' }]);
+      const result = await fetchAcpCapabilities(cliType, 'probe-agent', createSilentLogger());
+      expect(result.models.map((model) => model.modelId)).toEqual(['claude-sonnet']);
+      expect(result.availableCommands).toEqual([{ name: '/help', description: 'Help' }]);
+      expect(existsSync(workdir)).toBe(false);
+    }
+  );
+
+  it('keeps concurrent probe directories until each shutdown finishes', async () => {
+    let notifyStarted = () => {};
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+    let releaseShutdown = () => {};
+    const shutdownReleased = new Promise<void>((resolve) => {
+      releaseShutdown = resolve;
+    });
+    const directories: string[] = [];
+    mocks.startLocalAcpAgent.mockImplementation(async ({ workdir }: StartLocalAcpAgentOptions) => {
+      probeDirectories.add(workdir);
+      directories.push(workdir);
+      await writeFile(path.join(workdir, 'owner'), workdir);
+      return createSuccessfulStartupResult();
+    });
+    mocks.shutdownLocalAcpAgent.mockImplementation(async () => {
+      notifyStarted();
+      await shutdownReleased;
+    });
+    const first = fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger());
+    await started;
+    try {
+      mocks.shutdownLocalAcpAgent.mockImplementation(async () => {});
+      await fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger());
+      const [firstDir = '', secondDir = ''] = directories;
+      expect(firstDir).not.toBe(secondDir);
+      expect(await readFile(path.join(firstDir, 'owner'), 'utf8')).toBe(firstDir);
+      expect(existsSync(secondDir)).toBe(false);
+    } finally {
+      releaseShutdown();
+      await first;
+    }
+    expect(directories.every((directory) => !existsSync(directory))).toBe(true);
   });
 
-  it('preserves acknowledged steering support discovered from the live client', async () => {
-    const startupResult = createSuccessfulStartupResult();
-    startupResult.client = {
-      supportsAcknowledgedSteer: () => true,
-    } as never;
-    mocks.startLocalAcpAgent.mockResolvedValue(startupResult);
+  it.each(['startup', 'cancelled', 'normalization'] as const)(
+    'removes the workspace after %s failure and preserves the original error',
+    async (failure) => {
+      const controller = new AbortController();
+      const error = new Error(failure);
+      let workdir = '';
+      mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) => {
+        workdir = options.workdir;
+        probeDirectories.add(workdir);
+        await mkdir(path.join(workdir, '.gemini', 'skills'), { recursive: true });
+        if (failure === 'cancelled') {
+          controller.abort(error);
+          options.signal?.throwIfAborted();
+        }
+        if (failure === 'startup') throw error;
+        const startup = createSuccessfulStartupResult();
+        startup.client = {
+          ...(startup.client as object),
+          supportsSessionFork: () => {
+            throw error;
+          },
+        } as never;
+        return startup;
+      });
+      await expect(
+        fetchAcpCapabilities(
+          'registry',
+          'probe-agent',
+          createSilentLogger(),
+          undefined,
+          undefined,
+          undefined,
+          { signal: controller.signal }
+        )
+      ).rejects.toBe(error);
+      expect(workdir).not.toBe('');
+      expect(existsSync(workdir)).toBe(false);
+    }
+  );
 
-    const result = await fetchAcpCapabilities('registry', 'steering-agent', createSilentLogger());
-
-    expect(result.acknowledgedSteer).toBe(true);
+  it('cleans a directory allocated while cancellation was arriving without starting an agent', async () => {
+    const controller = new AbortController();
+    const error = new Error('cancelled during allocation');
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    let workdir = '';
+    vi.mocked(mkdtemp).mockImplementationOnce(async (prefix) => {
+      workdir = await actual.mkdtemp(prefix);
+      probeDirectories.add(workdir);
+      controller.abort(error);
+      return workdir;
+    });
+    let spawned = false;
+    mocks.startLocalAcpAgent.mockImplementation(async () => {
+      spawned = true;
+      return createSuccessfulStartupResult();
+    });
+    await expect(
+      fetchAcpCapabilities(
+        'registry',
+        'probe-agent',
+        createSilentLogger(),
+        undefined,
+        undefined,
+        undefined,
+        { signal: controller.signal }
+      )
+    ).rejects.toBe(error);
+    expect(spawned).toBe(false);
+    expect(existsSync(workdir)).toBe(false);
   });
 
-  it('uses commands from NewSessionResponse and ignores command update notifications', async () => {
-    mocks.startLocalAcpAgent.mockImplementation(async (options) => {
-      options.onUpdateMessage({
+  it('does not fall back to inherited cwd when workspace allocation fails', async () => {
+    const error = new Error('temporary directory unavailable');
+    vi.mocked(mkdtemp).mockRejectedValueOnce(error);
+    let spawned = false;
+    mocks.startLocalAcpAgent.mockImplementation(async () => {
+      spawned = true;
+      return createSuccessfulStartupResult();
+    });
+    await expect(
+      fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger())
+    ).rejects.toBe(error);
+    expect(spawned).toBe(false);
+  });
+
+  it.each([false, true])(
+    'preserves the probe outcome when removal fails (startup failure: %s)',
+    async (failStartup) => {
+      const startupError = new Error('provider authentication required');
+      const warnings: string[] = [];
+      const logger = createSilentLogger();
+      logger.warn = (message) => {
+        warnings.push(String(message));
+        throw new Error('log sink unavailable');
+      };
+      const directories: string[] = [];
+      mocks.startLocalAcpAgent.mockImplementation(
+        async ({ workdir }: StartLocalAcpAgentOptions) => {
+          probeDirectories.add(workdir);
+          directories.push(workdir);
+          if (failStartup) throw startupError;
+          return createSuccessfulStartupResult();
+        }
+      );
+      vi.mocked(rm).mockRejectedValueOnce(new Error('workspace busy'));
+      const result = fetchAcpCapabilities('registry', 'probe-agent', logger);
+      if (failStartup) await expect(result).rejects.toBe(startupError);
+      else expect((await result).models.map((model) => model.modelId)).toEqual(['claude-sonnet']);
+      expect(warnings).toEqual(['[acp-capabilities] Failed to remove temporary probe workspace']);
+      expect(existsSync(directories[0] ?? '')).toBe(true);
+
+      mocks.startLocalAcpAgent.mockImplementation(
+        async ({ workdir }: StartLocalAcpAgentOptions) => {
+          probeDirectories.add(workdir);
+          directories.push(workdir);
+          return createSuccessfulStartupResult();
+        }
+      );
+      const retry = await fetchAcpCapabilities('registry', 'probe-agent', logger);
+      expect(retry.models.map((model) => model.modelId)).toEqual(['claude-sonnet']);
+      expect(directories[1]).not.toBe(directories[0]);
+      expect(existsSync(directories[1] ?? '')).toBe(false);
+    }
+  );
+
+  it('preserves the Codex profile home when credential verification fails', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'lody-test-profile-'));
+    probeDirectories.add(home);
+    await writeFile(path.join(home, 'auth.json'), 'synthetic credentials');
+    const codexProfile: CodexProfileExecution = {
+      profile: {
+        workspaceId: 'workspace',
+        machineId: 'machine',
+        configId: 'config',
+        home,
+        authStore: 'codex-default',
+        profile: {
+          mode: 'api-key',
+          profileId: '00000000-0000-4000-8000-000000000001',
+          baseUrl: 'https://example.invalid/v1',
+        },
+      },
+    };
+    let workdir = '';
+    mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) => {
+      workdir = options.workdir;
+      probeDirectories.add(workdir);
+      expect(options.codexProfile).toBe(codexProfile);
+      expect(workdir).not.toBe(home);
+      return createSuccessfulStartupResult();
+    });
+    await expect(
+      fetchAcpCapabilities(
+        'builtin',
+        'codex',
+        createSilentLogger(),
+        undefined,
+        undefined,
+        undefined,
+        { codexProfile, verifyCodexCredential: true }
+      )
+    ).rejects.toThrow('Codex credential verification requires a candidate key');
+    expect(existsSync(workdir)).toBe(false);
+    expect(await readFile(path.join(home, 'auth.json'), 'utf8')).toBe('synthetic credentials');
+  });
+
+  it('still attempts workspace cleanup if shutdown unexpectedly rejects', async () => {
+    let workdir = '';
+    const error = new Error('shutdown failed');
+    mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) => {
+      workdir = options.workdir;
+      probeDirectories.add(workdir);
+      return createSuccessfulStartupResult();
+    });
+    mocks.shutdownLocalAcpAgent.mockRejectedValueOnce(error);
+    await expect(
+      fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger())
+    ).rejects.toBe(error);
+    expect(existsSync(workdir)).toBe(false);
+  });
+
+  describe('slash command preview', () => {
+    const startRealClient = (response: Record<string, unknown>) => {
+      const client = new AgentClient({
+        sessionId: 'probe-session' as SessionId,
+        logger: createSilentLogger(),
+        terminalManager: {} as never,
+        onUpdateMessage: () => {},
+        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      });
+      Object.assign(client, { connection: {} });
+      client.adoptPreparedSession({
+        sessionId: 'acp-session-1',
+        ...response,
+      } as Parameters<AgentClient['adoptPreparedSession']>[0]);
+      let markStarted = () => {};
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      mocks.startLocalAcpAgent.mockImplementation(async () => {
+        markStarted();
+        return {
+          ...createSuccessfulStartupResult({ sessionId: 'acp-session-1', ...response }),
+          client,
+        };
+      });
+      return { client, started };
+    };
+    const advertise = (client: AgentClient, name: string) =>
+      client.sessionUpdate({
+        sessionId: 'acp-session-1',
         update: {
           sessionUpdate: 'available_commands_update',
-          availableCommands: [{ name: '/late', description: 'Late update' }],
+          availableCommands: [{ name, description: name }],
         },
-      } as never);
-      return createSuccessfulStartupResult({
-        sessionId: 'acp-session-1',
-        availableCommands: [{ name: '/initial', description: 'Initial response' }],
       });
+
+    afterEach(() => vi.useRealTimers());
+
+    it('uses commands returned by session/new without waiting', async () => {
+      vi.useFakeTimers();
+      startRealClient({ availableCommands: [{ name: 'help', description: 'Help' }] });
+
+      const result = await fetchAcpCapabilities('registry', 'response-agent', createSilentLogger());
+
+      expect(result.availableCommands).toEqual([{ name: 'help', description: 'Help' }]);
     });
 
-    const result = await fetchAcpCapabilities('registry', 'response-agent', createSilentLogger());
+    it('reads commands a standard agent advertises after session/new', async () => {
+      vi.useFakeTimers();
+      const { client, started } = startRealClient({});
+      let settled = false;
+      const probe = fetchAcpCapabilities('builtin', 'antigravity', createSilentLogger()).finally(
+        () => {
+          settled = true;
+        }
+      );
+      await started;
+      await vi.advanceTimersByTimeAsync(ACP_PROBE_COMMANDS_WAIT_MS - 1);
+      expect(settled).toBe(false);
+      await advertise(client, 'goal');
 
-    expect(result.availableCommands).toEqual([
-      { name: '/initial', description: 'Initial response' },
-    ]);
-  });
-
-  it('preserves an explicit empty command list from NewSessionResponse', async () => {
-    mockStartupWithSessionResponse({
-      sessionId: 'acp-session-1',
-      availableCommands: [],
+      expect((await probe).availableCommands).toEqual([{ name: 'goal', description: 'goal' }]);
+      expect(mocks.shutdownLocalAcpAgent).toHaveBeenCalledTimes(1);
     });
 
-    const result = await fetchAcpCapabilities('registry', 'response-agent', createSilentLogger());
+    it('finishes with no commands when the agent never advertises any', async () => {
+      vi.useFakeTimers();
+      const { started } = startRealClient({});
+      let settled = false;
+      const probe = fetchAcpCapabilities('registry', 'quiet-agent', createSilentLogger()).finally(
+        () => {
+          settled = true;
+        }
+      );
+      await started;
+      await vi.advanceTimersByTimeAsync(ACP_PROBE_COMMANDS_WAIT_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
 
-    expect(result.availableCommands).toEqual([]);
-  });
-
-  it('ignores a malformed NewSessionResponse command extension', async () => {
-    mockStartupWithSessionResponse({
-      sessionId: 'acp-session-1',
-      availableCommands: [{ name: 123, description: 'invalid' }],
+      expect((await probe).availableCommands).toBeUndefined();
     });
-
-    const result = await fetchAcpCapabilities('registry', 'response-agent', createSilentLogger());
-
-    expect(result.availableCommands).toBeUndefined();
   });
 
   it('probes registry agents even when their agent type matches a builtin name', async () => {
@@ -210,49 +596,6 @@ describe('fetchAcpCapabilities', () => {
         runtimeOverrides: { codexPath: '/tmp/lody-test-codex' },
       })
     );
-  });
-
-  it('merges provider env into the capability probe process env', async () => {
-    await fetchAcpCapabilities('registry', 'env-agent', createSilentLogger(), {
-      ACP_PROVIDER_TOKEN: 'secret-token',
-    });
-
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'registry',
-        agentType: 'env-agent',
-        env: expect.objectContaining({
-          PATH: process.env.PATH,
-          ACP_PROVIDER_TOKEN: 'secret-token',
-        }),
-      })
-    );
-  });
-
-  it('derives models from a model-category config option when present', async () => {
-    mockStartupWithSessionResponse({
-      sessionId: 'acp-session-1',
-      configOptions: [
-        {
-          id: 'model',
-          name: 'Model',
-          category: 'model',
-          type: 'select',
-          currentValue: 'opus',
-          options: [
-            { value: 'opus', name: 'Opus' },
-            { value: 'sonnet', name: 'Sonnet' },
-          ],
-        },
-      ],
-    });
-
-    const result = await fetchAcpCapabilities('registry', 'config-agent', createSilentLogger());
-
-    expect(result.models).toEqual([
-      { modelId: 'opus', name: 'Opus', description: undefined },
-      { modelId: 'sonnet', name: 'Sonnet', description: undefined },
-    ]);
   });
 
   it('falls back to the legacy models field for agents without config options', async () => {
@@ -303,17 +646,6 @@ describe('fetchAcpCapabilities', () => {
     ]);
   });
 
-  it('returns no models when neither config options nor the legacy field provide them', async () => {
-    mockStartupWithSessionResponse({
-      sessionId: 'acp-session-1',
-      modes: { availableModes: [{ id: 'default', name: 'Default' }] },
-    });
-
-    const result = await fetchAcpCapabilities('registry', 'modeless-agent', createSilentLogger());
-
-    expect(result.models).toEqual([]);
-  });
-
   // BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED: the current version drops
   // the `agent`-id config option returned by acp-extension-claude.
   it('filters out the `agent` config option while keeping the rest', async () => {
@@ -341,23 +673,117 @@ describe('fetchAcpCapabilities', () => {
 
     expect(result.configOptions?.map((opt) => opt.id)).toEqual(['mode']);
   });
+});
 
-  it('returns no config options when only the `agent` option is present', async () => {
-    mockStartupWithSessionResponse({
+describe('fetchAcpCapabilities model option read', () => {
+  const effort = (values: string[]) => ({
+    id: 'thought_level',
+    name: 'Thinking',
+    category: 'thought_level',
+    type: 'select' as const,
+    currentValue: values[0] ?? '',
+    options: values.map((value) => ({ value, name: value })),
+  });
+  const model = (currentValue: string) => ({
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select' as const,
+    currentValue,
+    options: [
+      { value: 'mimo', name: 'MiMo' },
+      { value: 'deepseek-flash', name: 'DeepSeek Flash' },
+      { value: 'broken', name: 'Broken' },
+      { value: 'qwen', name: 'Qwen' },
+    ],
+  });
+  const answers: Record<string, unknown> = {
+    'deepseek-flash': [model('deepseek-flash'), effort(['auto', 'low', 'max'])],
+    qwen: [model('qwen'), effort(['high'])],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.probeBuiltinAuthentication.mockResolvedValue({ status: 'unknown' });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const startWith = (setSessionConfigOption: (modelId: string) => Promise<unknown>) => {
+    const startup = createSuccessfulStartupResult({
       sessionId: 'acp-session-1',
-      configOptions: [
-        {
-          id: 'agent',
-          name: 'Agent',
-          type: 'select',
-          currentValue: 'main',
-          options: [{ value: 'main', name: 'Main' }],
+      configOptions: [model('mimo'), effort(['auto', 'none'])],
+    });
+    Object.assign(startup.client as object, {
+      setSessionConfigOption: (_session: unknown, _configId: string, value: string) =>
+        setSessionConfigOption(value),
+    });
+    mocks.startLocalAcpAgent.mockResolvedValue(startup);
+  };
+
+  it('switches to every model, reports each one, and skips a model that fails', async () => {
+    startWith(async (modelId) => {
+      if (modelId === 'broken') throw new Error('rejected');
+      return answers[modelId];
+    });
+    const progress: string[] = [];
+
+    const result = await fetchAcpCapabilities(
+      'builtin',
+      'dimcode',
+      createSilentLogger(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        readModelOptions: {
+          onProgress: ({ modelName, index, total }) =>
+            progress.push(`${index}/${total} ${modelName}`),
         },
-      ],
+      }
+    );
+
+    expect(progress).toEqual(['1/4 MiMo', '2/4 DeepSeek Flash', '3/4 Broken', '4/4 Qwen']);
+    expect(Object.keys(result.modelConfigOptions ?? {})).toEqual([
+      'mimo',
+      'deepseek-flash',
+      'qwen',
+    ]);
+    expect(result.modelConfigOptions?.qwen).toEqual([model('qwen'), effort(['high'])]);
+  });
+
+  it('stops at a switch the agent never answers and keeps what it read', async () => {
+    vi.useFakeTimers();
+    startWith((modelId) =>
+      modelId === 'broken' ? new Promise(() => {}) : Promise.resolve(answers[modelId])
+    );
+    const progress: string[] = [];
+    const pending = fetchAcpCapabilities(
+      'builtin',
+      'dimcode',
+      createSilentLogger(),
+      undefined,
+      undefined,
+      undefined,
+      { readModelOptions: { onProgress: ({ modelId }) => progress.push(modelId) } }
+    );
+    await vi.waitFor(() => expect(progress).toContain('broken'));
+    await vi.advanceTimersByTimeAsync(ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS);
+
+    const result = await pending;
+    expect(progress).toEqual(['mimo', 'deepseek-flash', 'broken']);
+    expect(Object.keys(result.modelConfigOptions ?? {})).toEqual(['mimo', 'deepseek-flash']);
+  });
+
+  it('switches nothing unless the refresh asked to read models', async () => {
+    const switched: string[] = [];
+    startWith(async (modelId) => {
+      switched.push(modelId);
+      return answers[modelId];
     });
 
-    const result = await fetchAcpCapabilities('registry', 'filter-agent', createSilentLogger());
+    const result = await fetchAcpCapabilities('builtin', 'dimcode', createSilentLogger());
 
-    expect(result.configOptions).toBeUndefined();
+    expect(switched).toEqual([]);
+    expect(result.modelConfigOptions).toBeUndefined();
   });
 });

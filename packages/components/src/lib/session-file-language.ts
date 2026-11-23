@@ -21,6 +21,7 @@ const EXTENSION_LANGUAGE_IDS: ReadonlyMap<string, string> = new Map([
   ['clj', 'clojure'],
   ['cljs', 'clojure'],
   ['cmd', 'bat'],
+  ['coq', 'coq'],
   ['cpp', 'cpp'],
   ['cs', 'csharp'],
   ['css', 'css'],
@@ -30,9 +31,13 @@ const EXTENSION_LANGUAGE_IDS: ReadonlyMap<string, string> = new Map([
   ['ex', 'elixir'],
   ['exs', 'elixir'],
   ['fish', 'shell'],
+  ['fs', 'fsharp'],
+  ['fsi', 'fsharp'],
+  ['fsx', 'fsharp'],
   ['go', 'go'],
   ['graphql', 'graphql'],
   ['h', 'c'],
+  ['hcl', 'hcl'],
   ['hpp', 'cpp'],
   ['html', 'html'],
   ['ini', 'ini'],
@@ -45,6 +50,7 @@ const EXTENSION_LANGUAGE_IDS: ReadonlyMap<string, string> = new Map([
   ['jsx', 'javascript'],
   ['kt', 'kotlin'],
   ['kts', 'kotlin'],
+  ['lean', 'lean'],
   ['less', 'less'],
   ['lua', 'lua'],
   ['m', 'objective-c'],
@@ -54,8 +60,8 @@ const EXTENSION_LANGUAGE_IDS: ReadonlyMap<string, string> = new Map([
   ['mm', 'objective-c'],
   ['mjs', 'javascript'],
   ['mts', 'typescript'],
-  ['mysql', 'mysql'],
-  ['pgsql', 'pgsql'],
+  ['mysql', 'sql'],
+  ['pgsql', 'sql'],
   ['php', 'php'],
   ['pl', 'perl'],
   ['ps1', 'powershell'],
@@ -64,12 +70,13 @@ const EXTENSION_LANGUAGE_IDS: ReadonlyMap<string, string> = new Map([
   ['py', 'python'],
   ['r', 'r'],
   ['rb', 'ruby'],
+  ['rocq', 'coq'],
   ['rs', 'rust'],
   ['scala', 'scala'],
   ['scss', 'scss'],
   ['sh', 'shell'],
-  ['sol', 'solidity'],
   ['sql', 'sql'],
+  ['sol', 'solidity'],
   ['svelte', 'html'],
   ['swift', 'swift'],
   ['tf', 'hcl'],
@@ -77,6 +84,7 @@ const EXTENSION_LANGUAGE_IDS: ReadonlyMap<string, string> = new Map([
   ['toml', 'ini'],
   ['ts', 'typescript'],
   ['tsx', 'typescript'],
+  ['v', 'coq'],
   ['vue', 'html'],
   ['wgsl', 'wgsl'],
   ['xml', 'xml'],
@@ -84,6 +92,56 @@ const EXTENSION_LANGUAGE_IDS: ReadonlyMap<string, string> = new Map([
   ['yml', 'yaml'],
   ['zsh', 'shell'],
 ]);
+
+// These mappings are available only after the optional language pack is
+// enabled. Keeping the gate here means file previews and Markdown fences share
+// the same opt-in boundary instead of silently loading extra grammars.
+const EXTENDED_SESSION_FILE_EXTENSIONS = new Set([
+  'astro',
+  'bat',
+  'clj',
+  'cljs',
+  'cmd',
+  'coq',
+  'dart',
+  'ex',
+  'exs',
+  'fish',
+  'fs',
+  'fsi',
+  'fsx',
+  'hcl',
+  'jl',
+  'less',
+  'lean',
+  'lua',
+  'm',
+  'mdx',
+  'mm',
+  'mysql',
+  'pgsql',
+  'pl',
+  'proto',
+  'ps1',
+  'r',
+  'scala',
+  'scss',
+  'sol',
+  'svelte',
+  'tf',
+  'tfvars',
+  'vue',
+  'v',
+  'wgsl',
+  'rocq',
+]);
+
+// Monaco has no basic-language contribution for these grammars. Read-only
+// previews use the Shiki-backed file viewer instead; editable provider files
+// intentionally remain plaintext in Monaco.
+export type SessionFileShikiLanguage = 'coq' | 'lean';
+
+const SHIKI_ONLY_SESSION_FILE_LANGUAGES = new Set<string>(['coq', 'lean']);
 
 export const getSessionFileBasename = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -109,7 +167,10 @@ export const isSessionMarkdownPath = (filePath: string): boolean => {
   return extension === 'md' || extension === 'markdown';
 };
 
-export const getSessionFileMonacoLanguageId = (filePath: string): string => {
+export const getSessionFileLanguageId = (
+  filePath: string,
+  extendedLanguagesEnabled = false
+): string => {
   const basename = getSessionFileBasename(filePath);
   if (basename.startsWith('.env.')) {
     return 'ini';
@@ -123,5 +184,20 @@ export const getSessionFileMonacoLanguageId = (filePath: string): string => {
   if (!extension) {
     return 'plaintext';
   }
+  if (!extendedLanguagesEnabled && EXTENDED_SESSION_FILE_EXTENSIONS.has(extension)) {
+    return 'plaintext';
+  }
   return EXTENSION_LANGUAGE_IDS.get(extension) ?? 'plaintext';
+};
+
+export const isSessionFileShikiLanguage = (
+  languageId: string
+): languageId is SessionFileShikiLanguage => SHIKI_ONLY_SESSION_FILE_LANGUAGES.has(languageId);
+
+export const getSessionFileMonacoLanguageId = (
+  filePath: string,
+  extendedLanguagesEnabled = false
+): string => {
+  const language = getSessionFileLanguageId(filePath, extendedLanguagesEnabled);
+  return isSessionFileShikiLanguage(language) ? 'plaintext' : language;
 };

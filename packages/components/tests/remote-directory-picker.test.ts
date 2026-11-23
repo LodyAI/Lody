@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LocalProjectBrowseDirectoryResult, MachineId, MachineViewMeta } from '@lody/shared';
 
 import { buildAddLocalProjectMachineOptions } from '../src/components/local-projects/local-project-machine-options';
-import { mergeRemoteDirectoryPage } from '../src/components/local-projects/use-remote-directory-picker';
+
 import type { MachineVisibilityAccess } from '../src/lib/visible-machine-index';
 
 function directoryPage(
@@ -23,25 +23,6 @@ function directoryPage(
     ...(nextCursor === undefined ? {} : { nextCursor }),
   };
 }
-
-describe('mergeRemoteDirectoryPage', () => {
-  it('appends entries for the same directory', () => {
-    const current = directoryPage('/home/user/project', ['a'], '1');
-    const next = directoryPage('/home/user/project', ['b']);
-
-    expect(mergeRemoteDirectoryPage(current, next)).toEqual({
-      ...next,
-      entries: [...current.entries, ...next.entries],
-    });
-  });
-
-  it('discards stale page responses for a different directory', () => {
-    const current = directoryPage('/home/user/new', ['current']);
-    const stale = directoryPage('/home/user/old', ['stale']);
-
-    expect(mergeRemoteDirectoryPage(current, stale)).toBe(current);
-  });
-});
 
 function machine(id: string, name: string, ownerUserId: string): MachineViewMeta {
   return {
@@ -65,6 +46,7 @@ function access(machineId: string, ownerUserId: string): MachineVisibilityAccess
 describe('buildAddLocalProjectMachineOptions', () => {
   it('keeps teammates’ visible machines and marks them owner-only', () => {
     const ownMachine = machine('machine-own', 'My Mac', 'user-me');
+    ownMachine.protocolCapabilities = { localProjectCreateDirectory: 1, projectFolderSelection: 1 };
     const teammateMachine = machine('machine-team', 'Build server', 'user-alex');
     const visibleMachines = new Map([
       [ownMachine.id, ownMachine],
@@ -92,6 +74,8 @@ describe('buildAddLocalProjectMachineOptions', () => {
         id: ownMachine.id,
         name: 'My Mac',
         online: true,
+        supportsCreateDirectory: true,
+        supportsProjectFolderSelection: true,
         canAddProjects: true,
         ownerName: 'Zoe',
       },
@@ -99,6 +83,8 @@ describe('buildAddLocalProjectMachineOptions', () => {
         id: teammateMachine.id,
         name: 'Build server',
         online: true,
+        supportsCreateDirectory: false,
+        supportsProjectFolderSelection: false,
         canAddProjects: false,
         ownerName: 'Alex Chen',
       },
@@ -122,6 +108,8 @@ describe('buildAddLocalProjectMachineOptions', () => {
         id: ownMachine.id,
         name: 'My Mac',
         online: true,
+        supportsCreateDirectory: false,
+        supportsProjectFolderSelection: false,
         canAddProjects: true,
         ownerName: 'Zoe',
       },

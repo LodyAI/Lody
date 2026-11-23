@@ -3,6 +3,14 @@ import { CloudCapabilityUnavailableError, type PlatformCapability } from '@lody/
 export interface CloudHttpPort {
   readonly authBaseUrl: string | null;
   readonly serverBaseUrl: string | null;
+  readonly mintAutomationControlProof?: (
+    intent: import('@lody/shared/automations').RemoteAutomationIntent,
+    sessionToken: string
+  ) => Promise<import('@lody/shared/automations').RemoteAutomationProof>;
+}
+
+export function getAutomationProofIssuer() {
+  return installedPort?.mintAutomationControlProof;
 }
 
 let installedPort: CloudHttpPort | null = null;
@@ -17,10 +25,7 @@ export function installCloudHttpPort(port: CloudHttpPort): () => void {
   };
 }
 
-export function requireCloudAuthBaseUrl(
-  capability: PlatformCapability,
-  override?: string,
-): string {
+export function requireCloudAuthBaseUrl(capability: PlatformCapability, override?: string): string {
   if (!installedPort) {
     throw new CloudCapabilityUnavailableError(capability);
   }

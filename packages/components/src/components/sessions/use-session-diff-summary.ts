@@ -1,7 +1,14 @@
-import { normalizeFileDiff, type FileDiff, type SessionId } from '@lody/shared';
+import { deriveSessionTurnFacts, type SessionTurnFacts } from './session-turn-facts';
+import {
+  normalizeFileDiff,
+  type FileDiff,
+  type SessionId,
+  type SessionDiffStats,
+} from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { acquireConversationDerivation, type ConversationView } from '@/lib/conversation-view';
 import type {
   SessionFileChangedFilesResult,
   SessionFileChangeEntry,
@@ -22,6 +29,10 @@ type SessionDiffSummaryState = {
   source: 'initial' | 'fallback' | 'provider';
   summary: SessionDiffSummary;
   unavailableMessage?: string;
+  liveDiffStat?: SessionDiffStats['allChange'];
+  changesReady?: boolean;
+  changesSynced?: boolean;
+  changesUnavailableMessage?: string;
 };
 
 const INITIAL_STATE: SessionDiffSummaryState = {
@@ -82,28 +93,93 @@ function normalizeHistoryEntryFileDiffs(entry: SessionHistoryEntryInput): FileDi
   });
 }
 
+/**
+ * Per-turn diff inputs for the whole conversation in order, from a fact table
+ * over the view: turns the background pass has not reached yet are absent and
+ * appear as the pass completes.
+ */
+function collectDiffInputs(
+  view: ConversationView,
+  facts: ReadonlyMap<string, SessionTurnFacts>
+): SessionTurnFacts[] {
+  const entries: SessionTurnFacts[] = [];
+  for (let i = 0; i < view.turnCount; i += 1) {
+    const row = view.index(i);
+    const fact = row ? facts.get(row.id) : undefined;
+    if (fact) entries.push(fact);
+  }
+  return entries;
+}
+
+/** The diff-relevant identity of one turn. */
+const diffInputEntryShape = (entry: SessionDiffInputEntry): unknown => [
+  entry?.id ?? '',
+  getSessionHistoryEntryRole(entry) ?? '',
+  normalizeHistoryEntryFileDiffs(entry).map((fileDiff) => [
+    fileDiff.filePath,
+    fileDiff.add,
+    fileDiff.del,
+    fileDiff.cc === undefined
+      ? null
+      : [
+          fileDiff.cc.v,
+          fileDiff.cc.fileId,
+          fileDiff.cc.baseOpId ?? '',
+          fileDiff.cc.opId ?? '',
+          fileDiff.cc.base ?? '',
+          fileDiff.cc.deleted === true,
+        ],
+  ]),
+];
+
 export function computeSessionDiffInputsFingerprint(history: SessionHistoryInput): string {
-  return JSON.stringify(
-    (history ?? []).map((entry) => [
-      entry?.id ?? '',
-      getSessionHistoryEntryRole(entry) ?? '',
-      normalizeHistoryEntryFileDiffs(entry).map((fileDiff) => [
-        fileDiff.filePath,
-        fileDiff.add,
-        fileDiff.del,
-        fileDiff.cc === undefined
-          ? null
-          : [
-              fileDiff.cc.v,
-              fileDiff.cc.fileId,
-              fileDiff.cc.baseOpId ?? '',
-              fileDiff.cc.opId ?? '',
-              fileDiff.cc.base ?? '',
-              fileDiff.cc.deleted === true,
-            ],
-      ]),
-    ])
-  );
+  return JSON.stringify((history ?? []).map((entry) => diffInputEntryShape(entry)));
+}
+
+type SessionDiffInputEntry = NonNullable<SessionHistoryInput>[number];
+
+/**
+ * Per-entry serialization, memoized on the entry object.
+ *
+ * A fact is replaced only when its turn changed, so an unchanged entry keeps
+ * its identity across passes and is never re-serialized.
+ */
+const diffInputEntryFingerprints = new WeakMap<object, string>();
+const diffInputEntryFingerprint = (entry: SessionDiffInputEntry): string => {
+  if (!entry || typeof entry !== 'object') return JSON.stringify(diffInputEntryShape(entry));
+  const cached = diffInputEntryFingerprints.get(entry);
+  if (cached !== undefined) return cached;
+  const computed = JSON.stringify(diffInputEntryShape(entry));
+  diffInputEntryFingerprints.set(entry, computed);
+  return computed;
+};
+
+/**
+ * Whether the diff-relevant content of the collected turns changed.
+ *
+ * Facts arrive at token rate while a turn streams and in chunks while the
+ * background pass fills the conversation, so this runs once per frame over
+ * every turn. Serializing the whole conversation to answer it cost a 144 KiB
+ * string per frame on a 4,000-turn session; identical entries are now settled
+ * by reference and only a replaced entry is serialized.
+ */
+export function sessionDiffInputsChanged(
+  previous: SessionHistoryInput | undefined,
+  next: SessionHistoryInput
+): boolean {
+  if (previous === undefined) return true;
+  const before = previous ?? [];
+  const after = next ?? [];
+  if (before.length !== after.length) return true;
+  for (let index = 0; index < after.length; index += 1) {
+    const beforeEntry = before[index];
+    const afterEntry = after[index];
+    if (beforeEntry === afterEntry) continue;
+    if (diffInputEntryFingerprint(beforeEntry) !== diffInputEntryFingerprint(afterEntry)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function selectProviderDiffTurnIds(history: SessionHistoryInput): string[] {
@@ -169,6 +245,7 @@ export function useSessionDiffSummary(
     readonly fileProvider?: SessionFileProvider | null;
     readonly fileProviderPending?: boolean;
     readonly enabled?: boolean;
+    readonly refreshChanges?: boolean;
   } = {}
 ): SessionDiffSummaryState {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -176,13 +253,73 @@ export function useSessionDiffSummary(
   const fileProvider = options.fileProvider ?? null;
   const fileProviderPending = options.fileProviderPending ?? false;
   const providerModeActive = enabled && fileProvider !== null;
+  const refreshChanges = options.refreshChanges ?? false;
   const [state, setState] = useState<SessionDiffSummaryState>(INITIAL_STATE);
+  const [liveRead, setLiveRead] = useState<{
+    provider: SessionFileProvider;
+    status: 'loading' | 'ready' | 'unavailable';
+    message?: string;
+  } | null>(null);
   const [diffInputsVersion, setDiffInputsVersion] = useState(0);
+  const [changedFilesRevision, setChangedFilesRevision] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    return fileProvider?.subscribeChangedFiles?.(() =>
+      setChangedFilesRevision((value) => value + 1)
+    );
+  }, [enabled, fileProvider]);
   const historyRef = useRef<SessionHistoryInput>(undefined);
-  const diffInputsFingerprintRef = useRef<string | undefined>(undefined);
+  /** The entries the last accepted pass produced, for the per-frame compare. */
+  const diffInputsSeenRef = useRef<SessionHistoryInput | undefined>(undefined);
   const fileProviderRef = useRef<SessionFileProvider | null>(fileProvider);
   const providerSummaryRetryAttemptsRef = useRef(0);
   const providerSummaryRetryTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !refreshChanges || fileProviderPending || !fileProvider) return;
+    const refresh = fileProvider.refreshChangedFiles?.bind(fileProvider);
+    if (!refresh) return;
+    const controller = new AbortController();
+    setLiveRead({ provider: fileProvider, status: 'loading' });
+    void (async () => {
+      try {
+        const result = await refresh(controller.signal);
+        if (controller.signal.aborted) return;
+        if (result.status === 'unavailable') {
+          setLiveRead({
+            provider: fileProvider,
+            status: 'unavailable',
+            message: result.message ?? result.reason,
+          });
+          return;
+        }
+        const summary = buildSessionDiffSummaryFromProviderChanges(result.files, undefined);
+        setState((previous) => ({
+          ...previous,
+          ready: true,
+          synced: true,
+          source: 'provider',
+          revision: previous.revision + 1,
+          summary: {
+            ...previous.summary,
+            changeEntries: summary.changeEntries,
+            changeFilePaths: summary.changeFilePaths,
+          },
+          unavailableMessage: undefined,
+        }));
+        setLiveRead({ provider: fileProvider, status: 'ready' });
+        setChangedFilesRevision((revision) => revision + 1);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setLiveRead({
+          provider: fileProvider,
+          status: 'unavailable',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+    return () => controller.abort();
+  }, [enabled, refreshChanges, fileProvider, fileProviderPending, sessionId]);
 
   useEffect(() => {
     fileProviderRef.current = fileProvider;
@@ -234,12 +371,13 @@ export function useSessionDiffSummary(
   useEffect(() => {
     if (!enabled) {
       historyRef.current = undefined;
-      diffInputsFingerprintRef.current = undefined;
+      diffInputsSeenRef.current = undefined;
       setState(INITIAL_STATE);
       return undefined;
     }
 
-    const history = historyRef.current;
+    // Live Changes does not depend on the optional conversation history reader.
+    const history = historyRef.current ?? (fileProvider ? [] : undefined);
     if (!history) {
       return undefined;
     }
@@ -371,16 +509,24 @@ export function useSessionDiffSummary(
     return () => {
       cancelled = true;
     };
-  }, [enabled, fileProvider, fileProviderPending, diffInputsVersion, sessionId]);
+  }, [
+    enabled,
+    fileProvider,
+    fileProviderPending,
+    diffInputsVersion,
+    changedFilesRevision,
+    sessionId,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
     let acquiredStore = false;
     let releaseSync: (() => void) | null = null;
     let unsubscribe: (() => void) | null = null;
+    let lease: ReturnType<typeof acquireConversationDerivation<SessionTurnFacts>> | null = null;
 
     historyRef.current = undefined;
-    diffInputsFingerprintRef.current = undefined;
+    diffInputsSeenRef.current = undefined;
     setDiffInputsVersion((prev) => prev + 1);
     setState(INITIAL_STATE);
 
@@ -401,9 +547,11 @@ export function useSessionDiffSummary(
         }
         releaseSync = store.acquireSync();
 
-        const initialHistory = store.getState().history;
+        lease = acquireConversationDerivation(store.history, deriveSessionTurnFacts);
+        const derivation = lease.table;
+        const initialHistory = collectDiffInputs(store.history, derivation.facts) as never;
         historyRef.current = initialHistory;
-        diffInputsFingerprintRef.current = computeSessionDiffInputsFingerprint(initialHistory);
+        diffInputsSeenRef.current = initialHistory;
         setDiffInputsVersion((prev) => prev + 1);
         if (shouldUpdateFallbackSummary()) {
           const initialSummary = buildSessionDiffSummary(initialHistory);
@@ -427,18 +575,22 @@ export function useSessionDiffSummary(
             // ignore
           });
 
-        unsubscribe = store.subscribe((nextState) => {
-          const nextFingerprint = computeSessionDiffInputsFingerprint(nextState.history);
-          if (nextFingerprint === diffInputsFingerprintRef.current) {
+        const activeDerivation = derivation;
+        let frame: number | null = null;
+        const applyDerivedHistory = () => {
+          frame = null;
+          if (cancelled) return;
+          const nextHistory = collectDiffInputs(store.history, activeDerivation.facts) as never;
+          if (!sessionDiffInputsChanged(diffInputsSeenRef.current, nextHistory)) {
             return;
           }
-          diffInputsFingerprintRef.current = nextFingerprint;
-          historyRef.current = nextState.history;
+          diffInputsSeenRef.current = nextHistory;
+          historyRef.current = nextHistory;
           setDiffInputsVersion((prev) => prev + 1);
           if (!shouldUpdateFallbackSummary()) {
             return;
           }
-          const nextSummary = buildSessionDiffSummary(nextState.history);
+          const nextSummary = buildSessionDiffSummary(nextHistory);
           setState((prev) => {
             if (areSessionDiffSummariesEqual(prev.summary, nextSummary)) {
               if (prev.source === 'fallback') {
@@ -456,6 +608,10 @@ export function useSessionDiffSummary(
               unavailableMessage: undefined,
             };
           });
+        };
+        // Facts change at token rate while a turn streams; refresh once per frame.
+        unsubscribe = activeDerivation.subscribe(() => {
+          if (frame === null) frame = requestAnimationFrame(applyDerivedHistory);
         });
       } catch (error) {
         console.error('Failed to load session diff summary', { sessionId, error });
@@ -464,6 +620,7 @@ export function useSessionDiffSummary(
 
     return () => {
       cancelled = true;
+      lease?.release();
       if (unsubscribe) {
         unsubscribe();
       }
@@ -486,5 +643,31 @@ export function useSessionDiffSummary(
     };
   }
 
+  const currentLiveRead = liveRead?.provider === fileProvider ? liveRead : null;
+  if (refreshChanges && fileProvider?.refreshChangedFiles && currentLiveRead?.status !== 'ready') {
+    return {
+      ...state,
+      changesReady: currentLiveRead?.status === 'unavailable',
+      changesSynced: true,
+      changesUnavailableMessage: currentLiveRead?.message,
+    };
+  }
+  if (currentLiveRead?.status === 'ready') {
+    let add = 0;
+    let del = 0;
+    for (const entry of state.summary.changeEntries) {
+      if (entry.add === undefined || entry.del === undefined)
+        return {
+          ...state,
+          liveDiffStat: { add: 0, del: 0, files: state.summary.changeEntries.length },
+        };
+      add += entry.add;
+      del += entry.del;
+    }
+    return {
+      ...state,
+      liveDiffStat: { add, del, files: state.summary.changeEntries.length },
+    };
+  }
   return state;
 }

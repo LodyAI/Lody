@@ -1,4 +1,6 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ChevronRight,
@@ -8,27 +10,40 @@ import {
   LockKeyhole,
   MessageCircle,
 } from 'lucide-react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtom, useAtomValue, useSetAtom, type PrimitiveAtom } from 'jotai';
+import { atomFamily } from 'jotai/utils';
 import { useTranslation } from 'react-i18next';
-import { getServerNow } from '@lody/shared';
-import { buildOpenedBySessionTree, pinnedFirstRootRank } from '@/lib/session-opened-by-tree';
+import {
+  flattenStatusViewRows,
+  formatSnoozeCountdown,
+  getServerNow,
+  isStatusTierCollapsedByDefault,
+  STATUS_VIEW_SETTLED_FOLD_THRESHOLD,
+  type PinSection,
+  type StatusViewLayout,
+  type StatusViewRow,
+  type StatusViewTier,
+} from '@lody/shared';
+import { buildMobileStatusViewLayout } from './mobile-status-view';
+import { useMobileStatusList, type MobileStatusCommands } from './use-mobile-status-list';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import { useWorkspaceCatalog } from '@/hooks/use-workspace-catalog';
+import {
+  buildOpenedBySessionTree,
+  countOpenedByTreeRoots,
+  pinnedFirstRootRank,
+  placeOpenedSessionsWithOpeners,
+} from '@/lib/session-opened-by-tree';
 import {
   sidebarCollapsedOpenedBySessionsAtom,
   toggleSidebarCollapsedOpenedBySessionAtom,
 } from '@/atoms/focus-layer';
 import { buildSessionRowOpenedByTreeSlot } from '@/components/sidebar-row-shared';
 import { cn } from '@/lib/utils';
-import { Checkbox } from '@/ui/checkbox';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { Button } from '@lody/ui/button';
+import { Checkbox } from '@lody/ui/checkbox';
+import { AlertDialog } from '@/ui/dialog';
 import {
   ConversationRow,
   conversationRowHasActivity,
@@ -36,7 +51,12 @@ import {
 } from './mobile-project-screen';
 import { MobileInitialLetterAvatar } from './mobile-initial-letter-avatar';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
-import { MobileSwipeableRow, MobileSwipeableRowGroup } from './mobile-swipeable-row';
+import {
+  MobileStatusSwipeRow,
+  MobileSwipeableRow,
+  MobileSwipeableRowGroup,
+  type MobileStatusSwipeActionId,
+} from './mobile-swipeable-row';
 
 /* Exit animation tuned to feel like a row "falling out" of the list
    rather than vanishing: a height-and-opacity collapse paired with
@@ -71,8 +91,9 @@ const ROW_EXIT_TRANSITION = {
    - `none`: flat list (in-project page; home no longer offers this)
    - `project`: bucket by `projectKey` (+ no-project catch-all)
    - `date`: Today / Yesterday / This Week / This Month / older months
+   - `status`: the Status view's Focus / Later / Settled tiers
    Callers supply heading labels via `groupLabels` for i18n. */
-export type MobileChatGroupBy = 'none' | 'project' | 'date';
+export type MobileChatGroupBy = 'none' | 'project' | 'date' | 'status';
 
 /* Bucket id used for chats that have no associated project (kind
    = 'chat'). Exported so callers can map it in `groupLabels`. */
@@ -85,6 +106,90 @@ export const PINNED_BUCKET_ID = '__pinned__';
 /* Flat unpinned tail when groupBy is `none` and there is a Pinned
    section above — no heading; just the remaining rows. */
 const FLAT_UNPINNED_BUCKET_ID = '__flat-unpinned__';
+/** Bucket id prefix of a user pin section. */
+const PIN_SECTION_BUCKET_PREFIX = `${PINNED_BUCKET_ID}:`;
+const isPinnedBucketId = (id: string): boolean =>
+  id === PINNED_BUCKET_ID || id.startsWith(PIN_SECTION_BUCKET_PREFIX);
+
+/* Rows a bucket shows before it collapses behind "Show more".
+   Same value as the desktop sidebar's `MAX_VISIBLE_SESSIONS`
+   (`../session-list.tsx`) — deliberately duplicated rather than imported so
+   the mobile bundle does not pull in the desktop session-list module.
+
+   Why 5 and not 3: a phone screen already fits ~8 rows, so 3 turns every
+   project into a two-tap read and puts the toggle back in the user's way on
+   every bucket. 5 is the point where a project's recent work still reads as a
+   list while an idle project costs one line more than its heading — and it
+   keeps the two platforms saying the same thing about the same workspace.
+
+   The cap counts TOP-LEVEL rows only (`maxRoots`), so a preview never splits
+   an opener from the Sessions it opened. */
+export const MOBILE_CHAT_PREVIEW_MAX_ROOTS = 5;
+
+/* Tree accessors shared by the render pass and the overflow count, so the
+   "does this bucket overflow" question is answered by the same nesting model
+   that decides what renders. */
+const CHAT_OPENED_BY_TREE_ACCESSORS = {
+  getId: (chat: MobileConversationItem) => chat.id,
+  getOpenedBySessionId: (chat: MobileConversationItem) =>
+    chat.openedByRowSessionId ?? chat.openedBySessionId,
+} as const;
+
+/* Per-bucket preview state. Owned by `MobileChatList` (one flag per bucket id)
+   rather than by the shared `sidebarCollapsedOpenedBySessionsAtom`: that atom
+   is the opener FOLD state, which the drawer sidebar and this list must agree
+   on. How many rows a mobile bucket previews is a property of this surface
+   alone and must not leak into the sidebar. */
+export type MobileChatPreviewState = {
+  /** Extra top-level rows "Show more" has uncovered beyond the preview cap. */
+  revealedRows: number;
+  onShowMore: () => void;
+  onShowLess: () => void;
+  /** Top-level rows shown before the toggle; defaults to {@link MOBILE_CHAT_PREVIEW_MAX_ROOTS}. */
+  maxRoots?: number;
+};
+
+/**
+ * A card rendered inside the Status view: which list its rows belong to (drag
+ * targeting reads it from `data-status-*`), the swipe and menu actions they
+ * offer, and the drop indicator while a drag hovers this list.
+ */
+export type MobileChatCardStatus = {
+  area: 'focus' | 'later' | 'settled' | 'pinned';
+  /** Pin section of a Pinned-area card; `null` is the default section. */
+  sectionId: string | null;
+  /** The slot a drag would land in, when it is in this list: before that row, or the end. */
+  dropBeforeId?: string | null | undefined;
+  /** Rows the person may Later / Settle / move to Focus. */
+  canManage: (chatId: string) => boolean;
+  /** Rows the person may pin or unpin. */
+  canPrefer: (chatId: string) => boolean;
+  onLater: (chatId: string) => void;
+  onSettle: (chatId: string) => void;
+  /** True while a long press holds a row; swipes stand down. */
+  isLocked: () => boolean;
+};
+
+/* Group fold + reveal state for one list surface. Held in an atom, not
+   component state, because leaving the home screen (e.g. into Settings)
+   unmounts the list and would otherwise re-expand every folded group on
+   return. In-memory only: it survives navigation, not an app reload. */
+type MobileChatBucketUiState = {
+  collapsed: ReadonlySet<string>;
+  /** Extra top-level rows each bucket has revealed beyond its preview cap. */
+  revealed: Readonly<Record<string, number>>;
+};
+const createBucketUiStateAtom = () =>
+  atom<MobileChatBucketUiState>({ collapsed: new Set<string>(), revealed: {} });
+const mobileChatBucketUiStateAtomFamily = atomFamily((_stateKey: string) =>
+  createBucketUiStateAtom()
+);
+const toggleInSet = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+};
 
 /* Fixed date-bucket ids (ordered newest → oldest). Month buckets use
    `date:month:YYYY-MM` and sort after these named ones. */
@@ -113,15 +218,10 @@ const GROUP_HEADING_X = 'ps-[18px] pe-4';
 
 /* Group label type size — slightly under session-row 15px so sections
    stay secondary, but large enough to scan. */
-const GROUP_HEADING_TEXT =
-  'text-[14px] font-semibold tracking-tight text-muted-foreground';
+const GROUP_HEADING_TEXT = 'text-[14px] font-semibold tracking-tight text-muted-foreground';
 
 export function MobileChatSectionHeading({ children }: { children: ReactNode }) {
-  return (
-    <div className={cn(GROUP_HEADING_X, 'pb-1.5 pt-5', GROUP_HEADING_TEXT)}>
-      {children}
-    </div>
-  );
+  return <div className={cn(GROUP_HEADING_X, 'pb-1.5 pt-5', GROUP_HEADING_TEXT)}>{children}</div>;
 }
 
 /* Chevron for group collapse state: points right when collapsed,
@@ -371,9 +471,22 @@ export function MobileChatListCard({
   archived = false,
   onRequestDelete,
   selection,
-  secondaryField = 'branch',
+  preview,
+  preserveOrder = false,
+  status,
+  shownIds,
 }: {
   chats: MobileConversationItem[];
+  /**
+   * Ids every card of the surrounding list renders now. A row that leaves this
+   * card for another one (a drop into another section, a tier change) is
+   * removed at once instead of collapsing, so it is never shown twice.
+   */
+  shownIds?: ReadonlySet<string>;
+  /** Status view rows: drag targeting, status swipes and the drop indicator. */
+  status?: MobileChatCardStatus;
+  /** A pin section: keep the given manual order instead of ranking by activity. */
+  preserveOrder?: boolean;
   selectedConversationId?: string | null;
   onSelect?: (chatId: string) => void;
   rowActions?: MobileChatListRowActions;
@@ -392,9 +505,10 @@ export function MobileChatListCard({
      toolbar's "select all" + count stay in sync across grouped
      sections. */
   selection?: ChatSelectionState;
-  /** @deprecated Conversation rows are single-line; branch/project meta
-     is no longer shown. Kept for call-site compatibility. */
-  secondaryField?: 'branch' | 'project';
+  /** Caps the bucket at {@link MOBILE_CHAT_PREVIEW_MAX_ROOTS} top-level rows
+     and appends a "Show more" stepper. Omit to render every row (what a
+     standalone card without a `MobileChatList` around it does). */
+  preview?: MobileChatPreviewState;
 }) {
   /* The archived list swaps the pin/archive chips for restore/delete;
      each list mode only honours its own callbacks so a stray handler
@@ -419,19 +533,49 @@ export function MobileChatListCard({
      opener in the drawer and in the mobile list can never disagree. */
   const collapsedOpeners = useAtomValue(sidebarCollapsedOpenedBySessionsAtom);
   const toggleCollapsedOpener = useSetAtom(toggleSidebarCollapsedOpenedBySessionAtom);
+  /* A capped bucket renders at most `MOBILE_CHAT_PREVIEW_MAX_ROOTS` top-level
+     rows. `maxRoots` is applied AFTER `rootRank`, so the preview keeps the
+     pinned-first / latest-activity order the bucket already promises — it
+     truncates that order rather than reshuffling it. */
+  const revealedRows = preview?.revealedRows ?? 0;
+  const previewEnabled = preview != null;
+  const capped = previewEnabled;
+  const maxRoots = preview?.maxRoots ?? MOBILE_CHAT_PREVIEW_MAX_ROOTS;
   const treeNodes = useMemo(
     () =>
       buildOpenedBySessionTree(chats, {
-        getId: (chat) => chat.id,
-        getOpenedBySessionId: (chat) => chat.openedByRowSessionId ?? chat.openedBySessionId,
+        ...CHAT_OPENED_BY_TREE_ACCESSORS,
         isCollapsed: (openerId) => collapsedOpeners[openerId] === true,
         /* Bucket order is pinned-first then latest activity; rank an opener by
            its freshest opened Session so nesting cannot bury a just-updated
            row under a stale opener. */
-        rootRank: (chat) => pinnedFirstRootRank(chat.latestMessageAt ?? 0, chat.isPinned),
+        ...(preserveOrder
+          ? {}
+          : {
+              rootRank: (chat: MobileConversationItem) =>
+                pinnedFirstRootRank(chat.latestMessageAt ?? 0, chat.isPinned),
+            }),
+        ...(capped ? { maxRoots: maxRoots + revealedRows } : {}),
       }),
-    [chats, collapsedOpeners]
+    [capped, chats, collapsedOpeners, maxRoots, preserveOrder, revealedRows]
   );
+  /* Gate the toggle on TOP-LEVEL rows, matching what the cap actually limits:
+     five openers plus the Sessions they opened is not an overflowing bucket,
+     so it must not sprout a "Show more" the tap would not change.
+
+     Deliberately NOT wrapped in `useMemo`. `MobileChatList` calls `groupChats`
+     in its render body, so every bucket receives a freshly built `chats` array
+     on every render — measured: a state-only re-render (tapping one bucket's
+     toggle) hands all buckets a new array. A memo keyed on `chats` therefore
+     cannot ever hit, and one that looks like a cache while caching nothing is
+     worse than the O(rows) scan it fails to avoid. `previewEnabled` exists for
+     the same reason: `preview` is a new object literal each render, so only the
+     one bit of it that matters may be read. */
+  const rootCount = previewEnabled
+    ? countOpenedByTreeRoots(chats, CHAT_OPENED_BY_TREE_ACCESSORS)
+    : 0;
+  const overflowsPreview = rootCount > maxRoots;
+  const hasMoreRows = rootCount > maxRoots + revealedRows;
   return (
     /* Flat list — no rounded card shell or inter-row dividers. Rows
        sit directly on the page canvas; `ConversationRow` supplies its
@@ -449,10 +593,34 @@ export function MobileChatListCard({
          per-row exit animations don't fire for every row at once
          (which felt like a freeze on lists with > 5–10 rows). The
          intentional single-row archive case still works because that
-         path only removes one item from the same key bucket. */}
-      <AnimatePresence initial={false} key={archived ? 'archived' : 'active'}>
-        {treeNodes.map((node) => {
+         path only removes one item from the same key bucket.
+
+         "Show less" is the same shape of bulk removal. Measured with the key
+         carrying only `archived`: collapsing a 14-row bucket leaves all 14 rows
+         in the DOM a frame later, animating out together for 400ms. Adding the
+         preview state to the key makes that transition a remount instead — the
+         same frame reports the 5 rows that remain — and `initial={false}` means
+         expanding adds its rows with no enter animation either. */}
+      <AnimatePresence
+        initial={false}
+        custom={shownIds}
+        key={`${archived ? 'archived' : 'active'}:${capped ? `preview:${revealedRows}` : 'full'}`}
+      >
+        {treeNodes.map((node, nodeIndex) => {
           const conversation = node.item;
+          let rootId = conversation.id;
+          if (node.depth > 0) {
+            for (let i = nodeIndex - 1; i >= 0; i -= 1) {
+              if (treeNodes[i]!.depth === 0) {
+                rootId = treeNodes[i]!.id;
+                break;
+              }
+            }
+          }
+          const showDropBefore =
+            status?.dropBeforeId !== undefined &&
+            node.depth === 0 &&
+            status.dropBeforeId === conversation.id;
           /* Same builder the sidebar rows use, so the disclosure's aria-label
              and its "Show N opened sessions" count stay identical across
              platforms and only need translating once. */
@@ -470,15 +638,18 @@ export function MobileChatListCard({
               onClick={() => onSelect?.(conversation.id)}
               archived={archived}
               treeSlot={treeSlot}
-              selectionMode={selection?.active ?? false}
+              selectionMode={!conversation.readOnly && (selection?.active ?? false)}
               isSelected={selection?.isSelected(conversation.id) ?? false}
               onToggleSelect={
-                selection ? () => selection.onToggleSelect(conversation.id) : undefined
+                selection && !conversation.readOnly
+                  ? () => selection.onToggleSelect(conversation.id)
+                  : undefined
               }
               onLongPress={
-                selection ? () => selection.onLongPress(conversation.id) : undefined
+                selection && !conversation.readOnly
+                  ? () => selection.onLongPress(conversation.id)
+                  : undefined
               }
-              secondaryField={secondaryField}
             />
           );
           return (
@@ -498,25 +669,50 @@ export function MobileChatListCard({
                  actually want the slide-up animation. */
               layoutDependency={chats.length}
               initial={false}
-              exit={{ height: 0, opacity: 0 }}
+              variants={rowExitVariants(conversation.id)}
+              exit="exit"
               transition={ROW_EXIT_TRANSITION}
               /* `overflow-hidden` lets `height: 0` actually clip the
                  row content while it collapses. Canvas bg matches the
                  page so exit-collapse never flashes a seam. */
               className="overflow-hidden bg-background"
+              {...(status
+                ? {
+                    'data-status-row-id': conversation.id,
+                    'data-status-root-id': rootId,
+                    'data-status-area': status.area,
+                    'data-status-section': status.sectionId ?? '',
+                    style: STATUS_ROW_TOUCH_STYLE,
+                  }
+                : {})}
             >
-              {wrapSwipe ? (
+              {showDropBefore ? <MobileStatusDropIndicator /> : null}
+              {wrapSwipe && status ? (
+                <MobileStatusSwipeRow
+                  liftAboveEdgeSwipeZone={showsTreeToggle}
+                  isLocked={status.isLocked}
+                  isPinned={conversation.isPinned ?? false}
+                  onTogglePin={
+                    rowActions?.onTogglePin && status.canPrefer(conversation.id)
+                      ? () => rowActions.onTogglePin!(conversation.id, !conversation.isPinned)
+                      : undefined
+                  }
+                  trailing={statusSwipeActions(status, conversation, rowActions)}
+                >
+                  {row}
+                </MobileStatusSwipeRow>
+              ) : wrapSwipe ? (
                 archived ? (
                   <MobileSwipeableRow
                     variant="archived"
                     liftAboveEdgeSwipeZone={showsTreeToggle}
                     onRestore={
-                      rowActions?.onRestore
+                      !conversation.readOnly && rowActions?.onRestore
                         ? () => rowActions.onRestore!(conversation.id)
                         : undefined
                     }
                     onDelete={
-                      onRequestDelete
+                      !conversation.readOnly && onRequestDelete
                         ? () => onRequestDelete(conversation.id)
                         : undefined
                     }
@@ -532,12 +728,11 @@ export function MobileChatListCard({
                     isPinned={conversation.isPinned ?? false}
                     onTogglePin={
                       rowActions?.onTogglePin
-                        ? () =>
-                            rowActions.onTogglePin!(conversation.id, !conversation.isPinned)
+                        ? () => rowActions.onTogglePin!(conversation.id, !conversation.isPinned)
                         : undefined
                     }
                     onArchive={
-                      rowActions?.onArchive
+                      !conversation.readOnly && rowActions?.onArchive
                         ? () => rowActions.onArchive!(conversation.id)
                         : undefined
                     }
@@ -552,36 +747,226 @@ export function MobileChatListCard({
           );
         })}
       </AnimatePresence>
+      {status?.dropBeforeId === null ? <MobileStatusDropIndicator /> : null}
+      {overflowsPreview && preview ? (
+        <MobileChatPreviewToggle
+          revealedRows={revealedRows}
+          hasMoreRows={hasMoreRows}
+          onShowMore={preview.onShowMore}
+          onShowLess={preview.onShowLess}
+        />
+      ) : null}
     </>
   );
 }
 
+const rowExitVariants = (id: string) => ({
+  exit: (shown: ReadonlySet<string> | undefined) =>
+    shown?.has(id)
+      ? { height: 0, opacity: 0, transition: { duration: 0 } }
+      : { height: 0, opacity: 0 },
+});
+
+/** A lifted row must not start the WebView's text selection or callout. */
+const STATUS_ROW_TOUCH_STYLE = {
+  WebkitUserSelect: 'none',
+  userSelect: 'none',
+  WebkitTouchCallout: 'none',
+} as const;
+
+/** Trailing swipe per tier (note's phone table): Settle + Later, or Archive. */
+function statusSwipeActions(
+  status: MobileChatCardStatus,
+  conversation: MobileConversationItem,
+  rowActions: MobileChatListRowActions | undefined
+): Array<{ id: MobileStatusSwipeActionId; onSelect: () => void }> {
+  const archive =
+    !conversation.readOnly && rowActions?.onArchive
+      ? [{ id: 'archive' as const, onSelect: () => rowActions.onArchive!(conversation.id) }]
+      : [];
+  if (status.area === 'settled' || status.area === 'pinned') return archive;
+  if (!status.canManage(conversation.id)) return archive;
+  return [
+    { id: 'settle', onSelect: () => status.onSettle(conversation.id) },
+    { id: 'later', onSelect: () => status.onLater(conversation.id) },
+  ];
+}
+
+/** Where a dragged row would land. */
+function MobileStatusDropIndicator() {
+  return (
+    <div
+      aria-hidden="true"
+      data-status-drop-indicator=""
+      {...stylex.props(statusStyles.dropIndicator)}
+    />
+  );
+}
+
+/* Tail affordance of a capped bucket. Sits inside the bucket body, directly
+   under the last row and above the next group heading, so it reads as the end
+   of THIS list rather than as chrome between sections.
+
+   Geometry: the label starts on the row-title x (px-4 + the 16px leading slot
+   + gap-2.5 = 42px) via an empty spacer, exactly as the desktop sidebar's
+   "Show more" does. The slot stays EMPTY on purpose — it is the column that
+   carries a row's status indicator and an opener's fold chevron, so a chevron
+   here would read as one of those. The label alone says which way it goes.
+
+   The type is quieter than a session title (15px medium foreground) and than a
+   group heading (14px semibold muted), which is the hierarchy: rows, then
+   sections, then this. Full-width `min-h-11` keeps a thumb target the size of
+   a row. */
+function MobileChatPreviewToggle({
+  revealedRows,
+  hasMoreRows,
+  onShowMore,
+  onShowLess,
+}: {
+  revealedRows: number;
+  hasMoreRows: boolean;
+  onShowMore: () => void;
+  onShowLess: () => void;
+}) {
+  const { t } = useTranslation();
+  const buttonRef = useRef<HTMLDivElement | null>(null);
+  const wasRevealed = useRef(revealedRows > 0);
+  /* Collapsing removes rows ABOVE this button, so on a long bucket the tap
+     target — and everything the user was reading — jumps off the top of the
+     viewport. Pull it back into view minimally (`nearest` is a no-op when it
+     is already visible). A layout effect runs after the rows are removed and
+     before paint, so the correction never renders as a visible scroll jump.
+     Chrome's native scroll anchoring would cover this on its own; WebKit has
+     never shipped `overflow-anchor`, and iOS is the surface this list is for. */
+  useLayoutEffect(() => {
+    const revealed = revealedRows > 0;
+    if (wasRevealed.current && !revealed) {
+      buttonRef.current?.scrollIntoView?.({ block: 'nearest' });
+    }
+    wasRevealed.current = revealed;
+  }, [revealedRows]);
+  const toggleClass =
+    'flex min-h-11 w-full items-center gap-2.5 bg-background px-4 py-2 text-left text-[13px] font-medium text-muted-foreground transition-colors active:bg-muted/40';
+  return (
+    <div ref={buttonRef}>
+      {hasMoreRows ? (
+        <button
+          type="button"
+          data-chat-list-preview-toggle=""
+          aria-expanded={revealedRows > 0}
+          onClick={onShowMore}
+          className={toggleClass}
+        >
+          <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{t('sessions.showMore', 'Show more')}</span>
+        </button>
+      ) : null}
+      {revealedRows > 0 ? (
+        <button
+          type="button"
+          data-chat-list-preview-collapse=""
+          aria-expanded="true"
+          onClick={onShowLess}
+          className={toggleClass}
+        >
+          <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{t('sessions.showLess', 'Show less')}</span>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** Status tier bucket ids (`specs/sidebar-status-view.md`). */
+export const STATUS_BUCKET_FOCUS = 'status:focus';
+export const STATUS_BUCKET_LATER = 'status:later';
+export const STATUS_BUCKET_SETTLED = 'status:settled';
+
+export type MobileChatBucket = {
+  id: string;
+  items: MobileConversationItem[];
+  label?: string;
+  /** Pinned-area bucket: its pin section (`null` = default). */
+  pinSectionId?: string | null;
+  /** Status grouping: the tier this bucket shows. */
+  tier?: StatusViewTier;
+  /** Pinned-area bucket: pinned rows the list's scope hid. */
+  hiddenCount?: number;
+};
+
+const bucketIdOfSection = (sectionId: string | null) =>
+  sectionId === null ? PINNED_BUCKET_ID : `${PIN_SECTION_BUCKET_PREFIX}${sectionId}`;
+
 /**
- * Build ordered list sections. Pinned sessions always form their own
- * top group (when any exist), regardless of `groupBy`. Unpinned rows
- * then follow:
+ * Build ordered list sections from the shared Status view layout. The Pinned
+ * area comes from the layout in every grouping: pinned rows and the visible
+ * rows they opened, split into pin sections in their manual order. Named
+ * sections stay listed while empty so they remain a drop target and their
+ * header menu stays reachable. The remaining rows then follow:
+ * - `status`: Focus, Later and Settled in the layout's order (Focus always,
+ *   so a Later or Settled row can be dropped into it)
  * - `none`: one unlabeled flat tail
- * - `project` / `date`: normal buckets
+ * - `project` / `date`: normal buckets. An opened Session joins the bucket
+ *   of its topmost unpinned ancestor, so the tree there indents it, matching
+ *   the desktop Workspace groups. In `date` mode that bucket is the tree's
+ *   freshest update, the same time that ranks the opener.
  *
- * Item order inside each bucket matches the input order.
+ * Item order inside project / date buckets matches the input order.
  * `nowMs` is injectable for tests.
  */
 export function groupChats(
   chats: MobileConversationItem[],
   groupBy: MobileChatGroupBy,
-  nowMs: number = getServerNow()
-): Array<{ id: string; items: MobileConversationItem[] }> {
-  const pinned: MobileConversationItem[] = [];
-  const unpinned: MobileConversationItem[] = [];
-  for (const chat of chats) {
-    if (chat.isPinned) pinned.push(chat);
-    else unpinned.push(chat);
+  nowMs: number = getServerNow(),
+  pinSections: readonly PinSection[] = [],
+  sectionsLoaded = true,
+  layout: StatusViewLayout = buildMobileStatusViewLayout(chats, {
+    sections: pinSections,
+    sectionsLoaded,
+    writable: true,
+    nowMs,
+  })
+): MobileChatBucket[] {
+  const byId = new Map(chats.map((chat) => [chat.id, chat]));
+  const itemsOf = (rows: readonly StatusViewRow[]) =>
+    flattenStatusViewRows(rows).flatMap((row) => {
+      const item = byId.get(row.id);
+      if (!item) return [];
+      return [row.unread && !item.hasUnreadMessages ? { ...item, hasUnreadMessages: true } : item];
+    });
+
+  const ordered: MobileChatBucket[] = [];
+  const pinnedIds = new Set<string>();
+  for (const section of layout.pinned) {
+    const items = itemsOf(section.rows);
+    for (const item of items) pinnedIds.add(item.id);
+    if (items.length === 0 && section.sectionId === null && section.hiddenCount === 0) continue;
+    ordered.push({
+      id: bucketIdOfSection(section.sectionId),
+      items,
+      ...(section.name != null ? { label: section.name } : {}),
+      pinSectionId: section.sectionId,
+      ...(section.hiddenCount > 0 ? { hiddenCount: section.hiddenCount } : {}),
+    });
   }
 
-  const ordered: Array<{ id: string; items: MobileConversationItem[] }> = [];
-  if (pinned.length > 0) {
-    ordered.push({ id: PINNED_BUCKET_ID, items: pinned });
+  if (groupBy === 'status') {
+    const later = itemsOf(layout.later).map((item) => {
+      const countdown =
+        typeof item.snoozedUntil === 'number'
+          ? formatSnoozeCountdown(item.snoozedUntil, nowMs)
+          : null;
+      return countdown ? { ...item, snoozeCountdown: countdown } : item;
+    });
+    ordered.push({ id: STATUS_BUCKET_FOCUS, items: itemsOf(layout.focus), tier: 'focus' });
+    if (later.length > 0) ordered.push({ id: STATUS_BUCKET_LATER, items: later, tier: 'later' });
+    const settled = itemsOf(layout.settled);
+    if (settled.length > 0)
+      ordered.push({ id: STATUS_BUCKET_SETTLED, items: settled, tier: 'settled' });
+    return ordered;
   }
+
+  const unpinned = chats.filter((chat) => !pinnedIds.has(chat.id) && !chat.isPinned);
 
   if (groupBy === 'none') {
     if (unpinned.length > 0) {
@@ -590,9 +975,19 @@ export function groupChats(
     return ordered;
   }
 
+  const naturalBucketById = new Map(
+    unpinned.map((chat) => [chat.id, bucketIdFor(chat, groupBy, nowMs)])
+  );
+  const openerById = new Map(
+    unpinned.map((chat) => [chat.id, CHAT_OPENED_BY_TREE_ACCESSORS.getOpenedBySessionId(chat)])
+  );
+  const moved =
+    groupBy === 'project'
+      ? placeOpenedSessionsWithOpeners(naturalBucketById, (id) => openerById.get(id))
+      : placeTreesByFreshestUpdate(unpinned, openerById, nowMs);
   const buckets = new Map<string, MobileConversationItem[]>();
   for (const chat of unpinned) {
-    const id = bucketIdFor(chat, groupBy, nowMs);
+    const id = moved.get(chat.id) ?? naturalBucketById.get(chat.id) ?? NO_PROJECT_BUCKET_ID;
     const list = buckets.get(id) ?? [];
     list.push(chat);
     buckets.set(id, list);
@@ -629,9 +1024,37 @@ export function groupChats(
   return ordered;
 }
 
+/** Date bucket of every row in an opened-by tree: the day of its freshest member. */
+function placeTreesByFreshestUpdate(
+  chats: MobileConversationItem[],
+  openerById: ReadonlyMap<string, string | null | undefined>,
+  nowMs: number
+): Map<string, string> {
+  // Each row is its own group, so every nested row "moves" to its tree root.
+  const rootById = placeOpenedSessionsWithOpeners(
+    new Map(chats.map((chat) => [chat.id, chat.id])),
+    (id) => openerById.get(id)
+  );
+  const chatById = new Map(chats.map((chat) => [chat.id, chat]));
+  const latestOf = (id: string) => {
+    const latest = chatById.get(id)?.latestMessageAt;
+    return typeof latest === 'number' ? latest : 0;
+  };
+  const treeLatest = new Map<string, number>();
+  for (const [id, root] of rootById) {
+    treeLatest.set(root, Math.max(treeLatest.get(root) ?? latestOf(root), latestOf(id)));
+  }
+  const bucketById = new Map<string, string>();
+  for (const chat of chats) {
+    const latest = treeLatest.get(rootById.get(chat.id) ?? chat.id);
+    if (latest !== undefined) bucketById.set(chat.id, dateBucketIdFor(latest, nowMs));
+  }
+  return bucketById;
+}
+
 function bucketIdFor(
   chat: MobileConversationItem,
-  groupBy: Exclude<MobileChatGroupBy, 'none'>,
+  groupBy: 'project' | 'date',
   nowMs: number
 ): string {
   if (groupBy === 'project') {
@@ -649,9 +1072,7 @@ export function dateBucketIdFor(
   nowMs: number = getServerNow()
 ): string {
   const t =
-    typeof latestMessageAt === 'number' && Number.isFinite(latestMessageAt)
-      ? latestMessageAt
-      : 0;
+    typeof latestMessageAt === 'number' && Number.isFinite(latestMessageAt) ? latestMessageAt : 0;
   if (t <= 0) return DATE_BUCKET_UNKNOWN;
 
   const startToday = startOfLocalDayMs(nowMs);
@@ -802,17 +1223,36 @@ export function MobileChatList({
   archived = false,
   onPermanentDelete,
   selectionLabels,
-  rowSecondaryField,
+  capGroupPreviews = false,
   privateLabel,
   privateHelpAriaLabel,
   onPrivateHelp,
+  bucketStateKey,
+  splitTargets,
+  pinSections: pinSectionsOverride,
+  statusCommands,
+  statusWritable = true,
+  statusPreferable = true,
+  scopeHiddenCounts,
 }: {
   chats: MobileConversationItem[];
+  /** Status view writes (drag, row menu, section header menu). Omit for a read-only list. */
+  statusCommands?: MobileStatusCommands;
+  /**
+   * Whether this member may write Status view state at all (Later, Settle, Focus
+   * order, pin sections); read-only members only pin (`useStatusViewWritable`).
+   */
+  statusWritable?: boolean;
+  /** False when not even a pin can be written (an encrypted workspace's read role). */
+  statusPreferable?: boolean;
+  /** Pinned rows the list's scope hid, by pin section id (`""` = default). */
+  scopeHiddenCounts?: Record<string, number>;
+  /** Pin sections to split pinned rows by; defaults to the workspace catalog's. */
+  pinSections?: readonly PinSection[];
   groupBy?: MobileChatGroupBy;
-  /** Per-bucket headings keyed by the ids that `bucketIdFor` emits
-     ('chat' / 'local' / 'github' / 'open' / 'merged' / 'closed' /
-     'no-pr' / 'working' / 'waiting' / 'idle' / 'offline'). Missing
-     entries fall back to the id itself. */
+  /** Per-bucket headings keyed by bucket id: `NO_PROJECT_BUCKET_ID` and project
+     keys in project mode, the `DATE_BUCKET_*` ids in date mode, and
+     `PINNED_BUCKET_ID`. Missing entries fall back to a built-in label or the id. */
   groupLabels?: Partial<Record<string, string>>;
   /** Heading rendered ABOVE the list when groupBy is 'none'. Omit to
      render a flat list with no heading. Replaced by the multi-select
@@ -837,6 +1277,30 @@ export function MobileChatList({
      multi-select flow. The promise lets the list wait before
      clearing its selection state. */
   onPermanentDelete?: (chatIds: string[]) => void | Promise<void>;
+  /** Caps every bucket at {@link MOBILE_CHAT_PREVIEW_MAX_ROOTS} top-level rows
+     behind a "Show more" stepper. On for the workspace home list, where
+     buckets compete for the screen and one busy project would otherwise push
+     every other project and worktree below the fold. Off inside a single
+     project's page: the user drilled in to read exactly that list, and there
+     is nothing else there for a cap to make room for.
+
+     This stays an explicit flag rather than being derived from
+     `groupBy !== 'none'`, which is equivalent TODAY and shorter. The project
+     page is `none` only because `chat-landing.tsx` pins it there so a
+     single-bucket list does not render a redundant heading — a presentation
+     decision that has nothing to do with capping. Deriving from it would couple
+     the two through a shared variable and fail silently in both directions: give
+     the project page a date mode and the cap switches on and starts hiding
+     worktree rows, which is the opposite of what it is for; give home a flat
+     mode and the cap disappears. `groupBy` also defaults to `none`, so a new
+     caller would silently opt out. */
+  capGroupPreviews?: boolean;
+  /** Keeps group fold / reveal state across unmounts (navigating to
+     Settings and back). Surfaces sharing a key share that state; omit it to
+     scope the state to this mount. */
+  bucketStateKey?: string;
+  /** Home-owned scroll regions for the first and remaining whole buckets. */
+  splitTargets?: { upper: HTMLElement; lower: HTMLElement };
   /** Copy for the multi-select toolbar + confirmation alert-dialog.
      All keys are optional with reasonable Chinese defaults; callers
      can override to localize. */
@@ -844,28 +1308,58 @@ export function MobileChatList({
   privateLabel?: string;
   privateHelpAriaLabel?: string;
   onPrivateHelp?: () => void;
-  /** @deprecated Conversation rows are single-line; branch/project meta
-     is no longer shown. Kept for call-site compatibility. */
-  rowSecondaryField?: 'branch' | 'project';
 }) {
+  const workspaceCatalog = useWorkspaceCatalog();
+  const pinSections = pinSectionsOverride ?? workspaceCatalog.pinSections;
+  // Until the section rows are read, sectioned pins wait instead of flashing as unsectioned.
+  const pinSectionsLoaded =
+    pinSectionsOverride !== undefined || workspaceCatalog.loaded || workspaceCatalog.failed;
+  const { t } = useTranslation();
+  const statusMode = groupBy === 'status' && !archived;
+  const statusList = useMobileStatusList({
+    chats,
+    sections: pinSections,
+    sectionsLoaded: pinSectionsLoaded,
+    writable: statusWritable,
+    preferable: statusPreferable,
+    scopeHiddenCounts,
+    statusMode,
+    commands: archived ? undefined : statusCommands,
+    rowActions,
+    touchSurfaces: splitTargets ? [splitTargets.upper, splitTargets.lower] : undefined,
+  });
   /* Multi-select state is owned here so a Select-All hits every row,
      including rows that live in separate group cards when
      `groupBy !== 'none'`. */
   const selectionEnabled = archived && Boolean(onPermanentDelete);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  /* Project-group collapse: ids in the set are collapsed (body hidden).
-     Default empty → every bucket starts expanded. */
-  const [collapsedBucketIds, setCollapsedBucketIds] = useState<Set<string>>(
-    () => new Set()
+  /* Project-group collapse (ids in `collapsed` hide their body; default
+     empty → every bucket starts expanded) and buckets the user expanded past
+     the preview cap (`expanded`). Every bucket starts capped at
+     `MOBILE_CHAT_PREVIEW_MAX_ROOTS`, which is the whole point: without it a
+     project with forty Sessions pushes every other project and worktree off
+     the screen. The preview flag is deliberately NOT the shared opener-fold
+     atom — see `MobileChatPreviewState`. With `bucketStateKey` the state
+     outlives this component; without it, it lives and dies with the mount. */
+  const [localBucketUiStateAtom] =
+    useState<PrimitiveAtom<MobileChatBucketUiState>>(createBucketUiStateAtom);
+  const [bucketUiState, setBucketUiState] = useAtom(
+    bucketStateKey ? mobileChatBucketUiStateAtomFamily(bucketStateKey) : localBucketUiStateAtom
   );
+  const collapsedBucketIds = bucketUiState.collapsed;
+  const revealedRowsByBucket = bucketUiState.revealed;
   const toggleBucket = (bucketId: string) => {
-    setCollapsedBucketIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(bucketId)) next.delete(bucketId);
-      else next.add(bucketId);
-      return next;
-    });
+    setBucketUiState((prev) => ({ ...prev, collapsed: toggleInSet(prev.collapsed, bucketId) }));
+  };
+  const showMoreBucketRows = (bucketId: string, step: number) => {
+    setBucketUiState((prev) => ({
+      ...prev,
+      revealed: { ...prev.revealed, [bucketId]: (prev.revealed[bucketId] ?? 0) + step },
+    }));
+  };
+  const showLessBucketRows = (bucketId: string) => {
+    setBucketUiState((prev) => ({ ...prev, revealed: { ...prev.revealed, [bucketId]: 0 } }));
   };
   /* Pending permanent-delete confirmation. Drives one shared
      alert-dialog for two entry points: the multi-select toolbar
@@ -880,7 +1374,7 @@ export function MobileChatList({
 
   /* The full id set for "select-all" computations. Memoized so the
      toolbar can read it cheaply on every render. */
-  const allIds = useMemo(() => chats.map((c) => c.id), [chats]);
+  const allIds = useMemo(() => chats.filter((c) => !c.readOnly).map((c) => c.id), [chats]);
 
   /* When the underlying chat set changes (e.g. user flips the archive
      toggle off, or a delete completes), drop any ids that are no
@@ -982,24 +1476,11 @@ export function MobileChatList({
       }
     />
   ) : flatHeading != null && groupBy === 'none' ? (
-    <div
-      className={cn(
-        'flex w-full items-center gap-2 pb-1.5 pt-5',
-        GROUP_HEADING_X
-      )}
-    >
+    <div className={cn('flex w-full items-center gap-2 pb-1.5 pt-5', GROUP_HEADING_X)}>
       <div className={cn('min-w-0 flex-1', GROUP_HEADING_TEXT)}>{flatHeading}</div>
       {firstGroupTrailing ? <div className="shrink-0">{firstGroupTrailing}</div> : null}
     </div>
   ) : null;
-
-  /* Default secondary-text source: flat list → project label so users
-     can tell rows apart across projects; grouped list → branch name
-     (the bucket heading already carries the project identity). Caller
-     can override via `rowSecondaryField` — project sub-pages do that
-     to keep their original branch-name look regardless of groupBy. */
-  const resolvedSecondaryField: 'branch' | 'project' =
-    rowSecondaryField ?? (groupBy === 'none' ? 'project' : 'branch');
 
   /* `firstGroupTrailing` only mounts on the first *visible* group
      heading while multi-select is off — selection toolbar already owns
@@ -1013,140 +1494,259 @@ export function MobileChatList({
 
   /* Always go through `groupChats` so pinned rows lift into a top
      "Pinned" section in every mode (project / date / flat). */
-  const cards = (
-    <>
-      {groupChats(chats, groupBy).map(({ id, items }, index) => {
-        const expanded = !collapsedBucketIds.has(id);
-        const onToggle = () => toggleBucket(id);
-        const compactTop = index === 0;
-        const trailing =
-          showFirstGroupTrailing && !trailingConsumedByFlatHeading && index === 0
-            ? firstGroupTrailing
-            : undefined;
+  const groups = groupChats(
+    chats,
+    groupBy,
+    undefined,
+    pinSections,
+    pinSectionsLoaded,
+    statusList.layout
+  );
+  const isBucketExpanded = (id: string, tier: StatusViewTier | undefined) =>
+    collapsedBucketIds.has(id) === (tier ? isStatusTierCollapsedByDefault(tier) : false);
+  const shownIds = new Set(
+    groups.flatMap((group) =>
+      isBucketExpanded(group.id, group.tier) ? group.items.map((item) => item.id) : []
+    )
+  );
+  const cards = groups.map(({ id, items, label, tier, pinSectionId, hiddenCount }, index) => {
+    const expanded = isBucketExpanded(id, tier);
+    const isPinnedBucket = pinSectionId !== undefined;
+    const dropTarget = statusList.dropTarget;
+    const cardStatus: MobileChatCardStatus | undefined =
+      statusMode && statusCommands && (tier || isPinnedBucket)
+        ? {
+            area: tier ?? 'pinned',
+            sectionId: pinSectionId ?? null,
+            dropBeforeId:
+              dropTarget &&
+              ((dropTarget.to.area === 'focus' && tier === 'focus') ||
+                (dropTarget.to.area === 'pinned' &&
+                  isPinnedBucket &&
+                  dropTarget.to.sectionId === pinSectionId))
+                ? dropTarget.beforeId
+                : undefined,
+            canManage: statusList.canManage,
+            canPrefer: statusList.canPrefer,
+            onLater: statusList.openLater,
+            onSettle: statusCommands.settle,
+            isLocked: statusList.drag.isLifted,
+          }
+        : undefined;
+    const dropHeaderAttrs =
+      cardStatus && (tier === 'focus' || isPinnedBucket)
+        ? {
+            'data-status-drop-header': '',
+            'data-status-area': cardStatus.area,
+            'data-status-section': pinSectionId ?? '',
+          }
+        : undefined;
+    const sectionMenu = isPinnedBucket ? statusList.sectionHeaderMenu(pinSectionId ?? null) : null;
+    const onToggle = () => toggleBucket(id);
+    const compactTop = index === 0;
+    /* Multi-select drives a permanent delete, and "select all" operates on
+           every id in the list. Capping the rows while it is active would let
+           the user confirm a delete of Sessions the surface never showed them,
+           so selection mode renders the buckets in full. */
+    const bucketPreview: MobileChatPreviewState | undefined =
+      !capGroupPreviews ||
+      selectionToolbarActive ||
+      (groupBy === 'status' && id !== STATUS_BUCKET_SETTLED)
+        ? undefined
+        : {
+            revealedRows: revealedRowsByBucket[id] ?? 0,
+            onShowMore: () =>
+              showMoreBucketRows(
+                id,
+                id === STATUS_BUCKET_SETTLED
+                  ? STATUS_VIEW_SETTLED_FOLD_THRESHOLD
+                  : MOBILE_CHAT_PREVIEW_MAX_ROOTS
+              ),
+            onShowLess: () => showLessBucketRows(id),
+            ...(id === STATUS_BUCKET_SETTLED
+              ? { maxRoots: STATUS_VIEW_SETTLED_FOLD_THRESHOLD }
+              : {}),
+          };
+    const filterTrailing =
+      showFirstGroupTrailing && !trailingConsumedByFlatHeading && index === 0
+        ? firstGroupTrailing
+        : undefined;
+    const trailing =
+      sectionMenu && filterTrailing ? (
+        <span {...stylex.props(statusStyles.trailingCluster)}>
+          {sectionMenu}
+          {filterTrailing}
+        </span>
+      ) : (
+        (sectionMenu ?? filterTrailing)
+      );
 
-        /* Flat unpinned tail under a Pinned section (groupBy none):
+    /* Flat unpinned tail under a Pinned section (groupBy none):
            no heading — just the remaining rows. When nothing is
            pinned, this is the only section and still has no heading
            — mount a trailing-only row so the filter chip still has a
            home. */
-        if (id === FLAT_UNPINNED_BUCKET_ID) {
-          return (
-            <Fragment key={id}>
-              {trailing ? (
-                <div
-                  className={cn(
-                    'flex w-full items-center justify-end pb-1.5',
-                    GROUP_HEADING_X,
-                    compactTop ? 'pt-2' : 'pt-4'
-                  )}
-                >
-                  {trailing}
-                </div>
-              ) : null}
-              <MobileChatListCard
-                chats={items}
-                selectedConversationId={selectedConversationId}
-                onSelect={onSelect}
-                rowActions={rowActions}
-                archived={archived}
-                onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
-                selection={selectionState}
-                secondaryField={resolvedSecondaryField}
-              />
-            </Fragment>
-          );
-        }
+    if (id === FLAT_UNPINNED_BUCKET_ID) {
+      return (
+        <Fragment key={id}>
+          {trailing ? (
+            <div
+              className={cn(
+                'flex w-full items-center justify-end pb-1.5',
+                GROUP_HEADING_X,
+                compactTop ? 'pt-2' : 'pt-4'
+              )}
+            >
+              {trailing}
+            </div>
+          ) : null}
+          <MobileChatListCard
+            chats={items}
+            selectedConversationId={selectedConversationId}
+            onSelect={onSelect}
+            rowActions={rowActions}
+            archived={archived}
+            onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
+            selection={selectionState}
+            preview={bucketPreview}
+            shownIds={shownIds}
+          />
+        </Fragment>
+      );
+    }
 
-        /* Pinned + date buckets: quiet collapsible text label.
+    /* Pinned + date buckets: quiet collapsible text label.
            Project buckets: identity mark (folder / avatar / chat). */
-        const labeledItem =
-          groupBy === 'project' && id !== PINNED_BUCKET_ID
-            ? items.find((it) => it.projectLabel != null)
-            : undefined;
-        const projectLabel = labeledItem?.projectLabel ?? null;
-        const heading =
-          id === PINNED_BUCKET_ID || groupBy === 'date'
-            ? resolveDateBucketLabel(id, groupLabels)
-            : (projectLabel ?? groupLabels[id] ?? id);
+    const labeledItem =
+      groupBy === 'project' && !isPinnedBucketId(id)
+        ? // A row nested here under its opener describes another project.
+          items.find((it) => it.projectKey === id && it.projectLabel != null)
+        : undefined;
+    const projectLabel = labeledItem?.projectLabel ?? null;
+    const heading = label
+      ? label
+      : tier
+        ? t(
+            `sidebar.status.${tier}`,
+            tier === 'focus' ? 'Focus' : tier === 'later' ? 'Later' : 'Settled'
+          )
+        : id === PINNED_BUCKET_ID || groupBy === 'date'
+          ? resolveDateBucketLabel(id, groupLabels)
+          : (projectLabel ?? groupLabels[id] ?? id);
 
-        const isLocalBucket =
-          labeledItem != null &&
-          (labeledItem.kind === 'local' ||
-            (labeledItem.kind !== 'github' && !labeledItem.projectAvatarUrl));
+    const isLocalBucket =
+      labeledItem != null &&
+      (labeledItem.kind === 'local' ||
+        (labeledItem.kind !== 'github' && !labeledItem.projectAvatarUrl));
 
-        let groupedHeadingNode: ReactNode;
-        if (id === PINNED_BUCKET_ID || groupBy === 'date' || groupBy === 'none') {
-          groupedHeadingNode = (
-            <CollapsibleSectionHeading
-              expanded={expanded}
-              onToggle={onToggle}
-              compactTop={compactTop}
-              trailing={trailing}
-            >
-              {heading}
-            </CollapsibleSectionHeading>
-          );
-        } else if (id === NO_PROJECT_BUCKET_ID) {
-          groupedHeadingNode = (
-            <ProjectBucketHeading
-              label={heading}
-              leading={<NoProjectBucketLeading />}
-              expanded={expanded}
-              onToggle={onToggle}
-              compactTop={compactTop}
-              trailing={trailing}
+    const tierHeading =
+      tier === 'later' || tier === 'settled' ? (
+        <>
+          {heading}
+          <span {...stylex.props(statusStyles.count)}>{items.length}</span>
+          {!expanded && items.some((item) => item.hasUnreadMessages) ? (
+            <span
+              role="img"
+              aria-label={t('sessions.unreadMessages', 'Unread messages')}
+              {...stylex.props(statusStyles.unreadDot)}
             />
-          );
-        } else if (labeledItem) {
-          groupedHeadingNode = (
-            <ProjectBucketHeading
-              label={heading}
-              avatarUrl={labeledItem.projectAvatarUrl}
-              hashSeed={labeledItem.projectKey ?? id}
-              isLocal={isLocalBucket}
-              expanded={expanded}
-              onToggle={onToggle}
-              compactTop={compactTop}
-              trailing={trailing}
-              isPrivate={labeledItem.isPrivateProject}
-              privateLabel={privateLabel}
-              privateHelpAriaLabel={privateHelpAriaLabel}
-              onPrivateHelp={onPrivateHelp}
-            />
-          );
-        } else {
-          groupedHeadingNode = (
-            <CollapsibleSectionHeading
-              expanded={expanded}
-              onToggle={onToggle}
-              compactTop={compactTop}
-              trailing={trailing}
-            >
-              {heading}
-            </CollapsibleSectionHeading>
-          );
-        }
+          ) : null}
+        </>
+      ) : (
+        heading
+      );
+    let groupedHeadingNode: ReactNode;
+    if (isPinnedBucketId(id) || tier || groupBy === 'date' || groupBy === 'none') {
+      groupedHeadingNode = (
+        <CollapsibleSectionHeading
+          expanded={expanded}
+          onToggle={onToggle}
+          compactTop={compactTop}
+          trailing={trailing}
+        >
+          {tierHeading}
+        </CollapsibleSectionHeading>
+      );
+    } else if (id === NO_PROJECT_BUCKET_ID) {
+      groupedHeadingNode = (
+        <ProjectBucketHeading
+          label={heading}
+          leading={<NoProjectBucketLeading />}
+          expanded={expanded}
+          onToggle={onToggle}
+          compactTop={compactTop}
+          trailing={trailing}
+        />
+      );
+    } else if (labeledItem) {
+      groupedHeadingNode = (
+        <ProjectBucketHeading
+          label={heading}
+          avatarUrl={labeledItem.projectAvatarUrl}
+          hashSeed={labeledItem.projectKey ?? id}
+          isLocal={isLocalBucket}
+          expanded={expanded}
+          onToggle={onToggle}
+          compactTop={compactTop}
+          trailing={trailing}
+          isPrivate={labeledItem.isPrivateProject}
+          privateLabel={privateLabel}
+          privateHelpAriaLabel={privateHelpAriaLabel}
+          onPrivateHelp={onPrivateHelp}
+        />
+      );
+    } else {
+      groupedHeadingNode = (
+        <CollapsibleSectionHeading
+          expanded={expanded}
+          onToggle={onToggle}
+          compactTop={compactTop}
+          trailing={trailing}
+        >
+          {heading}
+        </CollapsibleSectionHeading>
+      );
+    }
 
-        return (
-          <Fragment key={id}>
+    return (
+      <Fragment key={id}>
+        {dropHeaderAttrs ? (
+          <div
+            {...dropHeaderAttrs}
+            {...stylex.props(
+              !expanded && cardStatus?.dropBeforeId !== undefined && statusStyles.dropHeader
+            )}
+          >
             {groupedHeadingNode}
-            {expanded ? (
-              <MobileChatListCard
-                chats={items}
-                selectedConversationId={selectedConversationId}
-                onSelect={onSelect}
-                rowActions={rowActions}
-                archived={archived}
-                onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
-                selection={selectionState}
-                secondaryField={resolvedSecondaryField}
-              />
-            ) : null}
-          </Fragment>
-        );
-      })}
-    </>
-  );
+          </div>
+        ) : (
+          groupedHeadingNode
+        )}
+        {hiddenCount ? (
+          <div {...stylex.props(statusStyles.hiddenCount)}>
+            {t('sidebar.pinSections.hiddenByScope', '{{count}} sessions hidden', {
+              count: hiddenCount,
+            })}
+          </div>
+        ) : null}
+        {expanded ? (
+          <MobileChatListCard
+            chats={items}
+            selectedConversationId={selectedConversationId}
+            onSelect={onSelect}
+            rowActions={rowActions}
+            archived={archived}
+            onRequestDelete={selectionEnabled ? requestSwipeDelete : undefined}
+            selection={selectionState}
+            preview={bucketPreview}
+            preserveOrder={isPinnedBucketId(id) || tier !== undefined}
+            shownIds={shownIds}
+            status={cardStatus}
+          />
+        ) : null}
+      </Fragment>
+    );
+  });
 
   return (
     /* All cards rendered under a single `MobileSwipeableRowGroup` so the
@@ -1154,46 +1754,63 @@ export function MobileChatList({
        across section headings — matches iOS Mail / Messages where a tap
        or swipe on any other row closes the previously-open one. */
     <MobileSwipeableRowGroup>
-      {headingNode}
-      {cards}
-      <AlertDialog
+      <div ref={statusList.drag.touchSurfaceRef} {...statusList.drag.handlers}>
+        {splitTargets ? (
+          <>
+            {createPortal(
+              <>
+                {headingNode}
+                {cards[0]}
+              </>,
+              splitTargets.upper
+            )}
+            {createPortal(cards.slice(1), splitTargets.lower)}
+          </>
+        ) : (
+          <>
+            {headingNode}
+            {cards}
+          </>
+        )}
+      </div>
+      {statusList.overlays}
+      <AlertDialog.Root
         open={pendingDelete != null}
         onOpenChange={(open) => !isDeleting && !open && setPendingDelete(null)}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {selectionLabels?.confirmTitle ?? '彻底删除归档对话'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {(selectionLabels?.confirmDescription ?? '将永久删除选中的 {count} 个对话，此操作不可恢复。').replace(
-                '{count}',
-                String(pendingDeleteCount)
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
+              {(
+                selectionLabels?.confirmDescription ??
+                '将永久删除选中的 {count} 个对话，此操作不可恢复。'
+              ).replace('{count}', String(pendingDeleteCount))}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={isDeleting}>
               {selectionLabels?.cancel ?? '取消'}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(event) => {
+            </AlertDialog.Cancel>
+            <Button
+              onClick={() => {
                 /* Don't auto-close — `handleDelete` does it after the
                    delete promise resolves. Without this, Radix closes
                    synchronously and the user sees the destructive
                    action complete with no feedback that anything is
                    happening on slow networks. */
-                event.preventDefault();
                 void handleDelete();
               }}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {selectionLabels?.confirmDelete ?? '删除'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </MobileSwipeableRowGroup>
   );
 }
@@ -1232,7 +1849,7 @@ function SelectionToolbar({
         onClick={onToggleAll}
         className="inline-flex items-center gap-2 text-sm font-medium text-foreground"
       >
-        <Checkbox checked={allSelected} tabIndex={-1} className="pointer-events-none h-4 w-4" />
+        <Checkbox checked={allSelected} tabIndex={-1} className="pointer-events-none" />
         <span>{countLabel}</span>
       </button>
       <div className="flex items-center gap-1">
@@ -1255,3 +1872,37 @@ function SelectionToolbar({
     </div>
   );
 }
+
+const statusStyles = stylex.create({
+  count: {
+    marginInlineStart: space[1.5],
+    fontWeight: 400,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  unreadDot: {
+    display: 'inline-block',
+    width: 6,
+    height: 6,
+    marginInlineStart: space[1.5],
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+    verticalAlign: 'middle',
+  },
+  dropHeader: {
+    backgroundColor: colors.selectedFill,
+    borderRadius: radius.medium,
+  },
+  hiddenCount: {
+    paddingInline: space[4],
+    paddingBottom: space[2],
+    fontSize: 13,
+    color: colors.secondaryLabel,
+  },
+  trailingCluster: { display: 'flex', alignItems: 'center', gap: space[1] },
+  dropIndicator: {
+    height: 2,
+    marginInline: space[4],
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+  },
+});

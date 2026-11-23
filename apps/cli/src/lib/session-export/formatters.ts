@@ -1,7 +1,9 @@
+import { stripEncryptedAttachmentMetadata } from '@lody/shared';
 import path from 'node:path';
 import type { MessageContent, SessionHistoryInput, SessionMeta } from '@lody/shared';
 import type {
   ExportAttachmentRecord,
+  ExportAttachmentSource,
   ExportPlanRecord,
   ExportSessionArtifacts,
   ExportSessionSummary,
@@ -43,9 +45,7 @@ function sanitizeTranscriptItem(item: MessageContent): MessageContent {
   return {
     ...item,
     content: (item.content ?? []).filter(
-      (
-        content
-      ): content is Exclude<NonNullable<typeof item.content>[number], { type: 'diff' }> =>
+      (content): content is Exclude<NonNullable<typeof item.content>[number], { type: 'diff' }> =>
         content.type !== 'diff'
     ),
   };
@@ -65,6 +65,7 @@ function buildAttachmentRelativePath(image: Extract<MessageContent, { type: 'ima
 
 function appendAttachment(
   attachments: Map<string, ExportAttachmentRecord>,
+  sources: Map<string, ExportAttachmentSource>,
   turnId: string,
   image: Extract<MessageContent, { type: 'image' }>
 ): void {
@@ -76,6 +77,10 @@ function appendAttachment(
     return;
   }
 
+  sources.set(image.imageId, {
+    encryption: image.encryption,
+    storageSessionId: image.storageSessionId,
+  });
   attachments.set(image.imageId, {
     imageId: image.imageId,
     mimeType: image.mimeType,
@@ -123,6 +128,7 @@ export function buildSessionArtifacts(history: SessionHistoryInput[]): ExportSes
   const toolCalls: ExportToolCallRecord[] = [];
   const systemNotices: ExportSystemNoticeRecord[] = [];
   const attachments = new Map<string, ExportAttachmentRecord>();
+  const attachmentSources = new Map<string, ExportAttachmentSource>();
 
   for (const entry of history) {
     const items = cloneItems(entry.items);
@@ -134,7 +140,7 @@ export function buildSessionArtifacts(history: SessionHistoryInput[]): ExportSes
       sendStatus: entry.sendStatus,
       startedAt: typeof entry.startedAt === 'number' ? entry.startedAt : null,
       endedAt: typeof entry.endedAt === 'number' ? entry.endedAt : null,
-      modelInfo: entry.modelInfo,
+      modelInfo: structuredClone(entry.modelInfo),
       items,
     });
 
@@ -148,13 +154,13 @@ export function buildSessionArtifacts(history: SessionHistoryInput[]): ExportSes
 
     for (const item of items) {
       if (item.type === 'image') {
-        appendAttachment(attachments, entry.id, item);
+        appendAttachment(attachments, attachmentSources, entry.id, item);
         continue;
       }
 
       if (item.type === 'image_group') {
         for (const image of item.images) {
-          appendAttachment(attachments, entry.id, { type: 'image', ...image });
+          appendAttachment(attachments, attachmentSources, entry.id, { type: 'image', ...image });
         }
         continue;
       }
@@ -194,7 +200,7 @@ export function buildSessionArtifacts(history: SessionHistoryInput[]): ExportSes
     }
   }
 
-  return {
+  const artifacts = {
     transcript,
     plans,
     toolCalls,
@@ -203,4 +209,6 @@ export function buildSessionArtifacts(history: SessionHistoryInput[]): ExportSes
       left.imageId.localeCompare(right.imageId)
     ),
   };
+  stripEncryptedAttachmentMetadata(artifacts);
+  return { ...artifacts, attachmentSources };
 }

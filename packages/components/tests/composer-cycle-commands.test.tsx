@@ -5,10 +5,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useComposerCycleCommands } from '../src/hooks/use-composer-cycle-commands';
 import { commands } from '../src/lib/commands';
+import { CommandShortcutHost } from '../src/lib/commands/shortcut-host';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
-}));
+const testI18n = createTestI18n();
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -21,6 +21,26 @@ type CycleCommandProbeProps = {
   onModelSelect: (value: string) => void;
   onThinkEffortSelect: (value: string) => void;
 };
+
+class MemoryStorage {
+  private store = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.store.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+}
 
 function CycleCommandProbe({
   id,
@@ -49,7 +69,7 @@ describe('composer cycle command ownership', () => {
   let root: Root;
 
   beforeEach(() => {
-    localStorage.clear();
+    vi.stubGlobal('localStorage', new MemoryStorage());
     commands.resetAllUserKeybindings();
     container = document.createElement('div');
     document.body.append(container);
@@ -57,11 +77,11 @@ describe('composer cycle command ownership', () => {
   });
 
   afterEach(() => {
-    commands.detach();
     commands.resetAllUserKeybindings();
     act(() => root.unmount());
     for (const command of commands.list()) commands.unregister(command.id);
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it('routes mode, model, and thinking commands to the enabled composer', () => {
@@ -78,22 +98,26 @@ describe('composer cycle command ownership', () => {
 
     const render = (active: 'first' | 'second') => {
       root.render(
-        <>
-          <CycleCommandProbe
-            id="first"
-            enabled={active === 'first'}
-            onModeSelect={first.mode}
-            onModelSelect={first.model}
-            onThinkEffortSelect={first.thinkEffort}
-          />
-          <CycleCommandProbe
-            id="second"
-            enabled={active === 'second'}
-            onModeSelect={second.mode}
-            onModelSelect={second.model}
-            onThinkEffortSelect={second.thinkEffort}
-          />
-        </>
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="first"
+              enabled={active === 'first'}
+              onModeSelect={first.mode}
+              onModelSelect={first.model}
+              onThinkEffortSelect={first.thinkEffort}
+            />
+            <CycleCommandProbe
+              id="second"
+              enabled={active === 'second'}
+              onModeSelect={second.mode}
+              onModelSelect={second.model}
+              onThinkEffortSelect={second.thinkEffort}
+            />
+          </>,
+          testI18n
+        )
       );
     };
 
@@ -120,38 +144,77 @@ describe('composer cycle command ownership', () => {
     expect(first.thinkEffort).toHaveBeenCalledTimes(1);
   });
 
+  it("cycles thinking effort on ⌘' only while the composer is focused", () => {
+    const thinkEffort = vi.fn();
+    act(() => {
+      root.render(
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="composer"
+              enabled
+              onModeSelect={vi.fn()}
+              onModelSelect={vi.fn()}
+              onThinkEffortSelect={thinkEffort}
+            />
+          </>,
+          testI18n
+        )
+      );
+    });
+
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: "'", code: 'Quote', ctrlKey: true, bubbles: true })
+    );
+    expect(thinkEffort).not.toHaveBeenCalled();
+
+    const composer = container.querySelector<HTMLTextAreaElement>('#composer');
+    composer?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: "'", code: 'Quote', ctrlKey: true, bubbles: true })
+    );
+    expect(thinkEffort).toHaveBeenCalledWith('high');
+  });
+
   it('lets a custom mode binding run outside the composer while keeping default Shift+Tab scoped', () => {
     const mode = vi.fn();
     act(() => {
       root.render(
-        <CycleCommandProbe
-          id="composer"
-          enabled
-          onModeSelect={mode}
-          onModelSelect={vi.fn()}
-          onThinkEffortSelect={vi.fn()}
-        />
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="composer"
+              enabled
+              onModeSelect={mode}
+              onModelSelect={vi.fn()}
+              onThinkEffortSelect={vi.fn()}
+            />
+          </>,
+          testI18n
+        )
       );
     });
-    commands.attach(window);
 
     window.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', shiftKey: true, bubbles: true })
     );
     expect(mode).not.toHaveBeenCalled();
 
-    commands.setUserKeybindings('session.cycleMode', ['Control+m']);
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'm',
-        code: 'KeyM',
-        ctrlKey: true,
-        bubbles: true,
-      })
-    );
+    act(() => commands.setUserKeybindings('session.cycleMode', ['Control+m']));
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'm',
+          code: 'KeyM',
+          ctrlKey: true,
+          bubbles: true,
+        })
+      );
+    });
     expect(mode).toHaveBeenCalledWith('auto');
 
-    commands.setUserKeybindings('session.cycleMode', null);
+    act(() => commands.setUserKeybindings('session.cycleMode', null));
     const composer = container.querySelector<HTMLTextAreaElement>('#composer');
     composer?.focus();
     composer?.dispatchEvent(

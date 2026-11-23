@@ -1,101 +1,124 @@
-import { describe, expect, it } from 'vitest';
-
+import { describe, it, expect } from 'vitest';
 import {
-  assertOrchestrationModelSafety,
-  enumerateOrchestrationModel,
   initialOrchestrationModelState,
   stepOrchestrationModel,
+  enumerateOrchestrationModel,
+  type InboxEvent,
 } from './operation-model';
-
-const trace = (...actions: Parameters<typeof stepOrchestrationModel>[1][]) =>
-  actions.reduce(stepOrchestrationModel, initialOrchestrationModelState());
-
-describe('Operation delivery executable model', () => {
-  it('exhaustively preserves safety over bounded race traces', () => {
-    expect(enumerateOrchestrationModel(9).length).toBeGreaterThan(50);
+const trace = (...events: InboxEvent[]) =>
+  events.reduce(stepOrchestrationModel, initialOrchestrationModelState());
+describe('current Inbox scheduling contract', () => {
+  it('exhaustively preserves nonempty at-most-once batches over bounded interleavings', () => {
+    expect(enumerateOrchestrationModel(9).length).toBeGreaterThan(100);
   });
-
-  it('prioritizes queued user input and later dispatches the Delivery separately', () => {
-    const afterUser = trace('accept', 'materialize_success', 'finish', 'enqueue_user', 'schedule');
-    expect(afterUser).toMatchObject({ activeTurn: 'user', delivery: 'pending' });
-    const afterDelivery = stepOrchestrationModel(
-      stepOrchestrationModel(afterUser, 'complete_turn'),
-      'schedule'
-    );
-    expect(afterDelivery).toMatchObject({
-      activeTurn: 'delivery',
-      delivery: 'consumed',
-      completionTurnWrites: 1,
+  it('automation never clears Stop and an accepted human wins before automatic submission', () => {
+    expect(trace('stop', 'automation', 'schedule')).toMatchObject({
+      active: 'none',
+      paused: true,
+      automation: false,
+    });
+    expect(trace('automation', 'human', 'schedule', 'submit')).toMatchObject({
+      active: 'human',
+      submitted: true,
+      automation: true,
+    });
+    expect(trace('automation', 'schedule', 'human', 'submit')).toMatchObject({
+      active: 'automation',
+      submitted: false,
+      human: true,
     });
   });
-
-  it('keeps archived delivery pending until restore', () => {
-    const archived = trace('accept', 'materialize_success', 'archive', 'finish', 'schedule');
-    expect(archived).toMatchObject({ delivery: 'pending', completionTurnWrites: 0 });
-    const restored = stepOrchestrationModel(
-      stepOrchestrationModel(archived, 'restore'),
-      'schedule'
-    );
-    expect(restored.delivery).toBe('consumed');
+  it('wakeable results coalesce before an idle conversation is scheduled', () => {
+    expect(trace('result', 'result', 'schedule')).toMatchObject({
+      active: 'automatic',
+      batch: [1, 2],
+      queue: [1, 2],
+      receipts: [],
+    });
   });
-
-  it('writes the result once without starting an assistant when configuration is gone', () => {
+  it('claim includes late results without duplicate release creating another wake', () => {
     expect(
-      trace('accept', 'materialize_success', 'delete_configuration', 'finish', 'schedule')
-    ).toMatchObject({
-      delivery: 'consumed',
-      activeTurn: 'none',
-      completionTurnWrites: 1,
-    });
-  });
-
-  it('uses deadline as a terminal backstop', () => {
-    expect(trace('accept', 'deadline')).toMatchObject({
-      operation: 'finished',
-      delivery: 'pending',
-    });
-  });
-
-  it('keeps a failed materialization pending until its owned retry fires', () => {
-    const failed = trace('accept', 'materialize_fail', 'finish');
-    expect(failed).toMatchObject({
-      operation: 'active',
-      targetInput: 'retry_scheduled',
-      delivery: 'absent',
-    });
-    expect(
-      stepOrchestrationModel(
-        stepOrchestrationModel(failed, 'materialization_retry'),
-        'materialize_success'
+      trace(
+        'human',
+        'schedule',
+        'submit',
+        'result',
+        'result',
+        'normal',
+        'result',
+        'duplicate_release',
+        'restart',
+        'schedule',
+        'submit'
       )
-    ).toMatchObject({ operation: 'active', targetInput: 'durable' });
-  });
-
-  it('clears a scheduled materialization retry at the deadline', () => {
-    expect(stepOrchestrationModel(trace('accept', 'materialize_fail'), 'deadline')).toMatchObject({
-      operation: 'finished',
-      targetInput: 'missing',
-      delivery: 'pending',
+    ).toMatchObject({
+      active: 'automatic',
+      batch: [1, 2, 3],
+      receipts: [[1, 2, 3]],
+      queue: [1, 2, 3],
     });
   });
-
-  it('rejects a new machine Command at the fixed chain-depth cap', () => {
-    const capped = { ...initialOrchestrationModelState(), chainDepth: 5 };
-    expect(stepOrchestrationModel(capped, 'accept').operation).toBe('absent');
+  it('Stop blocks automatic work until fresh human input, which carries saved results', () => {
+    expect(
+      trace(
+        'human',
+        'schedule',
+        'submit',
+        'result',
+        'stop',
+        'restart',
+        'schedule',
+        'human',
+        'schedule',
+        'submit'
+      )
+    ).toMatchObject({ active: 'human', batch: [1], receipts: [[1]], paused: false });
   });
-
-  it('can falsify duplicate completion writes and excess chain depth', () => {
-    expect(() =>
-      assertOrchestrationModelSafety({
-        ...initialOrchestrationModelState(),
-        completionTurnWrites: 2,
-      })
-    ).toThrow(/more than one visible completion/);
-    expect(() =>
-      assertOrchestrationModelSafety({
-        ...initialOrchestrationModelState(),
-        chainDepth: 6,
-      })
-    ).toThrow(/exceeded the fixed depth cap/);
+  it('consuming a batch cannot create an empty successor', () => {
+    expect(
+      trace(
+        'human',
+        'schedule',
+        'submit',
+        'result',
+        'normal',
+        'schedule',
+        'submit',
+        'normal',
+        'schedule'
+      )
+    ).toMatchObject({ active: 'none', queue: [], pending: [], receipts: [[1]] });
+  });
+  it('a pending human wins over automatic preparation', () => {
+    expect(
+      trace('human', 'schedule', 'submit', 'result', 'normal', 'human', 'schedule', 'submit')
+    ).toMatchObject({ active: 'human', receipts: [[1]], pending: [] });
+  });
+  it('restart retires interrupted work without replay and admits fresh human input', () => {
+    expect(
+      trace(
+        'human',
+        'schedule',
+        'submit',
+        'result',
+        'restart',
+        'schedule',
+        'human',
+        'schedule',
+        'submit'
+      )
+    ).toMatchObject({ active: 'human', batch: [1], receipts: [[1]], pending: [] });
+  });
+  it('withdrawing an unverified human execution reschedules the same results once', () => {
+    expect(
+      trace('result', 'human', 'schedule', 'withdraw', 'schedule', 'submit', 'withdraw', 'normal')
+    ).toMatchObject({ active: 'none', receipts: [[1]], consumed: [1], human: false });
+  });
+  it('failure retains results without automatic intent', () => {
+    expect(trace('human', 'schedule', 'submit', 'result', 'failed', 'schedule')).toMatchObject({
+      active: 'none',
+      queue: [1],
+      pending: [],
+    });
   });
 });

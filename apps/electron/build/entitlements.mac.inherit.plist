@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <!--
+      The embedded CLI and every ACP agent run as Lody Helper under
+      ELECTRON_RUN_AS_NODE, and agents materialize native addons at runtime: npx
+      installs DeepSeek Harness's koffi binding, which ships only an
+      ad-hoc/linker signature. Library validation rejects such a library inside a
+      Team-ID-signed hardened process ("mapping process and mapped file
+      (non-platform) have different Team IDs"), so without this exception the DSH
+      plugin tree cannot load dsh-subprocess-local/dsh-sandbox-local and the host
+      only observes `ACP connection closed`.
+
+      Only nested binaries need the exception. The top-level app keeps library
+      validation enabled through entitlements.mac.plist; it loads bundle-signed
+      libraries exclusively.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

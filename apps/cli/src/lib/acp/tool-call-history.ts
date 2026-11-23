@@ -1,1 +1,5 @@
-export { deriveLocationsFromRawInput, deriveLocationsFromToolCallContent, stripToolCallContentForHistory } from '@lody/shared';
+export {
+  deriveLocationsFromRawInput,
+  deriveLocationsFromToolCallContent,
+  stripToolCallContentForHistory,
+} from '@lody/shared';

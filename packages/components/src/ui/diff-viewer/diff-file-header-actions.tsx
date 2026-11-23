@@ -3,6 +3,7 @@ import { Check, Copy, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type DiffFileHeaderActionsProps = {
   readonly path: string;
@@ -26,7 +27,7 @@ export function DiffFileHeaderActions({ path, onOpenFile, className }: DiffFileH
     if (!path) {
       return;
     }
-    void navigator.clipboard.writeText(path).then(
+    void copyTextToClipboard(path).then(
       () => {
         setCopied(true);
         window.setTimeout(() => {

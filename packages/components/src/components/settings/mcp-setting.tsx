@@ -1,62 +1,150 @@
-import { useState } from 'react';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { useEffect, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
+import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
-import { Loader2, Plug, Plus, Trash2 } from 'lucide-react';
+import { usePostHog } from '@/lib/posthog-context';
+import { Plus, RefreshCw, Trash2, Settings } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   describeMcpConnection,
   getServerNow,
   type McpServerId,
+  type McpToolListResult,
   type WorkspaceMcpServerMeta,
+  type McpAuthenticationResult,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import {
   useWorkspaceMcpCatalog,
   useWorkspaceMcpCatalogActions,
 } from '@/hooks/use-workspace-mcp-catalog';
-import { cn } from '@/lib/utils';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MCP_TRANSPORT_LABELS, McpTransportIcon } from '@/components/shared/mcp-transport';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { Switch } from '@/ui/switch';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { settingContainerClass } from '.';
+import { AlertDialog } from '@/ui/dialog';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { Switch } from '@lody/ui/switch';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
+import { McpAuthenticationPanel } from './mcp-authentication-panel';
+import {
+  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  SETTINGS_EDITOR_DIALOG_WIDTH,
+  settingsCatalog as catalog,
+  settingsSurface as surface,
+} from './surface';
+
+const styles = stylex.create({
+  actions: { gap: space[2] },
+  tools: {
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  toolList: { display: 'flex', minWidth: 0, flexWrap: 'wrap', gap: space[1.5] },
+  toolName: { overflowWrap: 'anywhere', whiteSpace: 'normal' },
+  error: { color: colors.destructive },
+  default: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+    cursor: 'pointer',
+  },
+  /** The word beside the switch is dropped on a narrow panel; the switch keeps its label. */
+  defaultText: { display: { default: 'none', '@media (min-width: 640px)': 'inline' } },
+});
 
 type EditorState = { mode: 'add' } | { mode: 'edit'; entry: WorkspaceMcpServerMeta };
 
 export function McpSetting() {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const isMobile = useIsMobile();
   const user = useAtomValue(userAtom);
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const localMachineId = useAtomValue(localMachineIdAtom);
   const { servers, synced } = useWorkspaceMcpCatalog();
   const { upsert, remove } = useWorkspaceMcpCatalogActions();
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const { shown: shownEditor, onOpenChangeComplete } = useDialogExitSnapshot(editor);
+  const settingsPane = useSettingsPane();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<WorkspaceMcpServerMeta | null>(null);
   const [removing, setRemoving] = useState(false);
+  const draftId = useRef<McpServerId | undefined>(undefined);
+  const [authentication, setAuthentication] = useState<Record<string, McpAuthenticationResult>>({});
+
+  const [toolLists, setToolLists] = useState<
+    Record<string, { connection: WorkspaceMcpServerMeta['connection']; state: McpToolListState }>
+  >({});
+  const scope = useRef(0);
+  useEffect(() => {
+    setToolLists({});
+    setAuthentication({});
+    setEditor(null);
+    setSubmitting(false);
+    setError(undefined);
+    return () => {
+      scope.current += 1;
+    };
+  }, [runtime, localMachineId, user?.id]);
+
+  const discoverTools = async (entry: WorkspaceMcpServerMeta) => {
+    if (!runtime || !localMachineId || !entry.connection) return;
+    const requestScope = scope.current;
+    const pending = { connection: entry.connection, state: { status: 'loading' } as const };
+    setToolLists((current) => ({ ...current, [entry.id]: pending }));
+    try {
+      const { tools } = await runtime.requestLocalMcpTools(localMachineId, entry, user?.id);
+      if (requestScope === scope.current)
+        setToolLists((current) =>
+          current[entry.id] === pending
+            ? { ...current, [entry.id]: { ...pending, state: { status: 'success', tools } } }
+            : current
+        );
+    } catch {
+      try {
+        const status = await runtime.requestLocalMcpAuthentication(localMachineId, {
+          requesterUserId: user?.id ?? '',
+          action: 'status',
+          server: entry,
+        });
+        if (requestScope === scope.current)
+          setAuthentication((current) => ({ ...current, [entry.id]: status }));
+      } catch {
+        /* Old daemons still report the connection failure. */
+      }
+      if (requestScope === scope.current)
+        setToolLists((current) =>
+          current[entry.id] === pending
+            ? { ...current, [entry.id]: { ...pending, state: { status: 'error' } } }
+            : current
+        );
+    }
+  };
 
   const openEditor = (next: EditorState) => {
+    draftId.current = next.mode === 'add' ? (crypto.randomUUID() as McpServerId) : next.entry.id;
     setError(undefined);
     setEditor(next);
   };
 
   const save = async (value: McpConnectionFormValue) => {
+    const requestScope = scope.current;
     const duplicate = servers.find(
       (server) =>
         server.name.localeCompare(value.name, undefined, { sensitivity: 'accent' }) === 0 &&
@@ -72,7 +160,7 @@ export function McpSetting() {
     const now = getServerNow();
     const existing = editor?.mode === 'edit' ? editor.entry : undefined;
     const entry: WorkspaceMcpServerMeta = {
-      id: existing?.id ?? (crypto.randomUUID() as McpServerId),
+      id: existing?.id ?? draftId.current ?? (crypto.randomUUID() as McpServerId),
       name: value.name,
       transport: value.transport,
       ...(value.description ? { description: value.description } : {}),
@@ -86,6 +174,21 @@ export function McpSetting() {
       // Resolves on durability: the row exists, so the editor is done. The
       // upload runs on its own and is deliberately not reported.
       await upsert(entry);
+      if (requestScope !== scope.current) return;
+      if (value.localAuthentication) {
+        setEditor({ mode: 'edit', entry });
+        if (!runtime || !localMachineId)
+          throw new Error(t('settings.mcp.authentication.localRequired'));
+        const result = await runtime.requestLocalMcpAuthentication(localMachineId, {
+          requesterUserId: user?.id ?? '',
+          action: 'configure',
+          server: entry,
+          authentication: value.localAuthentication,
+        });
+        if (requestScope !== scope.current) return;
+        if (result.status === 'error') throw new Error(t('settings.mcp.authentication.error'));
+        setAuthentication((current) => ({ ...current, [entry.id]: result }));
+      }
       if (editor?.mode === 'add') {
         capturePostHogEvent(postHog, 'workspace/mcp_created', {
           source: 'settings',
@@ -95,10 +198,12 @@ export function McpSetting() {
         });
       }
       setEditor(null);
+      if (entry.connection) void discoverTools(entry);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (requestScope === scope.current)
+        setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setSubmitting(false);
+      if (requestScope === scope.current) setSubmitting(false);
     }
   };
 
@@ -124,154 +229,171 @@ export function McpSetting() {
   };
 
   const addLabel = t('settings.mcp.add');
+  const addButton = (
+    <Button size="small" variant="secondary" onClick={() => openEditor({ mode: 'add' })}>
+      <Plus {...stylex.props(catalog.icon)} />
+      {addLabel}
+    </Button>
+  );
 
   return (
-    <div className={settingContainerClass}>
-      <p className="text-xs leading-snug text-muted-foreground">{t('settings.mcp.description')}</p>
+    <div {...stylex.props(surface.container)}>
+      <SettingsPageLead>{t('settings.mcp.description')}</SettingsPageLead>
 
-      <section className="flex flex-col">
-        <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <h3 className="text-xs font-semibold text-muted-foreground">
-              {t('settings.mcp.catalogTitle')}
-            </h3>
-            {servers.length > 0 ? (
-              <span className="text-xs tabular-nums text-muted-foreground/70">
-                {servers.length}
-              </span>
-            ) : null}
-            {!synced ? (
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
-                <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
-                {t('settings.mcp.syncing')}
-              </span>
-            ) : null}
-          </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                aria-label={addLabel}
-                onClick={() => openEditor({ mode: 'add' })}
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{addLabel}</TooltipContent>
-          </Tooltip>
-        </div>
+      <SettingsPageActions>
+        {!synced ? (
+          <span {...stylex.props(catalog.syncing)}>
+            <Spinner size="small" aria-hidden="true" />
+            {t('settings.mcp.syncing')}
+          </span>
+        ) : null}
+        {servers.length > 0 ? addButton : null}
+      </SettingsPageActions>
 
-        {servers.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/30 px-6 py-8 text-center text-sm">
-            <Plug className="h-6 w-6 text-muted-foreground/70" aria-hidden="true" />
-            <p className="mt-2 text-muted-foreground">{t('settings.mcp.empty')}</p>
-            <Button size="sm" className="mt-3" onClick={() => openEditor({ mode: 'add' })}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              {addLabel}
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {servers.map((server) => (
+      {servers.length === 0 ? (
+        <SettingsEmptyState title={t('settings.mcp.empty')} action={addButton} />
+      ) : (
+        <div {...stylex.props(settingsRecordsCard)}>
+          {servers.map((server, index) => (
+            <div key={server.id} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
               <McpServerRow
-                key={server.id}
+                toolList={
+                  JSON.stringify(toolLists[server.id]?.connection) ===
+                  JSON.stringify(server.connection)
+                    ? toolLists[server.id]?.state
+                    : undefined
+                }
                 server={server}
+                authentication={authentication[server.id]}
+                onDiscoverTools={() => void discoverTools(server)}
+                canDiscoverTools={Boolean(runtime && localMachineId && server.connection)}
                 onEdit={() => openEditor({ mode: 'edit', entry: server })}
                 onToggleDefault={(enabled) => void toggleDefault(server, enabled)}
                 onRemove={() => setPendingRemoval(server)}
               />
-            ))}
-          </div>
-        )}
-      </section>
+            </div>
+          ))}
+        </div>
+      )}
 
-      <Dialog
+      <Dialog.Root
         open={editor !== null}
         onOpenChange={(open) => {
           if (open) return;
           setError(undefined);
           setEditor(null);
         }}
+        onOpenChangeComplete={onOpenChangeComplete}
       >
-        <DialogContent
-          overlayClassName={
-            // Desktop settings is itself a dialog; match its z-index so this
-            // later overlay covers it without stacking a second /80 veil.
-            isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
-          }
-          className={cn(
-            'flex max-h-[min(680px,88dvh)] w-[min(620px,96dvw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none sm:p-0',
-            !isMobile && 'shadow-popover'
-          )}
+        <Dialog.Content
+          width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          centerOn={settingsPane}
+          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
         >
-          <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-            <DialogTitle className="text-sm font-semibold">
-              {editor?.mode === 'edit' ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')}
-            </DialogTitle>
-            <DialogDescription className="mt-0.5 text-xs leading-snug text-muted-foreground">
-              {t('settings.mcp.dialogDescription')}
-            </DialogDescription>
-          </header>
-          {editor ? (
+          <Dialog.Header>
+            <Dialog.Title>
+              {shownEditor?.mode === 'edit'
+                ? t('settings.mcp.editTitle')
+                : t('settings.mcp.addTitle')}
+            </Dialog.Title>
+            <Dialog.Description>{t('settings.mcp.dialogDescription')}</Dialog.Description>
+          </Dialog.Header>
+          {shownEditor ? (
             <McpConnectionForm
-              key={editor.mode === 'edit' ? editor.entry.id : 'new'}
-              className="min-h-0 flex-1"
-              initialEntry={editor.mode === 'edit' ? editor.entry : undefined}
+              key={shownEditor.mode === 'edit' ? shownEditor.entry.id : 'new'}
+              initialEntry={shownEditor.mode === 'edit' ? shownEditor.entry : undefined}
               submitting={submitting}
               error={error}
               onSubmit={save}
+              authentication={(dirty, transport) =>
+                shownEditor.mode === 'edit' ? (
+                  <McpAuthenticationPanel
+                    server={shownEditor.entry}
+                    httpControls={transport === 'http'}
+                    disabled={dirty || submitting || editor === null}
+                    onEnable={async (entry) => {
+                      if (!entry.connection) throw new Error('MCP connection is missing.');
+                      const next: WorkspaceMcpServerMeta = {
+                        ...entry,
+                        connection: { ...entry.connection, authentication: 'local' },
+                        updatedAt: getServerNow(),
+                      };
+                      await upsert(next);
+                      setEditor({ mode: 'edit', entry: next });
+                      return next;
+                    }}
+                    onConnected={(entry) => void discoverTools(entry)}
+                    onStatus={(status) =>
+                      setAuthentication((current) => ({
+                        ...current,
+                        [shownEditor.entry.id]: status,
+                      }))
+                    }
+                  />
+                ) : (
+                  <p {...stylex.props(catalog.blockHint)}>
+                    {t('settings.mcp.authentication.saveFirst')}
+                  </p>
+                )
+              }
               onCancel={() => {
                 setError(undefined);
                 setEditor(null);
               }}
             />
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
 
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingRemoval !== null}
         onOpenChange={(open) => {
           if (!open && !removing) setPendingRemoval(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.mcp.removeTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('settings.mcp.removeTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('settings.mcp.confirmRemove', { name: pendingRemoval?.name ?? '' })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={removing}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={removing}>{t('common.cancel')}</AlertDialog.Cancel>
+            <Button
               disabled={removing}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(event) => {
-                event.preventDefault();
+              variant="destructive"
+              onClick={() => {
                 void confirmRemoval();
               }}
             >
-              {removing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {removing ? <Spinner size="small" /> : null}
               {t('common.remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }
 
-/** One catalog entry. The row body opens the editor (same affordance as an
- *  agent provider row); the trailing cluster keeps the two quick actions. */
+/** One catalog entry, as a line of the catalog's card. The row body opens the
+ *  editor (same affordance as an agent provider row); the trailing cluster keeps
+ *  the two quick actions. */
 export function McpServerRow({
   server,
   onEdit,
   onToggleDefault,
   onRemove,
+  onDiscoverTools,
+  canDiscoverTools,
+  toolList,
+  authentication,
 }: {
+  toolList?: McpToolListState;
+  authentication?: McpAuthenticationResult;
+  onDiscoverTools: () => void;
+  canDiscoverTools: boolean;
   server: WorkspaceMcpServerMeta;
   onEdit: () => void;
   onToggleDefault: (enabled: boolean) => void;
@@ -280,44 +402,62 @@ export function McpServerRow({
   const { t } = useTranslation();
   const defaultLabel = t('settings.mcp.defaultToggle', { name: server.name });
   return (
-    <div className="overflow-hidden rounded-lg bg-foreground/[0.04]">
-      <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
+    <div>
+      <div {...stylex.props(catalog.row, surface.pressableLine)}>
         <button
           type="button"
           onClick={onEdit}
           aria-label={t('common.edit')}
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 py-2 text-left focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          {...stylex.props(catalog.rowMain)}
         >
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-foreground/[0.05] text-muted-foreground">
+          <span {...stylex.props(catalog.glyph)}>
             <McpTransportIcon transport={server.transport} />
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="min-w-0 truncate text-sm font-medium leading-tight">
-                {server.name}
-              </span>
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
-                {MCP_TRANSPORT_LABELS[server.transport]}
-              </Badge>
+          <span {...stylex.props(catalog.body)}>
+            <span {...stylex.props(catalog.titleLine)}>
+              <span {...stylex.props(catalog.name)}>{server.name}</span>
+              <Badge>{MCP_TRANSPORT_LABELS[server.transport]}</Badge>
             </span>
-            <span className="mt-0.5 block truncate font-mono text-[11px] leading-tight text-muted-foreground">
-              {describeMcpConnection(server.connection) ?? '—'}
+            <span {...stylex.props(catalog.meta)}>
+              <span {...stylex.props(catalog.truncate, catalog.mono)}>
+                {describeMcpConnection(server.connection) ?? '—'}
+              </span>
             </span>
             {server.description ? (
-              <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground/80">
-                {server.description}
+              <span {...stylex.props(catalog.meta, catalog.metaHint)}>
+                <span {...stylex.props(catalog.truncate)}>{server.description}</span>
               </span>
             ) : null}
           </span>
         </button>
-        <div className="flex shrink-0 items-center gap-2 py-2 pl-2 pr-2">
-          {/* The switch keeps its own Radix `data-state`, so the label sits
-              beside it rather than wrapping it in a tooltip trigger. */}
+        <div {...stylex.props(catalog.actions, styles.actions)}>
+          <Button type="button" size="small" variant="ghost" onClick={onEdit}>
+            <Settings {...stylex.props(catalog.icon)} />
+            {t('settings.mcp.authentication.settings')}
+          </Button>
+          {server.connection ? (
+            <Button
+              type="button"
+              size="small"
+              variant="ghost"
+              disabled={!canDiscoverTools || toolList?.status === 'loading'}
+              onClick={onDiscoverTools}
+            >
+              {toolList?.status === 'loading' ? (
+                <Spinner size="small" />
+              ) : (
+                <RefreshCw {...stylex.props(catalog.icon)} />
+              )}
+              {t('settings.mcp.tools.discover')}
+            </Button>
+          ) : null}
+          {/* The switch carries its own state attributes, so the label sits
+            beside it rather than wrapping it in a tooltip trigger. */}
           <label
-            className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"
+            {...stylex.props(styles.default)}
             title={t('settings.mcp.form.defaultEnabledHint')}
           >
-            <span className="hidden sm:inline">{t('settings.mcp.default')}</span>
+            <span {...stylex.props(styles.defaultText)}>{t('settings.mcp.default')}</span>
             <Switch
               checked={server.enabledByDefault === true}
               aria-label={defaultLabel}
@@ -326,16 +466,52 @@ export function McpServerRow({
           </label>
           <Button
             type="button"
-            size="icon"
             variant="ghost"
-            className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             aria-label={t('common.remove')}
+            size="small"
+            icon
+            tone="destructive"
             onClick={onRemove}
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 {...stylex.props(catalog.icon)} />
           </Button>
         </div>
       </div>
+      {server.connection && toolList ? (
+        <div {...stylex.props(styles.tools)} aria-live="polite">
+          {toolList.status === 'loading' ? (
+            <Spinner size="small" aria-label={t('common.loading')} />
+          ) : null}
+          {toolList.status === 'error' ? (
+            authentication?.reason === 'oauth_required' ? (
+              <div {...stylex.props(catalog.actions)}>
+                <span>{t('settings.mcp.authentication.required')}</span>
+                <Button type="button" size="small" variant="secondary" onClick={onEdit}>
+                  {t('settings.mcp.authentication.authorize')}
+                </Button>
+              </div>
+            ) : (
+              <span {...stylex.props(styles.error)}>{t('settings.mcp.tools.failed')}</span>
+            )
+          ) : null}
+          {toolList?.status === 'success' && toolList.tools.length > 0 ? (
+            <div {...stylex.props(styles.toolList)} aria-label={t('settings.mcp.tools.label')}>
+              {toolList.tools.map((tool) => (
+                <Badge key={tool.name} title={tool.description}>
+                  <span {...stylex.props(styles.toolName)}>{tool.name}</span>
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+          {toolList?.status === 'success' && toolList.tools.length === 0 ? (
+            <span>{t('settings.mcp.tools.empty')}</span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
+
+type McpToolListState =
+  | { status: 'loading' | 'error' }
+  | { status: 'success'; tools: McpToolListResult['tools'] };

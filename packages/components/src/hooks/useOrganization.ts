@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { recordBootRequestResult } from '@/lib/boot-request-failures';
 import {
   clearPreferredWorkspaceSlugIfMatch,
   generateWorkspaceSlug,
@@ -10,8 +11,13 @@ import {
   clearCachedWorkspaceInfo,
   getCachedWorkspaceId,
 } from '@/lib/local-storage-cache';
-import { clearLastAppRoutePathIfWorkspaceMatch } from '@/lib/last-app-route';
-import { useSetAtom, useStore } from 'jotai';
+import { atom, useAtom, useSetAtom, useStore } from 'jotai';
+import { useOptionalCloudPlatformQuery } from '../providers/cloud-platform-api';
+import { cloudOperations } from '@/lib/cloud-api-operations';
+import {
+  clearSessionRunConfigDraftsAtom,
+  sessionRunConfigDraftAccountAtom,
+} from '@/atoms/session-run-config-drafts';
 import {
   setWorkspaceContextAtRevisionAtom,
   setWorkspaceContextAtom,
@@ -20,16 +26,27 @@ import {
 import { WorkspaceId } from '@lody/shared';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useAuthClient } from '../providers/convex-provider';
-import { resolveWorkspaceRemovalTransition } from '@/lib/workspace-removal-transition';
+import {
+  deleteAccountWorkspace,
+  hasEncryptedContentMode,
+  resolveWorkspaceRemovalTransition,
+} from '@/lib/workspace-removal-transition';
 import type { LodyAuthClient } from '@/lib/auth';
 import type { PlatformUser, WorkspaceSummary } from '@lody/platform';
-import { usePlatformSession } from '@lody/platform/react';
+import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import { useImplicitLocalWorkspace } from '../providers/local-platform-provider';
 
 type UseOrganizationOptions = {
   targetSlug?: string;
 };
+
+const selectedEncryptedWorkspaceAtom = atom<{ accountId: string; id: string } | null>(null);
+
+// A retained directory or a late Better Auth refresh can still publish a deleted workspace.
+const deletedEncryptedWorkspacesAtom = atom<{ accountId: string; ids: ReadonlySet<string> } | null>(
+  null
+);
 
 const inFlightSetActiveRequests = new Map<string, Promise<void>>();
 let completedUnobservedSetActiveRequestKey: string | null = null;
@@ -59,6 +76,9 @@ function getResponseErrorMessage(response: unknown): string | null {
   }
   return 'Failed to switch organization';
 }
+
+/** Spacing of the single retries a spent organization-list retry burst still gets. */
+export const ORGANIZATIONS_SLOW_RETRY_MS = 30_000;
 
 async function setActiveOrganizationOnce(
   authClient: LodyAuthClient,
@@ -187,6 +207,7 @@ function useLocalOrganizationState(): UseOrganizationResult {
       role: workspace?.role,
       hasAdminPermission: true,
       loading,
+      organizationsError: null,
       error: null,
       activeOrganization,
       activateOrganization: () => Promise.resolve(),
@@ -201,6 +222,7 @@ function useLocalOrganizationState(): UseOrganizationResult {
 
 function useCloudOrganizationState(options?: UseOrganizationOptions) {
   const authClient = useAuthClient();
+  const { e2eeWorkspaces } = usePlatform();
   const targetSlug = options?.targetSlug;
   const [isMutating, setIsMutating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -216,17 +238,136 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   } = useStableSession();
   const user = session?.user ?? null;
   const {
-    data: organizationsRaw,
-    isPending: organizationsPending,
+    data: ordinaryOrganizations,
+    isPending: ordinaryOrganizationsPending,
     error: organizationsError,
     refetch: refetchOrganizations,
   } = authClient.useListOrganizations();
   const {
-    data: activeOrganization,
+    data: listedActiveOrganization,
     isPending: activeOrganizationIsPending,
     refetch: refetchActiveOrganization,
-    error: activeOrganizationError,
+    error: activeOrganizationQueryError,
   } = authClient.useActiveOrganization();
+
+  const encryptedDirectory = useOptionalCloudPlatformQuery(
+    cloudOperations.e2eeMembers.workspaces,
+    user ? {} : 'skip'
+  );
+  const retainedDirectory = useRef<{
+    accountId: string;
+    items: typeof encryptedDirectory.data;
+  } | null>(null);
+  if (retainedDirectory.current?.accountId !== user?.id) retainedDirectory.current = null;
+  if (user && encryptedDirectory.data !== undefined)
+    retainedDirectory.current = { accountId: user.id, items: encryptedDirectory.data };
+  // Navigation labels may survive an outage; native credentials/ledger still decide access.
+  const encryptedWorkspaces = encryptedDirectory.data ?? retainedDirectory.current?.items;
+  const [selectedEncryptedWorkspace, setSelectedEncryptedWorkspace] = useAtom(
+    selectedEncryptedWorkspaceAtom
+  );
+  const [deletedEncrypted, setDeletedEncrypted] = useAtom(deletedEncryptedWorkspacesAtom);
+  const deletedIds = deletedEncrypted?.accountId === user?.id ? deletedEncrypted?.ids : undefined;
+  const ordinaryActiveOrganization =
+    listedActiveOrganization && deletedIds?.has(listedActiveOrganization.id)
+      ? null
+      : listedActiveOrganization;
+  const encryptedOrganizations = useMemo(
+    () =>
+      encryptedWorkspaces
+        ?.filter((workspace) => !deletedIds?.has(workspace.id))
+        .map((workspace) => ({
+          ...workspace,
+          logo: null,
+          createdAt: LOCAL_ORGANIZATION_EPOCH,
+          metadata: null,
+          members: workspace.members.map((member) => ({
+            ...member,
+            organizationId: workspace.id,
+            createdAt: LOCAL_ORGANIZATION_EPOCH,
+          })),
+          invitations: [],
+        })),
+    [deletedIds, encryptedWorkspaces]
+  );
+  const organizationsRaw = useMemo(() => {
+    if (!ordinaryOrganizations) return ordinaryOrganizations;
+    const encryptedIds = new Set(encryptedOrganizations?.map((workspace) => workspace.id));
+    return [
+      ...ordinaryOrganizations.filter(
+        (workspace) => !encryptedIds.has(workspace.id) && !deletedIds?.has(workspace.id)
+      ),
+      ...(encryptedOrganizations ?? []),
+    ];
+  }, [ordinaryOrganizations, encryptedOrganizations, deletedIds]);
+  const directoryNeeded =
+    Boolean(user) &&
+    (targetSlug
+      ? !ordinaryOrganizations?.some(
+          (workspace) =>
+            workspace.slug === targetSlug &&
+            !('contentMode' in workspace && workspace.contentMode === 'e2ee')
+        )
+      : selectedEncryptedWorkspace?.accountId === user?.id || ordinaryOrganizations?.length === 0);
+  const directoryError =
+    directoryNeeded && encryptedWorkspaces === undefined ? encryptedDirectory.error : null;
+  const organizationsPending =
+    ordinaryOrganizationsPending ||
+    (ordinaryOrganizations?.length === 0 && encryptedWorkspaces === undefined && !directoryError);
+  const selectedEncryptedId =
+    selectedEncryptedWorkspace?.accountId === user?.id ? selectedEncryptedWorkspace?.id : null;
+  const encryptedActive = encryptedOrganizations?.find((workspace) =>
+    targetSlug
+      ? workspace.slug === targetSlug
+      : workspace.id === (selectedEncryptedId ?? ordinaryActiveOrganization?.id)
+  );
+  // This roster comes from current ledger projections and the account directory.
+  // It is navigation/display metadata; native device authorization stays separate.
+  const activeOrganization = encryptedActive ?? ordinaryActiveOrganization;
+  useEffect(() => {
+    if (user && targetSlug && encryptedActive && selectedEncryptedId !== encryptedActive.id)
+      setSelectedEncryptedWorkspace({ accountId: user.id, id: encryptedActive.id });
+    else if (
+      user &&
+      targetSlug &&
+      !encryptedActive &&
+      ordinaryActiveOrganization?.slug === targetSlug &&
+      !(
+        'contentMode' in ordinaryActiveOrganization &&
+        ordinaryActiveOrganization.contentMode === 'e2ee'
+      ) &&
+      Array.isArray(ordinaryActiveOrganization.members) &&
+      selectedEncryptedId
+    )
+      setSelectedEncryptedWorkspace(null);
+  }, [
+    encryptedActive,
+    ordinaryActiveOrganization,
+    selectedEncryptedId,
+    setSelectedEncryptedWorkspace,
+    targetSlug,
+    user,
+  ]);
+
+  // A partial response is not a full organization. Keep membership-dependent
+  // consumers gated and expose a retryable error instead of inventing an empty roster.
+  const activeOrganizationDataError = useMemo(
+    () =>
+      activeOrganization && !Array.isArray(activeOrganization.members)
+        ? new Error('Incomplete organization response: members are missing')
+        : null,
+    [activeOrganization]
+  );
+  const activeOrganizationMatchesTarget = !targetSlug || activeOrganization?.slug === targetSlug;
+  const activeOrganizationError =
+    activeOrganizationQueryError ??
+    (activeOrganizationMatchesTarget ? activeOrganizationDataError : null);
+  useEffect(() => {
+    recordBootRequestResult('organizations', organizationsError);
+  }, [organizationsError]);
+  useEffect(() => {
+    recordBootRequestResult('active_organization', activeOrganizationQueryError);
+  }, [activeOrganizationQueryError]);
 
   const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
   const setWorkspaceContextAtRevision = useSetAtom(setWorkspaceContextAtRevisionAtom);
@@ -335,7 +476,39 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     !organizationsError &&
     organizationsRetryCount >= maxOrganizationsRetries;
 
-  const organizationsFailureFinal = organizationsErrorFinal || organizationsIdleFinal;
+  const organizationsFailureFinal =
+    organizationsErrorFinal || organizationsIdleFinal || Boolean(directoryError);
+
+  // A failed list must not stay failed for the life of the page: with no cached
+  // workspace id, the route has nothing else to open with. After the retry burst
+  // is spent, allow one more attempt when the network returns, when the app
+  // comes back to the foreground (a phone resuming after a long absence often
+  // fails its first requests), and every `ORGANIZATIONS_SLOW_RETRY_MS` while
+  // visible. A hidden page does not poll: coming back to it retries at once.
+  useEffect(() => {
+    if (!organizationsFailureFinal || typeof window === 'undefined') return undefined;
+    const retryOnce = () => setOrganizationsRetryCount(maxOrganizationsRetries - 1);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const armTimer = () => {
+      clearTimeout(timer);
+      timer =
+        document.visibilityState === 'hidden'
+          ? undefined
+          : setTimeout(retryOnce, ORGANIZATIONS_SLOW_RETRY_MS);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') retryOnce();
+      else armTimer();
+    };
+    armTimer();
+    window.addEventListener('online', retryOnce);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('online', retryOnce);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [maxOrganizationsRetries, organizationsFailureFinal]);
 
   const organizations = useMemo(() => {
     if (!user) return undefined;
@@ -379,9 +552,10 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
 
   // If the active org was deleted/left, or still points at a previous workspace while a target
   // route is opening, treat it as unavailable to avoid reusing a stale workspace.
-  const activeOrganizationMatchesTarget = !targetSlug || activeOrganization?.slug === targetSlug;
   const resolvedActiveOrganization =
-    activeOrganizationInList && activeOrganizationMatchesTarget ? activeOrganization : null;
+    activeOrganizationInList && activeOrganizationMatchesTarget && !activeOrganizationDataError
+      ? activeOrganization
+      : null;
 
   const role = useMemo(() => {
     return resolvedActiveOrganization?.members.find((member) => member.userId === user?.id)?.role;
@@ -394,10 +568,23 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     organizations !== undefined &&
     organizations.length > 0 &&
     (activeOrganizationIsPending || !resolvedActiveOrganization);
+  // While the list is still loading, an active-organization failure is not
+  // final: right after sign-in Better Auth can answer that query before the new
+  // session settles, and it only refetches on `setActive`, which the activation
+  // effect below issues once the list arrives. Surfacing it earlier turns the
+  // first-login wait into a failed-list screen.
   const shouldSurfaceActiveOrganizationError =
     Boolean(activeOrganizationError) &&
     !activeOrganizationIsPending &&
-    (organizations === undefined || (organizations.length > 0 && !resolvedActiveOrganization));
+    organizations !== undefined &&
+    organizations.length > 0 &&
+    !resolvedActiveOrganization;
+  const organizationsListError = organizationsFailureFinal
+    ? (organizationsError ??
+      (directoryError
+        ? new Error('Encrypted membership directory is unavailable')
+        : new Error('Failed to load organizations')))
+    : null;
   const optimisticWorkspaceId = useMemo(() => {
     if (!user || !targetSlug) {
       return null;
@@ -424,9 +611,20 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       if (currentWorkspaceId === organizationId) {
         return;
       }
+      if (encryptedOrganizations?.some((workspace) => workspace.id === organizationId)) {
+        setSelectedEncryptedWorkspace({ accountId: user.id, id: organizationId });
+        return;
+      }
       await setActiveOrganizationOnce(authClient, user.id, organizationId);
+      setSelectedEncryptedWorkspace(null);
     },
-    [authClient, resolvedActiveOrganization?.id, user?.id]
+    [
+      authClient,
+      encryptedOrganizations,
+      resolvedActiveOrganization?.id,
+      setSelectedEncryptedWorkspace,
+      user?.id,
+    ]
   );
 
   /** Switch active organization and surface failure to callers that must await it. */
@@ -435,8 +633,10 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       try {
         await switchOrganizationOrThrow(organizationId);
         setMutationError(null);
+        recordBootRequestResult('switch_organization', null);
       } catch (err) {
         setMutationError('Failed to switch organization');
+        recordBootRequestResult('switch_organization', err);
         throw err;
       }
     },
@@ -498,19 +698,22 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       if (!targetOrganization) {
         return;
       }
-      if (!resolvedActiveOrganization || resolvedActiveOrganization.id !== targetOrganization.id) {
+      if (activeOrganizationDataError && activeOrganization?.id === targetOrganization.id) return;
+      if (resolvedActiveOrganization?.id !== targetOrganization.id) {
         void switchOrganization(targetOrganization.id);
       }
       return;
     }
 
-    if (!resolvedActiveOrganization) {
+    if (!resolvedActiveOrganization && !activeOrganizationDataError) {
       const first = organizations[0];
       if (first) {
         void switchOrganization(first.id);
       }
     }
   }, [
+    activeOrganization?.id,
+    activeOrganizationDataError,
     activeOrganizationIsPending,
     organizations,
     resolvedActiveOrganization,
@@ -565,7 +768,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
    * Update organization metadata.
    */
   const updateOrganization = useCallback(
-    async (organizationId: string, data: { name?: string; logo?: string }) => {
+    async (organizationId: string, data: { name?: string; slug?: string; logo?: string }) => {
       setMutationError(null);
       try {
         const { data: updatedOrganization, error } = await authClient.organization.update({
@@ -599,12 +802,13 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
    * Delete organization (owner only).
    */
   const deleteOrganization = useCallback(
-    async (organizationId: string) => {
+    async (organizationId: string, options?: { isEncrypted?: boolean }) => {
+      const draftOwner = workspaceContextStore.get(sessionRunConfigDraftAccountAtom);
       setIsMutating(true);
       setMutationError(null);
       const removalTransition = resolveWorkspaceRemovalTransition({
         organizationId,
-        organizations,
+        organizations: organizations ?? encryptedOrganizations,
         activeOrganization: resolvedActiveOrganization,
       });
       let didDelete = false;
@@ -616,20 +820,46 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         transitionRevision = setWorkspaceContext({ slug: null, workspaceId: null });
       }
       try {
-        const { data, error } = await authClient.organization.delete({
+        const isEncrypted =
+          options?.isEncrypted === true ||
+          encryptedOrganizations?.some((workspace) => workspace.id === organizationId) ||
+          organizations?.some(
+            (workspace) => workspace.id === organizationId && hasEncryptedContentMode(workspace)
+          ) ||
+          (resolvedActiveOrganization?.id === organizationId &&
+            hasEncryptedContentMode(resolvedActiveOrganization));
+        const { data, error } = await deleteAccountWorkspace(
           organizationId,
-        });
+          isEncrypted,
+          authClient,
+          e2eeWorkspaces
+        );
         if (data) {
           didDelete = true;
+          if (isEncrypted && user?.id) {
+            setDeletedEncrypted((previous) => ({
+              accountId: user.id,
+              ids: new Set(previous?.accountId === user.id ? previous.ids : []).add(organizationId),
+            }));
+          }
+          setSelectedEncryptedWorkspace((selected) =>
+            selected?.accountId === user?.id && selected?.id === organizationId ? null : selected
+          );
+          if (draftOwner.accountId) {
+            workspaceContextStore.set(clearSessionRunConfigDraftsAtom, {
+              workspaceId: organizationId,
+              accountId: draftOwner.accountId,
+              lifetime: draftOwner.lifetime,
+            });
+          }
           // Drop per-slug caches up front so the post-delete `/` redirect
-          // doesn't bounce back into the deleted workspace via lastAppRoute /
-          // preferredSlug, and so `optimisticWorkspaceId` stops resolving the
+          // doesn't bounce back into the deleted workspace via preferredSlug,
+          // and so `optimisticWorkspaceId` stops resolving the
           // stale workspaceId — both routes triggered listVisibleMachines for
           // a workspace the user no longer belongs to (Convex 403 → error
           // boundary "Something went wrong").
           if (removalTransition.removedSlug) {
             clearCachedWorkspaceInfo(removalTransition.removedSlug);
-            clearLastAppRoutePathIfWorkspaceMatch(removalTransition.removedSlug);
             clearPreferredWorkspaceSlugIfMatch(removalTransition.removedSlug);
           }
           if (removalTransition.isActiveOrganization) {
@@ -674,7 +904,6 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
               });
             }
           }
-          // TODO: delete local workspace data
           void refetchOrganizations();
           void refetchActiveOrganization();
         }
@@ -702,6 +931,11 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     },
     [
       authClient,
+      e2eeWorkspaces,
+      encryptedOrganizations,
+      setSelectedEncryptedWorkspace,
+      setDeletedEncrypted,
+      user?.id,
       organizations,
       refetchActiveOrganization,
       refetchOrganizations,
@@ -721,6 +955,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       if (!user) {
         throw new Error('User not available');
       }
+      const draftOwner = workspaceContextStore.get(sessionRunConfigDraftAccountAtom);
       setIsMutating(true);
       setMutationError(null);
       const removalTransition = resolveWorkspaceRemovalTransition({
@@ -739,9 +974,15 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         });
         if (data) {
           didLeave = true;
+          if (draftOwner.accountId) {
+            workspaceContextStore.set(clearSessionRunConfigDraftsAtom, {
+              workspaceId: organizationId,
+              accountId: draftOwner.accountId,
+              lifetime: draftOwner.lifetime,
+            });
+          }
           if (removalTransition.removedSlug) {
             clearCachedWorkspaceInfo(removalTransition.removedSlug);
-            clearLastAppRoutePathIfWorkspaceMatch(removalTransition.removedSlug);
             clearPreferredWorkspaceSlugIfMatch(removalTransition.removedSlug);
           }
           if (removalTransition.isActiveOrganization) {
@@ -842,11 +1083,11 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         organizations !== undefined &&
         organizations.length > 0 &&
         activeOrganizationIsPending),
+    /** Final failure of the organization list alone; routes that only need the list gate on it. */
+    organizationsError: organizationsListError,
     error:
       (!user ? sessionError : null) ||
-      (organizationsFailureFinal
-        ? (organizationsError ?? new Error('Failed to load organizations'))
-        : null) ||
+      organizationsListError ||
       (shouldSurfaceActiveOrganizationError ? activeOrganizationError : null) ||
       mutationErrorObject,
     activeOrganization: resolvedActiveOrganization,

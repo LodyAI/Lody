@@ -13,6 +13,8 @@ export function sessionFileProviderDiffResultToFileDiffData(
   if (result.status === 'ready-parsed') {
     return {
       status: 'ready-parsed',
+      contentKey: result.contentKey,
+      loadDiffFiles: result.loadDiffFiles,
       fileDiff: result.fileDiff,
       oldTextLength: result.oldTextLength,
       newTextLength: result.newTextLength,
@@ -36,6 +38,7 @@ export function sessionFileProviderDiffResultToFileDiffData(
 
   return {
     status: 'ready',
+    contentKey: result.contentKey,
     oldSnapshot: oldSnapshot.snapshot,
     newSnapshot: newSnapshot.snapshot,
   };
@@ -47,6 +50,8 @@ function sessionFileProviderSnapshotToDiffSnapshot(
   switch (snapshot.kind) {
     case 'text':
       return { status: 'ready', snapshot: { kind: 'text', text: snapshot.text } };
+    case 'paged-text':
+      return { status: 'ready', snapshot: { kind: 'large' } };
     case 'binary':
       return { status: 'ready', snapshot: { kind: 'binary' } };
     case 'unavailable':

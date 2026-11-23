@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let knownFileTokens = new Set<string>();
 let knownSkillTokens = new Set<string>();
 let sessionItems: Array<{ sessionId: string; title: string; slug: string }> = [];
+let issueItems = new Map<number, { type: 'issue' | 'pr'; title: string; url?: string }>();
 
 vi.mock('../src/components/mentions/mention-project-file-source', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -38,6 +38,14 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
   useAgentRoleMentionItems: () => [],
 }));
 
+vi.mock('../src/components/mentions/issue-pr-hash-mention', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useKnownIssuePrItems: () => ({
+    knownItems: issueItems,
+    issuePrData: { entry: null, status: 'ready' as const, refresh: async () => undefined },
+  }),
+}));
+
 import { CombinedMentionTextarea } from '../src/components/mentions/combined-mention-textarea';
 import { getComposerMentionChip } from '../src/components/mentions/mention-chips';
 import {
@@ -45,56 +53,11 @@ import {
   type PersistedMentionRange,
 } from '../src/components/mentions/mention-persistence';
 import { initI18n } from '../src/i18n';
+import { composerIn } from './composer-test-utils';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
-
-/**
- * A stand-in for `session-chat-input-area.tsx`: module-level draft + range
- * caches keyed by session, seeded into state, and a render-phase switch branch.
- */
-const draftCache = new Map<string, string>();
-const rangeCache = new Map<string, PersistedMentionRange[]>();
-const getRanges = (id: string) => [...(rangeCache.get(id) ?? [])];
-const setRanges = (id: string, ranges: readonly PersistedMentionRange[]) => {
-  if (ranges.length === 0) rangeCache.delete(id);
-  else rangeCache.set(id, [...ranges]);
-};
-
-function FakeSessionComposer({ sessionId }: { sessionId: string }) {
-  const [userInput, setUserInput] = React.useState(() => draftCache.get(sessionId) ?? '');
-  const [persisted, setPersisted] = React.useState(() => getRanges(sessionId));
-
-  const [prevSessionId, setPrevSessionId] = React.useState(sessionId);
-  if (prevSessionId !== sessionId) {
-    setPrevSessionId(sessionId);
-    setUserInput(draftCache.get(sessionId) ?? '');
-    setPersisted(getRanges(sessionId));
-  }
-
-  const handleRanges = React.useCallback(
-    (ranges: Parameters<typeof toPersistedMentionRanges>[0]) => {
-      setRanges(sessionId, toPersistedMentionRanges(ranges));
-    },
-    [sessionId]
-  );
-
-  return (
-    <CombinedMentionTextarea
-      value={userInput}
-      onValueChange={(next) => {
-        draftCache.set(sessionId, next);
-        setUserInput(next);
-      }}
-      mentionSource={{ kind: 'local', localProjectId: 'p1' } as never}
-      persistedMentions={persisted}
-      draftKey={sessionId}
-      onMentionRangesChange={handleRanges}
-      getMentionChip={getComposerMentionChip}
-    />
-  );
-}
 
 /**
  * Leaving a composer and coming back must not cost a draft its mention
@@ -111,8 +74,7 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     knownFileTokens = new Set<string>();
     knownSkillTokens = new Set<string>();
     sessionItems = [];
-    draftCache.clear();
-    rangeCache.clear();
+    issueItems = new Map();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -132,6 +94,7 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     value: string;
     persisted?: readonly PersistedMentionRange[];
     draftKey?: string;
+    resetOnEmpty?: boolean;
     onRanges?: (
       ranges: Array<{ start: number; end: number; value: string; kind?: string }>
     ) => void;
@@ -146,11 +109,54 @@ describe('mention ranges survive leaving and returning to a draft', () => {
           draftKey={props.draftKey}
           onMentionRangesChange={props.onRanges as never}
           getMentionChip={getComposerMentionChip}
-          resetOnEmpty={false}
+          resetOnEmpty={props.resetOnEmpty ?? false}
         />
       );
     });
   }
+
+  it('closes an open mention menu on external clear and keeps it closed for the next draft', async () => {
+    knownFileTokens = new Set(['src/app.ts']);
+    let setText!: React.Dispatch<React.SetStateAction<string>>;
+    function Composer() {
+      const [value, setValue] = React.useState('');
+      setText = setValue;
+      return (
+        <CombinedMentionTextarea
+          value={value}
+          onValueChange={setValue}
+          mentionSource={{ kind: 'local', localProjectId: 'p1' } as never}
+        />
+      );
+    }
+    await act(async () => root.render(<Composer />));
+    const textarea = composerIn(container).element;
+    composerIn(container).focus();
+    composerIn(container).edit('@', 1);
+    await act(async () => {});
+    expect(textarea.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => setText(''));
+    expect(composerIn(container).element).toBe(textarea);
+    expect(textarea.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => setText('next draft'));
+    expect(textarea.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('clears and rehydrates mention data without replacing or blurring the input', async () => {
+    knownFileTokens = new Set(['src/app.ts']);
+    const props = { resetOnEmpty: true };
+    await render({ ...props, value: 'look at @src/app.ts' });
+    const textarea = composerIn(container).element;
+    act(() => textarea.focus());
+    expect(kinds()).toContain('file');
+    await render({ ...props, value: '' });
+    expect(composerIn(container).element).toBe(textarea);
+    expect(document.activeElement).toBe(textarea);
+    expect(kinds()).toEqual([]);
+    await render({ ...props, value: 'look at @src/app.ts' });
+    expect(composerIn(container).element).toBe(textarea);
+    expect(kinds()).toContain('file');
+  });
 
   it('restores the range from the persisted draft when the file index is cold', async () => {
     const text = 'look at @src/app.ts thanks';
@@ -261,19 +267,74 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     expect(spans).not.toContain('src/app.ts');
     expect(spans).toContain('src/other.ts');
   });
+});
 
-  it('restores the range when the file index IS warm on return', async () => {
-    const text = 'look at @src/app.ts thanks';
+/**
+ * One kind of mention must not cost another its decoration.
+ */
+describe('a draft with several kinds of mention keeps all of them', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(async () => {
+    await initI18n('en');
     knownFileTokens = new Set(['src/app.ts']);
+    knownSkillTokens = new Set(['review']);
+    sessionItems = [
+      { sessionId: 'sess_fix', title: 'Fix CI', slug: 'fix-ci', activityAt: 1 } as never,
+    ];
+    issueItems = new Map([[123, { type: 'issue' as const, title: 'Bug' }]]);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
 
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  const kinds = () =>
+    Array.from(
+      new Set(
+        Array.from(container.querySelectorAll('[data-mention-kind]')).map((n) =>
+          n.getAttribute('data-mention-kind')
+        )
+      )
+    ).sort();
+
+  async function render(props: {
+    value: string;
+    persisted?: readonly PersistedMentionRange[];
+    onRanges?: (ranges: never) => void;
+  }) {
+    await act(async () => {
+      root.render(
+        <CombinedMentionTextarea
+          value={props.value}
+          onValueChange={() => undefined}
+          mentionSource={
+            { kind: 'local', localProjectId: 'p1', githubRepoFullName: 'o/r' } as never
+          }
+          skillAgent={{ machineId: 'm1' } as never}
+          persistedMentions={props.persisted}
+          onMentionRangesChange={props.onRanges as never}
+          getMentionChip={getComposerMentionChip}
+          resetOnEmpty={false}
+        />
+      );
+    });
+  }
+
+  const roundTrip = async (text: string, expected: string[]) => {
     let reported: PersistedMentionRange[] = [];
     await render({
       value: text,
-      onRanges: (ranges) => {
-        reported = toPersistedMentionRanges(ranges as never);
-      },
+      onRanges: ((r: never) => {
+        reported = toPersistedMentionRanges(r);
+      }) as never,
     });
-    expect(reported).toHaveLength(1);
+    expect(kinds()).toEqual(expected);
 
     await act(async () => root.unmount());
     container.remove();
@@ -282,34 +343,14 @@ describe('mention ranges survive leaving and returning to a draft', () => {
     root = createRoot(container);
 
     await render({ value: text, persisted: reported });
-    expect(kinds()).toContain('file');
+    expect(kinds()).toEqual(expected);
+  };
+
+  it('keeps all four kinds at once', async () => {
+    await roundTrip('see @fix-ci @src/app.ts $review #123', ['file', 'issue', 'session', 'skill']);
   });
 
-  // The composer alone is not the whole contract: the session composer seeds
-  // its ranges from a module cache and swaps them in a render-phase branch, so
-  // the round trip is only proven with that wiring in place.
-  it('survives a session round trip through the draft caches', async () => {
-    draftCache.set('A', 'ping @fix-ci about it');
-    draftCache.set('B', 'unrelated draft');
-    sessionItems = [
-      { sessionId: 'sess_fix', title: 'Fix CI', slug: 'fix-ci', activityAt: 1 } as never,
-    ];
-
-    const show = async (sessionId: string) => {
-      await act(async () => {
-        root.render(<FakeSessionComposer sessionId={sessionId} />);
-      });
-    };
-
-    await show('A');
-    expect(kinds()).toContain('session');
-    expect(rangeCache.get('A')).toHaveLength(1);
-
-    await show('B');
-    expect(kinds()).not.toContain('session');
-    expect(rangeCache.get('A')).toHaveLength(1);
-
-    await show('A');
-    expect(kinds()).toContain('session');
+  it('keeps all four when the session mention comes last in the text', async () => {
+    await roundTrip('see @src/app.ts $review #123 @fix-ci', ['file', 'issue', 'session', 'skill']);
   });
 });

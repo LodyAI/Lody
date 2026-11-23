@@ -1,16 +1,40 @@
+import { AutomationSessionActionsLegacy } from '../src/automations/actions/session-actions-legacy';
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
-import { Effect } from 'effect';
+import { Effect, ManagedRuntime } from 'effect';
 import type { Logger } from '../src/utils/logger';
 import { SessionDispatchWatcher } from '../src/session/session-dispatch-watcher';
-import type { SessionExecutionService } from '../src/session/session-execution-service';
-import type { LoroDocumentManager } from '../src/lib/loro/doc';
+import { SessionExecutionService } from '../src/session/session-execution-service';
+import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
+import { composeTestSessionDoc } from './session-doc-fixture';
+import { LoroDoc } from 'loro-crdt';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import { makeLocalWorkspaceCatalog } from '../src/lib/local-workspace-catalog';
+import { makeSessionAccessPolicy } from '../src/session/session-access-policy';
+import type { MachineAccessVerification } from '../src/session/session-access-retry';
+import { fileLockLayer } from '../src/utils/file-lock';
+import { LodyOperationStore } from '../src/orchestration/operation-store';
+import { createSessionBackend } from '../src/session/session-backend';
+import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
+import { RealtimeJournal } from '../src/lib/e2ee/realtime-journal';
+import { makeEncryptedAgentExecution } from '../src/lib/e2ee/agent-execution';
+import { turnExecutionDigest } from '@lody/shared';
+import { createLoroSessionData, createRoostDirectoryRow } from '@lody/shared/session-data';
 import {
   buildMissingEmail,
+  getSessionCancelRequestMarker,
+  getPendingUserTurnActivationId,
+  hasPendingUserTurnActivation,
   type MessageContent,
+  type MessageQueueItem,
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
+  type SessionQueuePromotionRecord,
   type WorkspaceId,
+  queuedInputEvidence,
 } from '@lody/shared';
 
 const createSilentLogger = (): Logger => ({
@@ -19,12 +43,40 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
 });
 
 const createAllowMachineAccess = () => vi.fn(async () => ({ outcome: 'allowed' as const }));
+
+/**
+ * Give a fake session doc the session-data surface `subscribeSessionChanges`
+ * needs. The fakes drive change notification through their own `mirror.subscribe`
+ * mock; History reads in the watcher still go through the fake's `getHistory`,
+ * so this observe is a no-op stream. A real composed `SessionDocument` keeps its
+ * own getter.
+ */
+const withSessionData = <T extends object>(doc: T): T => {
+  if (!('sessionData' in doc)) {
+    Object.assign(doc, {
+      sessionData: {
+        history: {
+          count: async () => 0,
+          readAt: async () => ({ state: 'missing' as const }),
+          readTurn: async () => ({ state: 'missing' as const }),
+          readRange: async () => [],
+          readDirectory: async () => [],
+          observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+        },
+        commands: {},
+        durability: { waitDurable: async () => {} },
+      },
+    });
+  }
+  return doc;
+};
 
 type WatcherDeps = ConstructorParameters<typeof SessionDispatchWatcher>[0];
 
@@ -57,6 +109,8 @@ const addPreparedDispatchShim = (
     tryAcquireSessionRewriteConflictLease?: () => (() => void) | null;
   };
   service.tryAcquireSessionRewriteConflictLease ??= () => () => {};
+  service.reconcileSteerHistory ??= async () => {};
+  service.acknowledgeSteerTurn ??= async () => {};
   if (service.dispatchPreparedSessionTurn) {
     return executionService;
   }
@@ -124,6 +178,144 @@ describe('SessionDispatchWatcher', () => {
     userId: 'user-1',
   });
 
+  const createQueueRecoveryFixture = async (options: {
+    sessionId: SessionId;
+    meta?: Partial<SessionMeta>;
+    history?: SessionHistoryInput[];
+    queue?: MessageQueueItem[];
+    canceledTurnIds?: readonly string[];
+  }) => {
+    let meta: SessionMeta = {
+      id: options.sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-09-30T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      ...options.meta,
+    };
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
+    const repo = {
+      getDocMeta: vi.fn(async () => ({ meta })),
+      upsertDocMeta,
+      flush: vi.fn(async () => {}),
+    };
+    const doc = new SessionDocument(
+      repo as never,
+      options.sessionId,
+      async () => {},
+      createSilentLogger()
+    );
+    doc.roomId = `session-${options.sessionId}`;
+    composeTestSessionDoc(doc, { history: options.history ?? [] });
+    for (const item of options.queue ?? []) {
+      await doc.pushMessageQueue(item);
+    }
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo } as unknown as LoroDocumentManager,
+      executionService: {
+        isInboxInputCanceled: (_sid: SessionId, turnId: string) =>
+          options.canceledTurnIds?.includes(turnId) ?? false,
+        tryAcquireSessionRewriteConflictLease: vi.fn(() => () => {}),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    const recover = (
+      watcher as unknown as {
+        recoverIncompleteQueuePromotions: (
+          sessionDoc: SessionDocument,
+          currentMeta: SessionMeta
+        ) => Promise<void>;
+      }
+    ).recoverIncompleteQueuePromotions.bind(watcher);
+
+    return {
+      doc,
+      meta: () => meta,
+      updateMeta: (patch: Partial<SessionMeta>) => upsertDocMeta(doc.roomId, patch),
+      promote: () =>
+        (
+          watcher as unknown as {
+            promoteNextQueuedMessage: (
+              doc: SessionDocument,
+              meta: SessionMeta,
+              history: SessionHistoryInput[]
+            ) => Promise<SessionHistoryInput | null>;
+          }
+        ).promoteNextQueuedMessage(doc, meta, []),
+      recover,
+      dispose: () => doc.mirror.dispose(),
+    };
+  };
+
+  const createQueueItem = (turnId: string): MessageQueueItem =>
+    ({
+      $cid: `mq-${turnId}`,
+      task: `queued ${turnId}`,
+      userId: 'user-1',
+      userTurnId: turnId,
+      operationId: `queue:${turnId}`,
+      timestamp: '2026-09-30T00:00:00.000Z',
+      project: undefined,
+      acpSessionConfig: {
+        prompt: `queued ${turnId}`,
+        inputBlocks: [{ type: 'text', text: `queued ${turnId}` }],
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    }) as MessageQueueItem;
+
+  const createQueueReceipt = (
+    turnId: string,
+    state: SessionQueuePromotionRecord['state'] = 'prepared'
+  ): SessionQueuePromotionRecord => ({
+    queueCid: `mq-${turnId}`,
+    userTurnId: turnId,
+    state,
+    updatedAt: 1,
+  });
+
+  it('repairs missing Stop pause markers and keeps stopped drafts when later queue work runs', async () => {
+    const f = await createQueueRecoveryFixture({
+      sessionId: 'retained-stop-queue' as SessionId,
+      queue: ['B', 'C', 'D', 'E', 'F', 'G'].map(createQueueItem),
+      canceledTurnIds: ['B', 'C', 'D', 'E', 'F'],
+    });
+    try {
+      expect(await f.promote()).toMatchObject({ id: 'G' });
+      expect((await f.doc.getMessageQueue()).map((row) => [row.userTurnId, row.paused])).toEqual(
+        ['B', 'C', 'D', 'E', 'F'].map((id) => [id, true])
+      );
+      expect((await f.doc.sessionData.history.readAll()).map((row) => row.id)).toEqual(['G']);
+      expect(await f.promote()).toBeNull();
+    } finally {
+      f.dispose();
+    }
+  });
+
+  it('retains a paused draft when Stop interrupts its partially committed promotion', async () => {
+    const f = await createQueueRecoveryFixture({
+      sessionId: 'paused-promotion' as SessionId,
+      queue: [{ ...createQueueItem('B'), paused: true }],
+      history: [createPendingUserTurn('B', 'queued B')],
+      meta: { queuePromotionLedger: { 'queue:B': createQueueReceipt('B', 'activation_published') }, latestUserMsgId: 'B' },
+    });
+    try {
+      await f.recover(f.doc, f.meta());
+      expect(await f.doc.getMessageQueue()).toEqual([expect.objectContaining({ userTurnId: 'B', paused: true })]);
+      expect((await f.doc.sessionData.history.readAll()).find((entry) => entry.id === 'B')?.status).toBe('canceled');
+      expect(f.meta().queuePromotionLedger?.['queue:B']?.state).toBe('queue_consumed');
+      expect(await f.promote()).toBeNull();
+    } finally { f.dispose(); }
+  });
+
   it('processes pending user turns for an idle owned session', async () => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});
@@ -131,7 +323,7 @@ describe('SessionDispatchWatcher', () => {
     const sessionId = 'session-1' as SessionId;
     const roomId = `session-${sessionId}`;
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
@@ -146,11 +338,11 @@ describe('SessionDispatchWatcher', () => {
         parentSessionId: 'parent-session-1',
         latestUserMsgId: 'turn-1',
       })),
-      getHistory: vi.fn(async () => [createPendingUserTurn('turn-1', 'hello')]),
+      getHistory: vi.fn(() => [createPendingUserTurn('turn-1', 'hello')]),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -172,7 +364,7 @@ describe('SessionDispatchWatcher', () => {
         })),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -230,16 +422,16 @@ describe('SessionDispatchWatcher', () => {
       acpSessionId: 'acp-existing',
     };
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => [createPendingUserTurn('turn-chat-1', 'hello')]),
+      getHistory: vi.fn(() => [createPendingUserTurn('turn-chat-1', 'hello')]),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -249,7 +441,7 @@ describe('SessionDispatchWatcher', () => {
           flock: { scan: () => [] },
         })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
     const userResolver = {
@@ -308,16 +500,16 @@ describe('SessionDispatchWatcher', () => {
       status: { type: 'idle' as const },
     };
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -325,7 +517,7 @@ describe('SessionDispatchWatcher', () => {
         upsertDocMeta: vi.fn(async () => {}),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -384,6 +576,199 @@ describe('SessionDispatchWatcher', () => {
     );
   });
 
+  it('drops caller-supplied launch fields from dispatched turn input config', async () => {
+    const startSession = vi.fn(async () => {});
+    const cancelSession = vi.fn(async () => ({ success: true }));
+    const sessionId = 'session-rpc-launch-fields' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'pi',
+      status: { type: 'idle' as const },
+    };
+
+    const sessionDoc = withHistoryPort({
+      mirror: {
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      getMetaState: vi.fn(async () => sessionMeta),
+      getHistory: vi.fn(() => []),
+      updateHistory: vi.fn(async () => {}),
+      setStatus: vi.fn(async () => {}),
+      waitForRemoteSync: vi.fn(async () => {}),
+    });
+
+    const workspaceDocument = {
+      repo: {
+        getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
+        upsertDocMeta: vi.fn(async () => {}),
+        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
+      onMetaRoomSynced: vi.fn(() => vi.fn()),
+    } as unknown as LoroDocumentManager;
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        startSession,
+        cancelSession,
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    // Launch fields belong to the persisted config resolved by the daemon, not
+    // to whatever a dispatch caller writes into the turn input config.
+    const disposition = await watcher.offerRpcTurn({
+      sessionId,
+      userTurnId: 'rpc-turn-evil',
+      userId: 'user-1',
+      timestamp: new Date().toISOString(),
+      inputConfig: {
+        prompt: 'run it',
+        customAcp: { command: '/tmp/evil-acp' },
+        runtimeOverrides: { piExtensions: ['/tmp/evil-ext.ts'] },
+      },
+    });
+    expect(disposition).toBe('accepted');
+
+    await vi.waitFor(
+      () => {
+        expect(startSession).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3_000 }
+    );
+    expect(startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'session/create',
+        acpSessionConfig: expect.objectContaining({
+          prompt: 'run it',
+          customAcp: undefined,
+          runtimeOverrides: undefined,
+        }),
+      }),
+      { dispatchSource: 'rpc' }
+    );
+  });
+
+  it('keeps a stashed RPC turn while session meta is unknown and dispatches once meta syncs', async () => {
+    const startSession = vi.fn(async () => {});
+    const sessionId = 'session-rpc-before-meta' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' as const },
+    };
+    // The session was just created on another client: its meta has not synced
+    // to this machine yet, but the dispatch RPC already targeted it.
+    let metaRecord: { meta: typeof sessionMeta } | undefined;
+    let metadataWatchCallback: ((event: { kind: string; docId: string }) => void) | undefined;
+
+    const sessionDoc = withHistoryPort({
+      mirror: {
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      getMetaState: vi.fn(async () => metaRecord?.meta),
+      getHistory: vi.fn(() => []),
+      updateHistory: vi.fn(async () => {}),
+      setStatus: vi.fn(async () => {}),
+      waitForRemoteSync: vi.fn(async () => {}),
+    });
+
+    const getDocMeta = vi.fn(async () => metaRecord);
+    const workspaceDocument = {
+      repo: {
+        getMeta: () => ({ scan: vi.fn(async () => []) }),
+        getDocMeta,
+        upsertDocMeta: vi.fn(async () => {}),
+        watch: vi.fn((callback: (event: { kind: string; docId: string }) => void) => {
+          metadataWatchCallback = callback;
+          return { unsubscribe: vi.fn() };
+        }),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
+      onMetaRoomSynced: vi.fn(() => vi.fn()),
+    } as unknown as LoroDocumentManager;
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession: vi.fn(async () => {}),
+        startSession,
+        cancelSession: vi.fn(async () => ({ success: true })),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    await watcher.start();
+
+    await expect(
+      watcher.offerRpcTurn({
+        sessionId,
+        userTurnId: 'rpc-turn-early',
+        userId: 'user-1',
+        timestamp: new Date().toISOString(),
+        inputConfig: { prompt: 'created before meta sync' },
+      })
+    ).resolves.toBe('accepted');
+
+    // A metadata reconcile while meta is still absent must treat the session
+    // as unknown, not foreign: the stashed turn survives, nothing dispatches.
+    const reconcileReadsBefore = getDocMeta.mock.calls.length;
+    metadataWatchCallback?.({ kind: 'doc-metadata', docId: `session-${sessionId}` });
+    await vi.waitFor(
+      () => {
+        expect(getDocMeta.mock.calls.length).toBeGreaterThan(reconcileReadsBefore);
+      },
+      { timeout: 3_000 }
+    );
+    await flushMicrotasks(16);
+    expect(startSession).not.toHaveBeenCalled();
+
+    // Meta arrival fires the metadata watch again; the kept stash dispatches.
+    metaRecord = { meta: sessionMeta };
+    metadataWatchCallback?.({ kind: 'doc-metadata', docId: `session-${sessionId}` });
+    await vi.waitFor(
+      () => {
+        expect(startSession).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3_000 }
+    );
+    expect(startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'session/create',
+        sessionId,
+        userTurnId: 'rpc-turn-early',
+        acpSessionConfig: expect.objectContaining({ prompt: 'created before meta sync' }),
+      }),
+      { dispatchSource: 'rpc' }
+    );
+    watcher.stop();
+  });
+
   it('preempts an in-flight Doc Room join when an RPC turn arrives', async () => {
     const sessionId = 'session-rpc-during-doc-join' as SessionId;
     const userTurnId = 'rpc-turn-during-doc-join';
@@ -403,12 +788,12 @@ describe('SessionDispatchWatcher', () => {
     });
     const waitUntilSynced = vi.fn(async () => true);
     const ensureDocRoomJoined = vi.fn(() => new Promise<void>(() => {}));
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
@@ -417,13 +802,13 @@ describe('SessionDispatchWatcher', () => {
       getDocRoomStatus: vi.fn(() => 'joined' as const),
       onDocRoomStatusChange: vi.fn(() => vi.fn()),
       rejoinDocRoom: vi.fn(async () => {}),
-    };
+    });
     const workspaceDocument = {
       repo: {
         getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
         upsertDocMeta: vi.fn(async () => {}),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
     } as unknown as LoroDocumentManager;
     const watcher = createWatcher({
       logger: createSilentLogger(),
@@ -480,9 +865,12 @@ describe('SessionDispatchWatcher', () => {
         getDocMeta: vi.fn(async () => undefined),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => ({
-        getMetaState: vi.fn(async () => undefined),
-      })),
+      getOrCreateSessionDoc: vi.fn(async () =>
+        withSessionData({
+          getMetaState: vi.fn(async () => undefined),
+          mirror: { subscribe: vi.fn(() => vi.fn()) },
+        })
+      ),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
       publishSessionPresence,
       clearSessionPresence,
@@ -561,17 +949,17 @@ describe('SessionDispatchWatcher', () => {
     };
     let currentHistory: SessionHistoryInput[] = [];
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       roomId: `session-${sessionId}`,
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => currentMeta),
-      getHistory: vi.fn(async () => currentHistory),
+      getHistory: vi.fn(() => currentHistory),
       updateHistory: vi.fn(async () => {}),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -579,7 +967,7 @@ describe('SessionDispatchWatcher', () => {
         upsertDocMeta: vi.fn(async () => {}),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -645,6 +1033,515 @@ describe('SessionDispatchWatcher', () => {
     expect(watcher.hasPendingDispatch(sessionId)).toBe(false);
   });
 
+  it.each([false, true])(
+    'finishes a duplicate-turn check without replay or unbounded repair (blocked write: %s)',
+    async (blockedWrite) => {
+      const id = 'duplicate-queue-steer' as SessionId;
+      let meta = {
+        id,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-09-27T00:00:00Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+      } as SessionMeta;
+      const repo = {
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+        },
+      };
+      const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+      const loro = new LoroDoc();
+      loro.setPeerId('1');
+      composeTestSessionDoc(doc, { doc: loro });
+      let checks = 0;
+      const watcher = createWatcher({
+        logger: createSilentLogger(),
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument: { repo } as never,
+        executionService: {
+          reconcileSteerHistory: async () => {
+            // A deterministic tripwire makes the unfixed regression fail
+            // without starving Vitest's timeout or exhausting the process heap.
+            if (++checks > 4) throw new Error('history repair did not terminate');
+          },
+        } as SessionExecutionService,
+        canUseMachine: createAllowMachineAccess(),
+      });
+      const internal = watcher as unknown as {
+        promoteNextQueuedMessage: (
+          doc: SessionDocument,
+          meta: SessionMeta,
+          history: SessionHistoryInput[]
+        ) => Promise<SessionHistoryInput | null>;
+        checkHistoryAndQueue: (
+          doc: SessionDocument,
+          meta: SessionMeta
+        ) => Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }>;
+      };
+      let rendererData: ReturnType<typeof createLoroSessionData> | undefined;
+      try {
+        await doc.pushMessageQueue({
+          userTurnId: 'duplicate',
+          task: 'synthetic queued input',
+          userId: 'user-1',
+          timestamp: '2026-09-27T00:00:00Z',
+          acpSessionConfig: {
+            prompt: 'synthetic queued input',
+            cliType: 'builtin',
+            agentType: 'codex',
+          },
+        } as never);
+        const renderer = LoroDoc.fromSnapshot(loro.export({ mode: 'snapshot' }));
+        renderer.setPeerId('2');
+        rendererData = createLoroSessionData({ sessionId: id, doc: renderer });
+        const promoted = await internal.promoteNextQueuedMessage(doc, meta, []);
+        expect(promoted?.id).toBe('duplicate');
+        if (!promoted) throw new Error('queue promotion failed');
+        // The renderer steers the same queue item before receiving the CLI's
+        // promotion. Independent list inserts retain both business IDs on merge.
+        await rendererData.commands.appendTurn({ ...promoted, status: 'pending_apply' });
+        renderer.getMovableList('mq').delete(0, 1);
+        renderer.commit();
+        loro.import(renderer.export({ mode: 'snapshot' }));
+        await doc.sessionData.commands.applyHistoryAction({
+          kind: 'user-status',
+          turnId: 'duplicate',
+          status: blockedWrite ? 'processing' : 'handled',
+        });
+        await doc.sessionData.commands.appendTurn({
+          id: 'assistant:duplicate',
+          role: 'assistant',
+          userTurnId: 'duplicate',
+          timestamp: '2026-09-27T00:00:01Z',
+          items: [],
+          endedAt: 1,
+          finished: true,
+        });
+        meta = { ...meta, lastHandledUserMsgId: 'duplicate', latestUserMsgId: 'next' };
+        const next = createPendingUserTurn('next', 'next synthetic input');
+        await doc.sessionData.commands.appendTurn(next);
+        const before = loro.getList('history').toJSON();
+        expect(before.filter((entry) => entry.id === 'duplicate')).toHaveLength(2);
+        if (blockedWrite) {
+          vi.spyOn(doc.sessionData.commands, 'applyHistoryAction').mockResolvedValue({
+            matched: true,
+          });
+        }
+        const result = await internal.checkHistoryAndQueue(doc, meta);
+        expect(result.turn?.id ?? null).toBe(blockedWrite ? null : 'next');
+        expect(loro.getList('history').toJSON()).toEqual(before);
+      } finally {
+        vi.restoreAllMocks();
+        rendererData?.dispose();
+        doc.mirror.dispose();
+      }
+    }
+  );
+
+  it.each([
+    ['an applied steer', { steerTurnStatuses: { steered: 'processing' } }, 'drop'],
+    ['a refused steer', { steerTurnStatuses: { steered: 'pending' } }, 'hold'],
+    ['a missing-history tombstone', { lastMissingHistoryUserMsgId: 'steered' }, 'drop'],
+    [
+      'a refused steer whose recovery wrote its tombstone',
+      { steerTurnStatuses: { steered: 'pending' }, lastMissingHistoryUserMsgId: 'steered' },
+      'drop',
+    ],
+    ['no execution evidence', {}, 'promote'],
+  ] as const)(
+    'classifies a queued turn by fresh execution state before promotion: %s',
+    async (_name, patch, outcome) => {
+      const id = 'queued-steer-race' as SessionId;
+      const staleMeta = {
+        id,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-09-27T00:00:00Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+      } as SessionMeta;
+      let meta = staleMeta;
+      const repo = {
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_room: string, next: Partial<SessionMeta>) => {
+          meta = { ...meta, ...next };
+        },
+      };
+      const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+      const loro = new LoroDoc();
+      loro.setPeerId('1');
+      composeTestSessionDoc(doc, { doc: loro });
+      const watcher = createWatcher({
+        logger: createSilentLogger(),
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument: { repo } as never,
+        executionService: { reconcileSteerHistory: async () => {} } as SessionExecutionService,
+        canUseMachine: createAllowMachineAccess(),
+      });
+      const internal = watcher as unknown as {
+        promoteNextQueuedMessage: (
+          doc: SessionDocument,
+          meta: SessionMeta,
+          history: SessionHistoryInput[]
+        ) => Promise<SessionHistoryInput | null>;
+        checkHistoryAndQueue: (
+          doc: SessionDocument,
+          meta: SessionMeta
+        ) => Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }>;
+      };
+      let rendererData: ReturnType<typeof createLoroSessionData> | undefined;
+      const copies = () =>
+        (loro.getList('history').toJSON() as SessionHistoryInput[]).filter(
+          (entry) => entry.id === 'steered'
+        );
+      try {
+        await doc.pushMessageQueue({
+          userTurnId: 'steered',
+          task: 'synthetic steered input',
+          userId: 'user-1',
+          timestamp: '2026-09-27T00:00:00Z',
+          acpSessionConfig: {
+            prompt: 'synthetic steered input',
+            cliType: 'builtin',
+            agentType: 'codex',
+          },
+        } as never);
+        const renderer = LoroDoc.fromSnapshot(loro.export({ mode: 'snapshot' }));
+        renderer.setPeerId('2');
+        rendererData = createLoroSessionData({ sessionId: id, doc: renderer });
+        // Execution records the steer verdict before the renderer's own history
+        // row and queue removal reach this replica. The caller's meta is stale.
+        meta = { ...meta, ...patch };
+
+        const promoted = await internal.promoteNextQueuedMessage(doc, staleMeta, []);
+        expect(promoted?.id ?? null).toBe(outcome === 'promote' ? 'steered' : null);
+        expect(loro.getMovableList('mq').length).toBe(outcome === 'hold' ? 1 : 0);
+        expect(copies()).toHaveLength(outcome === 'promote' ? 1 : 0);
+        if (outcome === 'promote') return;
+
+        await rendererData.commands.appendTurn({
+          ...createPendingUserTurn('steered', 'synthetic steered input'),
+          status: 'pending_apply',
+        });
+        renderer.getMovableList('mq').delete(0, 1);
+        renderer.commit();
+        loro.import(renderer.export({ mode: 'snapshot' }));
+        const result = await internal.checkHistoryAndQueue(doc, meta);
+        // Only a refused steer runs, once, through the renderer's own row.
+        expect(result.turn?.id ?? null).toBe(outcome === 'hold' ? 'steered' : null);
+        expect(copies()).toHaveLength(1);
+        expect(loro.getMovableList('mq').length).toBe(0);
+      } finally {
+        rendererData?.dispose();
+        doc.mirror.dispose();
+      }
+    }
+  );
+
+  it.each([
+    'claimed',
+    'handled-pointer',
+    'processing-pointer',
+    'completed-reply',
+    'existing-failure',
+    'canceled',
+    'newer-pointer',
+  ] as const)(
+    'retires a crashed encrypted %s turn with one durable notice across restarts',
+    async (stage) => {
+      const directory = mkdtempSync(join(tmpdir(), 'lody-uncertain-turn-'));
+      const sessionId = 'encrypted-crash' as SessionId;
+      const turnId = 'crashed-input';
+      let meta: SessionMeta = {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-11-12T00:00:00Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: ['completed-reply', 'canceled'].includes(stage) ? 'idle' : 'running' },
+        latestUserMsgId: turnId,
+        ...(['handled-pointer', 'completed-reply', 'existing-failure'].includes(stage)
+          ? { lastHandledUserMsgId: turnId }
+          : {}),
+        ...(stage === 'processing-pointer' ? { processingUserMsgId: turnId } : {}),
+        ...(stage === 'newer-pointer' ? { lastHandledUserMsgId: 'turn_2' } : {}),
+      };
+      const repo = {
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+        },
+        flush: async () => {},
+      };
+      const doc = new SessionDocument(
+        repo as never,
+        sessionId,
+        async () => {},
+        createSilentLogger()
+      );
+      composeTestSessionDoc(doc, {
+        history: [
+          {
+            ...createPendingUserTurn(turnId, 'synthetic interrupted input'),
+            ...(stage === 'completed-reply'
+              ? { status: 'handled' as const }
+              : stage === 'canceled'
+                ? { status: 'canceled' as const }
+                : {}),
+          },
+          ...(stage === 'claimed'
+            ? []
+            : [
+                {
+                  id: 'partial-reply',
+                  role: 'assistant' as const,
+                  userTurnId: turnId,
+                  timestamp: '2026-11-12T00:00:01Z',
+                  finished: stage === 'completed-reply',
+                  ...(stage === 'completed-reply' ? { endedAt: 1000 } : {}),
+                  items: [{ type: 'text' as const, text: 'partial output' }],
+                },
+              ]),
+          ...(stage === 'existing-failure'
+            ? [
+                {
+                  id: 'existing-failure-notice',
+                  role: 'system' as const,
+                  timestamp: '2026-11-12T00:00:02Z',
+                  items: [
+                    {
+                      type: 'system_notice' as const,
+                      name: 'chat_failed' as const,
+                      meta: {
+                        reason: 'turn_pre_prompt_failed' as const,
+                        message: 'Existing failure',
+                      },
+                    },
+                  ],
+                },
+              ]
+            : []),
+        ],
+      });
+      const filename = join(directory, 'execution.sqlite');
+      let journal = RealtimeJournal.create(filename, () => 1000);
+      const request = {
+        genesis: 'genesis',
+        workspaceId: 'workspace-1',
+        targetMachineId: 'machine-1',
+        requestId: `agent-start:${turnId}`,
+        requester: 'synthetic-device',
+        expiresAt: 0,
+        frame: Buffer.from(JSON.stringify([2, sessionId, turnId, null])),
+      };
+      journal.receive(request);
+      expect(journal.claim(request).state).toBe('claimed');
+      try {
+        for (let restart = 0; restart < 2; restart++) {
+          journal = new RealtimeJournal(filename, () => 1000);
+          const readJournal = journal.read.bind(journal);
+          if (restart === 1)
+            vi.spyOn(journal, 'read').mockImplementation((key) => {
+              if (key.requestId === request.requestId)
+                throw new Error('old terminal journal unavailable');
+              return readJournal(key);
+            });
+          const gate = makeEncryptedAgentExecution({
+            genesis: 'genesis',
+            workspaceId: 'workspace-1',
+            targetMachineId: 'machine-1',
+            machineUserId: 'user-1',
+            journal: () => journal,
+            resolveVerifiedOriginal: () =>
+              Effect.die('recovery must not resolve or replay a prompt'),
+          });
+          const workspaceDocument = { repo } as unknown as LoroDocumentManager;
+          const service = new SessionExecutionService({
+            logger: createSilentLogger(),
+            workspaceId: 'workspace-1',
+            workspaceDocument,
+            encryptedExecution: gate,
+            sessionManager: { getSession: () => null, getPendingSession: () => null },
+          } as unknown as ConstructorParameters<typeof SessionExecutionService>[0]);
+          const watcher = createWatcher({
+            logger: createSilentLogger(),
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1' as WorkspaceId,
+            workspaceDocument,
+            executionService: service,
+            encryptedWorkspace: true,
+            canUseMachine: createAllowMachineAccess(),
+          });
+          const result = await (
+            watcher as unknown as {
+              checkHistoryAndQueue(
+                doc: SessionDocument,
+                meta: SessionMeta
+              ): Promise<{ turn: unknown }>;
+            }
+          ).checkHistoryAndQueue(doc, meta);
+          expect(result.turn).toBeNull();
+          expect(meta.status.type).toBe('idle');
+          expect(meta.processingUserMsgId).toBeUndefined();
+          if (stage === 'newer-pointer') expect(meta.lastHandledUserMsgId).toBe('turn_2');
+          const history = await doc.sessionData.history.readAll();
+          expect(history.find((entry) => entry.id === turnId)?.status).toBe(
+            stage === 'completed-reply' ? 'handled' : stage === 'canceled' ? 'canceled' : 'failed'
+          );
+          if (stage === 'canceled') {
+            expect(history.filter((entry) => entry.role === 'system')).toEqual([]);
+            continue;
+          }
+          if (stage === 'completed-reply') {
+            expect(history.filter((entry) => entry.role === 'system')).toEqual([]);
+            expect(history.find((entry) => entry.id === 'partial-reply')?.endedAt).toBe(1000);
+            continue;
+          }
+          const notices = history.filter((entry) => entry.role === 'system');
+          expect(notices).toHaveLength(1);
+          if (stage === 'existing-failure') {
+            expect(notices[0]?.id).toBe('existing-failure-notice');
+          } else
+            expect(notices[0]).toMatchObject({
+              id: `e2ee-interrupted:${turnId}`,
+              userTurnId: turnId,
+              items: [
+                {
+                  type: 'system_notice',
+                  name: 'chat_failed',
+                  meta: { message: expect.stringContaining('not retried automatically') },
+                },
+              ],
+            });
+          if (stage !== 'claimed')
+            expect(history.find((entry) => entry.id === 'partial-reply')).toMatchObject({
+              finished: true,
+              endedAt: expect.any(Number),
+              items: [{ type: 'text', text: 'partial output' }],
+            });
+          expect(readJournal(request)?.state).toBe('uncertain');
+          if (stage === 'newer-pointer') continue;
+          if (restart === 0) {
+            const settledTurn = await doc.sessionData.history.readTurn(turnId);
+            vi.spyOn(journal, 'read').mockImplementation((key) => {
+              if (key.requestId === request.requestId)
+                throw new Error('old terminal journal unavailable');
+              return readJournal(key);
+            });
+            expect(await service.recoverUncertainEncryptedTurn(sessionId, doc, turnId)).toBe(false);
+            await doc.pushMessageQueue({
+              userTurnId: 'turn_2',
+              task: 'next independent input',
+              userId: 'user-1',
+              timestamp: '2026-11-12T00:00:03Z',
+              acpSessionConfig: {
+                prompt: 'next independent input',
+                cliType: 'builtin',
+                agentType: 'codex',
+              },
+            } as never);
+            const next = await (
+              watcher as unknown as {
+                checkHistoryAndQueue(
+                  doc: SessionDocument,
+                  meta: SessionMeta
+                ): Promise<{ turn: SessionHistoryInput | null }>;
+              }
+            ).checkHistoryAndQueue(doc, meta);
+            expect(next.turn?.id).toBe('turn_2');
+            expect(await doc.sessionData.history.readTurn(turnId)).toEqual(settledTurn);
+            const backend = await createSessionBackend(doc, meta);
+            await backend.applyHistoryAction({
+              kind: 'user-status',
+              turnId: 'turn_2',
+              status: 'handled',
+            });
+            await repo.upsertDocMeta('', { lastHandledUserMsgId: 'turn_2' });
+          } else {
+            expect(meta.lastHandledUserMsgId).toBe('turn_2');
+          }
+        }
+      } finally {
+        doc.mirror.dispose();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['old-input', 'turn_2'] as const)(
+    'contains a recovery failure in %s while selecting a newer Inbox input',
+    async (failedTurn) => {
+      const f = await createQueueRecoveryFixture({
+        sessionId: 'recovery-isolation' as SessionId,
+        meta: {
+          latestUserMsgId: 'turn_2',
+          lastHandledUserMsgId: 'old-input',
+          processingUserMsgId: 'old-input',
+        },
+        history: [
+          { ...createPendingUserTurn('old-input', 'old'), status: 'seen', read: true },
+          { ...createPendingUserTurn('turn_2', 'new'), status: 'seen', read: true },
+        ],
+      });
+      const diagnostics: string[] = [];
+      const logger = {
+        ...createSilentLogger(),
+        debug: (message: string) => {
+          diagnostics.push(message);
+        },
+      };
+      const watcher = createWatcher({
+        logger,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument: {} as LoroDocumentManager,
+        encryptedWorkspace: true,
+        canUseMachine: createAllowMachineAccess(),
+        executionService: {
+          getPreferredInboxHumanInput: () => 'turn_2',
+          recoverUncertainEncryptedTurn: async (_session: string, _doc: unknown, turn: string) => {
+            if (turn === failedTurn) throw new Error('synthetic SQLite busy');
+            return false;
+          },
+        } as unknown as SessionExecutionService,
+      });
+      try {
+        const selecting = (
+          watcher as unknown as {
+            checkHistoryAndQueue(
+              doc: SessionDocument,
+              meta: SessionMeta
+            ): Promise<{ turn: SessionHistoryInput | null }>;
+          }
+        ).checkHistoryAndQueue(f.doc, f.meta());
+        if (failedTurn === 'turn_2') {
+          await expect(selecting).rejects.toThrow('synthetic SQLite busy');
+          expect(await f.doc.sessionData.history.readTurn('turn_2')).toMatchObject({
+            state: 'ready',
+            turn: { status: 'seen' },
+          });
+          return;
+        }
+        const result = await selecting;
+        expect(result.turn?.id).toBe('turn_2');
+        expect(await f.doc.sessionData.history.readTurn('old-input')).toMatchObject({
+          state: 'ready',
+          turn: { status: 'seen' },
+        });
+        expect(diagnostics.some((message) => message.includes('old-input'))).toBe(true);
+      } finally {
+        f.dispose();
+      }
+    }
+  );
+
   it('repairs a late-arriving entry for an already-handled fast-path turn instead of re-dispatching', async () => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});
@@ -663,25 +1560,25 @@ describe('SessionDispatchWatcher', () => {
     };
     let history: SessionHistoryInput[] = [createPendingUserTurn('turn-late', 'late entry')];
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       // No mirror: after the repair there is no dispatchable turn, and the
       // legacy realtime wait resolves immediately without one.
       mirror: undefined,
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
         getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
         upsertDocMeta: vi.fn(async () => {}),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
     } as unknown as LoroDocumentManager;
 
     const watcher = createWatcher({
@@ -735,23 +1632,23 @@ describe('SessionDispatchWatcher', () => {
     };
     let history: SessionHistoryInput[] = [createPendingUserTurn('turn-denied', 'denied entry')];
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: undefined,
       getMetaState: vi.fn(async () => sessionMeta),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
         getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
         upsertDocMeta: vi.fn(async () => {}),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
     } as unknown as LoroDocumentManager;
 
     const watcher = createWatcher({
@@ -792,7 +1689,7 @@ describe('SessionDispatchWatcher', () => {
     let history = [createPendingUserTurn('turn-denied', 'hello')];
     const upsertDocMeta = vi.fn(async () => {});
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
@@ -806,7 +1703,7 @@ describe('SessionDispatchWatcher', () => {
         status: { type: 'idle' },
         latestUserMsgId: 'turn-denied',
       })),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updateFn: (items: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updateFn(history);
@@ -814,7 +1711,7 @@ describe('SessionDispatchWatcher', () => {
       ),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -836,7 +1733,7 @@ describe('SessionDispatchWatcher', () => {
         upsertDocMeta,
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -886,6 +1783,7 @@ describe('SessionDispatchWatcher', () => {
     );
     expect(upsertDocMeta).toHaveBeenCalledWith(roomId, {
       lastHandledUserMsgId: 'turn-denied',
+      lastFailedUserMsgId: 'turn-denied',
       processingUserMsgId: undefined,
     });
     // A definitive denial must be surfaced to the user, not silently marked
@@ -901,11 +1799,15 @@ describe('SessionDispatchWatcher', () => {
   // in history, so dispatch reaches the canUseMachine gate without the 5-min wait.
   const createAccessHarness = (opts: {
     canUseMachine: WatcherDeps['canUseMachine'];
+    encryptedWorkspace?: boolean;
     accessPolicy?: WatcherDeps['accessPolicy'];
     currentUserId?: WatcherDeps['currentUserId'];
     recordOwnerAccessSnapshot?: WatcherDeps['recordOwnerAccessSnapshot'];
+    recordMemberAccessSnapshot?: WatcherDeps['recordMemberAccessSnapshot'];
     recordChatFailure?: WatcherDeps['recordChatFailure'];
     onFatalAuthFailure?: WatcherDeps['onFatalAuthFailure'];
+    dispatchPrepared?: SessionExecutionService['dispatchPreparedSessionTurn'];
+    subscribeExecutionEvidence?: WatcherDeps['subscribeExecutionEvidence'];
   }) => {
     const startSession = vi.fn(async () => {});
     const continueSession = vi.fn(async () => {});
@@ -924,10 +1826,10 @@ describe('SessionDispatchWatcher', () => {
       status: { type: 'idle' },
     };
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: { subscribe: vi.fn(() => vi.fn()) },
       getMetaState: vi.fn(async () => meta),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updateFn: (items: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updateFn(history);
@@ -935,7 +1837,7 @@ describe('SessionDispatchWatcher', () => {
       ),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -946,17 +1848,19 @@ describe('SessionDispatchWatcher', () => {
         upsertDocMeta,
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
     const watcher = createWatcher({
+      encryptedWorkspace: opts.encryptedWorkspace,
       logger: createSilentLogger(),
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       ...(opts.currentUserId ? { currentUserId: opts.currentUserId } : {}),
       workspaceDocument,
       executionService: {
+        ...(opts.dispatchPrepared ? { dispatchPreparedSessionTurn: opts.dispatchPrepared } : {}),
         getExecutionSnapshot: vi.fn(() => ({
           hasActiveTurn: false,
           hasBlockingPendingCreate: false,
@@ -970,12 +1874,18 @@ describe('SessionDispatchWatcher', () => {
       ...(opts.recordOwnerAccessSnapshot
         ? { recordOwnerAccessSnapshot: opts.recordOwnerAccessSnapshot }
         : {}),
+      ...(opts.recordMemberAccessSnapshot
+        ? { recordMemberAccessSnapshot: opts.recordMemberAccessSnapshot }
+        : {}),
       canUseMachine: opts.canUseMachine,
       recordChatFailure: opts.recordChatFailure,
       onFatalAuthFailure: opts.onFatalAuthFailure,
+      ...(opts.subscribeExecutionEvidence
+        ? { subscribeExecutionEvidence: opts.subscribeExecutionEvidence }
+        : {}),
     });
 
-    return {
+    return withHistoryPort({
       watcher,
       sessionId,
       roomId,
@@ -983,7 +1893,7 @@ describe('SessionDispatchWatcher', () => {
       continueSession,
       upsertDocMeta,
       getHistory: () => history,
-    };
+    });
   };
 
   // NOTE: backoff/cap/escalation/timeout timing is covered deterministically by
@@ -992,6 +1902,146 @@ describe('SessionDispatchWatcher', () => {
   // turn), and the fiber's outcome routes back to dispatch or a visible failure.
   // The fiber's FIRST verify attempt is immediate (no backoff), so recover/deny
   // flows complete without waiting on timers.
+
+  it.each([
+    { encryptedWorkspace: false, reason: 'not_visible' as const },
+    { encryptedWorkspace: true, reason: 'not_visible' as const },
+    { encryptedWorkspace: false, reason: 'project_not_shared' as const },
+    { encryptedWorkspace: true, reason: 'project_not_shared' as const },
+  ])(
+    'routes encrypted=$encryptedWorkspace through its admission gate ($reason)',
+    async ({ encryptedWorkspace, reason }) => {
+      const forwarded: string[] = [];
+      const snapshots: string[] = [];
+      const h = createAccessHarness({
+        encryptedWorkspace,
+        currentUserId: 'machine-owner',
+        canUseMachine: async () => ({ outcome: 'denied', reason }),
+        accessPolicy: {
+          decide: () => Effect.succeed({ outcome: 'remote' as const }),
+        } as never,
+        recordMemberAccessSnapshot: async ({ requesterUserId }) => {
+          snapshots.push(requesterUserId);
+        },
+        dispatchPrepared: async (options) => {
+          const access = await options.accessPromise;
+          if (access.outcome === 'denied') {
+            await options.onAccessDenied(access);
+            return;
+          }
+          expect(access).toEqual({ outcome: 'allowed' });
+          await options.requestPromise;
+          forwarded.push(options.userTurnId);
+        },
+      });
+      try {
+        await runMaybeHandleSession(h.watcher, h.sessionId);
+        expect(forwarded).toEqual(encryptedWorkspace ? ['turn-x'] : []);
+        expect(h.getHistory()[0]?.status).toBe(encryptedWorkspace ? 'pending' : 'failed');
+        if (encryptedWorkspace) expect(snapshots).toEqual([]);
+      } finally {
+        h.watcher.stop();
+      }
+    }
+  );
+
+  it('retries missing execution evidence without retiring the pending turn, and cancels the retry on stop', async () => {
+    vi.useFakeTimers();
+    const dispatched = createDeferred();
+    let originalAvailable = false;
+    let starts = 0;
+    const h = createAccessHarness({
+      canUseMachine: async () => ({ outcome: 'allowed' }),
+      dispatchPrepared: async (options) => {
+        if (!originalAvailable) {
+          await options.onExecutionDeferred?.();
+          return;
+        }
+        starts += 1;
+        dispatched.resolve();
+      },
+    });
+    try {
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      expect(h.getHistory()[0]?.status).toBe('pending');
+      expect(starts).toBe(0);
+      originalAvailable = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      await dispatched.promise;
+      expect(starts).toBe(1);
+      expect(h.getHistory()[0]?.status).toBe('pending');
+      originalAvailable = false;
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      h.watcher.stop();
+      originalAvailable = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(starts).toBe(1);
+    } finally {
+      h.watcher.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it('rechecks a waiting turn when its evidence arrives, with a timer fallback capped at five minutes', async () => {
+    vi.useFakeTimers();
+    const listeners = new Set<(roomId?: string) => void>();
+    let attempts = 0;
+    const h = createAccessHarness({
+      canUseMachine: async () => ({ outcome: 'allowed' }),
+      subscribeExecutionEvidence: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      dispatchPrepared: async (options) => {
+        attempts += 1;
+        await options.onExecutionDeferred?.();
+      },
+    });
+    const evidence = (roomId?: string) => {
+      for (const listener of listeners) listener(roomId);
+    };
+    try {
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      expect(attempts).toBe(1);
+      // The fallback doubles from one second and never waits longer than five minutes.
+      for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000]) {
+        const before = attempts;
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(attempts).toBe(before);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(attempts).toBe(before + 1);
+      }
+      for (let round = 0; round < 2; round += 1) {
+        const before = attempts;
+        await vi.advanceTimersByTimeAsync(299_999);
+        expect(attempts).toBe(before);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(attempts).toBe(before + 1);
+      }
+      // A new frame for another document does not touch this turn; its own frame,
+      // or a confirmed ledger read (no document), rechecks it at once.
+      let before = attempts;
+      evidence('session-other');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts).toBe(before);
+      evidence(h.roomId);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts).toBe(before + 1);
+      before = attempts;
+      evidence();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts).toBe(before + 1);
+      h.watcher.stop();
+      before = attempts;
+      evidence(h.roomId);
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(attempts).toBe(before);
+      expect(listeners.size).toBe(0);
+    } finally {
+      h.watcher.stop();
+      vi.useRealTimers();
+    }
+  });
 
   it('does not fail or retire a pending turn when access verification is indeterminate', async () => {
     const canUseMachine = vi.fn(async () => ({
@@ -1166,6 +2216,92 @@ describe('SessionDispatchWatcher', () => {
     h.watcher.stop();
   });
 
+  it('dispatches a member turn from a backend-confirmed cache while the backend is unreachable', async () => {
+    const runtime = ManagedRuntime.make(fileLockLayer);
+    const dir = mkdtempSync(join(tmpdir(), 'lody-member-dispatch-'));
+    const now = Date.parse('2026-10-15T16:00:00.000Z');
+    try {
+      const catalog = makeLocalWorkspaceCatalog({
+        filePath: join(dir, 'workspace-catalog.json'),
+        lockName: `member-dispatch-${basename(dir)}`,
+        now: () => now,
+      });
+      await runtime.runPromise(
+        catalog.cacheRemoteWorkspaces({
+          identity: { userId: 'user-owner' },
+          machine: { machineId: 'machine-1' },
+          workspaces: [{ id: 'workspace-1', name: 'Alpha', slug: 'alpha', role: 'member' }],
+        })
+      );
+      const cachedMembers = async () =>
+        (await runtime.runPromise(catalog.read())).workspaces[0]?.memberAccessSnapshots ?? [];
+      // The harness turn is authored by user-1, a member of the owner's machine.
+      const dispatchWithBackend = async (backendVerdict: MachineAccessVerification) => {
+        const h = createAccessHarness({
+          canUseMachine: async () => backendVerdict,
+          accessPolicy: makeSessionAccessPolicy(catalog, () => now),
+          currentUserId: 'user-owner',
+          recordMemberAccessSnapshot: async ({ requesterUserId, localProjectId, verdict }) =>
+            await runtime.runPromise(
+              catalog.recordMemberAccessSnapshot({
+                workspaceId: 'workspace-1',
+                requesterUserId,
+                ...(localProjectId ? { localProjectId } : {}),
+                ownerUserId: 'user-owner',
+                machineId: 'machine-1',
+                verifiedAt: verdict === 'allowed' ? new Date(now).toISOString() : null,
+              })
+            ),
+        });
+        await runMaybeHandleSession(h.watcher, h.sessionId);
+        return h;
+      };
+      const offline = {
+        outcome: 'indeterminate' as const,
+        cause: 'network' as const,
+        error: 'fetch failed',
+      };
+
+      // Without a cached verdict an outage keeps the member turn pending.
+      const uncached = await dispatchWithBackend(offline);
+      expect(uncached.startSession).not.toHaveBeenCalled();
+      uncached.watcher.stop();
+
+      // An online allow seeds the cache...
+      const online = await dispatchWithBackend({ outcome: 'allowed' });
+      expect(online.startSession).toHaveBeenCalledTimes(1);
+      await vi.waitFor(async () =>
+        expect(await cachedMembers()).toEqual([
+          {
+            requesterUserId: 'user-1',
+            ownerUserId: 'user-owner',
+            machineId: 'machine-1',
+            verifiedAt: new Date(now).toISOString(),
+          },
+        ])
+      );
+      online.watcher.stop();
+
+      // ...so the same outage no longer blocks the member's next turn.
+      const cached = await dispatchWithBackend(offline);
+      expect(cached.startSession).toHaveBeenCalledTimes(1);
+      await flushMicrotasks();
+      expect(await cachedMembers()).toHaveLength(1);
+      cached.watcher.stop();
+
+      // A definitive deny clears the entry, sending the next turn back to remote.
+      const revoked = await dispatchWithBackend({ outcome: 'denied', reason: 'not_visible' });
+      await vi.waitFor(async () => expect(await cachedMembers()).toEqual([]));
+      revoked.watcher.stop();
+      const afterRevoke = await dispatchWithBackend(offline);
+      expect(afterRevoke.startSession).not.toHaveBeenCalled();
+      afterRevoke.watcher.stop();
+    } finally {
+      await runtime.dispose();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('fails the turn visibly when the background retry reaches a definitive denial', async () => {
     let calls = 0;
     const canUseMachine = vi.fn(async () => {
@@ -1186,13 +2322,290 @@ describe('SessionDispatchWatcher', () => {
       { timeout: 3_000 }
     );
     expect(h.startSession).not.toHaveBeenCalled();
-    expect(recordChatFailure).toHaveBeenCalledWith(
-      expect.anything(),
-      'machine_access_denied',
-      expect.any(String)
+    await vi.waitFor(() =>
+      expect(recordChatFailure).toHaveBeenCalledWith(
+        expect.anything(),
+        'machine_access_denied',
+        expect.any(String)
+      )
     );
 
     h.watcher.stop();
+  });
+
+  it.each([
+    { deliveryOrder: 'content-first', versioned: false, automation: false },
+    { deliveryOrder: 'metadata-first', versioned: false, automation: false },
+    { deliveryOrder: 'content-first', versioned: true, automation: false },
+    { deliveryOrder: 'metadata-first', versioned: true, automation: false },
+    { deliveryOrder: 'content-first', versioned: true, automation: true },
+  ])(
+    'automatically dispatches a queued message after turn completion with $deliveryOrder delivery (versioned=$versioned, automation=$automation)',
+    async ({ deliveryOrder, versioned, automation }) => {
+      vi.useFakeTimers();
+      const sessionId = 'queue-arrival-order' as SessionId;
+      const roomId = `session-${sessionId}`;
+      // The previous turn has completed; only the queue watermark can keep this
+      // otherwise idle session watched. The two planes are delivered separately.
+      let meta: SessionMeta = {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-10-27T00:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+        latestUserMsgId: 'previous-turn',
+        lastHandledUserMsgId: 'previous-turn',
+        messageQueueUpdatedAt: 10,
+        messageQueueCheckedAt: 10,
+      };
+      let onMetadata: (event: { kind: 'doc-metadata'; docId: string }) => void = () => {};
+      const repo = {
+        getMeta: () => ({ scan: async () => [{ key: ['e', roomId], value: true }] }),
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_roomId: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+          onMetadata({ kind: 'doc-metadata', docId: roomId });
+        },
+        watch: (listener: typeof onMetadata) => {
+          onMetadata = listener;
+          return {
+            unsubscribe: () => {
+              onMetadata = () => {};
+            },
+          };
+        },
+        flush: async () => {},
+      };
+      const doc = new SessionDocument(
+        repo as never,
+        sessionId,
+        async () => {},
+        createSilentLogger()
+      );
+      doc.roomId = roomId;
+      composeTestSessionDoc(doc, {
+        history: [
+          { ...createPendingUserTurn('previous-turn', 'previous input'), status: 'handled' },
+        ],
+      });
+      // The fixture composes storage without init(); bind the real backend for
+      // subscribeSessionChanges, as SessionDocument.init() does in production.
+      const backend = await createSessionBackend(doc);
+      vi.spyOn(doc, 'getSessionBackend').mockReturnValue(backend);
+      const errors: unknown[] = [];
+      const dispatched: string[] = [];
+      const watcher = createWatcher({
+        logger: {
+          ...createSilentLogger(),
+          error: (...args) => {
+            errors.push(args);
+          },
+        },
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument: {
+          repo,
+          getOrCreateSessionDoc: async () => doc,
+          onMetaRoomSynced: () => () => {},
+        } as unknown as LoroDocumentManager,
+        executionService: {
+          getExecutionSnapshot: () => ({
+            hasActiveTurn: false,
+            hasBlockingPendingCreate: false,
+            hasReusableSession: false,
+          }),
+          startSession: async (request: { userTurnId: string }) => {
+            dispatched.push(request.userTurnId);
+            await (
+              await createSessionBackend(doc)
+            ).applyHistoryAction({
+              kind: 'user-status',
+              turnId: request.userTurnId,
+              status: 'handled',
+            });
+            await repo.upsertDocMeta(roomId, { lastHandledUserMsgId: request.userTurnId });
+          },
+          continueSession: async () => {},
+        } as unknown as SessionExecutionService,
+        canUseMachine: createAllowMachineAccess(),
+      });
+      // Observe existing work only: never enqueue a check to rescue the late row.
+      const work = watcher as unknown as {
+        metadataReconcileChain: Promise<void>;
+        metadataReconcileDrainScheduled: boolean;
+        sessionCheckChains: Map<SessionId, Promise<void>>;
+        watchedSessions: Map<SessionId, unknown>;
+      };
+      const drain = async () => {
+        do {
+          await vi.runAllTimersAsync();
+          await Promise.all([work.metadataReconcileChain, ...work.sessionCheckChains.values()]);
+        } while (work.metadataReconcileDrainScheduled || work.sessionCheckChains.size > 0);
+      };
+      try {
+        await watcher.start();
+        await drain();
+        expect(work.watchedSessions.has(sessionId)).toBe(false);
+        expect(dispatched).toEqual([]);
+        if (automation) {
+          let signed:
+            | { targetMachineId: string; userTurnId: string; inputConfig: unknown }
+            | undefined;
+          const adapter = new AutomationSessionActionsLegacy({
+            lody: {
+              documentManager: {
+                repo,
+                getOrCreateSessionDoc: async () => doc,
+                isEncryptedWorkspace: () => true,
+                signMachineInput: async (input: NonNullable<typeof signed>) => {
+                  signed = input;
+                  return 'B'.repeat(131);
+                },
+              },
+              getAutomationSessionAuthority: () => ({ acceptInput: async () => true }),
+            },
+          } as unknown as ConstructorParameters<typeof AutomationSessionActionsLegacy>[0]);
+          vi.spyOn(adapter, 'authorize').mockResolvedValue({ value: 'yes' });
+          const receipt = {
+            id: 'automation-operation',
+            sessionId,
+            turnId: 'late-queued-turn',
+            createdAt: 1,
+            rule: { ownerUserId: 'user-1' },
+            intent: {
+              action: {
+                kind: 'agent.invoke',
+                parameters: {
+                  target: { kind: 'existing', sessionId, onUnavailable: 'blocked' },
+                  input: { kind: 'external_event', ref: 'event' },
+                  ifBusy: 'enqueue',
+                },
+              },
+            },
+            prepared: {
+              config: { prompt: 'queued input', cliType: 'builtin', agentType: 'codex' },
+            },
+          } as unknown as Parameters<typeof adapter.submit>[0];
+          expect(await adapter.submit(receipt)).toEqual({ state: 'queued' });
+          await drain();
+          expect(errors).toEqual([]);
+          expect({ dispatched, queued: await doc.getMessageQueue() }).toEqual({
+            dispatched: ['late-queued-turn'],
+            queued: [],
+          });
+          // What the machine signed must be what promotion wrote, or encrypted starts refuse.
+          const promoted = await doc.sessionData.history.readTurn('late-queued-turn');
+          if (promoted.state !== 'ready') throw new Error('promoted turn missing');
+          expect(signed).toMatchObject({
+            targetMachineId: 'machine-1',
+            userTurnId: 'late-queued-turn',
+          });
+          expect(turnExecutionDigest({ inputConfig: promoted.turn.inputConfig })).toBeDefined();
+          expect(turnExecutionDigest({ inputConfig: signed?.inputConfig })).toBe(
+            turnExecutionDigest({ inputConfig: promoted.turn.inputConfig })
+          );
+          return;
+        }
+        const sender = new SessionDocument(
+          repo as never,
+          sessionId,
+          async () => {},
+          createSilentLogger()
+        );
+        const senderLoro = composeTestSessionDoc(sender, { doc: doc.handle.doc.fork() });
+        let update: Uint8Array;
+        let frontiers: ReturnType<LoroDoc['frontiers']>;
+        try {
+          await sender.pushMessageQueue(createQueueItem('late-queued-turn'));
+          update = senderLoro.export({ mode: 'update', from: doc.handle.doc.version() });
+          frontiers = senderLoro.frontiers();
+        } finally {
+          sender.mirror.dispose();
+        }
+        if (deliveryOrder === 'content-first') doc.handle.doc.import(update);
+        await repo.upsertDocMeta(roomId, {
+          messageQueueUpdatedAt: 20,
+          ...(versioned ? { messageQueueUpdateVersion: { updatedAt: 20, frontiers } } : {}),
+        });
+        await drain();
+        if (deliveryOrder === 'metadata-first') {
+          expect(meta.messageQueueCheckedAt).toBe(10);
+          doc.handle.doc.import(update);
+          await drain();
+        }
+        expect(errors).toEqual([]);
+        expect({
+          dispatched,
+          queued: (await doc.getMessageQueue()).map((item) => item.userTurnId),
+        }).toEqual({ dispatched: ['late-queued-turn'], queued: [] });
+        if (versioned) expect(meta.messageQueueCheckedAt).toBe(20);
+      } finally {
+        watcher.stop();
+        doc.mirror.dispose();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('keeps the queue signal open while a queued row could not be promoted', async () => {
+    const id = 'queue-held' as SessionId;
+    let meta = {
+      id,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-10-26T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      messageQueueUpdatedAt: 5,
+      messageQueueCheckedAt: 1,
+    } as SessionMeta;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+    };
+    const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+    doc.roomId = `session-${id}`;
+    composeTestSessionDoc(doc, { history: [] });
+    await doc.pushMessageQueue(createQueueItem('held'));
+    // Another session rewrite holds the lease during the first check.
+    let leaseFree = false;
+    const startSession = vi.fn(async () => {});
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo, getOrCreateSessionDoc: async () => doc } as never,
+      executionService: {
+        getExecutionSnapshot: () => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        }),
+        tryAcquireSessionRewriteConflictLease: () => (leaseFree ? () => {} : null),
+        startSession,
+        continueSession: vi.fn(async () => {}),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    try {
+      await runMaybeHandleSession(watcher, id);
+      expect(await doc.getMessageQueue()).toHaveLength(1);
+      expect(meta.messageQueueCheckedAt).toBe(1);
+
+      leaseFree = true;
+      await runMaybeHandleSession(watcher, id);
+      expect(await doc.getMessageQueue()).toHaveLength(0);
+      expect(startSession).toHaveBeenCalledWith(expect.objectContaining({ userTurnId: 'held' }), {
+        dispatchSource: 'queue',
+      });
+    } finally {
+      doc.mirror.dispose();
+    }
   });
 
   it('hydrates queued mq items into pending turns before dispatching', async () => {
@@ -1202,6 +2615,7 @@ describe('SessionDispatchWatcher', () => {
     const sessionId = 'session-mq-1' as SessionId;
     const roomId = `session-${sessionId}`;
     let history: SessionHistoryInput[] = [];
+    let promotedPointer: string | undefined;
     const queue = [
       {
         $cid: 'mq-1',
@@ -1214,11 +2628,19 @@ describe('SessionDispatchWatcher', () => {
           inputBlocks: [{ type: 'text', text: 'queued hello' }],
           cliType: 'builtin',
           agentType: 'codex',
+          agentRoleId: 'role-reviewer',
+          agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         },
       },
     ];
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
@@ -1232,8 +2654,15 @@ describe('SessionDispatchWatcher', () => {
         status: { type: 'idle' },
         messageQueueUpdatedAt: 1,
       })),
-      getHistory: vi.fn(async () => history),
-      popMessageQueue: vi.fn(async () => queue.shift() ?? null),
+      getHistory: vi.fn(() => history),
+      peekReadyMessageQueue: vi.fn(async () => queue[0] ?? null),
+      removeMessageQueueItem: vi.fn(async () => {
+        queue.shift();
+      }),
+      appendUserTurn: vi.fn(async (entry: SessionHistoryInput) => {
+        history = [...history, entry];
+        promotedPointer = entry.id;
+      }),
       updateHistory: vi.fn(
         async (updateFn: (items: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updateFn(history);
@@ -1241,7 +2670,7 @@ describe('SessionDispatchWatcher', () => {
       ),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -1262,7 +2691,7 @@ describe('SessionDispatchWatcher', () => {
         })),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -1289,24 +2718,227 @@ describe('SessionDispatchWatcher', () => {
     await vi.waitFor(() => {
       expect(startSession).toHaveBeenCalledTimes(1);
     });
-    expect(sessionDoc.popMessageQueue).toHaveBeenCalledTimes(1);
-    expect(sessionDoc.updateHistory).toHaveBeenCalledTimes(1);
+    expect(queue).toHaveLength(0);
     expect(history[0]).toEqual(
       expect.objectContaining({
         id: 'queued-mq-1',
         role: 'user',
         status: 'pending',
         userId: 'user-1',
+        inputConfig: expect.objectContaining({
+          agentRoleId: 'role-reviewer',
+          agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
+        }),
       })
     );
+    // The promoted turn is published for dispatch, not just written to history.
+    expect(promotedPointer).toBe('queued-mq-1');
     expect(startSession).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'session/create',
         sessionId,
         userTurnId: 'queued-mq-1',
+        acpSessionConfig: expect.objectContaining({
+          agentRoleId: 'role-reviewer',
+          agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
+        }),
       }),
       { dispatchSource: 'queue' }
     );
+  });
+
+  it('repairs activation after a history-only queue commit without duplicating or replaying turns', async () => {
+    const id = 'queue-retry' as SessionId;
+    let meta = {
+      id,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-09-09',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      latestUserMsgId: 'previous',
+      lastHandledUserMsgId: 'previous',
+    } as SessionMeta;
+    let rejectPointer = true;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+        if (rejectPointer) throw new Error('pointer-unavailable');
+        meta = { ...meta, ...patch };
+      },
+    };
+    const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+    const loro = new LoroDoc();
+    composeTestSessionDoc(doc, { doc: loro });
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo } as never,
+      executionService: {} as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    const promote = (
+      watcher as unknown as {
+        promoteNextQueuedMessage: (
+          doc: SessionDocument,
+          meta: SessionMeta,
+          history: SessionHistoryInput[]
+        ) => Promise<SessionHistoryInput | null>;
+      }
+    ).promoteNextQueuedMessage.bind(watcher);
+    const enqueue = () =>
+      doc.pushMessageQueue({
+        userTurnId: 'queued',
+        task: 'hello',
+        userId: 'user-1',
+        timestamp: '2026-09-09',
+        acpSessionConfig: {
+          prompt: 'hello',
+          cliType: 'builtin',
+          agentType: 'codex',
+        },
+      } as never);
+    try {
+      await enqueue();
+      const attempt = async () => promote(doc, meta, await doc.sessionData.history.readAll());
+      await expect(attempt()).rejects.toThrow('pointer-unavailable');
+      expect(loro.getList('history').length).toBe(1);
+      expect(await doc.getMessageQueue()).toHaveLength(1);
+      await expect(attempt()).rejects.toThrow('pointer-unavailable');
+      expect(await doc.getMessageQueue()).toHaveLength(1);
+      rejectPointer = false;
+      meta.latestUserMsgId = 'other';
+      expect(await attempt()).toBeNull();
+      expect(meta.latestUserMsgId).toBe('other');
+      expect(await doc.getMessageQueue()).toHaveLength(1);
+      meta.lastHandledUserMsgId = 'other';
+      expect((await attempt())?.id).toBe('queued');
+      expect(getPendingUserTurnActivationId(meta)).toBe('queued');
+      expect(await doc.getMessageQueue()).toHaveLength(0);
+      expect(loro.getList('history').length).toBe(1);
+      // A resurrected queue row must not replay even if history status is stale.
+      meta.lastHandledUserMsgId = 'queued';
+      await enqueue();
+      expect(await attempt()).toBeNull();
+      expect(hasPendingUserTurnActivation(meta)).toBe(false);
+      expect(await doc.getMessageQueue()).toHaveLength(0);
+    } finally {
+      doc.mirror.dispose();
+    }
+  });
+
+  it('recovers queue promotion receipts in queue order using fresh state for each receipt', async () => {
+    const fixture = await createQueueRecoveryFixture({
+      sessionId: 'session-queue-recovery-order' as SessionId,
+      meta: {
+        queuePromotionLedger: {
+          'queue:turn-1': createQueueReceipt('turn-1'),
+          'queue:turn-2': createQueueReceipt('turn-2'),
+        },
+      },
+      queue: [createQueueItem('turn-1'), createQueueItem('turn-2')],
+    });
+    try {
+      await fixture.recover(fixture.doc, fixture.meta());
+
+      expect((await fixture.doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual([
+        'turn-1',
+      ]);
+      expect((await fixture.doc.getMessageQueue()).map((item) => item.userTurnId)).toEqual([
+        'turn-2',
+      ]);
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-1']?.state).toBe('queue_consumed');
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-2']?.state).toBe('prepared');
+
+      // Once the first activation is handled, the next recovery pass can use
+      // the newly exposed queue head. It must not reuse the first pass's queue
+      // or metadata snapshot.
+      await fixture.updateMeta({ lastHandledUserMsgId: 'turn-1' });
+      await fixture.recover(fixture.doc, fixture.meta());
+
+      expect((await fixture.doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual([
+        'turn-1',
+        'turn-2',
+      ]);
+      expect(await fixture.doc.getMessageQueue()).toHaveLength(0);
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-2']?.state).toBe('queue_consumed');
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('does not replay an old activation when its queue row is gone and a newer activation is pending', async () => {
+    const oldTurn = createPendingUserTurn('turn-old', 'old queued input');
+    const fixture = await createQueueRecoveryFixture({
+      sessionId: 'session-queue-recovery-newer-activation' as SessionId,
+      meta: {
+        latestUserMsgId: 'turn-newer',
+        lastHandledUserMsgId: 'turn-before',
+        queuePromotionLedger: {
+          'queue:turn-old': createQueueReceipt('turn-old', 'activation_published'),
+        },
+      },
+      history: [oldTurn],
+    });
+    try {
+      await fixture.recover(fixture.doc, fixture.meta());
+
+      expect(fixture.meta().latestUserMsgId).toBe('turn-newer');
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-old']?.state).toBe(
+        'activation_published'
+      );
+      expect(await fixture.doc.getMessageQueue()).toHaveLength(0);
+      expect((await fixture.doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual([
+        'turn-old',
+      ]);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('retires a queue receipt when its history entry is already terminal without publishing activation', async () => {
+    const terminalTurn: SessionHistoryInput = {
+      ...createPendingUserTurn('turn-terminal', 'already handled'),
+      status: 'handled',
+      read: true,
+    };
+    const fixture = await createQueueRecoveryFixture({
+      sessionId: 'session-queue-recovery-terminal' as SessionId,
+      meta: {
+        queuePromotionLedger: {
+          'queue:turn-terminal': createQueueReceipt('turn-terminal', 'activation_published'),
+        },
+      },
+      history: [terminalTurn],
+      queue: [createQueueItem('turn-terminal')],
+    });
+    const publish = vi.spyOn(fixture.doc, 'publishUserTurnActivation');
+    try {
+      await fixture.recover(fixture.doc, fixture.meta());
+
+      expect(publish).not.toHaveBeenCalled();
+      expect(await fixture.doc.getMessageQueue()).toHaveLength(0);
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-terminal']?.state).toBe(
+        'queue_consumed'
+      );
+    } finally {
+      publish.mockRestore();
+      fixture.dispose();
+    }
   });
 
   it('drops a resurrected queue item whose user turn already exists in history', async () => {
@@ -1317,7 +2949,7 @@ describe('SessionDispatchWatcher', () => {
       status: 'handled' as const,
       read: true,
     };
-    const popMessageQueue = vi.fn(async () => ({
+    const peekReadyMessageQueue = vi.fn(async () => ({
       $cid: 'mq-resurrected',
       task: 'queued hello',
       userId: 'user-1',
@@ -1353,8 +2985,11 @@ describe('SessionDispatchWatcher', () => {
       watcher as unknown as {
         promoteNextQueuedMessage: (
           sessionDoc: {
-            popMessageQueue: typeof popMessageQueue;
+            peekReadyMessageQueue: typeof peekReadyMessageQueue;
             updateHistory: typeof updateHistory;
+            removeMessageQueueItem: (cid: string) => Promise<void>;
+            appendUserTurn?: (entry: SessionHistoryInput) => Promise<void>;
+            getMetaState?: () => Promise<SessionMeta | undefined>;
           },
           meta: SessionMeta,
           history: SessionHistoryInput[]
@@ -1363,7 +2998,12 @@ describe('SessionDispatchWatcher', () => {
     ).promoteNextQueuedMessage.bind(watcher);
 
     const promoted = await promoteNextQueuedMessage(
-      { popMessageQueue, updateHistory },
+      withHistoryPort({
+        peekReadyMessageQueue,
+        updateHistory,
+        getHistory: () => [existingTurn],
+        removeMessageQueueItem: vi.fn(async () => {}),
+      }),
       {
         id: sessionId,
         machineId: 'machine-1',
@@ -1377,24 +3017,57 @@ describe('SessionDispatchWatcher', () => {
     );
 
     expect(promoted).toBeNull();
-    expect(popMessageQueue).toHaveBeenCalledTimes(1);
     expect(updateHistory).not.toHaveBeenCalled();
+    const remainingQueue = [await peekReadyMessageQueue()];
+    const failingMeta: SessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-09-09T00:00:00Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+    };
+    const failingDoc = withHistoryPort({
+      getMetaState: async () => failingMeta,
+      peekReadyMessageQueue: async () => remainingQueue[0] ?? null,
+      removeMessageQueueItem: async () => {
+        remainingQueue.shift();
+      },
+      appendUserTurn: async () => {
+        throw new Error('synthetic-write-rejected');
+      },
+      updateHistory,
+    });
+    await expect(promoteNextQueuedMessage(failingDoc, failingMeta, [])).rejects.toThrow(
+      'synthetic-write-rejected'
+    );
+    expect(remainingQueue).toHaveLength(1);
+    expect(remainingQueue[0]?.userTurnId).toBe(turnId);
   });
 
-  it('uses queue update watermarks to wake and settle idle sessions', async () => {
-    const sessionId = 'session-mq-watermark' as SessionId;
-    const roomId = `session-${sessionId}`;
-    const upsertDocMeta = vi.fn(async () => {});
-    const workspaceDocument = {
-      repo: {
-        upsertDocMeta,
-      },
-    } as unknown as LoroDocumentManager;
+  /**
+   * Promotion is a dispatch producer. A queued turn that never passes through
+   * `latestUserMsgId` while `lastHandledUserMsgId` advances to it leaves the two
+   * pointers permanently unequal once the queue drains, which every activation
+   * reader treats as a turn still waiting to be delivered.
+   */
+  const promoteQueuedMessage = async (
+    initialMeta: SessionMeta,
+    queuedTurnId: string
+  ): Promise<SessionMeta> => {
+    const roomId = `session-${initialMeta.id}`;
+    let meta = initialMeta;
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
     const watcher = createWatcher({
       logger: createSilentLogger(),
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
-      workspaceDocument,
+      workspaceDocument: {
+        repo: { upsertDocMeta },
+      } as unknown as LoroDocumentManager,
       executionService: {
         getExecutionSnapshot: vi.fn(() => ({
           hasActiveTurn: false,
@@ -1407,33 +3080,430 @@ describe('SessionDispatchWatcher', () => {
       } as unknown as SessionExecutionService,
       canUseMachine: createAllowMachineAccess(),
     });
-    const privateWatcher = watcher as unknown as {
-      sessionNeedsActiveWatch: (meta: SessionMeta) => boolean;
-      markMessageQueueSignalChecked: (
-        sessionDoc: { roomId: string },
-        meta: SessionMeta
-      ) => Promise<void>;
+
+    // A real SessionDocument over real storage, so promotion runs the real
+    // `appendUserTurn` binding rather than a fake that could drift from it.
+    const realDoc = new SessionDocument(
+      {
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta,
+        flush: async () => {},
+      } as unknown as ConstructorParameters<typeof SessionDocument>[0],
+      initialMeta.id,
+      async () => {},
+      createSilentLogger()
+    );
+    realDoc.roomId = roomId;
+    composeTestSessionDoc(realDoc);
+    const sessionDoc = Object.assign(realDoc, {
+      peekReadyMessageQueue: vi.fn(async () => ({
+        $cid: 'mq-pointer',
+        task: 'queued hello',
+        userId: 'user-1',
+        userTurnId: queuedTurnId,
+        timestamp: new Date().toISOString(),
+        project: undefined,
+        acpSessionConfig: {
+          prompt: 'queued hello',
+          inputBlocks: [{ type: 'text' as const, text: 'queued hello' }],
+          cliType: 'builtin' as const,
+          agentType: 'codex' as const,
+        },
+      })),
+    });
+
+    const promoted = await (
+      watcher as unknown as {
+        promoteNextQueuedMessage: (
+          doc: typeof sessionDoc,
+          meta: SessionMeta,
+          history: SessionHistoryInput[]
+        ) => Promise<SessionHistoryInput | null>;
+      }
+    ).promoteNextQueuedMessage.bind(watcher)(sessionDoc, meta, []);
+
+    expect(promoted?.id).toBe(queuedTurnId);
+    return meta;
+  };
+
+  it('promotes an encrypted queue item with its signed intent and an unchanged content digest', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'queued-execution-origin-'));
+    const queuedConfig = {
+      prompt: 'synthetic queue prompt',
+      cliType: 'builtin',
+      agentType: 'codex',
     };
-    const meta = {
+    const signedIntent = 'A'.repeat(131);
+    const id = 'queue-origin' as SessionId;
+    let meta = {
+      id,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      createdAt: '2026-10-30T00:00:00.000Z',
+      status: { type: 'idle' },
+    } as SessionMeta;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+    };
+    const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+    const loro = new LoroDoc();
+    composeTestSessionDoc(doc, { doc: loro });
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo } as never,
+      encryptedWorkspace: true,
+      executionService: {} as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    try {
+      await doc.pushMessageQueue({
+        userTurnId: 'queued-turn',
+        task: 'synthetic queue prompt',
+        userId: 'user-1',
+        timestamp: '2026-10-30T20:17:36.812Z',
+        acpSessionConfig: queuedConfig,
+        e2eeIntent: signedIntent,
+      } as never);
+      const promoted = await (
+        watcher as unknown as {
+          promoteNextQueuedMessage: (
+            doc: SessionDocument,
+            meta: SessionMeta,
+            history: SessionHistoryInput[]
+          ) => Promise<SessionHistoryInput | null>;
+        }
+      ).promoteNextQueuedMessage(doc, meta, []);
+      if (!promoted) throw new Error('queue promotion failed');
+      // The machine adds `resume` and normalizes the row; the author's signature still covers it.
+      expect(promoted).toMatchObject({ queuedInput: true, e2eeIntent: signedIntent });
+      expect(turnExecutionDigest({ inputConfig: promoted.inputConfig })).toBe(
+        turnExecutionDigest({ inputConfig: queuedConfig })
+      );
+      const stored = await doc.sessionData.history.readTurn(promoted.id);
+      expect(stored.state).toBe('ready');
+      if (stored.state === 'ready')
+        expect(promoted.inputConfig).toStrictEqual(stored.turn.inputConfig);
+      expect(await doc.getMessageQueue()).toEqual([]);
+    } finally {
+      watcher.stop();
+      doc.mirror.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('builds an encrypted turn request under the verified requester', async () => {
+    const id = 'encrypted-requester' as SessionId;
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {} as never,
+      executionService: {} as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+      encryptedWorkspace: true,
+      resolveEncryptedRequester: async () => ({ userId: 'e2ee-member:verified' }),
+    });
+    const request = await (
+      watcher as unknown as {
+        buildChatRequestFromHistoryEntry: (
+          meta: SessionMeta,
+          entry: SessionHistoryInput,
+          launch: undefined,
+          user: { name: string; email: string },
+          requesterUserId?: string
+        ) => Promise<{ userId: string; userName: string }>;
+      }
+    ).buildChatRequestFromHistoryEntry(
+      { id, userId: 'label', cliType: 'builtin', agentType: 'codex' } as SessionMeta,
+      {
+        id: 'turn',
+        role: 'user',
+        userId: 'label',
+        items: [{ type: 'text', text: 'hello' }],
+        timestamp: '2026-11-06T00:00:00.000Z',
+      } as SessionHistoryInput,
+      undefined,
+      { name: 'Label Name', email: 'label@example.com' },
+      'e2ee-member:verified'
+    );
+    expect(request).toMatchObject({ userId: 'e2ee-member:verified', userName: 'Label Name' });
+  });
+
+  it('leaves no pending activation once a promoted queue turn is handled', async () => {
+    // The settled state after a direct send has run: both pointers name it.
+    const afterPromotion = await promoteQueuedMessage(
+      {
+        id: 'session-mq-pointer' as SessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: new Date().toISOString(),
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+        latestUserMsgId: 'direct-1',
+        lastHandledUserMsgId: 'direct-1',
+      },
+      'queued-1'
+    );
+
+    // The promoted turn is the activation the machine now owes an answer for.
+    expect(getPendingUserTurnActivationId(afterPromotion)).toBe('queued-1');
+
+    // Ordinary execution finishing that turn writes only `lastHandledUserMsgId`.
+    // Both pointers must land on the same turn, or the watcher spends
+    // HISTORY_SYNC_WAIT_TIMEOUT_MS waiting for an entry that already ran and
+    // then reports a bogus `message_delivery_failed`.
+    const afterHandled: SessionMeta = { ...afterPromotion, lastHandledUserMsgId: 'queued-1' };
+    expect(hasPendingUserTurnActivation(afterHandled)).toBe(false);
+  });
+
+  it('keeps a missing-history marker when promoting a queued turn', async () => {
+    // Unlike a resend, promotion does not supersede the acknowledged entry, so
+    // clearing the marker here would let its stale `pending` copy dispatch.
+    const afterPromotion = await promoteQueuedMessage(
+      {
+        id: 'session-mq-marker' as SessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: new Date().toISOString(),
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+        latestUserMsgId: 'stranded-1',
+        lastHandledUserMsgId: 'direct-1',
+        lastMissingHistoryUserMsgId: 'stranded-1',
+      },
+      'queued-2'
+    );
+
+    expect(afterPromotion.latestUserMsgId).toBe('queued-2');
+    expect(afterPromotion.lastMissingHistoryUserMsgId).toBe('stranded-1');
+    // The stranded entry stays skipped; the promoted turn is what dispatches.
+    expect(
+      findNextDispatchableUserTurn(
+        [
+          createPendingUserTurn('stranded-1', 'never delivered'),
+          createPendingUserTurn('queued-2', 'queued hello'),
+        ],
+        afterPromotion
+      )?.id
+    ).toBe('queued-2');
+  });
+
+  it('acknowledges an empty queue only after its matching control version arrives', async () => {
+    const sessionId = 'queue-version-ack' as SessionId;
+    let meta = {
       id: sessionId,
       machineId: 'machine-1',
       userId: 'user-1',
-      createdAt: new Date().toISOString(),
+      createdAt: '2026-10-27T00:00:00.000Z',
       cliType: 'builtin',
       agentType: 'codex',
       status: { type: 'idle' },
-      lastHandledUserMsgId: 'turn-handled',
       messageQueueUpdatedAt: 20,
       messageQueueCheckedAt: 10,
-    } satisfies SessionMeta;
-
-    expect(privateWatcher.sessionNeedsActiveWatch(meta)).toBe(true);
-
-    await privateWatcher.markMessageQueueSignalChecked({ roomId }, meta);
-
-    expect(upsertDocMeta).toHaveBeenCalledWith(roomId, {
-      messageQueueCheckedAt: 20,
+    } as SessionMeta;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_roomId: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+    };
+    const doc = new SessionDocument(repo as never, sessionId, async () => {}, createSilentLogger());
+    doc.roomId = `session-${sessionId}`;
+    const loro = composeTestSessionDoc(doc);
+    const sender = loro.fork();
+    // A remote enqueue followed by deletion leaves the final queue empty, but
+    // neither operation has arrived at the daemon yet.
+    sender.getMovableList('mq').push({ task: 'synthetic' });
+    sender.getMovableList('mq').delete(0, 1);
+    sender.commit();
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo } as unknown as LoroDocumentManager,
+      executionService: {} as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
     });
+    const owner = watcher as unknown as {
+      markMessageQueueSignalChecked: (doc: SessionDocument, meta: SessionMeta) => Promise<void>;
+      sessionNeedsActiveWatch: (meta: SessionMeta) => boolean;
+    };
+    try {
+      await owner.markMessageQueueSignalChecked(doc, meta);
+      expect(meta.messageQueueCheckedAt).toBe(10); // legacy signal has no proof
+      meta.messageQueueUpdateVersion = { updatedAt: 20, frontiers: sender.frontiers() };
+      await owner.markMessageQueueSignalChecked(doc, meta);
+      expect(meta.messageQueueCheckedAt).toBe(10); // missing control update
+      expect(owner.sessionNeedsActiveWatch(meta)).toBe(true);
+      loro.import(sender.export({ mode: 'update', from: loro.version() }));
+      meta.messageQueueUpdatedAt = 30;
+      await owner.markMessageQueueSignalChecked(doc, meta);
+      expect(meta.messageQueueCheckedAt).toBe(10); // receipt belongs to an older signal
+      meta.messageQueueUpdateVersion = { updatedAt: 30, frontiers: sender.frontiers() };
+      await owner.markMessageQueueSignalChecked(doc, meta);
+      expect(await doc.getMessageQueue()).toEqual([]);
+      expect(meta.messageQueueCheckedAt).toBe(30);
+      expect(owner.sessionNeedsActiveWatch(meta)).toBe(false);
+    } finally {
+      watcher.stop();
+      doc.mirror.dispose();
+    }
+  });
+
+  it('waits for Stop control data, deduplicates it after reopen, and honors a new Stop on the same turn', async () => {
+    vi.useFakeTimers();
+    const root = mkdtempSync(join(tmpdir(), 'lody-cancel-control-'));
+    const storePath = join(root, 'operations.sqlite3');
+    let store = new LodyOperationStore(storePath);
+    const sessionId = 'session-cancel-control' as SessionId;
+    const roomId = `session-${sessionId}`;
+    const input = {
+      workspaceId: 'workspace-1',
+      sessionId,
+      userId: 'user-1',
+      inputId: 'human-one',
+      kind: 'human' as const,
+    };
+    store.inbox.activate(input.workspaceId, 'owner');
+    store.inbox.accept(input);
+    store.inbox.begin(input, 'assistant-one');
+    let meta: SessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-10-13T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      lastCanceledTurn: getSessionCancelRequestMarker('stop-one'),
+    };
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_id: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+      flush: async () => {},
+      watch: () => ({ unsubscribe: () => {} }),
+    };
+    let sessionDoc = new SessionDocument(
+      repo as never,
+      sessionId,
+      async () => {},
+      createSilentLogger()
+    );
+    sessionDoc.roomId = roomId;
+    let loro = composeTestSessionDoc(sessionDoc);
+    let backend = await createSessionBackend(sessionDoc, meta);
+    sessionDoc.getSessionBackend = () => backend;
+    let completed = createDeferred();
+    const workspaceDocument = {
+      repo,
+      getOrCreateSessionDoc: async () => sessionDoc,
+      onMetaRoomSynced: () => () => {},
+    } as unknown as LoroDocumentManager;
+    const executionService = {
+      getExecutionSnapshot: () => ({
+        hasActiveTurn: false,
+        hasBlockingPendingCreate: false,
+        hasReusableSession: false,
+      }),
+      cancelSession: async (message: { turnId: string; cancelId?: string }) => {
+        const success = store.inbox.pause(input, message.turnId, [], message.cancelId);
+        completed.resolve();
+        return { success };
+      },
+    } as unknown as SessionExecutionService;
+    let watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    const reconcile = () =>
+      (
+        watcher as unknown as {
+          reconcileSessionWatch: (
+            id: SessionId,
+            trigger: string,
+            options: { awaitInitialChecks: boolean }
+          ) => Promise<void>;
+        }
+      ).reconcileSessionWatch(sessionId, 'test', { awaitInitialChecks: true });
+    try {
+      await watcher.start();
+      await reconcile();
+      expect(store.inbox.state(input).paused).toBe(0);
+      // Control-only arrival must reach the cancellation chain, without another meta event.
+      sessionDoc.mirror!.setState((draft) => {
+        draft.cancelRequest = { id: 'stop-one', turnId: 'assistant-one' };
+      });
+      await completed.promise;
+      expect(store.inbox.state(input).paused).toBe(1);
+      store.inbox.release({ ...input, executionId: 'assistant-one', outcome: 'user_stop' });
+      const fresh = { ...input, inputId: 'human-two' };
+      expect(store.inbox.accept(fresh)).toBe(true);
+      expect(store.inbox.state(input).paused).toBe(0);
+
+      watcher.stop();
+      const snapshot = loro.export({ mode: 'snapshot' });
+      store.close();
+      store = new LodyOperationStore(storePath);
+      store.inbox.activate(input.workspaceId, 'replacement');
+      sessionDoc.mirror!.dispose();
+      const reopened = new LoroDoc();
+      reopened.import(snapshot);
+      sessionDoc = new SessionDocument(
+        repo as never,
+        sessionId,
+        async () => {},
+        createSilentLogger()
+      );
+      sessionDoc.roomId = roomId;
+      loro = composeTestSessionDoc(sessionDoc, { doc: reopened });
+      backend = await createSessionBackend(sessionDoc, meta);
+      sessionDoc.getSessionBackend = () => backend;
+      watcher = createWatcher({
+        logger: createSilentLogger(),
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument,
+        executionService,
+        canUseMachine: createAllowMachineAccess(),
+      });
+      await watcher.start();
+      await reconcile();
+      // Replaying the durable side of the same Stop cannot cancel a fresh human input.
+      expect(store.inbox.state(input).paused).toBe(0);
+      expect(store.inbox.inputCanceled(input.workspaceId, sessionId, fresh.inputId)).toBe(false);
+
+      completed = createDeferred();
+      meta = { ...meta, lastCanceledTurn: getSessionCancelRequestMarker('stop-two') };
+      await reconcile();
+      expect(store.inbox.state(input).paused).toBe(0); // Old control payload is not this request.
+      sessionDoc.mirror!.setState((draft) => {
+        draft.cancelRequest = { id: 'stop-two', turnId: 'assistant-one' };
+      });
+      await completed.promise;
+      expect(store.inbox.state(input).paused).toBe(1);
+      expect(store.inbox.inputCanceled(input.workspaceId, sessionId, fresh.inputId)).toBe(true);
+    } finally {
+      watcher.stop();
+      sessionDoc.mirror!.dispose();
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+      vi.useRealTimers();
+    }
   });
 
   it('reacts to lastCanceledTurn metadata for an owned session', async () => {
@@ -1442,9 +3512,13 @@ describe('SessionDispatchWatcher', () => {
     const cancelSession = vi.fn(async () => ({ success: true }));
     const sessionId = 'session-2' as SessionId;
     const roomId = `session-${sessionId}`;
-    const sessionDoc = {
+    const subscriptions = new Set<() => void>();
+    const sessionDoc = withHistoryPort({
       mirror: {
-        subscribe: vi.fn(() => vi.fn()),
+        subscribe: (listener: () => void) => {
+          subscriptions.add(listener);
+          return () => subscriptions.delete(listener);
+        },
       },
       getMetaState: vi.fn(async () => ({
         id: sessionId,
@@ -1456,10 +3530,10 @@ describe('SessionDispatchWatcher', () => {
         status: { type: 'idle' },
         lastCanceledTurn: 'assistant-turn-2',
       })),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -1480,7 +3554,7 @@ describe('SessionDispatchWatcher', () => {
         })),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -1512,8 +3586,11 @@ describe('SessionDispatchWatcher', () => {
         type: 'session/cancel',
         sessionId,
         turnId: 'assistant-turn-2',
-      })
+      }),
+      { pendingInput: 'preserve', prePromptSession: 'discard' }
     );
+    expect(subscriptions.size).toBe(0);
+    await watcher.stop();
   });
 
   it('handles cancel metadata without waiting for an in-flight dispatch to finish', async () => {
@@ -1541,15 +3618,15 @@ describe('SessionDispatchWatcher', () => {
     } as SessionMeta;
     let metadataCallback: ((event: { kind: 'doc-metadata'; docId: string }) => void) | undefined;
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => meta),
-      getHistory: vi.fn(async () => [createPendingUserTurn('turn-2b', 'hello again')]),
+      getHistory: vi.fn(() => [createPendingUserTurn('turn-2b', 'hello again')]),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -1562,7 +3639,7 @@ describe('SessionDispatchWatcher', () => {
           return { unsubscribe: vi.fn() };
         }),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -1605,10 +3682,162 @@ describe('SessionDispatchWatcher', () => {
         type: 'session/cancel',
         sessionId,
         turnId: 'assistant-turn-2b',
-      })
+      }),
+      { pendingInput: 'preserve', prePromptSession: 'discard' }
     );
 
     resolveContinue?.();
+  });
+
+  it('coalesces mirror-triggered checks during a turn into one post-turn history read and yields to timers between drained checks', async () => {
+    vi.useFakeTimers();
+    try {
+      const sessionId = 'session-coalesce' as SessionId;
+      const roomId = `session-${sessionId}`;
+      const turnId = 'turn-coalesce';
+      let history: SessionHistoryInput[] = [createPendingUserTurn(turnId, 'hello')];
+      let meta = {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: new Date(0).toISOString(),
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' as const },
+        acpSessionId: 'acp-session-coalesce',
+        latestUserMsgId: turnId,
+      } as SessionMeta;
+      const events: string[] = [];
+      let historyReads = 0;
+      let mirrorListener: (() => void) | undefined;
+      const sessionDoc = withHistoryPort({
+        mirror: {
+          subscribe: vi.fn((listener: () => void) => {
+            mirrorListener = listener;
+            return vi.fn();
+          }),
+        },
+        getMetaState: vi.fn(async () => meta),
+        getHistory: () => history,
+        sessionData: {
+          history: {
+            readDirectory: (from: number, to: number) => {
+              historyReads += 1;
+              events.push(`history-read:${historyReads}`);
+              if (historyReads === 2) {
+                // A new trigger during one snapshot still owns a later check.
+                mirrorListener?.();
+                setTimeout(() => events.push('timer-2'), 0);
+              }
+              return history
+                .slice(from, to)
+                .map((entry, index) => createRoostDirectoryRow(from + index, entry));
+            },
+          },
+        },
+        setStatus: vi.fn(async () => {}),
+        updateHistory: vi.fn(async () => {}),
+      });
+      const workspaceDocument = {
+        repo: {
+          getMeta: () => ({
+            scan: vi.fn(async () => [{ key: ['e', roomId], value: true }]),
+          }),
+          getDocMeta: vi.fn(async () => ({ meta })),
+          upsertDocMeta: vi.fn(async () => {}),
+          watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        onMetaRoomSynced: vi.fn(() => vi.fn()),
+      } as unknown as LoroDocumentManager;
+      const turn = createDeferred();
+      let activeTurnId: string | undefined;
+      const dispatchPreparedSessionTurn = vi.fn(
+        async (options: {
+          accessPromise: Promise<unknown>;
+          requestPromise: Promise<unknown>;
+          onAccessAllowed: () => void | Promise<void>;
+        }) => {
+          activeTurnId = 'assistant-coalesce';
+          await options.accessPromise;
+          await options.onAccessAllowed();
+          await options.requestPromise;
+          await turn.promise;
+          history = [{ ...history[0], status: 'handled', read: true }];
+          meta = { ...meta, lastHandledUserMsgId: turnId };
+          activeTurnId = undefined;
+        }
+      );
+      const watcher = createWatcher({
+        logger: createSilentLogger(),
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument,
+        executionService: {
+          getExecutionSnapshot: vi.fn(() => ({
+            ...(activeTurnId ? { activeTurnId } : {}),
+            hasActiveTurn: activeTurnId !== undefined,
+            hasBlockingPendingCreate: false,
+            hasReusableSession: true,
+          })),
+          dispatchPreparedSessionTurn,
+          cancelSession: vi.fn(async () => ({ success: true })),
+        } as unknown as SessionExecutionService,
+        canUseMachine: createAllowMachineAccess(),
+      });
+
+      await watcher.start();
+      await vi.waitFor(() => {
+        expect(dispatchPreparedSessionTurn).toHaveBeenCalledTimes(1);
+      });
+      expect(mirrorListener).toBeDefined();
+      expect(historyReads).toBe(1);
+
+      // The agent streams output: every commit fires the mirror subscription,
+      // and turn completion also enqueues a queue-promotion check.
+      for (let i = 0; i < 300; i += 1) {
+        mirrorListener?.();
+      }
+      const postTurnCheck = watcher.enqueueSessionCheck(sessionId);
+      void postTurnCheck.then(() => {
+        events.push('check-resolved');
+      });
+      await flushMicrotasks(20);
+      expect(historyReads).toBe(1);
+
+      setTimeout(() => {
+        events.push('timer-1');
+      }, 0);
+      turn.resolve();
+      await flushMicrotasks(50);
+      // The drained follow-up is parked on a macrotask, not run on microtasks.
+      expect(historyReads).toBe(1);
+      await vi.runOnlyPendingTimersAsync();
+      await flushMicrotasks(20);
+      await postTurnCheck;
+      // 300 commits plus the post-turn enqueue cost exactly one follow-up read,
+      // and the coalesced caller's promise resolved only after that read. The
+      // trigger that landed during the read queued a third check, which is
+      // parked on its own macrotask, so the timer armed during the turn fired
+      // while that check was still waiting.
+      expect(historyReads).toBe(2);
+      expect(events).toEqual(['history-read:1', 'history-read:2', 'check-resolved', 'timer-1']);
+      await flushMicrotasks(50);
+      expect(historyReads).toBe(2);
+      await vi.runOnlyPendingTimersAsync();
+      await flushMicrotasks(20);
+      expect(historyReads).toBe(3);
+      expect(events).toContain('timer-2');
+      expect(dispatchPreparedSessionTurn).toHaveBeenCalledTimes(1);
+
+      // The chain is drained and still live: a fresh trigger costs one read.
+      mirrorListener?.();
+      await flushMicrotasks(20);
+      expect(historyReads).toBe(4);
+      watcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('bootstraps owned sessions concurrently while isolating failed reconciles', async () => {
@@ -1634,15 +3863,15 @@ describe('SessionDispatchWatcher', () => {
       status: { type: 'idle' },
       latestUserMsgId: turnId,
     } satisfies SessionMeta;
-    const fastSessionDoc = {
+    const fastSessionDoc = withHistoryPort({
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
       getMetaState: vi.fn(async () => fastMeta),
-      getHistory: vi.fn(async () => [createPendingUserTurn(turnId, 'hello')]),
+      getHistory: vi.fn(() => [createPendingUserTurn(turnId, 'hello')]),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
     const scan = vi.fn(async () => [
       { key: ['e', badRoomId], value: true },
       { key: ['e', fastRoomId], value: true },
@@ -1663,7 +3892,7 @@ describe('SessionDispatchWatcher', () => {
         getDocMeta,
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => fastSessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(fastSessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
     const logger = {
@@ -1826,27 +4055,33 @@ describe('SessionDispatchWatcher', () => {
           } satisfies SessionMeta,
         ])
       );
+      const openedSessionIds = new Set<SessionId>();
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = metaBySession.get(sessionId)!;
-        return {
-          mirror: { subscribe: vi.fn(() => vi.fn()) },
-          getMetaState: vi.fn(async () => meta),
-          getHistory: vi.fn(async () => {
-            activeHistoryReads += 1;
-            maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
-            if (sessionId === liveSessionId) {
-              liveStarted.resolve();
-            } else {
-              bootstrapHistoryReads += 1;
-              if (bootstrapHistoryReads === 3) bootstrapThreeStarted.resolve();
-            }
-            await releaseHistory.promise;
-            activeHistoryReads -= 1;
-            return [createPendingUserTurn(`turn-${sessionId}`, 'hello')];
-          }),
-          updateHistory: vi.fn(async () => {}),
-          setStatus: vi.fn(async () => {}),
-        };
+        if (!openedSessionIds.has(sessionId)) {
+          openedSessionIds.add(sessionId);
+          activeHistoryReads += 1;
+          maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
+          if (sessionId === liveSessionId) {
+            liveStarted.resolve();
+          } else {
+            bootstrapHistoryReads += 1;
+            if (bootstrapHistoryReads === 3) bootstrapThreeStarted.resolve();
+          }
+          await releaseHistory.promise;
+          activeHistoryReads -= 1;
+        }
+        return withSessionData(
+          withHistoryPort({
+            mirror: { subscribe: vi.fn(() => vi.fn()) },
+            getMetaState: vi.fn(async () => meta),
+            getHistory: vi.fn(() => {
+              return [createPendingUserTurn(`turn-${sessionId}`, 'hello')];
+            }),
+            updateHistory: vi.fn(async () => {}),
+            setStatus: vi.fn(async () => {}),
+          })
+        );
       });
       const workspaceDocument = {
         repo: {
@@ -1913,6 +4148,8 @@ describe('SessionDispatchWatcher', () => {
         (_, index) => `metadata-burst-${index}` as SessionId
       );
       const releaseHistory = createDeferred();
+      const slowHistory = createDeferred();
+      const lateStarted = createDeferred();
       const firstBatchStarted = createDeferred();
       const allHistoryStarted = createDeferred();
       let metadataCallback: ((event: { kind: 'doc-metadata'; docId: string }) => void) | undefined;
@@ -1937,24 +4174,31 @@ describe('SessionDispatchWatcher', () => {
       const getDocMeta = vi.fn(async (roomId: string) => ({
         meta: metaBySession.get(roomId.slice('session-'.length) as SessionId),
       }));
+      const openedSessionIds = new Set<SessionId>();
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = metaBySession.get(sessionId)!;
-        return {
-          mirror: { subscribe: vi.fn(() => vi.fn()) },
-          getMetaState: vi.fn(async () => meta),
-          getHistory: vi.fn(async () => {
-            historyReadCount += 1;
-            activeHistoryReads += 1;
-            maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
-            if (historyReadCount === 4) firstBatchStarted.resolve();
-            if (historyReadCount === sessionIds.length) allHistoryStarted.resolve();
-            await releaseHistory.promise;
-            activeHistoryReads -= 1;
-            return [createPendingUserTurn(`turn-${sessionId}`, 'hello')];
-          }),
-          updateHistory: vi.fn(async () => {}),
-          setStatus: vi.fn(async () => {}),
-        };
+        if (sessionId === 'late') lateStarted.resolve();
+        if (!openedSessionIds.has(sessionId)) {
+          openedSessionIds.add(sessionId);
+          historyReadCount += 1;
+          activeHistoryReads += 1;
+          maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
+          if (historyReadCount === 4) firstBatchStarted.resolve();
+          if (historyReadCount === sessionIds.length) allHistoryStarted.resolve();
+          await (sessionId === sessionIds[4] ? slowHistory.promise : releaseHistory.promise);
+          activeHistoryReads -= 1;
+        }
+        return withSessionData(
+          withHistoryPort({
+            mirror: { subscribe: vi.fn(() => vi.fn()) },
+            getMetaState: vi.fn(async () => meta),
+            getHistory: vi.fn(() => {
+              return [createPendingUserTurn(`turn-${sessionId}`, 'hello')];
+            }),
+            updateHistory: vi.fn(async () => {}),
+            setStatus: vi.fn(async () => {}),
+          })
+        );
       });
       const workspaceDocument = {
         repo: {
@@ -2005,6 +4249,12 @@ describe('SessionDispatchWatcher', () => {
       await flushMicrotasks(20);
       expect(historyReadCount).toBe(sessionIds.length);
       expect(maxActiveHistoryReads).toBe(4);
+      const lateId = 'late' as SessionId;
+      metaBySession.set(lateId, { ...metaBySession.get(sessionIds[0]!)!, id: lateId });
+      metadataCallback?.({ kind: 'doc-metadata', docId: `session-${lateId}` });
+      await lateStarted.promise;
+      slowHistory.resolve();
+      await flushMicrotasks(20);
       watcher.stop();
     } finally {
       vi.useRealTimers();
@@ -2032,14 +4282,10 @@ describe('SessionDispatchWatcher', () => {
       const statusSubscribe = vi.fn(() => vi.fn());
       const rejoinDocRoom = vi.fn(async () => {});
       const ensureDocRoomJoined = vi.fn(async () => {});
-      const sessionDoc = {
+      const sessionDoc = withHistoryPort({
         mirror: { subscribe: mirrorSubscribe },
         getMetaState: vi.fn(async () => meta),
-        getHistory: vi.fn(async () => {
-          historyStarted.resolve();
-          await releaseHistory.promise;
-          return [];
-        }),
+        getHistory: vi.fn(() => []),
         onDocRoomStatusChange: statusSubscribe,
         getDocRoomStatus: vi.fn(() => undefined),
         rejoinDocRoom,
@@ -2047,14 +4293,18 @@ describe('SessionDispatchWatcher', () => {
         waitUntilSynced: vi.fn(async () => {}),
         updateHistory: vi.fn(async () => {}),
         setStatus: vi.fn(async () => {}),
-      };
+      });
       const workspaceDocument = {
         repo: {
           getMeta: () => ({ scan: vi.fn(async () => []) }),
           getDocMeta: vi.fn(async () => ({ meta })),
           watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => {
+          historyStarted.resolve();
+          await releaseHistory.promise;
+          return withSessionData(sessionDoc);
+        }),
         onMetaRoomSynced: vi.fn(() => vi.fn()),
       } as unknown as LoroDocumentManager;
       const dispatchPreparedSessionTurn = vi.fn(async () => {});
@@ -2114,10 +4364,10 @@ describe('SessionDispatchWatcher', () => {
       const unsubscribeStatus = vi.fn();
       const mirrorSubscribe = vi.fn(() => unsubscribeMirror);
       const statusSubscribe = vi.fn(() => unsubscribeStatus);
-      const sessionDoc = {
+      const sessionDoc = withHistoryPort({
         mirror: { subscribe: mirrorSubscribe },
         getMetaState: vi.fn(async () => meta),
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         onDocRoomStatusChange: statusSubscribe,
         getDocRoomStatus: vi.fn(() => 'connected' as const),
         rejoinDocRoom: vi.fn(async () => {}),
@@ -2125,14 +4375,14 @@ describe('SessionDispatchWatcher', () => {
         waitUntilSynced: vi.fn(() => new Promise<void>(() => {})),
         updateHistory: vi.fn(async () => {}),
         setStatus: vi.fn(async () => {}),
-      };
+      });
       const workspaceDocument = {
         repo: {
           getMeta: () => ({ scan: vi.fn(async () => []) }),
           getDocMeta: vi.fn(async () => ({ meta })),
           watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         onMetaRoomSynced: vi.fn(() => vi.fn()),
       } as unknown as LoroDocumentManager;
       const watcher = createWatcher({
@@ -2188,13 +4438,15 @@ describe('SessionDispatchWatcher', () => {
       const bothOpensStarted = createDeferred();
       const unsubscribe = vi.fn();
       const subscribe = vi.fn(() => unsubscribe);
-      const sessionDoc = {
-        mirror: { subscribe },
-        getMetaState: vi.fn(async () => meta),
-        getHistory: vi.fn(async () => [createPendingUserTurn(turnId, 'hello')]),
-        updateHistory: vi.fn(async () => {}),
-        setStatus: vi.fn(async () => {}),
-      };
+      const sessionDoc = withSessionData(
+        withHistoryPort({
+          mirror: { subscribe },
+          getMetaState: vi.fn(async () => meta),
+          getHistory: vi.fn(() => [createPendingUserTurn(turnId, 'hello')]),
+          updateHistory: vi.fn(async () => {}),
+          setStatus: vi.fn(async () => {}),
+        })
+      );
       let openCount = 0;
       const getOrCreateSessionDoc = vi.fn(async () => {
         openCount += 1;
@@ -2334,25 +4586,31 @@ describe('SessionDispatchWatcher', () => {
           status: { type: 'idle' as const },
           latestUserMsgId: `turn-${sessionId}`,
         }) satisfies SessionMeta;
+      const openedSessionIds = new Set<SessionId>();
       const getOrCreateSessionDoc = vi.fn(async (sessionId: SessionId) => {
         const meta = createMeta(sessionId);
-        return {
-          mirror: { subscribe: vi.fn(() => vi.fn()) },
-          getMetaState: vi.fn(async () => meta),
-          getHistory: vi.fn(async () => {
-            historyReadCount += 1;
-            activeHistoryReads += 1;
-            maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
-            if (historyReadCount === 3) {
-              firstBatchStarted.resolve();
-            }
-            await releaseHistory.promise;
-            activeHistoryReads -= 1;
-            return [createPendingUserTurn(`turn-${sessionId}`, 'hello')];
-          }),
-          updateHistory: vi.fn(async () => {}),
-          setStatus: vi.fn(async () => {}),
-        };
+        if (!openedSessionIds.has(sessionId)) {
+          openedSessionIds.add(sessionId);
+          historyReadCount += 1;
+          activeHistoryReads += 1;
+          maxActiveHistoryReads = Math.max(maxActiveHistoryReads, activeHistoryReads);
+          if (historyReadCount === 3) {
+            firstBatchStarted.resolve();
+          }
+          await releaseHistory.promise;
+          activeHistoryReads -= 1;
+        }
+        return withSessionData(
+          withHistoryPort({
+            mirror: { subscribe: vi.fn(() => vi.fn()) },
+            getMetaState: vi.fn(async () => meta),
+            getHistory: vi.fn(() => {
+              return [createPendingUserTurn(`turn-${sessionId}`, 'hello')];
+            }),
+            updateHistory: vi.fn(async () => {}),
+            setStatus: vi.fn(async () => {}),
+          })
+        );
       });
       const workspaceDocument = {
         repo: {
@@ -2513,15 +4771,17 @@ describe('SessionDispatchWatcher', () => {
         latestUserMsgId: 'turn-stopped-bootstrap',
       },
     }));
-    const getOrCreateSessionDoc = vi.fn(async () => ({
-      mirror: {
-        subscribe: vi.fn(() => vi.fn()),
-      },
-      getMetaState: vi.fn(async () => null),
-      getHistory: vi.fn(async () => []),
-      setStatus: vi.fn(async () => {}),
-      waitForRemoteSync: vi.fn(async () => {}),
-    }));
+    const getOrCreateSessionDoc = vi.fn(async () =>
+      withHistoryPort({
+        mirror: {
+          subscribe: vi.fn(() => vi.fn()),
+        },
+        getMetaState: vi.fn(async () => null),
+        getHistory: vi.fn(() => []),
+        setStatus: vi.fn(async () => {}),
+        waitForRemoteSync: vi.fn(async () => {}),
+      })
+    );
 
     const workspaceDocument = {
       repo: {
@@ -2583,7 +4843,7 @@ describe('SessionDispatchWatcher', () => {
     const sessionId = 'session-3' as SessionId;
     const roomId = `session-${sessionId}`;
 
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       mirror: {
         subscribe: vi.fn(() => vi.fn()),
       },
@@ -2597,7 +4857,7 @@ describe('SessionDispatchWatcher', () => {
         status: { type: 'idle' },
         lastHandledUserMsgId: 'turn-3',
       })),
-      getHistory: vi.fn(async () => [
+      getHistory: vi.fn(() => [
         {
           ...createPendingUserTurn('turn-3', 'hello again'),
           status: 'handled',
@@ -2606,7 +4866,7 @@ describe('SessionDispatchWatcher', () => {
       ]),
       setStatus: vi.fn(async () => {}),
       waitForRemoteSync: vi.fn(async () => {}),
-    };
+    });
 
     const workspaceDocument = {
       repo: {
@@ -2627,7 +4887,7 @@ describe('SessionDispatchWatcher', () => {
         })),
         watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
       },
-      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
       onMetaRoomSynced: vi.fn(() => vi.fn()),
     } as unknown as LoroDocumentManager;
 
@@ -2730,12 +4990,12 @@ describe('SessionDispatchWatcher', () => {
         latestUserMsgId: 'turn-missing',
       } satisfies SessionMeta;
 
-      const sessionDoc = {
+      const sessionDoc = withHistoryPort({
         mirror: {
           subscribe: vi.fn(() => unsubscribeMirror),
         },
         getMetaState: vi.fn(async () => sessionMeta),
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         setStatus: vi.fn(async () => {}),
         waitForRemoteSync: vi.fn(async () => {}),
         waitUntilSynced: vi.fn(async () => true),
@@ -2743,14 +5003,14 @@ describe('SessionDispatchWatcher', () => {
         getDocRoomStatus: vi.fn(() => 'joined'),
         onDocRoomStatusChange: vi.fn(() => vi.fn()),
         rejoinDocRoom: vi.fn(async () => {}),
-      };
+      });
 
       const workspaceDocument = {
         repo: {
           getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
           upsertDocMeta,
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         cleanSessionDoc,
       } as unknown as LoroDocumentManager;
 
@@ -2798,6 +5058,7 @@ describe('SessionDispatchWatcher', () => {
       expect(upsertDocMeta).toHaveBeenCalledWith(roomId, {
         status: { type: 'idle' },
         lastMissingHistoryUserMsgId: 'turn-missing',
+        missingHistoryUserMsgIds: { 'turn-missing': true },
       });
       expect(recordChatFailure).toHaveBeenCalledWith(
         sessionDoc,
@@ -2833,12 +5094,12 @@ describe('SessionDispatchWatcher', () => {
         | ((status: 'connecting' | 'joined' | 'reconnecting' | 'disconnected' | 'error') => void)
         | undefined;
 
-      const sessionDoc = {
+      const sessionDoc = withHistoryPort({
         mirror: {
           subscribe: vi.fn(() => vi.fn()),
         },
         getMetaState: vi.fn(async () => sessionMeta),
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         setStatus: vi.fn(async () => {}),
         waitForRemoteSync: vi.fn(async () => {}),
         waitUntilSynced: vi.fn(async () => true),
@@ -2849,14 +5110,14 @@ describe('SessionDispatchWatcher', () => {
           return vi.fn();
         }),
         rejoinDocRoom: vi.fn(async () => {}),
-      };
+      });
 
       const workspaceDocument = {
         repo: {
           getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
           upsertDocMeta: vi.fn(async () => {}),
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         cleanSessionDoc: vi.fn(async () => {}),
       } as unknown as LoroDocumentManager;
 
@@ -2944,12 +5205,12 @@ describe('SessionDispatchWatcher', () => {
         .mockResolvedValueOnce(outerMeta)
         .mockResolvedValue(freshSessionDocMeta);
 
-      const sessionDoc = {
+      const sessionDoc = withHistoryPort({
         mirror: {
           subscribe: vi.fn(() => vi.fn()),
         },
         getMetaState,
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         setStatus: vi.fn(async () => {}),
         waitForRemoteSync: vi.fn(async () => {}),
         waitUntilSynced: vi.fn(async () => true),
@@ -2957,7 +5218,7 @@ describe('SessionDispatchWatcher', () => {
         getDocRoomStatus: vi.fn(() => 'joined'),
         onDocRoomStatusChange: vi.fn(() => vi.fn()),
         rejoinDocRoom: vi.fn(async () => {}),
-      };
+      });
 
       const upsertDocMeta = vi.fn(async () => {});
       const workspaceDocument = {
@@ -2965,7 +5226,7 @@ describe('SessionDispatchWatcher', () => {
           getDocMeta: vi.fn(async () => ({ meta: outerMeta })),
           upsertDocMeta,
         },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
         cleanSessionDoc: vi.fn(async () => {}),
       } as unknown as LoroDocumentManager;
 
@@ -3004,5 +5265,211 @@ describe('SessionDispatchWatcher', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  /**
+   * The settle tests all need the same shape: an owned idle session whose meta
+   * and history are supplied, with every doc method the wait path would reach so
+   * that entering the wait is observable rather than a five-minute hang.
+   */
+  const createSettleHarness = (
+    sessionId: SessionId,
+    initialMeta: Omit<
+      SessionMeta,
+      'id' | 'machineId' | 'userId' | 'createdAt' | 'cliType' | 'agentType' | 'status'
+    >,
+    history: SessionHistoryInput[],
+    /** Overrides the repo read only, so a test can land a send mid-settle. */
+    repoMetaOverride?: Partial<SessionMeta>
+  ) => {
+    const state = {
+      meta: {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: new Date().toISOString(),
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+        ...initialMeta,
+      } satisfies SessionMeta as SessionMeta,
+    };
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      state.meta = { ...state.meta, ...patch };
+    });
+    const recordChatFailure = vi.fn(async () => {});
+    const startSession = vi.fn(async () => {});
+    const continueSession = vi.fn(async () => {});
+    const sessionDoc = withHistoryPort({
+      roomId: `session-${sessionId}`,
+      mirror: { subscribe: vi.fn(() => vi.fn()) },
+      getMetaState: vi.fn(async () => state.meta),
+      getHistory: vi.fn(() => history),
+      setStatus: vi.fn(async () => {}),
+      // Reaching any of these means the bounded history wait was entered.
+      waitUntilSynced: vi.fn(async () => true),
+      ensureDocRoomJoined: vi.fn(async () => {}),
+      getDocRoomStatus: vi.fn(() => 'joined'),
+      onDocRoomStatusChange: vi.fn(() => vi.fn()),
+      rejoinDocRoom: vi.fn(async () => {}),
+    });
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {
+        repo: {
+          getDocMeta: vi.fn(async () => ({ meta: { ...state.meta, ...repoMetaOverride } })),
+          upsertDocMeta,
+        },
+        getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
+        cleanSessionDoc: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession,
+        startSession,
+        cancelSession: vi.fn(async () => ({ success: true })),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+      recordChatFailure,
+    } as unknown as WatcherDeps);
+
+    return {
+      watcher,
+      sessionDoc,
+      upsertDocMeta,
+      recordChatFailure,
+      startSession,
+      continueSession,
+      meta: () => state.meta,
+      /** Settlement must never rewrite the producer-owned pointer. */
+      expectPointerNeverRewritten: () => {
+        for (const [, patch] of upsertDocMeta.mock.calls) {
+          expect(patch).not.toHaveProperty('latestUserMsgId');
+        }
+      },
+    };
+  };
+
+  it('settles a stale activation pointer instead of accusing a turn that already ran', async () => {
+    const sessionId = 'session-stale-pointer' as SessionId;
+    // The shape a drained message queue used to leave behind: the pointer still
+    // names the first direct send while `lastHandledUserMsgId` has advanced to a
+    // later turn, so the pair never becomes equal on its own.
+    const h = createSettleHarness(
+      sessionId,
+      { latestUserMsgId: 'turn-a', lastHandledUserMsgId: 'turn-b' },
+      [
+        { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
+        { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
+      ]
+    );
+
+    await runMaybeHandleSession(h.watcher, sessionId);
+
+    // History already answered for `turn-a`, so no waiting and no accusation.
+    expect(h.sessionDoc.waitUntilSynced).not.toHaveBeenCalled();
+    expect(h.recordChatFailure).not.toHaveBeenCalled();
+    // The activation is retired, so the session can stop being watched instead
+    // of re-checking this same stale pair forever.
+    expect(hasPendingUserTurnActivation(h.meta())).toBe(false);
+    expect(h.meta().settledActivationUserMsgId).toBe('turn-a');
+    expect(h.meta().latestUserMsgId).toBe('turn-a');
+    h.expectPointerNeverRewritten();
+  });
+
+  it('settles a stale pointer without unprotecting an already-acknowledged turn', async () => {
+    const sessionId = 'session-stale-with-marker' as SessionId;
+    // `lastMissingHistoryUserMsgId` is a SINGLE slot. Turn X was acknowledged as
+    // undelivered and its payload has since arrived as `pending`; only the
+    // marker keeps it out of dispatch. Settling the unrelated stale pointer A
+    // must not evict X from that slot.
+    const history = [
+      createPendingUserTurn('turn-x', 'never delivered'),
+      { ...createPendingUserTurn('turn-a', 'first'), status: 'handled' as const, read: true },
+      { ...createPendingUserTurn('turn-b', 'second'), status: 'handled' as const, read: true },
+    ];
+    const h = createSettleHarness(
+      sessionId,
+      {
+        latestUserMsgId: 'turn-a',
+        lastHandledUserMsgId: 'turn-b',
+        lastMissingHistoryUserMsgId: 'turn-x',
+      },
+      history
+    );
+
+    await runMaybeHandleSession(h.watcher, sessionId);
+
+    // X keeps the slot, so it stays undispatchable...
+    expect(h.meta().lastMissingHistoryUserMsgId).toBe('turn-x');
+    expect(findNextDispatchableUserTurn(history, h.meta())).toBeNull();
+    // ...and the stale pointer still settled.
+    expect(hasPendingUserTurnActivation(h.meta())).toBe(false);
+
+    // A second pass must not resurrect X either.
+    await runMaybeHandleSession(h.watcher, sessionId);
+    expect(h.startSession).not.toHaveBeenCalled();
+    expect(h.continueSession).not.toHaveBeenCalled();
+  });
+
+  it('does not accuse a newer activation when only part of the pointer state settles', async () => {
+    const sessionId = 'session-partial-settle' as SessionId;
+    // Crash-mid-turn left `processing=turn-a` behind after turn-a reached a
+    // terminal status, and turn-c has since been published but has not synced.
+    // Retiring turn-a must not report the session settled: turn-c is a real
+    // activation and still needs its history-sync window.
+    const h = createSettleHarness(
+      sessionId,
+      {
+        processingUserMsgId: 'turn-a',
+        latestUserMsgId: 'turn-c',
+        lastHandledUserMsgId: 'turn-a',
+      },
+      [{ ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true }]
+    );
+
+    void runMaybeHandleSession(h.watcher, sessionId);
+    await vi.waitFor(() => {
+      expect(h.sessionDoc.ensureDocRoomJoined).toHaveBeenCalled();
+    });
+
+    // turn-a is retired, turn-c keeps its activation and its grace window.
+    expect(h.meta().processingUserMsgId).toBeUndefined();
+    expect(h.recordChatFailure).not.toHaveBeenCalled();
+    expect(getPendingUserTurnActivationId(h.meta())).toBe('turn-c');
+    h.expectPointerNeverRewritten();
+    h.watcher.stop();
+  });
+
+  it('does not accuse a turn published while the stale pointer was being settled', async () => {
+    const sessionId = 'session-settle-race' as SessionId;
+    // The outer read sees the stale pair; by the time settling re-reads meta a
+    // producer has published turn-c, whose entry has not synced yet. Settling
+    // must stand down rather than hand turn-c to missing-history recovery.
+    const h = createSettleHarness(
+      sessionId,
+      { latestUserMsgId: 'turn-a', lastHandledUserMsgId: 'turn-b' },
+      [
+        { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
+        { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
+      ],
+      { latestUserMsgId: 'turn-c' }
+    );
+
+    void runMaybeHandleSession(h.watcher, sessionId);
+    await vi.waitFor(() => {
+      expect(h.sessionDoc.ensureDocRoomJoined).toHaveBeenCalled();
+    });
+
+    // turn-c gets the grace window, and nothing was written against it.
+    expect(h.recordChatFailure).not.toHaveBeenCalled();
+    expect(h.upsertDocMeta).not.toHaveBeenCalled();
+    h.watcher.stop();
   });
 });

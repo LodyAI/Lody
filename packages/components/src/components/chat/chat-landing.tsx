@@ -1,4 +1,21 @@
+import { buildDaemonInstallCommands } from '@/lib/daemon-installation';
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
+import { isSessionInMyScope } from '@/lib/session-visibility';
+import { McpDefaultsRecovery } from './mcp-defaults-recovery';
 import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
+import { E2eeLocalAgentApproval, localAgentRunsWorkspace } from '../e2ee-local-agent-approval';
+import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
+import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
+import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
+import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -11,16 +28,22 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
+import { RESET } from 'jotai/utils';
 import {
-  buildPendingUserHistoryEntry,
-  buildSessionPreparationRunConfig,
+  ACP_CAPABILITY_ROW_FAMILIES,
   buildSessionTurnInputConfig,
   evaluateSessionCreateQuota,
   extractPromptPreviewFromInputBlocks,
   findFreshSessionPresenceState,
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   getServerNow,
+  isLegacyPiProvider,
+  migratePiProvider,
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  getMachineFlockDocId,
+  machineFlockKeys,
   hashAnalyticsId,
   type SessionStartFailureReason,
   InFlightDedupe,
@@ -28,32 +51,45 @@ import {
   type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
-  githubFetchBranches,
-  type LocalProjectGitState,
   type LocalProjectId,
+  type LocalProjectMeta,
   type MachineId,
   type MachineViewMeta,
+  type ProjectMember,
+  type ProjectMemberId,
   type ProjectRef,
   type SessionId,
+  type SessionProjectRun,
   type SessionStatus,
+  machineSupportsMultiRepoProject,
+  machineSupportsProjectRepositoryMembers,
+  buildSessionProjectRun,
   type WorktreeSetupScriptConfig,
   type WorktreeCleanupScriptConfig,
   type WorkspaceId,
+  deriveDraftSessionTitle,
 } from '@lody/shared';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
-import { usePostHog } from '@posthog/react';
+import { useCloudMutation, useCloudQuery, usePlatform } from '@lody/platform/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   ArrowUp,
+  ChevronsUpDown,
+  Folders,
   FolderOpen,
-  Github as GithubIcon,
-  Loader2,
+  CircleSlash2,
+  FolderPlus,
+  ArrowUpRight,
+  GitBranch,
   LockKeyhole,
   Monitor,
-  PanelLeft,
   RefreshCw,
   X,
 } from 'lucide-react';
-import { Button } from '@/ui/button';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
+import { SidebarHistoryControls } from '../sidebar-history-controls';
+import { PiProviderMigrationCard } from './pi-provider-migration-card';
 
 import {
   type AgentSelection,
@@ -61,7 +97,6 @@ import {
   WorktreeCheckboxPill,
   type WorkdirMode,
 } from '@/components/shared';
-import { cn } from '@/lib/utils';
 import { getIpcServices, onIpcEvent, sendIpc } from '@/lib/electron-ipc-client';
 import {
   bugReportDialogOpenAtom,
@@ -71,49 +106,57 @@ import {
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
   setMobileDrawerOpenAtom,
-  sidebarCollapsedAtom,
-  tasksFeatureEnabledAtom,
+  mainPageAtWindowEdgeAtom,
+  showNavigationSidebarAtom,
   userAtom,
   workspaceReposCacheAtomFamily,
 } from '@/atoms';
 import { docMetaCacheReadyAtom, sessionMetaCountAtom } from '@/atoms/doc-meta';
-import { localProbeAttemptedAtom, localProbeResultAtom } from '@/atoms/local-probe';
-import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
+import { projectEditorRequestAtom } from '@/atoms/project-editor';
+import {
+  localAgentEnabledAtom,
+  localProbeAttemptedAtom,
+  localProbeResultAtom,
+} from '@/atoms/local-probe';
+import {
+  lodyPresenceNowMsAtom,
+  lodyPresenceStatesAtom,
+  lodyPresenceSyncStateAtom,
+} from '@/atoms/presence';
 import { buildAgentPrompt } from '@/lib';
+import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { useNavigate } from '@tanstack/react-router';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import {
   focusFirstChatLandingOption,
   useChatLandingKeyboardNav,
 } from '@/hooks/use-chat-landing-keyboard-nav';
-import { useFireOnKeyChange, useFireOncePerKey } from '@/hooks/use-fire-once';
+import { useFireOncePerKey } from '@/hooks/use-fire-once';
 import {
   isArchivedLocalProjectRestoreUnavailableError,
   SessionCreateBillingError,
   useSessionActions,
 } from '@/hooks/use-session-actions';
 import { useChatLandingDefaults } from '@/hooks/use-chat-landing-defaults';
+import { useGitHubRepoBranches } from '@/hooks/use-github-repo-branches';
 import {
   useAcpSessionConfigSelectionState,
-  useReconcileAcpSessionConfigSelection,
+  useResolvedAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
-import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
+import { useMachineOnlineStatus, useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import {
   getChatLandingAgentSelectionsForMachine,
   readChatLandingDefaults,
+  recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
-import {
-  agentDefaultsCache,
-  githubBranchesCache,
-  persistAgentSessionDefaults,
-} from '@/lib/local-storage-cache';
+import { readAgentStartDefaults, persistAgentSessionDefaults } from '@/lib/local-storage-cache';
 import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 import {
   buildRecentRunConfigItems,
@@ -145,22 +188,22 @@ import {
 } from '@/hooks/use-workspace-agent-roles';
 import { useAvailableCommands } from '@/hooks/use-available-commands';
 import { useOrganization } from '@/hooks/useOrganization';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
 import { useResolvedTheme } from '../../theme-provider';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
 import {
-  areChatLandingBranchListsEqual,
-  createChatLandingBranchSnapshot,
-  getGitHubBranchesCacheId,
-  normalizeChatLandingBranches,
-  resolveChatLandingBranchSelection,
-  type ChatLandingBranchSnapshot,
-} from '@/lib/chat-landing-branches';
-import {
+  LOCAL_PROJECT_BRANCH_PAGE_SIZE,
+  LocalProjectBranchSwrCache,
+  deriveLocalProjectGitStateFromMeta,
   getLocalProjectBranchLabel,
   getLocalProjectGitStateLoadKey,
   getLocalProjectWorktreeAvailability,
   isLocalProjectMachineOffline,
+  normalizeOrderedLocalProjectBranches,
   resolveLocalProjectBranchSelection,
+  toObservedLocalProjectGitState,
+  type LocalProjectObservedGitState,
 } from '@/lib/chat-landing-git-state';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import {
@@ -170,15 +213,21 @@ import {
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
 import {
+  captureAgentRoleApplied,
+  captureAgentRoleMentionsApplied,
+} from '@/lib/agent-role-analytics';
+import {
   SESSION_ACP_CONFIG_USED_EVENT,
   buildSessionCreateAcpAnalyticsProperties,
 } from '@/lib/session-create-analytics';
 import { toIntlLocale } from '@/lib/intl-locale';
 import {
   arePastedTextDraftsEqual,
+  createPastedTextFile,
   getPastedTextCharacterCount,
   getPastedTextDraftsAfterInsertion,
   insertPastedTextDraft,
+  isPastedTextTooLarge,
   normalizePastedTextDraft,
   sanitizePastedTextDrafts,
   shouldCapturePastedTextDraft,
@@ -188,7 +237,14 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
-import { BranchSelector, getSelectorTagClassName } from './chat-landing-selectors';
+import { HomeDashboardHost } from './home/home-dashboard-host';
+import {
+  getSessionCreationNavigation,
+  MOBILE_NEW_CHAT_PROMPT_ID,
+} from './submission/use-composer-navigation-focus';
+import { BranchSelector } from './chat-landing-selectors';
+import { composerSurface } from '@/components/shared/composer-surface';
+import { PinSectionTarget } from '@/components/chat/pin-section-target-pill';
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -199,16 +255,20 @@ import {
   arePersistedMentionRangesEqual,
   toPersistedMentionRanges,
 } from '@/components/mentions/mention-persistence';
+import {
+  buildChatLandingDraftKey,
+  buildChatLandingSurfaceDraftKey,
+  type ChatLandingSurface,
+} from '@/atoms/chat-landing-draft';
 import { useChatLandingImageDraft } from '@/hooks/use-chat-landing-image-draft';
 import { useChatLandingFileDraft } from '@/hooks/use-chat-landing-file-draft';
 import { useChatLandingDraftSession } from '@/hooks/use-chat-landing-draft-session';
-import { useSessionPreparation } from '@/hooks/use-session-preparation';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { isElectronRenderer } from '@/lib/electron';
-import { withGitHubTokenRetry } from '@/lib/github-token';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import {
+  isLocalProjectRemovalCompletionSuppressed,
   useLocalProjectRemovalResultNotifications,
   usePendingLocalProjectRemovals,
 } from '@/hooks/use-remove-local-project';
@@ -218,6 +278,7 @@ import {
   useVisibleSessionMetas,
 } from '@/hooks/use-visible-session-metas';
 import { useReportVisibleSessionsForEagerSync } from '@/hooks/use-report-visible-sessions-for-eager-sync';
+import { useLatestRef } from '@/hooks/use-latest-ref';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 import { shouldShowSessionSharing } from '@/lib/session-sharing';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -234,18 +295,32 @@ import {
   shouldSubmitOnEnterForMobileKeyboardAction,
 } from '@/lib/mobile-keyboard-action';
 import { getChatComposerPromptPlaceholderKey } from '@/lib/chat-composer-placeholder';
-import { splitImageAndFileAttachments } from '@/lib/file-drop';
+import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
+import { buildHomeWeekUsage, type HomeWeekUsageOption } from '@/lib/home-week-usage';
 import { createMachinePairing } from '@/lib/cli-api-key';
-import { ContextSwitch, type SessionContextType } from './context-switch';
+import type { SessionContextType } from './context-switch';
 import {
   UNIFIED_PROJECT_OPTION_RENDER_LIMIT,
   UnifiedProjectSelectorView,
+  GitHubOwnerAvatarIcon,
   buildUnifiedLocalProjectOptions,
   type LocalProjectSelection,
+  type UnifiedProjectGroupOption,
   type UnifiedProjectSelection,
 } from './unified-project-selector';
+import { ProjectGroupMemberList } from './project-group-member-list';
+import { MobileProjectEditSection } from '@/components/mobile/mobile-project-edit-section';
+import { useWorkspaceProjects } from '@/hooks/use-workspace-projects';
+import {
+  buildProjectGroupProjectRef,
+  buildProjectRepositoryCopyIndex,
+  getProjectGroupMachineAvailability,
+  resolveProjectGroupLaunchTarget,
+} from '@/lib/project-group-launch';
+
+const EMPTY_PROJECT_MEMBER_IDS: ReadonlySet<ProjectMemberId> = new Set();
 import {
   DesktopMachineMenu,
   DesktopPermissionModeButton,
@@ -253,6 +328,7 @@ import {
 } from '@/components/sessions/desktop-run-config-menu';
 import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import { SessionUsagePopover } from '@/components/sessions/session-usage-popover';
+import { useArchiveSessionWithConfirmation } from '@/components/sessions/session-sub-conversation-confirmation';
 import { MachinePairingDialog } from './machine-pairing-dialog';
 import {
   DATE_BUCKET_THIS_MONTH,
@@ -263,7 +339,10 @@ import {
   NO_PROJECT_BUCKET_ID,
   PINNED_BUCKET_ID,
 } from '@/components/mobile/mobile-chat-list';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { mobileStatusFieldsOf } from '@/components/mobile/mobile-status-view';
+import { useMobileStatusActions } from '@/components/mobile/use-mobile-status-actions';
+import type { MobileStatusCommands } from '@/components/mobile/use-mobile-status-list';
+import { Tooltip } from '@lody/ui/tooltip';
 import {
   MobileHomeScreen,
   type MobileChatGroupBy,
@@ -289,15 +368,34 @@ import {
   MobileNewChatSheet,
   type MobileNewChatSheetContentProps,
 } from '@/components/mobile/mobile-new-chat-sheet';
-import { MobileWorkspaceSwitcherSheet } from '@/components/mobile/mobile-workspace-switcher-sheet';
-import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
+import { MobileFooterRail } from '@/components/mobile/mobile-footer-rail';
+import {
+  MobileInlinePicker,
+  MobileInlinePickerCoordinator,
+} from '@/components/mobile/mobile-inline-picker';
+import {
+  getMobileProjectOptions,
+  resolveMobileNewChatDefaultProject,
+} from '@/components/mobile/mobile-new-chat-project-options';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
+import {
+  resolveMobileNewChatBranchLabel,
+  resolveMobileNewChatTargetLabel,
+} from '@/components/mobile/mobile-new-chat-target';
+import { MobileWorkspaceSwitcherSheet } from '@/components/mobile/mobile-workspace-switcher-sheet';
+import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
+import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
-import {
-  MobileProjectFileBrowser,
-  type MobileProjectFileBrowserHandle,
-} from '@/components/files/mobile-project-file-browser';
+/* The files tab only renders in a mobile project context, but `chat-landing`
+   is on the desktop boot path — and the browser pulls `SessionMonacoTextViewer`
+   (the whole monaco editor). Keep the type eager, defer the implementation. */
+const MobileProjectFileBrowser = lazy(() =>
+  import('@/components/files/mobile-project-file-browser').then((module) => ({
+    default: module.MobileProjectFileBrowser,
+  }))
+);
+import type { MobileProjectFileBrowserHandle } from '@/components/files/mobile-project-file-browser';
 import {
   createLocalProjectIpcFileTransport,
   createLocalProjectRpcFileTransport,
@@ -305,15 +403,8 @@ import {
 } from '@/lib/local-project-rpc-file-provider';
 import { GitHubRepoFileProvider } from '@/lib/github-repo-file-provider';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
-import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
-import { Folder as FolderIcon, GitBranch as GitBranchIcon } from 'lucide-react';
 import { AddLocalProjectDialogContainer } from '@/components/local-projects/add-local-project-dialog-container';
-import {
-  MobileInlinePicker,
-  MobileInlinePickerCoordinator,
-  MobileInlinePickerRowSlot,
-  type MobileInlinePickerOption,
-} from '@/components/mobile/mobile-inline-picker';
+import type { MobileNativeSelectOption } from '@/components/mobile/mobile-native-select';
 import {
   buildChildSessionsByParent,
   buildSidebarOpenerRowResolver,
@@ -340,10 +431,15 @@ import {
   mobileHomeChatExcludedRunningAtom,
   mobileHomeChatViewModeAtom,
   mobileHomeProjectsSubTabAtom,
+  mobileHomeReturnTabAtom,
   useMobileHomeExcludedSetAtom,
 } from '@/atoms/mobile-home-state';
 import {
+  buildChatLandingPreSelectionKey,
   compareChatLandingLocalProjectByRecency,
+  getChatLandingSelectionSearch,
+  getChatLandingSelectionSyncDecision,
+  type ChatLandingSearch,
   compareChatLandingRepositoryByRecency,
   getChatLandingBranchSelectorState,
   getChatLandingHasAnyOnlineMachine,
@@ -354,25 +450,75 @@ import {
   getChatLandingSelectedMachineProjectStatus,
   getEmptyLocalProjectsMessageKey,
   getSharingReviewActionTarget,
+  getChatLandingSharingReviewActionTarget,
   getSharingReviewSourceRevision,
   getSharingReviewSourcesReady,
   getSharingReviewTeamHasNoVisibleLocalResources,
   getSharingReviewTeamLooksEmpty,
   shouldRetrySharingReviewConflict,
+  shouldReportLocalProjectUnavailable,
+  getChatLandingSelectedMachineState,
   getChatLandingSubmitDisabled,
   getChatLandingVisibleComposerStatus,
   isChatLandingMachineReachable,
 } from './chat-landing-derived';
+import {
+  type ComposerInputElement,
+  getComposerSelection,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 interface ChatLandingProps {
+  /** Committed mobile session surface; route completion alone is not presentation. */
+  mobilePresentedSessionId?: string;
   workspaceSlug: string;
-  preSelectedContext?: 'local' | 'github' | 'chat';
+  preSelectedContext?: 'local' | 'github' | 'chat' | 'group';
   preSelectedMachine?: string;
   preSelectedProject?: string;
   preSelectedRepo?: string;
-  resetDraftKey?: string;
-  resetDraftOnKeyChange?: boolean;
+  /** Project group id, with `preSelectedContext: 'group'`. */
+  preSelectedGroup?: string;
+  pinSectionId?: string;
+  onClearPinSection?: () => void;
+  /**
+   * Mirrors the composer's effective selection back into the chat-route URL
+   * (with `replace`) once the URL names a selection. Passed by the desktop
+   * chat route only; mobile keeps its base-context model.
+   */
+  onSelectionUrlSync?: (search: ChatLandingSearch) => void;
+  /**
+   * Renders the landing inside another surface (Today's "Convert to task"
+   * dialog) instead of as the new-chat page. Absent on the page, whose
+   * behaviour does not change.
+   */
+  embedding?: ChatLandingEmbedding;
 }
+
+export type ChatLandingEmbedding = {
+  /** Selects the separate draft, prompt id, analytics entrypoint and eager-sync source. */
+  surface: ChatLandingSurface;
+  /** Replaces the page's navigation once `startSession` has accepted the first turn. */
+  onSessionAccepted: (result: { sessionId: SessionId }) => void;
+  /** Reports a send in flight, so the host can refuse to close meanwhile. */
+  onPendingChange?: (pending: boolean) => void;
+  /** The host's words for the submit button, which the dialog layout labels. */
+  submitLabel?: string;
+  /** Dismisses the host; the dialog layout shows Cancel only when given. */
+  onCancel?: () => void;
+};
+
+/** Everything an embedded landing does differently, derived in one place. */
+const CHAT_LANDING_EMBEDDED_SURFACES: Record<
+  ChatLandingSurface,
+  { entrypoint: string; eagerSyncSourceId: string; promptId: string }
+> = {
+  'today-convert': {
+    entrypoint: 'today_convert',
+    eagerSyncSourceId: 'chat-landing:today-convert',
+    promptId: 'today-convert-prompt',
+  },
+};
 
 const getGitHubOwnerHandle = (fullName: string): string => {
   const [owner] = fullName.split('/');
@@ -469,21 +615,22 @@ const warnWorkspaceRuntimeUnavailable = (message: string, context: string): void
 };
 
 const resolveLocalProjectGithubRepoFullName = (
-  gitState: LocalProjectGitState | null | undefined,
-  workspaceRepositories: { fullName: string }[] | null | undefined
+  gitState: { git: boolean; githubRepoFullName?: string | null } | null | undefined,
+  meta?: LocalProjectMeta | null
 ): string | null => {
-  if (!gitState?.git) return null;
-  const repoFullName = gitState.githubRepoFullName?.trim();
-  if (!repoFullName) return null;
-  return workspaceRepositories?.some((repo) => repo.fullName === repoFullName)
-    ? repoFullName
-    : null;
+  if (gitState?.git === false) return null;
+  return (
+    (gitState?.git ? gitState.githubRepoFullName?.trim() : null) ||
+    meta?.githubRepoFullName?.trim() ||
+    null
+  );
 };
 
 type LocalProjectGitStateEntry = {
   machineId: MachineId;
   localProjectId: LocalProjectId;
-  state: LocalProjectGitState;
+  query: string;
+  state: LocalProjectObservedGitState;
 };
 
 type LocalProjectBranchSelection = {
@@ -496,73 +643,87 @@ type LocalProjectWorkdirModeSelection = {
   mode: WorkdirMode;
 };
 
-type LocalProjectGitStateCacheEntry = {
-  state: LocalProjectGitState;
-  expiresAtMs: number;
-};
-
-const LOCAL_PROJECT_GIT_STATE_CACHE_TTL_MS = 20_000;
-const LOCAL_PROJECT_GIT_STATE_CACHE_MAX_ENTRIES = 64;
 const LOCAL_PROJECT_GIT_STATE_RPC_TIMEOUT_MS = 30_000;
+const LOCAL_PROJECT_BRANCH_SEARCH_DEBOUNCE_MS = 150;
 const CHAT_LANDING_MACHINE_FLOCK_FAMILIES = [
   'localProject',
   'deleteLocalProjectCommand',
-  'acpCapability',
+  ...ACP_CAPABILITY_ROW_FAMILIES,
   'rateLimit',
   'agentConfig',
   'providerSetup',
 ] as const;
-// FIFO eviction relies on Map iteration order matching insertion order so the oldest
-// entry can be dropped without an additional bookkeeping structure.
-const localProjectGitStateCache = new Map<string, LocalProjectGitStateCacheEntry>();
-const localProjectGitStateDedupe = new InFlightDedupe<string, LocalProjectGitState>();
+const localProjectBranchSwrCache = new LocalProjectBranchSwrCache();
+const localProjectBranchDedupe = new InFlightDedupe<
+  string,
+  import('@lody/shared').LocalProjectBranchListResult
+>();
 
-const getLocalProjectGitStateCacheKey = (
+const getLocalProjectBranchCacheKey = (
   workspaceId: WorkspaceId,
   machineId: MachineId,
-  localProjectId: LocalProjectId
-): string => `${workspaceId}:${machineId}:${localProjectId}`;
-
-const setLocalProjectGitStateCacheEntry = (
-  cacheKey: string,
-  entry: LocalProjectGitStateCacheEntry
-): void => {
-  localProjectGitStateCache.delete(cacheKey);
-  localProjectGitStateCache.set(cacheKey, entry);
-  while (localProjectGitStateCache.size > LOCAL_PROJECT_GIT_STATE_CACHE_MAX_ENTRIES) {
-    const oldestKey = localProjectGitStateCache.keys().next().value;
-    if (oldestKey === undefined) break;
-    localProjectGitStateCache.delete(oldestKey);
-  }
-};
+  localProjectId: LocalProjectId,
+  query: string,
+  cursor?: string
+): string =>
+  `${workspaceId}:${machineId}:${localProjectId}:${query.trim().toLowerCase()}:${cursor ?? ''}`;
 
 export function ChatLanding(props: ChatLandingProps) {
   return <WorkspaceChatLanding key={props.workspaceSlug} {...props} />;
 }
 
 function WorkspaceChatLanding({
+  mobilePresentedSessionId,
   workspaceSlug,
-  preSelectedContext,
+  preSelectedContext: preSelectedContextProp,
   preSelectedMachine,
   preSelectedProject,
   preSelectedRepo,
-  resetDraftKey,
-  resetDraftOnKeyChange = true,
+  preSelectedGroup,
+  pinSectionId: pinSectionIdProp,
+  onClearPinSection,
+  onSelectionUrlSync,
+  embedding,
 }: ChatLandingProps) {
+  const embeddedSurface = embedding ? CHAT_LANDING_EMBEDDED_SURFACES[embedding.surface] : null;
+  const isEmbedded = embeddedSurface != null;
+  const pinSectionId = isEmbedded ? undefined : pinSectionIdProp;
+  const sessionEntrypoint = embeddedSurface?.entrypoint ?? 'chat_landing';
+  const embeddingRef = useLatestRef(embedding);
+  // A Project group runs on top of the plain chat context: every existing
+  // local/GitHub branch below sees `chat`, and the group overrides only the
+  // picker value, the context pill, the machine and the submit payload.
+  const preSelectedContext = preSelectedContextProp === 'group' ? 'chat' : preSelectedContextProp;
+  const preSelectedProjectGroupId =
+    preSelectedContextProp === 'group' ? (preSelectedGroup ?? null) : null;
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { openSettings } = useOpenSettings();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
+  const nativeE2ee = usePlatform().e2eeWorkspaces?.runtime;
+  const { state: localCliState } = useElectronCliDaemon();
   const workspaceRuntime = useAtomValue(runtimeAtom);
   const postHog = usePostHog();
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
   const currentUser = useAtomValue(userAtom);
-  const userId = currentUser?.id;
-  const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
-  const { activeOrganization, organizations, switchOrganization } = useOrganization({
+  const userId =
+    currentUser?.id ??
+    (runtime?.contentMode === 'e2ee' ? (runtime.accountId ?? undefined) : undefined);
+  const {
+    activeOrganization,
+    organizations,
+    switchOrganization,
+    role: workspaceRole,
+  } = useOrganization({
     targetSlug: workspaceSlug,
   });
-  const isMobile = useIsMobile();
+  const statusViewWritable = useStatusViewWritable(workspaceRole);
+  /** An encrypted workspace's read role cannot seal a pin either; elsewhere pins are preferences. */
+  const statusViewPreferable = runtime?.contentMode === 'e2ee' ? statusViewWritable : true;
+  const viewportIsMobile = useIsMobile();
+  // An embedded landing is a desktop surface (Today has no mobile layout in v1).
+  const isMobile = viewportIsMobile && !isEmbedded;
   const mobileKeyboardAction = useAtomValue(mobileKeyboardActionAtom);
   const usesMobileKeyboardAction = isMobile || isNativeAppShell();
   const hidesBillingUi = usesMobileKeyboardAction;
@@ -585,6 +746,7 @@ function WorkspaceChatLanding({
   const [machinePairing, setMachinePairing] = useState<{
     requestId: string;
     command: string;
+    windowsCommand: string;
     expiresAt: number;
   } | null>(null);
   const machinePairingSuccessNotifiedRef = useRef<string | null>(null);
@@ -614,10 +776,13 @@ function WorkspaceChatLanding({
     controlConnectionState === 'syncing';
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
   const { workspaceId } = useResolvedWorkspaceScope();
-  const setLocalProjectSharedWithTeam = useCloudMutation(
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyQueriesEnabled = legacyQueryStatus === 'allowed';
+  const setLocalProjectSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
+  const { currentUserId: myAccountId } = useMySessionScope();
   const visibleMachineIndex = useVisibleMachineMetas({
     machineFlockFamilies: CHAT_LANDING_MACHINE_FLOCK_FAMILIES,
   });
@@ -637,26 +802,32 @@ function WorkspaceChatLanding({
     isLoading: visibleLocalProjectsLoading,
   } = visibleLocalProjects;
   const getProjectShareErrorMessage = useConvexErrorMessage();
-  const { sessions: visibleActiveSessions, allActiveSessions: visibleAllActiveSessions } =
-    useVisibleSessionMetas();
+  const {
+    sessions: visibleActiveSessions,
+    allActiveSessions: visibleAllActiveSessions,
+    historyOnlySessionIds: activeReadOnlyIds,
+  } = useVisibleSessionMetas();
   useReportVisibleSessionsForEagerSync(
-    'chat-landing',
+    embeddedSurface?.eagerSyncSourceId ?? 'chat-landing',
     visibleActiveSessions,
     visibleAllActiveSessions
   );
-  const { archivedSessions: visibleArchivedSessions } = useVisibleArchivedSessionMetas();
-  const showProjectSharing = shouldShowSessionSharing({
-    workspaceId,
-    activeWorkspaceId: activeOrganization?.id ?? null,
-    memberCount: activeOrganization?.members.length ?? null,
-  });
-  const inboxRows = useCloudQuery(
+  const { archivedSessions: visibleArchivedSessions, historyOnlySessionIds: archivedReadOnlyIds } =
+    useVisibleArchivedSessionMetas();
+  const showProjectSharing =
+    legacyQueriesEnabled &&
+    shouldShowSessionSharing({
+      workspaceId,
+      activeWorkspaceId: activeOrganization?.id ?? null,
+      memberCount: activeOrganization?.members.length ?? null,
+    });
+  const inboxRows = useLegacyWorkspaceQuery(
     cloudOperations.inbox.listMine,
     showProjectSharing && workspaceId ? { workspaceId } : 'skip'
   );
-  const sharingReviewServerState = useCloudQuery(
+  const sharingReviewServerState = useLegacyWorkspaceQuery(
     cloudOperations.inbox.getSharingReviewState,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const sharingReviewInboxRevisionRef = useRef<string | null>(null);
   const sharingReviewReconcileRef = useRef({
@@ -668,10 +839,14 @@ function WorkspaceChatLanding({
   if (sharingReviewInboxReady) {
     sharingReviewInboxRevisionRef.current = sharingReviewServerState?.sourceRevision ?? null;
   }
-  const reconcileSharingReview = useCloudMutation(cloudOperations.inbox.reconcileSharingReview);
-  const markInboxItemRead = useCloudMutation(cloudOperations.inbox.markRead);
-  const dismissInboxItem = useCloudMutation(cloudOperations.inbox.dismiss);
-  const suppressSharingReview = useCloudMutation(cloudOperations.inbox.suppressSharingReview);
+  const reconcileSharingReview = useLegacyWorkspaceMutation(
+    cloudOperations.inbox.reconcileSharingReview
+  );
+  const markInboxItemRead = useLegacyWorkspaceMutation(cloudOperations.inbox.markRead);
+  const dismissInboxItem = useLegacyWorkspaceMutation(cloudOperations.inbox.dismiss);
+  const suppressSharingReview = useLegacyWorkspaceMutation(
+    cloudOperations.inbox.suppressSharingReview
+  );
   const handleShareLocalProjectWithTeam = useCallback(
     async (selection: LocalProjectSelection) => {
       if (!workspaceId) throw new Error('Workspace is not ready');
@@ -729,23 +904,26 @@ function WorkspaceChatLanding({
   const localProbeResult = useAtomValue(localProbeResultAtom);
   const localProbeAttempted = useAtomValue(localProbeAttemptedAtom);
   const onlineMachineIds = useOnlineMachineIds();
+  const presenceSynced = useAtomValue(lodyPresenceSyncStateAtom) === 'synced';
+  const presenceSyncedRef = useRef(presenceSynced);
+  presenceSyncedRef.current = presenceSynced;
   const onlineMachineIdsRef = useRef(onlineMachineIds);
   onlineMachineIdsRef.current = onlineMachineIds;
   const isPresenceMachineOnline = useCallback(
     (machineId: string) => onlineMachineIds.has(machineId as MachineId),
     [onlineMachineIds]
   );
-  const freshRepositories = useCloudQuery(
+  const freshRepositories = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   );
   const billingEntitlement = useCloudQuery(
     cloudOperations.billing.getWorkspaceBillingEntitlement,
     workspaceId ? { workspaceId } : 'skip'
   );
-  const workspaceReposWithStatus = useCloudQuery(
+  const workspaceReposWithStatus = useLegacyWorkspaceQuery(
     cloudOperations.github.listWorkspaceReposWithStatus,
-    workspaceId ? { workspaceId } : 'skip'
+    legacyQueriesEnabled && workspaceId ? { workspaceId } : 'skip'
   ) as
     | {
         repoFullName: string;
@@ -754,11 +932,20 @@ function WorkspaceChatLanding({
       }[]
     | null
     | undefined;
-  const repositories = freshRepositories ?? cachedRepositories ?? undefined;
+  const repositories = useMemo(
+    () =>
+      legacyQueriesEnabled
+        ? (freshRepositories ?? cachedRepositories ?? undefined)
+        : legacyQueryStatus === 'blocked'
+          ? []
+          : undefined,
+    [legacyQueriesEnabled, legacyQueryStatus, freshRepositories, cachedRepositories]
+  );
   const isElectron = isElectronRenderer();
   const launchMode = useMemo(() => detectAppLaunchMode(isElectron), [isElectron]);
   const hasGitHubRepos = (repositories?.length ?? 0) > 0;
-  const repositoriesReady = freshRepositories !== undefined;
+  const repositoriesReady =
+    legacyQueryStatus === 'blocked' || (legacyQueriesEnabled && freshRepositories !== undefined);
   const sharingReviewState = useMemo(() => {
     const privateMachineIds = Array.from(accessByMachineId.values())
       .filter((access) => access.ownerUserId === userId && !access.sharedWithTeam)
@@ -887,7 +1074,7 @@ function WorkspaceChatLanding({
         reconcileWriterId: writerId,
         reconcileAttempt: attempt,
       });
-    })();
+    })().catch((error) => console.error('Failed to reconcile sharing review', error));
     return cancel;
   }, [
     activeOrganization?.id,
@@ -906,11 +1093,13 @@ function WorkspaceChatLanding({
     archiveSession,
     restoreSession,
     deleteArchivedSession,
+    runStatusViewCommand,
   } = useSessionActions();
   const openMobileDrawer = useSetAtom(setMobileDrawerOpenAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
-  const isLeftSidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
-  const setLeftSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
+  // Hidden sidebar and no pinned Today in front: this page owns the window's left edge.
+  const isLeftSidebarHidden = useAtomValue(mainPageAtWindowEdgeAtom);
+  const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const visibleLocalMachineId = useMemo(() => {
     const machineId = localProbeResult?.machineId as MachineId | undefined;
     return machineId && machines.has(machineId) ? machineId : null;
@@ -928,7 +1117,6 @@ function WorkspaceChatLanding({
   const hasLocalProjects = visibleLocalProjectMap.size > 0;
   const localProjectCount = visibleLocalProjectMap.size;
 
-  // ── Context type (Local Projects vs GitHub Worktrees) ──
   const [contextType, setContextType] = useState<SessionContextType>(
     () =>
       preSelectedContext ??
@@ -937,13 +1125,29 @@ function WorkspaceChatLanding({
   );
   const analyticsProjectKind = contextType === 'chat' ? null : contextType;
 
-  // ── Prompt state (shared across contexts) ──
-  const chatLandingStateKey = userId ?? null;
+  const { projects: workspaceProjects } = useWorkspaceProjects();
+  const [selectedProjectGroupId, setSelectedProjectGroupId] = useState<string | null>(
+    preSelectedProjectGroupId
+  );
+  const selectProjectGroup = useCallback((projectId: string | null) => {
+    setSelectedProjectGroupId(projectId);
+  }, []);
+  const selectedProjectGroup = useMemo(
+    () =>
+      selectedProjectGroupId
+        ? (workspaceProjects.find((project) => project.id === selectedProjectGroupId) ?? null)
+        : null,
+    [selectedProjectGroupId, workspaceProjects]
+  );
+
+  const chatLandingStateOwnerKey = userId ?? null;
+  const chatLandingDraftKey = embedding
+    ? buildChatLandingSurfaceDraftKey(chatLandingStateOwnerKey, embedding.surface, workspaceSlug)
+    : buildChatLandingDraftKey(chatLandingStateOwnerKey, workspaceSlug);
   const [sessionState, setSessionState] = useAtom(
-    chatLandingSessionStateAtomFamily(chatLandingStateKey)
+    chatLandingSessionStateAtomFamily(chatLandingDraftKey)
   );
   const prompt = sessionState.prompt;
-  const [draftActivityRevision, setDraftActivityRevision] = useState(0);
   const pastedTextDrafts = useMemo(
     () => sanitizePastedTextDrafts(sessionState.pastedTextDrafts),
     [sessionState.pastedTextDrafts]
@@ -982,7 +1186,6 @@ function WorkspaceChatLanding({
   const setPrompt = useCallback(
     (value: string) => {
       setSessionState((prev) => ({ ...prev, prompt: value }));
-      setDraftActivityRevision((revision) => revision + 1);
       setComposerStatus(null);
     },
     [setSessionState]
@@ -1014,11 +1217,52 @@ function WorkspaceChatLanding({
     });
   }, [setSessionState]);
 
-  // ── Machine & Agent selection ──
   const [selectedMachineId, setSelectedMachineId] = useState<MachineId | null>(null);
+
+  // Which machines hold a copy of each repository, as their daemons publish it.
+  const projectRepositoryCopies = useMemo(
+    () => buildProjectRepositoryCopyIndex(visibleLocalProjects.registeredProjects.values()),
+    [visibleLocalProjects.registeredProjects]
+  );
+  // Without GitHub integration (local-only) a repository Member the machine
+  // has no copy of cannot be cloned. A conversation always gets the whole
+  // group, so such a group cannot start on this machine.
+  const canCloneProjectRepositories = useAppCapability('githubIntegration');
+  const selectedProjectGroupAvailability = useMemo(
+    () =>
+      selectedProjectGroup
+        ? getProjectGroupMachineAvailability(
+            selectedProjectGroup,
+            selectedMachineId,
+            projectRepositoryCopies
+          )
+        : null,
+    [projectRepositoryCopies, selectedMachineId, selectedProjectGroup]
+  );
+  const projectGroupMissingMemberIds =
+    selectedProjectGroupAvailability?.kind === 'available'
+      ? selectedProjectGroupAvailability.missing
+      : EMPTY_PROJECT_MEMBER_IDS;
+  const projectGroupLacksLocalCopies =
+    !canCloneProjectRepositories && projectGroupMissingMemberIds.size > 0;
+  const projectGroupLaunchTarget = useMemo(
+    () => (selectedProjectGroup ? resolveProjectGroupLaunchTarget(selectedProjectGroup) : null),
+    [selectedProjectGroup]
+  );
+  const projectGroupUsesRepositoryMembers =
+    projectGroupLaunchTarget?.kind === 'ready' &&
+    projectGroupLaunchTarget.members.some(
+      (member) => member.source.kind === 'github' && member.source.preferLocal === true
+    );
+  const projectGroupPinnedMachineId =
+    projectGroupLaunchTarget?.kind === 'ready' ? projectGroupLaunchTarget.machineId : null;
+  const projectGroupPinnedMachineIdRef = useRef(projectGroupPinnedMachineId);
+  projectGroupPinnedMachineIdRef.current = projectGroupPinnedMachineId;
   const [selectedAgent, setSelectedAgent] = useState<AgentSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const mcpSelection = useSessionMcpSelection(undefined, { disabled: submitting });
+  useEffect(() => {
+    embeddingRef.current?.onPendingChange?.(submitting);
+  }, [embeddingRef, submitting]);
   // The project selector always uses the machine-aware picker so multi-machine
   // workspaces can choose the target explicitly. Standalone Electron entry
   // points such as the sidebar and onboarding may still use the native dialog.
@@ -1036,11 +1280,16 @@ function WorkspaceChatLanding({
       setAddProjectInitialMachineId(null);
     }
   }, []);
-  /* Mobile-only: controls the bottom-sheet composer launched from the
-     home screen's new-chat chip. The sheet hosts the same composer +
-     selectors as the desktop landing — opening it doesn't navigate,
-     so the home tab list stays visible underneath. */
+  /* The new-chat page sits over the mounted home or project screen. */
   const [mobileNewChatOpen, setMobileNewChatOpen] = useState(false);
+  const [restoreMobileProject, setRestoreMobileProject] = useState(false);
+  const [mobileCreatedSessionId, setMobileCreatedSessionId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (mobileCreatedSessionId && mobilePresentedSessionId === mobileCreatedSessionId) {
+      setMobileNewChatOpen(false);
+      setMobileCreatedSessionId(null);
+    }
+  }, [mobileCreatedSessionId, mobilePresentedSessionId]);
 
   /* Mobile-only: controls the bottom-sheet workspace switcher launched
      from the home screen's workspace pill. Replaces the inline dropdown
@@ -1053,18 +1302,6 @@ function WorkspaceChatLanding({
      mobile create flow existed and was an actively confusing UX
      (settings ≠ where you go to create something new). */
   const [mobileCreateWorkspaceOpen, setMobileCreateWorkspaceOpen] = useState(false);
-  const {
-    state: sessionConfigSelectionState,
-    selectedModeId,
-    selectedModelId,
-    configOptionValues,
-    selectMode: setSelectedModeId,
-    selectModel: setSelectedModelName,
-    selectConfigOption: handleConfigOptionChange,
-    dispatch: dispatchSessionConfigSelection,
-  } = useAcpSessionConfigSelectionState();
-
-  // ── GitHub context state ──
   const [selectedRepo, setSelectedRepo] = useState<string | undefined>(undefined);
   const selectedRepoWorktreeSetup = useMemo(() => {
     if (!selectedRepo) return undefined;
@@ -1077,22 +1314,7 @@ function WorkspaceChatLanding({
       ?.worktreeCleanup;
   }, [selectedRepo, workspaceReposWithStatus]);
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
-  const [repoBranches, setRepoBranches] = useState<string[]>([]);
-  const [repoDefaultBranch, setRepoDefaultBranch] = useState<string | null>(null);
-  const applyGitHubBranchSnapshot = useCallback((snapshot: ChatLandingBranchSnapshot) => {
-    setRepoDefaultBranch((prev) =>
-      prev === snapshot.defaultBranch ? prev : snapshot.defaultBranch
-    );
-    setRepoBranches((prev) =>
-      areChatLandingBranchListsEqual(prev, snapshot.branches) ? prev : snapshot.branches
-    );
-    setSelectedBranch((prev) => {
-      const next = resolveChatLandingBranchSelection(snapshot, prev);
-      return next === prev ? prev : next;
-    });
-  }, []);
 
-  // ── Local project context state ──
   const [selectedLocalProject, setSelectedLocalProject] = useState<LocalProjectSelection | null>(
     null
   );
@@ -1104,9 +1326,12 @@ function WorkspaceChatLanding({
   const [selectedWorkdirModeState, setSelectedWorkdirModeState] =
     useState<LocalProjectWorkdirModeSelection | null>(null);
   const [loadingLocalGitState, setLoadingLocalGitState] = useState(false);
+  const [loadingMoreLocalBranches, setLoadingMoreLocalBranches] = useState(false);
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false);
+  const [branchSearchInput, setBranchSearchInput] = useState('');
+  const [debouncedBranchQuery, setDebouncedBranchQuery] = useState('');
 
-  // ── Common refs ──
-  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const promptTextareaRef = useRef<ComposerInputElement>(null);
   // Scope root for the keyboard-nav controller (arrow roving over the desktop landing's
   // config + composer column). Mobile/touch keeps native focus behavior.
   const keyboardNavRef = useRef<HTMLDivElement>(null);
@@ -1140,11 +1365,12 @@ function WorkspaceChatLanding({
   });
   const landingLoadStartMsRef = useRef(getPerformanceNowMs());
   const fireLandingViewedOnce = useFireOncePerKey();
-  const fireProjectSourceReadyOnce = useFireOncePerKey();
   const previousContextTypeRef = useRef(contextType);
-  const fireProjectSelectedOnChange = useFireOnKeyChange();
-  const fireAgentConfigOnChange = useFireOnKeyChange();
   const preSelectionAppliedRef = useRef<string | null>(null);
+  const previousPreSelectionKeyRef = useRef<string | null>(null);
+  // False while a just-applied URL intent has not rendered yet; the selection
+  // mirror must not compare against that pre-application state.
+  const selectionSyncArmedRef = useRef(false);
   const selectedLocalProjectRef = useRef<LocalProjectSelection | null>(null);
   selectedLocalProjectRef.current = selectedLocalProject;
   // `machines` is read inside fetchLocalGitState only for an offline pre-check.
@@ -1157,6 +1383,20 @@ function WorkspaceChatLanding({
   machinesRef.current = machines;
   const selectedLocalProjectMachineId = selectedLocalProject?.machineId ?? null;
   const activeLocalProjectId = selectedLocalProject?.localProjectId ?? null;
+  // A new conversation starts from its target project's defaults. Branch and
+  // worktree are not part of the project's identity, so they are left out.
+  const mcpSelection = useSessionMcpSelection(undefined, {
+    disabled: submitting,
+    defaultsTarget:
+      contextType === 'local' && activeLocalProjectId
+        ? {
+            project: { kind: 'local', localProjectId: activeLocalProjectId },
+            machineId: selectedLocalProjectMachineId,
+          }
+        : contextType === 'github' && selectedRepo
+          ? { project: { kind: 'github', repoFullName: selectedRepo, branch: '' } }
+          : { project: null },
+  });
   const hasWorkspaceRuntime = Boolean(runtime);
   const canUseSelectedLocalProjectDesktopControl = useMemo(
     () =>
@@ -1165,7 +1405,25 @@ function WorkspaceChatLanding({
       visibleLocalMachineId === selectedLocalProjectMachineId,
     [isElectron, selectedLocalProjectMachineId, visibleLocalMachineId]
   );
-  const activeLocalGitState = useMemo(() => {
+  const selectedLocalProjectMeta = useMemo<LocalProjectMeta | null>(() => {
+    if (!selectedLocalProject) return null;
+    const key = getLocalProjectVisibilityKey(
+      selectedLocalProject.machineId,
+      selectedLocalProject.localProjectId
+    );
+    return (
+      visibleLocalProjectMap.get(key)?.project ??
+      machines.get(selectedLocalProject.machineId)?.localProjects?.[
+        selectedLocalProject.localProjectId
+      ] ??
+      null
+    );
+  }, [machines, selectedLocalProject, visibleLocalProjectMap]);
+  const syncedLocalGitSummary = useMemo(
+    () => deriveLocalProjectGitStateFromMeta(selectedLocalProjectMeta),
+    [selectedLocalProjectMeta]
+  );
+  const activeFetchedLocalGitState = useMemo(() => {
     if (
       !selectedLocalProject ||
       localGitState?.machineId !== selectedLocalProject.machineId ||
@@ -1175,15 +1433,28 @@ function WorkspaceChatLanding({
     }
     return localGitState.state;
   }, [localGitState, selectedLocalProject]);
-  const selectedLocalBranch = useMemo(() => {
-    if (
-      !activeLocalProjectId ||
-      selectedLocalBranchState?.localProjectId !== activeLocalProjectId
-    ) {
-      return null;
+  const activeLocalGitState = useMemo<LocalProjectObservedGitState | null>(() => {
+    if (activeFetchedLocalGitState) {
+      if (!activeFetchedLocalGitState.git) return activeFetchedLocalGitState;
+      return {
+        ...activeFetchedLocalGitState,
+        githubRepoFullName:
+          activeFetchedLocalGitState.githubRepoFullName ??
+          selectedLocalProjectMeta?.githubRepoFullName?.trim() ??
+          null,
+      };
     }
-    return selectedLocalBranchState.branch;
-  }, [activeLocalProjectId, selectedLocalBranchState]);
+    return syncedLocalGitSummary;
+  }, [activeFetchedLocalGitState, selectedLocalProjectMeta, syncedLocalGitSummary]);
+  const selectedLocalBranch = useMemo(() => {
+    if (!activeLocalProjectId) return null;
+    const explicitBranch =
+      selectedLocalBranchState?.localProjectId === activeLocalProjectId
+        ? selectedLocalBranchState.branch
+        : null;
+    if (!activeLocalGitState) return explicitBranch;
+    return resolveLocalProjectBranchSelection(activeLocalGitState, explicitBranch);
+  }, [activeLocalGitState, activeLocalProjectId, selectedLocalBranchState]);
   const selectedWorkdirMode = useMemo<WorkdirMode>(() => {
     if (
       !activeLocalProjectId ||
@@ -1203,6 +1474,22 @@ function WorkspaceChatLanding({
     },
     [activeLocalProjectId]
   );
+  useEffect(() => {
+    setBranchPickerOpen(false);
+    setBranchSearchInput('');
+    setDebouncedBranchQuery('');
+  }, [activeLocalProjectId, selectedLocalProjectMachineId]);
+  useEffect(() => {
+    const trimmed = branchSearchInput.trim();
+    if (!trimmed) {
+      setDebouncedBranchQuery('');
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedBranchQuery(trimmed);
+    }, LOCAL_PROJECT_BRANCH_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [branchSearchInput]);
   useEffect(() => {
     setComposerStatus(null);
   }, [
@@ -1274,10 +1561,11 @@ function WorkspaceChatLanding({
     sessionId: draftSessionId,
     ensureSessionId: ensureDraftSessionId,
     resetSessionId: resetDraftSessionId,
-  } = useChatLandingDraftSession();
+  } = useChatLandingDraftSession(chatLandingDraftKey);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const {
     imageItems,
+    attachments: imageDraftAttachments,
     hasBlockingImages,
     hasUploadedImages,
     canAddMoreImages,
@@ -1288,6 +1576,7 @@ function WorkspaceChatLanding({
     clearPendingImages,
     buildInputBlocks,
   } = useChatLandingImageDraft({
+    draftKey: chatLandingDraftKey,
     workspaceId: (workspaceId as WorkspaceId | null) ?? null,
     authToken,
     isMobile,
@@ -1297,6 +1586,7 @@ function WorkspaceChatLanding({
   });
   const {
     fileItems,
+    attachments: fileDraftAttachments,
     hasBlockingFiles,
     hasUploadedFiles,
     canAddMoreFiles,
@@ -1306,41 +1596,27 @@ function WorkspaceChatLanding({
     clearPendingFiles,
     buildFileInputBlocks,
   } = useChatLandingFileDraft({
+    draftKey: chatLandingDraftKey,
     workspaceId: (workspaceId as WorkspaceId | null) ?? null,
     authToken,
     machineId: selectedMachineId,
     sessionId: draftSessionId,
     ensureSessionId: ensureDraftSessionId,
   });
-  const lastAppliedResetDraftKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!resetDraftKey) {
-      return;
-    }
-
-    const scopedResetKey = `${chatLandingStateKey ?? 'anonymous'}:${resetDraftKey}`;
-    if (lastAppliedResetDraftKeyRef.current === scopedResetKey) {
-      return;
-    }
-    lastAppliedResetDraftKeyRef.current = scopedResetKey;
-    if (resetDraftOnKeyChange) {
-      setSessionState({ prompt: '', pastedTextDrafts: [] });
-    }
-    setComposerStatus(null);
+  // The page keeps its draft across route unmounts; an embedded landing's
+  // draft lives only as long as its host, so closing it releases previews,
+  // uploads, the reserved id and the stored text.
+  const releaseEmbeddedDraftRef = useLatestRef(() => {
     clearPendingImages();
     clearPendingFiles();
     resetDraftSessionId();
-  }, [
-    chatLandingStateKey,
-    clearPendingFiles,
-    clearPendingImages,
-    resetDraftSessionId,
-    resetDraftKey,
-    resetDraftOnKeyChange,
-    setSessionState,
-  ]);
-
+    setSessionState(RESET);
+  });
+  useLayoutEffect(() => {
+    if (!isEmbedded) return undefined;
+    const release = releaseEmbeddedDraftRef;
+    return () => release.current();
+  }, [isEmbedded, releaseEmbeddedDraftRef]);
   const insertLargePastedTextAtSelection = useCallback(
     (text: string) => {
       const normalizedText = normalizePastedTextDraft(text).trim();
@@ -1348,9 +1624,11 @@ function WorkspaceChatLanding({
         return false;
       }
 
-      const currentValue = promptTextareaRef.current?.value ?? prompt;
-      const selectionStart = promptTextareaRef.current?.selectionStart ?? null;
-      const selectionEnd = promptTextareaRef.current?.selectionEnd ?? null;
+      const promptInput = promptTextareaRef.current;
+      const currentValue = promptInput ? getComposerText(promptInput) : prompt;
+      const promptSelection = promptInput ? getComposerSelection(promptInput) : null;
+      const selectionStart = promptSelection?.start ?? null;
+      const selectionEnd = promptSelection?.end ?? null;
       const result = insertPastedTextDraft({
         currentValue,
         pastedText: normalizedText,
@@ -1386,7 +1664,7 @@ function WorkspaceChatLanding({
 
       requestAnimationFrame(() => {
         promptTextareaRef.current?.focus();
-        promptTextareaRef.current?.setSelectionRange(result.draft.end, result.draft.end);
+        setComposerSelection(promptTextareaRef.current, result.draft.end, result.draft.end);
       });
 
       return true;
@@ -1395,34 +1673,62 @@ function WorkspaceChatLanding({
   );
 
   // Auto-focus textarea on mount (desktop only)
-  const isMobileRef = useRef(isMobile);
-  isMobileRef.current = isMobile;
+  const mobileKeyboardRef = useRef(usesMobileKeyboardAction);
+  mobileKeyboardRef.current = usesMobileKeyboardAction;
   useEffect(() => {
     const id = requestAnimationFrame(() => {
-      if (!isMobileRef.current) {
+      if (!mobileKeyboardRef.current) {
         promptTextareaRef.current?.focus();
       }
     });
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // ── Apply pre-selection from search params ──
-  const preSelectionKey = `${preSelectedContext}|${preSelectedMachine}|${preSelectedProject}|${preSelectedRepo}`;
+  const preSelectionKey = buildChatLandingPreSelectionKey({
+    context: preSelectedProjectGroupId ? 'group' : preSelectedContext,
+    machine: preSelectedMachine,
+    project: preSelectedProject,
+    repo: preSelectedRepo,
+    group: preSelectedProjectGroupId ?? undefined,
+  });
   useEffect(() => {
+    const previousPreSelectionKey = previousPreSelectionKeyRef.current;
+    previousPreSelectionKeyRef.current = preSelectionKey;
     if (preSelectionAppliedRef.current === preSelectionKey) return;
     preSelectionAppliedRef.current = preSelectionKey;
+    // The applied selection reaches state next render; disarm the mirror so it
+    // cannot race this intent with the still-stale selection (see the mirror
+    // effect below, which must run after this one).
+    selectionSyncArmedRef.current = false;
 
+    if (preSelectedProjectGroupId) {
+      setContextType('chat');
+      selectProjectGroup(preSelectedProjectGroupId);
+      return;
+    }
+    if (preSelectedContext || preSelectedRepo) selectProjectGroup(null);
     if (preSelectedContext === 'chat') {
       setContextType('chat');
     } else if (preSelectedContext === 'local' && preSelectedMachine && preSelectedProject) {
       setContextType('local');
-      handleSelectedLocalProjectChange({
-        machineId: preSelectedMachine as MachineId,
-        localProjectId: preSelectedProject as LocalProjectId,
-      });
+      const currentProject = selectedLocalProjectRef.current;
+      if (
+        currentProject?.machineId !== preSelectedMachine ||
+        currentProject?.localProjectId !== preSelectedProject
+      ) {
+        handleSelectedLocalProjectChange({
+          machineId: preSelectedMachine as MachineId,
+          localProjectId: preSelectedProject as LocalProjectId,
+        });
+      }
     } else if (preSelectedRepo) {
       setContextType('github');
       setSelectedRepo(preSelectedRepo);
+    } else if (previousPreSelectionKey?.startsWith('local|')) {
+      // A sidebar removal navigates from a URL-named local project to plain
+      // `/chat` while this landing stays mounted. Clear the stale local
+      // selection before the optimistic Flock overlay can report it missing.
+      handleSelectedLocalProjectChange(null);
     }
   }, [
     preSelectionKey,
@@ -1430,10 +1736,61 @@ function WorkspaceChatLanding({
     preSelectedMachine,
     preSelectedProject,
     preSelectedRepo,
+    preSelectedProjectGroupId,
+    selectProjectGroup,
     handleSelectedLocalProjectChange,
   ]);
 
-  // ── Machine-owner authorization check for local projects ──
+  // The composer owns the selection once pre-selection is applied. When the
+  // URL names a selection, it must keep telling the truth: steering or
+  // clearing the composer would otherwise leave a stale project in the URL,
+  // and re-activating that project's sidebar row would be an identical-URL
+  // no-op. A plain /chat URL names nothing and stays plain, so restored
+  // defaults and auto-selection never rewrite the home landing's address.
+  const selectionSearch = useMemo(
+    () =>
+      getChatLandingSelectionSearch({
+        contextType: selectedProjectGroupId ? 'group' : contextType,
+        machineId: selectedLocalProject?.machineId ?? null,
+        localProjectId: selectedLocalProject?.localProjectId ?? null,
+        repoFullName: selectedRepo ?? null,
+        projectGroupId: selectedProjectGroupId,
+      }),
+    [contextType, selectedLocalProject, selectedProjectGroupId, selectedRepo]
+  );
+  const urlNamesSelection =
+    preSelectedProjectGroupId !== null ||
+    preSelectedContext !== undefined ||
+    preSelectedMachine !== undefined ||
+    preSelectedProject !== undefined ||
+    preSelectedRepo !== undefined;
+  useEffect(() => {
+    if (!onSelectionUrlSync) return;
+    const selectionKey = buildChatLandingPreSelectionKey({
+      context: selectionSearch.context,
+      machine: selectionSearch.machine,
+      project: selectionSearch.project,
+      repo: selectionSearch.repo,
+      group: selectionSearch.group,
+    });
+    const decision = getChatLandingSelectionSyncDecision({
+      urlNamesSelection,
+      intentApplied: preSelectionAppliedRef.current === preSelectionKey,
+      armed: selectionSyncArmedRef.current,
+      urlKey: preSelectionKey,
+      selectionKey,
+    });
+    if (decision === 'arm') {
+      selectionSyncArmedRef.current = true;
+      return;
+    }
+    if (decision !== 'sync') return;
+    // The URL will soon name this state-originated selection; stamp it as
+    // already applied so the pre-selection effect does not re-apply it.
+    preSelectionAppliedRef.current = selectionKey;
+    onSelectionUrlSync(selectionSearch);
+  }, [onSelectionUrlSync, urlNamesSelection, preSelectionKey, selectionSearch]);
+
   useEffect(() => {
     if (contextType !== 'local' || !selectedLocalProject) return;
     const machineMeta = machines.get(selectedLocalProject.machineId);
@@ -1460,7 +1817,24 @@ function WorkspaceChatLanding({
       isDocMetaCacheReady: docMetaCacheReady,
       isMetaRoomFirstSyncPending,
     });
-    if (localProjectAvailability !== 'unavailable') return;
+    const localProjectKey = buildLocalProjectKey(
+      selectedLocalProject.machineId,
+      selectedLocalProject.localProjectId
+    );
+    const removalInProgress =
+      pendingLocalProjectRemovals.has(localProjectKey) ||
+      isLocalProjectRemovalCompletionSuppressed(
+        selectedLocalProject.machineId,
+        selectedLocalProject.localProjectId
+      );
+    if (
+      !shouldReportLocalProjectUnavailable({
+        availability: localProjectAvailability,
+        removalInProgress,
+      })
+    ) {
+      return;
+    }
     toast.error(t('sidebar.localProjects.forbidden', 'Local project is not available'));
     handleSelectedLocalProjectChange(null);
     setContextType(hasGitHubRepos ? 'github' : 'chat');
@@ -1476,12 +1850,12 @@ function WorkspaceChatLanding({
     visibleLocalProjectAccess,
     visibleLocalProjectsLoading,
     isMetaRoomFirstSyncPending,
+    pendingLocalProjectRemovals,
     hasGitHubRepos,
     t,
     handleSelectedLocalProjectChange,
   ]);
 
-  // ── Auto-switch to available tab if current is disabled ──
   useEffect(() => {
     if (repositories === undefined) return; // Wait for repos to load
     if (machines.size === 0) return; // Wait for machine data to load
@@ -1506,9 +1880,6 @@ function WorkspaceChatLanding({
     visibleLocalProjectsLoading,
   ]);
 
-  // ── Agent/Mode/Model config ──
-  const selectorTagClassName = getSelectorTagClassName(tone);
-
   const selectedConfig = useMemo<AgentConfigMeta | undefined>(
     () =>
       selectedAgent ? executorConfigs.find((cfg) => cfg.id === selectedAgent.agentId) : undefined,
@@ -1518,46 +1889,12 @@ function WorkspaceChatLanding({
     () => (selectedAgent ? machines.get(selectedAgent.machineId) : undefined),
     [machines, selectedAgent]
   );
-  const selectorOptions = useAcpSelectorOptions({
-    configId: selectedConfig?.id,
-    cliType: selectedConfig?.cliType,
-    agentType: selectedConfig?.agentType,
-    selectedModeId,
-    selectedModelId,
-    configOptionValues,
-    runtimeOverrides: selectedConfig?.runtimeOverrides,
-    machine: selectedMachine,
-  });
-  const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
-  const dispatchConfigOptionValues = useMemo(
-    () => filterAcpSessionConfigOptionValues(configOptionValues, configOptionSelectors),
-    [configOptionSelectors, configOptionValues]
-  );
-  const selectedRateLimits =
-    selectedConfig &&
-    canShowSubscriptionRateLimits({
-      cliType: selectedConfig.cliType,
-      agentType: selectedConfig.agentType,
-      config: selectedConfig,
-    })
-      ? selectedMachine?.raceLimits
-      : undefined;
-  // The landing knows the picked provider's full config, so eligibility is
-  // decided here rather than from `cliType`/`agentType` further down.
-  const showCodexResetForecast =
-    !!selectedConfig &&
-    canShowCodexResetForecast({
-      cliType: selectedConfig.cliType,
-      agentType: selectedConfig.agentType,
-      config: selectedConfig,
-    });
-  const selectedModelLabel = modelOptions.find((option) => option.value === selectedModelId)?.label;
   /* ── Agent Role selection ──
      A Role is one packaged run configuration, so picking one flows through the
      SAME preference channel as this agent's remembered defaults rather than a
-     second apply path: the reconcile pass seeds mode/model/options from the
-     Role before paint, and an option the agent no longer supports falls back to
-     the agent's own value there — visibly — instead of being forced in.
+     second apply path: the derivation seeds mode/model/options from the Role,
+     and an option the agent no longer supports falls back to the agent's own
+     value there — visibly — instead of being forced in.
 
      `token` makes re-picking the same Role after hand-editing a knob a new
      preference, and the preference deliberately OUTLIVES `activeAgentRole`
@@ -1591,10 +1928,12 @@ function WorkspaceChatLanding({
   const activeAgentRolePreference = useMemo(() => {
     if (!agentRolePreference || !selectedAgent) return null;
     const role = workspaceAgentRoles.find((entry) => entry.id === agentRolePreference.roleId);
-    if (!role) return null;
-    const bound =
-      role.agentConfigId === selectedAgent.agentId && role.machineId === selectedAgent.machineId;
-    return bound ? { role, token: agentRolePreference.token } : null;
+    // The Role as the selected machine runs it; a Role with no target there,
+    // or a different agent there, does not apply.
+    const bound = role && bindAgentRoleTarget(role, selectedAgent.machineId);
+    return bound && bound.agentConfigId === selectedAgent.agentId
+      ? { role: bound, token: agentRolePreference.token }
+      : null;
   }, [agentRolePreference, selectedAgent, workspaceAgentRoles]);
   const selectedAgentDefaults = useMemo(() => {
     const roleRunConfig = activeAgentRolePreference?.role.runConfig;
@@ -1605,17 +1944,134 @@ function WorkspaceChatLanding({
         configOptionValues: roleRunConfig.configOptionValues,
       };
     }
-    return selectedAgent ? (agentDefaultsCache.get(selectedAgent.agentId) ?? {}) : {};
-  }, [activeAgentRolePreference, selectedAgent]);
-  useReconcileAcpSessionConfigSelection({
+    return selectedAgent ? (readAgentStartDefaults(selectedConfig) ?? {}) : {};
+  }, [activeAgentRolePreference, selectedAgent, selectedConfig]);
+  /* No effects: user edits are the only stored selection state; the effective
+     values derive per render. Candidates feed the capability lookup so the
+     catalog can depend on the selection without feeding back into it. */
+  const {
+    selection: sessionConfigSelection,
+    candidates: sessionConfigCandidates,
+    appliedTargetKey: appliedSessionConfigTargetKey,
+    selectMode: setSelectedModeId,
+    selectModel: setSelectedModelName,
+    selectConfigOption: handleConfigOptionChange,
+  } = useAcpSessionConfigSelectionState({
     targetKey: selectedAgent ? `${selectedAgent.machineId}:${selectedAgent.agentId}` : null,
     preferenceRevision: activeAgentRolePreference
       ? `role:${activeAgentRolePreference.role.id}:${activeAgentRolePreference.role.revision}:${activeAgentRolePreference.token}`
       : (selectedAgent?.agentId ?? 'none'),
     preferences: selectedAgentDefaults,
-    selectorOptions,
-    dispatch: dispatchSessionConfigSelection,
   });
+  const selectorOptions = useAcpSelectorOptions({
+    configId: selectedConfig?.id,
+    cliType: selectedConfig?.cliType,
+    agentType: selectedConfig?.agentType,
+    selectedModeId: sessionConfigCandidates.modeId,
+    selectedModelId: sessionConfigCandidates.modelId,
+    configOptionValues: sessionConfigCandidates.configOptionValues,
+    runtimeOverrides: selectedConfig?.runtimeOverrides,
+    machine: selectedMachine,
+  });
+  const { modeOptions, modelOptions, configOptionSelectors } = selectorOptions;
+  const {
+    selectedModeId,
+    selectedModelId,
+    configOptionValues,
+    configOptionSelectors: resolvedConfigOptionSelectors,
+  } = useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
+    cliType: selectedConfig?.cliType,
+    agentType: selectedConfig?.agentType,
+  });
+  const dispatchConfigOptionValues = useMemo(
+    () => filterAcpSessionConfigOptionValues(configOptionValues, resolvedConfigOptionSelectors),
+    [configOptionValues, resolvedConfigOptionSelectors]
+  );
+  const refreshQuota = useProviderQuotaRefresh(
+    selectedMachine?.id,
+    selectedConfig?.id,
+    !!selectedConfig &&
+      selectedMachine?.acpCapabilities?.[selectedConfig.id]?.rateLimits?.query === true &&
+      canShowSubscriptionRateLimits({
+        cliType: selectedConfig.cliType,
+        agentType: selectedConfig.agentType,
+        config: selectedConfig,
+        capability: selectedMachine?.acpCapabilities?.[selectedConfig.id]?.rateLimits,
+      })
+  );
+  const selectedRateLimits =
+    selectedConfig &&
+    canShowSubscriptionRateLimits({
+      cliType: selectedConfig.cliType,
+      agentType: selectedConfig.agentType,
+      config: selectedConfig,
+      capability: selectedMachine?.acpCapabilities?.[selectedConfig.id]?.rateLimits,
+    })
+      ? selectedMachine?.raceLimits
+      : undefined;
+  // The landing knows the picked provider's full config, so eligibility is
+  // decided here rather than from `cliType`/`agentType` further down.
+  const showCodexResetForecast =
+    !!selectedConfig &&
+    canShowCodexResetForecast({
+      cliType: selectedConfig.cliType,
+      agentType: selectedConfig.agentType,
+      config: selectedConfig,
+    });
+  // A row on the new-chat page's "now" board opens its session, as a sidebar row does.
+  const handleOpenHomeSession = useCallback(
+    (sessionId: string) => {
+      void navigate({
+        to: '/$workspaceName/sessions/$sessionId',
+        params: { workspaceName: workspaceSlug, sessionId: sessionId as SessionId },
+      });
+    },
+    [navigate, workspaceSlug]
+  );
+  // The new-chat page's usage tile: every provider on the selected machine that reports a
+  // plan, each read the way the composer's usage popover reads it. The composer's own
+  // provider uses the selected model; the others have none selected.
+  const homeWeekUsageOptions = useMemo<HomeWeekUsageOption[]>(() => {
+    if (!selectedMachine) return [];
+    return executorConfigs.flatMap((config) => {
+      if (config.machineId !== selectedMachine.id) return [];
+      if (
+        !canShowSubscriptionRateLimits({
+          cliType: config.cliType,
+          agentType: config.agentType,
+          config,
+          capability: selectedMachine.acpCapabilities?.[config.id]?.rateLimits,
+        })
+      ) {
+        return [];
+      }
+      const usage = buildHomeWeekUsage({
+        rateLimits: selectedMachine.raceLimits,
+        agentType: config.agentType,
+        agentConfigId: config.id,
+        modelId: config.id === selectedConfig?.id ? selectedModelId : null,
+      });
+      return usage
+        ? [
+            {
+              source: {
+                id: config.id,
+                cliType: config.cliType,
+                agentType: config.agentType,
+                name: config.name,
+              },
+              usage,
+              codexForecast: canShowCodexResetForecast({
+                cliType: config.cliType,
+                agentType: config.agentType,
+                config,
+              }),
+            },
+          ]
+        : [];
+    });
+  }, [executorConfigs, selectedMachine, selectedConfig?.id, selectedModelId]);
+  const selectedModelLabel = modelOptions.find((option) => option.value === selectedModelId)?.label;
   /* The Role the composer IS, not the one last clicked. The footer names a Role
      only while every value that Role pins is still what will run, so moving a
      knob — or an unsupported pin falling back — takes the name away instead of
@@ -1684,42 +2140,45 @@ function WorkspaceChatLanding({
       setPendingRecentRunConfig(null);
       return;
     }
-    if (
-      sessionConfigSelectionState.targetKey !==
-      `${selectedAgent.machineId}:${selectedAgent.agentId}`
-    ) {
+    if (appliedSessionConfigTargetKey !== `${selectedAgent.machineId}:${selectedAgent.agentId}`) {
       return;
     }
     // A cold agent reports no models until its capabilities resolve; applying
     // then would silently drop the recorded model. Wait — unless the user has
     // meanwhile picked a model themselves, which outranks the entry.
     if (pendingRecentRunConfig.modelId && modelOptions.length === 0) {
-      if (sessionConfigSelectionState.model.origin === 'user') {
+      if (sessionConfigSelection.edits.model !== undefined) {
         setPendingRecentRunConfig(null);
       }
       return;
     }
     setPendingRecentRunConfig(null);
-    if (
+    const appliedModelId =
       pendingRecentRunConfig.modelId &&
       modelOptions.some((option) => option.value === pendingRecentRunConfig.modelId)
-    ) {
-      setSelectedModelName(pendingRecentRunConfig.modelId);
+        ? pendingRecentRunConfig.modelId
+        : undefined;
+    if (appliedModelId) {
+      setSelectedModelName(appliedModelId);
     }
     for (const { configId, value } of resolveApplicableConfigOptionValues(
       pendingRecentRunConfig,
-      configOptionSelectors
+      configOptionSelectors,
+      // The selectors still describe the model this entry replaces, so its
+      // effort must not be validated against the outgoing model's ladder.
+      { switchesModel: appliedModelId !== undefined && appliedModelId !== selectedModelId }
     )) {
       handleConfigOptionChange(configId, value);
     }
   }, [
+    appliedSessionConfigTargetKey,
     configOptionSelectors,
     handleConfigOptionChange,
     modelOptions,
     pendingRecentRunConfig,
     selectedAgent,
-    sessionConfigSelectionState.model.origin,
-    sessionConfigSelectionState.targetKey,
+    selectedModelId,
+    sessionConfigSelection.edits.model,
     setSelectedModelName,
   ]);
   const availableCommands = useAvailableCommands({
@@ -1797,7 +2256,6 @@ function WorkspaceChatLanding({
       : null,
   });
 
-  // ── Machine online check (context-dependent) ──
   const hasAnyOnlineMachine = useMemo(() => {
     return getChatLandingHasAnyOnlineMachine({
       localMachineId: visibleLocalMachineId,
@@ -1816,7 +2274,6 @@ function WorkspaceChatLanding({
   }, [machines, onlineMachineIds]);
   const hasNoMachine = !hasAnyOnlineMachine;
 
-  // ── Sync selectedMachineId from selectedAgent (e.g. when restored from defaults) ──
   // Skip sync when the machine was explicitly changed by the user via handleMachineChange.
   const machineChangedByUserRef = useRef(false);
   useEffect(() => {
@@ -1835,11 +2292,14 @@ function WorkspaceChatLanding({
     }
   }, [contextType, selectedAgent?.machineId, selectedLocalProjectMachineId, selectedMachineId]);
 
-  // ── Handle explicit machine change: auto-select an agent owned by the new machine ──
   const handleMachineChange = useCallback(
     (machineId: MachineId) => {
       machineChangedByUserRef.current = true;
       setSelectedMachineId(machineId);
+      // A group whose local repositories live on another machine cannot run
+      // here; leaving that machine leaves the group.
+      const pinnedMachineId = projectGroupPinnedMachineIdRef.current;
+      if (pinnedMachineId && pinnedMachineId !== machineId) selectProjectGroup(null);
       if (contextType === 'local') {
         const currentProject = selectedLocalProjectRef.current;
         if (currentProject?.machineId !== machineId) {
@@ -1868,8 +2328,21 @@ function WorkspaceChatLanding({
         setSelectedAgent(null);
       }
     },
-    [contextType, executorConfigs, handleSelectedLocalProjectChange, selectedAgent]
+    [
+      contextType,
+      executorConfigs,
+      handleSelectedLocalProjectChange,
+      selectProjectGroup,
+      selectedAgent,
+    ]
   );
+
+  // The group's local repositories decide the machine.
+  useEffect(() => {
+    if (!projectGroupPinnedMachineId || projectGroupPinnedMachineId === selectedMachineId) return;
+    if (!machines.has(projectGroupPinnedMachineId as MachineId)) return;
+    handleMachineChange(projectGroupPinnedMachineId as MachineId);
+  }, [handleMachineChange, machines, projectGroupPinnedMachineId, selectedMachineId]);
 
   const createNewMachinePairing = useCallback(async () => {
     setMachinePairingDialogOpen(true);
@@ -1891,7 +2364,7 @@ function WorkspaceChatLanding({
     }
     setMachinePairing({
       requestId: result.value.request.id,
-      command: `npx lody@latest daemon start --auth ${result.value.token}`,
+      ...buildDaemonInstallCommands({ auth: result.value.token }),
       expiresAt: result.value.request.expiresAt,
     });
   }, [authToken, workspaceId]);
@@ -1970,7 +2443,6 @@ function WorkspaceChatLanding({
     [machinePairing, machinePairingStatus]
   );
 
-  // ── Selectable machines: reachable AND own at least one configured agent. ──
   // The hook uses this to ensure the current selection still resolves; falling
   // back to a valid default when machines stream in late (e.g. relogin) or go
   // offline.
@@ -2009,7 +2481,6 @@ function WorkspaceChatLanding({
     hasSelectableMachine: selectableMachines.size > 0,
   });
 
-  // ── Defaults loading (all contexts) ──
   const { defaultsReady, repoDefaultsReady } = useChatLandingDefaults({
     workspaceId,
     shouldRestoreContextType,
@@ -2018,6 +2489,7 @@ function WorkspaceChatLanding({
     executorConfigs,
     machines,
     selectableMachines,
+    presenceSynced,
     visibleMachinesLoading,
     docMetaCacheReady,
     repositories,
@@ -2035,7 +2507,6 @@ function WorkspaceChatLanding({
     selectedAgentRoleId: agentRoleRestored ? (activeAgentRole?.id ?? null) : undefined,
   });
 
-  // ── Auto-select first repo when none selected ──
   useEffect(() => {
     if (!repoDefaultsReady) return;
     if (contextType !== 'github' || selectedRepo) return;
@@ -2043,7 +2514,6 @@ function WorkspaceChatLanding({
     if (firstRepo) setSelectedRepo(firstRepo.fullName);
   }, [contextType, repoDefaultsReady, repositories, selectedRepo]);
 
-  // ── Auto-select first local project when none selected ──
   useEffect(() => {
     if (!defaultsReady) return;
     if (contextType !== 'local' || selectedLocalProject) return;
@@ -2098,7 +2568,6 @@ function WorkspaceChatLanding({
     visibleLocalProjectsLoading,
   ]);
 
-  // ── Local project: auto-select agent when machine changes ──
   useEffect(() => {
     if (contextType !== 'local' || !selectedLocalProject) return;
 
@@ -2126,8 +2595,9 @@ function WorkspaceChatLanding({
     }
   }, [contextType, executorConfigs, machines, selectedAgent, selectedLocalProject, workspaceId]);
 
-  // ── PostHog tracking ──
   useEffect(() => {
+    // The page funnel counts page views; an embedded landing is not one.
+    if (isEmbedded) return;
     if (!postHog || !userId || !workspaceId) return;
     if (!fireLandingViewedOnce(`${userId}:${workspaceId}`)) return;
     capturePostHogEvent(postHog, 'chat_landing/viewed', {
@@ -2146,6 +2616,7 @@ function WorkspaceChatLanding({
   }, [
     contextType,
     fireLandingViewedOnce,
+    isEmbedded,
     isMobile,
     launchMode,
     localProjectCount,
@@ -2182,167 +2653,38 @@ function WorkspaceChatLanding({
     workspaceId,
   ]);
 
-  useEffect(() => {
-    if (!postHog || !userId || !workspaceId) return;
-    // Wait until the GitHub repo query has settled (undefined = still loading)
-    if (repositories === undefined) return;
-    if (visibleLocalProjectsLoading) return;
-    const githubRepoCount = repositories.length;
-    if (githubRepoCount === 0 && localProjectCount === 0) return;
-    if (!fireProjectSourceReadyOnce(`${userId}:${workspaceId}`)) return;
-    const sourceKind =
-      githubRepoCount > 0 && localProjectCount > 0
-        ? 'mixed'
-        : githubRepoCount > 0
-          ? 'github'
-          : 'local';
-    capturePostHogEvent(postHog, 'onboarding/project_source_ready', {
-      user_id: userId,
-      workspace_id: workspaceId,
-      source_kind: sourceKind,
-      github_repo_count: githubRepoCount,
-      local_project_count: localProjectCount,
-    });
-  }, [
-    fireProjectSourceReadyOnce,
-    localProjectCount,
-    postHog,
-    repositories,
-    userId,
-    visibleLocalProjectsLoading,
+  const {
+    branches: repoBranches,
+    defaultBranch: repoDefaultBranch,
+    hasMore: repoBranchesHasMore,
+    loadingMore: loadingMoreRepoBranches,
+    searching: searchingRepoBranches,
+    onSearchQueryChange: handleRepoBranchSearchQueryChange,
+    onReachEnd: handleRepoBranchListEnd,
+  } = useGitHubRepoBranches({
+    enabled: contextType === 'github',
     workspaceId,
-  ]);
+    repoFullName: selectedRepo,
+    selectedBranch,
+    setSelectedBranch,
+  });
 
-  useEffect(() => {
-    if (!postHog || !userId || !workspaceId) return;
-    if (contextType === 'chat') return;
-    if (contextType === 'github' && !selectedRepo) return;
-    if (contextType === 'local' && !selectedLocalProject) return;
-    if (
-      contextType === 'local' &&
-      selectedLocalProject &&
-      activeLocalGitState === null &&
-      !localGitStateError
-    ) {
-      return;
-    }
-
-    const selectionKey =
-      contextType === 'github'
-        ? `github:${selectedRepo}`
-        : `local:${selectedLocalProject?.machineId}:${selectedLocalProject?.localProjectId}`;
-    const analyticsKey = `${userId}:${workspaceId}:${selectionKey}`;
-    if (!fireProjectSelectedOnChange(analyticsKey)) return;
-    capturePostHogEvent(postHog, 'onboarding/project_selected', {
-      user_id: userId,
-      workspace_id: workspaceId,
-      project_kind: contextType,
-      repo_id_hash: contextType === 'github' ? hashAnalyticsId(selectedRepo) : null,
-      local_project_id:
-        contextType === 'local' ? (selectedLocalProject?.localProjectId ?? null) : null,
-      machine_id: contextType === 'local' ? (selectedLocalProject?.machineId ?? null) : null,
-      has_git_branch:
-        contextType === 'local'
-          ? localGitStateError
-            ? null
-            : (activeLocalGitState?.git ?? null)
-          : true,
-    });
-  }, [
-    activeLocalGitState,
-    contextType,
-    fireProjectSelectedOnChange,
-    localGitStateError,
-    postHog,
-    selectedLocalProject,
-    selectedRepo,
-    userId,
-    workspaceId,
-  ]);
-
-  useEffect(() => {
-    if (!postHog || !userId || !workspaceId || !selectedAgent || !selectedConfig) return;
-    const analyticsKey = [
-      userId,
-      workspaceId,
-      selectedAgent.machineId,
-      selectedAgent.agentId,
-      selectedConfig.cliType,
-      selectedConfig.agentType,
-    ].join(':');
-    if (!fireAgentConfigOnChange(analyticsKey)) return;
-    capturePostHogEvent(postHog, 'onboarding/agent_config_selected', {
-      user_id: userId,
-      workspace_id: workspaceId,
-      machine_id: selectedAgent.machineId,
-      agent_config_id: selectedAgent.agentId,
-      cli_type: selectedConfig.cliType,
-      agent_type: selectedConfig.agentType,
-    });
-  }, [fireAgentConfigOnChange, postHog, selectedAgent, selectedConfig, userId, workspaceId]);
-
-  // ── GitHub branch loading ──
-  useLayoutEffect(() => {
-    if (contextType !== 'github') return undefined;
-    if (!workspaceId || !selectedRepo) {
-      setRepoBranches([]);
-      setRepoDefaultBranch(null);
-      setSelectedBranch(null);
-
-      return undefined;
-    }
-
-    const cached = githubBranchesCache.get(getGitHubBranchesCacheId(workspaceId, selectedRepo));
-    if (cached) {
-      applyGitHubBranchSnapshot(cached);
-      return undefined;
-    }
-
-    setRepoDefaultBranch(null);
-    setRepoBranches((prev) => (prev.length === 0 ? prev : []));
-    return undefined;
-  }, [applyGitHubBranchSnapshot, contextType, selectedRepo, workspaceId]);
-
-  useEffect(() => {
-    if (contextType !== 'github') return undefined;
-    if (!workspaceId || !selectedRepo) return undefined;
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await withGitHubTokenRetry(workspaceId, selectedRepo, (token) =>
-          githubFetchBranches(token, selectedRepo)
-        );
-        const snapshot = createChatLandingBranchSnapshot(result.branches, result.defaultBranch);
-        githubBranchesCache.set(getGitHubBranchesCacheId(workspaceId, selectedRepo), {
-          ...snapshot,
-          updatedAt: Date.now(),
-        });
-        if (cancelled) return;
-        applyGitHubBranchSnapshot(snapshot);
-      } catch (error) {
-        if (cancelled) return;
-        console.warn('Failed to load repository branches', error);
-        setSelectedBranch((prev) => {
-          const trimmed = prev?.trim() || null;
-          return trimmed === prev ? prev : trimmed;
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [applyGitHubBranchSnapshot, contextType, selectedRepo, workspaceId]);
-
-  const applyLocalGitState = useCallback(
-    (machineId: MachineId, localProjectId: LocalProjectId, result: LocalProjectGitState) => {
+  const applyLocalBranchListResult = useCallback(
+    (
+      machineId: MachineId,
+      localProjectId: LocalProjectId,
+      query: string,
+      result: import('@lody/shared').LocalProjectBranchListResult
+    ) => {
+      const observed = toObservedLocalProjectGitState(result);
       setLocalGitState({
         machineId,
         localProjectId,
-        state: result,
+        query,
+        state: observed,
       });
       setLocalGitStateError(null);
-      if (!result.git) {
+      if (!observed.git) {
         setSelectedLocalBranchState({
           localProjectId,
           branch: null,
@@ -2350,30 +2692,38 @@ function WorkspaceChatLanding({
         return;
       }
 
-      setSelectedLocalBranchState((prev) => {
-        const previousBranch = prev?.localProjectId === localProjectId ? prev.branch : null;
-        return {
-          localProjectId,
-          branch: resolveLocalProjectBranchSelection(result, previousBranch),
-        };
-      });
+      if (!query) {
+        setSelectedLocalBranchState((prev) => {
+          const previousBranch = prev?.localProjectId === localProjectId ? prev.branch : null;
+          return {
+            localProjectId,
+            branch: resolveLocalProjectBranchSelection(observed, previousBranch),
+          };
+        });
+      }
     },
     []
   );
 
-  const fetchLocalGitState = useCallback(
+  const fetchLocalProjectBranchesPage = useCallback(
     async (
       targetWorkspaceId: WorkspaceId,
-      project: LocalProjectSelection
-    ): Promise<LocalProjectGitState> => {
-      const cacheKey = getLocalProjectGitStateCacheKey(
+      project: LocalProjectSelection,
+      options: { query?: string; cursor?: string; forceNetwork?: boolean } = {}
+    ): Promise<import('@lody/shared').LocalProjectBranchListResult> => {
+      const normalizedQuery = options.query?.trim() ?? '';
+      const cacheKey = getLocalProjectBranchCacheKey(
         targetWorkspaceId,
         project.machineId,
-        project.localProjectId
+        project.localProjectId,
+        normalizedQuery,
+        options.cursor
       );
-      const cached = localProjectGitStateCache.get(cacheKey);
-      if (cached && cached.expiresAtMs > Date.now()) {
-        return cached.state;
+      if (!options.forceNetwork && !options.cursor) {
+        const cached = localProjectBranchSwrCache.get(cacheKey);
+        if (cached?.isFresh) {
+          return cached.result;
+        }
       }
 
       if (
@@ -2381,6 +2731,7 @@ function WorkspaceChatLanding({
           projectMachineId: project.machineId,
           visibleLocalMachineId,
           targetMachine: machinesRef.current.get(project.machineId),
+          presenceSynced: presenceSyncedRef.current,
           isMachineOnline: (machineId) => onlineMachineIdsRef.current.has(machineId),
         })
       ) {
@@ -2396,20 +2747,24 @@ function WorkspaceChatLanding({
         defaultValue: 'Failed to load local project Git state',
       });
 
-      return await localProjectGitStateDedupe.run(cacheKey, async () => {
+      return await localProjectBranchDedupe.run(cacheKey, async () => {
         let fastPathError: string | null = null;
         const canUseElectronFastPath = isElectron && visibleLocalMachineId === project.machineId;
 
         if (canUseElectronFastPath && window.__LODY_ELECTRON__ && getIpcServices()) {
-          const result = await getIpcServices()!.localProjects.getGitState(
+          const result = await getIpcServices()!.localProjects.listBranches(
             targetWorkspaceId,
-            project.localProjectId
+            project.localProjectId,
+            {
+              ...(normalizedQuery ? { query: normalizedQuery } : {}),
+              limit: LOCAL_PROJECT_BRANCH_PAGE_SIZE,
+              ...(options.cursor ? { cursor: options.cursor } : {}),
+            }
           );
           if (result && !('error' in result)) {
-            setLocalProjectGitStateCacheEntry(cacheKey, {
-              state: result,
-              expiresAtMs: Date.now() + LOCAL_PROJECT_GIT_STATE_CACHE_TTL_MS,
-            });
+            if (!options.cursor) {
+              localProjectBranchSwrCache.set(cacheKey, result);
+            }
             return result;
           }
           fastPathError = result?.error?.trim() || fallbackMessage;
@@ -2419,11 +2774,16 @@ function WorkspaceChatLanding({
           throw new Error(fastPathError ?? fallbackMessage);
         }
 
-        const response = await runtime.requestLocalProjectGitState(
+        const response = await runtime.requestLocalProjectBranches(
           project.machineId,
           project.localProjectId,
           userId,
-          { timeoutMs: LOCAL_PROJECT_GIT_STATE_RPC_TIMEOUT_MS }
+          {
+            ...(normalizedQuery ? { query: normalizedQuery } : {}),
+            limit: LOCAL_PROJECT_BRANCH_PAGE_SIZE,
+            ...(options.cursor ? { cursor: options.cursor } : {}),
+            timeoutMs: LOCAL_PROJECT_GIT_STATE_RPC_TIMEOUT_MS,
+          }
         );
         if (!response) {
           throw new Error(
@@ -2436,11 +2796,10 @@ function WorkspaceChatLanding({
           );
         }
 
-        setLocalProjectGitStateCacheEntry(cacheKey, {
-          state: response.state,
-          expiresAtMs: Date.now() + LOCAL_PROJECT_GIT_STATE_CACHE_TTL_MS,
-        });
-        return response.state;
+        if (!options.cursor) {
+          localProjectBranchSwrCache.set(cacheKey, response.result);
+        }
+        return response.result;
       });
     },
     [isElectron, runtime, t, userId, visibleLocalMachineId]
@@ -2456,55 +2815,86 @@ function WorkspaceChatLanding({
       projectMachineId: selectedLocalProjectMachineId,
       visibleLocalMachineId,
       targetMachine: machines.get(selectedLocalProjectMachineId),
+      presenceSynced,
       isMachineOnline: isPresenceMachineOnline,
     });
-  }, [isPresenceMachineOnline, machines, selectedLocalProjectMachineId, visibleLocalMachineId]);
-  const localGitStateLoadKey = useMemo(
-    () =>
-      getLocalProjectGitStateLoadKey({
-        workspaceId,
-        machineId: selectedLocalProjectMachineId,
-        localProjectId: activeLocalProjectId,
-        userId: userId ?? null,
-        machineOnline: selectedLocalProjectMachineOnline,
-        retryNonce: localGitStateRetryNonce,
-        hasRuntime: hasWorkspaceRuntime,
-        hasDesktopControl: canUseSelectedLocalProjectDesktopControl,
-      }),
-    [
-      activeLocalProjectId,
-      canUseSelectedLocalProjectDesktopControl,
-      hasWorkspaceRuntime,
-      localGitStateRetryNonce,
-      selectedLocalProjectMachineId,
-      selectedLocalProjectMachineOnline,
-      userId,
+  }, [
+    isPresenceMachineOnline,
+    machines,
+    presenceSynced,
+    selectedLocalProjectMachineId,
+    visibleLocalMachineId,
+  ]);
+  const shouldLoadLocalBranchPage = useMemo(() => {
+    if (contextType !== 'local' || !selectedLocalProject) return false;
+    if (syncedLocalGitSummary === null) return true;
+    if (syncedLocalGitSummary.git === false) return false;
+    if (effectiveWorkdirMode === 'worktree' && branchPickerOpen) return true;
+    if (selectedWorkdirMode === 'worktree' && !selectedLocalBranch) return true;
+    return localGitStateRetryNonce > 0 && effectiveWorkdirMode === 'worktree';
+  }, [
+    branchPickerOpen,
+    contextType,
+    effectiveWorkdirMode,
+    localGitStateRetryNonce,
+    selectedLocalBranch,
+    selectedLocalProject,
+    selectedWorkdirMode,
+    syncedLocalGitSummary,
+  ]);
+  const activeBranchQuery = branchPickerOpen ? debouncedBranchQuery : '';
+  const localGitStateLoadKey = useMemo(() => {
+    const baseKey = getLocalProjectGitStateLoadKey({
       workspaceId,
-    ]
-  );
+      machineId: selectedLocalProjectMachineId,
+      localProjectId: activeLocalProjectId,
+      userId: userId ?? null,
+      machineOnline: selectedLocalProjectMachineOnline,
+      retryNonce: localGitStateRetryNonce,
+      hasRuntime: hasWorkspaceRuntime,
+      hasDesktopControl: canUseSelectedLocalProjectDesktopControl,
+    });
+    if (!baseKey || !shouldLoadLocalBranchPage) return null;
+    return `${baseKey}:${activeBranchQuery}`;
+  }, [
+    activeBranchQuery,
+    activeLocalProjectId,
+    canUseSelectedLocalProjectDesktopControl,
+    hasWorkspaceRuntime,
+    localGitStateRetryNonce,
+    selectedLocalProjectMachineOnline,
+    selectedLocalProjectMachineId,
+    shouldLoadLocalBranchPage,
+    userId,
+    workspaceId,
+  ]);
 
-  // `localGitStateLoadKey` fully identifies a load (workspace/machine/project/user/
-  // reachability/loader/runtime-refresh/retry). Snapshot every other input through a
-  // ref so the effect depends ONLY on that key + contextType: callback identity churn
-  // (`fetchLocalGitState` rebuilds whenever `runtime`/`t` change) can no longer re-run
-  // the effect against an unchanged key, which is what previously looped failed loads.
   const gitStateLoadInputs = {
     workspaceId,
     machineId: selectedLocalProjectMachineId,
     localProjectId: activeLocalProjectId,
     canLoad: hasWorkspaceRuntime || canUseSelectedLocalProjectDesktopControl,
     machineOnline: selectedLocalProjectMachineOnline,
-    fetchLocalGitState,
-    applyLocalGitState,
+    query: activeBranchQuery,
+    hasUsableFallback: Boolean(syncedLocalGitSummary?.git && selectedLocalBranch),
+    fetchLocalProjectBranchesPage,
+    applyLocalBranchListResult,
     t,
   };
   const gitStateLoadInputsRef = useRef(gitStateLoadInputs);
   gitStateLoadInputsRef.current = gitStateLoadInputs;
 
-  // ── Local project git capability loading ──
   useEffect(() => {
     if (contextType !== 'local') return undefined;
     const load = gitStateLoadInputsRef.current;
+    if (!shouldLoadLocalBranchPage) {
+      setLoadingLocalGitState(false);
+      setLoadingMoreLocalBranches(false);
+      if (syncedLocalGitSummary !== null) {
+        setLocalGitStateError(null);
+      }
+      return undefined;
+    }
     if (
       !localGitStateLoadKey ||
       !load.canLoad ||
@@ -2512,13 +2902,41 @@ function WorkspaceChatLanding({
       !load.machineId ||
       !load.localProjectId
     ) {
-      setLocalGitState(null);
+      if (!load.hasUsableFallback) setLocalGitState(null);
       setLocalGitStateError(null);
       setLoadingLocalGitState(false);
       return undefined;
     }
+
+    const targetWorkspaceId = load.workspaceId;
+    const localProject: LocalProjectSelection = {
+      machineId: load.machineId,
+      localProjectId: load.localProjectId,
+    };
+    const cacheKey = getLocalProjectBranchCacheKey(
+      targetWorkspaceId,
+      localProject.machineId,
+      localProject.localProjectId,
+      load.query
+    );
+    const swrHit = localProjectBranchSwrCache.get(cacheKey);
+    if (swrHit) {
+      load.applyLocalBranchListResult(
+        localProject.machineId,
+        localProject.localProjectId,
+        load.query,
+        swrHit.result
+      );
+      if (swrHit.isFresh && localGitStateRetryNonce === 0) {
+        setLoadingLocalGitState(false);
+        return undefined;
+      }
+    }
+
     if (!load.machineOnline) {
-      setLocalGitState(null);
+      if (!swrHit && !load.hasUsableFallback) {
+        setLocalGitState(null);
+      }
       setLocalGitStateError(
         load.t('chat.localGitStateMachineOffline', {
           defaultValue:
@@ -2533,20 +2951,24 @@ function WorkspaceChatLanding({
     let unsubscribeCliState: (() => void) | null = null;
     let retryCount = 0;
     const MAX_DAEMON_RETRIES = 5;
-    const targetWorkspaceId = load.workspaceId;
-    const localProject: LocalProjectSelection = {
-      machineId: load.machineId,
-      localProjectId: load.localProjectId,
-    };
+    const isBackgroundRevalidate = Boolean(swrHit || load.hasUsableFallback);
 
     const attemptLoad = async () => {
       let pendingRetry = false;
       setLoadingLocalGitState(true);
       setLocalGitStateError(null);
       try {
-        const result = await load.fetchLocalGitState(targetWorkspaceId, localProject);
+        const result = await load.fetchLocalProjectBranchesPage(targetWorkspaceId, localProject, {
+          query: load.query,
+          forceNetwork: !swrHit?.isFresh || localGitStateRetryNonce > 0,
+        });
         if (cancelled) return;
-        load.applyLocalGitState(localProject.machineId, localProject.localProjectId, result);
+        load.applyLocalBranchListResult(
+          localProject.machineId,
+          localProject.localProjectId,
+          load.query,
+          result
+        );
       } catch (error) {
         if (cancelled) return;
         const errorMessage =
@@ -2556,7 +2978,7 @@ function WorkspaceChatLanding({
           });
         if (isWorkspaceRuntimeUnavailableMessage(errorMessage)) {
           warnWorkspaceRuntimeUnavailable(errorMessage, 'local git state unavailable');
-          setLocalGitState(null);
+          if (!isBackgroundRevalidate) setLocalGitState(null);
           setLocalGitStateError(null);
           return;
         }
@@ -2565,7 +2987,7 @@ function WorkspaceChatLanding({
           retryCount += 1;
           if (retryCount > MAX_DAEMON_RETRIES) {
             console.warn('[chat-landing] CLI daemon retry limit reached', errorMessage);
-            setLocalGitState(null);
+            if (!isBackgroundRevalidate) setLocalGitState(null);
             setLocalGitStateError(null);
             return;
           }
@@ -2573,16 +2995,18 @@ function WorkspaceChatLanding({
             `[chat-landing] CLI daemon not ready (attempt ${retryCount}/${MAX_DAEMON_RETRIES}), waiting…`,
             errorMessage
           );
-          setLocalGitState(null);
+          if (!isBackgroundRevalidate) setLocalGitState(null);
           setLocalGitStateError(null);
           pendingRetry = true;
           waitForCliReady();
           return;
         }
-        console.warn('Failed to load local project git state', error, {
+        console.warn('Failed to load local project branches', error, {
           loadKey: localGitStateLoadKey,
         });
-        setLocalGitState(null);
+        if (!isBackgroundRevalidate) {
+          setLocalGitState(null);
+        }
         setLocalGitStateError(errorMessage);
       } finally {
         if (!cancelled && !pendingRetry) setLoadingLocalGitState(false);
@@ -2639,28 +3063,107 @@ function WorkspaceChatLanding({
       cancelled = true;
       unsubscribeCliState?.();
     };
-  }, [contextType, localGitStateLoadKey]);
+  }, [
+    contextType,
+    localGitStateLoadKey,
+    localGitStateRetryNonce,
+    shouldLoadLocalBranchPage,
+    syncedLocalGitSummary,
+  ]);
 
-  // ── GitHub repo resolution for local projects ──
+  const handleLoadMoreLocalBranches = useCallback(async () => {
+    if (
+      contextType !== 'local' ||
+      !workspaceId ||
+      !selectedLocalProject ||
+      loadingLocalGitState ||
+      loadingMoreLocalBranches ||
+      !activeLocalGitState?.git ||
+      !activeLocalGitState.truncated ||
+      !activeLocalGitState.nextCursor
+    ) {
+      return;
+    }
+    const queryAtStart = activeBranchQuery;
+    const cursor = activeLocalGitState.nextCursor;
+    const targetProject = selectedLocalProject;
+    setLoadingMoreLocalBranches(true);
+    try {
+      const nextPage = await fetchLocalProjectBranchesPage(workspaceId, targetProject, {
+        query: queryAtStart,
+        cursor,
+      });
+      if (!nextPage.git) return;
+      setLocalGitState((prev) => {
+        if (
+          !prev ||
+          !prev.state.git ||
+          prev.machineId !== targetProject.machineId ||
+          prev.localProjectId !== targetProject.localProjectId ||
+          prev.query !== queryAtStart
+        ) {
+          return prev;
+        }
+        const mergedBranches = normalizeOrderedLocalProjectBranches({
+          branches: [...prev.state.branches, ...nextPage.branches],
+        });
+        return {
+          ...prev,
+          state: {
+            ...prev.state,
+            branches: mergedBranches,
+            truncated: nextPage.truncated,
+            nextCursor: nextPage.nextCursor,
+            totalCount: nextPage.totalCount,
+            summaryOnly: false,
+          },
+        };
+      });
+    } catch (error) {
+      console.warn('Failed to load next branch page', error);
+    } finally {
+      setLoadingMoreLocalBranches(false);
+    }
+  }, [
+    activeBranchQuery,
+    activeLocalGitState,
+    contextType,
+    fetchLocalProjectBranchesPage,
+    loadingLocalGitState,
+    loadingMoreLocalBranches,
+    selectedLocalProject,
+    workspaceId,
+  ]);
+
   const resolveSelectedLocalProjectGitHubRepo = useCallback(
-    (gitStateOverride?: LocalProjectGitState | null): string | null => {
+    (
+      gitStateOverride?: { git: boolean; githubRepoFullName?: string | null } | null
+    ): string | null => {
       const effectiveLocalGitState = gitStateOverride ?? activeLocalGitState;
       if (!selectedLocalProject) return null;
-      return resolveLocalProjectGithubRepoFullName(effectiveLocalGitState, repositories);
+      return resolveLocalProjectGithubRepoFullName(
+        effectiveLocalGitState,
+        selectedLocalProjectMeta
+      );
     },
-    [activeLocalGitState, repositories, selectedLocalProject]
+    [activeLocalGitState, selectedLocalProject, selectedLocalProjectMeta]
   );
 
-  // ── Branch options (context-dependent) ──
   const branchOptions = useMemo<AcpSessionSelectOption[]>(() => {
     if (contextType === 'local') {
       if (!activeLocalGitState?.git) {
         return [];
       }
-      return normalizeChatLandingBranches(
-        activeLocalGitState.branches,
-        activeLocalGitState.defaultBranch
-      ).map((branch) => ({
+      const orderedBranches = activeBranchQuery
+        ? normalizeOrderedLocalProjectBranches({
+            branches: activeLocalGitState.branches,
+          })
+        : normalizeOrderedLocalProjectBranches({
+            pinnedBranches: activeLocalGitState.pinnedBranches,
+            selectedBranch: selectedLocalBranch,
+            branches: activeLocalGitState.branches,
+          });
+      return orderedBranches.map((branch) => ({
         value: branch,
         label: getLocalProjectBranchLabel(branch, {
           local: t('chat.branchLocal'),
@@ -2671,16 +3174,13 @@ function WorkspaceChatLanding({
     // If no branches loaded (e.g. empty repo), show empty list instead of a fake "main"
     if (repoBranches.length === 0) return [];
     return repoBranches.map((b) => ({ value: b, label: b }));
-  }, [activeLocalGitState, contextType, repoBranches, t]);
+  }, [activeBranchQuery, activeLocalGitState, contextType, repoBranches, selectedLocalBranch, t]);
 
   const currentBranch = contextType === 'local' ? selectedLocalBranch : selectedBranch;
-  const currentBranchLabel =
-    branchOptions.find((option) => option.value === currentBranch)?.label ?? currentBranch;
   const setCurrentBranch =
     contextType === 'local' ? handleSelectedLocalBranchChange : setSelectedBranch;
 
-  // ── Prompt keydown ──
-  const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handlePromptKeyDown = (event: KeyboardEvent<ComposerInputElement>) => {
     if (event.key !== 'Enter' || isImeComposingKeyboardEvent(event)) return;
     if (
       !shouldSubmitOnEnterForMobileKeyboardAction({
@@ -2695,37 +3195,66 @@ function WorkspaceChatLanding({
     void handleSubmit();
   };
 
+  const attachPastedFiles = useCallback(
+    (files: File[]) => {
+      const { images, attachments } = splitImageAndFileAttachments(files);
+      if (images.length > 0) {
+        addFiles(images);
+      }
+      if (attachments.length > 0) {
+        addFileAttachments(attachments);
+      }
+    },
+    [addFileAttachments, addFiles]
+  );
   const handlePromptPaste = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ClipboardEvent<ComposerInputElement>) => {
       const text = event.clipboardData.getData('text/plain');
 
-      if (text && shouldCapturePastedTextDraft(text)) {
+      const pastedTextFile = text && isPastedTextTooLarge(text) ? createPastedTextFile(text) : null;
+
+      if (pastedTextFile) {
         event.preventDefault();
-        if (insertLargePastedTextAtSelection(text)) {
-          return;
-        }
+      } else if (text && shouldCapturePastedTextDraft(text)) {
+        event.preventDefault();
+        insertLargePastedTextAtSelection(text);
       }
 
-      const pastedFiles = Array.from(event.clipboardData.items)
+      const clipboardFiles = Array.from(event.clipboardData.items)
         .filter((item) => item.kind === 'file')
         .map((item) => item.getAsFile())
         .filter((file): file is File => file !== null);
+      // A Word or PowerPoint copy carries a picture of the selection beside the
+      // text, so attaching every clipboard file turned those pastes into a
+      // screenshot of themselves.
+      const { files: pastedFiles, renderedImages } = selectPastedClipboardFiles({
+        text,
+        files: clipboardFiles,
+      });
 
-      if (pastedFiles.length > 0) {
+      if (renderedImages.length > 0) {
+        toast(t('composer.pastedRichTextAsText', 'Pasted as text'), {
+          // One id, so pasting repeatedly replaces the hint instead of stacking it.
+          id: 'composer-pasted-rich-text-as-text',
+          action: {
+            label: t('composer.pastedRichTextAttachImage', 'Attach image'),
+            onClick: () => attachPastedFiles(renderedImages),
+          },
+        });
+      }
+
+      const filesToAttach = pastedTextFile ? [pastedTextFile, ...pastedFiles] : pastedFiles;
+      if (filesToAttach.length > 0) {
         event.preventDefault();
-        const { images, attachments } = splitImageAndFileAttachments(pastedFiles);
-        if (images.length > 0) {
-          addFiles(images);
-        }
-        if (attachments.length > 0) {
-          addFileAttachments(attachments);
-        }
+        attachPastedFiles(filesToAttach);
         return;
       }
 
+      if (pastedTextFile) return;
+
       handleImagePromptPaste(event);
     },
-    [addFileAttachments, addFiles, handleImagePromptPaste, insertLargePastedTextAtSelection]
+    [attachPastedFiles, handleImagePromptPaste, insertLargePastedTextAtSelection, t]
   );
   const handleImageDrop = useCallback(
     (files: File[]) => {
@@ -2761,6 +3290,8 @@ function WorkspaceChatLanding({
     openAddProjectDialog();
   }, [openAddProjectDialog]);
 
+  const requestProjectEditor = useSetAtom(projectEditorRequestAtom);
+
   const handleLocalProjectAdded = useCallback(
     (info: { machineId: MachineId; localProjectId: LocalProjectId }) => {
       handleSelectedLocalProjectChange({
@@ -2782,12 +3313,13 @@ function WorkspaceChatLanding({
         | 'missing_context'
         | 'local_project_git_state_failed'
         | 'missing_branch'
-        | 'missing_project',
+        | 'missing_project'
+        | 'mcp_defaults_not_ready',
       extra?: Record<string, unknown>
     ) => {
       capturePostHogEvent(postHog, 'session/input_blocked', {
         reason,
-        entrypoint: 'chat_landing',
+        entrypoint: sessionEntrypoint,
         project_kind: analyticsProjectKind,
         has_pending_images: hasBlockingImages,
         workspace_id: workspaceId ?? null,
@@ -2810,12 +3342,12 @@ function WorkspaceChatLanding({
       selectedAgent,
       selectedLocalProject,
       selectedRepo,
+      sessionEntrypoint,
       workspaceId,
     ]
   );
 
-  // ── Submit ──
-  const handleSubmit = async () => {
+  const handleSubmit = async (withoutMcp = false) => {
     if (submitting) return;
     const submitStartedAtMs = getPerformanceNowMs();
     if (hasBlockingImages || hasBlockingFiles) {
@@ -2836,8 +3368,9 @@ function WorkspaceChatLanding({
       buildInputBlocks(expandedPrompt.text, buildFileInputBlocks(), expandedPrompt.spans),
       ''
     );
+    const attachments = [...imageDraftAttachments, ...fileDraftAttachments];
     const promptText = extractPromptPreviewFromInputBlocks(inputBlocks);
-    if (inputBlocks.length === 0) {
+    if (inputBlocks.length === 0 && attachments.length === 0) {
       captureSessionInputBlocked('empty_input');
       setComposerError(t('chat.validation.missingPrompt'));
       return;
@@ -2845,6 +3378,17 @@ function WorkspaceChatLanding({
     if (!selectedAgent || !selectedConfig) {
       captureSessionInputBlocked('missing_agent_config');
       setComposerError(t('chat.validation.missingAgent'));
+      return;
+    }
+    // The selection still comes from defaults that were never read; sending now
+    // would create the conversation with no MCP servers instead of its defaults.
+    if (!mcpSelection.ready && !withoutMcp) {
+      captureSessionInputBlocked('mcp_defaults_not_ready');
+      if (!mcpSelection.defaultsFailed) {
+        setComposerError(
+          t('chat.validation.mcpDefaultsLoading', 'Loading this project’s default MCP servers…')
+        );
+      }
       return;
     }
     const scopedMachineId =
@@ -2857,7 +3401,11 @@ function WorkspaceChatLanding({
           : null;
     if (!scopedMachineId || selectedAgent.machineId !== scopedMachineId) {
       captureSessionInputBlocked('missing_machine');
-      setComposerError(t('chat.validation.missingMachine'));
+      setComposerError(
+        selectedMachineState === 'offline'
+          ? t('chat.validation.machineOffline', 'The selected machine is offline.')
+          : t('chat.validation.missingMachine')
+      );
       return;
     }
     const machine = machines.get(scopedMachineId);
@@ -2866,7 +3414,7 @@ function WorkspaceChatLanding({
       setComposerError(t('chat.validation.missingMachine'));
       return;
     }
-    if (!currentUser || !userId || !workspaceId) {
+    if ((!currentUser && runtime?.contentMode !== 'e2ee') || !userId || !workspaceId) {
       captureSessionInputBlocked('missing_context');
       setComposerError(t('chat.validation.missingContext'));
       return;
@@ -2879,7 +3427,12 @@ function WorkspaceChatLanding({
     const githubBranch = selectedBranch?.trim() || '';
     const localWorktreeBranch =
       effectiveWorkdirMode === 'worktree' ? selectedLocalBranch?.trim() || undefined : undefined;
-    if (contextType === 'local' && localGitStateError && selectedWorkdirMode === 'worktree') {
+    if (
+      contextType === 'local' &&
+      selectedWorkdirMode === 'worktree' &&
+      localGitStateError &&
+      !localWorktreeBranch
+    ) {
       captureSessionInputBlocked('local_project_git_state_failed', {
         error_message: localGitStateError,
       });
@@ -2909,17 +3462,60 @@ function WorkspaceChatLanding({
     try {
       setSubmitting(true);
       setComposerStatus(null);
-      // Preserve React draft state until startSession is accepted, but clear the
-      // controlled element immediately so click/Enter feedback cannot wait for
-      // the first local writer await.
-      if (promptTextareaRef.current) {
-        promptTextareaRef.current.value = '';
-      }
 
       let project: ProjectRef | undefined;
       let repoFullNameForMentions: string | undefined;
+      let projectRun: SessionProjectRun | undefined;
 
-      if (contextType === 'local' && !selectedLocalProject) {
+      if (selectedProjectGroupId) {
+        if (
+          !selectedProjectGroup ||
+          projectGroupLaunchTarget?.kind !== 'ready' ||
+          projectGroupLacksLocalCopies
+        ) {
+          captureSessionInputBlocked('missing_project');
+          setComposerError(
+            projectGroupStatusMessage ??
+              t('chat.validation.missingProject', 'Please select a project')
+          );
+          return;
+        }
+        const groupMembers = projectGroupLaunchTarget.members;
+        const projectUsesRepositoryMembers = projectGroupUsesRepositoryMembers;
+        projectRun = buildSessionProjectRun(
+          selectedProjectGroup,
+          groupMembers.map((member) => member.id)
+        );
+        if (projectRun && !machineSupportsMultiRepoProject(machine)) {
+          captureSessionInputBlocked('missing_machine');
+          setComposerError(
+            t(
+              'chat.projectGroup.unsupportedMachine',
+              'Update Lody on this machine to start project group conversations.'
+            )
+          );
+          return;
+        }
+        // An older daemon would clone a repository Member instead of using
+        // this machine's copy.
+        if (projectUsesRepositoryMembers && !machineSupportsProjectRepositoryMembers(machine)) {
+          captureSessionInputBlocked('missing_machine');
+          setComposerError(
+            t(
+              'chat.projectGroup.unsupportedRepositoryMembers',
+              'Update Lody on this machine to use its copies of these repositories.'
+            )
+          );
+          return;
+        }
+        // The legacy fields describe the first member, so older clients still
+        // show a repository, a branch and a PR for the conversation.
+        const firstMember = groupMembers[0]!;
+        project = buildProjectGroupProjectRef(firstMember);
+        const githubMember = groupMembers.find((member) => member.source.kind === 'github');
+        repoFullNameForMentions =
+          githubMember?.source.kind === 'github' ? githubMember.source.repoFullName : undefined;
+      } else if (contextType === 'local' && !selectedLocalProject) {
         captureSessionInputBlocked('missing_project');
         setComposerError(t('chat.validation.missingProject', 'Please select a project'));
         return;
@@ -2945,11 +3541,7 @@ function WorkspaceChatLanding({
         repoFullNameForMentions = selectedRepo;
       }
 
-      const draftTitle = promptText
-        .split('\n')
-        .map((line) => line.trim())
-        .find((line) => line.length > 0)
-        ?.slice(0, 50);
+      const draftTitle = deriveDraftSessionTitle(promptText);
       /* Agent config prompt, then the Role's instruction, then the task — the
          Role speaks for how this agent is being used, so it sits between the
          two. A Role only reaches here while it is still what will run. */
@@ -2971,15 +3563,21 @@ function WorkspaceChatLanding({
         modelId: modelOptions.length > 0 ? (selectedModelId ?? undefined) : undefined,
         configOptionValues: dispatchConfigOptionValues,
         issuePRMentions,
-        mcpServerIds: mcpSelection.selectedIds,
-        taskToolsEnabled: tasksFeatureEnabled,
+        mcpServerIds: withoutMcp ? [] : mcpSelection.selectedIds,
+        agentRoleId: activeAgentRole?.id ?? null,
+        agentRoleRevision: activeAgentRole?.revision,
+        memory: activeAgentRole?.runConfig.memory,
+        agentRoleSnapshot: activeAgentRole ? snapshotAgentRole(activeAgentRole) : undefined,
       });
-      const pendingHistoryEntry = buildPendingUserHistoryEntry({
-        userId,
-        inputBlocks,
-        timestamp: new Date().toISOString(),
-        inputConfig,
-      });
+      const pendingHistoryEntry = buildDraftUserHistoryEntry(
+        {
+          userId,
+          inputBlocks,
+          timestamp: new Date().toISOString(),
+          inputConfig,
+        },
+        attachments
+      );
       if (!pendingHistoryEntry) {
         throw new Error('Initial session history missing effective items');
       }
@@ -2997,6 +3595,7 @@ function WorkspaceChatLanding({
           env: selectedConfig.env,
           repoFullName: repoFullNameForMentions,
           project,
+          ...(projectRun ? { projectRun } : {}),
           worktreeSetup:
             contextType === 'github' && selectedRepoWorktreeSetup
               ? selectedRepoWorktreeSetup
@@ -3005,7 +3604,11 @@ function WorkspaceChatLanding({
             contextType === 'github' && selectedRepoWorktreeCleanup
               ? selectedRepoWorktreeCleanup
               : undefined,
-          branchName: contextType === 'github' ? githubBranch : localWorktreeBranch,
+          branchName: projectRun
+            ? undefined
+            : contextType === 'github'
+              ? githubBranch
+              : localWorktreeBranch,
           title: draftTitle,
           titleSource: draftTitle ? 'draft' : undefined,
           // Provenance only: the dispatch config above is already frozen, so a
@@ -3013,12 +3616,41 @@ function WorkspaceChatLanding({
           ...(activeAgentRole
             ? { agentRoleId: activeAgentRole.id, agentRoleRevision: activeAgentRole.revision }
             : {}),
+          ...(pinSectionId ? { isPinned: true, pinSectionId } : {}),
         },
-        pendingHistoryEntry
+        pendingHistoryEntry,
+        attachments
       );
+      mcpSelection.acceptSend(sessionId, withoutMcp);
+      if (mobileNewChatOpen) {
+        setMobileCreatedSessionId(sessionId);
+        setRestoreMobileProject(false);
+      }
+      // Admission owns the snapshot now; later preference/navigation failures must not resend it.
+      setPrompt('');
+      clearPastedTextDrafts();
+      clearPendingImages();
+      clearPendingFiles();
+      resetDraftSessionId();
+      if (embeddingRef.current) {
+        // The host's handoff runs once the turn is accepted; its failure is
+        // not a start failure, so it must not reach the catch below.
+        try {
+          embeddingRef.current.onSessionAccepted({ sessionId });
+        } catch (handoffError) {
+          console.error('Embedded landing failed to hand off the new session', handoffError);
+          toast.error(
+            t(
+              'chat.embeddedHandoffFailed',
+              'The conversation was created, but this view could not be updated.'
+            )
+          );
+        }
+      }
       if (!historyEntry || typeof historyEntry !== 'object' || !('id' in historyEntry)) {
         throw new Error(`Initial session history missing entry id (sessionId=${sessionId})`);
       }
+      recordChatLandingProjectUse(workspaceId, desktopProjectSelection);
       persistAgentSessionDefaults(selectedAgent.agentId, {
         modeId: modeOptions.length > 0 ? selectedModeId : null,
         modelId: modelOptions.length > 0 ? selectedModelId : null,
@@ -3045,8 +3677,6 @@ function WorkspaceChatLanding({
           Date.now()
         )
       );
-      handoffSessionPreparation(sessionId);
-
       capturePostHogEvent(postHog, 'session/start_requested', {
         user_id: userId,
         workspace_id: workspaceId,
@@ -3062,9 +3692,23 @@ function WorkspaceChatLanding({
         workdir_mode: contextType === 'local' ? effectiveWorkdirMode : null,
         has_images: inputBlocks.some((block) => block.type === 'image'),
         image_count: inputBlocks.filter((block) => block.type === 'image').length,
-        entrypoint: 'chat_landing',
+        entrypoint: sessionEntrypoint,
         launch_mode: launchMode,
         submit_prepare_ms: getDurationSinceMs(submitStartedAtMs),
+        agent_role_used: activeAgentRole != null,
+      });
+      if (activeAgentRole) {
+        // The composer's Role picker only offers Roles bound to the machine the
+        // chat starts on, so a new-chat Role is never cross-machine.
+        captureAgentRoleApplied(postHog, activeAgentRole, {
+          source: 'new_chat',
+          crossMachine: false,
+        });
+      }
+      captureAgentRoleMentionsApplied(postHog, {
+        spans: expandedPrompt.spans,
+        roles: workspaceAgentRoles,
+        executionMachineId: selectedAgent.machineId,
       });
       capturePostHogEvent(postHog, SESSION_ACP_CONFIG_USED_EVENT, {
         user_id: userId,
@@ -3076,7 +3720,7 @@ function WorkspaceChatLanding({
         agent_type: selectedConfig.agentType,
         ...acpAnalyticsProperties,
         project_kind: analyticsProjectKind,
-        entrypoint: 'chat_landing',
+        entrypoint: sessionEntrypoint,
         launch_mode: launchMode,
       });
 
@@ -3100,7 +3744,7 @@ function WorkspaceChatLanding({
           project_kind: analyticsProjectKind,
           local_project_id: selectedLocalProject?.localProjectId ?? null,
           workdir_mode: contextType === 'local' ? effectiveWorkdirMode : null,
-          entrypoint: 'chat_landing',
+          entrypoint: sessionEntrypoint,
           launch_mode: launchMode,
           duration_ms: getDurationSinceMs(dispatchStartedAtMs),
           error_message: errorMessage,
@@ -3163,22 +3807,18 @@ function WorkspaceChatLanding({
       // be misattributed.
       startFailureReason = 'unknown';
 
-      setPrompt('');
-      clearPastedTextDrafts();
-      clearPendingImages();
-      clearPendingFiles();
-      resetDraftSessionId();
-      if (mobileNewChatOpen) {
-        // The mobile base ChatLanding stays mounted beneath the session drawer.
-        // Close the sheet explicitly on successful start so keyboard-submit and
-        // button-submit leave the same clean underlying state.
-        promptTextareaRef.current?.blur();
-        setMobileNewChatOpen(false);
-      }
-      await navigate({
-        to: '/$workspaceName/sessions/$sessionId',
-        params: { workspaceName: workspaceSlug, sessionId },
-      });
+      // An embedded landing handed the session to its host above; it stays put.
+      if (embeddingRef.current) return;
+      // The mobile host acknowledges its committed session surface before
+      // dismissing the new-chat page; navigation may resolve before portals paint.
+      await navigate(
+        getSessionCreationNavigation(
+          workspaceSlug,
+          sessionId,
+          usesMobileKeyboardAction,
+          promptTextareaRef.current != null && promptTextareaRef.current === document.activeElement
+        )
+      );
     } catch (error) {
       capturePostHogEvent(postHog, 'session/start_failed', {
         user_id: userId ?? null,
@@ -3192,7 +3832,7 @@ function WorkspaceChatLanding({
         project_kind: analyticsProjectKind,
         local_project_id: selectedLocalProject?.localProjectId ?? null,
         failure_reason: startFailureReason,
-        entrypoint: 'chat_landing',
+        entrypoint: sessionEntrypoint,
         launch_mode: launchMode,
         duration_ms: getDurationSinceMs(submitStartedAtMs),
         error_message: error instanceof Error ? error.message : String(error),
@@ -3244,17 +3884,27 @@ function WorkspaceChatLanding({
     }
   };
 
-  // ── Selector nodes ──
-  // Only constrain to selectedMachineId if it still refers to a valid online machine.
-  const isSelectedMachineValid = useMemo(() => {
-    if (!selectedMachineId) return false;
-    return isChatLandingMachineReachable({
-      machineId: selectedMachineId,
-      localMachineId: visibleLocalMachineId,
+  // Only constrain to selectedMachineId unless it is definitely offline or gone.
+  const selectedMachineOnlineStatus = useMachineOnlineStatus(selectedMachineId);
+  const selectedMachineState = useMemo(
+    () =>
+      getChatLandingSelectedMachineState({
+        machineId: selectedMachineId,
+        localMachineId: visibleLocalMachineId,
+        machines,
+        isMachineOnline: isPresenceMachineOnline,
+        onlineStatus: selectedMachineOnlineStatus,
+      }),
+    [
+      selectedMachineId,
       machines,
-      isMachineOnline: isPresenceMachineOnline,
-    });
-  }, [selectedMachineId, machines, visibleLocalMachineId, isPresenceMachineOnline]);
+      visibleLocalMachineId,
+      isPresenceMachineOnline,
+      selectedMachineOnlineStatus,
+    ]
+  );
+  const isSelectedMachineValid =
+    selectedMachineState === 'available' || selectedMachineState === 'unknown';
 
   // The agent selector must always be scoped to exactly one machine.
   const localProjectMachineId =
@@ -3263,12 +3913,8 @@ function WorkspaceChatLanding({
     () => (selectedMachineId && isSelectedMachineValid ? selectedMachineId : localProjectMachineId),
     [localProjectMachineId, selectedMachineId, isSelectedMachineValid]
   );
-  const localProjectSelectorMachineId =
-    contextType === 'local' ? (selectedMachineId ?? localProjectMachineId) : null;
-  const localProjectSelectorEmptyText = t(
-    getEmptyLocalProjectsMessageKey(Boolean(localProjectSelectorMachineId))
-  );
-
+  const isBlockingLocalGitLoading =
+    contextType === 'local' && loadingLocalGitState && !worktreeAvailable;
   const { showBranchSelector, isBranchDisabled, branchSelectorKey } =
     getChatLandingBranchSelectorState({
       contextType,
@@ -3279,10 +3925,31 @@ function WorkspaceChatLanding({
       hasSelectedLocalProject: Boolean(selectedLocalProject),
       selectedLocalProjectId: selectedLocalProject?.localProjectId ?? null,
       isRuntimeInitializing: runtimeInitializing,
-      isLoadingLocalGitState: loadingLocalGitState,
+      isLoadingLocalGitState: isBlockingLocalGitLoading,
       hasLocalGit: activeLocalGitState?.git === true,
-      branchOptionsCount: branchOptions.length,
+      branchOptionsCount:
+        contextType === 'local' && activeLocalGitState?.git
+          ? Math.max(branchOptions.length, selectedLocalBranch ? 1 : 0)
+          : branchOptions.length,
     });
+
+  const isGitHubBranchList = contextType === 'github';
+  const localBranchesHaveMore = Boolean(
+    contextType === 'local' && activeLocalGitState?.git && activeLocalGitState.truncated
+  );
+  const branchListHasMore = isGitHubBranchList ? repoBranchesHasMore : localBranchesHaveMore;
+  const onBranchSearchQueryChange = isGitHubBranchList
+    ? handleRepoBranchSearchQueryChange
+    : setBranchSearchInput;
+  const onBranchListEnd = isGitHubBranchList
+    ? handleRepoBranchListEnd
+    : () => void handleLoadMoreLocalBranches();
+  const branchListFooter =
+    contextType === 'local' && (loadingLocalGitState || loadingMoreLocalBranches)
+      ? t('chat.branchLoading', { defaultValue: 'Loading branches...' })
+      : isGitHubBranchList && loadingMoreRepoBranches
+        ? t('chat.branchLoadingMore', { defaultValue: 'Loading more branches...' })
+        : null;
 
   const branchSelectorNode = showBranchSelector ? (
     <span className="inline-flex min-w-0 items-center gap-1">
@@ -3291,13 +3958,23 @@ function WorkspaceChatLanding({
         value={currentBranch}
         onChange={setCurrentBranch}
         options={branchOptions}
-        tone={tone}
         placeholder={t('chat.branchPlaceholder')}
         searchPlaceholder={t('chat.branchSearchPlaceholder', { defaultValue: 'Search branches' })}
-        emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
+        emptyText={
+          isGitHubBranchList && searchingRepoBranches
+            ? t('chat.branchSearching', { defaultValue: 'Searching branches...' })
+            : t('chat.branchEmpty', { defaultValue: 'No branches found' })
+        }
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-        className="h-6 min-w-0 max-w-full gap-1.5 rounded-none border-none bg-transparent px-2 text-xs font-normal text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-100 [&_span]:text-xs [&_span]:leading-tight [&_svg]:text-current [&_svg]:opacity-100"
+        hasMore={branchListHasMore}
+        onOpenChange={contextType === 'local' ? setBranchPickerOpen : undefined}
+        onSearchQueryChange={onBranchSearchQueryChange}
+        remoteSearchable={contextType === 'local'}
+        disableClientFilter={contextType === 'local' && Boolean(activeBranchQuery)}
+        onReachEnd={onBranchListEnd}
+        footer={branchListFooter}
+        className="min-w-0 max-w-full"
         disabled={isBranchDisabled}
       />
     </span>
@@ -3307,27 +3984,37 @@ function WorkspaceChatLanding({
     selectedLocalProject &&
     localGitStateError &&
     !loadingLocalGitState ? (
-      <Tooltip delayDuration={300}>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 rounded-md px-0 text-status-error hover:text-status-error [&_svg]:size-3.5"
-            onClick={handleLocalGitStateRetry}
-            aria-label={t('chat.localGitStateRetry', 'Retry loading branches')}
-          >
-            <RefreshCw aria-hidden="true" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          delay={300}
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="mini"
+              tone="destructive"
+              icon
+              onClick={handleLocalGitStateRetry}
+              aria-label={t('chat.localGitStateRetry', 'Retry loading branches')}
+            >
+              <RefreshCw {...stylex.props(composerSurface.glyph14)} aria-hidden="true" />
+            </Button>
+          }
+        />
+        <Tooltip.Content side="bottom">
           {t('chat.localGitStateRetry', 'Retry loading branches')}
-        </TooltipContent>
-      </Tooltip>
+        </Tooltip.Content>
+      </Tooltip.Root>
     ) : null;
 
-  const worktreeUnavailableReason = loadingLocalGitState
-    ? t('chat.workdir.checkingGit', 'Checking whether this project is a git repository.')
+  const worktreeLoading = Boolean(
+    contextType === 'local' &&
+    selectedLocalProject &&
+    activeLocalGitState === null &&
+    (loadingLocalGitState || runtimeInitializing)
+  );
+  const worktreeUnavailableReason = worktreeLoading
+    ? t('chat.workdir.loading', 'Loading Git status…')
     : activeLocalGitState?.git === false
       ? t('chat.workdir.notGitRepo', 'This local project is not a git repository.')
       : (localGitStateError ?? undefined);
@@ -3337,7 +4024,7 @@ function WorkspaceChatLanding({
       <WorktreeCheckboxPill
         checked
         disabled
-        className="h-6 rounded-none bg-transparent px-2 text-foreground/80 hover:bg-foreground/[0.06]"
+        surface="context"
         disabledReason={t(
           'chat.workdir.githubRequired',
           'GitHub projects always run in an isolated worktree.'
@@ -3347,22 +4034,42 @@ function WorkspaceChatLanding({
       <WorktreeCheckboxPill
         checked={effectiveWorkdirMode === 'worktree'}
         onCheckedChange={(checked) => handleWorkdirModeChange(checked ? 'worktree' : 'local')}
-        disabled={!worktreeAvailable}
-        disabledReason={!worktreeAvailable ? worktreeUnavailableReason : undefined}
-        className="h-6 rounded-none bg-transparent px-2 text-foreground/80 hover:bg-foreground/[0.06]"
+        loading={worktreeLoading}
+        disabled={!worktreeAvailable || worktreeLoading}
+        disabledReason={
+          worktreeLoading || !worktreeAvailable ? worktreeUnavailableReason : undefined
+        }
+        surface="context"
       />
     ) : null;
 
-  const branchWorktreePill =
-    branchSelectorNode || topWorktreeNode ? (
-      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-input/60 dark:bg-foreground/[0.08]">
-        {branchSelectorNode}
-        {branchSelectorNode && topWorktreeNode ? (
-          <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
-        ) : null}
-        {topWorktreeNode}
-      </div>
-    ) : null;
+  const projectMemberLabel = useCallback(
+    (member: ProjectMember) =>
+      member.source.kind === 'github'
+        ? member.source.repoFullName
+        : (visibleLocalProjectMap.get(
+            getLocalProjectVisibilityKey(member.source.machineId, member.source.localProjectId)
+          )?.project.name ?? member.source.localProjectId),
+    [visibleLocalProjectMap]
+  );
+  const branchWorktreePill = selectedProjectGroup ? (
+    <ProjectGroupMemberList
+      members={selectedProjectGroup.members}
+      missing={projectGroupMissingMemberIds}
+      canClone={canCloneProjectRepositories}
+      labelOf={projectMemberLabel}
+    />
+  ) : branchSelectorNode || topWorktreeNode ? (
+    <div
+      {...stylex.props(composerSurface.contextPill, isEmbedded && composerSurface.contextPillFixed)}
+    >
+      {branchSelectorNode}
+      {branchSelectorNode && topWorktreeNode ? (
+        <span aria-hidden="true" {...stylex.props(composerSurface.contextPillDivider)} />
+      ) : null}
+      {topWorktreeNode}
+    </div>
+  ) : null;
 
   const mobileSheetRecency = useMemo(
     () => getChatLandingProjectRecency(visibleSessions),
@@ -3370,6 +4077,7 @@ function WorkspaceChatLanding({
   );
 
   const desktopProjectSelection = useMemo<UnifiedProjectSelection>(() => {
+    if (selectedProjectGroupId) return { kind: 'group', projectId: selectedProjectGroupId };
     if (contextType === 'local' && selectedLocalProject) {
       return { kind: 'local', ...selectedLocalProject };
     }
@@ -3377,9 +4085,15 @@ function WorkspaceChatLanding({
       return { kind: 'github', repoFullName: selectedRepo };
     }
     return { kind: 'none' };
-  }, [contextType, selectedLocalProject, selectedRepo]);
+  }, [contextType, selectedLocalProject, selectedProjectGroupId, selectedRepo]);
   const handleDesktopProjectChange = useCallback(
     (selection: UnifiedProjectSelection) => {
+      if (selection.kind === 'group') {
+        setContextType('chat');
+        selectProjectGroup(selection.projectId);
+        return;
+      }
+      selectProjectGroup(null);
       if (selection.kind === 'none') {
         setContextType('chat');
         return;
@@ -3395,10 +4109,73 @@ function WorkspaceChatLanding({
       });
       setContextType('local');
     },
-    [handleSelectedLocalProjectChange]
+    [handleSelectedLocalProjectChange, selectProjectGroup]
+  );
+  // The project just created is what the user meant to work in.
+  const handleCreateProject = useCallback(
+    () =>
+      requestProjectEditor({
+        kind: 'create',
+        onCreated: (projectId) => handleDesktopProjectChange({ kind: 'group', projectId }),
+      }),
+    [handleDesktopProjectChange, requestProjectEditor]
+  );
+  const handleEditProjectGroup = useCallback(
+    (projectId: string) => requestProjectEditor({ kind: 'edit', projectId }),
+    [requestProjectEditor]
+  );
+  const desktopProjectGroupOptions = useMemo<UnifiedProjectGroupOption[]>(
+    () =>
+      workspaceProjects.flatMap((project) => {
+        // Machine first, as for single local projects: a group whose folders
+        // live on another machine is not offered here.
+        const availability = getProjectGroupMachineAvailability(
+          project,
+          selectedMachineId,
+          projectRepositoryCopies
+        );
+        if (availability.kind === 'elsewhere') return [];
+        const missing = availability.kind === 'available' ? availability.missing.size : 0;
+        return [
+          {
+            projectId: project.id,
+            name: project.name,
+            memberCount: project.members.length,
+            lastUsedAt: mobileSheetRecency.byGroup.get(project.id),
+            ...(missing > 0 && canCloneProjectRepositories
+              ? {
+                  availability: t('chat.projectGroup.missingClone', '{{count}} cloned on start', {
+                    count: missing,
+                  }),
+                }
+              : {}),
+            // The whole group or nothing: a repository this machine lacks
+            // and cannot clone makes the group unavailable here.
+            disabledReason:
+              availability.kind === 'conflict'
+                ? t(
+                    'chat.projectGroup.machinesConflict',
+                    'Its local repositories are on different machines'
+                  )
+                : missing > 0 && !canCloneProjectRepositories
+                  ? t('chat.projectGroup.missingLocal', '{{count}} not on this machine', {
+                      count: missing,
+                    })
+                  : undefined,
+          },
+        ];
+      }),
+    [
+      canCloneProjectRepositories,
+      mobileSheetRecency.byGroup,
+      projectRepositoryCopies,
+      selectedMachineId,
+      t,
+      workspaceProjects,
+    ]
   );
   const desktopAgentMachineIds = useMemo(
-    () => (scopedMachineId ? [scopedMachineId] : undefined),
+    () => (scopedMachineId ? [scopedMachineId] : []),
     [scopedMachineId]
   );
   /* Roles offered for the machine this chat will start on. Scoped to that one
@@ -3461,10 +4238,12 @@ function WorkspaceChatLanding({
   ]);
   const handleAgentRoleEdit = useCallback(
     (roleId: AgentRoleId) => {
-      const role = composerAgentRoleItems.find((entry) => entry.role.id === roleId)?.role;
-      if (role) setAgentRoleEditor(openAgentRoleEditorForEdit(role));
+      // The item is bound to this machine; edit the catalog row, opened on it.
+      const bound = composerAgentRoleItems.find((entry) => entry.role.id === roleId)?.role;
+      const role = workspaceAgentRoles.find((entry) => entry.id === roleId);
+      if (bound && role) setAgentRoleEditor(openAgentRoleEditorForEdit(role, bound.machineId));
     },
-    [composerAgentRoleItems]
+    [composerAgentRoleItems, workspaceAgentRoles]
   );
   /* Creating a Role from the composer means "use this now", so the new Role is
      selected as soon as the composer can offer it. Deferred rather than
@@ -3595,7 +4374,9 @@ function WorkspaceChatLanding({
       })),
     [accessByMachineId, selectableMachines, showProjectSharing]
   );
-  const desktopSelectedMachineId = scopedMachineId;
+  // An offline selection stays visible and marked rather than reading as unset.
+  const desktopSelectedMachineId =
+    selectedMachineState === 'offline' ? selectedMachineId : scopedMachineId;
   const desktopSelectedMachineLabel = desktopSelectedMachineId
     ? machines.get(desktopSelectedMachineId)?.name
     : null;
@@ -3627,38 +4408,58 @@ function WorkspaceChatLanding({
       name="ChatLandingTopSelector"
       variant="inline"
       resetKeys={[workspaceId, selectedRepo, selectedLocalProject, selectedMachineId, contextType]}
-      fallback={
-        <div className={cn(selectorTagClassName, 'text-xs leading-tight')}>
-          {t('common.unavailable', 'Unavailable')}
-        </div>
-      }
+      fallbackRender={({ resetErrorBoundary }) => (
+        <Button
+          type="button"
+          variant="ghost"
+          size="mini"
+          onClick={resetErrorBoundary}
+          aria-label={t('chat.retryTargetSelector', 'Retry target selector')}
+        >
+          <RefreshCw {...stylex.props(composerSurface.glyph12)} aria-hidden="true" />
+          {t('common.retry', 'Retry')}
+        </Button>
+      )}
     >
-      <div className="flex w-full min-w-0 items-center gap-2">
+      {/* Embedded, the scope pills are items of the composer's one property row,
+          beside the run config, so each pill shrinks by its own rule. */}
+      <div className={isEmbedded ? 'contents' : 'flex w-full min-w-0 items-center gap-2'}>
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
           visibleLocalMachineId={visibleLocalMachineId}
           selectedLabel={desktopSelectedMachineLabel}
+          offline={selectedMachineState === 'offline'}
           options={desktopMachineOptions}
           onChange={handleMachineChange}
           disabled={isInitialDataLoading}
           onAddMachine={handleAddMachine}
         />
-        <UnifiedProjectSelectorView
-          value={desktopProjectSelection}
-          onChange={handleDesktopProjectChange}
-          localProjects={desktopLocalProjectOptions}
-          repositories={repositories}
-          latestMessageAtByRepo={mobileSheetRecency.byRepo}
-          onConnectGitRepo={handleConnectGitRepo}
-          onAddLocalProject={handleAddLocalProject}
-          onShareLocalProjectWithTeam={
-            showProjectSharing ? handleShareLocalProjectWithTeam : undefined
-          }
-          getShareErrorMessage={getProjectShareErrorMessage}
-          renderLimit={UNIFIED_PROJECT_OPTION_RENDER_LIMIT}
-        />
+        {/* Embedded, the project label is the one that gives way first, but
+            never below its icon and a few characters. */}
+        <div className={isEmbedded ? 'flex min-w-[4.5rem] shrink' : 'contents'}>
+          <UnifiedProjectSelectorView
+            value={desktopProjectSelection}
+            onChange={handleDesktopProjectChange}
+            localProjects={desktopLocalProjectOptions}
+            projectGroups={desktopProjectGroupOptions}
+            repositories={repositories}
+            latestMessageAtByRepo={mobileSheetRecency.byRepo}
+            onConnectGitRepo={handleConnectGitRepo}
+            onAddLocalProject={handleAddLocalProject}
+            onCreateProject={handleCreateProject}
+            onEditProjectGroup={handleEditProjectGroup}
+            onShareLocalProjectWithTeam={
+              showProjectSharing ? handleShareLocalProjectWithTeam : undefined
+            }
+            getShareErrorMessage={getProjectShareErrorMessage}
+            renderLimit={UNIFIED_PROJECT_OPTION_RENDER_LIMIT}
+          />
+        </div>
         {localGitStateRetryNode}
         {branchWorktreePill}
+        {pinSectionId ? (
+          <PinSectionTarget sectionId={pinSectionId} onClear={onClearPinSection} />
+        ) : null}
       </div>
     </ErrorBoundary>
   );
@@ -3674,6 +4475,13 @@ function WorkspaceChatLanding({
         <DesktopRunConfigMenu
           agentSelection={selectedAgent}
           allowedMachineIds={desktopAgentMachineIds}
+          disabledReason={
+            scopedMachineId
+              ? undefined
+              : selectedMachineState === 'offline'
+                ? t('chat.machineSelector.offline', 'Offline')
+                : t('chat.machineSelector.selectFirst', 'Select a machine first')
+          }
           fallbackAgent={{
             cliType: selectedConfig?.cliType,
             agentType: selectedConfig?.agentType,
@@ -3697,6 +4505,7 @@ function WorkspaceChatLanding({
             onEdit: handleAgentRoleEdit,
             machine: scopedMachineId ? (machines.get(scopedMachineId) ?? null) : null,
           }}
+          menuSide={isEmbedded ? 'top' : undefined}
         />
         {/* Permission is part of what a Role pins, so behind one it stops being
             a separate control and is stated in the Role's own face instead. It
@@ -3711,11 +4520,14 @@ function WorkspaceChatLanding({
             configOptionSelectors={configOptionSelectors}
             configOptionValues={configOptionValues}
             onConfigOptionChange={handleConfigOptionChange}
+            menuSide={isEmbedded ? 'top' : undefined}
           />
         )}
         <SessionUsagePopover
+          onRefreshQuota={refreshQuota}
           rateLimits={selectedRateLimits}
           agentType={selectedConfig?.agentType ?? ''}
+          agentConfigId={selectedConfig?.id}
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           showCodexResetForecast={showCodexResetForecast}
@@ -3727,245 +4539,177 @@ function WorkspaceChatLanding({
 
   const bottomBarNode = null;
 
-  /* ── Mobile-sheet (new-chat bottom sheet) selector nodes ──
-     The sheet drives every selector through the unified
-     `MobileInlinePicker` — a chip-style trigger that expands a drawer
-     of options inline below it. We bypass the desktop selector
-     desktop selector components
-     and feed the picker raw option arrays here so the interaction +
-     animation are identical across machine / project / branch / model /
-     thinking / agent / permission. The pill switchers (类型, 模式) stay
-     as Tabs since they're already inline. */
-
-  /* ── Machine ── */
+  /* Mobile target options retain the same machine and project scoping as desktop. */
   const mobileSheetOnlineMachines = useOnlineMachines();
-  const mobileSheetMachineOptions = useMemo<MobileInlinePickerOption<MachineId>[]>(() => {
-    return mobileSheetOnlineMachines.map((m) => ({
-      value: m.id as MachineId,
-      label: m.name,
-      searchText: m.name,
-      icon: <Monitor className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
-    }));
-  }, [mobileSheetOnlineMachines]);
-  const mobileSheetSelectedMachineLabel = useMemo(() => {
-    if (!selectedMachineId) return null;
-    return mobileSheetMachineOptions.find((opt) => opt.value === selectedMachineId)?.label ?? null;
-  }, [mobileSheetMachineOptions, selectedMachineId]);
-  const mobileSheetMachineNode = (
-    <MobileInlinePicker<MachineId>
-      id="mobile-sheet-machine"
-      value={selectedMachineId}
-      onChange={(id) => handleMachineChange(id)}
-      options={mobileSheetMachineOptions}
-      disabled={hasNoMachine}
-      loading={isInitialDataLoading}
-      ariaLabel={t('chat.machineSelector.placeholder', 'Machine')}
-      emptyText={t('chat.machineSelector.emptyText', 'No machines online')}
-      searchable={mobileSheetMachineOptions.length > 5}
-      searchPlaceholder={t('chat.machineSelector.searchPlaceholder', 'Search machines')}
-      triggerContent={
-        <>
-          <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-          <span className="truncate">
-            {isInitialDataLoading
-              ? t('chat.machineSelector.loading', 'Loading machine...')
-              : (mobileSheetSelectedMachineLabel ??
-                t('chat.machineSelector.placeholder', 'Machine'))}
-          </span>
-        </>
-      }
-    />
+  const mobileProjectSelectedMachineId =
+    selectedMachineId && (isSelectedMachineValid || selectedMachineState === 'offline')
+      ? selectedMachineId
+      : (selectedLocalProject?.machineId ?? null);
+  const mobileSheetSelectedMachineLabel = mobileProjectSelectedMachineId
+    ? (machines.get(mobileProjectSelectedMachineId)?.name ?? null)
+    : null;
+  const mobileProjectMachines = useMemo(() => {
+    const onlineIds = new Set(mobileSheetOnlineMachines.map((machine) => machine.id));
+    const localMachineIds = new Set(
+      [...visibleLocalProjectMap.values()].map((entry) => entry.machineId)
+    );
+    return [...machines.values()]
+      .filter(
+        (machine) =>
+          onlineIds.has(machine.id) ||
+          localMachineIds.has(machine.id) ||
+          machine.id === mobileProjectSelectedMachineId ||
+          machine.id === activeAgentRole?.machineId
+      )
+      .map((machine) => ({
+        id: machine.id,
+        name: machine.name,
+        online: onlineIds.has(machine.id),
+        disabledReason:
+          !onlineIds.has(machine.id) && machine.id !== mobileProjectSelectedMachineId
+            ? t('chat.machineSelector.offline', 'Offline')
+            : undefined,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [
+    activeAgentRole?.machineId,
+    machines,
+    mobileProjectSelectedMachineId,
+    mobileSheetOnlineMachines,
+    t,
+    visibleLocalProjectMap,
+  ]);
+  const mobileProjectFolders = useMemo(
+    () =>
+      [...visibleLocalProjectMap.values()].map((entry) => ({
+        machineId: entry.machineId,
+        localProjectId: entry.project.id,
+        name: entry.project.name,
+        rootPath: entry.project.rootPath,
+        lastUsedAt: mobileSheetRecency.byProject.get(entry.key) ?? entry.project.lastOpenedAtMs,
+      })),
+    [mobileSheetRecency.byProject, visibleLocalProjectMap]
+  );
+  const mobileProjectRepos = useMemo(
+    () =>
+      [...(repositories ?? [])].map((repository) => ({
+        fullName: repository.fullName,
+        description: repository.description ?? undefined,
+        lastUsedAt: mobileSheetRecency.byRepo.get(repository.fullName),
+      })),
+    [mobileSheetRecency.byRepo, repositories]
+  );
+  const mobileProjectGroups = useMemo(
+    () =>
+      desktopProjectGroupOptions.map((group) => ({
+        projectId: group.projectId,
+        name: group.name,
+        memberCount: group.memberCount,
+        availability: group.availability,
+        disabledReason: group.disabledReason,
+        lastUsedAt: group.lastUsedAt,
+      })),
+    [desktopProjectGroupOptions]
   );
 
-  /* ── Project (per context) ── */
-  const mobileSheetGitHubRepoOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
-    if (contextType !== 'github') return [];
-    const repos = [...(repositories ?? [])].sort((a, b) =>
-      compareChatLandingRepositoryByRecency(a, b, mobileSheetRecency.byRepo)
-    );
-    return repos.map((repo) => ({
-      value: repo.fullName,
-      label: repo.fullName,
-      searchText: repo.fullName,
-      description: repo.description ?? undefined,
-      icon: <GithubIcon className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
-    }));
-  }, [contextType, repositories, mobileSheetRecency]);
-  const mobileSheetLocalProjectOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
-    if (contextType !== 'local') return [];
-    const entries = [...visibleLocalProjectMap.values()]
-      .filter(
-        (entry) =>
-          !localProjectSelectorMachineId || entry.machineId === localProjectSelectorMachineId
-      )
-      .sort((left, right) =>
-        compareChatLandingLocalProjectByRecency(left, right, mobileSheetRecency.byProject)
-      );
-    return entries.map((entry) => ({
-      value: buildLocalProjectKey(entry.machineId, entry.project.id),
-      label: entry.project.name,
-      searchText: `${entry.project.name} ${entry.project.rootPath}`,
-      description: entry.project.rootPath,
-      icon: <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
-    }));
-  }, [contextType, localProjectSelectorMachineId, visibleLocalProjectMap, mobileSheetRecency]);
-  const mobileSheetSelectedLocalProjectKey = selectedLocalProject
-    ? buildLocalProjectKey(selectedLocalProject.machineId, selectedLocalProject.localProjectId)
-    : null;
-  const mobileSheetSelectedRepoLabel = selectedRepo ?? null;
-  const mobileSheetSelectedLocalProjectLabel = useMemo(() => {
-    if (!mobileSheetSelectedLocalProjectKey) return null;
-    return (
-      mobileSheetLocalProjectOptions.find((opt) => opt.value === mobileSheetSelectedLocalProjectKey)
-        ?.label ?? null
-    );
-  }, [mobileSheetLocalProjectOptions, mobileSheetSelectedLocalProjectKey]);
-  const mobileSheetProjectNode =
-    contextType === 'github' ? (
-      <MobileInlinePicker<string>
-        id="mobile-sheet-repo"
-        value={selectedRepo ?? null}
-        onChange={(repo) => {
-          setSelectedRepo(repo);
-          setContextType('github');
-        }}
-        options={mobileSheetGitHubRepoOptions}
-        ariaLabel={t('chat.repoPlaceholder', 'Repository')}
-        emptyText={t(
-          'chat.mobileHome.emptyGitHubProjects',
-          '当前 workspace 没有已授权的 GitHub 仓库'
-        )}
-        searchable={mobileSheetGitHubRepoOptions.length > 5}
-        searchPlaceholder={t('chat.mobileHome.repoSearchPlaceholder', 'Search repositories')}
-        triggerContent={
-          <>
-            <GithubIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-            <span className="truncate">
-              {mobileSheetSelectedRepoLabel ?? t('chat.repoPlaceholder', 'Repository')}
-            </span>
-          </>
-        }
-      />
-    ) : (
-      <MobileInlinePicker<string>
-        id="mobile-sheet-local-project"
-        value={mobileSheetSelectedLocalProjectKey}
-        onChange={(key) => {
-          const opt = visibleLocalProjectMap.get(key);
-          if (!opt) return;
-          handleSelectedLocalProjectChange({
-            machineId: opt.machineId,
-            localProjectId: opt.project.id,
-          });
-          setContextType('local');
-        }}
-        options={mobileSheetLocalProjectOptions}
-        ariaLabel={t('chat.validation.missingProject', 'Select a project')}
-        emptyText={localProjectSelectorEmptyText}
-        searchable={mobileSheetLocalProjectOptions.length > 5}
-        searchPlaceholder={t('chat.mobileHome.localProjectSearchPlaceholder', 'Search projects')}
-        triggerContent={
-          <>
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-            <span className="truncate">
-              {mobileSheetSelectedLocalProjectLabel ??
-                t('chat.validation.missingProject', 'Select a project')}
-            </span>
-          </>
-        }
-      />
-    );
+  useLayoutEffect(() => {
+    if (!restoreMobileProject || !mobileNewChatOpen || submitting || !workspaceId || !defaultsReady)
+      return;
+    if (visibleLocalProjectsLoading || visibleMachinesLoading || !docMetaCacheReady) return;
+    const remembered = readChatLandingDefaults(workspaceId)?.lastUsedProject;
+    if (
+      (!remembered || remembered.kind === 'github') &&
+      !repositoriesReady &&
+      repositories === undefined
+    )
+      return;
+    const options = getMobileProjectOptions({
+      folders: mobileProjectFolders,
+      repositories: mobileProjectRepos,
+      groups: mobileProjectGroups,
+      machineId:
+        remembered?.kind === 'local'
+          ? (remembered.machineId as MachineId)
+          : mobileProjectSelectedMachineId,
+      query: '',
+    });
+    setRestoreMobileProject(false);
+    const selection = resolveMobileNewChatDefaultProject(remembered, options);
+    if (selection.kind === 'local' && selection.machineId !== mobileProjectSelectedMachineId) {
+      if (activeAgentRole) handleAgentRoleSelect(null);
+      handleMachineChange(selection.machineId);
+    }
+    handleDesktopProjectChange(selection);
+  }, [
+    restoreMobileProject,
+    mobileNewChatOpen,
+    submitting,
+    workspaceId,
+    defaultsReady,
+    visibleLocalProjectsLoading,
+    visibleMachinesLoading,
+    docMetaCacheReady,
+    repositoriesReady,
+    repositories,
+    mobileProjectFolders,
+    mobileProjectRepos,
+    mobileProjectGroups,
+    mobileProjectSelectedMachineId,
+    handleDesktopProjectChange,
+    activeAgentRole,
+    handleAgentRoleSelect,
+    handleMachineChange,
+  ]);
 
+  const mobileSheetSelectedProjectName = useMemo(() => {
+    if (desktopProjectSelection.kind === 'group') {
+      return (
+        desktopProjectGroupOptions.find(
+          (group) => group.projectId === desktopProjectSelection.projectId
+        )?.name ?? null
+      );
+    }
+    if (desktopProjectSelection.kind === 'local') {
+      const key = buildLocalProjectKey(
+        desktopProjectSelection.machineId,
+        desktopProjectSelection.localProjectId
+      );
+      return (
+        desktopLocalProjectOptions.find((project) => project.key === key)?.name ??
+        visibleLocalProjectMap.get(key)?.project.name ??
+        null
+      );
+    }
+    return null;
+  }, [
+    desktopLocalProjectOptions,
+    desktopProjectGroupOptions,
+    desktopProjectSelection,
+    visibleLocalProjectMap,
+  ]);
+  const mobileSheetTargetLabel =
+    desktopProjectSelection.kind === 'group'
+      ? (mobileSheetSelectedProjectName ??
+        String(t('chat.validation.missingProject', 'Select a project')))
+      : resolveMobileNewChatTargetLabel({
+          contextType,
+          repoFullName: selectedRepo,
+          projectName: mobileSheetSelectedProjectName,
+          labels: {
+            noProject: String(t('chat.mobileNewChat.noProject', 'No project selected')),
+            project: String(t('chat.validation.missingProject', 'Select a project')),
+            repository: String(t('chat.repoPlaceholder', 'Repository')),
+          },
+        });
   /* ── Branch ── */
-  const mobileSheetBranchOptions = useMemo<MobileInlinePickerOption<string>[]>(
+  const mobileSheetBranchOptions = useMemo<MobileNativeSelectOption<string>[]>(
     () =>
       branchOptions.map((opt) => ({
         value: opt.value,
         label: opt.label,
-        searchText: opt.label,
-        description: opt.description,
-        icon: <GitBranchIcon className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
       })),
     [branchOptions]
   );
-  const mobileSheetBranchNode = showBranchSelector ? (
-    <MobileInlinePicker<string>
-      id="mobile-sheet-branch"
-      key={branchSelectorKey}
-      value={currentBranch}
-      onChange={(value) => setCurrentBranch(value)}
-      options={mobileSheetBranchOptions}
-      disabled={isBranchDisabled}
-      loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : false}
-      loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-      ariaLabel={t('chat.branchPlaceholder', 'Branch')}
-      emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
-      searchable={mobileSheetBranchOptions.length > 5}
-      searchPlaceholder={t('chat.branchSearchPlaceholder', { defaultValue: 'Search branches' })}
-      triggerContent={
-        <>
-          <GitBranchIcon
-            className="h-3.5 w-3.5 shrink-0 opacity-70"
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
-          <span className="truncate">
-            {currentBranchLabel ?? t('chat.branchPlaceholder', 'Branch')}
-          </span>
-        </>
-      }
-    />
-  ) : null;
-
-  /* Project and branch now live on their own rows in the new-chat
-     sheet (see `MobileNewChatSheet` `perTypeNode` + `branchNode`
-     slots), so the previous side-by-side wrapper is gone. The two
-     nodes are passed individually to the sheet. */
-
-  /* Local-only: workdir mode lives on its own row in the sheet as a
-     pill switcher (本地文件 / 新工作树), matching the visual pattern of
-     the type pill above. The desktop WorkdirModeSelector dropdown is too
-     small to read at a glance on a phone and doesn't surface both
-     options without an extra tap. */
-  /* Workdir mode pills: icon+label as a tight group, centered in each
-     equal-width segment (same affinity pattern as the Type ContextSwitch). */
-  const mobileSheetWorkdirModePillTriggerClassName = cn(
-    'flex-1 justify-center gap-1 rounded-md px-2 py-1 text-sm font-medium transition-all',
-    'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs',
-    'text-muted-foreground'
-  );
-  const mobileSheetWorkdirModeNode =
-    contextType === 'local' && selectedLocalProject ? (
-      <Tabs
-        value={effectiveWorkdirMode}
-        onValueChange={(value) => handleWorkdirModeChange(value as WorkdirMode)}
-        className="w-full"
-      >
-        <TabsList className="flex h-10 w-full rounded-md bg-muted p-1">
-          <TabsTrigger value="local" className={mobileSheetWorkdirModePillTriggerClassName}>
-            <FolderIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{t('chat.mobileNewChat.workdirLocalLabel', '本地文件')}</span>
-          </TabsTrigger>
-          <TabsTrigger
-            value="worktree"
-            disabled={!worktreeAvailable}
-            title={worktreeUnavailableReason}
-            className={cn(
-              mobileSheetWorkdirModePillTriggerClassName,
-              !worktreeAvailable && 'cursor-not-allowed opacity-50'
-            )}
-          >
-            <GitBranchIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{t('chat.mobileNewChat.workdirWorktreeLabel', '新工作树')}</span>
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-    ) : null;
-
-  /* ── Composer footer: same MobileSessionRunConfig as the in-session
-     composer (agent / model / reasoning / permission / Plan / Fast in one
-     sheet). Usage stays in the footer; the old below-composer agent +
-     permission + plan row is gone. */
   const mobileSheetFooterSelectorNode = (
     <ErrorBoundary
       name="MobileSheetFooterSelector"
@@ -3973,83 +4717,48 @@ function WorkspaceChatLanding({
       resetKeys={[workspaceId, selectedAgent?.agentId]}
       fallback={null}
     >
-      <div className="flex w-full min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
-        {/* flex-1 + overflow so the run-config button can shrink; only the
-            model label inside it truncates. Usage stays full-width. */}
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <MobileSessionRunConfig
-            agentSelection={selectedAgent}
-            allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
-            agentLocked={false}
-            onAgentConfigChange={setSelectedAgent}
-            modelOptions={modelOptions}
-            selectedModelId={selectedModelId}
-            onModelChange={setSelectedModelName}
-            modeOptions={modeOptions}
-            selectedModeId={selectedModeId}
-            onModeChange={setSelectedModeId}
-            configOptionSelectors={configOptionSelectors}
-            configOptionValues={configOptionValues}
-            onConfigOptionChange={handleConfigOptionChange}
-            fallbackAgent={{
-              cliType: selectedConfig?.cliType,
-              agentType: selectedConfig?.agentType,
-            }}
-            agentRoles={{
-              items: composerAgentRoleItems,
-              selectedRoleId: activeAgentRole?.id ?? null,
-              onSelect: handleAgentRoleSelect,
-              onCreate: handleAgentRoleCreate,
-            }}
-          />
-        </div>
+      <MobileFooterRail>
+        <MobileSessionRunConfig
+          disabled={submitting}
+          agentSelection={selectedAgent}
+          allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
+          agentLocked={false}
+          onAgentConfigChange={setSelectedAgent}
+          modelOptions={modelOptions}
+          selectedModelId={selectedModelId}
+          onModelChange={setSelectedModelName}
+          modeOptions={modeOptions}
+          selectedModeId={selectedModeId}
+          onModeChange={setSelectedModeId}
+          configOptionSelectors={configOptionSelectors}
+          configOptionValues={configOptionValues}
+          onConfigOptionChange={handleConfigOptionChange}
+          fallbackAgent={{
+            cliType: selectedConfig?.cliType,
+            agentType: selectedConfig?.agentType,
+          }}
+          agentRoles={{
+            items: composerAgentRoleItems,
+            selectedRoleId: activeAgentRole?.id ?? null,
+            onSelect: handleAgentRoleSelect,
+            onCreate: handleAgentRoleCreate,
+          }}
+        />
         <SessionUsagePopover
+          onRefreshQuota={refreshQuota}
           rateLimits={selectedRateLimits}
           agentType={selectedConfig?.agentType ?? ''}
+          agentConfigId={selectedConfig?.id}
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           showCodexResetForecast={showCodexResetForecast}
           showRateLimitWithoutContext
-          className="h-8 shrink-0"
+          className="h-7 shrink-0"
         />
-      </div>
+      </MobileFooterRail>
     </ErrorBoundary>
   );
-  /* New-chat no longer needs a below-composer selector row — every run
-     knob lives inside MobileSessionRunConfig. */
-  const mobileSheetBelowComposerNode = null;
 
-  /* Mobile-sheet Type row: same ContextSwitch as desktop. Icon+label are a
-     tight centered pair inside each equal-width pill (not icon-left /
-     label-centered, which broke icon–label affinity). */
-  const mobileSheetContextSwitchNode = (
-    <ContextSwitch
-      value={contextType}
-      onChange={setContextType}
-      tone={tone}
-      localLabel={t('chat.contextSwitch.localProjects', 'Local')}
-      githubLabel={t('chat.contextSwitch.github', 'GitHub')}
-      chatLabel={t('chat.contextSwitch.chat', 'Chat')}
-      /* The mobile new-chat sheet is a compact launcher — empty Local/GitHub tabs must
-         NOT carry the desktop's
-         "Open project" / "Connect GitHub" affordance, whose onClick navigates
-         away (and was firing on hover/click/Enter). Omit onClick so the tab
-         stays plainly disabled with only an explanatory tooltip. */
-      localDisabled={hasLocalProjects ? undefined : { label: localProjectSelectorEmptyText }}
-      githubDisabled={
-        !hasGitHubRepos
-          ? {
-              label: t(
-                'chat.mobileHome.emptyGitHubProjects',
-                '当前 workspace 没有已授权的 GitHub 仓库'
-              ),
-            }
-          : undefined
-      }
-    />
-  );
-
-  // ── Hints ──
   const hasNoAgentConfig = executorConfigs.length === 0;
   const hintType: ChatLandingHintType = getChatLandingHintType({
     hasNoMachine,
@@ -4073,109 +4782,22 @@ function WorkspaceChatLanding({
     openSettings('agents');
   };
 
-  // ── Mention source ──
-  const isSelectedRepoPublic = useMemo(() => {
-    if (!selectedRepo) return undefined;
-    const repo = freshRepositories?.find((r) => r.fullName === selectedRepo);
-    return repo ? !repo.private : undefined;
-  }, [freshRepositories, selectedRepo]);
+  const linkedSelectedRepo = useMemo(
+    () => resolveLinkedWorkspaceGitHubRepo(selectedRepo, freshRepositories),
+    [freshRepositories, selectedRepo]
+  );
+  const isSelectedRepoPublic = linkedSelectedRepo?.isPublic;
   const selectedLocalProjectGithubRepoFullName = useMemo(() => {
     if (contextType !== 'local') return undefined;
-    return resolveLocalProjectGithubRepoFullName(activeLocalGitState, repositories) ?? undefined;
-  }, [activeLocalGitState, contextType, repositories]);
-
-  const preparationMachineId = useMemo(() => {
-    if (!selectedAgent) return null;
-    const candidateMachineId =
-      selectedMachineId && isSelectedMachineValid
-        ? selectedMachineId
-        : contextType === 'local'
-          ? (selectedLocalProject?.machineId ?? null)
-          : null;
-    return candidateMachineId === selectedAgent.machineId ? candidateMachineId : null;
-  }, [
-    contextType,
-    isSelectedMachineValid,
-    selectedAgent,
-    selectedLocalProject?.machineId,
-    selectedMachineId,
-  ]);
-  const preparationProject = useMemo<ProjectRef | undefined>(() => {
-    if (contextType === 'chat') return undefined;
-    if (contextType === 'github') {
-      const branch = selectedBranch?.trim();
-      if (!selectedRepo || !branch) return undefined;
-      return { kind: 'github', repoFullName: selectedRepo, branch };
-    }
-    if (!selectedLocalProject || selectedLocalProject.machineId !== preparationMachineId) {
-      return undefined;
-    }
-    const branch =
-      effectiveWorkdirMode === 'worktree' ? selectedLocalBranch?.trim() || undefined : undefined;
-    return {
-      kind: 'local',
-      localProjectId: selectedLocalProject.localProjectId,
-      ...(branch ? { branch } : {}),
-      ...(selectedLocalProjectGithubRepoFullName
-        ? { githubRepoFullName: selectedLocalProjectGithubRepoFullName }
-        : {}),
-      ...(effectiveWorkdirMode === 'worktree' ? { useWorktree: true } : {}),
-    };
-  }, [
-    contextType,
-    effectiveWorkdirMode,
-    preparationMachineId,
-    selectedBranch,
-    selectedLocalBranch,
-    selectedLocalProject,
-    selectedLocalProjectGithubRepoFullName,
-    selectedRepo,
-  ]);
-  const preparationContextReady =
-    contextType === 'chat' ||
-    (contextType === 'github' && preparationProject?.kind === 'github') ||
-    (contextType === 'local' && preparationProject?.kind === 'local');
-  const preparationRunConfig = useMemo(
-    () =>
-      buildSessionPreparationRunConfig({
-        modeId: modeOptions.length > 0 ? selectedModeId : null,
-        modelId: modelOptions.length > 0 ? selectedModelId : null,
-        configOptionValues: dispatchConfigOptionValues,
-        mcpServerIds: mcpSelection.selectedIds,
-        taskToolsEnabled: tasksFeatureEnabled,
-      }),
-    [
-      dispatchConfigOptionValues,
-      mcpSelection.selectedIds,
-      modeOptions.length,
-      modelOptions.length,
-      selectedModeId,
-      selectedModelId,
-      tasksFeatureEnabled,
-    ]
+    return (
+      resolveLocalProjectGithubRepoFullName(activeLocalGitState, selectedLocalProjectMeta) ??
+      undefined
+    );
+  }, [activeLocalGitState, contextType, selectedLocalProjectMeta]);
+  const linkedLocalProjectRepo = useMemo(
+    () => resolveLinkedWorkspaceGitHubRepo(selectedLocalProjectGithubRepoFullName, freshRepositories),
+    [freshRepositories, selectedLocalProjectGithubRepoFullName]
   );
-  const { handoffToSession: handoffSessionPreparation } = useSessionPreparation({
-    runtime,
-    machineId: preparationMachineId,
-    requestedByUserId: userId ?? null,
-    agentConfigId: selectedConfig?.id ?? null,
-    cliType: selectedConfig?.cliType ?? null,
-    agentType: selectedConfig?.agentType ?? null,
-    project: preparationProject,
-    runConfig: preparationRunConfig,
-    sessionId: draftSessionId,
-    ensureSessionId: ensureDraftSessionId,
-    enabled:
-      preparationContextReady &&
-      Boolean(
-        runtime &&
-        preparationMachineId &&
-        userId &&
-        selectedConfig &&
-        (prompt.trim().length > 0 || imageItems.length > 0 || fileItems.length > 0)
-      ),
-    activityRevision: `${draftActivityRevision}:${imageItems.length}:${fileItems.length}`,
-  });
 
   const mentionSource = useMemo(() => {
     if (contextType === 'chat') return undefined;
@@ -4185,19 +4807,27 @@ function WorkspaceChatLanding({
         machineId: selectedLocalProject.machineId,
         workspaceId,
         localProjectId: selectedLocalProject.localProjectId,
-        githubRepoFullName: selectedLocalProjectGithubRepoFullName,
+        githubRepoFullName: linkedLocalProjectRepo?.fullName,
+        isPublic: linkedLocalProjectRepo?.isPublic,
       };
     }
-    return { kind: 'github' as const, repoFullName: selectedRepo, isPublic: isSelectedRepoPublic };
+    return {
+      kind: 'github' as const,
+      repoFullName: selectedRepo,
+      isPublic: isSelectedRepoPublic,
+      issuePrEnabled: !repositoriesReady || Boolean(linkedSelectedRepo),
+    };
   }, [
     contextType,
     isSelectedRepoPublic,
+    linkedLocalProjectRepo,
+    linkedSelectedRepo,
+    repositoriesReady,
     selectedLocalProject,
-    selectedLocalProjectGithubRepoFullName,
     selectedRepo,
     workspaceId,
   ]);
-  const expandSkillMentionsForPrompt = useMentionPromptExpansion({
+  const { expand: expandSkillMentionsForPrompt } = useMentionPromptExpansion({
     source: mentionSource,
     skillAgent,
     promptValue: prompt,
@@ -4206,8 +4836,17 @@ function WorkspaceChatLanding({
     getChatComposerPromptPlaceholderKey({ mentionSource, availableCommands, skillAgent })
   );
   const issuePrRepoFullName =
-    contextType === 'local' ? selectedLocalProjectGithubRepoFullName : selectedRepo;
-  const issuePrRepoIsPublic = contextType === 'github' ? isSelectedRepoPublic : undefined;
+    contextType === 'local'
+      ? linkedLocalProjectRepo?.fullName
+      : repositoriesReady
+        ? linkedSelectedRepo?.fullName
+        : selectedRepo;
+  const issuePrRepoIsPublic =
+    contextType === 'local'
+      ? linkedLocalProjectRepo?.isPublic
+      : contextType === 'github'
+        ? isSelectedRepoPublic
+        : undefined;
 
   const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(
     issuePrRepoFullName,
@@ -4215,18 +4854,22 @@ function WorkspaceChatLanding({
   );
 
   const hasSendableContent = prompt.trim().length > 0 || hasUploadedImages || hasUploadedFiles;
-  const submitDisabled = getChatLandingSubmitDisabled({
-    submitting,
-    hasBlockingImages,
-    hasBlockingFiles,
-    hasSendableContent,
-    contextType,
-    workdirMode: selectedWorkdirMode,
-    hasSelectedLocalProject: Boolean(selectedLocalProject),
-    isRuntimeInitializing: runtimeInitializing,
-    isLoadingLocalGitState: loadingLocalGitState,
-    hasLocalGitStateError: Boolean(localGitStateError),
-  });
+  const submitDisabled =
+    (selectedProjectGroupId !== null &&
+      (projectGroupLaunchTarget?.kind !== 'ready' || projectGroupLacksLocalCopies)) ||
+    getChatLandingSubmitDisabled({
+      submitting,
+      hasBlockingImages,
+      hasBlockingFiles,
+      hasSendableContent,
+      contextType,
+      workdirMode: selectedWorkdirMode,
+      hasSelectedLocalProject: Boolean(selectedLocalProject),
+      isRuntimeInitializing: runtimeInitializing,
+      isLoadingLocalGitState: loadingLocalGitState && !selectedLocalBranch,
+      hasLocalGitStateError: Boolean(localGitStateError) && !selectedLocalBranch,
+      mcpDefaultsPending: !mcpSelection.ready && !mcpSelection.defaultsFailed,
+    });
   const selectedMachineHasVisibleLocalProject = useMemo(
     () =>
       selectedMachineId ? getFirstVisibleLocalProjectForMachine(selectedMachineId) !== null : false,
@@ -4249,16 +4892,49 @@ function WorkspaceChatLanding({
             selectedMachineProjectStatus === 'no-projects-on-selected-machine'
           )
         );
-  const visibleComposerStatus = getChatLandingVisibleComposerStatus({
-    contextType,
-    composerStatus,
-    localGitStateError,
-    selectedMachineProjectStatus: selectedMachineProjectStatusMessage
-      ? { message: selectedMachineProjectStatusMessage, tone: 'warning' }
-      : null,
-  });
+  const scopedMachineMeta = selectedMachineId ? machines.get(selectedMachineId) : undefined;
+  const projectGroupStatusMessage: string | null = !selectedProjectGroupId
+    ? null
+    : !selectedProjectGroup
+      ? t('chat.projectGroup.missing', 'This project group no longer exists')
+      : projectGroupLaunchTarget?.kind === 'machines_conflict'
+        ? t(
+            'chat.projectGroup.machinesConflictStatus',
+            'This group has local repositories on different machines, so they cannot share one conversation.'
+          )
+        : projectGroupLacksLocalCopies
+          ? t(
+              'chat.projectGroup.missingLocalStatus',
+              'This machine has no copy of {{count}} of this group’s repositories. Add them as local projects here, or start on another machine.',
+              { count: projectGroupMissingMemberIds.size }
+            )
+          : projectGroupLaunchTarget?.kind === 'ready' &&
+              projectGroupLaunchTarget.members.length > 1 &&
+              scopedMachineMeta &&
+              !machineSupportsMultiRepoProject(scopedMachineMeta)
+            ? t(
+                'chat.projectGroup.unsupportedMachine',
+                'Update Lody on this machine to start project group conversations.'
+              )
+            : projectGroupUsesRepositoryMembers &&
+                scopedMachineMeta &&
+                !machineSupportsProjectRepositoryMembers(scopedMachineMeta)
+              ? t(
+                  'chat.projectGroup.unsupportedRepositoryMembers',
+                  'Update Lody on this machine to use its copies of these repositories.'
+                )
+              : null;
+  const visibleComposerStatus = projectGroupStatusMessage
+    ? { message: projectGroupStatusMessage, tone: 'warning' as const }
+    : getChatLandingVisibleComposerStatus({
+        contextType,
+        composerStatus,
+        localGitStateError,
+        selectedMachineProjectStatus: selectedMachineProjectStatusMessage
+          ? { message: selectedMachineProjectStatusMessage, tone: 'warning' }
+          : null,
+      });
 
-  // ── Title ──
   // Rotate the landing heading once per (UTC) day: stable within a day, no
   // flicker across re-renders, no Math.random().
   const headings = [t('chat.heading'), t('chat.heading2')];
@@ -4304,6 +4980,7 @@ function WorkspaceChatLanding({
         name: organization.name,
         avatarUrl: resolveWorkspaceIdentityLogo(organization.logo, multiWorkspaceAvailable),
         isActive: organization.id === activeOrganization?.id,
+        encrypted: isListedEncryptedWorkspace(organization),
       })),
     [activeOrganization?.id, multiWorkspaceAvailable, organizations]
   );
@@ -4329,8 +5006,7 @@ function WorkspaceChatLanding({
       if (typeof session.lastMessageAt === 'number' && Number.isFinite(session.lastMessageAt)) {
         const prev = latest.get(key) ?? 0;
         if (session.lastMessageAt > prev) latest.set(key, session.lastMessageAt);
-        const isUnread =
-          typeof session.lastReadAt !== 'number' || session.lastMessageAt > session.lastReadAt;
+        const isUnread = sessionHasUnreadMessages(session);
         if (isUnread) unread.set(key, (unread.get(key) ?? 0) + 1);
       }
     }
@@ -4406,19 +5082,13 @@ function WorkspaceChatLanding({
     return counts;
   }, [visibleSessions]);
   const githubRepositoryLatestMessageAt = mobileSheetRecency.byRepo;
-  /* Unread-session count per repository — drives the row's trailing
-     badge. Mirrors `localProjectActivity.unread` semantics: a session
-     is unread when `lastMessageAt` is newer than `lastReadAt` (or
-     `lastReadAt` is missing entirely). */
+  /* Unread-session count per repository drives the row's trailing badge. */
   const githubRepositoryUnreadCount = useMemo(() => {
     const unread = new Map<string, number>();
     for (const session of visibleSessions) {
       const repoFullName = getSessionGitHubRepoFullName(session);
       if (!repoFullName) continue;
-      if (typeof session.lastMessageAt !== 'number') continue;
-      const isUnread =
-        typeof session.lastReadAt !== 'number' || session.lastMessageAt > session.lastReadAt;
-      if (!isUnread) continue;
+      if (!sessionHasUnreadMessages(session)) continue;
       unread.set(repoFullName, (unread.get(repoFullName) ?? 0) + 1);
     }
     return unread;
@@ -4514,7 +5184,10 @@ function WorkspaceChatLanding({
   /* Coerce stored value into Project | Date. Older builds stored
      'none' / 'type' / 'pr-status' / 'running-status'; anything other
      than 'date' becomes 'project' (No Group is no longer offered). */
-  const chatViewMode: MobileChatGroupBy = storedChatViewMode === 'date' ? 'date' : 'project';
+  const chatViewMode: MobileChatGroupBy =
+    storedChatViewMode === 'date' || storedChatViewMode === 'status'
+      ? storedChatViewMode
+      : 'project';
   /* Drives the mobile home's connection-status banner. Mirrors the
      desktop sidebar's `ConnectionPill` data source so users see the
      same reconnecting state regardless of platform. */
@@ -4607,7 +5280,6 @@ function WorkspaceChatLanding({
      level (so the predicate reads from the same field accessors the
      grouping logic uses). Cap at 200. */
   const mobileHomeChats = useMemo<MobileConversationItem[]>(() => {
-    const myUserId = userId ?? null;
     /* `sessionListAtom` and `archivedSessionListAtom` live in
        different jotai atoms (see `atoms/doc-meta.ts`) — the active
        list excludes archived items and vice versa. Pick the right
@@ -4629,9 +5301,10 @@ function WorkspaceChatLanding({
       activityCache.set(session.id, activity);
       return activity;
     };
+    const rowCap = chatViewMode === 'status' && !mobileHomeShowArchived ? undefined : 200;
     return sourceSessions
       .filter((session) => {
-        if (chatScope === 'my' && myUserId && session.userId !== myUserId) return false;
+        if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId)) return false;
         if (chatExcludedMachines.has(session.machineId)) return false;
         return true;
       })
@@ -4646,7 +5319,7 @@ function WorkspaceChatLanding({
         const rightTime = getSessionActivity(right).latestMessageAt;
         return rightTime - leftTime;
       })
-      .slice(0, 200)
+      .slice(0, rowCap)
       .map<MobileConversationItem>((session) => {
         const prInfo = getLatestPullRequestInfo(session);
         const activity = getSessionActivity(session);
@@ -4711,6 +5384,10 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          pinSectionId: session.pinSectionId ?? null,
+          orderKey: session.orderKey ?? null,
+          ...mobileStatusFieldsOf(session),
+          readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* Provenance for the list's opened-by tree. TWO fields, never
              merged: the precise opener drives navigation, the row id drives
@@ -4767,10 +5444,14 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    chatViewMode,
+    myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
     liveSessionStatuses,
     mobileHomeShowArchived,
+    activeReadOnlyIds,
+    archivedReadOnlyIds,
     onlineMachineIds,
     showProjectSharing,
     t,
@@ -4781,6 +5462,18 @@ function WorkspaceChatLanding({
     visibleLocalProjectMap,
     visibleSessions,
   ]);
+
+  /** Pinned rows My Tasks hid, by pin section, as the desktop Pinned area counts them. */
+  const mobileScopeHiddenCounts = useMemo(() => {
+    if (chatScope !== 'my' || mobileHomeShowArchived) return undefined;
+    const counts: Record<string, number> = {};
+    for (const session of visibleSessions) {
+      if (!session.isPinned || isSessionInMyScope(session, myAccountId)) continue;
+      const key = session.pinSectionId ?? '';
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return Object.keys(counts).length > 0 ? counts : undefined;
+  }, [chatScope, mobileHomeShowArchived, myAccountId, visibleSessions]);
 
   /* Pill bar config for the Chat tab. Multi-select pills model state
      as EXCLUDED sets: `selectedIds = (allOptionIds − excluded)` and
@@ -4961,13 +5654,14 @@ function WorkspaceChatLanding({
       {
         kind: 'single',
         id: 'view',
-        fallbackLabel: t('chat.mobileHome.filters.view.byProject', 'Group: Project'),
+        fallbackLabel: t('chat.mobileHome.filters.view.byStatus', 'Group: Status'),
         options: [
+          { id: 'status', label: t('chat.mobileHome.filters.view.byStatus', 'Group: Status') },
           { id: 'project', label: t('chat.mobileHome.filters.view.byProject', 'Group: Project') },
           { id: 'date', label: t('chat.mobileHome.filters.view.byDate', 'Group: Date') },
         ],
         selectedId: chatViewMode,
-        onSelect: (id) => setChatViewMode(id === 'date' ? 'date' : 'project'),
+        onSelect: (id) => setChatViewMode(id === 'date' || id === 'status' ? id : 'project'),
       },
       {
         kind: 'aggregate',
@@ -4983,6 +5677,7 @@ function WorkspaceChatLanding({
     chatExcludedRepos,
     chatExcludedRunning,
     chatScope,
+    myAccountId,
     chatViewMode,
     mobileHomeMachines,
     mobileSheetRecency,
@@ -5021,7 +5716,11 @@ function WorkspaceChatLanding({
   const [persistedProjectsSubTab, setPersistedProjectsSubTab] = useAtom(
     mobileHomeProjectsSubTabAtom
   );
+  const jotaiStore = useStore();
   const [selectedMobileHomeTab, setSelectedMobileHomeTab] = useState<MobileHomeTab>(() => {
+    // Read without clearing. React invokes this initializer twice in dev;
+    // the effect below consumes the handoff after the tab is committed.
+    if (isMobile && jotaiStore.get(mobileHomeReturnTabAtom) === 'schedules') return 'schedules';
     if (preSelectedContext === 'chat') return 'chat';
     const hasProjectPreselection = Boolean(
       preSelectedRepo || (preSelectedMachine && preSelectedProject)
@@ -5036,16 +5735,18 @@ function WorkspaceChatLanding({
     if (isMobile) return 'chat';
     return contextType === 'chat' ? 'chat' : 'projects';
   });
-  /* Developer-only beta gates drive the extra dock tabs on mobile home.
-     When a gate is off, a stale selection must render as Chat — as if
-     the tab were never built. Inbox also retains its team-workspace gate. */
+  useEffect(() => {
+    if (jotaiStore.get(mobileHomeReturnTabAtom) === 'schedules') {
+      jotaiStore.set(mobileHomeReturnTabAtom, null);
+    }
+  }, [jotaiStore]);
+  /* A developer-only beta gate (plus the team-workspace gate) drives the
+     Inbox dock tab on mobile home. When it is off, a stale selection must
+     render as Chat — as if the tab were never built. */
   const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
   const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
-    (selectedMobileHomeTab === 'tasks' && !tasksFeatureEnabled) ||
-    (selectedMobileHomeTab === 'inbox' && !showMobileInbox)
-      ? 'chat'
-      : selectedMobileHomeTab;
+    selectedMobileHomeTab === 'inbox' && !showMobileInbox ? 'chat' : selectedMobileHomeTab;
   useEffect(() => {
     if (!showMobileInbox && selectedMobileHomeTab === 'inbox') {
       setSelectedMobileHomeTab('chat');
@@ -5136,7 +5837,9 @@ function WorkspaceChatLanding({
     (itemId: string) => {
       const item = inboxRows?.find((candidate) => candidate._id === itemId);
       if (!item) return;
-      void markInboxItemRead({ itemId: item._id });
+      void markInboxItemRead({ itemId: item._id }).catch((error) =>
+        console.error('Failed to mark inbox item read', error)
+      );
       if (item.kind === 'sharing_review') {
         if (sharingReviewState.actionTarget === 'machines') {
           openSettings('machines');
@@ -5164,7 +5867,10 @@ function WorkspaceChatLanding({
   const handleMobileInboxItemDismiss = useCallback(
     (itemId: string) => {
       const item = inboxRows?.find((candidate) => candidate._id === itemId);
-      if (item) void dismissInboxItem({ itemId: item._id });
+      if (item)
+        void dismissInboxItem({ itemId: item._id }).catch((error) =>
+          console.error('Failed to dismiss inbox item', error)
+        );
     },
     [dismissInboxItem, inboxRows]
   );
@@ -5202,22 +5908,15 @@ function WorkspaceChatLanding({
     (nextTab: MobileHomeTab) => {
       setSelectedMobileHomeTab(nextTab);
       /* Per-tab sync rules:
-         - 'inbox': purely visual — Inbox isn't a session-context type
-           and doesn't drive the composer's contextType. We also don't
-           write the URL: refreshing into Inbox would be confusing
-           since the feature isn't shipping yet and the user's actual
-           "data context" is still whichever Chat / Projects state
-           they were on.
-         - 'tasks': same as Inbox — the Tasks surface reads its own
-           atoms and has no session-context meaning, so the composer
-           context + URL stay on whatever Chat / Projects state the
-           user had before tapping across.
+         - 'inbox' and 'schedules': purely visual. Neither is a
+           session-context type, so they must not rewrite the composer
+           context or the chat URL.
          - 'chat': mirror to `contextType` + URL so the composer's
            selectors line up with the visible list.
          - 'projects': delegate to whichever sub-tab is remembered
            (`persistedProjectsSubTab`), since 项目 isn't itself a
            contextType. */
-      if (nextTab === 'inbox' || nextTab === 'tasks') return;
+      if (nextTab === 'inbox' || nextTab === 'schedules') return;
       const nextContext: SessionContextType = nextTab === 'chat' ? 'chat' : persistedProjectsSubTab;
       setContextType(nextContext);
       void navigate({
@@ -5308,17 +6007,49 @@ function WorkspaceChatLanding({
   /* Pin / archive callbacks for the mobile swipe-to-reveal drawer.
      Cast the id to `SessionId` — the row only knows it as `string`,
      but our session-action helpers want the branded type. */
+  const {
+    snooze: snoozeMobileStatus,
+    settle: settleMobileStatus,
+    moveToFocus: focusMobileStatus,
+    report: reportMobileStatus,
+  } = useMobileStatusActions();
+  const mobileStatusCommands = useMemo<MobileStatusCommands>(
+    () => ({
+      run: async (command, state) => {
+        const writes = await runStatusViewCommand(command, state);
+        if (command.type === 'move' && writes.length === 0)
+          throw new Error(t('sidebar.status.moveRefused'));
+      },
+      snooze: snoozeMobileStatus,
+      settle: settleMobileStatus,
+      moveToFocus: focusMobileStatus,
+      report: reportMobileStatus,
+    }),
+    [
+      focusMobileStatus,
+      reportMobileStatus,
+      runStatusViewCommand,
+      settleMobileStatus,
+      snoozeMobileStatus,
+      t,
+    ]
+  );
   const handleMobileChatTogglePin = useCallback(
     (chatId: string, nextPinned: boolean) => {
-      void setSessionPinned(chatId as SessionId, nextPinned);
+      void setSessionPinned(chatId as SessionId, nextPinned).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
     [setSessionPinned]
   );
+  const archiveSessionWithConfirmation = useArchiveSessionWithConfirmation(archiveSession);
   const handleMobileChatArchive = useCallback(
     (chatId: string) => {
-      void archiveSession(chatId as SessionId);
+      void archiveSessionWithConfirmation(chatId as SessionId).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     },
-    [archiveSession]
+    [archiveSessionWithConfirmation]
   );
   /* Restore (un-archive) from the mobile archived-list swipe drawer.
      Same `restoreSession` the desktop archive view uses; the row drops
@@ -5495,6 +6226,7 @@ function WorkspaceChatLanding({
           ? createLocalProjectIpcFileTransport({
               workspaceId,
               localProjectId: mobileProjectContext.projectId as LocalProjectId,
+              machineId: mobileProjectContext.machineId as MachineId,
             })
           : workspaceRuntime && userId
             ? createLocalProjectRpcFileTransport({
@@ -5526,7 +6258,6 @@ function WorkspaceChatLanding({
      the list it's given. */
   const mobileProjectConversations = useMemo<MobileConversationItem[]>(() => {
     if (!mobileProjectContext) return [];
-    const myUserId = userId ?? null;
     /* See mobileHomeChats: archived sessions live in a separate atom,
        not in `visibleSessions`. Pick the right source so the toggle
        actually surfaces items instead of always rendering empty. */
@@ -5547,7 +6278,7 @@ function WorkspaceChatLanding({
       return activity;
     };
     const projectScopedSessions = sourceSessions.filter((session) => {
-      if (chatScope === 'my' && myUserId && session.userId !== myUserId) return false;
+      if (chatScope === 'my' && !isSessionInMyScope(session, myAccountId)) return false;
       if (mobileProjectContext.kind === 'local') {
         if (session.machineId !== mobileProjectContext.machineId) return false;
         const key = getSessionLocalProjectKey(session);
@@ -5620,6 +6351,10 @@ function WorkspaceChatLanding({
           isOffline: !isOnline,
           hasUnreadMessages: activity.hasUnreadMessages,
           isPinned: Boolean(session.isPinned),
+          pinSectionId: session.pinSectionId ?? null,
+          orderKey: session.orderKey ?? null,
+          ...mobileStatusFieldsOf(session),
+          readOnly: activeReadOnlyIds.has(session.id) || archivedReadOnlyIds.has(session.id),
           machineId: session.machineId,
           /* See the home Chat-tab builder: precise opener for navigation, row
              id for nesting. An opener outside this project simply leaves the
@@ -5642,11 +6377,14 @@ function WorkspaceChatLanding({
       });
   }, [
     chatScope,
+    myAccountId,
     mobileChildSessionsByParent,
     mobileOpenerRowResolver,
     liveSessionStatuses,
     mobileProjectContext,
     mobileProjectShowArchived,
+    activeReadOnlyIds,
+    archivedReadOnlyIds,
     onlineMachineIds,
     t,
     teamMembersByUserId,
@@ -5781,6 +6519,7 @@ function WorkspaceChatLanding({
     chatExcludedPr,
     chatExcludedRunning,
     chatScope,
+    myAccountId,
     mobileHomeMachines,
     mobileProjectContext,
     setChatExcludedMachines,
@@ -5872,8 +6611,24 @@ function WorkspaceChatLanding({
       ) : null}
     </div>
   ) : null;
+  const selectedSharingReviewActionTarget = getChatLandingSharingReviewActionTarget({
+    currentUserId: userId ?? null,
+    machineId: selectedMachineId,
+    localProjectIds:
+      projectGroupLaunchTarget?.kind === 'ready'
+        ? projectGroupLaunchTarget.members.flatMap((member) =>
+            member.source.kind === 'local' && member.source.machineId === selectedMachineId
+              ? [member.source.localProjectId]
+              : []
+          )
+        : contextType === 'local' && selectedLocalProject?.machineId === selectedMachineId
+          ? [selectedLocalProject.localProjectId]
+          : [],
+    machineAccessByMachineId: accessByMachineId,
+    localProjectAccessByKey: visibleLocalProjectAccess,
+  });
   const sharingReviewRow =
-    sharingReviewState.ready && sharingReviewState.active
+    sharingReviewState.ready && sharingReviewState.active && selectedSharingReviewActionTarget
       ? inboxRows?.find((item) => item.kind === 'sharing_review')
       : undefined;
   const sharingReviewNoticeNode = sharingReviewRow ? (
@@ -5884,32 +6639,29 @@ function WorkspaceChatLanding({
           {t('inbox.sharingReview.title', 'Review what your team can see')}
         </div>
         <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-          {sharingReviewState.teamLooksEmpty
+          {selectedSharingReviewActionTarget === 'machines'
             ? t(
-                'inbox.sharingReview.emptyTeam',
-                'Nothing is visible in this team workspace yet. Ask a teammate to share a machine or project if you expected to see their conversations.'
+                'inbox.sharingReview.selectedMachine',
+                'The selected machine is private. Share it so your teammates can use it.'
               )
-            : sharingReviewState.privateMachineCount + sharingReviewState.privateProjectCount === 0
-              ? t(
-                  'inbox.sharingReview.noLocalResources',
-                  'No team machines or local projects are visible to you. A teammate may need to share them before their local conversations appear.'
-                )
-              : t(
-                  'inbox.sharingReview.landing',
-                  'Private machines and projects are only visible to you. Share the ones your teammates should be able to use.'
-                )}
+            : t(
+                'inbox.sharingReview.selectedProject',
+                'A selected project is private. Share it so your teammates can use it.'
+              )}
         </p>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-          {sharingReviewState.actionTarget ? (
+          {selectedSharingReviewActionTarget ? (
             <button
               type="button"
               className="text-xs font-semibold text-primary hover:underline"
               onClick={() => {
-                void markInboxItemRead({ itemId: sharingReviewRow._id });
-                openSettings(sharingReviewState.actionTarget ?? 'projects');
+                void markInboxItemRead({ itemId: sharingReviewRow._id }).catch((error) =>
+                  console.error('Failed to mark sharing review read', error)
+                );
+                openSettings(selectedSharingReviewActionTarget);
               }}
             >
-              {sharingReviewState.actionTarget === 'machines'
+              {selectedSharingReviewActionTarget === 'machines'
                 ? t('inbox.sharingReview.actionDevices', 'Review machines')
                 : t('inbox.sharingReview.action', 'Review projects')}
             </button>
@@ -5917,7 +6669,11 @@ function WorkspaceChatLanding({
           <button
             type="button"
             className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
-            onClick={() => void suppressSharingReview({ itemId: sharingReviewRow._id })}
+            onClick={() =>
+              void suppressSharingReview({ itemId: sharingReviewRow._id }).catch((error) =>
+                console.error('Failed to suppress sharing review', error)
+              )
+            }
           >
             {t('inbox.sharingReview.neverRemind', "Don't remind me again")}
           </button>
@@ -5925,59 +6681,317 @@ function WorkspaceChatLanding({
       </div>
       <button
         type="button"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-        onClick={() => void dismissInboxItem({ itemId: sharingReviewRow._id })}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground"
+        onClick={() =>
+          void dismissInboxItem({ itemId: sharingReviewRow._id }).catch((error) =>
+            console.error('Failed to dismiss sharing review', error)
+          )
+        }
         aria-label={t('common.dismiss', 'Dismiss')}
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>
     </div>
   ) : null;
+  const legacyPiProviders = executorConfigs.filter(
+    (config) => isLegacyPiProvider(config) && isOwnVisibleMachine(config.machineId)
+  );
+  const [piMigrationBusy, setPiMigrationBusy] = useState(false);
+  const [piMigrationError, setPiMigrationError] = useState(false);
+  const migratablePiProviders = legacyPiProviders.filter((config) =>
+    machineSupportsProtocolCapability(
+      machines.get(config.machineId),
+      MACHINE_PROTOCOL_CAPABILITIES.builtinPi
+    )
+  );
+  const canMigratePi = migratablePiProviders.length > 0;
+  const confirmPiMigration = async () => {
+    if (!runtime || piMigrationBusy || !canMigratePi) return;
+    setPiMigrationBusy(true);
+    setPiMigrationError(false);
+    try {
+      for (const config of migratablePiProviders) {
+        await runtime.writer.flockRowUpdate(
+          getMachineFlockDocId(runtime.workspaceId, config.machineId),
+          machineFlockKeys.agentConfig(config.id),
+          (current) =>
+            isLegacyPiProvider(current) &&
+            current.id === config.id &&
+            current.machineId === config.machineId
+              ? migratePiProvider(current)
+              : undefined
+        );
+      }
+    } catch {
+      setPiMigrationError(true);
+    } finally {
+      setPiMigrationBusy(false);
+    }
+  };
+  const e2eeLocalAgentNode =
+    runtime?.contentMode === 'e2ee' && localAgentEnabled && isElectron ? (
+      <E2eeLocalAgentApproval
+        key={`${runtime.accountId}:${runtime.workspaceId}`}
+        workspaceId={runtime.workspaceId}
+        runtime={nativeE2ee}
+        enabled
+        localAgentRunning={localAgentRunsWorkspace(localCliState, runtime.workspaceId)}
+      />
+    ) : null;
+  // Pi migration and the sharing review are page guidance; an embedded
+  // landing keeps only the notices that concern the send itself.
+  const landingSharingReviewNoticeNode = isEmbedded ? null : sharingReviewNoticeNode;
   const composerNoticeNode =
-    sharingReviewNoticeNode || sessionLimitNoticeNode ? (
+    mcpSelection.defaultsFailed ||
+    e2eeLocalAgentNode ||
+    landingSharingReviewNoticeNode ||
+    sessionLimitNoticeNode ||
+    (!isEmbedded && canMigratePi) ? (
       <>
-        {sharingReviewNoticeNode}
+        {isEmbedded ? null : (
+          <PiProviderMigrationCard
+            count={migratablePiProviders.length}
+            busy={piMigrationBusy}
+            error={piMigrationError}
+            canMigrate={canMigratePi}
+            onConfirm={() => void confirmPiMigration()}
+          />
+        )}
+        {mcpSelection.defaultsFailed ? (
+          <McpDefaultsRecovery
+            onRetry={mcpSelection.retryDefaults}
+            onSendWithoutMcp={() => void handleSubmit(true)}
+            disabled={submitting}
+          />
+        ) : null}
+        {e2eeLocalAgentNode}
+        {landingSharingReviewNoticeNode}
         {sessionLimitNoticeNode}
       </>
     ) : null;
 
+  const mobileProjectChoices = getMobileProjectOptions({
+    folders: mobileProjectFolders,
+    repositories: mobileProjectRepos,
+    groups: mobileProjectGroups,
+    machineId: mobileProjectSelectedMachineId,
+    query: '',
+  });
+  const mobileInlineProjects = [
+    {
+      value: 'none',
+      label: t('chat.mobileNewChat.noProject', 'No project selected'),
+      icon: <CircleSlash2 className="size-4" />,
+      selection: { kind: 'none' } as UnifiedProjectSelection,
+    },
+    ...mobileProjectChoices.map((option) => ({
+      ...option,
+      searchText: `${option.label} ${option.description ?? ''}`,
+      disabled: Boolean(option.disabledReason),
+      icon:
+        option.selection.kind === 'group' ? (
+          <Folders className="size-4" />
+        ) : option.selection.kind === 'local' ? (
+          <FolderOpen className="size-4" />
+        ) : (
+          <GitHubOwnerAvatarIcon repoFullName={option.selection.repoFullName} />
+        ),
+    })),
+    {
+      value: '__add_local__',
+      icon: <FolderPlus className="size-4" />,
+      label: t('chat.contextSwitch.addProject', 'Add a folder'),
+      selection: null,
+    },
+    {
+      value: '__connect_github__',
+      icon: <ArrowUpRight className="size-4" />,
+      label: t('repos.connectMore', 'Connect more GitHub projects'),
+      selection: null,
+    },
+  ];
+  const mobileInlineProjectValue =
+    desktopProjectSelection.kind === 'group'
+      ? `group:${desktopProjectSelection.projectId}`
+      : desktopProjectSelection.kind === 'local'
+        ? `local:${desktopProjectSelection.machineId}:${desktopProjectSelection.localProjectId}`
+        : desktopProjectSelection.kind === 'github'
+          ? `github:${desktopProjectSelection.repoFullName}`
+          : 'none';
+  const mobileInlineValue = (icon: ReactNode, value: string) => (
+    <span className="flex min-w-0 w-full items-center gap-2 text-start">
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-sm text-foreground">
+        {value}
+      </span>
+      <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    </span>
+  );
+  const mobileInlineTrigger = 'min-h-11 rounded-xl bg-foreground/[0.04] px-3 py-2';
+  const mobileInlinePanel = 'border-border/30 bg-muted/45 shadow-none';
+  const mobileProjectIcon =
+    desktopProjectSelection.kind === 'group' ? (
+      <Folders className="size-4" />
+    ) : desktopProjectSelection.kind === 'local' ? (
+      <FolderOpen className="size-4" />
+    ) : desktopProjectSelection.kind === 'github' ? (
+      <GitHubOwnerAvatarIcon repoFullName={desktopProjectSelection.repoFullName} />
+    ) : (
+      <CircleSlash2 className="size-4" />
+    );
+  const mobileLocalGitProject =
+    contextType === 'local' && !!selectedLocalProject && activeLocalGitState?.git === true;
+  const mobileBranchVisible = mobileLocalGitProject || (contextType === 'github' && !!selectedRepo);
+  const mobileBranchLabel = resolveMobileNewChatBranchLabel({
+    contextType,
+    currentBranch: activeLocalGitState?.git ? activeLocalGitState.currentBranch : null,
+    selectedBranch: currentBranch,
+    useWorktree: effectiveWorkdirMode === 'worktree',
+    labels: {
+      local: t('chat.branchLocal'),
+      remote: t('chat.branchRemote'),
+      placeholder: t('chat.branchPlaceholder', 'Branch'),
+    },
+  });
   const mobileNewChatSheetContentProps: MobileNewChatSheetContentProps = {
     labels: {
       title: t('chat.mobileNewChat.title', '新建对话'),
-      closeAriaLabel: t('common.close', 'Close'),
-      machineLabel: t('chat.mobileNewChat.machineLabel', '机器'),
-      contextTypeLabel: t('chat.mobileNewChat.contextTypeLabel', '类型'),
-      perTypeLabel:
-        contextType === 'github'
-          ? t('chat.mobileNewChat.repoLabel', '仓库')
-          : t('chat.mobileNewChat.projectLabel', '项目'),
-      branchLabel: t('chat.mobileNewChat.branchLabel', '分支'),
-      secondaryPerTypeLabel: t('chat.mobileNewChat.workdirModeLabel', '模式'),
+      backAriaLabel: t('common.back', 'Back'),
     },
+    targetNode: t('chat.mobileNewChat.title', 'New chat'),
     coordinator: MobileInlinePickerCoordinator,
-    machineNode: mobileSheetMachineNode,
-    contextTypeNode: mobileSheetContextSwitchNode,
-    /* Project / repo on its own row; branch on its own row below
-         (split per the user's design ask — chips no longer share a row
-         and so don't truncate on narrow phones). */
-    perTypeNode: contextType === 'chat' ? null : mobileSheetProjectNode,
-    branchNode: contextType === 'chat' ? null : mobileSheetBranchNode,
-    secondaryPerTypeNode: mobileSheetWorkdirModeNode,
+    summary: (
+      <div className="flex flex-col gap-2 py-3">
+        <MobileInlinePicker
+          id="new-machine"
+          value={mobileProjectSelectedMachineId}
+          options={mobileProjectMachines.map((machine) => ({
+            value: machine.id,
+            label: machine.name,
+            disabled: Boolean(machine.disabledReason),
+            description:
+              machine.disabledReason ??
+              (activeAgentRole && machine.id !== mobileProjectSelectedMachineId
+                ? t(
+                    'chat.mobileNewChat.switchClearsRole',
+                    'Changing machine clears the selected Role'
+                  )
+                : undefined),
+          }))}
+          onChange={(id) => {
+            setRestoreMobileProject(false);
+            if (id !== mobileProjectSelectedMachineId) {
+              if (activeAgentRole) handleAgentRoleSelect(null);
+              handleMachineChange(id);
+            }
+          }}
+          ariaLabel={t('chat.mobileNewChat.machineLabel', 'Machine')}
+          triggerClassName={mobileInlineTrigger}
+          expansionPanelClassName={mobileInlinePanel}
+          triggerContent={mobileInlineValue(
+            <Monitor className="size-4" />,
+            mobileSheetSelectedMachineLabel ?? t('chat.machineSelector.placeholder', 'Machine')
+          )}
+        />
+        <MobileInlinePicker
+          id="new-project"
+          preserveOptionOrder
+          value={mobileInlineProjectValue}
+          options={mobileInlineProjects}
+          onChange={(value) => {
+            setRestoreMobileProject(false);
+            const item = mobileInlineProjects.find((entry) => entry.value === value);
+            if (value === '__add_local__') handleAddLocalProject();
+            else if (value === '__connect_github__') handleConnectGitRepo();
+            else if (item?.selection) handleDesktopProjectChange(item.selection);
+          }}
+          ariaLabel={t('chat.projectPicker.title', 'Project')}
+          searchable
+          searchPlaceholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
+          triggerClassName={mobileInlineTrigger}
+          expansionPanelClassName={mobileInlinePanel}
+          triggerContent={mobileInlineValue(mobileProjectIcon, mobileSheetTargetLabel)}
+        />
+        {mobileBranchVisible ? (
+          <div className="flex min-w-0 items-start gap-2 px-1">
+            {mobileLocalGitProject ? (
+              <div className="pt-1">
+                <WorktreeCheckboxPill
+                  checked={effectiveWorkdirMode === 'worktree'}
+                  onCheckedChange={(checked) =>
+                    handleWorkdirModeChange(checked ? 'worktree' : 'local')
+                  }
+                  loading={worktreeLoading}
+                  disabled={!worktreeAvailable || worktreeLoading}
+                  disabledReason={worktreeUnavailableReason}
+                />
+              </div>
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <MobileInlinePicker
+                id="new-branch"
+                value={currentBranch}
+                onChange={setCurrentBranch}
+                options={mobileSheetBranchOptions}
+                disabled={
+                  isBranchDisabled || (mobileLocalGitProject && effectiveWorkdirMode !== 'worktree')
+                }
+                loading={
+                  contextType === 'local' &&
+                  !selectedLocalBranch &&
+                  (loadingLocalGitState || runtimeInitializing)
+                }
+                searchable
+                onOpenChange={contextType === 'local' ? setBranchPickerOpen : undefined}
+                onQueryChange={onBranchSearchQueryChange}
+                disableClientFilter={contextType === 'local' && Boolean(activeBranchQuery)}
+                onReachEnd={branchListHasMore ? onBranchListEnd : undefined}
+                footer={branchListFooter}
+                emptyText={
+                  isGitHubBranchList && searchingRepoBranches
+                    ? t('chat.branchSearching', { defaultValue: 'Searching branches...' })
+                    : undefined
+                }
+                ariaLabel={t('chat.branchPlaceholder', 'Branch')}
+                triggerClassName="h-8 rounded-lg bg-transparent px-2 hover:bg-transparent"
+                expansionPanelClassName={mobileInlinePanel}
+                triggerContent={
+                  <>
+                    <GitBranch className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 truncate">{mobileBranchLabel}</span>
+                    <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+                  </>
+                }
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+    ),
     composer: (
       <ErrorBoundary
         name="MobileNewChatSheetComposer"
         variant="section"
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
-        <MobileInlinePickerRowSlot>
-          {sessionLimitNoticeNode}
+        <div className="flex min-h-0 flex-col">
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleAttachmentInputChange}
+          />
+          {composerNoticeNode ? <div className="px-4 pt-2">{composerNoticeNode}</div> : null}
           <ChatComposer
             tone={tone}
             variant="session"
+            autoResize
+            className="min-h-0"
             mentionSource={mentionSource}
             availableCommands={availableCommands}
             skillAgent={skillAgent}
-            promptId="chat-prompt-mobile-sheet"
+            promptId={MOBILE_NEW_CHAT_PROMPT_ID}
             promptRef={promptTextareaRef}
             promptValue={submitting ? '' : prompt}
             onPromptChange={setPrompt}
@@ -5986,9 +7000,13 @@ function WorkspaceChatLanding({
             onImageDrop={submitting ? undefined : handleImageDrop}
             imageDropDisabled={submitting}
             promptPlaceholder={promptPlaceholder}
+            compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
             promptDisabled={submitting}
-            promptRows={4}
+            preservePromptFocus={usesMobileKeyboardAction}
+            promptRows={2}
+            maxRows={11}
             promptEnterKeyHint={promptEnterKeyHint}
+            focusOnContainerClick
             pastedTextDrafts={submitting ? [] : pastedTextDrafts}
             onPastedTextDraftsChange={submitting ? undefined : setPastedTextDrafts}
             onMentionRangesChange={handleMentionRangesChange}
@@ -6008,40 +7026,40 @@ function WorkspaceChatLanding({
             primaryAction={
               <Button
                 type="button"
-                size="icon"
+                icon
                 variant="ghost"
+                size="medium"
+                shape="pill"
                 onClick={() => {
                   void handleSubmit();
                 }}
+                onMouseDown={(event) => event.preventDefault()}
                 disabled={submitDisabled}
+                data-testid="composer-send"
                 aria-label={submitDisabled ? t('chat.submitting') : t('chat.send')}
                 /* Match the in-session mobile composer send face: solid
                    foreground disc + ArrowUp (not the old primary-tint chip). */
-                className={cn(
-                  'h-8 w-8 rounded-full shadow-xs transition-all',
-                  'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-                )}
+                className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
               >
-                {submitting ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <ArrowUp className="h-5 w-5" />
-                )}
+                {submitting ? <Spinner size="medium" /> : <ArrowUp className="h-5 w-5" />}
               </Button>
             }
-            autoResize
-            maxRows={6}
           />
-        </MobileInlinePickerRowSlot>
+        </div>
       </ErrorBoundary>
     ),
-    belowComposerNode: mobileSheetBelowComposerNode,
   };
 
   const mobileNewChatSheetNode = (
     <MobileNewChatSheet
       open={mobileNewChatOpen}
-      onOpenChange={setMobileNewChatOpen}
+      onOpenChange={(open) => {
+        setMobileNewChatOpen(open);
+        if (!open) {
+          setMobileCreatedSessionId(null);
+          setRestoreMobileProject(false);
+        }
+      }}
       {...mobileNewChatSheetContentProps}
     />
   );
@@ -6049,13 +7067,6 @@ function WorkspaceChatLanding({
   if (isMobile && mobileProjectContext) {
     return (
       <>
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleAttachmentInputChange}
-        />
         {mobileNewChatSheetNode}
         <MobileProjectScreen
           project={mobileProjectContext}
@@ -6077,7 +7088,6 @@ function WorkspaceChatLanding({
             archiveToggleLabel: t('chat.mobileHome.archiveToggleLabel', '归档'),
             searchPlaceholder: t('chat.mobileProject.searchPlaceholder', '搜索对话'),
             clearSearchAriaLabel: t('common.clear', '清空'),
-            allConversationsHeading: t('chat.mobileHome.allChatsHeading', '全部对话'),
             archivedConversationsHeading: t('chat.mobileHome.archivedChatsHeading', '归档对话'),
             archiveSelection: {
               selectedCount: (count) =>
@@ -6111,7 +7121,10 @@ function WorkspaceChatLanding({
              sheet reads the current project context from chat-landing
              state, so it lands preselected without needing extra
              props. */
-          onNewChat={() => setMobileNewChatOpen(true)}
+          onNewChat={() => {
+            setRestoreMobileProject(false);
+            setMobileNewChatOpen(true);
+          }}
           showArchived={mobileProjectShowArchived}
           onShowArchivedToggle={() => setMobileProjectShowArchived((prev) => !prev)}
           /* The Files tab shares the project header: it renders the
@@ -6120,19 +7133,21 @@ function WorkspaceChatLanding({
           fileNavSegments={mobileFileNavSegments}
           onFileNavBack={() => mobileFileBrowserRef.current?.goBack()}
           filesTabContent={({ onScrollActivity, bottomTabBarVisible }) => (
-            <MobileProjectFileBrowser
-              key={mobileProjectFileProviderKey ?? 'no-provider'}
-              ref={mobileFileBrowserRef}
-              provider={mobileProjectFileProvider}
-              onPathChange={setMobileFileNavSegments}
-              onScrollActivity={onScrollActivity}
-              bottomTabBarVisible={bottomTabBarVisible}
-              message={
-                mobileProjectFileProvider
-                  ? undefined
-                  : t('workspace.projects.filesUnavailable', 'Files are unavailable.')
-              }
-            />
+            <Suspense fallback={null}>
+              <MobileProjectFileBrowser
+                key={mobileProjectFileProviderKey ?? 'no-provider'}
+                ref={mobileFileBrowserRef}
+                provider={mobileProjectFileProvider}
+                onPathChange={setMobileFileNavSegments}
+                onScrollActivity={onScrollActivity}
+                bottomTabBarVisible={bottomTabBarVisible}
+                message={
+                  mobileProjectFileProvider
+                    ? undefined
+                    : t('workspace.projects.filesUnavailable', 'Files are unavailable.')
+                }
+              />
+            </Suspense>
           )}
           /* Both project kinds get a real per-project Settings tab. Local
              projects expose team-share + ACP history sync + worktree
@@ -6144,9 +7159,23 @@ function WorkspaceChatLanding({
                 machineId={mobileProjectContext.machineId}
                 projectId={mobileProjectContext.projectId}
                 onRemoved={handleMobileProjectBack}
+                intro={
+                  <MobileProjectEditSection
+                    seedSourceKey={`local:${mobileProjectContext.machineId}:${mobileProjectContext.projectId}`}
+                    seedName={mobileProjectContext.name}
+                  />
+                }
               />
             ) : (
-              <MobileGithubProjectSettings repoFullName={mobileProjectContext.fullName} />
+              <MobileGithubProjectSettings
+                repoFullName={mobileProjectContext.fullName}
+                intro={
+                  <MobileProjectEditSection
+                    seedSourceKey={`github:${mobileProjectContext.fullName.toLowerCase()}`}
+                    seedName={mobileProjectContext.name}
+                  />
+                }
+              />
             )
           }
         />
@@ -6157,13 +7186,6 @@ function WorkspaceChatLanding({
   if (isMobile) {
     return (
       <>
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleAttachmentInputChange}
-        />
         <MobileHomeScreen
           workspace={mobileHomeWorkspace}
           workspaceOptions={mobileHomeWorkspaceOptions}
@@ -6177,7 +7199,6 @@ function WorkspaceChatLanding({
           onPullToRefresh={handleMobileHomePullToRefresh}
           selectedTab={effectiveMobileHomeTab}
           showInboxTab={showMobileInbox}
-          showTasksTab={tasksFeatureEnabled}
           selectedProjectsSubTab={selectedProjectsSubTab}
           onProjectsSubTabSelect={handleMobileHomeProjectsSubTabSelect}
           onAddLocalProject={() => openAddProjectDialog()}
@@ -6224,7 +7245,7 @@ function WorkspaceChatLanding({
             localTab: t('chat.contextSwitch.localProjects', 'Local'),
             githubTab: t('chat.contextSwitch.github', 'GitHub'),
             addProjectMenu: t('chat.contextSwitch.addProjectMenu', 'Add project'),
-            addLocalProject: t('chat.contextSwitch.addProject', 'Add a local project'),
+            addLocalProject: t('chat.contextSwitch.addProject', 'Add a folder'),
             addLocalProjectHint: t(
               'chat.contextSwitch.addLocalProjectHint',
               'Browse the machine and pick a folder'
@@ -6235,7 +7256,8 @@ function WorkspaceChatLanding({
               'Connect a GitHub repository'
             ),
             chatTab: t('chat.contextSwitch.chat', 'Chat'),
-            tasksTab: t('tasks.title', 'Tasks'),
+            schedulesTab: t('schedules.title', 'Schedules'),
+            newSchedule: t('schedules.new', 'New schedule'),
             recentProjectsHeading: t('chat.mobileHome.recentProjectsHeading', '最近常用'),
             settingsTab: t('settings.title', 'Settings'),
             projectRemoving: t('sidebar.localProjects.remove.removing', 'Removing…'),
@@ -6257,14 +7279,15 @@ function WorkspaceChatLanding({
                 ? t('chat.mobileHome.searchPlaceholderInbox', 'Search')
                 : selectedMobileHomeTab === 'chat'
                   ? t('chat.mobileHome.searchPlaceholderChat', 'Search conversations')
-                  : selectedProjectsSubTab === 'github'
-                    ? t('chat.mobileHome.searchPlaceholderGithub', 'Search repositories')
-                    : t('chat.mobileHome.searchPlaceholderLocal', 'Search projects'),
+                  : selectedMobileHomeTab === 'schedules'
+                    ? t('schedules.search', 'Search schedules')
+                    : selectedProjectsSubTab === 'github'
+                      ? t('chat.mobileHome.searchPlaceholderGithub', 'Search repositories')
+                      : t('chat.mobileHome.searchPlaceholderLocal', 'Search projects'),
             recentReposHeading: t('chat.mobileHome.recentReposHeading', '最近常用'),
             recentLocalProjectsHeading: t('chat.mobileHome.recentLocalProjectsHeading', '最近常用'),
             allLocalProjectsHeading: t('chat.mobileHome.allLocalProjectsHeading', '全部项目'),
             allGitHubReposHeading: t('chat.mobileHome.allGitHubReposHeading', '全部仓库'),
-            allChatsHeading: t('chat.mobileHome.allChatsHeading', '全部对话'),
             archivedChatsHeading: t('chat.mobileHome.archivedChatsHeading', '归档对话'),
             archiveSelection: {
               selectedCount: (count) =>
@@ -6304,17 +7327,53 @@ function WorkspaceChatLanding({
             emptyChats: t('chat.mobileHome.emptyChatsAllMachines', '当前 workspace 还没有任何对话'),
             emptyFilteredChats: t('chat.mobileHome.emptyFilteredChats', '当前过滤条件下没有对话'),
             clearChatFilters: t('chat.mobileHome.clearFilters', '清除所有过滤'),
-            /* First-run hint (no machines + no chats): the user installed
-               the mobile app before starting the desktop client, so nudge
-               them to the download page. The mobile app can't run the agent
-               itself. Kept short on purpose. */
+            /* First-run guide (no machines + no chats): the user installed
+               the mobile app before ever connecting a computer, so walk them
+               through the two ways to connect one — the standalone installer
+               one-liner on any machine, or the desktop app on their computer.
+               The mobile app can't run agents itself — and the phone never
+               opens the download page: both CTAs hand the command/link to the
+               computer via share sheet or clipboard instead. */
             onboarding: {
-              title: t('chat.mobileHome.onboarding.title', 'Lody runs on your computer'),
+              title: t('chat.mobileHome.onboarding.title', 'Connect a machine to start'),
               description: t(
                 'chat.mobileHome.onboarding.description',
-                'Download the desktop app to get started.'
+                'Agents run on a computer you own — this app is mission control.'
               ),
-              downloadButton: t('chat.mobileHome.onboarding.downloadButton', 'Download Lody'),
+              commandHeading: t(
+                'chat.mobileHome.onboarding.commandHeading',
+                'One command — macOS / Linux'
+              ),
+              command: buildDaemonInstallCommands().command,
+              commandHint: t(
+                'chat.mobileHome.onboarding.commandHint',
+                'Run the installer on a macOS/Linux server, VM, or computer. Node.js is included. It prints a sign-in link you can open on this phone.'
+              ),
+              copyCommandLabel: t('chat.mobileHome.onboarding.copyCommand', 'Copy command'),
+              shareCommandLabel: t('chat.mobileHome.onboarding.shareCommand', 'Send to computer'),
+              desktopHeading: t('chat.mobileHome.onboarding.desktopHeading', 'Or on your computer'),
+              desktopHint: t(
+                'chat.mobileHome.onboarding.desktopHint',
+                'Install the desktop app and sign in — it starts the agent runtime automatically.'
+              ),
+              shareDownloadLabel: t('chat.mobileHome.onboarding.shareDownload', 'Send to computer'),
+              copyDownloadLabel: t('chat.mobileHome.onboarding.copyDownload', 'Copy download link'),
+              nextStepsHeading: t(
+                'chat.mobileHome.onboarding.nextStepsHeading',
+                'Once a machine is online'
+              ),
+              nextStepMachine: t(
+                'chat.mobileHome.onboarding.nextStepMachine',
+                'It shows up in this workspace automatically.'
+              ),
+              nextStepProject: t(
+                'chat.mobileHome.onboarding.nextStepProject',
+                'Add a project folder on it from Projects → +.'
+              ),
+              nextStepAgent: t(
+                'chat.mobileHome.onboarding.nextStepAgent',
+                'Pick an agent in Settings → Agents, then send your first task.'
+              ),
             },
           }}
           onWorkspaceMenuOpen={
@@ -6325,6 +7384,10 @@ function WorkspaceChatLanding({
           onGitHubRepositorySelect={handleMobileHomeGitHubRepositorySelect}
           onChatSelect={handleMobileHomeChatSelect}
           onChatTogglePin={handleMobileChatTogglePin}
+          chatStatusCommands={mobileStatusCommands}
+          chatStatusWritable={statusViewWritable}
+          chatStatusPreferable={statusViewPreferable}
+          chatScopeHiddenCounts={mobileScopeHiddenCounts}
           onChatArchive={handleMobileChatArchive}
           onChatRestore={handleMobileChatRestore}
           onChatPermanentDelete={handleMobileChatPermanentDelete}
@@ -6332,23 +7395,23 @@ function WorkspaceChatLanding({
             void navigate({
               to: '/$workspaceName/settings',
               params: { workspaceName: workspaceSlug },
+              search: { from: getAppCurrentPathWithSearch() },
             });
           }}
           /* New-chat chip opens the bottom-sheet composer. Stays on the
              home screen behind the overlay so the user can cancel and
              return to the project / chat list without navigation. */
           onNewChat={() => {
-            if (selectedMobileHomeTab === 'chat') {
-              setContextType('chat');
-            }
+            setRestoreMobileProject(
+              !prompt.trim() && imageItems.length === 0 && fileItems.length === 0
+            );
             setMobileNewChatOpen(true);
           }}
           showArchived={mobileHomeShowArchived}
           onShowArchivedToggle={() => setMobileHomeShowArchived((prev) => !prev)}
-          /* First-run onboarding CTA — opens the localized download page in
-             the external browser (same handler the desktop no-machine hint
-             uses). */
-          onDownloadClient={handleDownloadClient}
+          /* The localized download URL is the payload the guide's share/copy
+             actions hand to the user's computer — the phone never opens it. */
+          onboardingDownloadUrl={getDownloadPageUrl(i18n.resolvedLanguage ?? i18n.language)}
         />
         {multiWorkspaceAvailable ? (
           <>
@@ -6384,11 +7447,18 @@ function WorkspaceChatLanding({
             <MobileCreateWorkspaceSheet
               open={mobileCreateWorkspaceOpen}
               onOpenChange={setMobileCreateWorkspaceOpen}
-              onCreated={(createdSlug) => {
-                void navigate({
-                  to: '/$workspaceName/chat',
-                  params: { workspaceName: createdSlug },
-                });
+              onCreated={(createdSlug, createdWorkspaceId) => {
+                void navigate(
+                  createdWorkspaceId
+                    ? {
+                        to: '/workspace/e2ee/$workspaceId',
+                        params: { workspaceId: createdWorkspaceId },
+                      }
+                    : {
+                        to: '/$workspaceName/chat',
+                        params: { workspaceName: createdSlug },
+                      }
+                );
               }}
             />
           </>
@@ -6417,17 +7487,27 @@ function WorkspaceChatLanding({
       <ChatLandingView
         tone={tone}
         isMobile={isMobile}
+        layout={isEmbedded ? 'dialog' : 'page'}
+        promptId={embeddedSurface?.promptId}
         navRootRef={keyboardNavRef}
         mentionSource={mentionSource}
         availableCommands={availableCommands}
         skillAgent={skillAgent}
         title={title}
+        ambient={
+          <HomeDashboardHost
+            usageOptions={homeWeekUsageOptions}
+            composerAgentId={selectedConfig?.id ?? null}
+            onOpenSession={handleOpenHomeSession}
+          />
+        }
         promptValue={prompt}
         onPromptChange={setPrompt}
         onPromptKeyDown={handlePromptKeyDown}
         onPromptPaste={handlePromptPaste}
         onImageDrop={handleImageDrop}
         promptPlaceholder={promptPlaceholder}
+        compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
         promptEnterKeyHint={promptEnterKeyHint}
         promptRef={promptTextareaRef}
         pastedTextDrafts={pastedTextDrafts}
@@ -6443,7 +7523,9 @@ function WorkspaceChatLanding({
         onFileRemove={handleRemoveFile}
         onFileRetry={handleRetryFile}
         mcp={mcpSelection.menu}
-        topSelector={<div className="w-full min-w-0">{topSelectorNode}</div>}
+        topSelector={
+          isEmbedded ? topSelectorNode : <div className="w-full min-w-0">{topSelectorNode}</div>
+        }
         footerSelector={footerSelectorNode}
         bottomBar={bottomBarNode}
         composerNotice={composerNoticeNode}
@@ -6454,12 +7536,16 @@ function WorkspaceChatLanding({
         onSubmit={() => {
           void handleSubmit();
         }}
-        submitLabel={t('chat.send')}
+        submitLabel={embedding?.submitLabel ?? t('chat.send')}
         submittingLabel={t('chat.submitting')}
+        onCancel={embedding?.onCancel}
+        cancelLabel={t('common.cancel', 'Cancel')}
         hintType={hintType}
         noMachineVariant={isElectron ? 'daemon-starting' : 'download-client'}
+        hintDownloadClientTitle={t('chat.cliHint.downloadClientTitle')}
         hintDownloadClientMessage={t('chat.cliHint.downloadClient')}
         hintDownloadClientLabel={t('chat.cliHint.downloadClientButton')}
+        hintDaemonStartingTitle={t('chat.cliHint.daemonStartingTitle')}
         hintDaemonStartingMessage={t('chat.cliHint.daemonStarting')}
         hintReportBugLabel={t('chat.cliHint.reportBug')}
         hintNoAgentConfigMessage={t('chat.cliHint.noAgentConfig')}
@@ -6474,17 +7560,8 @@ function WorkspaceChatLanding({
         onGoToAgentSettings={handleGoToAgentSettings}
         onOpenMobileDrawer={() => openMobileDrawer(true)}
         leftSidebarExpandSlot={
-          !isMobile && isLeftSidebarCollapsed ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => setLeftSidebarCollapsed(false)}
-              aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
-              className="h-7 w-7 shrink-0 text-muted-foreground"
-            >
-              <PanelLeft className="h-4 w-4" />
-            </Button>
+          !isMobile && isLeftSidebarHidden ? (
+            <SidebarHistoryControls onToggleSidebar={() => showNavigationSidebar()} />
           ) : null
         }
         resetKeys={[workspaceId, workspaceSlug, contextType, isMobile]}
@@ -6513,6 +7590,9 @@ function WorkspaceChatLanding({
         machineId={pairedMachineId}
         machineName={observedMachinePairing?.machineName}
         command={machinePairingStatus === 'pending' ? (machinePairing?.command ?? null) : null}
+        windowsCommand={
+          machinePairingStatus === 'pending' ? (machinePairing?.windowsCommand ?? null) : null
+        }
         expiresAt={machinePairing?.expiresAt ?? null}
         creating={machinePairingCreating}
         createError={machinePairingCreateError}

@@ -3,6 +3,7 @@ import type { BuiltinPathLauncherId, PathLauncherOption } from '@/lib/session-pa
 import {
   AntigravityIcon,
   CursorIcon,
+  DeltaIcon,
   SublimeIcon,
   TerminalIcon,
   VSCodeIcon,
@@ -26,6 +27,7 @@ const BUILTIN_PATH_LAUNCHER_ICONS: Record<BuiltinPathLauncherId, PathLauncherIco
   sublime: SublimeIcon,
   warp: WarpIcon,
   xcode: XcodeIcon,
+  delta: DeltaIcon,
 };
 
 /**

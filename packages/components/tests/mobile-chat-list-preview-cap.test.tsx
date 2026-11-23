@@ -1,0 +1,349 @@
+// @vitest-environment jsdom
+import React from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { createStore, Provider } from 'jotai';
+import {
+  MOBILE_CHAT_PREVIEW_MAX_ROOTS,
+  MobileChatList,
+} from '../src/components/mobile/mobile-chat-list';
+import type { MobileConversationItem } from '../src/components/mobile/mobile-project-screen';
+import { sidebarCollapsedOpenedBySessionsAtom } from '../src/atoms/focus-layer';
+import { initI18n } from '../src/i18n';
+
+/**
+ * Every bucket of the mobile chat list previews at most
+ * `MOBILE_CHAT_PREVIEW_MAX_ROOTS` TOP-LEVEL rows and offers "Show more" — one
+ * more page per tap, with "Show less" returning to the preview. The same model
+ * the desktop sidebar's `MAX_VISIBLE_SESSIONS` applies per group. Without it,
+ * one busy project buries every other project and worktree below the fold.
+ */
+
+const HOUR = 60 * 60 * 1000;
+const NOW = Date.UTC(2026, 3, 22, 10, 0, 0);
+
+function makeItem(overrides: Partial<MobileConversationItem> & { id: string }) {
+  return {
+    kind: 'chat',
+    title: `Session ${overrides.id}`,
+    latestMessageAt: NOW - HOUR,
+    ...overrides,
+  } satisfies MobileConversationItem;
+}
+
+/** `count` unpinned rows in one project bucket, newest first. */
+function makeProjectItems(
+  count: number,
+  projectKey = 'p1',
+  startIndex = 0
+): MobileConversationItem[] {
+  return Array.from({ length: count }, (_, index) =>
+    makeItem({
+      id: `${projectKey}-${startIndex + index}`,
+      projectKey,
+      projectLabel: projectKey,
+      latestMessageAt: NOW - (startIndex + index) * HOUR,
+    })
+  );
+}
+
+/**
+ * Every commit goes through `act`, including the render and the unmount. A
+ * commit outside it leaves React's passive-effect flush queued on the real
+ * macrotask queue, and that callback reads `window.event` before it does
+ * anything else — so when this file finishes first, teardown removes `window`
+ * and the queued callback throws into the run as an unhandled error.
+ */
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+let container: HTMLDivElement;
+let root: Root;
+let store: ReturnType<typeof createStore>;
+
+beforeEach(async () => {
+  await initI18n();
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  store = createStore();
+});
+
+afterEach(async () => {
+  act(() => {
+    root.unmount();
+  });
+  container.remove();
+  // Then let the macrotask queue run out. Anything React still had queued when
+  // this file ends fires into the next file, after Vitest has torn this jsdom
+  // environment down — and the first thing such a callback reads is
+  // `window.event`. Awaiting one `setImmediate` is an ordering barrier, not a
+  // sleep: the queue is FIFO, so every callback queued before this one has run
+  // by the time it resolves, while the DOM it expects is still here.
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+function render(
+  chats: MobileConversationItem[],
+  props: Partial<React.ComponentProps<typeof MobileChatList>> = {}
+) {
+  act(() => {
+    root.render(
+      <Provider store={store}>
+        <MobileChatList chats={chats} groupBy="project" capGroupPreviews {...props} />
+      </Provider>
+    );
+  });
+}
+
+function rows(): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>('.mobile-project-conversation-row'));
+}
+
+function titles(): string[] {
+  return rows().map((row) => row.textContent?.trim() ?? '');
+}
+
+function toggles(): HTMLButtonElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLButtonElement>('[data-chat-list-preview-toggle]')
+  );
+}
+
+function toggleLabels(): string[] {
+  return toggles().map((button) => button.textContent?.trim() ?? '');
+}
+
+function collapseToggles(): HTMLButtonElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLButtonElement>('[data-chat-list-preview-collapse]')
+  );
+}
+
+function collapseLabels(): string[] {
+  return collapseToggles().map((button) => button.textContent?.trim() ?? '');
+}
+
+describe('mobile chat list group preview cap', () => {
+  it('caps only when the caller opts in, independently of grouping', () => {
+    // Both directions matter, and neither follows from the other. The
+    // in-project list drills into one project deliberately, so it opts out and
+    // must render everything. And the cap must NOT be inferred from `groupBy`:
+    // the project page is only `none` because `chat-landing.tsx` pins it for
+    // heading reasons, so deriving the cap from grouping would silently switch
+    // it on there the day that page grows a date mode — hiding the very
+    // worktree rows the cap exists to expose.
+    render(makeProjectItems(9, 'p1'), { capGroupPreviews: false });
+    expect(rows()).toHaveLength(9);
+    expect(toggles()).toHaveLength(0);
+
+    render(makeProjectItems(9, 'p1'), { groupBy: 'none' });
+    expect(rows()).toHaveLength(MOBILE_CHAT_PREVIEW_MAX_ROOTS);
+    expect(toggleLabels()).toEqual(['Show more']);
+    expect(collapseLabels()).toEqual([]);
+  });
+
+  it('reveals one page per tap and collapses back to the preview in one tap', () => {
+    render([...makeProjectItems(12, 'p1'), ...makeProjectItems(8, 'p2')]);
+    expect(toggleLabels()).toEqual(['Show more', 'Show more']);
+
+    act(() => {
+      toggles()[0]!.click();
+    });
+    expect(titles().filter((title) => title.includes('p1-'))).toHaveLength(10);
+    // The untapped bucket keeps its preview.
+    expect(titles().filter((title) => title.includes('p2-'))).toHaveLength(5);
+    expect(toggleLabels()).toEqual(['Show more', 'Show more']);
+    expect(collapseLabels()).toEqual(['Show less']);
+    expect(toggles()[0]!.getAttribute('aria-expanded')).toBe('true');
+
+    act(() => {
+      toggles()[0]!.click();
+    });
+    expect(titles().filter((title) => title.includes('p1-'))).toHaveLength(12);
+    expect(toggleLabels()).toEqual(['Show more']);
+    expect(collapseLabels()).toEqual(['Show less']);
+
+    act(() => {
+      collapseToggles()[0]!.click();
+    });
+    expect(titles().filter((title) => title.includes('p1-'))).toHaveLength(5);
+    expect(toggleLabels()).toEqual(['Show more', 'Show more']);
+    expect(collapseLabels()).toEqual([]);
+  });
+
+  it('counts top-level rows, so a preview never splits an opener', () => {
+    // Four standalone rows plus an opener with three opened Sessions is five
+    // TOP-LEVEL rows: nothing overflows, and all eight rows render. Counting
+    // raw rows instead would cut inside the opener's group.
+    const chats = [
+      ...makeProjectItems(4, 'p1'),
+      makeItem({
+        id: 'opener',
+        projectKey: 'p1',
+        projectLabel: 'p1',
+        latestMessageAt: NOW - 10 * HOUR,
+      }),
+      ...['a', 'b', 'c'].map((suffix, index) =>
+        makeItem({
+          id: `opened-${suffix}`,
+          projectKey: 'p1',
+          projectLabel: 'p1',
+          openedBySessionId: 'opener',
+          openedByRowSessionId: 'opener',
+          latestMessageAt: NOW - (11 + index) * HOUR,
+        })
+      ),
+    ];
+    render(chats);
+    expect(rows()).toHaveLength(8);
+    expect(toggles()).toHaveLength(0);
+  });
+
+  it('keeps a kept root together with the Sessions it opened', () => {
+    // Six top-level rows, the last of which opened two Sessions. The cap drops
+    // the sixth root entirely rather than showing it without its children.
+    const chats = [
+      ...makeProjectItems(5, 'p1'),
+      makeItem({
+        id: 'opener',
+        projectKey: 'p1',
+        projectLabel: 'p1',
+        latestMessageAt: NOW - 20 * HOUR,
+      }),
+      ...['a', 'b'].map((suffix, index) =>
+        makeItem({
+          id: `opened-${suffix}`,
+          projectKey: 'p1',
+          projectLabel: 'p1',
+          openedBySessionId: 'opener',
+          openedByRowSessionId: 'opener',
+          latestMessageAt: NOW - (21 + index) * HOUR,
+        })
+      ),
+    ];
+    render(chats);
+    expect(titles()).not.toContain('Session opener');
+    expect(titles()).not.toContain('Session opened-a');
+    expect(toggleLabels()).toEqual(['Show more']);
+
+    act(() => {
+      toggles()[0]!.click();
+    });
+    expect(titles().slice(5)).toEqual(['Session opener', 'Session opened-a', 'Session opened-b']);
+  });
+
+  it('truncates the pinned-first order rather than reshuffling it', () => {
+    // A pinned row outranks fresher unpinned ones, so it must survive the cap
+    // even though it is the stalest row in the bucket.
+    render([
+      ...makeProjectItems(6, 'p1'),
+      makeItem({
+        id: 'stale-pin',
+        isPinned: true,
+        projectKey: 'p1',
+        projectLabel: 'p1',
+        latestMessageAt: NOW - 99 * HOUR,
+      }),
+    ]);
+    // Pinned rows lift into their own bucket, which is itself capped.
+    expect(titles()).toEqual([
+      'Session stale-pin',
+      'Session p1-0',
+      'Session p1-1',
+      'Session p1-2',
+      'Session p1-3',
+      'Session p1-4',
+    ]);
+    expect(toggleLabels()).toEqual(['Show more']);
+  });
+
+  it('does not write the preview state into the shared opener-fold atom', () => {
+    // The fold atom is shared with the drawer sidebar; how many rows a mobile
+    // bucket previews is this surface's business alone.
+    render(makeProjectItems(9, 'p1'));
+    act(() => {
+      toggles()[0]!.click();
+    });
+    expect(store.get(sidebarCollapsedOpenedBySessionsAtom)).toEqual({});
+  });
+
+  it('shows every row while multi-select is active', () => {
+    // "Select all" operates on every id in the list, so a capped surface would
+    // let the user confirm a permanent delete of rows it never showed.
+    vi.useFakeTimers();
+    try {
+      const chats = makeProjectItems(9, 'p1');
+      render(chats, { archived: true, onPermanentDelete: () => {} });
+      expect(rows()).toHaveLength(MOBILE_CHAT_PREVIEW_MAX_ROOTS);
+
+      // Long-press the first row: pointerdown, then let the injected clock run
+      // past the 500ms hold. No wall-clock sleep is involved.
+      act(() => {
+        rows()[0]!.dispatchEvent(
+          new MouseEvent('pointerdown', { bubbles: true, clientX: 8, clientY: 8 })
+        );
+      });
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+
+      expect(rows()).toHaveLength(chats.length);
+      expect(toggles()).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('mobile pin sections', () => {
+  it('splits pinned rows into their sections, keeping the manual order', () => {
+    render(
+      [
+        makeItem({ id: 'loose', title: 'loose', isPinned: true, latestMessageAt: NOW }),
+        makeItem({
+          id: 'deps-bump',
+          title: 'deps-bump',
+          isPinned: true,
+          pinSectionId: 'maintenance',
+          orderKey: '81',
+          latestMessageAt: NOW,
+        }),
+        makeItem({
+          id: 'weekly-mirror',
+          title: 'weekly-mirror',
+          isPinned: true,
+          pinSectionId: 'maintenance',
+          orderKey: '80',
+          latestMessageAt: NOW - 50 * HOUR,
+        }),
+        ...makeProjectItems(1),
+      ],
+      { pinSections: [{ id: 'maintenance', name: 'Maintenance', orderKey: '80' }] }
+    );
+    expect(titles().slice(0, 3)).toEqual(['loose', 'weekly-mirror', 'deps-bump']);
+    const text = container.textContent ?? '';
+    expect(text.indexOf('Pinned')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('Maintenance')).toBeGreaterThan(text.indexOf('Pinned'));
+  });
+});
+
+describe('mobile pin sections before the sections are read', () => {
+  it('holds back a sectioned pin instead of showing it unsectioned', () => {
+    // No workspace runtime: the section catalog has not been read.
+    render([
+      makeItem({ id: 'loose', title: 'loose', isPinned: true, latestMessageAt: NOW }),
+      makeItem({
+        id: 'weekly-mirror',
+        title: 'weekly-mirror',
+        isPinned: true,
+        pinSectionId: 'maintenance',
+        orderKey: '80',
+        latestMessageAt: NOW,
+      }),
+    ]);
+    expect(titles()).toEqual(['loose']);
+  });
+});

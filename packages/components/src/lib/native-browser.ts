@@ -1,10 +1,17 @@
 import { isElectronRenderer } from './electron';
+import { parseSessionLink } from '@lody/shared/session-link';
+import { openSessionDeepLink } from './session-deep-link';
 import { getIpcServices } from './electron-ipc-client';
 import { isNativeAppShell } from './native-platform';
 
 export async function openExternalUrl(url: string): Promise<boolean> {
   if (typeof window === 'undefined') {
     return false;
+  }
+  const sessionLink = parseSessionLink(url);
+  if (sessionLink) {
+    openSessionDeepLink(sessionLink);
+    return true;
   }
 
   const isElectron = isElectronRenderer();

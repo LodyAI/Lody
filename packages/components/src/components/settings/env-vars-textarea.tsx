@@ -1,8 +1,18 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Textarea } from '@/ui/textarea';
-import { Label } from '@/ui/label';
-import { cn } from '@/lib/utils';
+import { Textarea } from '@lody/ui/textarea';
+import { Field as UiField } from '@lody/ui/field';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
+
+const styles = stylex.create({
+  root: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
+  errors: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  error: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.destructive },
+  help: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.secondaryLabel },
+});
 
 /**
  * Result of parsing environment variables from text
@@ -200,23 +210,22 @@ export function EnvVarsTextarea({
   });
 
   return (
-    <div className={cn('space-y-2', className)}>
-      {showLabel && <Label>{displayLabel}</Label>}
+    <div {...withClassName(stylex.props(styles.root), className)}>
+      {showLabel && <UiField.Label>{displayLabel}</UiField.Label>}
       <Textarea
         value={text}
         onChange={handleChange}
         placeholder={placeholder}
         rows={rows}
         disabled={disabled}
-        className={cn(
-          'font-mono text-sm',
-          hasErrors && 'border-destructive focus-visible:ring-destructive'
-        )}
+        // The well rings destructive from `aria-invalid`, so what a screen
+        // reader hears and what is drawn are one fact.
+        aria-invalid={hasErrors || undefined}
       />
       {hasErrors && (
-        <div className="space-y-1">
+        <div {...stylex.props(styles.errors)}>
           {parseErrors.map((error, index) => (
-            <p key={index} className="text-xs text-destructive">
+            <p key={index} {...stylex.props(styles.error)}>
               {t('agents.envVarsLineError', {
                 line: error.line,
                 message: error.message,
@@ -226,7 +235,7 @@ export function EnvVarsTextarea({
           ))}
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
+      <p {...stylex.props(styles.help)}>
         {t('agents.envVarsTextareaHelp', {
           defaultValue:
             'One variable per line in KEY=VALUE format. A leading "export" and matching quotes around values are stripped automatically. Lines starting with # are comments.',

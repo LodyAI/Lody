@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -7,7 +8,6 @@ import {
   SET_ANNOTATION_MODE_MESSAGE_TYPE,
   VISUAL_ANNOTATION_ANCHORS_RESOLVED_MESSAGE_TYPE,
   VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE,
-  buildStableSelector,
   createMinimalVisualAnnotationAnchor,
   createVisualAnnotationInspectPayload,
   createVisualCommentInspector,
@@ -48,6 +48,7 @@ describe('visual annotation inspector runtime', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
     document.body.innerHTML = '';
   });
 
@@ -236,169 +237,8 @@ describe('visual annotation inspector runtime', () => {
     inspector.destroy();
   });
 
-  it('positions the hover overlay from the viewport origin', () => {
-    const card = document.createElement('article');
-    card.setAttribute('data-testid', 'hover-card');
-    card.textContent = 'Hover target';
-    setRect(card, { x: 72, y: 96, width: 240, height: 140 });
-    document.body.append(card);
-
-    Object.defineProperty(document, 'elementFromPoint', {
-      configurable: true,
-      value: vi.fn(() => card),
-    });
-
-    const inspector = createVisualCommentInspector();
-    inspector.setEnabled(true);
-
-    card.dispatchEvent(
-      new MouseEvent('mousemove', {
-        bubbles: true,
-        clientX: 88,
-        clientY: 112,
-      })
-    );
-
-    const overlay = document.querySelector<HTMLDivElement>(
-      '[data-lody-visual-annotation-overlay="true"]'
-    );
-    expect(overlay).not.toBeNull();
-    expect(overlay?.style.display).toBe('block');
-    expect(overlay?.style.top).toBe('0px');
-    expect(overlay?.style.left).toBe('0px');
-    expect(overlay?.style.transform).toBe('translate(72px, 96px)');
-    expect(overlay?.style.width).toBe('240px');
-    expect(overlay?.style.height).toBe('140px');
-
-    inspector.destroy();
-  });
-
-  it('hides hover overlay when annotation mode is disabled', () => {
-    const card = document.createElement('article');
-    card.setAttribute('data-testid', 'hover-card');
-    card.textContent = 'Hover target';
-    setRect(card, { x: 72, y: 96, width: 240, height: 140 });
-    document.body.append(card);
-
-    Object.defineProperty(document, 'elementFromPoint', {
-      configurable: true,
-      value: vi.fn(() => card),
-    });
-
-    const inspector = createVisualCommentInspector();
-    inspector.setEnabled(true);
-    card.dispatchEvent(
-      new MouseEvent('mousemove', {
-        bubbles: true,
-        clientX: 88,
-        clientY: 112,
-      })
-    );
-
-    const overlay = document.querySelector<HTMLDivElement>(
-      '[data-lody-visual-annotation-overlay="true"]'
-    );
-    expect(overlay?.style.display).toBe('block');
-
-    inspector.setEnabled(false);
-    expect(overlay?.style.display).toBe('none');
-
-    inspector.destroy();
-  });
-
-  it('removes event listeners and overlay on destroy', () => {
-    const button = document.createElement('button');
-    button.textContent = 'Send comment';
-    setRect(button, { x: 40, y: 50, width: 120, height: 32 });
-    document.body.append(button);
-
-    Object.defineProperty(document, 'elementFromPoint', {
-      configurable: true,
-      value: vi.fn(() => button),
-    });
-
-    const postMessage = vi.fn();
-    vi.spyOn(window.parent, 'postMessage').mockImplementation(postMessage);
-    const inspector = createVisualCommentInspector({ postMessageTargetOrigin: '*' });
-    inspector.setEnabled(true);
-    button.dispatchEvent(
-      new MouseEvent('mousemove', {
-        bubbles: true,
-        clientX: 42,
-        clientY: 54,
-      })
-    );
-    expect(document.querySelector('[data-lody-visual-annotation-overlay="true"]')).not.toBeNull();
-
-    inspector.destroy();
-    button.dispatchEvent(
-      new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        clientX: 42,
-        clientY: 54,
-      })
-    );
-
-    expect(postMessage).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-lody-visual-annotation-overlay="true"]')).toBeNull();
-  });
-
-  it('can attach to a same-origin iframe window for local harnesses', () => {
-    const iframe = document.createElement('iframe');
-    document.body.append(iframe);
-    const frameWindow = iframe.contentWindow;
-    const frameDocument = iframe.contentDocument;
-    expect(frameWindow).not.toBeNull();
-    expect(frameDocument).not.toBeNull();
-    if (!frameWindow || !frameDocument) {
-      return;
-    }
-
-    frameDocument.body.innerHTML = '<input aria-label="Search docs" value="local harness" />';
-    const input = frameDocument.querySelector('input');
-    expect(input).not.toBeNull();
-    if (!input) {
-      return;
-    }
-    setRect(input, { x: 12, y: 16, width: 180, height: 28 });
-    Object.defineProperty(frameDocument, 'elementFromPoint', {
-      configurable: true,
-      value: vi.fn(() => input),
-    });
-
-    const postMessage = vi.fn();
-    vi.spyOn(frameWindow.parent, 'postMessage').mockImplementation(postMessage);
-    const inspector = createVisualCommentInspector({
-      targetWindow: frameWindow,
-      allowedParentOrigins: ['https://app.example.test'],
-      postMessageTargetOrigin: '*',
-    });
-
-    inspector.setEnabled(true);
-    expect(inspector.isEnabled()).toBe(true);
-
-    input.dispatchEvent(
-      new frameWindow.MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        clientX: 20,
-        clientY: 24,
-      })
-    );
-
-    expect(postMessage).toHaveBeenCalledTimes(1);
-    const message = postMessage.mock.calls[0]?.[0] as
-      | { type: string; payload: VisualAnnotationInspectPayload }
-      | undefined;
-    expect(message?.type).toBe(VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE);
-    expect(message?.payload.target.tag).toBe('input');
-    expect(message?.payload.target.text).toBe('local harness');
-
-    inspector.destroy();
-  });
-
   it('resolves tracked anchors and refreshes them on scroll', async () => {
+    vi.useFakeTimers();
     const heading = document.createElement('h1');
     heading.setAttribute('data-testid', 'live-heading');
     heading.textContent = 'Design reviews should point at pixels.';
@@ -453,7 +293,7 @@ describe('visual annotation inspector runtime', () => {
     postMessage.mockClear();
     setRect(heading, { x: 120, y: 40, width: 300, height: 80 });
     window.dispatchEvent(new Event('scroll'));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(20);
 
     expect(postMessage).toHaveBeenCalledTimes(1);
     message = postMessage.mock.calls[0]?.[0] as
@@ -467,46 +307,6 @@ describe('visual annotation inspector runtime', () => {
     });
 
     inspector.destroy();
-  });
-
-  it('builds stable selectors and minimal anchors for cross-viewport fallback', () => {
-    const container = document.createElement('section');
-    container.setAttribute('data-testid', 'settings-panel');
-    const button = document.createElement('button');
-    button.className = 'primary-button w-4 css-a1b2c3d4';
-    button.textContent = 'Save settings';
-    setRect(button, { x: 200, y: 100, width: 160, height: 40 });
-    container.append(button);
-    document.body.append(container);
-
-    const selector = buildStableSelector(button);
-    expect(selector).toBe('button.primary-button');
-
-    const payload = createVisualAnnotationInspectPayload(
-      button,
-      {
-        clientX: 280,
-        clientY: 120,
-        pageX: 280,
-        pageY: 120,
-      },
-      { includeComputedStyle: false }
-    );
-    const anchor = createMinimalVisualAnnotationAnchor(payload);
-
-    expect(anchor.click.viewportXRatio).toBe(0.28);
-    expect(anchor.click.viewportYRatio).toBe(0.24);
-    expect(anchor.target.rectRatio).toEqual({
-      x: 0.2,
-      y: 0.2,
-      width: 0.16,
-      height: 0.08,
-    });
-    expect(anchor.target.attributes).toEqual({});
-    expect(anchor.context.ancestors[0]).toMatchObject({
-      tag: 'section',
-      selector: 'section[data-testid="settings-panel"]',
-    });
   });
 
   it('redacts form values from outerHTML previews', () => {

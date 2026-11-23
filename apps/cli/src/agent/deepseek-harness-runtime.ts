@@ -1,32 +1,206 @@
+import { z } from 'zod';
+import { fileLocksLegacy } from '@/utils/file-lock';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { existsSync, realpathSync } from 'node:fs';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { getDeepSeekHarnessProviderHome } from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 import {
   ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION,
-  ACP_EXTENSION_DSH_PROFILE_REVISION,
+  ACP_EXTENSION_DSH_LEGACY_HOME_ENV,
   ACP_EXTENSION_DSH_QUERY_PATH_ENV,
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
-  ACP_EXTENSION_DSH_VERSION,
   DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION,
-  DEEPSEEK_HARNESS_NPX_PACKAGES,
+  DEEPSEEK_HARNESS_PROFILE_NAME,
   DEEPSEEK_HARNESS_VERSION,
-  createDeepSeekHarnessCordisConfig,
+  createDeepSeekHarnessNpxSpecifiers,
+  createDeepSeekHarnessProfileFiles,
   type DeepSeekHarnessSessionCompression,
 } from 'acp-extension-dsh/profile';
 
-export { DEEPSEEK_HARNESS_VERSION, createDeepSeekHarnessCordisConfig };
-export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION =
-  ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION;
+export { DEEPSEEK_HARNESS_VERSION, createDeepSeekHarnessProfileFiles };
+export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION = `${ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION}:provider-home-v1:system-node-v1`;
 export const DEEPSEEK_HARNESS_HOME_ENV = 'DSH_HOME';
 
-const DEEPSEEK_HARNESS_CONFIG_FILE_PREFIX =
-  `cordis-${DEEPSEEK_HARNESS_VERSION.replaceAll('.', '-')}` +
-  `-acp-extension-dsh-${ACP_EXTENSION_DSH_VERSION}-${ACP_EXTENSION_DSH_PROFILE_REVISION}`;
+const RAW_SESSION_ARTIFACT = /^session(?:\.v[1-9]\d*)?\.jsonl$/;
+const ZSTD_SESSION_ARTIFACT = /^session(?:\.v[1-9]\d*)?\.jsonl\.zstd$/;
+const DSH_NODE_EXECUTABLE_ENV = 'LODY_DSH_NODE_EXECUTABLE';
+const DSH_NODE_ARGS_ENV = 'LODY_DSH_NODE_ARGS';
 
-const RAW_SESSION_ARTIFACT = 'session.jsonl';
-const ZSTD_SESSION_ARTIFACT = 'session.jsonl.zstd';
+// windowsHide is not inherited by descendants. npm's shell and DSH's Windows
+// Job runner omit it, so apply the ACP host policy inside those two processes.
+// Intercept the normalized async spawn boundary, covering CJS/ESM spawn, execFile
+// and fork without changing their overloads, stdio, environment or lifecycle.
+const HIDE_WINDOWS_CHILD_CONSOLES = `
+import { ChildProcess } from 'node:child_process';
+if (process.platform === 'win32') {
+  const spawn = ChildProcess.prototype.spawn;
+  ChildProcess.prototype.spawn = function (options) {
+    return spawn.call(this, { ...options, windowsHide: true });
+  };
+}
+`.trim();
+
+/** Keep npx's logical command/argv for cache recovery; bypass its Windows shell shim only at spawn. */
+export function resolveDeepSeekHarnessSpawn(options: {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  workdir: string;
+  platform?: NodeJS.Platform;
+}): { command: string; args: string[] } {
+  const { command, args, env, workdir } = options;
+  if (
+    (options.platform ?? process.platform) !== 'win32' ||
+    command !== 'npx' ||
+    !env[DSH_NODE_EXECUTABLE_ENV]
+  ) {
+    return { command, args };
+  }
+
+  const envValue = (name: string) => {
+    const key = Object.keys(env)
+      .sort()
+      .find((candidate) => candidate.toLowerCase() === name);
+    return key ? env[key] : undefined;
+  };
+  const directories = (envValue('path') ?? '').split(';');
+  const extensions = (envValue('pathext') ?? '.COM;.EXE;.BAT;.CMD').split(';');
+  for (const directory of directories) {
+    if (!directory) continue;
+    for (const extension of extensions) {
+      const executable = resolve(
+        workdir,
+        directory.replace(/^"|"$/g, ''),
+        `npx${extension.toLowerCase()}`
+      );
+      if (!existsSync(executable)) continue;
+      // Native shims already avoid cmd.exe and its 8191-character limit.
+      if (/\.(exe|com)$/i.test(extension)) return { command: executable, args };
+      const entry = join(
+        dirname(realpathSync(executable)),
+        'node_modules',
+        'npm',
+        'bin',
+        'npx-cli.js'
+      );
+      if (!existsSync(entry)) {
+        throw new Error(
+          `Cannot launch DeepSeek Harness without cmd.exe: npm's npx-cli.js is missing beside ${executable}. Install Node.js with npm and retry.`
+        );
+      }
+      return {
+        command: env[DSH_NODE_EXECUTABLE_ENV],
+        args: [
+          '--import',
+          `data:text/javascript;base64,${encodeBase64(HIDE_WINDOWS_CHILD_CONSOLES)}`,
+          entry,
+          ...args,
+        ],
+      };
+    }
+  }
+  throw new Error(
+    'Cannot launch DeepSeek Harness: npx was not found on PATH. Install Node.js with npm and retry.'
+  );
+}
+
+function encodeBase64(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64');
+}
+
+function createDeepSeekHarnessNodeLauncherArg(): string {
+  const source = `
+const { spawn } = require('node:child_process');
+const executable = process.env.${DSH_NODE_EXECUTABLE_ENV};
+const encodedArgs = process.env.${DSH_NODE_ARGS_ENV};
+if (!executable || !encodedArgs) throw new Error('Missing Lody DSH runtime launch environment');
+const args = JSON.parse(Buffer.from(encodedArgs, 'base64').toString('utf8'));
+const child = spawn(executable, args, { env: process.env, stdio: 'inherit', windowsHide: true });
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => child.kill(signal));
+}
+child.on('error', (error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exitCode = 1;
+});
+child.on('exit', (code) => {
+  process.exitCode = code === null ? 1 : code;
+});
+`.trim();
+  // Keep the eval payload opaque so npm can safely forward it as one argument.
+  return `eval(Buffer.from('${encodeBase64(source)}','base64').toString('utf8'))`;
+}
+
+function createDeepSeekHarnessBootstrapSource(): string {
+  return `
+${HIDE_WINDOWS_CHILD_CONSOLES}
+import { readFile, realpath } from 'node:fs/promises';
+import { delimiter, dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const expectedVersion = ${JSON.stringify(DEEPSEEK_HARNESS_VERSION)};
+let entryPath;
+
+for (const binDir of (process.env.PATH ?? '').split(delimiter)) {
+  if (!binDir) continue;
+  const packageRoot = join(dirname(binDir), '@deepseek-ai', 'dsh');
+  try {
+    const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
+    if (manifest.version !== expectedVersion) continue;
+    entryPath = join(packageRoot, 'lib', 'bin.js');
+    await readFile(entryPath, 'utf8');
+    break;
+  } catch {}
+}
+
+if (!entryPath) {
+  throw new Error(
+    'The pinned @deepseek-ai/dsh@' + expectedVersion + ' entry was not found in the npx closure'
+  );
+}
+
+if (process.platform === 'win32') {
+  // The pinned Job runner calls CreateProcessW directly, bypassing Node's
+  // windowsHide. Preserve its suspended launch, Unicode env, Job and IPC;
+  // only add CREATE_NO_WINDOW at the shared native process boundary.
+  const familyRoot = dirname(dirname(dirname(await realpath(entryPath))));
+  const nativeEntry = pathToFileURL(join(familyRoot, 'dsh-win32-process', 'lib', 'index.js')).href;
+  const nativePolicy = [
+    'const { loadWin32ProcessBindings } = await import(' + JSON.stringify(nativeEntry) + ');',
+    'const api = loadWin32ProcessBindings();',
+    'for (const [name, flagsIndex] of [["createProcessW", 5], ["createProcessAsUserW", 6]]) {',
+    '  const create = api[name];',
+    '  api[name] = (...args) => { args[flagsIndex] |= 0x08000000; return create(...args); };',
+    '}',
+  ].join('\\n');
+  const preload = 'data:text/javascript;base64,' + Buffer.from(nativePolicy).toString('base64');
+  await import(preload);
+  const runnerEntry = join(familyRoot, 'dsh-subprocess-local', 'lib', 'runner.js');
+  const spawn = ChildProcess.prototype.spawn;
+  ChildProcess.prototype.spawn = function (options) {
+    // Only the pinned native Job runner needs this preload. Do not export a
+    // NODE_OPTIONS hook to agent commands or MCP servers.
+    if (options.file === process.execPath && options.args[1] === runnerEntry) {
+      options = { ...options, args: [options.args[0], '--import', preload, ...options.args.slice(1)] };
+    }
+    return spawn.call(this, options);
+  };
+}
+
+const dshArgs = process.argv.slice(1);
+process.argv = [process.execPath, entryPath, ...dshArgs];
+const dsh = await import(pathToFileURL(entryPath).href);
+if (typeof dsh.runCli !== 'function') {
+  throw new Error('The pinned @deepseek-ai/dsh entry does not export runCli()');
+}
+await dsh.runCli();
+`.trim();
+}
 
 export class DeepSeekHarnessMixedSessionCompressionError extends Error {
   readonly code = 'DSH_MIXED_SESSION_COMPRESSION';
@@ -92,9 +266,9 @@ export async function resolveDeepSeekHarnessSessionCompression(
       const sessionPath = join(projectPath, sessionEntry.name);
       const artifactEntries = await readdir(sessionPath, { withFileTypes: true });
       for (const artifactEntry of artifactEntries) {
-        if (artifactEntry.name === RAW_SESSION_ARTIFACT) {
+        if (RAW_SESSION_ARTIFACT.test(artifactEntry.name)) {
           rawArtifact ??= join(sessionPath, artifactEntry.name);
-        } else if (artifactEntry.name === ZSTD_SESSION_ARTIFACT) {
+        } else if (ZSTD_SESSION_ARTIFACT.test(artifactEntry.name)) {
           zstdArtifact ??= join(sessionPath, artifactEntry.name);
         }
       }
@@ -111,63 +285,182 @@ export async function resolveDeepSeekHarnessSessionCompression(
   return rawArtifact ? 'none' : DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION;
 }
 
-async function publishConfigAtomically(configPath: string, config: string): Promise<void> {
-  const temporaryPath = `${configPath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, config, { mode: 0o600 });
+async function publishFileAtomically(filePath: string, contents: string): Promise<void> {
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporaryPath, contents, { mode: 0o600 });
   try {
-    await rename(temporaryPath, configPath);
+    await rename(temporaryPath, filePath);
   } catch (error) {
-    // On Windows rename cannot replace an existing destination. Another Lody
-    // process can only have published the same versioned, immutable content.
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     await rm(temporaryPath, { force: true });
+    throw error;
   }
+}
+
+const DshProfileManifestSchema = z
+  .object({
+    dependencies: z.record(z.string(), z.string()).optional(),
+    devDependencies: z.record(z.string(), z.string()).optional(),
+    optionalDependencies: z.record(z.string(), z.string()).optional(),
+    dsh: z
+      .object({
+        profile: z.object({ bundles: z.array(z.string()) }).passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export function dshProfileLockName(rootDir: string): string {
+  return `dsh-profile-${createHash('sha256').update(resolve(rootDir)).digest('hex')}`;
 }
 
 export async function resolveDeepSeekHarnessProcessLaunch(options: {
   adapterPath: string;
   rootDir?: string;
+  providerId?: string;
+  dataRoot?: string;
   extraArgs?: string[];
+  /** Host-only plugin CLI arguments, never accepted from RPC. */
+  pluginArgs?: string[];
 }) {
-  const rootDir = options.rootDir ?? resolveDeepSeekHarnessHome();
-  const sessionsRoot = join(rootDir, 'sessions');
+  const legacyHome = options.rootDir ?? resolveDeepSeekHarnessHome();
+  const rootDir = options.providerId
+    ? getDeepSeekHarnessProviderHome(options.dataRoot ?? getLodyDataDir(), options.providerId)
+    : legacyHome;
+  // Existing native session IDs still resolve to the same artifacts and query database.
+  const sessionsRoot = join(legacyHome, 'sessions');
   const presetRoot = join(dirname(options.adapterPath), 'deepseek-agent-presets');
   const sessionCompression = await resolveDeepSeekHarnessSessionCompression(sessionsRoot);
-  const config = createDeepSeekHarnessCordisConfig(
-    options.adapterPath,
+  const profileFiles = createDeepSeekHarnessProfileFiles({
+    adapterPath: options.adapterPath,
     presetRoot,
-    sessionCompression
-  );
-  // The adapter lives next to the installed CLI, so its absolute path can
-  // change across app upgrades. Content-address the otherwise immutable file
-  // so Windows never has to replace an in-use config with a stale path.
-  const configHash = createHash('sha256').update(config).digest('hex').slice(0, 12);
-  const configPath = join(rootDir, `${DEEPSEEK_HARNESS_CONFIG_FILE_PREFIX}-${configHash}.yml`);
+    sessionCompression,
+    reasoningEffort: 'max',
+  });
   await mkdir(sessionsRoot, { recursive: true });
-  await publishConfigAtomically(configPath, config);
+  // Host machinery is a generated bundle; the final profile patch belongs to the user.
+  // Bundle identity changes with the installed adapter, but the editable path never does.
+  // A last, route-neutral layer keeps the public host boundary and native history roots.
+  const guardPatch = `- id: session-telemetry-otel
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.${ACP_EXTENSION_DSH_SESSION_ROOT_ENV}
+    compression: ${sessionCompression}
+- id: session-query-sqlite
+  config:
+    path: !!js process.env.${ACP_EXTENSION_DSH_QUERY_PATH_ENV}
+    openAt: never
+- id: acp-agent
+  disabled: false
+  name: ${JSON.stringify(options.adapterPath.startsWith('file:') ? options.adapterPath : pathToFileURL(options.adapterPath).href)}
+`;
+  const fingerprint = createHash('sha256')
+    .update(profileFiles.cordisPatchYml)
+    .update(guardPatch)
+    .digest('hex')
+    .slice(0, 16);
+  const bundleName = `@lody/dsh-host-${fingerprint}`;
+  const profileName = DEEPSEEK_HARNESS_PROFILE_NAME;
+  const profileDir = join(rootDir, 'profiles', profileName);
+  const bundleDir = join(profileDir, 'node_modules', bundleName);
+  await fileLocksLegacy.withLock(
+    dshProfileLockName(rootDir),
+    async () => {
+      await mkdir(bundleDir, { recursive: true });
+      await Promise.all([
+        publishFileAtomically(
+          join(bundleDir, 'package.json'),
+          JSON.stringify({
+            name: bundleName,
+            private: true,
+            dsh: { bundle: { patch: './cordis.patch.yml' } },
+          }) + '\n'
+        ),
+        publishFileAtomically(join(bundleDir, 'cordis.patch.yml'), profileFiles.cordisPatchYml),
+        publishFileAtomically(join(bundleDir, 'host.patch.yml'), guardPatch),
+      ]);
+      const generated = DshProfileManifestSchema.parse(JSON.parse(profileFiles.packageJson));
+      let manifest = generated;
+      try {
+        manifest = DshProfileManifestSchema.parse(
+          JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      // User dependencies, package-manager configuration and bundle order survive upgrades.
+      // Only the base and content-addressed host layers belong to Lody.
+      const userBundles = manifest.dsh.profile.bundles.filter(
+        (name) =>
+          !name.startsWith('@lody/dsh-host-') && !generated.dsh.profile.bundles.includes(name)
+      );
+      manifest.dsh.profile.bundles = [...generated.dsh.profile.bundles, bundleName, ...userBundles];
+      manifest.dsh.profile.patchReload = 'startup';
+      await Promise.all([
+        publishFileAtomically(
+          join(profileDir, 'package.json'),
+          JSON.stringify(manifest, null, 2) + '\n'
+        ),
+        writeFile(join(profileDir, 'pnpm-workspace.yaml'), profileFiles.pnpmWorkspaceYaml, {
+          flag: 'wx',
+          mode: 0o600,
+        }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'EEXIST') throw error;
+        }),
+        writeFile(join(profileDir, 'cordis.patch.yml'), '[]\n', { flag: 'wx', mode: 0o600 }).catch(
+          (error: NodeJS.ErrnoException) => {
+            if (error.code !== 'EEXIST') throw error;
+          }
+        ),
+      ]);
+    },
+    { locksDir: join(rootDir, 'lody-locks'), timeout: 300_000 }
+  );
+
+  const dshNodeArgs = [
+    '--input-type=module',
+    '--eval',
+    createDeepSeekHarnessBootstrapSource(),
+    '--',
+    ...(options.pluginArgs
+      ? ['plugin', '--profile', profileName, ...options.pluginArgs]
+      : [
+          '--profile',
+          profileName,
+          '--patch',
+          join(bundleDir, 'host.patch.yml'),
+          ...(options.extraArgs ?? []),
+        ]),
+  ];
 
   return {
     command: 'npx',
     args: [
-      // dsh 0.1.1-rc.1 publishes a cyclic same-version peer graph that npm 10
-      // mis-resolves in a full npx --package closure. Every DSH package remains
-      // explicitly pinned below; --force keeps npm installing external peers.
-      '--force',
       '--prefer-offline',
       '-y',
-      ...DEEPSEEK_HARNESS_NPX_PACKAGES.flatMap((packageName) => [
-        '--package',
-        `${packageName}@${DEEPSEEK_HARNESS_VERSION}`,
-      ]),
-      'dsh-acp-demo',
-      '--config',
-      configPath,
-      ...(options.extraArgs ?? []),
+      // Exact `name@version` specifiers: the Cordis-ecosystem packages version
+      // independently of the Harness family and have no release at
+      // `DEEPSEEK_HARNESS_VERSION`.
+      ...createDeepSeekHarnessNpxSpecifiers().flatMap((specifier) => ['--package', specifier]),
+      // Plugin management must not require a globally installed package manager.
+      ...(options.pluginArgs ? ['--package', 'pnpm@10.20.0'] : []),
+      // npm exec does not shell-quote executable paths, so a minimal Node
+      // launcher safely passes a Node path containing spaces to spawn().
+      // DSH itself uses the validated Node from the final launch PATH.
+      'node',
+      '-e',
+      createDeepSeekHarnessNodeLauncherArg(),
     ],
     env: {
       [DEEPSEEK_HARNESS_HOME_ENV]: rootDir,
+      [ACP_EXTENSION_DSH_LEGACY_HOME_ENV]: legacyHome,
       [ACP_EXTENSION_DSH_SESSION_ROOT_ENV]: sessionsRoot,
       [ACP_EXTENSION_DSH_QUERY_PATH_ENV]: join(sessionsRoot, 'session-query.db'),
+      [DSH_NODE_ARGS_ENV]: encodeBase64(JSON.stringify(dshNodeArgs)),
     },
   };
 }

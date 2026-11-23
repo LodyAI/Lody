@@ -1,3 +1,8 @@
+import { decodeSessionFilePath } from './project-path';
+import type { AgentRoleProposalMeta } from './agent-role-proposal';
+import type { LodyRateLimitsCapability } from 'acp-extension-core';
+import type { MemoryBinding } from './memory-provider';
+import type { AcpModelControls } from './acp-model-capabilities';
 import {
   AvailableCommand,
   PermissionOption,
@@ -7,22 +12,26 @@ import {
 } from '@agentclientprotocol/sdk';
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionOutcome } from './message';
-import type { AgentConfigId, McpServerId, SessionId } from './ids';
+import type { SessionGoalAction } from './goal';
+import { createPlanModeConfigOption } from 'acp-extension-core';
+import type { LodySubagentSnapshot, LodySubagentProgress } from 'acp-extension-core';
+import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
-import type { WorktreeScriptPhase } from './project';
+import type { ProjectRef, WorktreeScriptPhase } from './project';
 import {
   DEEPSEEK_HARNESS_AGENT_PRESETS,
-  DEEPSEEK_HARNESS_MODELS,
   DEEPSEEK_HARNESS_PERMISSION_MODES,
-  DEEPSEEK_HARNESS_REASONING_OPTIONS,
 } from './deepseek-harness';
 
 export const MANAGED_BUILTIN_RUNTIMES = [
+  { runtimeName: 'antigravity', agentType: 'antigravity', displayName: 'Antigravity' },
   { runtimeName: 'kimi-code', agentType: 'kimi', displayName: 'Kimi Code' },
+  { runtimeName: 'devin', agentType: 'devin', displayName: 'Devin' },
   { runtimeName: 'grok-build', agentType: 'grok', displayName: 'Grok' },
   { runtimeName: 'claude-code', agentType: 'claude', displayName: 'Claude Code' },
   { runtimeName: 'codex', agentType: 'codex', displayName: 'Codex' },
+  { runtimeName: 'pi', agentType: 'pi', displayName: 'Pi' },
 ] as const;
 
 export type ManagedBuiltinRuntime = (typeof MANAGED_BUILTIN_RUNTIMES)[number];
@@ -35,6 +44,9 @@ export type CliType = BuiltinCliType;
 export const BUILTIN_AGENTS = [
   ...MANAGED_BUILTIN_RUNTIMES.map(({ agentType, displayName }) => ({ agentType, displayName })),
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
+  { agentType: 'bub', displayName: 'Bub' },
+  { agentType: 'dimcode', displayName: 'Dimcode' },
+  { agentType: 'sorbet', displayName: 'Lody Agent' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
@@ -42,11 +54,76 @@ export type BuiltinAgentType = BuiltinAgent['agentType'];
 export type AgentConfigCliType = 'builtin' | 'registry' | 'custom';
 export type AgentType = string;
 
-/** Builtin ACP adapters that publish their own session titles. */
-export const usesAcpProvidedSessionTitle = (
+/**
+ * How each builtin agent's ACP adapter handles the session title.
+ *
+ * - `none` — Lody generates titles unless the runtime advertises ownership.
+ *   Builtin Codex always uses Lody's configurable isolated title session.
+ * - `untagged` — legacy Claude/Grok runtimes publish authoritative untagged titles.
+ *   Claude uses its SDK; Grok generates titles in the official runtime.
+ *
+ * Exhaustive on purpose: adding a builtin agent must not silently default it.
+ */
+const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged'> = {
+  antigravity: 'none',
+  pi: 'none',
+  devin: 'none',
+  claude: 'untagged',
+  codex: 'none',
+  grok: 'untagged',
+  kimi: 'none',
+  deepseek: 'none',
+  // Bub's ACP server does not push an authoritative session title, so Lody
+  // keeps running its isolated title agent.
+  bub: 'none',
+  dimcode: 'none',
+  sorbet: 'none',
+};
+
+const builtinAcpTitleOwnership = (
   cliType: AgentConfigCliType | null | undefined,
   agentType: AgentType | null | undefined
-): boolean => cliType === 'builtin' && agentType === 'claude';
+): 'none' | 'untagged' =>
+  cliType === 'builtin' && agentType && isBuiltinAgentType(agentType)
+    ? BUILTIN_ACP_TITLE_OWNERSHIP[agentType]
+    : 'none';
+
+/**
+ * Except for builtin Codex, advertised ownership or legacy builtin identity means Lody never
+ * starts its isolated title agent for them and hides the title-generation config
+ * from their agent settings.
+ *
+ * A runtime override revokes only the identity fallback; an advertised capability
+ * still owns generation. The table describes the managed runtime each
+ * agent normally launches, but `BuiltinRuntimeOverrides` can point the same
+ * `agentType` at any executable — including one predating the title behaviour.
+ * Such a session would otherwise get no title at all: the isolated generator is
+ * skipped, no title arrives over ACP, and the settings that would fix it are
+ * hidden. Keeping the local generator for overridden runtimes is the conservative
+ * side to be wrong on, and it costs only the duplicate work this change removed
+ * for the managed case.
+ */
+export const acpOwnsSessionTitleGeneration = (
+  cliType: AgentConfigCliType | null | undefined,
+  agentType: AgentType | null | undefined,
+  runtimeOverrides?: BuiltinRuntimeOverrides,
+  sessionTitle?: boolean
+): boolean =>
+  !(cliType === 'builtin' && agentType === 'codex') &&
+  (sessionTitle === true ||
+    (!hasBuiltinRuntimeOverrideValues(runtimeOverrides) &&
+      builtinAcpTitleOwnership(cliType, agentType) !== 'none'));
+
+/**
+ * Adapters whose pushed titles are authoritative without a `titleSource` tag.
+ *
+ * Deliberately narrower than {@link acpOwnsSessionTitleGeneration}, and narrower
+ * by construction rather than by a second list kept in sync by hand.
+ */
+export const trustsUntaggedAcpSessionTitle = (
+  cliType: AgentConfigCliType | null | undefined,
+  agentType: AgentType | null | undefined
+): boolean => builtinAcpTitleOwnership(cliType, agentType) === 'untagged';
 
 /**
  * User-defined ACP launch spec for `cliType: 'custom'` providers: the exact
@@ -64,38 +141,85 @@ export type CustomAcpLaunchSpec = {
  * manages the official runtime binary for the selected builtin agent.
  */
 export type BuiltinRuntimeOverrides = {
+  antigravityPath?: string;
   codexPath?: string;
   claudeCodeExecutable?: string;
   kimiPath?: string;
   grokPath?: string;
+  devinPath?: string;
+  piPath?: string;
+  piExtensions?: string[];
+  /**
+   * Builtin Antigravity only: launch `agy acp --dangerously-skip-permissions`,
+   * which approves every tool permission request inside agy. This is a launch
+   * policy, not a runtime replacement, so it does not count as an override in
+   * {@link hasBuiltinRuntimeOverrideValues}.
+   */
+  antigravitySkipPermissions?: boolean;
 };
+
+export const PI_EXTENSIONS_MAX_SELECTIONS = 32;
+export const PI_EXTENSION_PATH_MAX_LENGTH = 4096;
 
 export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRuntimeOverrides => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return false;
   }
   const record = value as {
+    antigravityPath?: unknown;
     codexPath?: unknown;
     claudeCodeExecutable?: unknown;
     kimiPath?: unknown;
     grokPath?: unknown;
+    devinPath?: unknown;
+    piPath?: unknown;
+    piExtensions?: unknown;
+    antigravitySkipPermissions?: unknown;
   };
   return (
+    (record.antigravitySkipPermissions === undefined ||
+      typeof record.antigravitySkipPermissions === 'boolean') &&
+    (record.antigravityPath === undefined || typeof record.antigravityPath === 'string') &&
     (record.codexPath === undefined || typeof record.codexPath === 'string') &&
     (record.claudeCodeExecutable === undefined ||
       typeof record.claudeCodeExecutable === 'string') &&
     (record.kimiPath === undefined || typeof record.kimiPath === 'string') &&
-    (record.grokPath === undefined || typeof record.grokPath === 'string')
+    (record.devinPath === undefined || typeof record.devinPath === 'string') &&
+    (record.grokPath === undefined || typeof record.grokPath === 'string') &&
+    (record.piPath === undefined || typeof record.piPath === 'string') &&
+    (record.piExtensions === undefined ||
+      (Array.isArray(record.piExtensions) &&
+        record.piExtensions.length <= PI_EXTENSIONS_MAX_SELECTIONS &&
+        record.piExtensions.every(
+          (entry) =>
+            typeof entry === 'string' &&
+            entry.trim().length > 0 &&
+            entry.length <= PI_EXTENSION_PATH_MAX_LENGTH
+        )))
   );
 };
 
+/**
+ * Whether a runtime path or Pi extension selection replaces what Lody would
+ * launch by default. Launch policies such as `antigravitySkipPermissions` are
+ * excluded: they keep the managed runtime, static capabilities, title ownership
+ * and Provider setup. Use {@link hasPersistedBuiltinRuntimeOverrides} to decide
+ * whether the field is worth persisting.
+ */
 export const hasBuiltinRuntimeOverrideValues = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
 ): boolean =>
   !!runtimeOverrides &&
-  Object.values(runtimeOverrides).some(
-    (value) => typeof value === 'string' && value.trim().length > 0
+  Object.values(runtimeOverrides).some((value) =>
+    Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.trim().length > 0
   );
+
+/** Whether `runtimeOverrides` carries anything a stored Provider must keep. */
+export const hasPersistedBuiltinRuntimeOverrides = (
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+): boolean =>
+  hasBuiltinRuntimeOverrideValues(runtimeOverrides) ||
+  runtimeOverrides?.antigravitySkipPermissions === true;
 
 export const getBuiltinRuntimeOverrideSourceVersionSuffix = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
@@ -279,9 +403,36 @@ export type AcpCommandSummary = {
 };
 
 // Bump when cached ACP probes need to be invalidated across clients.
-export const ACP_CAPABILITY_CACHE_VERSION = 6;
+// 7: entries probed before the legacy `model[effort]` derivation became
+// Codex-only carry a bogus ladder for every agent that spells other variants
+// with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
+// per-model effort picker would rebuild that model's ladder from it.
+// 11: provider command previews come only from probes, never project sessions.
+// 12: official registry Antigravity supports Lody's /usage quota compatibility reader.
+export const ACP_CAPABILITY_CACHE_VERSION = 12;
 
-export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
+/**
+ * One sign-in method an ACP agent advertised in its `initialize` response.
+ *
+ * Persisted with the capability cache so the account panel can offer the
+ * agent's own sign-in methods without starting an authentication attempt
+ * first. `args` is display-only; the Machine resolves the trusted executable
+ * and arguments itself.
+ */
+export type AcpAuthMethodSummary = {
+  type: 'agent' | 'env_var' | 'terminal';
+  id?: string;
+  name?: string;
+  description?: string;
+  args?: string[];
+};
+
+export type AcpCapabilityAuthority =
+  | 'unavailable'
+  | 'provisional'
+  | 'authoritative'
+  /** Probe succeeded but advertised a model selector with zero choices. */
+  | 'degraded';
 
 export type AcpCapabilityCacheEntry = {
   cliType: AgentConfigCliType;
@@ -307,12 +458,42 @@ export type AcpCapabilityCacheEntry = {
    * `configOptions` is a snapshot that only describes `currentValue`'s model.
    */
   modelReasoningEfforts?: Record<string, string[]>;
-  /** Available slash commands advertised by the agent. */
+  /**
+   * Per-model controls from the config's `acpModelCapability` row, attached by
+   * `getMachineFlockAcpCapabilities` when its source version matches. Never
+   * stored in the capability row itself; see `acp-model-capabilities.ts`.
+   */
+  declaredModelControls?: Record<string, AcpModelControls>;
+  /**
+   * Each model's own option list from the config's `acpModelConfigOptions`
+   * rows, attached by `getMachineFlockAcpCapabilities`. Never stored in the
+   * capability row itself; see `acp-model-config-options.ts`.
+   */
+  observedModelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
+  /** Probe commands shown before a session reports its own list; [] confirms an empty probe. */
   availableCommands?: AcpCommandSummary[];
+  /**
+   * Sign-in methods the agent advertised in its `initialize` response.
+   *
+   * `undefined` means no probe has asked yet; an empty array means the agent was
+   * asked and advertised none. Only agent-driven (registry/custom/Devin)
+   * providers record this: built-in providers sign in with their own native
+   * login command, which the adapter's method list does not describe.
+   */
+  authMethods?: AcpAuthMethodSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
   sessionFork?: boolean;
+  /** Runtime advertised Core sessionTitle v1 (automatic, tagged title updates). */
+  sessionTitle?: boolean;
+  rateLimits?: LodyRateLimitsCapability;
   /** True only when the runtime advertised Lody's acknowledged steering extension. */
   acknowledgedSteer?: boolean;
+  /**
+   * Goal actions the runtime advertised, on any transport. Absent means the
+   * runtime has no goal extension, which is what keeps the goal controls hidden
+   * instead of guessing from the agent's name.
+   */
+  goalActions?: SessionGoalAction[];
   /** True when this Lody machine supports durable asynchronous forks into a new worktree. */
   sessionForkWorktree?: boolean;
   fetchedAt: number;
@@ -324,6 +505,83 @@ export const isAcpCapabilityCacheEntryCurrent = (
   entry: AcpCapabilityCacheEntry | undefined
 ): entry is AcpCapabilityCacheEntry => entry?.cacheVersion === ACP_CAPABILITY_CACHE_VERSION;
 
+/**
+ * Prefix of the capability source version Lody stamps for builtin Sorbet; the build
+ * segment follows it, optionally suffixed with `+<probe capability>`.
+ */
+const SORBET_SOURCE_VERSION_PREFIX = 'builtin-sorbet:@sorbetai/acp@';
+
+/** Sorbet builds that could not discover sign-in methods, so their probe wrote none. */
+const SORBET_STALE_AUTH_DISCOVERY_VERSIONS: ReadonlySet<string> = new Set(['0.1.0-alpha.4']);
+
+/**
+ * The Sorbet build an entry came from: the installed version when the npx cache could
+ * name it, otherwise the dist-tag Lody launched through. `undefined` for other agents.
+ */
+const readSorbetBuildVersion = (entry: AcpCapabilityCacheEntry): string | undefined => {
+  if (entry.cliType !== 'builtin' || entry.agentType !== 'sorbet') return undefined;
+  const sourceVersion = entry.sourceVersion;
+  if (!sourceVersion?.startsWith(SORBET_SOURCE_VERSION_PREFIX)) return undefined;
+  const [build] = sourceVersion.slice(SORBET_SOURCE_VERSION_PREFIX.length).split('+', 1);
+  return build ? build : undefined;
+};
+
+/**
+ * A parsed capability entry remains readable regardless of the producer's cache version.
+ * `cacheVersion` is a refresh hint, not a data-compatibility gate: mixed-version clients
+ * keep using fields they understand while a newer probe converges the stored entry.
+ */
+export const getReadableAcpCapabilityCacheEntry = (
+  entry: AcpCapabilityCacheEntry | undefined
+): AcpCapabilityCacheEntry | undefined => {
+  if (!entry) {
+    return undefined;
+  }
+  // Sorbet is on a floating dist-tag, so the build that wrote an entry is only knowable
+  // from the version stamped into `sourceVersion`. Drop the method list those early
+  // builds could not discover; every other entry keeps the list it reported.
+  if (
+    SORBET_STALE_AUTH_DISCOVERY_VERSIONS.has(readSorbetBuildVersion(entry) ?? '') &&
+    entry.authMethods !== undefined
+  ) {
+    const { authMethods: _staleAuthMethods, ...compatible } = entry;
+    entry = compatible;
+  }
+  if ((entry.cacheVersion ?? 0) < 11 && entry.availableCommands !== undefined) {
+    const { availableCommands: _projectCommands, ...compatible } = entry;
+    entry = compatible;
+  }
+  // Cache v7 stopped deriving bracketed model suffixes as reasoning efforts for
+  // non-Codex agents. Preserve every other understood field from older entries,
+  // but do not revive the known-bad derived map while waiting for a fresh probe.
+  if (
+    (entry.cacheVersion ?? 0) < 7 &&
+    (entry.cliType !== 'builtin' || entry.agentType !== 'codex') &&
+    entry.modelReasoningEfforts
+  ) {
+    const { modelReasoningEfforts: _incompatibleModelReasoningEfforts, ...compatible } = entry;
+    return compatible;
+  }
+  return entry;
+};
+
+export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
+  entry: AcpCapabilityCacheEntry | undefined,
+  runtimeOverrides: BuiltinRuntimeOverrides | undefined
+): AcpCapabilityCacheEntry | undefined => {
+  const readableEntry = getReadableAcpCapabilityCacheEntry(entry);
+  if (!readableEntry) {
+    return undefined;
+  }
+  const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
+  const matches = sourceVersionSuffix
+    ? readableEntry.sourceVersion?.endsWith(sourceVersionSuffix) === true
+    : readableEntry.cliType !== 'builtin' ||
+      readableEntry.agentType !== 'pi' ||
+      !readableEntry.sourceVersion?.includes('+override:');
+  return matches ? readableEntry : undefined;
+};
+
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   entry: AcpCapabilityCacheEntry | undefined,
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
@@ -331,24 +589,57 @@ export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   if (!isAcpCapabilityCacheEntryCurrent(entry)) {
     return false;
   }
-  const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
-  return !sourceVersionSuffix || entry.sourceVersion?.endsWith(sourceVersionSuffix) === true;
+  return (
+    getReadableAcpCapabilityCacheEntryForRuntimeOverrides(entry, runtimeOverrides) !== undefined
+  );
 };
 
 export const getAcpCapabilityCacheEntryAuthority = (
   entry: AcpCapabilityCacheEntry | undefined,
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
 ): AcpCapabilityAuthority => {
-  if (!isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(entry, runtimeOverrides)) {
+  const readableEntry = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+    entry,
+    runtimeOverrides
+  );
+  if (!readableEntry) {
     return 'unavailable';
   }
-  return entry.provenance === 'runtime' ? 'authoritative' : 'provisional';
+  if (readableEntry.provenance !== 'runtime') {
+    return 'provisional';
+  }
+  // A runtime-probed entry that advertises a model select with zero choices was
+  // read while the agent's catalog was unavailable — the picker the user sees
+  // renders that select directly, so the entry is verified-but-degraded rather
+  // than authoritative.
+  if (hasEmptyModelSelectOption(readableEntry.configOptions)) {
+    return 'degraded';
+  }
+  return 'authoritative';
 };
+
+/**
+ * Whether a normalized (or persisted) config-option list advertises a model
+ * selector with no choices. The agent clearly intends to expose model
+ * selection — it emitted the option — but produced an empty catalog, which is
+ * a probe-time degradation (cold upstream cache, startup race, auth lag), not
+ * an agent that legitimately has no values. Selectors render this select
+ * directly (they do not fall back to `models`), so an entry in this state must
+ * never answer a capability refresh or be presented as fully verified.
+ */
+export const hasEmptyModelSelectOption = (
+  configOptions: AcpConfigOptionSummary[] | undefined
+): boolean =>
+  (configOptions ?? []).some(
+    (option) =>
+      option.type === 'select' && option.category === 'model' && option.options.length === 0
+  );
 
 export type AcpCapabilityCacheStaleReason =
   | 'missing'
   | 'cache-version-mismatch'
-  | 'source-version-mismatch';
+  | 'source-version-mismatch'
+  | 'empty-model-catalog';
 
 export const getAcpCapabilityCacheStaleReason = (
   entry: AcpCapabilityCacheEntry | undefined,
@@ -363,7 +654,109 @@ export const getAcpCapabilityCacheStaleReason = (
   if (entry.sourceVersion !== expectedSourceVersion) {
     return 'source-version-mismatch';
   }
+  if (hasEmptyModelSelectOption(entry.configOptions)) {
+    return 'empty-model-catalog';
+  }
   return undefined;
+};
+
+/**
+ * How long a persisted runtime capability entry may answer a
+ * `machine/acp-capabilities-refresh` request without starting the agent again.
+ *
+ * `sourceVersion` already covers every input Lody controls (adapter version,
+ * managed-runtime version, runtime-override path, custom launch spec, and the
+ * env values that change an agent's identity), so the TTL exists only for drift
+ * Lody cannot observe: slash commands, sub-agents or model entitlements that the
+ * user changes in the agent's own configuration. Two other paths converge faster
+ * than the TTL — creating a real session rewrites the entry from that session's
+ * own `session/new` response, and Settings offers an explicit forced refresh —
+ * so the TTL only bounds staleness for agents nobody launches, where it costs at
+ * most one probe per config per day.
+ */
+export const ACP_CAPABILITY_REFRESH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Age after which rewriting an unchanged capability entry is worth a Machine
+ * Flock write, solely to move `fetchedAt` forward.
+ *
+ * Writers skip unchanged entries so that every probe and every created session
+ * does not cost a Flock write, flush and sync. That skip must not outlive the
+ * TTL, or an entry whose content never changes expires once and then misses
+ * forever. Half the TTL is the smallest window that still gives two guarantees
+ * at once: a renewal is at most one write per config per half-TTL no matter how
+ * often sessions start or refreshes are forced, and an agent that starts even
+ * one session per half-TTL keeps its entry fresh without any probe at all,
+ * because that session's own write lands before the entry can expire.
+ */
+export const ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS = ACP_CAPABILITY_REFRESH_CACHE_TTL_MS / 2;
+
+/** Whether an unchanged entry should still be rewritten to renew its fetch time. */
+export const shouldRenewAcpCapabilityFetchTime = (
+  entry: Pick<AcpCapabilityCacheEntry, 'fetchedAt'>,
+  nowMs: number
+): boolean => nowMs - entry.fetchedAt >= ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS;
+
+export type AcpCapabilityRefreshCacheMissReason =
+  | AcpCapabilityCacheStaleReason
+  | 'source-version-unresolved'
+  | 'launch-inputs-unknown'
+  | 'launch-inputs-changed'
+  | 'not-runtime-provenance'
+  | 'expired';
+
+export type AcpCapabilityRefreshCacheDecision =
+  | { hit: true; entry: AcpCapabilityCacheEntry }
+  | { hit: false; reason: AcpCapabilityRefreshCacheMissReason };
+
+/**
+ * Whether the launch inputs that produced a persisted entry match the ones a
+ * probe would use now. `sourceVersion` cannot answer this alone: for custom and
+ * registry configs, and for every builtin except DeepSeek's base URL, it does not
+ * depend on the config's environment, and a token or endpoint change can still
+ * change what the agent advertises. The answering daemon remembers a fingerprint
+ * per entry it wrote, in memory only, so this is `'unknown'` after a restart.
+ */
+export type AcpCapabilityLaunchInputsMatch = 'matching' | 'changed' | 'unknown';
+
+/**
+ * Decides whether a capability refresh may be answered from the persisted entry.
+ *
+ * `expectedSourceVersion` is `undefined` when the caller cannot name the version
+ * a fresh probe would produce (an uninstalled managed runtime, for example); that
+ * is always a miss, never an implicit hit. A future-dated `fetchedAt` counts as
+ * fresh because both sides stamp it from the same server clock, so a negative age
+ * means clock adjustment rather than an entry worth re-probing.
+ */
+export const decideAcpCapabilityRefreshCache = (args: {
+  entry: AcpCapabilityCacheEntry | undefined;
+  expectedSourceVersion: string | undefined;
+  launchInputs: AcpCapabilityLaunchInputsMatch;
+  nowMs: number;
+  ttlMs?: number;
+}): AcpCapabilityRefreshCacheDecision => {
+  const { entry, expectedSourceVersion, launchInputs, nowMs } = args;
+  const ttlMs = args.ttlMs ?? ACP_CAPABILITY_REFRESH_CACHE_TTL_MS;
+  if (expectedSourceVersion === undefined) {
+    return { hit: false, reason: 'source-version-unresolved' };
+  }
+  if (launchInputs !== 'matching') {
+    return {
+      hit: false,
+      reason: launchInputs === 'changed' ? 'launch-inputs-changed' : 'launch-inputs-unknown',
+    };
+  }
+  const staleReason = getAcpCapabilityCacheStaleReason(entry, expectedSourceVersion);
+  if (staleReason || !entry) {
+    return { hit: false, reason: staleReason ?? 'missing' };
+  }
+  if (entry.provenance !== 'runtime') {
+    return { hit: false, reason: 'not-runtime-provenance' };
+  }
+  if (nowMs - entry.fetchedAt > ttlMs) {
+    return { hit: false, reason: 'expired' };
+  }
+  return { hit: true, entry };
 };
 
 export const isBuiltinAgentType = (agentType: string): agentType is BuiltinAgentType =>
@@ -376,6 +769,18 @@ export const isManagedBuiltinAgentType = (
   agentType: string
 ): agentType is ManagedBuiltinAgentType =>
   MANAGED_BUILTIN_RUNTIMES.some((runtime) => runtime.agentType === agentType);
+
+/**
+ * Builtins that may be created through the durable provider-setup queue.
+ * Managed runtimes use it for download + verification; Bub uses the same queue
+ * only to keep its user-installed command unpublished until a live probe passes.
+ * Dimcode uses the same verification path with its npx-managed package.
+ */
+export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
+  isManagedBuiltinAgentType(agentType) ||
+  agentType === 'bub' ||
+  agentType === 'dimcode' ||
+  agentType === 'sorbet';
 
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string
@@ -391,18 +796,23 @@ export type StaticBuiltinAcpCapabilities = {
   modes: Array<{ id: string; name: string; description?: string }>;
   models: Array<{ modelId: string; name: string; description?: string }>;
   configOptions: AcpConfigOptionSummary[];
+  /** Per-model reasoning-effort ladders, mirroring the cached runtime map. */
+  modelReasoningEfforts?: Record<string, string[]>;
 };
 
 /** Codex mode that routes approval requests to a model reviewer subagent. */
 export const CODEX_AUTO_REVIEW_MODE_ID = 'agent-auto-review';
 
-const BUILTIN_DEFAULT_MODE_IDS: Record<BuiltinAgentType, string> = {
+const BUILTIN_DEFAULT_MODE_IDS = {
+  antigravity: 'default',
   kimi: 'auto',
-  grok: 'agent',
+  // Grok advertises `default` / `plan`, not Codex `agent`. Injecting `agent`
+  // makes Role/MCP session create fail with "Unsupported ACP mode".
+  grok: 'default',
   claude: 'auto',
   codex: CODEX_AUTO_REVIEW_MODE_ID,
   deepseek: 'workspace-write',
-};
+} as const satisfies Partial<Record<BuiltinAgentType, string>>;
 
 /**
  * Lody-owned mode default for builtin agents when a turn has no
@@ -414,10 +824,11 @@ export const getBuiltinDefaultModeId = (
   agentType: AgentType | null | undefined
 ): string | undefined =>
   cliType === 'builtin' && agentType && isBuiltinAgentType(agentType)
-    ? BUILTIN_DEFAULT_MODE_IDS[agentType]
+    ? BUILTIN_DEFAULT_MODE_IDS[agentType as keyof typeof BUILTIN_DEFAULT_MODE_IDS]
     : undefined;
 
 const DEEPSEEK_HARNESS_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
+  { ...createPlanModeConfigOption(false), options: [] },
   {
     id: 'mode',
     name: 'Permission',
@@ -439,28 +850,6 @@ const DEEPSEEK_HARNESS_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
     type: 'select',
     currentValue: 'standard',
     options: DEEPSEEK_HARNESS_AGENT_PRESETS.map((preset) => ({ ...preset })),
-  },
-  {
-    id: 'model',
-    name: 'Model',
-    description: 'DeepSeek model used for the session',
-    category: 'model',
-    type: 'select',
-    currentValue: 'deepseek-v4-pro',
-    options: DEEPSEEK_HARNESS_MODELS.map((model) => ({
-      value: model.modelId,
-      name: model.name,
-      description: model.description,
-    })),
-  },
-  {
-    id: 'reasoning_effort',
-    name: 'Reasoning effort',
-    description: 'How much reasoning effort the model should use',
-    category: 'thought_level',
-    type: 'select',
-    currentValue: 'max',
-    options: DEEPSEEK_HARNESS_REASONING_OPTIONS.map((option) => ({ ...option })),
   },
 ];
 
@@ -575,20 +964,8 @@ const CODEX_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
     options: [],
   },
   {
-    id: 'collaboration_mode',
-    name: 'Collaboration mode',
-    description: 'How Codex collaborates for subsequent turns',
-    category: 'collaboration_mode',
-    type: 'select',
-    currentValue: 'default',
-    options: [
-      { value: 'default', name: 'Default' },
-      {
-        value: 'plan',
-        name: 'Plan',
-        description: 'Plan before making changes',
-      },
-    ],
+    ...createPlanModeConfigOption(false),
+    options: [],
   },
 ];
 
@@ -600,7 +977,7 @@ const CLAUDE_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
   },
   {
     id: 'default',
-    name: 'Default',
+    name: 'Manual',
     description: 'Standard behavior, prompts for dangerous operations',
   },
   {
@@ -618,6 +995,11 @@ const CLAUDE_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
     name: "Don't Ask",
     description: "Don't prompt for permissions, deny if not pre-approved",
   },
+  {
+    id: 'bypassPermissions',
+    name: 'Bypass Permissions',
+    description: 'Bypass all permission checks',
+  },
 ];
 
 /**
@@ -632,9 +1014,9 @@ const CLAUDE_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
  * - `render: 'icon'` + `tone: 'neutral'`: a notable but non-risky mode
  *   (read-only, accept-edits, plan) — plain indicator.
  * - `render: 'icon'` + `tone: 'warning'`: a mode that changes the safety model —
- *   Codex `agent-full-access` (Full access) OR Claude `dontAsk` (Don't Ask /
- *   skip permissions, which drops the human out of the approval loop) — amber so
- *   the risk is visible at a glance.
+ *   Codex `agent-full-access` (Full access), Claude `dontAsk` (Don't Ask /
+ *   skip permissions), or Claude `bypassPermissions` (bypass all checks) — amber
+ *   so the risk is visible at a glance.
  * - `render: 'auto-label'`: show the literal short text "Auto" (Claude auto and
  *   Codex agent-auto-review route approval prompts to a reviewing model, so a
  *   short name fits better than a glyph).
@@ -677,6 +1059,8 @@ export function classifyPermissionModeFace(modeId: string | null | undefined): P
     case 'dontAsk':
       // "Don't Ask" skips the human approval prompt — flag it like full access.
       return { kind: 'deny', tone: 'warning', render: 'icon' };
+    case 'bypassPermissions':
+      return { kind: 'full-access', tone: 'warning', render: 'icon' };
     case 'yolo':
     case 'always-approve':
       return { kind: 'full-access', tone: 'warning', render: 'icon' };
@@ -690,28 +1074,28 @@ export function classifyPermissionModeFace(modeId: string | null | undefined): P
 const CLAUDE_STATIC_MODELS: StaticBuiltinAcpCapabilities['models'] = [
   {
     modelId: 'default',
-    name: 'Default',
-    description: 'Claude Code default model',
+    name: 'Default (recommended)',
+    description: 'Opus (1M context)',
   },
   {
-    modelId: 'opus',
-    name: 'Opus',
-    description: 'Claude Opus',
+    modelId: 'opus[1m]',
+    name: 'Opus (1M context)',
+    description: 'Opus 5 with 1M context · Best for everyday, complex tasks',
   },
   {
-    modelId: 'claude-fable-5[1m]',
+    modelId: 'claude-fable-5-1[1m]',
     name: 'Fable',
-    description: 'Claude Fable 5 with 1M context',
+    description: 'Fable 5.1 · Most capable for your hardest and longest-running tasks',
   },
   {
     modelId: 'sonnet',
     name: 'Sonnet',
-    description: 'Claude Sonnet',
+    description: 'Sonnet 5 · Efficient for routine tasks',
   },
   {
     modelId: 'haiku',
     name: 'Haiku',
-    description: 'Claude Haiku',
+    description: 'Haiku 4.5 · Fastest for quick answers',
   },
 ];
 
@@ -754,7 +1138,18 @@ const CLAUDE_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
       { value: 'low', name: 'Low' },
       { value: 'medium', name: 'Medium' },
       { value: 'high', name: 'High' },
+      { value: 'xhigh', name: 'Xhigh' },
+      { value: 'max', name: 'Max' },
     ],
+  },
+  {
+    id: 'fast',
+    name: 'Fast mode',
+    description: 'Faster responses on supported models',
+    category: 'model_config',
+    type: 'boolean',
+    currentValue: false,
+    options: [],
   },
 ];
 
@@ -783,17 +1178,18 @@ const KIMI_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
 
 const KIMI_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
   {
-    id: 'mode',
-    name: 'Mode',
-    category: 'mode',
+    id: 'permission_mode',
+    name: 'Permission',
+    category: '_permission',
     type: 'select',
     currentValue: BUILTIN_DEFAULT_MODE_IDS.kimi,
-    options: KIMI_STATIC_MODES.map((mode) => ({
+    options: KIMI_STATIC_MODES.filter((mode) => mode.id !== 'plan').map((mode) => ({
       value: mode.id,
       name: mode.name,
       description: mode.description ?? undefined,
     })),
   },
+  { ...createPlanModeConfigOption(false), options: [] },
 ];
 
 const GROK_STATIC_MODES: StaticBuiltinAcpCapabilities['modes'] = [
@@ -822,22 +1218,7 @@ const GROK_STATIC_MODELS: StaticBuiltinAcpCapabilities['models'] = [
 ];
 
 const GROK_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
-  {
-    id: 'interaction_mode',
-    name: 'Interaction Mode',
-    description: 'Controls whether the agent acts, plans, or answers read-only questions',
-    category: 'mode',
-    type: 'select',
-    currentValue: BUILTIN_DEFAULT_MODE_IDS.grok,
-    options: [
-      { value: 'agent', name: 'Agent', description: 'Use tools and make changes when needed' },
-      {
-        value: 'plan',
-        name: 'Plan',
-        description: 'Plan and reason without modifying the workspace',
-      },
-    ],
-  },
+  { ...createPlanModeConfigOption(false), options: [] },
   {
     id: 'permission_mode',
     name: 'Permission Mode',
@@ -850,11 +1231,6 @@ const GROK_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
         value: 'ask',
         name: 'Ask Every Time',
         description: 'Request approval before protected actions',
-      },
-      {
-        value: 'auto',
-        name: 'Auto',
-        description: 'Let Grok decide when approval is required (experimental)',
       },
       {
         value: 'always-approve',
@@ -892,7 +1268,9 @@ const GROK_STATIC_CONFIG_OPTIONS: AcpConfigOptionSummary[] = [
   },
 ];
 
-const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcpCapabilities> = {
+const STATIC_BUILTIN_ACP_CAPABILITIES: Partial<
+  Record<BuiltinAgentType, StaticBuiltinAcpCapabilities>
+> = {
   claude: {
     modes: CLAUDE_STATIC_MODES,
     models: CLAUDE_STATIC_MODELS,
@@ -912,10 +1290,14 @@ const STATIC_BUILTIN_ACP_CAPABILITIES: Record<BuiltinAgentType, StaticBuiltinAcp
     modes: GROK_STATIC_MODES,
     models: GROK_STATIC_MODELS,
     configOptions: GROK_STATIC_CONFIG_OPTIONS,
+    modelReasoningEfforts: {
+      'grok-4.6': ['xhigh', 'high', 'medium', 'low'],
+      'grok-4.5': ['high', 'medium', 'low'],
+    },
   },
   deepseek: {
     modes: DEEPSEEK_HARNESS_PERMISSION_MODES.map((mode) => ({ ...mode })),
-    models: DEEPSEEK_HARNESS_MODELS.map((model) => ({ ...model })),
+    models: [],
     configOptions: DEEPSEEK_HARNESS_CONFIG_OPTIONS,
   },
 };
@@ -931,6 +1313,16 @@ const cloneStaticCapabilities = (
   modes: capabilities.modes.map((mode) => ({ ...mode })),
   models: capabilities.models.map((model) => ({ ...model })),
   configOptions: capabilities.configOptions.map(cloneConfigOption),
+  ...(capabilities.modelReasoningEfforts
+    ? {
+        modelReasoningEfforts: Object.fromEntries(
+          Object.entries(capabilities.modelReasoningEfforts).map(([modelId, efforts]) => [
+            modelId,
+            [...efforts],
+          ])
+        ),
+      }
+    : {}),
 });
 
 /**
@@ -951,7 +1343,8 @@ export const getStaticBuiltinAcpCapabilities = (
   if (hasBuiltinRuntimeOverrideValues(runtimeOverrides)) {
     return undefined;
   }
-  return cloneStaticCapabilities(STATIC_BUILTIN_ACP_CAPABILITIES[agentType]);
+  const capabilities = STATIC_BUILTIN_ACP_CAPABILITIES[agentType];
+  return capabilities ? cloneStaticCapabilities(capabilities) : undefined;
 };
 
 /**
@@ -1005,25 +1398,25 @@ const selectByLowestRank = (
 /**
  * Computes runtime title-generation configOptionValues from current ACP capabilities.
  *
- * These are not agent-specific hardcoded defaults. When the user has not configured title
- * generation, choose the least-privileged mode, the last listed model, and the smallest
- * reasoning effort from the agent's current configOptions.
+ * Builtin Codex defaults to Luna, low reasoning, and full access. Other providers
+ * retain their current model; only explicitly configured title models are applied.
+ * Safe mode and reasoning defaults are inferred from advertised capabilities.
  */
 export function computeTitleGenerationDefaults(
-  _cliType: AgentConfigCliType,
-  _agentType: AgentType,
+  cliType: AgentConfigCliType,
+  agentType: AgentType,
   configOptions: AcpConfigOptionSummary[]
 ): Record<string, AcpConfigOptionValue> {
+  if (cliType === 'builtin' && agentType === 'codex') {
+    return { model: 'gpt-5.6-luna', reasoning_effort: 'low', mode: 'agent-full-access' };
+  }
   const defaults: Record<string, AcpConfigOptionValue> = {};
   for (const opt of configOptions) {
     if (opt.type !== 'select') {
       continue;
     }
 
-    if (opt.category === 'model') {
-      const lastOption = opt.options.length > 0 ? opt.options[opt.options.length - 1] : undefined;
-      defaults[opt.id] = lastOption?.value ?? opt.currentValue;
-    } else if (opt.category === 'mode') {
+    if (opt.category === 'mode') {
       defaults[opt.id] =
         selectByLowestRank(opt.options, leastPermissionModeRank) ?? opt.currentValue;
     } else if (opt.id === 'reasoning_effort' || opt.category === 'thought_level') {
@@ -1066,6 +1459,8 @@ export type SystemNoticeName =
   | 'chat_failed'
   | 'agent_warning'
   | 'task_proposal'
+  | 'schedule_proposal'
+  | 'agent_role_proposal'
   | 'session_fork_origin';
 
 /**
@@ -1105,6 +1500,7 @@ export type ChatFailedReason =
   | 'acp_auth_required' // -32000: Authentication required
   | 'acp_internal_error' // -32603: Internal JSON-RPC error
   | 'acp_upstream_api_error' // -32603 with upstream API error (500/529) - transient, retryable
+  | 'acp_provider_overloaded' // provider capacity exhausted; safe to continue in a new turn
   | 'acp_session_storage_incompatible' // -32603 from an incompatible session-persistence root
   | 'acp_resource_not_found' // -32002: Resource not found
   | 'acp_request_cancelled' // -32800: Request cancelled
@@ -1126,6 +1522,10 @@ export type ChatFailedMeta = {
   code?: ChatFailedCode;
   /** Human-readable error message */
   message?: string;
+  /** Quota reset instant named by the provider or its capacity observation. */
+  resetAt?: string;
+  /** Epoch-seconds form used by provider capacity observations. */
+  resetAtEpochSeconds?: number;
 };
 
 /**
@@ -1162,10 +1562,8 @@ export type MessageItemActor = {
 };
 
 /**
- * Metadata for the task_proposal system notice: an agent suggesting that work
- * be recorded as a task. The notice stays in history unresolved, so a proposal
- * ignored today can still be confirmed days later — unlike a dialog, which
- * would vanish while the session ran unattended.
+ * Leftover metadata for stored `task_proposal` system notices. The Tasks
+ * product is gone; this shape exists only so existing history still parses.
  */
 export type TaskProposalMeta = {
   /** Stable id so repeated proposals of the same work do not stack up. */
@@ -1182,6 +1580,55 @@ export type TaskProposalMeta = {
 };
 
 /**
+ * The time rule an agent may propose: exactly the named shapes the schedule
+ * editor offers, never cron. `timeZone` is optional because the person, not the
+ * agent, is where the wall clock lives; the client fills in its own zone.
+ */
+export type ScheduleProposalRule =
+  | { kind: 'manual' }
+  | { kind: 'minutes'; every: number }
+  | { kind: 'hours'; every: number }
+  | { kind: 'daily'; hour: number; minute: number; timeZone?: string }
+  | { kind: 'weekdays'; hour: number; minute: number; timeZone?: string }
+  | { kind: 'weekly'; weekdays: number[]; hour: number; minute: number; timeZone?: string }
+  | { kind: 'monthly'; days: number[]; hour: number; minute: number; timeZone?: string }
+  | { kind: 'once'; at: string };
+
+/**
+ * Where a proposed schedule runs, when the person named it in conversation.
+ * Anything absent is taken from the conversation the proposal was made in.
+ */
+export type ScheduleProposalTarget = {
+  agentConfigId?: string;
+  agentRoleId?: string;
+  machineId?: string;
+  project?: ProjectRef;
+};
+
+/**
+ * Metadata for the schedule_proposal system notice: an agent has gathered
+ * enough to schedule a task and is asking the person to create it. Confirming
+ * on the card IS the creation; there is no form afterwards. Like a task
+ * proposal, it stays in history unresolved until acted on.
+ */
+export type ScheduleProposalMeta = {
+  /** Stable id; a retried proposal replaces itself instead of stacking. */
+  proposalId: string;
+  title: string;
+  prompt: string;
+  rule: ScheduleProposalRule;
+  destination?:
+    | { kind: 'new_session' }
+    | { kind: 'own_session' }
+    | { kind: 'existing_session'; sessionId: string };
+  target?: ScheduleProposalTarget;
+  outcome?: 'created' | 'dismissed';
+  /** Set once the person confirmed and the schedule exists. */
+  scheduleId?: string;
+  proposedBy?: MessageItemActor;
+};
+
+/**
  * System notice metadata by notice name
  */
 export type SystemNoticeMeta = {
@@ -1189,6 +1636,8 @@ export type SystemNoticeMeta = {
   chat_failed: ChatFailedMeta;
   agent_warning: AgentWarningMeta;
   task_proposal: TaskProposalMeta;
+  schedule_proposal: ScheduleProposalMeta;
+  agent_role_proposal: AgentRoleProposalMeta;
   session_fork_origin: SessionForkOriginMeta;
 };
 
@@ -1203,6 +1652,12 @@ export const SESSION_IMAGE_ALLOWED_MIME_TYPES = [
 ] as const;
 
 export type SessionImagePayload = {
+  /** Absent transport preserves the existing cloud image contract. */
+  transport?: 'local' | 'r2';
+  machineId?: string;
+  /** Immutable local snapshot identity retained after relay publication. */
+  localImageId?: string;
+  encryption?: import('./encrypted-attachment').EncryptedAttachment;
   imageId: string;
   mimeType: string;
   fileName?: string;
@@ -1240,6 +1695,14 @@ export type SessionFileTransport = 'r2' | 'local';
  * absolute or parent-traversing path when it reaches a different machine.
  */
 export function isSessionFileSourcePath(value: string): boolean {
+  if (value.startsWith('\0')) {
+    const decoded = decodeSessionFilePath(value);
+    return (
+      decoded !== undefined &&
+      decoded.rootId !== 'main' &&
+      isSessionFileSourcePath(decoded.relativePath)
+    );
+  }
   if (value.length === 0 || value.includes('\0')) return false;
   const normalized = value.replace(/\\/g, '/');
   if (normalized === '.' || normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
@@ -1248,7 +1711,19 @@ export function isSessionFileSourcePath(value: string): boolean {
   return !normalized.split('/').some((segment) => segment === '..');
 }
 
+/** A machine-local path, never a blob key or an upload candidate. */
+export type SessionLocalAttachment = {
+  type: 'local_attachment';
+  machineId: string;
+  path: string;
+  kind: 'file' | 'image';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
 export type SessionFilePayload = {
+  encryption?: import('./encrypted-attachment').EncryptedAttachment;
   type: 'file';
   /** Unique identifier; also the relay-store key. Generated by the uploader. */
   fileId: string;
@@ -1359,6 +1834,7 @@ export type SessionInputBlock =
       type: 'image';
     } & SessionImagePayload)
   | SessionFilePayload
+  | SessionLocalAttachment
   | ({
       type: 'comment_reference';
     } & CommentReferencePayload)
@@ -1386,6 +1862,13 @@ export type SubagentTaskUsage = {
  * event into the transcript.
  */
 export type SubagentTaskPayload = {
+  /** Normalized run transcript. Absent on legacy provider task rows. */
+  run?: {
+    sessionId: string;
+    snapshot: LodySubagentSnapshot;
+    progress?: LodySubagentProgress;
+    items: SubagentRunItem[];
+  };
   taskId: string;
   status: SubagentTaskStatus;
   /** Provider-neutral task category published through `_meta.lody.task`. */
@@ -1416,10 +1899,16 @@ export type SubagentTaskPayload = {
   hasOutputFile?: boolean;
 };
 
+export type SubagentRunItem = Extract<
+  MessageContent,
+  { type: 'text' | 'thought' | 'tool_call' | 'plan' }
+> & { nativeTurnId?: string; messageId?: string };
+
 export type MessageContent =
   | {
       type: 'text';
       text: string;
+      messagePhase?: 'commentary' | 'final_answer';
       /** Mention regions of `text`. See `message-text-spans.ts`. */
       spans?: MessageTextSpan[];
     }
@@ -1428,6 +1917,7 @@ export type MessageContent =
     } & SessionImagePayload)
   | SessionImageGroupContent
   | SessionFilePayload
+  | SessionLocalAttachment
   | {
       type: 'thought';
       text: string;
@@ -1446,6 +1936,7 @@ export type MessageContent =
   | SessionGoalContent
   | {
       type: 'tool_call';
+      _meta?: { [k: string]: unknown } | null;
       toolCallId: string;
       title?: string | null;
       status: ToolCallStatus;
@@ -1470,6 +1961,15 @@ export type MessageContent =
        * for scheduling tool calls; see `collectPendingScheduledTasksFromHistory`.
        */
       schedulingTimeZone?: string;
+      /**
+       * Epoch ms when this tool call was first persisted by the machine that ran it.
+       * Only set for scheduling tool calls: the turn entry's timestamps are NOT a safe
+       * proxy for the creation moment (cron-fire follow-up turns are runtime-internal
+       * steers, so one history entry can aggregate several runtime turns and its
+       * `endedAt` keeps advancing past a one-shot's fire minute). See
+       * `collectPendingScheduledTasksFromHistory`.
+       */
+      recordedAtMs?: number;
       permissionRequest?: {
         requestId: string;
         options: PermissionOption[];
@@ -1485,11 +1985,21 @@ export type MessageContent =
       commands: AvailableCommand[];
     }
   | {
-      type: 'system_notice';
-      name: SystemNoticeName;
-      meta?: SystemNoticeMeta[SystemNoticeName];
+      [Name in SystemNoticeName]: {
+        type: 'system_notice';
+        name: Name;
+        meta?: SystemNoticeMeta[Name];
+      };
+    }[SystemNoticeName]
+  | {
+      type: 'operation_completion_batch';
+      batchId: string;
+      memberCount: number;
+      members?: OperationCompletionContent[];
+      deliveryStatus?: 'prepared' | 'submitted' | 'unknown' | 'settled' | 'not_submitted';
     }
   | OperationCompletionContent
+  | OperationProgressContent
   | {
       type: 'worktree_script';
       phase: WorktreeScriptPhase;
@@ -1525,6 +2035,8 @@ export type TerminalCommandBlock = {
   command: string;
   args?: string[];
   cwd?: string;
+  /** History kept only the head of command + args (1 KiB budget). */
+  truncated?: boolean;
 };
 
 export type TerminalOutputBlock = {
@@ -1558,23 +2070,30 @@ export type IssuePRMention = {
   number: number;
 };
 
-export type ACPSessionConfig = {
+export type ACPTurnConfig = {
+  memory?: MemoryBinding;
+  /** Frozen effective execution text, including accepted Config/Role instructions. */
   prompt: string;
+  /** Authored input for display/editing and structured attachments for execution. */
   inputBlocks?: SessionInputBlock[];
   cliType: AgentConfigCliType;
   agentType: AgentType;
-  /** Launch spec for `cliType: 'custom'` agents; resolved from the agent config / session meta. */
-  customAcp?: CustomAcpLaunchSpec;
-  /** Advanced runtime binary override for builtin Claude/Codex agents. */
-  runtimeOverrides?: BuiltinRuntimeOverrides;
   modeId?: SessionMode['id'];
   modelId?: string;
   /** Config option values (configId → value) for setSessionConfigOption. */
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   /** Workspace MCP catalog ids selected for this session. */
   mcpServerIds?: McpServerId[];
-  /** Whether the built-in Lody Task MCP tools are available to this Turn's Agent session. */
-  taskToolsEnabled?: boolean;
+  /**
+   * Agent Role identity selected in the composer for this Turn. Null is an
+   * explicit None selection; absence is legacy/unknown. This is provenance for
+   * restoring synchronized composer state, not an instruction to re-resolve the
+   * mutable Role catalog during execution.
+   */
+  agentRoleId?: AgentRoleId | null;
+  /** Catalog revision whose values were frozen into this Turn. */
+  agentRoleRevision?: number;
+  agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
   issuePRMentions?: IssuePRMention[];
   // continue to chat
   resume?: ACPSessionId;
@@ -1582,9 +2101,23 @@ export type ACPSessionConfig = {
   chainDepth?: number;
 };
 
+/** Provider launch fields belong only to the durable session config, never per-turn input. */
+export type ACPSessionConfig = ACPTurnConfig & {
+  /** Launch spec for `cliType: 'custom'` agents; resolved from the agent config / session meta. */
+  customAcp?: CustomAcpLaunchSpec;
+  /** Advanced runtime binary override for builtin Claude/Codex agents. */
+  runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
+};
+
 /**
  * Persisted per-user-turn dispatch config.
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
-export type SessionTurnInputConfig = Partial<ACPSessionConfig>;
-import type { OperationCompletionContent } from './session-orchestration';
+export type SessionTurnInputConfig = Partial<ACPTurnConfig> & {
+  /** Attribution only; the Host checks its durable Invocation receipt at admission. */
+  _lodyAutomation?: import('./automations/contracts').AutomationOrigin;
+  /** An accepted steer has no independently editable provider turn boundary. */
+  _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
+};
+import type { OperationCompletionContent, OperationProgressContent } from './session-orchestration';

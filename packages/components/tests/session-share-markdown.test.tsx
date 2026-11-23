@@ -1,0 +1,642 @@
+// @vitest-environment jsdom
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { Provider, createStore } from 'jotai';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
+import { SessionReadonlyContext } from '../src/components/ai-gui/session-readonly-context';
+import { SessionLinkProvider } from '../src/components/ai-gui/session-link-context';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
+import type { WorkspaceId } from '@lody/shared';
+import { SESSION_DEEP_LINK_EVENT } from '../src/lib/session-deep-link';
+import { MarkdownFileResources } from '../src/components/ai-gui/markdown-file-image';
+import { SessionCommentMarkdown } from '../src/ui/diff-viewer/session-comment-markdown';
+import { MessageTextWithChips } from '../src/components/mentions/message-text-chips';
+import { prRemoteImagesEnabledAtom } from '../src/atoms/settings';
+import {
+  createFakeFileWorkspaceProvider,
+  type FileWorkspaceOpenResult,
+} from '../src/lib/file-workspace-provider';
+import { createTestI18n, withTestI18n } from './test-i18n';
+
+const testI18n = createTestI18n();
+
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+afterAll(async () => {
+  // Copy-tex installs a document listener; finish the renderer's lazy import before jsdom closes.
+  await vi.dynamicImportSettled();
+});
+
+describe('PR remote images', () => {
+  let root: Root, container: HTMLDivElement;
+  const store = createStore();
+  beforeEach(() => {
+    Object.defineProperty(window, '__LODY_ELECTRON__', { configurable: true, value: true });
+    store.set(prRemoteImagesEnabledAtom, false);
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    Reflect.deleteProperty(window, '__LODY_ELECTRON__');
+  });
+  const render = (body: string) =>
+    act(async () =>
+      root.render(
+        withTestI18n(
+          <Provider store={store}>
+            <SessionCommentMarkdown body={body} allowHtml />
+          </Provider>,
+          testI18n
+        )
+      )
+    );
+
+  it('loads a single image only after a click and does not transfer consent to a changed URL', async () => {
+    await render('![Diagram](https://images.example/one.png)');
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('img')).toBeNull();
+    const button = [...container.querySelectorAll('button')].find(
+      (item) => item.textContent === 'Load image'
+    );
+    expect(button).toBeDefined();
+    await act(async () => button!.click());
+    expect(container.querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(decodeURIComponent(new URL(container.querySelector('iframe')!.src).hash.slice(1))).toBe(
+      'https://images.example/one.png'
+    );
+    await render('![Diagram](https://images.example/two.png)');
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('loads automatically only when enabled and stops on disabling', async () => {
+    await render('![Diagram](https://images.example/one.png)');
+    await act(async () => store.set(prRemoteImagesEnabledAtom, true));
+    expect(container.querySelector('iframe')).not.toBeNull();
+    await act(async () => store.set(prRemoteImagesEnabledAtom, false));
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('requires consent again for an HTML image using a protocol-relative URL', async () => {
+    await render('<img src="//images.example/one.png" alt="Diagram" />');
+    expect(container.querySelector('iframe')).toBeNull();
+    await act(async () => container.querySelector('button')!.click());
+    const frame = container.querySelector('iframe')!;
+    expect(decodeURIComponent(new URL(frame.src).hash.slice(1))).toBe(
+      'https://images.example/one.png'
+    );
+  });
+
+  it('shows an error and retries after the isolated image fails', async () => {
+    await render('![Diagram](https://images.example/one.png)');
+    await act(async () => container.querySelector('button')!.click());
+    const frame = container.querySelector('iframe')!;
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: frame.contentWindow,
+          data: { kind: 'lody-pr-image-error' },
+        })
+      );
+    });
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).toContain('Unable to load image');
+    await act(async () => container.querySelector('button')!.click());
+    expect(container.querySelector('iframe')).not.toBeNull();
+  });
+});
+
+describe('anonymous Markdown resource boundary', () => {
+  let root: Root, container: HTMLDivElement;
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+  const render = (text: string) =>
+    act(async () =>
+      root.render(
+        withTestI18n(
+          <SessionReadonlyContext.Provider
+            value={{ renderImage: () => null, renderFiles: () => null }}
+          >
+            <MarkdownRenderer text={text} />
+          </SessionReadonlyContext.Provider>,
+          testI18n
+        )
+      )
+    );
+
+  it('does not load raw remote image URLs or instantiate a workspace image resolver', async () => {
+    await render('![Original diagram](https://source.example/signed-image?token=synthetic)');
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('Original diagram');
+  });
+
+  it('makes source attachment links inert while retaining ordinary explicit web navigation', async () => {
+    await render(
+      '[Attachment](https://api.example/api/workspaces/private/session-files/source/file)\n\n[Article](https://example.org/article)'
+    );
+    const links = [...container.querySelectorAll('a')];
+    expect(links.some((link) => link.href.includes('/session-files/'))).toBe(false);
+    expect(container.textContent).toContain('Attachment');
+    expect(links.some((link) => link.href === 'https://example.org/article')).toBe(true);
+  });
+});
+
+describe('conversation Markdown images across row remounts', () => {
+  let root: Root, container: HTMLDivElement;
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+  // Virtua unmounts a row outside its overscan and mounts it again on return.
+  const remount = async (text: string) => {
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(withTestI18n(<MarkdownRenderer text={text} />, testI18n)));
+  };
+
+  it('shows an unreachable image as its alt text, and keeps it so on the next mount', async () => {
+    const text = '![Local preview](/tmp/remount-unreachable.png)';
+    await act(async () => root.render(withTestI18n(<MarkdownRenderer text={text} />, testI18n)));
+    await act(async () => container.querySelector('img')!.dispatchEvent(new Event('error')));
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('[role="img"]')?.textContent).toBe('Local preview');
+
+    await remount(text);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('[role="img"]')?.textContent).toBe('Local preview');
+  });
+});
+
+describe('file Markdown images', () => {
+  let root: Root, container: HTMLDivElement;
+  const blobs = new Map<string, Blob>();
+  let sequence = 0;
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    vi.stubGlobal(
+      'URL',
+      class extends URL {
+        static createObjectURL(blob: Blob) {
+          const url = `blob:test-${++sequence}`;
+          blobs.set(url, blob);
+          return url;
+        }
+        static revokeObjectURL(url: string) {
+          blobs.delete(url);
+        }
+      }
+    );
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    expect(blobs.size).toBe(0);
+    vi.unstubAllGlobals();
+  });
+  const provider = () =>
+    createFakeFileWorkspaceProvider({
+      files: [{ path: 'images/plot.png', kind: 'binary', sourceState: 'live-readonly' }],
+      snapshots: {
+        'images/plot.png': { kind: 'binary', bytes: new Uint8Array([137, 80, 78, 71]) },
+      },
+    });
+  const render = (
+    source: Pick<ReturnType<typeof provider>, 'openFile'>,
+    automatic = false,
+    documentPath = 'docs/guide.md',
+    text = '# Complete document\n\n![Plot](../images/plot.png)\n\nText after the image.'
+  ) =>
+    act(async () =>
+      root.render(
+        withTestI18n(
+          <MarkdownFileResources
+            provider={source}
+            documentPath={documentPath}
+            automatic={automatic}
+            active
+          >
+            <MarkdownRenderer text={text} />
+          </MarkdownFileResources>,
+          testI18n
+        )
+      )
+    );
+  const click = () =>
+    act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+
+  it('renders all text first, reads only on click, and releases the resulting blob on close', async () => {
+    const source = provider();
+    const paths: string[] = [];
+    await render({
+      openFile: async (path) => {
+        paths.push(path);
+        return source.openFile(path);
+      },
+    });
+    expect(container.textContent).toContain('Complete document');
+    expect(container.textContent).toContain('Text after the image.');
+    expect(container.textContent).toContain('Load image');
+    expect(container.querySelector('img')).toBeNull();
+    expect(paths).toEqual([]);
+    await click();
+    expect(paths).toEqual(['images/plot.png']);
+    const img = container.querySelector('img')!;
+    expect(blobs.get(img.src)?.type).toBe('image/png');
+    expect(blobs.get(img.src)?.size).toBe(4);
+    await act(async () => img.dispatchEvent(new Event('load')));
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  it('shows a failed read and can retry it', async () => {
+    const source = provider();
+    let available = false;
+    await render({
+      openFile: (path) =>
+        available
+          ? source.openFile(path)
+          : Promise.resolve({
+              status: 'unavailable',
+              reason: 'transient-io',
+              message: 'Machine offline',
+            }),
+    });
+    await click();
+    expect(container.textContent).toContain('Machine offline');
+    expect(container.textContent).toContain('Retry');
+    available = true;
+    await click();
+    expect(container.querySelector('img')?.src).toMatch(/^blob:/);
+  });
+
+  it('discards a late read after switching documents and waits for another click', async () => {
+    let settle!: (result: FileWorkspaceOpenResult) => void;
+    const pending = new Promise<FileWorkspaceOpenResult>((resolve) => {
+      settle = resolve;
+    });
+    const source = { openFile: () => pending };
+    await render(source);
+    await click();
+    await render(source, false, 'other/guide.md');
+    await act(async () => settle(await provider().openFile('images/plot.png')));
+    expect(blobs.size).toBe(0);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('Load image');
+  });
+
+  it('does not carry a load request into a different provider', async () => {
+    await render(provider());
+    await click();
+    expect(blobs.size).toBe(1);
+    await render({
+      openFile: async () => {
+        throw new Error('Must not read the new machine');
+      },
+    });
+    expect(blobs.size).toBe(0);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('Load image');
+  });
+
+  it('shows a linked remote image on click instead of a copy-path chip', async () => {
+    const source = provider();
+    const paths: string[] = [];
+    await render(
+      {
+        openFile: async (path) => {
+          paths.push(path);
+          return source.openFile(path);
+        },
+      },
+      false,
+      'docs/guide.md',
+      'See [the plot](../images/plot.png).'
+    );
+    expect(container.textContent).toContain('the plot');
+    expect(container.textContent).toContain('Load image');
+    expect(container.querySelector('[aria-label^="Copy agent file path"]')).toBeNull();
+    expect(paths).toEqual([]);
+    await click();
+    expect(paths).toEqual(['images/plot.png']);
+    expect(blobs.get(container.querySelector('img')!.src)?.type).toBe('image/png');
+  });
+
+  it('loads linked same-machine images directly and keeps chips for other links', async () => {
+    const source = createFakeFileWorkspaceProvider({
+      files: [{ path: 'images/plot.png', kind: 'binary', sourceState: 'live-readonly' }],
+      snapshots: { 'images/plot.png': { kind: 'binary', url: 'lody-file://synthetic/image' } },
+    });
+    await render(
+      source,
+      true,
+      'docs/guide.md',
+      '[Plot](../images/plot.png) [Notes](../notes.md) [Line](../images/plot.png#L3)'
+    );
+    expect([...container.querySelectorAll('img')].map((img) => img.getAttribute('src'))).toEqual([
+      'lody-file://synthetic/image',
+    ]);
+    expect(
+      [...container.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'))
+    ).toEqual(['Copy agent file path: ../notes.md', 'Copy agent file path: ../images/plot.png#L3']);
+  });
+
+  it('cannot grant filesystem access to an anonymous share', async () => {
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          <SessionReadonlyContext.Provider
+            value={{ renderImage: () => null, renderFiles: () => null }}
+          >
+            <MarkdownFileResources
+              provider={{
+                openFile: async () => {
+                  throw new Error('Must not read');
+                },
+              }}
+              documentPath="docs/a.md"
+              automatic
+              active
+            >
+              <MarkdownRenderer text="![Private image](../images/plot.png) [Linked image](../images/plot.png)" />
+            </MarkdownFileResources>
+          </SessionReadonlyContext.Provider>,
+          testI18n
+        )
+      )
+    );
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toBe('Private image Linked image');
+  });
+});
+
+describe('Markdown session links', () => {
+  let root: Root, container: HTMLDivElement;
+  let opened: string[], events: AbortController;
+  beforeEach(() => {
+    opened = [];
+    events = new AbortController();
+    window.addEventListener(
+      SESSION_DEEP_LINK_EVENT,
+      (event) => opened.push((event as CustomEvent<string>).detail),
+      { signal: events.signal }
+    );
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    events.abort();
+    await act(async () => root.unmount());
+    container.remove();
+  });
+  const legacyText = 'See [@Independent review](session://1ed6ba53-93bc-46d5-91e3-bb693cb0e729).';
+
+  it.each([
+    ['https://app.example/acme/sessions/target', 'target'],
+    ['https://app.example/acme/sessions/root?tab=session%3Achild', 'child'],
+    ['https://app.example/acme/sessions/root?tab=files', 'root'],
+    ['https://app.example/acme/sessions/target', 'target', 'bare'],
+  ])('opens a trusted current-workspace URL inside Lody: %s', async (url, target, format) => {
+    vi.stubEnv('VITE_SITE_URL', 'https://app.example');
+    const store = createStore();
+    store.set(currentWorkspaceSlugAtom, 'acme');
+    store.set(currentWorkspaceIdAtom, 'ws_1' as WorkspaceId);
+    try {
+      await act(async () =>
+        root.render(
+          withTestI18n(
+            <Provider store={store}>
+              <SessionLinkProvider enabled>
+                <MarkdownRenderer text={format === 'bare' ? url : `[Conversation](${url})`} />
+              </SessionLinkProvider>
+            </Provider>,
+            testI18n
+          )
+        )
+      );
+      const link = container.querySelector('a')!;
+      expect(link.getAttribute('href')).toBe(url);
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      await act(async () => {
+        link.dispatchEvent(click);
+      });
+      expect(click.defaultPrevented).toBe(true);
+      expect(opened).toEqual([`lody://session/${target}?workspace=ws_1`]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    { url: 'https://app.example/other/sessions/target' },
+    { url: 'https://foreign.example/acme/sessions/target' },
+    { url: 'https://app.example/acme/settings' },
+    { url: 'https://app.example/acme/sessions/target', enabled: false },
+    { url: 'https://app.example/acme/sessions/target', readonly: true },
+    { url: 'https://app.example/acme/sessions/target', modifier: { metaKey: true } },
+    { url: 'https://app.example/acme/sessions/target', modifier: { ctrlKey: true } },
+    { url: 'https://app.example/acme/sessions/target', modifier: { shiftKey: true } },
+    { url: 'https://app.example/acme/sessions/target', modifier: { altKey: true } },
+    { url: 'https://app.example/acme/sessions/target', missingWorkspace: true },
+  ])('preserves external navigation when the link is not eligible: %j', async (test) => {
+    vi.stubEnv('VITE_SITE_URL', 'https://app.example');
+    const store = createStore();
+    store.set(currentWorkspaceSlugAtom, 'acme');
+    if (!test.missingWorkspace) store.set(currentWorkspaceIdAtom, 'ws_1' as WorkspaceId);
+    try {
+      await act(async () =>
+        root.render(
+          withTestI18n(
+            <Provider store={store}>
+              <SessionReadonlyContext.Provider
+                value={test.readonly ? { renderImage: () => null, renderFiles: () => null } : null}
+              >
+                <SessionLinkProvider enabled={test.enabled !== false}>
+                  <MarkdownRenderer text={`[Conversation](${test.url})`} />
+                </SessionLinkProvider>
+              </SessionReadonlyContext.Provider>
+            </Provider>,
+            testI18n
+          )
+        )
+      );
+      const link = container.querySelector('a')!;
+      // Observe the product decision, then suppress jsdom's unsupported navigation.
+      let intercepted = false;
+      const preventNavigation = (event: MouseEvent) => {
+        intercepted = event.defaultPrevented;
+        event.preventDefault();
+      };
+      document.addEventListener('click', preventNavigation, { once: true });
+      await act(async () => {
+        link.dispatchEvent(
+          new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            ...test.modifier,
+          })
+        );
+      });
+      expect(intercepted).toBe(false);
+      expect(link.target).toBe('_blank');
+      expect(opened).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    [legacyText, 'lody://session/1ed6ba53-93bc-46d5-91e3-bb693cb0e729'],
+    ...['ws_1', 'ws_2'].map((workspace) => {
+      const url = `lody://session/1ed6ba53-93bc-46d5-91e3-bb693cb0e729?workspace=${workspace}`;
+      return [`See [@Independent review](${url}).`, url];
+    }),
+    [
+      'See [@Independent review](lody://session/root?workspace=ws_1&tab=child).',
+      'lody://session/child?workspace=ws_1',
+    ],
+  ])('dispatches the exact target to the deep-link router: %s', async (text, url) => {
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          <SessionLinkProvider enabled>
+            <MarkdownRenderer text={text} />
+          </SessionLinkProvider>,
+          testI18n
+        )
+      )
+    );
+    const chip = container.querySelector<HTMLButtonElement>('button[data-session-link]')!;
+    expect(chip.textContent).toBe('Independent review');
+    expect(container.querySelector('a')).toBeNull();
+    await act(async () => chip.click());
+    expect(opened).toEqual([url]);
+  });
+
+  it('stays inert without live navigation capability', async () => {
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          <SessionLinkProvider enabled={false}>
+            <MarkdownRenderer text={legacyText} />
+          </SessionLinkProvider>,
+          testI18n
+        )
+      )
+    );
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[data-session-link]')?.textContent).toBe('Independent review');
+    expect(opened).toEqual([]);
+  });
+
+  it.each([
+    legacyText,
+    'See [@Independent review](lody://session/1ed6ba53-93bc-46d5-91e3-bb693cb0e729?workspace=ws_1).',
+  ])('stays an inert chip on a read-only share: %s', async (text) => {
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          <SessionReadonlyContext.Provider
+            value={{ renderImage: () => null, renderFiles: () => null }}
+          >
+            <SessionLinkProvider enabled>
+              <MarkdownRenderer text={text} />
+            </SessionLinkProvider>
+          </SessionReadonlyContext.Provider>,
+          testI18n
+        )
+      )
+    );
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[data-session-link]')?.textContent).toBe('Independent review');
+  });
+
+  const mentionLink = '[@Review](lody://session/ses_target?workspace=ws_1)';
+  const mentionSpan = (target = 'ses_target') => ({
+    start: 4,
+    end: 4 + mentionLink.length,
+    kind: 'session' as const,
+    label: 'Review',
+    target,
+  });
+
+  it('navigates a transcript session mention to its conversation', async () => {
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          <SessionLinkProvider enabled>
+            <MessageTextWithChips
+              text={`See ${mentionLink} now`}
+              spans={[mentionSpan()]}
+            />
+          </SessionLinkProvider>,
+          testI18n
+        )
+      )
+    );
+    const chip = container.querySelector<HTMLElement>('[data-session-link="ses_target"]')!;
+    expect(chip.getAttribute('role')).toBe('link');
+    await act(async () => chip.click());
+    expect(opened).toEqual(['lody://session/ses_target']);
+    await act(async () =>
+      chip.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      )
+    );
+    expect(opened).toEqual(['lody://session/ses_target', 'lody://session/ses_target']);
+  });
+
+  it.each([
+    { name: 'no provider', provider: false },
+    { name: 'read-only', readonly: true },
+    { name: 'corrupt target', target: 'not an id' },
+  ])('keeps a transcript session chip inert: %j', async (test) => {
+    const body = (
+      <MessageTextWithChips
+        text={`See ${mentionLink} now`}
+        spans={[mentionSpan(test.target)]}
+      />
+    );
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          test.readonly ? (
+            <SessionReadonlyContext.Provider
+              value={{ renderImage: () => null, renderFiles: () => null }}
+            >
+              <SessionLinkProvider enabled>{body}</SessionLinkProvider>
+            </SessionReadonlyContext.Provider>
+          ) : test.provider === false ? (
+            body
+          ) : (
+            <SessionLinkProvider enabled>{body}</SessionLinkProvider>
+          ),
+          testI18n
+        )
+      )
+    );
+    expect(container.querySelector('[role="link"]')).toBeNull();
+    expect(container.querySelector('[data-session-link]')).toBeNull();
+    expect(container.textContent).toContain('Review');
+    expect(opened).toEqual([]);
+  });
+});

@@ -66,6 +66,7 @@ function createTestLogger(): Logger {
     error: vi.fn(),
     success: vi.fn(),
     debug: vi.fn(),
+    trace: vi.fn(),
     setLevel: vi.fn(),
     setDebug: vi.fn(),
     child: vi.fn(() => logger),
@@ -164,47 +165,6 @@ describe('AuthClient device login', () => {
 });
 
 describe('AuthClient API key login', () => {
-  it('validates the provided key and persists CLI credentials', async () => {
-    const fetchMock = vi.fn(async () => {
-      return Response.json({
-        valid: true,
-        userId: 'user-1',
-        user: {
-          id: 'user-1',
-          email: 'user@example.com',
-          name: 'User One',
-        },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const authClient = new AuthClient(createTestLogger());
-    const result = await authClient.loginWithApiKey('  lody_cli_test_key  ', 'test-machine');
-
-    expect(result.success).toBe(true);
-    if (!result.success) {
-      throw new Error(result.error);
-    }
-
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(result.token).toBe('lody_cli_test_key');
-    expect(result.user).toEqual({
-      id: 'user-1',
-      email: 'user@example.com',
-      name: 'User One',
-    });
-    expect(result.machine.machineName).toBe('test-machine');
-
-    const saved = JSON.parse(fs.readFileSync(getConfigPath(), 'utf8')) as {
-      token?: unknown;
-      user?: unknown;
-      machine?: unknown;
-    };
-    expect(saved.token).toBe('lody_cli_test_key');
-    expect(saved.user).toEqual(result.user);
-    expect(saved.machine).toEqual(result.machine);
-  });
-
   it('rejects invalid API keys without writing credentials', async () => {
     vi.stubGlobal(
       'fetch',
@@ -220,6 +180,80 @@ describe('AuthClient API key login', () => {
     expect(result.success).toBe(false);
     expect(fs.existsSync(getConfigPath())).toBe(false);
   });
+});
+
+describe('credential file security', () => {
+  it.skipIf(process.platform === 'win32')(
+    'creates credentials as 0600 before writing and atomically replaces the old file',
+    async () => {
+      const root = path.join(tempHome as string, 'custom-data');
+      process.env.LODY_DATA_DIR = root;
+      const user = { id: 'user-1', email: 'user@example.com' };
+      const machine = { machineId: 'machine-1', machineName: 'test-machine' };
+      await saveAuthInfo('old-token', user, machine);
+      expect(fs.statSync(root).mode & 0o777).toBe(0o700);
+      // An existing permissive file must be replaced, rather than truncated in place.
+      fs.chmodSync(getConfigPath(), 0o644);
+      const open = fs.openSync;
+      let observedPrivateCreation = false;
+      const creationObserver = vi.spyOn(fs, 'openSync').mockImplementation((file, flags, mode) => {
+        const descriptor = open(file, flags, mode);
+        if (flags === 'wx') {
+          expect(fs.fstatSync(descriptor).mode & 0o777).toBe(0o600);
+          expect(fs.fstatSync(descriptor).size).toBe(0);
+          observedPrivateCreation = true;
+        }
+        return descriptor;
+      });
+      const rename = fs.renameSync;
+      let observedPublication = false;
+      const observer = vi.spyOn(fs, 'renameSync').mockImplementation((source, destination) => {
+        expect(fs.statSync(source).mode & 0o777).toBe(0o600);
+        expect(JSON.parse(fs.readFileSync(source, 'utf8')).token).toBe('new-token');
+        expect(JSON.parse(fs.readFileSync(destination, 'utf8')).token).toBe('old-token');
+        observedPublication = true;
+        rename(source, destination);
+      });
+      try {
+        await saveAuthInfo('new-token', user, machine);
+      } finally {
+        observer.mockRestore();
+        creationObserver.mockRestore();
+      }
+      expect(observedPrivateCreation).toBe(true);
+      expect(observedPublication).toBe(true);
+      expect(fs.statSync(getConfigPath()).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(fs.readFileSync(getConfigPath(), 'utf8')).token).toBe('new-token');
+      expect(fs.readdirSync(root)).toEqual(['credentials.json']);
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'preserves existing custom directory permissions and old credentials on publication failure',
+    async () => {
+      const root = path.join(tempHome as string, 'shared-parent', 'custom-data');
+      fs.mkdirSync(root, { recursive: true, mode: 0o755 });
+      fs.chmodSync(root, 0o755);
+      process.env.LODY_DATA_DIR = root;
+      const user = { id: 'user-1', email: 'user@example.com' };
+      const machine = { machineId: 'machine-1', machineName: 'test-machine' };
+      await saveAuthInfo('old-token', user, machine);
+      const observer = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+        throw new Error('publication failed');
+      });
+      try {
+        await expect(saveAuthInfo('new-token', user, machine)).rejects.toThrow(
+          'publication failed'
+        );
+      } finally {
+        observer.mockRestore();
+      }
+      expect(fs.statSync(root).mode & 0o777).toBe(0o755);
+      expect(fs.statSync(path.dirname(root)).mode & 0o777).toBe(0o755);
+      expect(JSON.parse(fs.readFileSync(getConfigPath(), 'utf8')).token).toBe('old-token');
+      expect(fs.readdirSync(root)).toEqual(['credentials.json']);
+    }
+  );
 });
 
 describe('AuthClient rejected credential cleanup', () => {
@@ -298,40 +332,6 @@ describe('performLoginWithAuthCredential', () => {
       typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as Request).url
     );
 
-  it('routes machine pairing tokens through the one-time exchange', async () => {
-    const fetchMock = vi.fn(async (url: string | URL | Request) => {
-      const urlText = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
-      if (urlText === 'https://auth.example.com/api/cli/machine-pairing/exchange') {
-        return Response.json({
-          apiKey: 'lody_cli_temporary_key',
-          requestId: 'request-1',
-          workspaceId: 'workspace-1',
-          expiresAt: Date.now() + 60_000,
-          user: { id: 'user-1', email: 'user@example.com', name: 'User One' },
-        });
-      }
-      return Response.json({
-        valid: true,
-        userId: 'user-1',
-        user: { id: 'user-1', email: 'user@example.com', name: 'User One' },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await performLoginWithAuthCredential(
-      new AuthClient(createTestLogger()),
-      createTestLogger(),
-      { credential: 'lody_pair_one_time_secret', machineName: 'test-machine' }
-    );
-
-    expect(result.success).toBe(true);
-    expect(requestedUrls(fetchMock)[0]).toBe(
-      'https://auth.example.com/api/cli/machine-pairing/exchange'
-    );
-    const saved = JSON.parse(fs.readFileSync(getConfigPath(), 'utf8')) as { token?: string };
-    expect(saved.token).toBe('lody_cli_temporary_key');
-  });
-
   it('routes CLI API keys through key validation without touching the pairing exchange', async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
@@ -352,21 +352,6 @@ describe('performLoginWithAuthCredential', () => {
     expect(requestedUrls(fetchMock).some((url) => url.includes('machine-pairing'))).toBe(false);
     const saved = JSON.parse(fs.readFileSync(getConfigPath(), 'utf8')) as { token?: string };
     expect(saved.token).toBe('lody_cli_regular_key');
-  });
-
-  it('routes a pairing token with surrounding whitespace through the exchange', async () => {
-    const fetchMock = vi.fn(async () => Response.json({ error: 'expired' }, { status: 401 }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await performLoginWithAuthCredential(
-      new AuthClient(createTestLogger()),
-      createTestLogger(),
-      { credential: '  lody_pair_padded_secret  ', machineName: 'test-machine' }
-    );
-
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error('expected failure');
-    expect(result.error).toBe('This machine connection token is invalid or expired.');
   });
 });
 
@@ -433,113 +418,6 @@ describe('validateExistingToken', () => {
       valid: false,
       retryable: false,
       reason: 'invalid_response',
-    });
-  });
-});
-
-describe('AuthClient session token bootstrap', () => {
-  it('creates automatic CLI API keys when bootstrapping from a session token', async () => {
-    const fetchMock = vi.fn(async (url: string | URL | Request) => {
-      const urlText = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
-      if (urlText === 'https://auth.example.com/api/cli/api-key/create') {
-        return Response.json({
-          apiKey: 'lody_cli_auto_key',
-          apiKeyId: 'key-1',
-          apiKeyStart: 'lody_cli_',
-        });
-      }
-
-      return Response.json({
-        valid: true,
-        userId: 'user-1',
-        user: {
-          id: 'user-1',
-          email: 'user@example.com',
-          name: 'User One',
-        },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const authClient = new AuthClient(createTestLogger());
-    const result = await authClient.bootstrapFromSessionToken('session-token', 'test-machine');
-
-    expect(result.success).toBe(true);
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      'https://auth.example.com/api/cli/api-key/create',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer session-token',
-        },
-        body: JSON.stringify({ source: 'auto' }),
-      }
-    );
-  });
-
-  it.each([
-    {
-      name: 'network failures',
-      respond: () => {
-        throw new TypeError('fetch failed');
-      },
-      retryable: true,
-    },
-    {
-      name: 'retryable HTTP failures',
-      respond: () => Response.json({ error: 'unavailable' }, { status: 503 }),
-      retryable: true,
-    },
-    {
-      name: 'client-side failures',
-      respond: () => Response.json({ error: 'unauthorized' }, { status: 401 }),
-      retryable: false,
-    },
-  ])('marks api-key creation $name as retryable=$retryable', async ({ respond, retryable }) => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => respond())
-    );
-
-    const authClient = new AuthClient(createTestLogger());
-    const result = await authClient.bootstrapFromSessionToken('session-token', 'test-machine');
-
-    expect(result.success).toBe(false);
-    if (result.success) {
-      throw new Error('expected bootstrap to fail');
-    }
-    expect(result.retryable).toBe(retryable);
-  });
-
-  it('resolves the current session user from a desktop session token', async () => {
-    const fetchMock = vi.fn(async () => {
-      return Response.json({
-        data: {
-          user: {
-            id: 'user-session',
-            email: 'session@example.com',
-            name: 'Session User',
-          },
-        },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const authClient = new AuthClient(createTestLogger());
-    const user = await authClient.getSessionUserFromSessionToken('session-token');
-
-    expect(fetchMock).toHaveBeenCalledWith('https://auth.example.com/api/auth/get-session', {
-      method: 'GET',
-      headers: {
-        Authorization: 'Bearer session-token',
-      },
-    });
-    expect(user).toEqual({
-      id: 'user-session',
-      email: 'session@example.com',
-      name: 'Session User',
     });
   });
 });

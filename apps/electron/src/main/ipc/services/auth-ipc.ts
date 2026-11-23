@@ -1,26 +1,37 @@
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { ProductWindowIpcService } from '../product-window-ipc-service'
+import { closeDesktopE2eeAccount } from '../../services/e2ee-account-runtime'
+import { productWindows } from '../../window-state'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
-  ElectronAuthCallbackInputSchema,
   ElectronDevEmailPasswordSignInInputSchema,
-  type ElectronAuthCallbackInput,
   type ElectronDevEmailPasswordSignInInput
 } from '@lody/shared/electron-ipc'
-import { assertMainWindowSender } from '../assert-sender'
+import { assertProductWindowSender } from '../assert-sender'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 
 function assertAuthSender(): void {
   const { event } = getIpcContext()
-  assertMainWindowSender(event, getIpcServiceDeps().getMainWindow)
+  assertProductWindowSender(event)
 }
 
-export class AuthIpc extends IpcService {
+const workspaceSelections = new WeakMap<
+  Electron.WebContents,
+  { organizationId?: string; organizationSlug?: string }
+>()
+
+export class AuthIpc extends ProductWindowIpcService {
   static override readonly groupName = 'auth'
 
   @IpcMethod()
-  async completeCallback(payload: ElectronAuthCallbackInput) {
+  async startLogin() {
     assertAuthSender()
-    const input = ElectronAuthCallbackInputSchema.parse(payload)
-    return await getIpcServiceDeps().authService.completeCallback(input)
+    await getIpcServiceDeps().authService.startLogin()
+  }
+
+  @IpcMethod()
+  getLoginState() {
+    assertAuthSender()
+    return getIpcServiceDeps().authService.login.getState()
   }
 
   @IpcMethod()
@@ -33,7 +44,11 @@ export class AuthIpc extends IpcService {
   @IpcMethod()
   async signOut() {
     assertAuthSender()
-    await getIpcServiceDeps().authService.signOut()
+    const sender = getIpcContext().event.sender
+    for (const window of productWindows) {
+      if (window.webContents !== sender) window.destroy()
+    }
+    await closeDesktopE2eeAccount({ signOut: () => getIpcServiceDeps().authService.signOut() })
   }
 
   @IpcMethod()
@@ -51,7 +66,16 @@ export class AuthIpc extends IpcService {
   @IpcMethod()
   async getActiveOrganization(options?: unknown) {
     assertAuthSender()
-    return await getIpcServiceDeps().authService.getActiveOrganization(options)
+    const sender = getIpcContext().event.sender
+    const url = new URL(sender.getURL())
+    const path = url.protocol === 'file:' ? url.hash.slice(1) : url.pathname
+    const slug = path.split('/')[1]?.split('?')[0]
+    const query =
+      workspaceSelections.get(sender) ??
+      (slug && !['onboarding', 'sign-in', 'login'].includes(slug)
+        ? { organizationSlug: slug }
+        : undefined)
+    return await getIpcServiceDeps().authService.getActiveOrganization(options, query)
   }
 
   @IpcMethod()
@@ -141,7 +165,23 @@ export class AuthIpc extends IpcService {
   @IpcMethod()
   async setActive(payload: unknown) {
     assertAuthSender()
-    return await getIpcServiceDeps().authService.organizationSetActive(payload)
+    const id = (payload as { organizationId?: unknown } | null)?.organizationId
+    if (typeof id !== 'string' || !id) throw new Error('Invalid organization id')
+    const sender = getIpcContext().event.sender
+    const query = { organizationId: id }
+    const previous = workspaceSelections.get(sender)
+    workspaceSelections.set(sender, query)
+    let accepted = false
+    try {
+      const result = await getIpcServiceDeps().authService.getActiveOrganization(payload, query)
+      accepted = Boolean(result.data && !result.error)
+      return result
+    } finally {
+      if (!accepted && workspaceSelections.get(sender) === query) {
+        if (previous) workspaceSelections.set(sender, previous)
+        else workspaceSelections.delete(sender)
+      }
+    }
   }
 
   @IpcMethod()

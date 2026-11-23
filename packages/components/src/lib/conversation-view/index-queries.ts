@@ -1,0 +1,176 @@
+import { resolveActiveAssistantTurnId, type SessionHistory } from '@lody/shared';
+import { isEmptyAssistantIndexRow } from './index-row';
+import {
+  conversationTailStart,
+  DEFAULT_TAIL_KEEP,
+  isUnloadedTurnId,
+  type ConversationView,
+  type TurnIndexRow,
+} from './types';
+
+/**
+ * Index-only answers to the "latest turn such that…" questions the session
+ * surfaces ask at token rate. None of these hydrate a turn.
+ */
+
+/** Index of the last row satisfying `predicate`, scanning from the tail; -1 when none. */
+export function findLastIndex(
+  view: Pick<ConversationView, 'turnCount' | 'index'>,
+  predicate: (row: TurnIndexRow, index: number) => boolean,
+  options: { limit?: number } = {}
+): number {
+  const stop = options.limit === undefined ? 0 : Math.max(0, view.turnCount - options.limit);
+  for (let i = view.turnCount - 1; i >= stop; i -= 1) {
+    const row = view.index(i);
+    if (row && !isUnloadedTurnId(row.id) && predicate(row, i)) return i;
+  }
+  return -1;
+}
+
+export const lastUserTurnIndex = (view: Pick<ConversationView, 'turnCount' | 'index'>): number =>
+  findLastIndex(view, (row) => row.role === 'user');
+
+/**
+ * The shared `resolveActiveAssistantTurnId` rule applied to the index instead
+ * of a materialized array: find the last assistant row, then let the shared
+ * function decide whether it is still active, so "active" has one definition.
+ */
+export function resolveActiveAssistantTurnIdFromIndex(
+  view: Pick<ConversationView, 'turnCount' | 'index'>
+): string | undefined {
+  const index = findLastIndex(view, (row) => row.role === 'assistant');
+  return index < 0 ? undefined : resolveActiveAssistantTurnId([view.index(index)!]);
+}
+
+/**
+ * The ids `buildChatStreamItems` reported: the last rendered assistant turn and
+ * the last rendered assistant turn that finished, skipping empty entries.
+ */
+export function resolveLastAssistantTurnIds(
+  view: Pick<ConversationView, 'turnCount' | 'index' | 'indexOf'>
+): { lastAssistantMessageId: string | null; lastCompletedAssistantMessageId: string | null } {
+  let lastAssistantMessageId: string | null = null;
+  let lastCompletedAssistantMessageId: string | null = null;
+  for (let i = view.turnCount - 1; i >= 0; i -= 1) {
+    const row = view.index(i);
+    if (
+      !row ||
+      isUnloadedTurnId(row.id) ||
+      row.role !== 'assistant' ||
+      isEmptyAssistantIndexRow(row)
+    )
+      continue;
+    // A duplicate id renders once, at its first position; later copies are skipped.
+    if (view.indexOf(row.id) !== i) continue;
+    if (lastAssistantMessageId === null) lastAssistantMessageId = row.id;
+    if (row.finished === true) {
+      lastCompletedAssistantMessageId = row.id;
+      break;
+    }
+  }
+  return { lastAssistantMessageId, lastCompletedAssistantMessageId };
+}
+
+export function countUserTurns(view: Pick<ConversationView, 'turnCount' | 'index'>): number {
+  let count = 0;
+  for (let i = 0; i < view.turnCount; i += 1) {
+    const row = view.index(i);
+    if (row && !isUnloadedTurnId(row.id) && row.role === 'user') count += 1;
+  }
+  return count;
+}
+
+/**
+ * Where the always-hydrated tail begins, optionally pulled back to the last
+ * user turn so "latest user input" readers never miss it.
+ */
+export function resolveTailStart(
+  view: Pick<ConversationView, 'turnCount' | 'index'>,
+  options: { tailKeep?: number; extendToLastUserTurn?: boolean } = {}
+): number {
+  let start = conversationTailStart(view.turnCount, options.tailKeep ?? DEFAULT_TAIL_KEEP);
+  if (options.extendToLastUserTurn) {
+    // Include the turn before the last user turn too: "editable last user
+    // message" looks at the assistant turn that preceded it.
+    const lastUser = lastUserTurnIndex(view);
+    if (lastUser >= 0) start = Math.min(start, Math.max(0, lastUser - 1));
+  }
+  return start;
+}
+
+/** Hydrated turns in `[from, to)`. By default, stop at the first unloaded body. */
+export function collectHydratedRange(
+  view: Pick<ConversationView, 'turn' | 'index'>,
+  from: number,
+  to: number,
+  options: { skipGaps?: boolean } = {}
+): SessionHistory[] {
+  const turns: SessionHistory[] = [];
+  for (let i = from; i < to; i += 1) {
+    const row = view.index(i);
+    if (row && isUnloadedTurnId(row.id)) continue;
+    const turn = view.turn(i);
+    if (!turn) {
+      if (options.skipGaps) continue;
+      break;
+    }
+    turns.push(turn);
+  }
+  return turns;
+}
+
+type ConversationConfigSource = { id: string; role: unknown; inputConfig?: unknown };
+
+/** Last result per view, so an unchanged conversation reuses its array. */
+const previousConfigSources = new WeakMap<object, ConversationConfigSource[]>();
+const hydratedConfigSources = new WeakMap<SessionHistory, ConversationConfigSource>();
+
+/** Reuse source identity without keeping the hydrated turn and its items alive. */
+function configSourceFromTurn(turn: SessionHistory): ConversationConfigSource {
+  const previous = hydratedConfigSources.get(turn);
+  if (previous) return previous;
+  const source = { id: turn.id, role: turn.role, inputConfig: turn.inputConfig };
+  hydratedConfigSources.set(turn, source);
+  return source;
+}
+
+/**
+ * Source rows for `resolveSessionConversationConfig` and the source fence: the
+ * hydrated tail (full input config) followed by every older user turn as an
+ * index row carrying its shallow config, newest last as the resolver expects.
+ */
+export function collectConversationConfigSources(
+  view: Pick<ConversationView, 'turnCount' | 'index' | 'turn'>,
+  tailFrom: number
+): ConversationConfigSource[] {
+  const sources: ConversationConfigSource[] = [];
+  for (let i = 0; i < tailFrom; i += 1) {
+    const row = view.index(i);
+    if (!row || row.role !== 'user') continue;
+    // The index row already IS a source: same id and role, and an
+    // `inputConfig` that projects itself on first read. Wrapping it would
+    // allocate one object per historical user turn on every streamed delta,
+    // and reading its config here would parse the whole conversation to
+    // resolve a question about its tail.
+    sources.push(row);
+  }
+  for (let i = tailFrom; i < view.turnCount; i += 1) {
+    const hydrated = view.turn(i);
+    const turn = hydrated ?? view.index(i);
+    if (turn && !isUnloadedTurnId(turn.id)) {
+      sources.push(hydrated ? configSourceFromTurn(hydrated) : turn);
+    }
+  }
+  // Callers memoize the resolved configuration on this array's identity, so an
+  // unchanged conversation must hand back the same array.
+  const previous = previousConfigSources.get(view);
+  if (
+    previous &&
+    previous.length === sources.length &&
+    previous.every((source, index) => source === sources[index])
+  ) {
+    return previous;
+  }
+  previousConfigSources.set(view, sources);
+  return sources;
+}

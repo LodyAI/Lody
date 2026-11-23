@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { AgentConfigCliTypeSchema, ProjectRefSchema, type SessionId } from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 /**
  * Machine-local discovery index for in-flight worktree-fork operations.
@@ -16,12 +16,9 @@ import { AgentConfigCliTypeSchema, ProjectRefSchema, type SessionId } from '@lod
  * the Streams backend once a workspace accumulates thousands of sessions
  * (see ../lib/loro/AGENTS.md).
  *
- * This deliberately does NOT reuse the speculative-worktree marker/sweep
- * (worktree/speculative-worktree.ts): that sweep only disposes after a 10-minute
- * staleness window, while fork compensation must run at startup, before any
- * same-target retry can arrive — a retry that adopts a crashed saga's worktree
- * would inherit a stale captured HEAD. The three disciplines that make the
- * sweep race-safe ARE replicated here:
+ * Fork compensation must run at startup, before any same-target retry can
+ * arrive — a retry that adopts a crashed saga's worktree would inherit a stale
+ * captured HEAD. Three disciplines make recovery race-safe:
  *
  * 1. `withForkOperationLock` serializes accept/saga-finalize/recovery per
  *    target session, and recovery RE-READS the marker inside the lock — acting
@@ -53,8 +50,7 @@ import { AgentConfigCliTypeSchema, ProjectRefSchema, type SessionId } from '@lod
  * leaves the file behind. They are tiny and bounded by fork count; reclaiming
  * them safely needs owner confirmation we don't have locally.
  *
- * Storage follows the speculative-worktree marker conventions: one JSON file
- * per target session under `~/.lody/session-fork-operations/` (dir 0o700),
+ * Storage is one JSON file per target session under `~/.lody/session-fork-operations/` (dir 0o700),
  * atomic tmp+rename writes (0o600), strict schema, unreadable entries skipped.
  */
 
@@ -84,6 +80,8 @@ const SessionForkOperationMarkerSchema = z
     createdAt: z.string().min(1),
     /** Target session title, for republishing meta after a mid-commit crash. */
     title: z.string().min(1),
+    /** History backend selected by the source session, for crash-safe target repair. */
+    historyBackend: z.enum(['loro', 'roost']).optional(),
     /**
      * The worktree's real branch name, recorded by the saga once git answers.
      * Absent on markers whose saga never reached the commit block.
@@ -104,7 +102,7 @@ export type SessionForkOperationStore = {
 };
 
 function getStoreRoot(): string {
-  return path.join(os.homedir(), '.lody', 'session-fork-operations');
+  return path.join(getLodyDataDir(), 'session-fork-operations');
 }
 
 function getMarkerPath(targetSessionId: SessionId): string {
@@ -166,7 +164,7 @@ export function createFileSessionForkOperationStore(): SessionForkOperationStore
 
 /**
  * Serializes marker read-check-act sequences per fork target within this
- * process (same pattern as `withSessionMarkerLock` for speculative worktrees).
+ * process.
  * Accept, saga finalize, and startup recovery all mutate the same marker/doc
  * pair for a target; the lock plus an under-lock re-read is what keeps a
  * same-target retry from being rolled back as "interrupted".

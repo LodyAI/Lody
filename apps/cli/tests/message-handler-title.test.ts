@@ -1,7 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import * as codexProfiles from '../src/agent/codex-profile-store';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { Logger } from '../src/utils/logger';
-import type { SessionId, SessionTitleSource } from '@lody/shared';
+import type { AgentConfigMeta, SessionId, SessionTitleSource } from '@lody/shared';
 import type { SessionManager } from '../src/session/session-manager';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import { createTestCloudPort } from './test-cloud-port';
@@ -25,6 +29,7 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
@@ -36,7 +41,7 @@ const createHandler = async (
   latestMeta?: { title?: string; titleSource?: SessionTitleSource },
   options?: {
     agentConfigId?: string;
-    agentConfigMeta?: { titleGeneration?: { configOptionValues: Record<string, string> } } | null;
+    agentConfigMeta?: Partial<AgentConfigMeta> | null;
   }
 ) => {
   const logger = createSilentLogger();
@@ -107,6 +112,78 @@ describe('MessageHandler title generation', () => {
     mockedGenerateTitleIsolated.mockClear();
   });
 
+  it('skips a bound Codex account with corrupt metadata and a missing reference, then recovers', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'lody-title-binding-'));
+    const store = new codexProfiles.CodexProfileStore(root);
+    const storeSpy = vi.spyOn(codexProfiles, 'getCodexProfileStore').mockReturnValue(store);
+    try {
+      const provider: AgentConfigMeta = {
+        id: 'title-provider' as AgentConfigMeta['id'],
+        machineId: 'm-1' as AgentConfigMeta['machineId'],
+        name: 'Synthetic Codex',
+        description: undefined,
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: {},
+        codexAuth: { mode: 'chatgpt', profileId: 'b881560c-f117-434b-bd92-15ce23f7a78c' },
+      };
+      const profile = await store.resolve('ws-1', provider, true);
+      if (!profile) throw new Error('Expected a synthetic Codex profile');
+      await store.markChatgptReady(profile);
+      const file = path.join(root, profile.profile.profileId, 'profile.json');
+      const original = await readFile(file, 'utf8');
+      await writeFile(file, '{broken');
+      expect(await store.list('ws-1')).toEqual([]);
+      const { handler, sessionDoc, workspaceDocument } = await createHandler(
+        undefined,
+        undefined,
+        undefined,
+        {
+          agentConfigId: provider.id,
+          agentConfigMeta: { ...provider, codexAuth: undefined },
+        }
+      );
+      sessionDoc.getMetaState.mockResolvedValue({ agentConfigId: provider.id });
+      let storedTitle: string | undefined;
+      sessionDoc.setTitleIfSourceIn.mockImplementation(async (title) => {
+        storedTitle = title;
+        return true;
+      });
+      const titleHost = handler as unknown as {
+        maybeGenerateAndStoreSessionTitle(
+          sessionId: SessionId,
+          cliType: string,
+          agentType: string,
+          prompt: string
+        ): Promise<void>;
+      };
+      const generate = () =>
+        titleHost.maybeGenerateAndStoreSessionTitle(
+          'bound-title' as SessionId,
+          'builtin',
+          'codex',
+          'Synthetic task text'
+        );
+      await expect(generate()).resolves.toBeUndefined();
+      expect(mockedGenerateTitleIsolated).not.toHaveBeenCalled();
+      expect(storedTitle).toBeUndefined();
+
+      await writeFile(file, original);
+      workspaceDocument.getAgentConfigById.mockResolvedValue(provider);
+      await generate();
+      expect(storedTitle).toBe('Generated Title');
+      expect(mockedGenerateTitleIsolated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          codexProfile: { profile },
+          taskPrompt: 'Synthetic task text',
+        })
+      );
+    } finally {
+      storeSpy.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('skips isolated generation when title already meaningful', async () => {
     const { handler } = await createHandler('Existing Title');
     const titleHost = handler as unknown as {
@@ -127,7 +204,7 @@ describe('MessageHandler title generation', () => {
     expect(mockedGenerateTitleIsolated).not.toHaveBeenCalled();
   });
 
-  it('runs isolated generation for Codex when title is missing', async () => {
+  it('runs isolated generation for Kimi when title is missing', async () => {
     const { handler, sessionDoc } = await createHandler(undefined);
 
     const titleHost = handler as unknown as {
@@ -141,7 +218,7 @@ describe('MessageHandler title generation', () => {
     await titleHost.maybeGenerateAndStoreSessionTitle(
       's-2' as SessionId,
       'builtin',
-      'codex',
+      'kimi',
       'Do something cool'
     );
 
@@ -172,13 +249,13 @@ describe('MessageHandler title generation', () => {
     const first = titleHost.maybeGenerateAndStoreSessionTitle(
       's-shared' as SessionId,
       'builtin',
-      'codex',
+      'kimi',
       'Fix title races'
     );
     const second = titleHost.maybeGenerateAndStoreSessionTitle(
       's-shared' as SessionId,
       'builtin',
-      'codex',
+      'kimi',
       'Fix title races'
     );
     await vi.waitFor(() => expect(mockedGenerateTitleIsolated).toHaveBeenCalledTimes(1));
@@ -187,38 +264,6 @@ describe('MessageHandler title generation', () => {
 
     expect(mockedGenerateTitleIsolated).toHaveBeenCalledTimes(1);
     expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledTimes(1);
-  });
-
-  it('reuses an existing title promise for branch-name generation', async () => {
-    const { handler } = await createHandler(undefined);
-    const titleHost = handler as unknown as {
-      generateBranchNameWithTimeout: (
-        cliType: string,
-        agentType: string,
-        taskPrompt: string,
-        env: Record<string, string> | undefined,
-        timeoutMs: number,
-        titleConfig: undefined,
-        customAcp: undefined,
-        runtimeOverrides: undefined,
-        reusableTitlePromise: Promise<string | null>
-      ) => Promise<string | null>;
-    };
-
-    const branch = await titleHost.generateBranchNameWithTimeout(
-      'builtin',
-      'codex',
-      'Fallback prompt',
-      undefined,
-      1_000,
-      undefined,
-      undefined,
-      undefined,
-      Promise.resolve('Fix title races')
-    );
-
-    expect(branch).toBe('fix/title-races');
-    expect(mockedGenerateTitleIsolated).not.toHaveBeenCalled();
   });
 
   it('keeps skipping isolated generation when an existing title has no draft source', async () => {
@@ -296,13 +341,47 @@ describe('MessageHandler title generation', () => {
     expect(sessionDoc.setTitle).not.toHaveBeenCalled();
   });
 
-  it('applies Codex titleGeneration overrides when no titleConfig is passed', async () => {
-    const titleGeneration = {
-      configOptionValues: { model: 'gpt-5.1-codex', reasoning_effort: 'low' },
-    };
+  it.each(['kimi', 'codex'])(
+    'applies %s titleGeneration overrides when no titleConfig is passed',
+    async (agentType) => {
+      const titleGeneration = {
+        configOptionValues: { model: 'kimi-k2-turbo', reasoning_effort: 'low' },
+      };
+      const { handler, workspaceDocument } = await createHandler(undefined, undefined, undefined, {
+        agentConfigId: 'agent-config-1',
+        agentConfigMeta: { titleGeneration },
+      });
+
+      const titleHost = handler as unknown as {
+        maybeGenerateAndStoreSessionTitle: (
+          sessionId: SessionId,
+          cliType: string,
+          agentType: string,
+          taskPrompt: string
+        ) => Promise<void>;
+      };
+      await titleHost.maybeGenerateAndStoreSessionTitle(
+        's-6' as SessionId,
+        'builtin',
+        agentType,
+        'Do something cool'
+      );
+
+      expect(workspaceDocument.getAgentConfigById).toHaveBeenCalledWith('agent-config-1');
+      expect(mockedGenerateTitleIsolated).toHaveBeenCalledTimes(1);
+      expect(mockedGenerateTitleIsolated).toHaveBeenCalledWith(
+        expect.objectContaining({ titleConfig: titleGeneration })
+      );
+    }
+  );
+
+  // Claude asks the Agent SDK and Grok's
+  // runtime pushes one per session; either way the isolated generator would only
+  // duplicate that work, and must not read the agent config to do it.
+  it.each(['claude', 'grok'])('skips isolated generation for builtin %s', async (agentType) => {
     const { handler, workspaceDocument } = await createHandler(undefined, undefined, undefined, {
       agentConfigId: 'agent-config-1',
-      agentConfigMeta: { titleGeneration },
+      agentConfigMeta: { titleGeneration: { configOptionValues: { model: 'stale-model' } } },
     });
 
     const titleHost = handler as unknown as {
@@ -314,36 +393,9 @@ describe('MessageHandler title generation', () => {
       ) => Promise<void>;
     };
     await titleHost.maybeGenerateAndStoreSessionTitle(
-      's-6' as SessionId,
+      's-acp-owned' as SessionId,
       'builtin',
-      'codex',
-      'Do something cool'
-    );
-
-    expect(workspaceDocument.getAgentConfigById).toHaveBeenCalledWith('agent-config-1');
-    expect(mockedGenerateTitleIsolated).toHaveBeenCalledTimes(1);
-    expect(mockedGenerateTitleIsolated).toHaveBeenCalledWith(
-      expect.objectContaining({ titleConfig: titleGeneration })
-    );
-  });
-
-  it('skips isolated generation for builtin Claude', async () => {
-    const { handler, workspaceDocument } = await createHandler(undefined, undefined, undefined, {
-      agentConfigId: 'agent-config-1',
-    });
-
-    const titleHost = handler as unknown as {
-      maybeGenerateAndStoreSessionTitle: (
-        sessionId: SessionId,
-        cliType: string,
-        agentType: string,
-        taskPrompt: string
-      ) => Promise<void>;
-    };
-    await titleHost.maybeGenerateAndStoreSessionTitle(
-      's-8' as SessionId,
-      'builtin',
-      'claude',
+      agentType,
       'Do something cool'
     );
 

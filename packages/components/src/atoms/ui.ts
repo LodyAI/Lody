@@ -36,10 +36,11 @@ export const toggleMobileDrawerAtom = atom(null, (get, set) => {
  * than resurrect a stale context from a previous visit.
  */
 export type MobileWorkspaceBaseContext = {
-  context?: 'local' | 'github' | 'chat';
+  context?: 'local' | 'github' | 'chat' | 'group';
   machine?: string;
   project?: string;
   repo?: string;
+  group?: string;
 };
 
 export const mobileWorkspaceBaseContextAtom = atom<MobileWorkspaceBaseContext>({});
@@ -50,14 +51,12 @@ export const mobileWorkspaceBaseContextAtom = atom<MobileWorkspaceBaseContext>({
  */
 export interface DataLoadingState {
   projects: boolean;
-  tasks: boolean;
   machines: boolean;
   agents: boolean;
 }
 
 export const dataLoadedAtom = atom<DataLoadingState>({
   projects: false,
-  tasks: false,
   machines: false,
   agents: false,
 });

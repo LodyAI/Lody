@@ -1,0 +1,90 @@
+# Live working/waiting status and dispatch state
+
+Presence versus durable meta, the bounded pre-start window, and message submission routing.
+
+Scope: `packages/components/src/components/sessions`. Binding rules and the
+pointer to this page live in
+[that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
+this page is the full text of the rules summarised there.
+
+- `floating-permission-request.tsx` owns the live permission/question queue and
+  hidden-composer mobile keyboard lift/scroll. Pending question forms retain their
+  local state by session and request identity; inactive forms remain hidden, inert,
+  and disabled, including while an ordinary permission prompt is displayed.
+  Removing a request unmounts its form. The response owner supplies localized write
+  failures to both branches; the question card renders its compact notice above the
+  actions, preserving the answer for retry.
+  [Request contract](../../specs/permission-requests.md) owns the retention lifetime.
+  `notification-permission-prompt.tsx` and the inner content of `session-pin.tsx`
+  use the same `ConversationColumn` as the stream and composer; keep full-bleed
+  bands outside that column, but never let their interactive content span the pane.
+- While presence is active, the conversation activity line distinguishes pending
+  Core question metadata from ordinary tool approval using the composer's pending
+  request queue. Its history input includes all hydrated bodies in the leased tail,
+  including those beyond an unrelated body-loading gap; an old turn must not hide
+  an already available question while newer output streams. Questions say “Waiting for your answer”; both kinds of user wait
+  omit the live “Worked for” suffix. This is a presentation distinction over the
+  existing durable permission bridge, not a new ACP or presence status. Without
+  active presence, old unanswered history must not relight activity.
+- Explicit `running + phase: finalizing` presence displays “Finalizing…” /
+  “收尾中…” until the execution owner clears presence or starts another phase.
+  It still counts as busy for submission routing and Stop; a finished history
+  row alone never selects this label. See [intent](../../specs/session-finalization-status.md).
+- Live working/waiting UI (spinners, permission badges, Stop visibility, tab/dock
+  status) must use presence (`sessionLiveStatusAtomFamily` or an explicit
+  `liveSessionStatuses` map), not `SessionMeta.status` / `lastRunningSeen`.
+  Session meta status is durable/historical state and can be stale until a write
+  lands; presence is the single source for "is working now". The meta dispatch
+  pointers (`latestUserMsgId` / `lastHandledUserMsgId` / `processingUserMsgId`)
+  are CLI dispatch mechanics and must not drive UI either — a stale meta plane
+  once left finished conversations showing "Starting…" forever. The one
+  frontend-derived activity state is the dispatched-but-not-started window,
+  read from the trailing `pending`/`seen` user turn in session history via
+  `lib/session-dispatch-state.ts`; history is the same doc the transcript
+  renders from, so it cannot contradict the visible conversation. That pre-start
+  window is TIME-BOUNDED: `resolveUnstartedTrailingDispatchAtMs` anchors on the
+  turn's own durable `timestamp` and the UI stops showing "Starting…" once
+  `UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS` (30s) elapses with no CLI presence.
+  The bound exists because a crashed daemon / desynced dispatch pointer / stuck
+  sync otherwise left "Starting…" showing forever (reading as a stuck-busy
+  agent) — presence never arrived to clear it, and the machine could still look
+  online. Anchor on the durable timestamp, NOT a component mount time: a stalled
+  turn must report its full age immediately after a reload instead of restarting
+  the 30s clock. The window only needs to cover send → the CLI's FIRST
+  `initializing` presence (published the moment the turn owns the session); every
+  later phase reports its own presence, so do not widen the timeout to cover a
+  whole agent run. Durable resolution of a truly stalled turn still comes from
+  CLI-side reconciliation on the next daemon start; the timeout only bounds the
+  optimistic UI. Message SUBMISSION ROUTING has one deliberate conservative
+  exception to presence-only display state: an unfinished assistant transcript is
+  an ordering barrier when presence is momentarily absent. `session-message-submit-route.ts`
+  must queue in that state (even when the preference is guide; steering requires
+  positive live prompt activity), because queue promotion is safe for both a live
+  turn and a stale transcript while direct dispatch can create a second accepted
+  turn. Cmd+Shift+Enter in the composer inverts the configured busy-send
+  behavior for that one submission (`invertBehavior` in the route resolver): a
+  queue default steers, a guide default queues — with every guard unchanged, so
+  an inverted steer still requires positive live prompt activity and authoritative
+  acknowledged-steer support. Composer routing and queued-row native steering share
+  the capability predicate. Without confirmed support, busy composer submissions use
+  `queueInputBlocks`, appending behind existing rows with their normal edit/remove
+  lifecycle; they never enter pending-apply history or issue a steer RPC. Native
+  requests already submitted keep the delivery/recovery rules in the
+  [history-write contract](../../specs/session-history-writes.md). This barrier
+  affects routing only; it must not relight Working UI or enable
+  Stop. That pre-start label is additionally suppressed whenever the
+  status chip has an active connection/machine problem (`statusStripState !=
+null`: browser offline, machine removed or offline) — the chip owns that story,
+  and "Starting…" next to "machine offline" is a contradiction. `isSessionWorking`
+  (Stop visibility, busy-send queue routing) shares the SAME time-bounded
+  pre-start signal, so a stalled dispatch no longer holds the composer in a busy
+  state either.
+
+## Stop and retained queue drafts
+
+Stop pauses existing queue rows without removing their content or adding them to model context.
+The queue keeps editing and removal, and offers Send while idle or Steer while working. Explicitly
+sending a paused row creates a fresh input with its frozen configuration; other paused rows stay
+out of automatic dispatch even when a later message clears the Inbox pause. Host cancellation
+receipts remain final. The [Inbox decision](../notes/implemented/architecture/2026-10-12-operation-inbox.md)
+explains the split between retained drafts and retired execution eligibility.

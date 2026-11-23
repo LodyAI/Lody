@@ -1,0 +1,573 @@
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LoroRepo } from 'loro-repo';
+import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
+import { Mirror, schema } from 'loro-mirror';
+import {
+  getSessionRoomId,
+  parseSessionNotification,
+  resolveSessionAcpRuntimeConfig,
+  type AcpSessionNotification,
+  type AgentConfigMeta,
+  type AgentConfigId,
+  type LocalProjectHistoryProvider,
+  resolveSessionAcpTargetId,
+  type LocalProjectId,
+  type MachineId,
+  type SessionId,
+  type SessionMeta,
+  type WorkspaceId} from '@lody/shared';
+import {
+  HASH_VERSION_V1,
+  hashHistoryEntryForVersion,
+  hashText,
+  readSessionHistory,
+} from '@lody/shared/session-data';
+import type { SessionHistoryInput } from '@lody/shared';
+
+import { LocalProjectHistorySyncService } from '../src/lib/local-project-history-sync-service';
+import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
+import type { Logger } from '../src/utils/logger';
+
+const providerMocks = vi.hoisted(() => ({
+  list: vi.fn(),
+  replay: vi.fn(),
+}));
+
+vi.mock('../src/lib/history-session-catalog-client', () => ({
+  listHistorySessionsForLocalProject: providerMocks.list,
+  loadHistorySessionReplay: providerMocks.replay,
+  MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS: 100,
+}));
+
+vi.mock('../src/lib/local-project-meta', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/local-project-meta')>()),
+  readMachineLocalProjects: async () => ({}),
+  upsertMachineLocalProject: async () => {},
+}));
+
+const localProjectId = 'history-writer-project' as LocalProjectId;
+const machineId = 'history-writer-machine' as MachineId;
+const workspaceId = 'history-writer-workspace' as WorkspaceId;
+const acpSessionId = 'history-writer-source';
+const rootPath = '/synthetic/history-provider';
+const provider = { cliType: 'builtin', agentType: 'codex' } as const;
+const disposers: Array<() => Promise<void>> = [];
+
+afterEach(async () => {
+  for (const dispose of disposers.splice(0)) await dispose();
+  vi.clearAllMocks();
+});
+
+function notifications(turns: number): AcpSessionNotification[] {
+  const result: AcpSessionNotification[] = [];
+  for (let turn = 0; turn < turns; turn += 1) {
+    for (const update of [
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: `User ${turn}` } },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: `call-${turn}`,
+        title: 'Read synthetic file',
+        kind: 'read',
+        status: 'completed',
+        // Legal ACP extension: new writes must retain it, not just compensate in the hash.
+        locations: [{ path: `src/file-${turn}.ts`, line: 1, endColumn: 12 }],
+      },
+      {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: `Answer ${turn}` },
+      },
+    ]) {
+      result.push(parseSessionNotification({ sessionId: acpSessionId, update }));
+    }
+  }
+  return result;
+}
+
+async function createHarness() {
+  const repo = await LoroRepo.create({});
+  disposers.push(() => repo.destroy());
+  const docs = new Map<SessionId, SessionDocument>();
+  const logger: Logger = {
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    success: () => {},
+    debug: () => {},
+    trace: () => {},
+    setLevel: () => {},
+    child: () => logger,
+    close: async () => {},
+  };
+  const manager = {
+    repo,
+    async getOrCreateSessionDoc(sessionId: SessionId) {
+      let doc = docs.get(sessionId);
+      if (!doc) {
+        doc = new SessionDocument(repo, sessionId, undefined, logger);
+        await doc.initOffline({ history: [] });
+        vi.spyOn(doc, 'waitUntilSynced').mockResolvedValue(true);
+        docs.set(sessionId, doc);
+      }
+      return doc;
+    },
+    cleanSessionDoc: async () => {},
+    findSoleAgentConfig: async () => agentConfigs.sole,
+    getAgentConfigById: async (id: string) =>
+      agentConfigs.all.find((config) => config.id === id) ?? null,
+  };
+  const agentConfigs: { sole?: AgentConfigMeta; all: AgentConfigMeta[] } = { all: [] };
+  // Production builds a service per request.
+  const createService = (selectedProvider: LocalProjectHistoryProvider = provider) =>
+    new LocalProjectHistorySyncService(
+      manager as unknown as LoroDocumentManager,
+      logger,
+      { workspaceId, machineId, userId: 'synthetic-user' },
+      selectedProvider
+    );
+  const service = createService();
+
+  let revision = 0;
+  async function importTurns(
+    turns: number,
+    modelId?: string,
+    selectedProvider: LocalProjectHistoryProvider = provider
+  ) {
+    revision += 1;
+    providerMocks.list.mockResolvedValue({
+      sessions: [
+        {
+          sessionId: acpSessionId,
+          title: 'Synthetic writer history',
+          updatedAt: new Date(Date.UTC(2026, 8, 7, 0, revision)).toISOString(),
+        },
+      ],
+    });
+    providerMocks.replay.mockResolvedValue({
+      notifications: notifications(turns),
+      runtimeConfig: modelId && { acpSessionId, modelId, configOptionValues: { model: modelId } },
+    });
+    return createService(selectedProvider).importLocalProjectSessions({
+      localProjectId,
+      rootPath,
+      acpSessionIds: [acpSessionId],
+    });
+  }
+
+  function getOnlyDoc() {
+    expect(docs.size).toBe(1);
+    const entry = docs.entries().next().value;
+    if (!entry) throw new Error('Import did not create a SessionDocument');
+    return { sessionId: entry[0], doc: entry[1] };
+  }
+
+  async function getMeta(sessionId: SessionId) {
+    const record = await repo.getDocMeta(getSessionRoomId(sessionId));
+    if (!record?.meta) throw new Error('Import did not publish session metadata');
+    return record.meta as SessionMeta;
+  }
+
+  async function rawDoc() {
+    const { sessionId } = getOnlyDoc();
+    return (await repo.openPersistedDoc(getSessionRoomId(sessionId))).doc;
+  }
+  async function makeLegacy() {
+    const { doc } = getOnlyDoc();
+    const loro = await rawDoc();
+    location(loro).set('endColumn', 12);
+    loro.commit();
+    // Model a real pre-version client: v1 hashes AND a cursor/baseline shape that has no
+    // `hashVersion` field anywhere. A baseline that carries `hashVersion: 1` is a shape
+    // only this build can write and would hide the "unversioned baseline is v1" rule.
+    const stored = loro.getList('history').toJSON() as SessionHistoryInput[];
+    const importedTurnHashes = stored.map((entry) =>
+      hashHistoryEntryForVersion(entry, HASH_VERSION_V1)
+    );
+    await doc.setExternalHistoryCursor({
+      importedTurnHashes,
+      storedHistoryBaseline: JSON.stringify({
+        version: 1,
+        sourceDigest: hashText(importedTurnHashes.join('\n')),
+        turnHashes: stored.map((entry) => hashHistoryEntryForVersion(entry, HASH_VERSION_V1)),
+      }),
+    });
+    return loro;
+  }
+  return {
+    repo,
+    service,
+    agentConfigs,
+    importTurns,
+    getOnlyDoc,
+    getMeta,
+    rawDoc,
+    makeLegacy,
+    docs,
+  };
+}
+
+function location(doc: LoroDoc): LoroMap {
+  const turn = doc.getList('history').get(1) as LoroMap;
+  const tool = (turn.get('items') as LoroList).get(0) as LoroMap;
+  return (tool.get('locations') as LoroList).get(0) as LoroMap;
+}
+
+describe('history import through the real SessionDocument writer', () => {
+  it('binds the exact selected Provider with multiple accounts and retains imported runtime identity', async () => {
+    const h = await createHarness();
+    const config = {
+      ...provider,
+      machineId,
+      id: 'config-a',
+      env: { CODEX_HOME: '/synthetic/a' },
+    } as AgentConfigMeta;
+    h.agentConfigs.all.push(config, {
+      ...config,
+      id: 'config-b' as AgentConfigId,
+      env: { CODEX_HOME: '/synthetic/b' },
+    });
+    const selected = { ...provider, agentConfigId: config.id };
+    expect((await h.importTurns(1, 'source-model', selected)).summary.imported).toBe(1);
+    const { sessionId, doc } = h.getOnlyDoc();
+    const meta = await h.getMeta(sessionId);
+    expect(meta.agentConfigId).toBe(config.id);
+    expect(meta.acpSessionId).toBeUndefined();
+    expect(resolveSessionAcpTargetId(meta)).toBe(acpSessionId);
+    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({ modelId: 'source-model' });
+    expect((await h.importTurns(2, 'next-model', selected)).summary.refreshed).toBe(1);
+    expect(h.docs.size).toBe(1);
+    expect(providerMocks.replay.mock.lastCall?.[0].provider.env).toEqual(config.env);
+
+    // Identical native IDs under another account must not refresh or steal this session.
+    expect(
+      (
+        await h.importTurns(1, 'other-model', {
+          ...provider,
+          agentConfigId: 'config-b' as AgentConfigId,
+        })
+      ).summary.imported
+    ).toBe(1);
+    expect(h.docs.size).toBe(2);
+    expect((await h.getMeta(sessionId)).agentConfigId).toBe(config.id);
+    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({ modelId: 'next-model' });
+  });
+
+  it('repairs an unbound legacy import without duplicating or rewriting its history', async () => {
+    const h = await createHarness();
+    await h.importTurns(1, 'source-model');
+    const { sessionId, doc } = h.getOnlyDoc();
+    const history = readSessionHistory(doc.sessionData.history);
+    const config = { ...provider, machineId, id: 'config-a' } as AgentConfigMeta;
+    h.agentConfigs.all.push(config);
+    await h.importTurns(1, 'source-model', { ...provider, agentConfigId: config.id });
+    expect(h.docs.size).toBe(1);
+    expect((await h.getMeta(sessionId)).agentConfigId).toBe(config.id);
+    expect(readSessionHistory(doc.sessionData.history)).toEqual(history);
+  });
+
+  it.each(['missing', 'wrong-machine', 'wrong-agent'])(
+    'rejects a %s explicit Provider without falling back or writing history',
+    async (kind) => {
+      const h = await createHarness();
+      const config = { ...provider, machineId, id: 'config-a' } as AgentConfigMeta;
+      h.agentConfigs.sole = config;
+      if (kind !== 'missing')
+        h.agentConfigs.all.push({
+          ...config,
+          ...(kind === 'wrong-machine'
+            ? { machineId: 'other-machine' as MachineId }
+            : { agentType: 'claude' }),
+        });
+      await expect(
+        h.importTurns(1, 'model', { ...provider, agentConfigId: config.id })
+      ).rejects.toThrow('selected history Provider is unavailable');
+      expect(h.docs.size).toBe(0);
+    }
+  );
+
+  it.each([false, true])(
+    'recognizes a projected suffix arriving before the cursor (legacy=%s)',
+    async (legacy) => {
+      const h = await createHarness();
+      await h.importTurns(1);
+      if (legacy) await h.makeLegacy();
+      const { doc } = h.getOnlyDoc();
+      const cursor = await doc.getExternalHistoryCursor();
+      if (!cursor) throw new Error('Missing source cursor');
+      expect((await h.importTurns(2)).summary.refreshed).toBe(1);
+      // Model a peer receiving the history commit before the separate cursor commit.
+      await doc.setExternalHistoryCursor(cursor);
+      const loro = await h.rawDoc();
+      const before = loro.getList('history').toJSON();
+      expect((await h.importTurns(2)).summary).toMatchObject({ skipped: 1, conflicted: 0 });
+      expect(loro.getList('history').toJSON()).toEqual(before);
+      expect((await doc.getExternalHistoryCursor())?.importedTurnHashes).toHaveLength(4);
+    }
+  );
+
+  it("keeps the source session's model as the composer baseline across import and refresh", async () => {
+    const h = await createHarness();
+    await h.importTurns(1, 'model-a');
+    const { doc } = h.getOnlyDoc();
+    const baselineModel = () =>
+      resolveSessionAcpRuntimeConfig(
+        readSessionHistory(doc.sessionData.history),
+        [],
+        doc.mirror?.getState().acpRuntimeConfig
+      )?.modelId;
+    expect(baselineModel()).toBe('model-a');
+
+    expect((await h.importTurns(2, 'model-b')).summary.refreshed).toBe(1);
+    expect(baselineModel()).toBe('model-b');
+  });
+
+  it('refreshes a bound session through its own Provider after the sole one changes', async () => {
+    const h = await createHarness();
+    const bound = { id: 'config-a', env: { CODEX_HOME: '/a' } } as unknown as AgentConfigMeta;
+    h.agentConfigs.all.push(bound);
+    h.agentConfigs.sole = bound;
+    await h.importTurns(1);
+    expect((await h.getMeta(h.getOnlyDoc().sessionId)).agentConfigId).toBe('config-a');
+
+    // A second same-type Provider appears, so there is no sole Provider any more.
+    h.agentConfigs.sole = undefined;
+    expect((await h.importTurns(2)).summary.refreshed).toBe(1);
+    expect(providerMocks.replay.mock.lastCall?.[0].provider.env).toEqual({ CODEX_HOME: '/a' });
+  });
+
+  it('does not advance the cursor when the new history command fails validation', async () => {
+    const h = await createHarness();
+    await h.importTurns(1);
+    const { doc } = h.getOnlyDoc();
+    const loro = await h.rawDoc();
+    const before = loro.toJSON();
+    const version = loro.version().toJSON();
+    await expect(
+      doc.sessionData.commands.applyHistoryImport({
+        mode: 'initialize',
+        replay: {
+          history: [
+            {
+              id: 'invalid',
+              role: 'assistant',
+              timestamp: 'synthetic',
+              items: [{ type: 'text', text: 3 }],
+            },
+          ],
+          turnHashes: ['must-not-be-saved'],
+          replayDigest: 'digest',
+          droppedNotifications: 0,
+          hashVersion: 2,
+        },
+      })
+    ).resolves.toMatchObject({ status: 'rejected', reason: { code: 'invalid_input' } });
+    expect(loro.toJSON()).toEqual(before);
+    expect(loro.version().toJSON()).toEqual(version);
+  });
+
+  it('keeps the new baseline opaque to an old cursor reader and survives reopening', async () => {
+    const h = await createHarness();
+    await h.importTurns(1);
+    const { doc } = h.getOnlyDoc();
+    const loro = await h.rawDoc();
+    const peer = new LoroDoc();
+    peer.import(loro.export({ mode: 'snapshot' }));
+    // Exact pre-baseline cursor shape; all other schema fields are unchanged.
+    const oldReader = new Mirror({
+      doc: peer,
+      schema: schema({
+        ...sessionDocSchema.definition,
+        externalHistoryCursor: schema.LoroMap(
+          {
+            importedTurnHashes: schema.LoroList(schema.String(), undefined, { required: false }),
+          },
+          { required: false }
+        ),
+      }),
+      ignoreUnknownProperties: true,
+    });
+    const before = peer.toJSON();
+    expect(oldReader.getState().history).toHaveLength(2);
+    expect(peer.toJSON()).toEqual(before);
+    const reopened = new SessionDocument(h.repo, h.getOnlyDoc().sessionId, undefined, undefined);
+    await reopened.initOffline({ history: [] });
+    expect(await reopened.getExternalHistoryCursor()).toEqual(await doc.getExternalHistoryCursor());
+    // Reopening is not a migration or a new author of the old history.
+    expect(loro.toJSON()).toEqual(before);
+    oldReader.setState((state) => {
+      state.externalHistoryCursor.importedTurnHashes = ['old-writer-source'];
+    });
+    expect(peer.toJSON().externalHistoryCursor.storedHistoryBaseline).toEqual(
+      before.externalHistoryCursor.storedHistoryBaseline
+    );
+    loro.import(peer.export({ mode: 'update', from: loro.version() }));
+    expect((await h.importTurns(1)).summary.conflicted).toBe(1);
+    oldReader.dispose();
+  });
+
+  it('resolves a marked conflict through the real writer and repeated resolve stays idempotent', async () => {
+    const h = await createHarness();
+    await h.importTurns(1);
+    const { sessionId } = h.getOnlyDoc();
+    const loro = await h.rawDoc();
+    location(loro).set('line', 99);
+    loro.commit();
+    expect((await h.importTurns(2)).summary.conflicted).toBe(1);
+    const args = { localProjectId, rootPath, sessionId, acpSessionId };
+    expect((await h.service.resolveHistoryConflict(args)).status).toBe('resolved');
+    expect(loro.getList('history').length).toBe(4);
+    expect(location(loro).get('line')).toBe(1);
+    const version = loro.version().toJSON();
+    expect((await h.service.resolveHistoryConflict(args)).status).toBe('resolved');
+    expect(loro.version().toJSON()).toEqual(version);
+    expect((await h.importTurns(3)).summary).toMatchObject({ refreshed: 1, conflicted: 0 });
+  });
+
+  it('preserves legacy storage/CIDs while appending projected new turns', async () => {
+    const h = await createHarness();
+    await h.importTurns(1);
+    const loro = await h.makeLegacy();
+    const before = loro.getList('history').toJSON();
+    const cid = location(loro).id;
+    expect((await h.importTurns(2)).summary).toMatchObject({ refreshed: 1, conflicted: 0 });
+    expect(loro.getList('history').toJSON().slice(0, 2)).toEqual(before);
+    expect(location(loro).id).toBe(cid);
+    expect((await h.importTurns(3)).summary).toMatchObject({ refreshed: 1, conflicted: 0 });
+  });
+
+  it('detects deletion of a legacy provider field', async () => {
+    const h = await createHarness();
+    await h.importTurns(1);
+    const loro = await h.makeLegacy();
+    location(loro).delete('endColumn');
+    loro.commit();
+    const before = loro.toJSON();
+    expect((await h.importTurns(2)).summary).toMatchObject({ conflicted: 1, refreshed: 0 });
+    expect(loro.toJSON()).toEqual(before);
+  });
+
+  it.each(['field', 'delete', 'append'] as const)(
+    'detects local %s changes with an unchanged source digest',
+    async (change) => {
+      const h = await createHarness();
+      await h.importTurns(1);
+      const loro = await h.rawDoc();
+      if (change === 'field') location(loro).set('endColumn', 99);
+      else if (change === 'delete') loro.getList('history').delete(1, 1);
+      else loro.getList('history').push({ id: 'local', role: 'assistant', items: [] });
+      loro.commit();
+      const before = loro.toJSON();
+      expect((await h.importTurns(1)).summary).toMatchObject({ conflicted: 1, refreshed: 0 });
+      expect(loro.toJSON()).toEqual(before);
+    }
+  );
+
+  it('does not reuse a baseline after an old client advances only source hashes', async () => {
+    const h = await createHarness();
+    await h.importTurns(1);
+    const { doc } = h.getOnlyDoc();
+    const cursor = await doc.getExternalHistoryCursor();
+    await doc.setExternalHistoryCursor({ ...cursor, importedTurnHashes: ['old-client-source'] });
+    const before = await doc.getExternalHistoryCursor();
+    expect((await h.importTurns(1)).summary).toMatchObject({ conflicted: 1, refreshed: 0 });
+    expect(await doc.getExternalHistoryCursor()).toEqual(before);
+  });
+
+  it('checks a peer edit arriving at the write boundary instead of blessing it in the baseline', async () => {
+    const h = await createHarness();
+    await h.importTurns(1);
+    const { doc } = h.getOnlyDoc();
+    const loro = await h.rawDoc();
+    const peer = new LoroDoc();
+    peer.import(loro.export({ mode: 'snapshot' }));
+    location(peer).set('endColumn', 99);
+    peer.commit();
+    // Hook the port command the service now drives: the peer edit lands before
+    // the synchronous write block, so the write-time decision must see it.
+    const commands = doc.sessionData.commands;
+    const original = commands.applyHistoryImport.bind(commands);
+    vi.spyOn(commands, 'applyHistoryImport').mockImplementationOnce((...args) => {
+      loro.import(peer.export({ mode: 'update', from: loro.version() }));
+      return original(...args);
+    });
+    expect((await h.importTurns(2)).summary).toMatchObject({ conflicted: 1, refreshed: 0 });
+    peer.import(loro.export({ mode: 'update', from: peer.version() }));
+    expect(peer.getList('history').toJSON()).toEqual(loro.getList('history').toJSON());
+    expect(location(loro).get('endColumn')).toBe(99);
+  });
+
+  it('uses the document baseline when conflict metadata already carries the next source digest', async () => {
+    const h = await createHarness();
+    await h.importTurns(1);
+    const { doc } = h.getOnlyDoc();
+    const loro = await h.rawDoc();
+    location(loro).set('endColumn', 99);
+    loro.commit();
+    expect((await h.importTurns(2)).summary.conflicted).toBe(1);
+    location(loro).set('endColumn', 12);
+    loro.commit();
+    const cursor = await doc.getExternalHistoryCursor();
+    expect((await h.importTurns(2)).summary).toMatchObject({ refreshed: 1, conflicted: 0 });
+    expect((await doc.getExternalHistoryCursor())?.importedTurnHashes?.slice(0, 2)).toEqual(
+      cursor?.importedTurnHashes
+    );
+  });
+
+  it('retains ACP extensions and appends the next source replay', async () => {
+    const harness = await createHarness();
+    expect((await harness.importTurns(1)).summary).toMatchObject({ imported: 1, failed: 0 });
+    const { doc, sessionId } = harness.getOnlyDoc();
+    const initialHistory = await doc.sessionData.history.readAll();
+    expect(initialHistory).toHaveLength(2);
+    expect(JSON.stringify(initialHistory)).toContain('"endColumn":12');
+    const initialCursor = await doc.getExternalHistoryCursor();
+    const initialIds = initialHistory.map((entry) => entry.id);
+
+    expect((await harness.importTurns(2)).summary).toMatchObject({
+      refreshed: 1,
+      conflicted: 0,
+      failed: 0,
+    });
+    const history = await doc.sessionData.history.readAll();
+    expect(history).toHaveLength(4);
+    expect(history.slice(0, 2)).toEqual(initialHistory);
+    expect(history.slice(0, 2).map((entry) => entry.id)).toEqual(initialIds);
+    expect((await doc.getExternalHistoryCursor())?.importedTurnHashes?.slice(0, 2)).toEqual(
+      initialCursor?.importedTurnHashes
+    );
+    expect((await harness.getMeta(sessionId)).externalHistory?.status).toBe('synced');
+  });
+});
+
+it('accepts a genuine unversioned v1 stored baseline after upgrade', async () => {
+  // Regression: the baseline guard must not compare a raw optional `hashVersion`
+  // against the cursor version (`undefined !== 1` rejected every real pre-version
+  // baseline, discarded the projected stored history, and turned a normal append into
+  // `local_history_has_untracked_suffix`). The cursor and the baseline here are the
+  // exact shape an old client writes: no `hashVersion` field anywhere.
+  const h = await createHarness();
+  await h.importTurns(1);
+  const { doc } = h.getOnlyDoc();
+  const loro = await h.rawDoc();
+  const source = loro.getList('history').toJSON() as SessionHistoryInput[];
+  const hashes = source.map((entry) => hashHistoryEntryForVersion(entry, HASH_VERSION_V1));
+  // A prior importer projected away an extension; its saved baseline represents the
+  // actual stored turns independently of the source transcript hashes.
+  location(loro).delete('endColumn');
+  loro.commit();
+  const stored = loro.getList('history').toJSON() as SessionHistoryInput[];
+  await doc.setExternalHistoryCursor({
+    importedTurnHashes: hashes,
+    storedHistoryBaseline: JSON.stringify({
+      version: 1,
+      sourceDigest: hashText(hashes.join('\n')),
+      turnHashes: stored.map((entry) => hashHistoryEntryForVersion(entry, HASH_VERSION_V1)),
+    }),
+  });
+
+  expect((await h.importTurns(2)).summary).toMatchObject({ refreshed: 1, conflicted: 0 });
+  // The accepted refresh rewrote the cursor at the current version.
+  const cursor = await doc.getExternalHistoryCursor();
+  expect(cursor?.hashVersion).toBe(2);
+  expect(cursor?.importedTurnHashes).toHaveLength(4);
+});

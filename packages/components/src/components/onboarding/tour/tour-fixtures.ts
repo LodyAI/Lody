@@ -1,3 +1,4 @@
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { createStore } from 'jotai';
 import {
   getAgentConfigRoomId,
@@ -31,11 +32,11 @@ import {
   machineMetaCacheAtom,
   sessionMetaCacheAtom,
 } from '@/atoms/doc-meta';
-import { focusLayerAtom } from '@/atoms/focus-layer';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import type { TaskListTask } from '@/components/task-list';
 import type { SessionDiffChangeEntry } from '@/components/sessions/session-diff-summary';
 import type { LodyAuthClient } from '@/lib/auth';
+import { createTourRepo } from './tour-repo';
 
 // The data the tour's app runs on.
 //
@@ -513,7 +514,7 @@ export const TOUR_PERMISSION_REQUEST_ID = 'onboarding-tour-permission';
 /**
  * The permission the run asks for, as a real pending `tool_call`.
  *
- * Rendered by the product's own `PermissionRequestCard`, in the conversation,
+ * Answered in the product's own `PermissionPrompt`, in the composer's place,
  * with real option shapes — so the first time this appears during actual work
  * it is recognised rather than met cold. The scripted cursor presses the real
  * button on it; nothing about the answer is simulated except who pressed.
@@ -525,6 +526,7 @@ export function buildPermissionItem(answeredOptionId: string | null): MessageCon
     title: 'Bash(pnpm typecheck)',
     status: answeredOptionId === null ? 'pending' : 'completed',
     kind: 'execute',
+    content: [{ type: 'terminal_command', command: 'pnpm typecheck' }],
     permissionRequest: {
       requestId: TOUR_PERMISSION_REQUEST_ID,
       options: [
@@ -758,11 +760,19 @@ export function buildTourHistory({
   return history;
 }
 
-// ─── Store ────────────────────────────────────────────────────────────────────
-
 const tourRuntime = {
   workspaceId: TOUR_WORKSPACE_ID,
   workspaceSlug: TOUR_WORKSPACE_SLUG,
+  // The reused product components DO read: the composer opens the workspace
+  // catalog and machine Flock documents through the repo. `createTourRepo` is
+  // the read-only stand-in for that plane, the way `TourCloudBoundary` is the
+  // stand-in for the cloud one.
+  repo: createTourRepo(),
+  // The real composer subscribes here; this read-only tour has no suggestions.
+  subscribePromptSuggestion: ((_machineId, _sessionId, listener) => {
+    listener(null);
+    return () => {};
+  }) satisfies WorkspaceRuntime['subscribePromptSuggestion'],
   // Nothing in the tour writes. A runtime that threw on read would take the
   // whole overlay down; one that silently accepted writes would let a scripted
   // surface believe it had persisted something.
@@ -773,6 +783,12 @@ export function createTourStore(identity: TourIdentity) {
   const store = createStore();
   const session = buildTourSession(identity);
   const agentConfig = buildTourAgentConfig(identity);
+  store.set(workspaceContentModeAtom, {
+    accountId: TOUR_USER_ID,
+    workspaceId: TOUR_WORKSPACE_ID,
+    workspaceSlug: TOUR_WORKSPACE_SLUG,
+    descriptor: { workspaceId: TOUR_WORKSPACE_ID, contentMode: 'plaintext', contentModeVersion: 1 },
+  });
   store.set(currentWorkspaceIdAtom, TOUR_WORKSPACE_ID);
   store.set(currentWorkspaceSlugAtom, TOUR_WORKSPACE_SLUG);
   store.set(authTokenAtom, 'onboarding-tour-token');
@@ -783,7 +799,6 @@ export function createTourStore(identity: TourIdentity) {
     email: identity.userEmail,
     image: null,
   });
-  store.set(focusLayerAtom, 'L3');
   store.set(machineMetaCacheAtom, {
     [getMachineRoomId(TOUR_MACHINE_ID)]: buildTourMachine(identity),
   });
@@ -870,8 +885,6 @@ export function buildTourStableSession(identity: TourIdentity) {
     refetch: async () => ({ data, error: null }),
   };
 }
-
-// ─── Terminal ─────────────────────────────────────────────────────────────────
 
 /** What the scripted terminal prints, in order, once it is attached. */
 const TERMINAL_SCRIPT: string[] = [

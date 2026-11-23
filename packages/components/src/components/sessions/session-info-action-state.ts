@@ -1,7 +1,6 @@
 import type {
   SessionPullRequestCiState,
   SessionPullRequestMergeState,
-  SessionPullRequestReadiness,
   PrStatus,
 } from '@lody/shared';
 
@@ -12,49 +11,111 @@ export type SessionInfoBarGitHubActionId =
   | 'fix-ci-errors'
   | 'resolve-conflicts'
   | 'ready-for-review'
-  | 'merge';
+  | 'merge'
+  | 'auto-deliver';
+
+const SESSION_TURN_GITHUB_ACTION_IDS = new Set<SessionInfoBarGitHubActionId>([
+  'create-pr',
+  'create-draft-pr',
+  'commit-and-push',
+  'fix-ci-errors',
+  'resolve-conflicts',
+]);
+
+/** Agent-driven GitHub actions need a hydrated Session Turn configuration. */
+export function shouldDisableSessionInfoBarGitHubActionForHydration(
+  actionId: SessionInfoBarGitHubActionId,
+  sessionDocReady: boolean
+): boolean {
+  return !sessionDocReady && SESSION_TURN_GITHUB_ACTION_IDS.has(actionId);
+}
 
 export function resolveSessionInfoBarGitHubActionIds({
   canShowGitHubActions,
+  canMutatePr,
   hasExistingPr,
   workspaceDirty,
+  workspaceUnpushed,
   hasChanges,
   isAgentBusy,
   prCiState,
   prMergeState,
-  prReadiness,
   prStatus,
+  canAutoDeliver = false,
 }: {
   canShowGitHubActions: boolean;
+  /**
+   * Auto delivery can be started here: the Session's automation settings are
+   * reachable, the workspace observes PRs, and it is not already on.
+   */
+  canAutoDeliver?: boolean;
+  /** Direct GitHub mutation API is available, independently of summary observation. */
+  canMutatePr: boolean;
   hasExistingPr: boolean;
+  /** Uncommitted changes in the working tree. */
   workspaceDirty: boolean;
+  /** Local commits the remote does not have. */
+  workspaceUnpushed: boolean;
   /**
    * Whether there is anything to base a PR on — committed OR uncommitted. Gates
-   * "Create PR"; see `getSessionGitHubState`. Distinct from `workspaceDirty`,
-   * which is uncommitted-only and gates "Commit & Push".
+   * "Create PR"; see `getSessionGitHubState`.
    */
   hasChanges: boolean;
   isAgentBusy: boolean;
   prCiState?: SessionPullRequestCiState | null;
   prMergeState?: SessionPullRequestMergeState | null;
-  prReadiness?: SessionPullRequestReadiness | null;
   prStatus?: PrStatus | null;
 }): SessionInfoBarGitHubActionId[] {
   if (!canShowGitHubActions || isAgentBusy) return [];
 
   if (hasExistingPr) {
     if (prStatus === 'merged' || prStatus === 'closed') return [];
-    if (prStatus === 'draft') return ['ready-for-review'];
-    if (prMergeState === 'd') return ['resolve-conflicts'];
-    if (prCiState === 'f' || prCiState === 'e') return ['fix-ci-errors'];
-    if (prReadiness === 'y') return ['merge'];
-    return workspaceDirty ? ['commit-and-push'] : [];
+
+    // Priority order, highest first. The caller renders index 0 as the single
+    // text button and hangs the rest off its chevron, so this array is the
+    // whole ranking — every applicable action stays reachable.
+    //
+    // `commit-and-push` outranks conflict/CI repair and merge because it is the
+    // only one that protects work the user can still lose. Turn finalization no
+    // longer commits or pushes on the session's behalf (that surprised users who
+    // had not asked for it), so unpublished work here means the PR head is NOT
+    // the author's latest work. Offering "Merge" first on that state invites
+    // landing a PR that is missing it.
+    //
+    // Both flags, NOT `workspaceDirty` alone: `git status` goes clean the moment
+    // the agent commits, so a commit whose push failed would otherwise drop the
+    // action and leave Merge as the top offer against a stale remote head — the
+    // precise failure this ranking exists to prevent.
+    const actions: SessionInfoBarGitHubActionId[] = [];
+    if (workspaceDirty || workspaceUnpushed) {
+      actions.push('commit-and-push');
+    }
+    if (prStatus === 'draft') {
+      // A draft PR has no merge gate to clear; readiness is the user's call.
+      if (canMutatePr) actions.push('ready-for-review');
+      return actions;
+    }
+    if (prMergeState === 'd') {
+      actions.push('resolve-conflicts');
+    }
+    if (prCiState === 'f' || prCiState === 'e') {
+      actions.push('fix-ci-errors');
+    }
+    // Offer Merge whenever GitHub would accept it: clean, or unstable (checks
+    // still running or failing but not required). Blocked and behind need
+    // branch protection cleared first; dirty needs the conflicts resolved.
+    if (canMutatePr && (prMergeState === 'c' || prMergeState === 'u')) {
+      actions.push('merge');
+    }
+    // Last: handing the remaining steps to Lody never outranks doing one now.
+    if (canAutoDeliver) actions.push('auto-deliver');
+    return actions;
   }
 
   // No PR yet. "Create PR" is gated on whether the GitHub-capable workspace has
   // ANY changes to base a PR on (committed or uncommitted), not on the
   // working-tree-dirty flag alone — the latter vanished the moment the agent
-  // auto-committed (clean tree, real commits, still no PR), hiding the action.
+  // committed (clean tree, real commits, still no PR), hiding the action.
   // "Commit & Push" still requires uncommitted changes; a clean tree has nothing
   // to commit.
   const actions: SessionInfoBarGitHubActionId[] = [];
@@ -65,5 +126,6 @@ export function resolveSessionInfoBarGitHubActionIds({
   if (workspaceDirty) {
     actions.push('commit-and-push');
   }
+  if (hasChanges && canAutoDeliver) actions.push('auto-deliver');
   return actions;
 }

@@ -31,10 +31,7 @@ import {
   seabedHeight,
   type TerrainAttributes,
 } from './underwater-terrain-math';
-import type {
-  TerrainWorkerRequest,
-  TerrainWorkerResponse,
-} from './underwater-terrain.worker';
+import type { TerrainWorkerRequest, TerrainWorkerResponse } from './underwater-terrain.worker';
 
 type Quality = 'high' | 'medium' | 'low';
 
@@ -501,9 +498,7 @@ function buildJellyfish(
   // Desktop: left/right of centre. Portrait: keep everything in the panned
   // band so at least one near/bright medusa is on-screen (was: near jelly at
   // x≈-24 sat entirely off the left edge of phone frames).
-  const slots = portrait
-    ? [11, 18, 7, 22, 14, 5]
-    : [-24, 26, 16, -30, 22, -15];
+  const slots = portrait ? [11, 18, 7, 22, 14, 5] : [-24, 26, 16, -30, 22, -15];
   for (let i = 0; i < count; i++) {
     // Portrait: first ~⅔ are near/bright (the ones the eye actually reads as
     // the floating animation); the rest stay as deep accents.
@@ -550,9 +545,8 @@ function buildJellyfish(
     const yTop = far ? 13 : portrait ? 11 : 12;
     // Portrait: start mid-column so a jelly is visible immediately (not waiting
     // to rise from below the fold after a cold load).
-    const y0 = portrait && !far
-      ? 2 + Math.random() * 5
-      : yBottom + Math.random() * (yTop - yBottom);
+    const y0 =
+      portrait && !far ? 2 + Math.random() * 5 : yBottom + Math.random() * (yTop - yBottom);
     points.position.set(baseX, y0, z);
     jellies.push({
       points,
@@ -1143,24 +1137,36 @@ export function UnderwaterPointCloudBackground({
     let numParticles = particleCount ?? activePreset.particles;
     let numJellies = jellyfishCount ?? activePreset.jellyfish;
     let coralScale = TIER_ORDER[tierIndex] === 'low' ? 0.85 : 1;
-    const isStatic = reduceMotion || !animated;
-
+    let pixelRatio = Math.min(window.devicePixelRatio || 1, activePreset.dpr);
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
         canvas,
-        antialias: activePreset.antialias,
+        // A 2x drawing buffer already supersamples the soft point sprites; 4x MSAA
+        // on top multiplies every blended sample and the resolve for no visible
+        // edge. The browser's default adapter keeps dual-GPU laptops off the
+        // discrete GPU for a background; the FPS watchdog covers slow ones.
+        antialias: activePreset.antialias && pixelRatio < 2,
         alpha: false,
-        powerPreference: 'high-performance',
       });
     } catch {
       setWebglFailed(true);
       return undefined;
     }
 
-    let pixelRatio = Math.min(window.devicePixelRatio || 1, activePreset.dpr);
     renderer.setPixelRatio(pixelRatio);
     renderer.setClearColor(0x050f24, 1);
+
+    // A CPU rasteriser (no usable GPU) pegs every core at any tier, so it gets
+    // the single still frame that reduced motion gets.
+    const gl = renderer.getContext();
+    const rendererInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    const softwareRenderer = rendererInfo
+      ? /swiftshader|llvmpipe|software/i.test(
+          String(gl.getParameter(rendererInfo.UNMASKED_RENDERER_WEBGL))
+        )
+      : false;
+    const isStatic = reduceMotion || !animated || softwareRenderer;
 
     // If the GL context is dropped (GPU reset, or a bfcache restore on browsers
     // that fire this instead of just blanking), preventDefault keeps the canvas
@@ -1417,10 +1423,7 @@ export function UnderwaterPointCloudBackground({
     let dirZ = 0;
     let aniso = 0;
     const onPointerMove = (e: PointerEvent) => {
-      ndc.set(
-        (e.clientX / window.innerWidth) * 2 - 1,
-        -(e.clientY / window.innerHeight) * 2 + 1
-      );
+      ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
       raycaster.setFromCamera(ndc, camera);
       if (raycaster.ray.intersectPlane(seabedPlane, hitPoint)) {
         pointerRaw.set(hitPoint.x, hitPoint.z);
@@ -1681,7 +1684,8 @@ export function UnderwaterPointCloudBackground({
     let rebuildTimer = 0;
 
     const applyCheap = () => {
-      if (terrain) (terrain.material as THREE.ShaderMaterial).uniforms.uSize.value = PARAMS.pointSize;
+      if (terrain)
+        (terrain.material as THREE.ShaderMaterial).uniforms.uSize.value = PARAMS.pointSize;
       if (isStatic || !running) renderFrame();
     };
 

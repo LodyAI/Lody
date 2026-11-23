@@ -1,13 +1,43 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
+import {
+  runWithDaemonWorkspace,
+  runWithEncryptedCommandAccess,
+} from '../lib/session-command-environment';
+import { Console } from 'node:console';
+import { Writable } from 'node:stream';
+import * as commandRuntime from '@/lib/command-runtime';
+import * as telemetry from '@/instrument';
+import { getLogger } from '@/utils/logger';
+import { makeWorkspaceCommandManagers } from '@/lib/workspace-command-manager';
+import { runSessionCommand } from './session';
+import { z } from 'zod';
+import { getSessionCancelProtocolFields } from './session';
+import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
+import { LoroDoc } from 'loro-crdt';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import { appendUserPromptHistory } from './session';
+import { prepareSessionInput } from './session';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LoroRepo } from 'loro-repo';
+import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
+
 import {
   getMachineFlockDocId,
+  getWorkspaceFlockDocId,
+  getProjectMcpKey,
+  writeWorkspaceMcpServerToFlock,
+  workspaceFlockKeys,
+  ACP_CAPABILITY_CACHE_VERSION,
+  getBuiltinRuntimeOverrideSourceVersionSuffix,
   getSessionRoomId,
+  isLoroRepoDocDeleted,
   type AcpCapabilityCacheEntry,
   type AgentConfigMeta,
+  type LocalProjectGitState,
   type MachineId,
   type MachineMeta,
   type SessionHistoryInput,
@@ -15,53 +45,48 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
-import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
+import { createLocalProjectBranchSelector } from '@lody/shared/node/local-project';
 
+import type { MachineAccessCheckResult } from '@/lib/workspace';
 import {
-  applyAgentRunConfigSelection,
+  type MachineAccessReaders,
+  MachineFlockReadUnavailableError,
+  readAgentAcpCapability,
+  runSessionOperationWithSyncedMetadata,
+  assertSessionManagementAccess,
   assertSupportedParentDepth,
   confirmDispatchSyncedBestEffort,
-  buildLegacyMachineRestoreQueueCleanupPatch,
-  buildSessionArchiveMetaPatch,
-  buildSessionRestoreMetaPatch,
   filterAuthorizedMachineMetas,
   filterAuthorizedLocalProjectCandidates,
-  filterCompatibleInheritedTurnConfig,
   filterCompatibleTurnConfigOptionValues,
   filterSessionMetas,
-  hasNonPositionalPromptSource,
-  listChildSessionIds,
-  normalizeCliValue,
-  rollbackPendingSessionCreate,
-  renderSessionTranscript,
   renderAssistantTurnCompletion,
   deriveSessionLiveStatus,
-  ensureSessionCreateWorkspaceMetaFresh,
-  resolveCreateAgentSelector,
+  resolveEffectiveSessionCreateDispatchConfig,
   resolveCreateCurrentSessionId,
   resolveOpenedBySessionRelation,
   resolveSessionCreateOwnerUserId,
   selectDefaultAgentConfigForCreate,
+  readDelegatedMachineAccess,
+  readSessionMachineAccess,
+  resolveSessionRequester,
+  sendSessionChatResult,
+  ensureTargetMachineNotOffline,
+  MachineOfflineError,
+  readSessionLiveStatusesMany,
   resolveSessionCommandRequesterUserId,
-  resolveChatArgs,
-  resolveRenameArgs,
-  resolvePromptCandidate,
   resolveTurnDispatchConfigFromInputConfig,
+  resolveTurnDispatchDefaultsFromHistory,
+  resolveEffectiveSessionChatDispatchConfig,
   resolveLocalProjectBranchForCreate,
+  resolveLocalProjectCreateGitContext,
   resolveLocalProjectRefOrThrow,
-  selectLocalProjectsBySelector,
   selectTargetMachineForCreate,
-  shouldQueueMachineDelete,
-  shouldReadStdinForChatArgResolution,
   shouldWaitForSessionCompletion,
-  selectSessionTranscriptEntries,
-  selectWorkspaceSummary,
   sortSessionMetas,
   toSessionTranscriptEntries,
   updateSessionActivityTimestamps,
   updateSessionActivityTimestampsBestEffort,
-  validateTurnConfigOptionValues,
-  validateTurnModeAndModel,
   withBuiltinDefaultTurnMode,
 } from './session';
 
@@ -81,6 +106,24 @@ const createHistoryEntry = (overrides: Partial<SessionHistoryInput> = {}): Sessi
   timestamp: '2026-03-12T00:00:00.000Z',
   items: [],
   fileDiff: [],
+  ...overrides,
+});
+
+const createLocalProjectGitState = (
+  overrides: Partial<Extract<LocalProjectGitState, { git: true }>> = {}
+): LocalProjectGitState => ({
+  git: true,
+  currentBranch: 'main',
+  defaultBranch: 'main',
+  branches: ['main'],
+  githubRepoFullName: 'loro-dev/lody',
+  workingTree: {
+    clean: true,
+    staged: false,
+    unstaged: false,
+    untracked: false,
+    conflicted: false,
+  },
   ...overrides,
 });
 
@@ -120,33 +163,6 @@ const createAcpCapability = (): AcpCapabilityCacheEntry => ({
 });
 
 describe('session command helpers', () => {
-  it('uses one hard Meta read across request validation and accepted create materialization', async () => {
-    const syncMetaOrThrow = vi.fn(async () => undefined);
-    const manager = { syncMetaOrThrow };
-    const workspaceId = 'workspace-id' as WorkspaceId;
-
-    await ensureSessionCreateWorkspaceMetaFresh({
-      manager,
-      workspaceId,
-      prewriteSatisfied: false,
-    });
-    await ensureSessionCreateWorkspaceMetaFresh({
-      manager,
-      workspaceId,
-      prewriteSatisfied: true,
-    });
-
-    expect(syncMetaOrThrow).toHaveBeenCalledTimes(1);
-    expect(syncMetaOrThrow).toHaveBeenCalledWith({
-      reason: 'session.create:workspace-id:prewrite',
-    });
-  });
-
-  it('normalizes blank CLI values to undefined', () => {
-    expect(normalizeCliValue('   ')).toBeUndefined();
-    expect(normalizeCliValue(' value ')).toBe('value');
-  });
-
   it('records both the root Session and exact child Tab that opened a Session', () => {
     expect(
       resolveOpenedBySessionRelation(
@@ -189,45 +205,44 @@ describe('session command helpers', () => {
     expect(withBuiltinDefaultTurnMode({}, createSessionMeta({ cliType: 'registry' }))).toEqual({});
   });
 
-  it('picks prompt candidates by explicit precedence', () => {
+  it('skips a builtin default mode the adapter does not offer', () => {
+    const grok = createSessionMeta({ agentType: 'grok' });
+    expect(withBuiltinDefaultTurnMode({}, grok)).toEqual({ modeId: 'default' });
     expect(
-      resolvePromptCandidate({
-        prompt: 'from-prompt',
-        promptFileContent: 'from-file',
-        positionalPrompt: 'from-position',
-        stdinText: 'from-stdin',
+      withBuiltinDefaultTurnMode({}, grok, {
+        ...createAcpCapability(),
+        agentType: 'grok',
+        modes: [],
+        configOptions: [
+          {
+            id: 'permission_mode',
+            name: 'Permission Mode',
+            category: '_permission',
+            type: 'select',
+            currentValue: 'ask',
+            options: [
+              { value: 'ask', name: 'Ask' },
+              { value: 'always-approve', name: 'Always Approve' },
+            ],
+          },
+        ],
       })
-    ).toBe('from-prompt');
-
+    ).toEqual({});
     expect(
-      resolvePromptCandidate({
-        promptFileContent: 'from-file',
-        positionalPrompt: 'from-position',
-        stdinText: 'from-stdin',
+      withBuiltinDefaultTurnMode({}, grok, {
+        ...createAcpCapability(),
+        agentType: 'grok',
+        modes: [
+          { id: 'default', name: 'Agent' },
+          { id: 'plan', name: 'Plan' },
+        ],
       })
-    ).toBe('from-file');
-  });
-
-  it('selects workspaces by explicit selector or the only candidate', () => {
-    const workspaces = [
-      { id: 'ws-1', slug: 'alpha', name: 'Alpha', role: 'member' },
-      { id: 'ws-2', slug: 'beta', name: 'Beta', role: 'member' },
-    ];
-
-    expect(selectWorkspaceSummary(workspaces, 'beta')).toEqual(workspaces[1]);
-    expect(
-      selectWorkspaceSummary([{ id: 'ws-3', slug: null, name: 'Solo', role: 'owner' }])
-    ).toEqual({
-      id: 'ws-3',
-      slug: null,
-      name: 'Solo',
-      role: 'owner',
-    });
+    ).toEqual({ modeId: 'default' });
   });
 
   it('throws when workspace selection is ambiguous', () => {
     expect(() =>
-      selectWorkspaceSummary([
+      commandRuntime.selectWorkspaceSummary([
         { id: 'ws-1', slug: 'alpha', name: 'Alpha', role: 'member' },
         { id: 'ws-2', slug: 'beta', name: 'Beta', role: 'member' },
       ])
@@ -270,6 +285,24 @@ describe('session command helpers', () => {
       'new-archived',
       'old-active',
     ]);
+    const targeted = {
+      ...sessions[0],
+      title: 'Review parser',
+      machineId: 'target-machine',
+      agentConfigId: 'target-agent',
+      agentRoleId: 'target-role',
+    } as SessionMeta;
+    const other = { ...targeted, id: 'other', agentRoleId: 'other-role' } as SessionMeta;
+    expect(
+      filterSessionMetas([targeted, other], {
+        query: 'PARSER',
+        machineId: 'target-machine',
+        agentConfigId: 'target-agent',
+        agentRoleId: 'target-role',
+      })
+    ).toEqual([targeted]);
+    expect(filterSessionMetas([targeted], { machineId: 'wrong' })).toEqual([]);
+    expect(filterSessionMetas([targeted], { agentConfigId: 'wrong' })).toEqual([]);
   });
 
   it('filters machine selectors to authorized machine ids before selection', () => {
@@ -324,6 +357,19 @@ describe('session command helpers', () => {
     );
   });
 
+  it('keeps delegated requester identity separate from the authenticated executor', () => {
+    const delegatedRequester = { userId: 'collaborator-b' };
+    expect(
+      resolveSessionRequester({ userId: 'machine-owner-a' }, undefined, delegatedRequester)
+    ).toEqual({ userId: 'collaborator-b', isDelegated: true });
+    expect(
+      resolveSessionRequester({ userId: 'machine-owner-c' }, undefined, delegatedRequester)
+    ).toEqual({ userId: 'collaborator-b', isDelegated: true });
+    expect(() =>
+      resolveSessionRequester({ userId: 'machine-owner-a' }, 'someone-else', delegatedRequester)
+    ).toThrow('Requester identity must match the delegated Session requester.');
+  });
+
   it('keeps Session ownership separate from the authenticated requester', () => {
     expect(resolveSessionCreateOwnerUserId('machine-owner', 'session-owner')).toBe('session-owner');
     expect(resolveSessionCreateOwnerUserId('machine-owner', '   ')).toBe('machine-owner');
@@ -342,290 +388,6 @@ describe('session command helpers', () => {
       state: 'waiting',
       source: 'machine',
     });
-  });
-
-  it('validates ACP config option ids, types, and select values before dispatch', () => {
-    const capability = createAcpCapability();
-    expect(() =>
-      validateTurnConfigOptionValues({ approval_policy: 'never', web_search: true }, capability)
-    ).not.toThrow();
-    expect(() => validateTurnConfigOptionValues({ unknown: true }, capability)).toThrow(
-      /Unknown ACP config option/
-    );
-    expect(() => validateTurnConfigOptionValues({ approval_policy: false }, capability)).toThrow(
-      /expects a select value/
-    );
-    expect(() =>
-      validateTurnConfigOptionValues({ approval_policy: 'invalid' }, capability)
-    ).toThrow(/Allowed values/);
-    expect(() => validateTurnConfigOptionValues({ web_search: 'true' }, capability)).toThrow(
-      /expects a boolean value/
-    );
-  });
-
-  it('resolves a semantic run config selection against the target agent capabilities', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...createAcpCapability(),
-      configOptions: [
-        ...(createAcpCapability().configOptions ?? []),
-        {
-          id: 'reasoning_effort',
-          name: 'Reasoning effort',
-          category: 'thought_level',
-          type: 'select',
-          currentValue: 'medium',
-          options: [{ value: 'high', name: 'High' }],
-        },
-      ],
-    };
-
-    expect(
-      applyAgentRunConfigSelection(
-        {
-          configOptionValues: { approval_policy: 'never' },
-          runConfig: { modelId: 'model-a', reasoningEffort: 'high' },
-        },
-        capability
-      ).config
-    ).toEqual({
-      modelId: 'model-a',
-      configOptionValues: { approval_policy: 'never', reasoning_effort: 'high' },
-    });
-
-    // No selection: the config passes through untouched, capability or not.
-    expect(applyAgentRunConfigSelection({ modeId: 'default' }, undefined).config).toEqual({
-      modeId: 'default',
-    });
-
-    expect(() =>
-      applyAgentRunConfigSelection({ runConfig: { fastMode: true } }, capability)
-    ).toThrow(/does not offer a fast mode option/);
-  });
-
-  it('validates effort against the selected model and skips the probed-model snapshot check', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...createAcpCapability(),
-      configOptions: [
-        {
-          id: 'model',
-          name: 'Model',
-          category: 'model',
-          type: 'select',
-          currentValue: 'model-a',
-          options: [
-            { value: 'model-a', name: 'Model A' },
-            { value: 'model-b', name: 'Model B' },
-          ],
-        },
-        {
-          id: 'reasoning_effort',
-          name: 'Reasoning effort',
-          category: 'thought_level',
-          type: 'select',
-          // Snapshot taken while model-a was current.
-          currentValue: 'medium',
-          options: [{ value: 'medium', name: 'Medium' }],
-        },
-      ],
-      models: [],
-      modelReasoningEfforts: { 'model-a': ['medium'], 'model-b': ['medium', 'xhigh'] },
-    };
-
-    const requested = applyAgentRunConfigSelection(
-      { runConfig: { modelId: 'model-b', reasoningEffort: 'xhigh' } },
-      capability
-    );
-
-    expect(requested.config.configOptionValues).toEqual({ reasoning_effort: 'xhigh' });
-    expect(requested.validatedConfigIds.has('reasoning_effort')).toBe(true);
-    // `xhigh` is absent from the probed model's option list, so the snapshot
-    // check must skip it rather than reject a value valid for model-b.
-    expect(() =>
-      validateTurnConfigOptionValues(
-        requested.config.configOptionValues,
-        capability,
-        requested.validatedConfigIds
-      )
-    ).not.toThrow();
-    expect(() =>
-      validateTurnConfigOptionValues(requested.config.configOptionValues, capability)
-    ).toThrow(/Allowed values/);
-  });
-
-  it('drops inherited ACP config options that are no longer compatible', () => {
-    expect(
-      filterCompatibleTurnConfigOptionValues(
-        { approval_policy: 'never', web_search: 'true', removed: false },
-        createAcpCapability()
-      )
-    ).toEqual({ approval_policy: 'never' });
-  });
-
-  it('validates explicit mode and model selectors against agent capabilities', () => {
-    const capability = createAcpCapability();
-    expect(() =>
-      validateTurnModeAndModel({ modeId: 'default', modelId: 'model-a' }, capability)
-    ).not.toThrow();
-    expect(() => validateTurnModeAndModel({ modeId: 'plan' }, capability)).toThrow(
-      'Unsupported ACP mode'
-    );
-    expect(() => validateTurnModeAndModel({ modelId: 'model-b' }, capability)).toThrow(
-      'Unsupported ACP model'
-    );
-    expect(() => validateTurnModeAndModel({ modeId: 'default' }, undefined)).toThrow(
-      'Unsupported ACP mode'
-    );
-  });
-
-  it('drops incompatible inherited mode and model selectors', () => {
-    expect(
-      filterCompatibleInheritedTurnConfig(
-        {
-          modeId: 'plan',
-          modelId: 'model-a',
-          configOptionValues: { approval_policy: 'never' },
-        },
-        createAcpCapability()
-      )
-    ).toEqual({
-      modelId: 'model-a',
-      configOptionValues: { approval_policy: 'never' },
-    });
-  });
-
-  it('accepts mode and model selectors advertised as ACP config options', () => {
-    const capability: AcpCapabilityCacheEntry = {
-      ...createAcpCapability(),
-      modes: [],
-      models: [],
-      configOptions: [
-        {
-          id: 'mode',
-          name: 'Mode',
-          category: 'mode',
-          type: 'select',
-          currentValue: 'plan',
-          options: [{ value: 'plan', name: 'Plan' }],
-        },
-        {
-          id: 'model',
-          name: 'Model',
-          category: 'model',
-          type: 'select',
-          currentValue: 'model-b',
-          options: [{ value: 'model-b', name: 'Model B' }],
-        },
-      ],
-    };
-    expect(() =>
-      validateTurnModeAndModel({ modeId: 'plan', modelId: 'model-b' }, capability)
-    ).not.toThrow();
-  });
-
-  it('sorts sessions with invalid createdAt timestamps deterministically', () => {
-    const sessions = [
-      createSessionMeta({
-        id: 'z-session',
-        createdAt: 'not-a-date',
-      }),
-      createSessionMeta({
-        id: 'a-session',
-        createdAt: 'still-not-a-date',
-      }),
-    ];
-
-    expect(sortSessionMetas(sessions).map((session) => session.id)).toEqual([
-      'z-session',
-      'a-session',
-    ]);
-  });
-
-  it('resolves rename args from explicit title, positional title, and env fallback', () => {
-    expect(
-      resolveRenameArgs({
-        sessionIdArg: 'session-1',
-        titleArg: 'Renamed from positional',
-      })
-    ).toEqual({
-      sessionId: 'session-1',
-      title: 'Renamed from positional',
-    });
-
-    expect(
-      resolveRenameArgs({
-        sessionIdArg: 'session-1',
-        optionTitle: 'Renamed from option',
-      })
-    ).toEqual({
-      sessionId: 'session-1',
-      title: 'Renamed from option',
-    });
-
-    expect(
-      resolveRenameArgs({
-        optionTitle: 'Renamed using env fallback',
-        envSessionId: 'session-from-env',
-      })
-    ).toEqual({
-      sessionId: 'session-from-env',
-      title: 'Renamed using env fallback',
-    });
-  });
-
-  it('rejects rename args when the title is missing', () => {
-    expect(() =>
-      resolveRenameArgs({
-        sessionIdArg: 'session-1',
-      })
-    ).toThrow(/Missing title/);
-
-    expect(() =>
-      resolveRenameArgs({
-        sessionIdArg: 'session-2',
-        envSessionId: 'session-from-env',
-      })
-    ).toThrow(/Missing title/);
-  });
-
-  it('resolves chat args from explicit session id or env fallback', () => {
-    expect(
-      resolveChatArgs({
-        sessionIdArg: 'session-1',
-        promptArg: 'prompt from second positional',
-      })
-    ).toEqual({
-      sessionId: 'session-1',
-      positionalPrompt: 'prompt from second positional',
-    });
-
-    expect(
-      resolveChatArgs({
-        sessionIdArg: 'prompt from first positional',
-        envSessionId: 'session-from-env',
-      })
-    ).toEqual({
-      sessionId: 'session-from-env',
-      positionalPrompt: 'prompt from first positional',
-    });
-
-    expect(
-      resolveChatArgs({
-        sessionIdArg: 'session-explicit',
-        envSessionId: 'session-from-env',
-        hasNonPositionalPromptSource: true,
-      })
-    ).toEqual({
-      sessionId: 'session-explicit',
-    });
-  });
-
-  it('resolves --agent as a create alias for --agent-config', () => {
-    expect(resolveCreateAgentSelector({ agent: 'Codex' })).toBe('Codex');
-    expect(resolveCreateAgentSelector({ agentConfig: 'cfg-1' })).toBe('cfg-1');
-    expect(resolveCreateAgentSelector({ agent: 'cfg-1', agentConfig: 'cfg-1' })).toBe('cfg-1');
-    expect(() => resolveCreateAgentSelector({ agent: 'cfg-1', agentConfig: 'cfg-2' })).toThrow(
-      /either --agent or --agent-config/
-    );
   });
 
   it('uses the same default agent config rules for create and create_options', () => {
@@ -659,6 +421,622 @@ describe('session command helpers', () => {
         currentSession
       )
     ).toBeUndefined();
+  });
+
+  it('inherits chat follow-up run config from the last target turn that recorded a model', () => {
+    const agent = { cliType: 'builtin' as const, agentType: 'codex' };
+    const history = [
+      createHistoryEntry({
+        id: 'turn-1',
+        role: 'user',
+        inputConfig: {
+          prompt: 'first',
+          cliType: 'builtin',
+          agentType: 'codex',
+          modeId: 'plan',
+          modelId: 'model-a',
+          configOptionValues: { approval_policy: 'never' },
+        },
+      }),
+      createHistoryEntry({ id: 'assistant-1', role: 'assistant' }),
+      createHistoryEntry({
+        id: 'turn-2',
+        role: 'user',
+        inputConfig: {
+          prompt: 'follow-up without a model',
+          cliType: 'builtin',
+          agentType: 'codex',
+          modeId: 'agent-auto-review',
+        },
+      }),
+    ];
+
+    expect(resolveTurnDispatchDefaultsFromHistory(history, agent)).toEqual({
+      modeId: 'plan',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    });
+    expect(
+      resolveTurnDispatchDefaultsFromHistory(
+        [
+          ...history,
+          createHistoryEntry({
+            id: 'turn-3',
+            role: 'user',
+            inputConfig: {
+              prompt: 'later selected model',
+              cliType: 'builtin',
+              agentType: 'codex',
+              modeId: 'default',
+              modelId: 'model-a',
+              configOptionValues: { approval_policy: 'on-request' },
+            },
+          }),
+        ],
+        agent
+      )
+    ).toEqual({
+      modeId: 'default',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'on-request' },
+    });
+    expect(
+      resolveTurnDispatchDefaultsFromHistory(
+        [
+          createHistoryEntry({
+            id: 'turn-claude',
+            role: 'user',
+            inputConfig: {
+              prompt: 'other agent',
+              cliType: 'builtin',
+              agentType: 'claude',
+              modelId: 'ignored',
+            },
+          }),
+          ...history,
+        ],
+        agent
+      )
+    ).toEqual({
+      modeId: 'plan',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    });
+    expect(
+      resolveTurnDispatchDefaultsFromHistory(
+        [
+          createHistoryEntry({
+            id: 'mode-only',
+            role: 'user',
+            inputConfig: {
+              prompt: 'mode only',
+              cliType: 'builtin',
+              agentType: 'codex',
+              modeId: 'plan',
+            },
+          }),
+        ],
+        agent
+      )
+    ).toEqual({ modeId: 'plan' });
+    expect(resolveTurnDispatchDefaultsFromHistory([], agent)).toBeUndefined();
+  });
+
+  it("validates effort against the target model's declaration, keeping Claude's default", () => {
+    // The probe ran on model-a, which has no effort option at all.
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'claude',
+      modes: [{ id: 'default', name: 'Default' }],
+      models: [
+        { modelId: 'model-a', name: 'Model A' },
+        { modelId: 'model-b', name: 'Model B' },
+      ],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'Model A' },
+            { value: 'model-b', name: 'Model B' },
+          ],
+        },
+      ],
+      declaredModelControls: {
+        'model-a': { fastMode: false },
+        'model-b': { effortValues: ['low', 'high'], fastMode: true },
+      },
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'claude' });
+    const dispatch = (configOptionValues: Record<string, string | boolean>) => () =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modelId: 'model-b', configOptionValues },
+        target,
+        capability,
+      });
+
+    // `default` clears the effort pin and follows the provider: always offered.
+    expect(dispatch({ effort: 'default' })).not.toThrow();
+    expect(dispatch({ effort: 'high', fast: true })).not.toThrow();
+    expect(dispatch({ effort: 'max' })).toThrow(/Allowed values: default, low, high/);
+  });
+
+  it('keeps Fast values away from a model declared without Fast', () => {
+    // The probe ran on haiku, which has no Fast option; the declaration agrees.
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'claude',
+      modes: [{ id: 'default', name: 'Default' }],
+      models: [{ modelId: 'haiku', name: 'Haiku' }],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'haiku',
+          options: [{ value: 'haiku', name: 'Haiku' }],
+        },
+      ],
+      declaredModelControls: { haiku: { fastMode: false } },
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'claude' });
+    const dispatch = (configOptionValues: Record<string, string | boolean>) => () =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modelId: 'haiku', configOptionValues },
+        target,
+        capability,
+      });
+
+    expect(dispatch({ fast: true })).toThrow(/does not offer fast mode/);
+    expect(dispatch({ fast: false })).not.toThrow();
+    // An inherited Fast value is dropped rather than sent to a model without it.
+    expect(
+      filterCompatibleTurnConfigOptionValues({ fast: true, effort: 'default' }, capability, 'haiku')
+    ).toBeUndefined();
+  });
+
+  it('validates and filters Codex ultrafast speed tiers per target model', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      modes: [{ id: 'agent', name: 'Agent' }],
+      models: [
+        { modelId: 'gpt-6.2-sol', name: '6.2 Sol' },
+        { modelId: 'gpt-6.2-astra', name: '6.2 Astra' },
+      ],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'gpt-6.2-astra',
+          options: [
+            { value: 'gpt-6.2-sol', name: '6.2 Sol' },
+            { value: 'gpt-6.2-astra', name: '6.2 Astra' },
+          ],
+        },
+        {
+          id: 'fast-mode',
+          name: 'Fast mode',
+          category: 'model_config',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      declaredModelControls: {
+        'gpt-6.2-sol': { fastMode: true, speedTiers: ['fast', 'ultrafast'] },
+        'gpt-6.2-astra': { fastMode: true },
+      },
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'codex' });
+    expect(() =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {
+          modelId: 'gpt-6.2-sol',
+          configOptionValues: { 'fast-mode': 'ultrafast' },
+        },
+        target,
+        capability,
+      })
+    ).not.toThrow();
+    expect(() =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {
+          modelId: 'gpt-6.2-astra',
+          configOptionValues: { 'fast-mode': 'ultrafast' },
+        },
+        target,
+        capability,
+      })
+    ).toThrow(/Invalid speed tier for model gpt-6.2-astra: ultrafast/);
+    expect(
+      filterCompatibleTurnConfigOptionValues(
+        { 'fast-mode': 'ultrafast' },
+        capability,
+        'gpt-6.2-sol'
+      )
+    ).toEqual({ 'fast-mode': 'ultrafast' });
+    expect(
+      filterCompatibleTurnConfigOptionValues(
+        { 'fast-mode': 'ultrafast' },
+        capability,
+        'gpt-6.2-astra'
+      )
+    ).toBeUndefined();
+  });
+
+  it('fills omitted chat follow-up selectors from the target turn and keeps explicit overrides', () => {
+    const target = createSessionMeta();
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      modes: [
+        { id: 'default', name: 'Default' },
+        { id: 'plan', name: 'Plan' },
+        { id: 'agent-auto-review', name: 'Auto' },
+      ],
+    };
+    const inherited = {
+      modeId: 'plan',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    };
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {},
+        inheritedDispatchConfig: inherited,
+        target,
+        capability,
+      })
+    ).toMatchObject(inherited);
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modelId: 'model-a' },
+        inheritedDispatchConfig: inherited,
+        target,
+        capability,
+      })
+    ).toMatchObject(inherited);
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modeId: 'default' },
+        inheritedDispatchConfig: inherited,
+        target,
+        capability,
+      })
+    ).toMatchObject({
+      modeId: 'default',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    });
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {},
+        inheritedDispatchConfig: {
+          modeId: 'plan',
+          modelId: 'retired-model',
+          configOptionValues: { approval_policy: 'never' },
+        },
+        target,
+        capability: createAcpCapability(),
+      })
+    ).toMatchObject({
+      configOptionValues: { approval_policy: 'never' },
+    });
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {},
+        target,
+      })
+    ).toMatchObject({ modeId: 'agent-auto-review' });
+  });
+
+  it('keeps the inherited permission option across model switches and partial overrides', () => {
+    // Grok carries permission in a `_permission` config option, not in modeId.
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'grok',
+      modes: [],
+      models: [
+        { modelId: 'grok-a', name: 'A' },
+        { modelId: 'grok-b', name: 'B' },
+      ],
+      configOptions: [
+        {
+          id: 'permission_mode',
+          name: 'Permission Mode',
+          category: '_permission',
+          type: 'select',
+          currentValue: 'ask',
+          options: [
+            { value: 'ask', name: 'Ask Every Time' },
+            { value: 'always-approve', name: 'Always Approve' },
+          ],
+        },
+        {
+          id: 'web_search',
+          name: 'Web search',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'grok' });
+    const inheritedDispatchConfig = {
+      modelId: 'grok-a',
+      configOptionValues: { permission_mode: 'always-approve', web_search: true },
+    };
+    const resolve = (
+      dispatchConfig: Parameters<
+        typeof resolveEffectiveSessionChatDispatchConfig
+      >[0]['dispatchConfig']
+    ) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig,
+        inheritedDispatchConfig,
+        target,
+        capability,
+      });
+
+    expect(resolve({ modelId: 'grok-b' })).toMatchObject({
+      modelId: 'grok-b',
+      configOptionValues: { permission_mode: 'always-approve' },
+    });
+    expect(resolve({ modelId: 'grok-b' }).configOptionValues).not.toHaveProperty('web_search');
+    expect(resolve({ configOptionValues: { web_search: false } }).configOptionValues).toEqual({
+      permission_mode: 'always-approve',
+      web_search: false,
+    });
+    expect(resolve({ configOptionValues: { permission_mode: 'ask' } }).configOptionValues).toEqual({
+      permission_mode: 'ask',
+    });
+  });
+
+  it.each(['xhigh', 'medium'])(
+    'checks inherited effort %s against the inherited model',
+    (effort) => {
+      const capability: AcpCapabilityCacheEntry = {
+        ...createAcpCapability(),
+        models: [{ modelId: 'model-b', name: 'B' }],
+        modelReasoningEfforts: { 'model-b': ['xhigh'] },
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'model-a',
+            options: [
+              { value: 'model-a', name: 'A' },
+              { value: 'model-b', name: 'B' },
+            ],
+          },
+          {
+            id: 'reasoning_effort',
+            name: 'Effort',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'medium',
+            options: [{ value: 'medium', name: 'Medium' }],
+          },
+        ],
+      };
+      const resolve = (cache: AcpCapabilityCacheEntry) =>
+        resolveEffectiveSessionChatDispatchConfig({
+          dispatchConfig: {},
+          target: createSessionMeta(),
+          capability: cache,
+          inheritedDispatchConfig: {
+            modelId: 'model-b',
+            configOptionValues: { reasoning_effort: effort, fast: true, unknown: 'value' },
+          },
+        });
+      expect(resolve(capability).configOptionValues).toEqual(
+        effort === 'xhigh' ? { reasoning_effort: 'xhigh', fast: true } : { fast: true }
+      );
+      expect(
+        resolve({ ...capability, modelReasoningEfforts: undefined }).configOptionValues
+      ).toEqual({ reasoning_effort: effort, fast: true });
+      expect(resolve({ ...capability, configOptions: [] }).configOptionValues).toEqual(
+        effort === 'xhigh' ? { reasoning_effort: 'xhigh', fast: true } : { fast: true }
+      );
+    }
+  );
+
+  it('validates explicit options against the inherited or explicitly selected model', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      modelReasoningEfforts: { 'model-a': ['medium'], 'model-b': ['xhigh'] },
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'A' },
+            { value: 'model-b', name: 'B' },
+          ],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'medium',
+          options: [{ value: 'medium', name: 'Medium' }],
+        },
+      ],
+    };
+    const resolve = (configOptionValues: Record<string, string>) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { configOptionValues },
+        inheritedDispatchConfig: { modelId: 'model-b' },
+        target: createSessionMeta(),
+        capability,
+      });
+
+    expect(resolve({ reasoning_effort: 'xhigh' })).toMatchObject({
+      modelId: 'model-b',
+      configOptionValues: { reasoning_effort: 'xhigh' },
+    });
+    expect(() => resolve({ reasoning_effort: 'medium' })).toThrow(
+      'Invalid reasoning effort for model model-b'
+    );
+    expect(resolve({ model: 'model-b', reasoning_effort: 'xhigh' })).toMatchObject({
+      modelId: undefined,
+      configOptionValues: { model: 'model-b', reasoning_effort: 'xhigh' },
+    });
+  });
+
+  it('validates options against the target model’s own observed list (LodyAI/Lody#1215)', () => {
+    const thoughtLevel = (values: string[]) => ({
+      id: 'thought_level',
+      name: 'Thinking',
+      category: 'thought_level',
+      type: 'select' as const,
+      currentValue: values[0] ?? '',
+      options: values.map((value) => ({ value, name: value })),
+    });
+    // Probed on swe-2-high, whose ladder lacks `low`.
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      agentType: 'devin',
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'swe-2-high',
+          options: [
+            { value: 'swe-2-high', name: 'SWE 2' },
+            { value: 'fusion', name: 'Fusion' },
+          ],
+        },
+        thoughtLevel(['medium', 'high', 'max']),
+      ],
+    };
+    const resolve = (cache: AcpCapabilityCacheEntry, effort: string) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modelId: 'fusion', configOptionValues: { thought_level: effort } },
+        target: createSessionMeta(),
+        capability: cache,
+      });
+
+    // Unknown target model: dispatched for the agent to decide, as before.
+    expect(resolve(capability, 'low').configOptionValues).toEqual({ thought_level: 'low' });
+    const observed = {
+      ...capability,
+      observedModelConfigOptions: { fusion: [thoughtLevel(['low', 'medium', 'xhigh', 'max'])] },
+    };
+    expect(resolve(observed, 'low').configOptionValues).toEqual({ thought_level: 'low' });
+    // Once the agent has answered for the target model, its list decides.
+    expect(() => resolve(observed, 'high')).toThrow('Invalid reasoning effort for model fusion');
+  });
+
+  it('lets explicit selector config options replace inherited top-level selectors', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      modes: [
+        { id: 'default', name: 'Default' },
+        { id: 'plan', name: 'Plan' },
+      ],
+      models: [
+        { modelId: 'model-a', name: 'A' },
+        { modelId: 'model-b', name: 'B' },
+      ],
+      configOptions: [
+        {
+          id: 'mode',
+          name: 'Mode',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'plan', name: 'Plan' },
+          ],
+        },
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'A' },
+            { value: 'model-b', name: 'B' },
+          ],
+        },
+      ],
+    };
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { configOptionValues: { mode: 'plan', model: 'model-b' } },
+        inheritedDispatchConfig: { modeId: 'default', modelId: 'model-a' },
+        target: createSessionMeta(),
+        capability,
+      })
+    ).toEqual({
+      modeId: undefined,
+      modelId: undefined,
+      configOptionValues: { mode: 'plan', model: 'model-b' },
+    });
+  });
+
+  it('drops old-model options on a model switch while preserving explicit options', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      models: [
+        { modelId: 'model-a', name: 'A' },
+        { modelId: 'model-b', name: 'B' },
+      ],
+      configOptions: [{ id: 'fast', name: 'Fast', type: 'boolean', currentValue: true }],
+    };
+    const inheritedDispatchConfig = {
+      modelId: 'model-a',
+      modeId: 'default',
+      configOptionValues: { fast: true },
+    };
+    const resolve = (
+      dispatchConfig: Parameters<
+        typeof resolveEffectiveSessionChatDispatchConfig
+      >[0]['dispatchConfig']
+    ) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig,
+        inheritedDispatchConfig,
+        target: createSessionMeta(),
+        capability,
+      });
+    expect(resolve({ modelId: 'model-b' })).toEqual({
+      modelId: 'model-b',
+      modeId: 'default',
+      configOptionValues: undefined,
+    });
+    expect(resolve({ modelId: 'model-a' }).configOptionValues).toEqual({ fast: true });
+    expect(resolve({}).configOptionValues).toEqual({ fast: true });
+    expect(
+      resolve({ modelId: 'model-b', configOptionValues: { fast: false } }).configOptionValues
+    ).toEqual({ fast: false });
   });
 
   it('filters frozen inherited config against the resolved target agent kind', () => {
@@ -719,64 +1097,6 @@ describe('session command helpers', () => {
     ).toThrow(/Nested child sessions are not supported.*root-session/);
   });
 
-  it('treats stdin as a prompt source only when it actually has content', () => {
-    expect(hasNonPositionalPromptSource({ stdinText: undefined })).toBe(false);
-    expect(hasNonPositionalPromptSource({ stdinText: 'prompt from stdin' })).toBe(true);
-    expect(hasNonPositionalPromptSource({ promptFile: '-' })).toBe(true);
-  });
-
-  it('only pre-reads stdin for chat arg resolution when env fallback is ambiguous', () => {
-    expect(
-      shouldReadStdinForChatArgResolution({
-        sessionIdArg: 'session-1',
-        envSessionId: 'session-from-env',
-        prompt: 'prompt from option',
-        stdinIsTty: false,
-      })
-    ).toBe(false);
-
-    expect(
-      shouldReadStdinForChatArgResolution({
-        sessionIdArg: 'session-1',
-        envSessionId: 'session-from-env',
-        stdinIsTty: false,
-      })
-    ).toBe(true);
-
-    expect(
-      shouldReadStdinForChatArgResolution({
-        sessionIdArg: 'session-1',
-        envSessionId: 'session-from-env',
-        stdinIsTty: true,
-      })
-    ).toBe(false);
-  });
-
-  it('swallows rollback cleanup failures so the original create error can propagate', async () => {
-    const deleteDoc = vi.fn(async () => {
-      throw new Error('delete failed');
-    });
-    const cleanSessionDoc = vi.fn(async () => {
-      throw new Error('clean failed');
-    });
-    const warn = vi.fn();
-
-    await expect(
-      rollbackPendingSessionCreate(
-        {
-          repo: { deleteDoc },
-          cleanSessionDoc,
-        },
-        'session-1',
-        { warn }
-      )
-    ).resolves.toBeUndefined();
-
-    expect(deleteDoc).toHaveBeenCalledWith('session-session-1');
-    expect(cleanSessionDoc).toHaveBeenCalledWith('session-1', { preserveStatus: true });
-    expect(warn).toHaveBeenCalledTimes(2);
-  });
-
   it('does not throw when the dispatch doc sync is not confirmed, and skips meta sync', async () => {
     const waitUntilSynced = vi.fn(async () => false);
     const waitUntilMetaSynced = vi.fn(async () => true);
@@ -817,47 +1137,6 @@ describe('session command helpers', () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it('confirms workspace meta after the dispatch doc sync succeeds, without warning', async () => {
-    const waitUntilSynced = vi.fn(async () => true);
-    const waitUntilMetaSynced = vi.fn(async () => true);
-    const warn = vi.fn();
-
-    await expect(
-      confirmDispatchSyncedBestEffort({
-        manager: { waitUntilMetaSynced },
-        sessionDoc: { waitUntilSynced },
-        reason: 'session.create:session-1',
-        logger: { warn },
-      })
-    ).resolves.toBeUndefined();
-
-    expect(waitUntilMetaSynced).toHaveBeenCalledTimes(1);
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it('does not start workspace meta confirmation before dispatch doc confirmation settles', async () => {
-    let resolveDocSync!: (synced: boolean) => void;
-    const waitUntilSynced = vi.fn(
-      async () =>
-        await new Promise<boolean>((resolve) => {
-          resolveDocSync = resolve;
-        })
-    );
-    const waitUntilMetaSynced = vi.fn(async () => true);
-
-    const confirmation = confirmDispatchSyncedBestEffort({
-      manager: { waitUntilMetaSynced },
-      sessionDoc: { waitUntilSynced },
-      reason: 'session.create:session-1',
-    });
-    await Promise.resolve();
-    expect(waitUntilMetaSynced).not.toHaveBeenCalled();
-
-    resolveDocSync(true);
-    await confirmation;
-    expect(waitUntilMetaSynced).toHaveBeenCalledTimes(1);
-  });
-
   it('does not throw when workspace meta sync is not confirmed', async () => {
     const waitUntilSynced = vi.fn(async () => true);
     const waitUntilMetaSynced = vi.fn(async () => false);
@@ -875,106 +1154,206 @@ describe('session command helpers', () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it('only queues machine-side deletion for sessions with repo-backed resources', () => {
-    expect(shouldQueueMachineDelete(createSessionMeta({ repoFullName: 'owner/repo' }))).toBe(true);
-    expect(
-      shouldQueueMachineDelete(
-        createSessionMeta({
-          parentSessionId: 'parent-session' as SessionId,
-          repoFullName: 'owner/repo',
-          isWorktree: true,
-        })
-      )
-    ).toBe(false);
-    expect(
-      shouldQueueMachineDelete(
-        createSessionMeta({
-          repoFullName: '   ',
-        })
-      )
-    ).toBe(false);
-    expect(shouldQueueMachineDelete(createSessionMeta())).toBe(false);
-  });
-
-  it('lists child sessions for lifecycle cascade commands', async () => {
-    const parentSessionId = 'parent-session' as SessionId;
-    const childSessionId = 'child-session' as SessionId;
-    const otherSessionId = 'other-session' as SessionId;
-    const getDocMeta = vi.fn(async (roomId: string) => {
-      if (roomId === getSessionRoomId(parentSessionId)) {
-        return { meta: createSessionMeta({ id: parentSessionId }) };
+  it.each(['archive', 'restore', 'delete'] as const)(
+    'requires editing authority before CLI %s writes or cleanup',
+    async (operation) => {
+      const repo = await LoroRepo.create({});
+      const id = 'read-only-target' as SessionId;
+      const meta = createSessionMeta({
+        id,
+        isArchived: operation !== 'archive',
+        title: 'Original',
+      });
+      await repo.upsertDocMeta(getSessionRoomId(id), meta);
+      const manager = {
+        repo,
+        syncMetaOrThrow: async () => {},
+        waitUntilMetaSynced: async () => true,
+        cleanSessionDoc: async () => {},
+      } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
+      const auth = { token: 'synthetic', userId: 'reader', machineId: 'caller' } as Parameters<
+        typeof assertSessionManagementAccess
+      >[0]['auth'];
+      const workspace = { id: 'workspace' } as Parameters<
+        typeof assertSessionManagementAccess
+      >[0]['workspace'];
+      let canEdit = false;
+      const run = () =>
+        runWithEncryptedCommandAccess(
+          async () => (canEdit ? { allowed: true } : { allowed: false, reason: 'not_visible' }),
+          () =>
+            runSessionOperationWithSyncedMetadata(manager, id, operation, (targetId) =>
+              assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
+            )
+        );
+      try {
+        await expect(run()).rejects.toMatchObject({
+          code: 'SESSION_MANAGEMENT_DENIED',
+          retryable: false,
+        });
+        expect((await repo.getDocMeta(getSessionRoomId(id)))?.meta).toEqual(meta);
+        canEdit = true;
+        await run();
+        const entry = await repo.getDocMeta(getSessionRoomId(id));
+        if (operation === 'delete') expect(isLoroRepoDocDeleted(entry)).toBe(true);
+        else expect(entry?.meta.isArchived).toBe(operation === 'archive');
+      } finally {
+        await repo.destroy();
       }
-      if (roomId === getSessionRoomId(childSessionId)) {
-        return {
-          meta: createSessionMeta({
-            id: childSessionId,
-            parentSessionId,
-          }),
-        };
-      }
-      if (roomId === getSessionRoomId(otherSessionId)) {
-        return { meta: createSessionMeta({ id: otherSessionId }) };
-      }
-      return undefined;
-    });
-    const manager = {
-      repo: {
-        getMeta: () => ({
-          scan: vi.fn(async () => [
-            { key: ['e', getSessionRoomId(parentSessionId)], value: true },
-            { key: ['e', getSessionRoomId(childSessionId)], value: true },
-            { key: ['e', getSessionRoomId(otherSessionId)], value: true },
-          ]),
-        }),
-        getDocMeta,
-      },
-    } as any;
+    }
+  );
 
-    await expect(listChildSessionIds(manager, parentSessionId)).resolves.toEqual([childSessionId]);
-  });
+  it.each(['archive', 'restore', 'delete'] as const)(
+    'synchronizes the %s snapshot and changes only the selected containment tree',
+    async (operation) => {
+      const root = createSessionMeta({
+        id: 'sync-root' as SessionId,
+        isArchived: operation !== 'archive',
+      });
+      const child = createSessionMeta({
+        id: 'sync-child' as SessionId,
+        parentSessionId: root.id,
+        isArchived: root.isArchived,
+      });
+      const opened = createSessionMeta({
+        id: 'sync-opened' as SessionId,
+        openedBySessionId: child.id,
+        openedByRootSessionId: root.id,
+        isArchived: root.isArchived,
+      });
+      const openedChild = createSessionMeta({
+        id: 'sync-opened-child' as SessionId,
+        parentSessionId: opened.id,
+        isArchived: root.isArchived,
+      });
+      const directlyOpened = createSessionMeta({
+        id: 'sync-directly-opened' as SessionId,
+        openedBySessionId: root.id,
+        isArchived: root.isArchived,
+      });
+      const independentSessions = [opened, openedChild, directlyOpened];
+      const repo = await LoroRepo.create({});
+      try {
+        await repo.upsertDocMeta(getSessionRoomId(root.id), root);
+        const started = Promise.withResolvers<void>();
+        const sync = Promise.withResolvers<void>();
+        let failSync = true;
+        const cleaned: SessionId[] = [];
+        const manager = {
+          repo,
+          syncMetaOrThrow: async () => {
+            started.resolve();
+            await sync.promise;
+            if (failSync) throw new Error('metadata unavailable');
+            for (const session of [child, ...independentSessions])
+              await repo.upsertDocMeta(getSessionRoomId(session.id), session);
+          },
+          waitUntilMetaSynced: async () => true,
+          cleanSessionDoc: async (id: SessionId) => {
+            cleaned.push(id);
+          },
+        } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
+        const result = runSessionOperationWithSyncedMetadata(
+          manager,
+          root.id,
+          operation,
+          async () => {}
+        );
+        const rejected = expect(result).rejects.toThrow('metadata unavailable');
+        await started.promise;
+        expect((await repo.getDocMeta(getSessionRoomId(root.id)))?.meta).toEqual(root);
+        sync.resolve();
+        await rejected;
+        expect((await repo.getDocMeta(getSessionRoomId(root.id)))?.meta).toEqual(root);
+        expect(cleaned).toEqual([]);
+        failSync = false;
+        await expect(
+          runSessionOperationWithSyncedMetadata(manager, root.id, operation, async () => {})
+        ).resolves.toEqual([child.id]);
+        for (const session of [root, child]) {
+          const entry = await repo.getDocMeta(getSessionRoomId(session.id));
+          if (operation === 'delete') {
+            expect(isLoroRepoDocDeleted(entry)).toBe(true);
+          } else {
+            expect(isLoroRepoDocDeleted(entry)).toBe(false);
+            expect(entry?.meta.isArchived).toBe(operation === 'archive');
+            if (operation === 'archive') expect(entry?.meta.status).toEqual({ type: 'idle' });
+          }
+        }
+        for (const session of independentSessions) {
+          const entry = await repo.getDocMeta(getSessionRoomId(session.id));
+          expect(isLoroRepoDocDeleted(entry)).toBe(false);
+          expect(entry?.meta).toEqual(session);
+        }
+        expect(cleaned).toEqual(operation === 'delete' ? [child.id, root.id] : []);
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
 
-  it('builds archive and restore patches without changing archive semantics', () => {
-    expect(buildSessionArchiveMetaPatch()).toEqual({
+  it.each(['archive', 'restore', 'delete'] as const)(
+    '%s rejects query failures and tombstoned roots before mutation',
+    async (operation) => {
+      const root = createSessionMeta({ isArchived: true });
+      const repo = await LoroRepo.create({});
+      try {
+        await repo.upsertDocMeta(getSessionRoomId(root.id), root);
+        const manager = {
+          repo,
+          syncMetaOrThrow: async () => {},
+          waitUntilMetaSynced: async () => true,
+          cleanSessionDoc: async () => {},
+        } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
+        const listDoc = vi.spyOn(repo, 'listDoc').mockRejectedValueOnce(new Error('query failed'));
+        await expect(
+          runSessionOperationWithSyncedMetadata(manager, root.id, operation, async () => {})
+        ).rejects.toThrow('query failed');
+        expect((await repo.getDocMeta(getSessionRoomId(root.id)))?.meta).toEqual(root);
+        listDoc.mockRestore();
+        await repo.deleteDoc(getSessionRoomId(root.id));
+        await expect(
+          runSessionOperationWithSyncedMetadata(manager, root.id, operation, async () => {})
+        ).rejects.toThrow('Session metadata missing');
+        expect(isLoroRepoDocDeleted(await repo.getDocMeta(getSessionRoomId(root.id)))).toBe(true);
+      } finally {
+        await repo.destroy();
+      }
+    }
+  );
+
+  it('retains the archived root when a child deletion fails and retries safely', async () => {
+    const root = createSessionMeta({ isArchived: true });
+    const child = createSessionMeta({
+      id: 'child' as SessionId,
+      parentSessionId: root.id,
       isArchived: true,
-      status: { type: 'idle' },
     });
-    expect(buildSessionRestoreMetaPatch()).toEqual({
-      isArchived: false,
-    });
-
-    expect(
-      buildLegacyMachineRestoreQueueCleanupPatch('session-1', {
-        needToArchiveSessions: { 'session-1': true, 'session-2': true },
-        needToDeleteSessions: {
-          'session-1': { requestedAt: 2000 },
-          'session-3': { requestedAt: 2000 },
-        },
-      })
-    ).toEqual({
-      needToArchiveSessions: { 'session-2': true },
-      needToDeleteSessions: {
-        'session-3': { requestedAt: 2000 },
-      },
-    });
-    expect(
-      buildLegacyMachineRestoreQueueCleanupPatch('session-1', {
-        needToArchiveSessions: { 'session-2': true },
-        needToDeleteSessions: {},
-      })
-    ).toBeNull();
-  });
-
-  it('matches local project selectors against normalized paths', () => {
-    const project = {
-      id: 'local-project-1',
-      name: 'lody',
-      rootPath: normalizeLocalProjectRootPath(process.cwd()),
-    };
-
-    expect(selectLocalProjectsBySelector([project], '.')).toEqual([project]);
-    expect(selectLocalProjectsBySelector([project], `${process.cwd()}${path.sep}`)).toEqual([
-      project,
-    ]);
+    const repo = await LoroRepo.create({});
+    try {
+      for (const session of [root, child])
+        await repo.upsertDocMeta(getSessionRoomId(session.id), session);
+      const manager = {
+        repo,
+        syncMetaOrThrow: async () => {},
+        waitUntilMetaSynced: async () => true,
+        cleanSessionDoc: async () => {},
+      } as unknown as Parameters<typeof runSessionOperationWithSyncedMetadata>[0];
+      const deleteDoc = vi.spyOn(repo, 'deleteDoc').mockRejectedValueOnce(new Error('disk full'));
+      await expect(
+        runSessionOperationWithSyncedMetadata(manager, root.id, 'delete', async () => {})
+      ).rejects.toThrow('disk full');
+      for (const session of [root, child])
+        expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta).toEqual(session);
+      deleteDoc.mockRestore();
+      await runSessionOperationWithSyncedMetadata(manager, root.id, 'delete', async () => {});
+      for (const session of [root, child])
+        expect(isLoroRepoDocDeleted(await repo.getDocMeta(getSessionRoomId(session.id)))).toBe(
+          true
+        );
+    } finally {
+      await repo.destroy();
+    }
   });
 
   it('filters local project candidates to authorized project ids before selection', () => {
@@ -1072,6 +1451,47 @@ describe('session command helpers', () => {
     } finally {
       rmSync(rootPath, { recursive: true, force: true });
     }
+  });
+
+  it('resolves a local project from the replica when Flock freshness sync fails', async () => {
+    const syncFlockDocOrThrow = vi.fn(async () => {
+      throw new Error('Streams sync failed: network_error');
+    });
+    const manager = {
+      syncFlockDocOrThrow,
+      repo: {
+        getDocMeta: vi.fn(async () => ({
+          meta: {
+            localProjects: {
+              'local-project-1': {
+                id: 'local-project-1',
+                name: 'lody',
+                rootPath: '/workspace/lody',
+                createdAtMs: 1,
+              },
+            },
+          },
+        })),
+        openFlockDoc: vi.fn(async () => ({
+          flock: {
+            scan: () => [],
+          },
+        })),
+      },
+    } as unknown as Parameters<typeof resolveLocalProjectRefOrThrow>[0];
+
+    await expect(
+      resolveLocalProjectRefOrThrow(
+        manager,
+        'workspace-1' as WorkspaceId,
+        'machine-id' as MachineId,
+        'lody'
+      )
+    ).resolves.toEqual({
+      kind: 'local',
+      localProjectId: 'local-project-1',
+    });
+    expect(syncFlockDocOrThrow).toHaveBeenCalled();
   });
 
   it('does not synthesize a branch for non-git local projects', async () => {
@@ -1172,6 +1592,55 @@ describe('session command helpers', () => {
     } finally {
       rmSync(rootPath, { recursive: true, force: true });
     }
+  });
+
+  it('binds a local origin without product-cloud repository registration', () => {
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState(),
+        useWorktree: true,
+      })
+    ).toEqual({ branch: 'main', githubRepoFullName: 'loro-dev/lody' });
+  });
+
+  it('binds the GitHub repository of a direct local session without capturing its branch', () => {
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState(),
+      })
+    ).toEqual({ githubRepoFullName: 'loro-dev/lody' });
+  });
+
+  it('keeps a non-GitHub local origin without a GitHub identity', () => {
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState({ githubRepoFullName: null }),
+        useWorktree: true,
+      })
+    ).toEqual({ branch: 'main' });
+  });
+
+  it('resolves a requested branch selector alongside the repository identity', () => {
+    const remoteSelector = createLocalProjectBranchSelector({
+      kind: 'remote',
+      remoteName: 'origin',
+      branchName: 'feature/session',
+    });
+    expect(
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState({
+          branches: ['main', remoteSelector],
+          currentBranch: 'main',
+        }),
+        requestedBranch: 'feature/session',
+      })
+    ).toEqual({ branch: remoteSelector, githubRepoFullName: 'loro-dev/lody' });
+    expect(() =>
+      resolveLocalProjectCreateGitContext({
+        gitState: createLocalProjectGitState(),
+        requestedBranch: 'feature/missing',
+      })
+    ).toThrow('Local project branch not found: feature/missing');
   });
 
   it('downgrades session activity timestamp write failures to warnings', async () => {
@@ -1327,55 +1796,6 @@ describe('session command helpers', () => {
     ]);
   });
 
-  it('selects the most recent transcript entries and supports reverse order', () => {
-    const entries = [
-      { index: 0, id: 'a', role: 'user', timestamp: 't0', text: 'a' },
-      { index: 1, id: 'b', role: 'assistant', timestamp: 't1', text: 'b' },
-      { index: 2, id: 'c', role: 'user', timestamp: 't2', text: 'c' },
-      { index: 3, id: 'd', role: 'assistant', timestamp: 't3', text: 'd' },
-    ] as const;
-
-    expect(selectSessionTranscriptEntries([...entries], { limit: 2 })).toEqual([
-      entries[2],
-      entries[3],
-    ]);
-    expect(selectSessionTranscriptEntries([...entries], { limit: 2, reverse: true })).toEqual([
-      entries[3],
-      entries[2],
-    ]);
-    expect(selectSessionTranscriptEntries([...entries], { all: true, reverse: true })).toEqual([
-      entries[3],
-      entries[2],
-      entries[1],
-      entries[0],
-    ]);
-  });
-
-  it('renders transcript entries as readable blocks', () => {
-    expect(
-      renderSessionTranscript([
-        {
-          index: 0,
-          id: 'entry-1',
-          role: 'user',
-          timestamp: '2026-03-12T00:00:00.000Z',
-          text: 'hello',
-        },
-        {
-          index: 1,
-          id: 'entry-2',
-          role: 'assistant',
-          timestamp: '2026-03-12T00:00:01.000Z',
-          text: 'world',
-        },
-      ])
-    ).toBe(
-      '[user] 2026-03-12T00:00:00.000Z entry-1\nhello\n\n[assistant] 2026-03-12T00:00:01.000Z entry-2\nworld'
-    );
-
-    expect(renderSessionTranscript([])).toBe('No visible history found.');
-  });
-
   it('renders the visible assistant completion for human --wait output', () => {
     expect(
       renderAssistantTurnCompletion([
@@ -1395,5 +1815,959 @@ describe('session command helpers', () => {
     expect(shouldWaitForSessionCompletion({ json: true })).toBe(false);
     expect(shouldWaitForSessionCompletion({ jsonl: true })).toBe(false);
     expect(shouldWaitForSessionCompletion({ wait: true, json: true })).toBe(true);
+  });
+});
+
+describe('delegated machine access', () => {
+  // A synthetic model of the hosted rules. `reach` is one user's own access:
+  // owned, or shared (and, with a project, the project shared too).
+  const machines: Record<string, { owner: string; shared: boolean; sharedProjects?: string[] }> = {
+    'owner-private': { owner: 'owner', shared: false },
+    'owner-shared': { owner: 'owner', shared: true },
+    'peer-shared': { owner: 'peer', shared: true, sharedProjects: ['public-project'] },
+    'peer-private': { owner: 'peer', shared: false },
+  };
+  const tokenUser = 'owner';
+  const reach = (
+    userId: string,
+    machineId: string,
+    localProjectId?: string
+  ): MachineAccessCheckResult => {
+    const machine = machines[machineId];
+    if (!machine) return { allowed: false, reason: 'machine_not_registered' };
+    if (machine.owner === userId) return { allowed: true };
+    if (!machine.shared) return { allowed: false, reason: 'not_visible' };
+    if (localProjectId && !machine.sharedProjects?.includes(localProjectId))
+      return { allowed: false, reason: 'project_not_shared' };
+    return { allowed: true };
+  };
+  const legacyReaders: MachineAccessReaders = {
+    delegated: async () => null,
+    asTokenUser: async (input) => reach(tokenUser, input.machineId, input.localProjectId),
+    asServedRequester: async (input) =>
+      machines[input.machineId]?.owner === tokenUser
+        ? reach(input.requesterUserId, input.machineId, input.localProjectId)
+        : { allowed: false, reason: 'not_visible' },
+  };
+  const hostedReaders: MachineAccessReaders = {
+    ...legacyReaders,
+    delegated: async (input) => {
+      const owner = reach(tokenUser, input.machineId, input.localProjectId);
+      return owner.allowed
+        ? reach(input.requesterUserId, input.machineId, input.localProjectId)
+        : owner;
+    },
+  };
+  const read =
+    (readers: MachineAccessReaders) =>
+    (requesterUserId: string, machineId: string, localProjectId?: string) =>
+      readDelegatedMachineAccess(
+        {
+          token: 'synthetic-token',
+          tokenUserId: tokenUser,
+          workspaceId: 'workspace',
+          machineId,
+          requesterUserId,
+          ...(localProjectId ? { localProjectId } : {}),
+        },
+        readers
+      );
+
+  it.each([
+    ['hosted', hostedReaders],
+    ['legacy', legacyReaders],
+  ] as const)(
+    'reaches every machine and project the executing owner may use (%s backend)',
+    async (_backend, readers) => {
+      const check = read(readers);
+      expect(await check('owner', 'owner-private')).toEqual({ allowed: true });
+      expect(await check('owner', 'peer-shared')).toEqual({ allowed: true });
+      expect(await check('owner', 'peer-shared', 'public-project')).toEqual({ allowed: true });
+      expect(await check('owner', 'peer-shared', 'private-project')).toEqual({
+        allowed: false,
+        reason: 'project_not_shared',
+      });
+      expect(await check('owner', 'peer-private')).toEqual({
+        allowed: false,
+        reason: 'not_visible',
+      });
+    }
+  );
+
+  it.each([
+    ['hosted', hostedReaders],
+    ['legacy', legacyReaders],
+  ] as const)(
+    'never widens a teammate driving the owner machine beyond their own reach (%s backend)',
+    async (_backend, readers) => {
+      const check = read(readers);
+      expect(await check('teammate', 'owner-shared')).toEqual({ allowed: true });
+      expect(await check('teammate', 'owner-private')).toEqual({
+        allowed: false,
+        reason: 'not_visible',
+      });
+      expect(await check('teammate', 'peer-private')).toEqual({
+        allowed: false,
+        reason: 'not_visible',
+      });
+    }
+  );
+
+  it("lets a teammate reach a third person's shared machine once the backend checks both users", async () => {
+    expect(await read(hostedReaders)('teammate', 'peer-shared', 'public-project')).toEqual({
+      allowed: true,
+    });
+    // The fallback cannot check the teammate on a machine the owner does not own.
+    expect(await read(legacyReaders)('teammate', 'peer-shared', 'public-project')).toEqual({
+      allowed: false,
+      reason: 'not_visible',
+    });
+  });
+});
+
+describe('MCP selection at turn authoring', () => {
+  it('freezes project defaults and honors explicit opt-out through subsequent resolution', async () => {
+    const repo = await LoroRepo.create({});
+    try {
+      const workspaceId = 'workspace-mcp' as WorkspaceId;
+      const project = { kind: 'github' as const, repoFullName: 'Example/Repo', branch: 'main' };
+      const key = getProjectMcpKey(project);
+      if (!key) throw new Error('Expected a project identity');
+      const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+      for (const id of ['global', 'project']) {
+        writeWorkspaceMcpServerToFlock(handle.flock, {
+          id: id as import('@lody/shared').McpServerId,
+          name: id,
+          transport: 'stdio',
+          connection: { transport: 'stdio', command: 'synthetic' },
+          enabledByDefault: id === 'global',
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }
+      handle.flock.set(workspaceFlockKeys.projectMcpDefault(key), {
+        ids: ['project' as import('@lody/shared').McpServerId],
+      });
+      handle.flock.commit();
+      const manager = {
+        repo,
+        syncFlockDocOrThrow: async () => {
+          await repo.flush();
+        },
+      } as unknown as import('../lib/loro/doc').LoroDocumentManager;
+      const args = {
+        manager,
+        workspaceId,
+        project,
+        agentConfig: {
+          id: 'agent',
+          name: 'Synthetic',
+          machineId: 'machine',
+          cliType: 'custom',
+          agentType: 'claude',
+        } as AgentConfigMeta,
+        dispatchConfig: {},
+      };
+      const frozen = await resolveEffectiveSessionCreateDispatchConfig(args);
+      expect(frozen.mcpServerIds).toEqual(['project']);
+      handle.flock.set(workspaceFlockKeys.projectMcpDefault(key), { ids: [] });
+      handle.flock.commit();
+      expect(
+        (await resolveEffectiveSessionCreateDispatchConfig({ ...args, dispatchConfig: frozen }))
+          .mcpServerIds
+      ).toEqual(['project']);
+      expect((await resolveEffectiveSessionCreateDispatchConfig(args)).mcpServerIds).toEqual([]);
+      expect(
+        (await resolveEffectiveSessionCreateDispatchConfig({ ...args, project: undefined }))
+          .mcpServerIds
+      ).toEqual(['global']);
+      expect(
+        (
+          await resolveEffectiveSessionCreateDispatchConfig({
+            ...args,
+            project: undefined,
+            dispatchConfig: { mcpServerIds: [] },
+          })
+        ).mcpServerIds
+      ).toEqual([]);
+      const unavailable = {
+        repo,
+        syncFlockDocOrThrow: async () => {
+          throw new Error('catalog unavailable');
+        },
+      } as unknown as import('../lib/loro/doc').LoroDocumentManager;
+      await expect(
+        resolveEffectiveSessionCreateDispatchConfig({ ...args, manager: unavailable })
+      ).rejects.toThrow('catalog unavailable');
+      expect(
+        (
+          await resolveEffectiveSessionCreateDispatchConfig({
+            ...args,
+            manager: unavailable,
+            dispatchConfig: { mcpServerIds: [] },
+          })
+        ).mcpServerIds
+      ).toEqual([]);
+    } finally {
+      await repo.destroy();
+    }
+  });
+});
+
+describe('target Machine availability from presence', () => {
+  const target = {
+    auth: {
+      machineId: 'caller-machine' as MachineId,
+      userId: 'user-1',
+      token: '',
+      userName: 'User',
+      userEmail: 'user@example.test',
+      machineName: 'Caller',
+    },
+    workspaceId: 'workspace-1' as WorkspaceId,
+    machineId: 'target-machine' as MachineId,
+  };
+  // `null` is a presence room that is not joined and holds no fresh heartbeat.
+  const presence = (online: MachineId[] | null, synced = online !== null) => ({
+    getMachinePresenceView: async () => ({ online: new Set(online ?? []), synced }),
+  });
+  // A Streams path slow enough that every one-shot Machine RPC times out.
+  const rpcTimesOut = () =>
+    vi
+      .spyOn(commandRuntime, 'withMachineRpcClient')
+      .mockRejectedValue(new Error('timeout: Machine status request timed out'));
+  const sessionId = 'session-1' as SessionId;
+  const sessions = [{ id: sessionId, machineId: target.machineId }];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('admits online or unknown presence even while Machine RPC times out', async () => {
+    rpcTimesOut();
+    await expect(
+      ensureTargetMachineNotOffline({ ...target, manager: presence([target.machineId]) })
+    ).resolves.toBe('online');
+    await expect(
+      ensureTargetMachineNotOffline({ ...target, manager: presence(null) })
+    ).resolves.toBe('unknown');
+  });
+
+  it('rejects only definite presence offline, as retryable MACHINE_OFFLINE', async () => {
+    const error = await ensureTargetMachineNotOffline({ ...target, manager: presence([]) }).catch(
+      (caught: unknown) => caught
+    );
+    expect(error).toBeInstanceOf(MachineOfflineError);
+    expect((error as MachineOfflineError).toLodyError()).toEqual({
+      code: 'MACHINE_OFFLINE',
+      message: 'Target Machine is offline: target-machine',
+      retryable: true,
+    });
+  });
+
+  it('admits a fresh heartbeat as online while the presence room is not joined', async () => {
+    rpcTimesOut();
+    await expect(
+      ensureTargetMachineNotOffline({
+        ...target,
+        manager: presence([target.machineId], false),
+      })
+    ).resolves.toBe('online');
+  });
+
+  it('keeps presence three-state when live status RPC times out', async () => {
+    rpcTimesOut();
+    const online = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence([target.machineId]),
+    });
+    expect(online.get(sessionId)).toEqual({
+      sessionId,
+      machinePresence: 'online',
+      fresh: false,
+      reason: 'timeout: Machine status request timed out',
+    });
+
+    // An unanswered RPC is no evidence of absence: unknown presence stays unknown.
+    const unknown = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence(null),
+    });
+    expect(unknown.get(sessionId)?.machinePresence).toBe('unknown');
+
+    const offline = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence([]),
+    });
+    expect(offline.get(sessionId)).toEqual({
+      sessionId,
+      machinePresence: 'offline',
+      fresh: false,
+      reason: 'Target Machine is offline: target-machine',
+    });
+  });
+
+  it('asks only daemons advertising sessionLiveActivity for activity', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockImplementation(async (_args, run) =>
+      run({
+        requestSessionLiveStatus: async (options: Record<string, unknown>) => {
+          requests.push(options);
+          return {
+            type: 'session/live-status_response',
+            machineId: target.machineId,
+            sessionId,
+            success: true,
+            state: 'running',
+            observedAtMs: 1,
+            ...(options.includeActivity
+              ? { activity: { currentAction: 'shell: flock heavy.lock', queuedInputs: 2 } }
+              : {}),
+          };
+        },
+      } as never)
+    );
+    const read = (capabilities: Record<string, number> | undefined) =>
+      readSessionLiveStatusesMany({
+        ...target,
+        sessions,
+        manager: {
+          ...presence([target.machineId]),
+          repo: {
+            getDocMeta: async () =>
+              capabilities ? { meta: { protocolCapabilities: capabilities } } : undefined,
+          } as never,
+        },
+      });
+
+    // An older daemon rejects the unknown request field, so it is never sent.
+    expect((await read(undefined)).get(sessionId)).not.toHaveProperty('activity');
+    expect(requests[0]).not.toHaveProperty('includeActivity');
+
+    expect((await read({ sessionLiveActivity: 1 })).get(sessionId)).toMatchObject({
+      activity: { currentAction: 'shell: flock heavy.lock', queuedInputs: 2 },
+    });
+    expect(requests[1]).toMatchObject({ includeActivity: true });
+  });
+});
+
+describe('prepared command attachment inputs', () => {
+  const auth = {
+    machineId: 'machine-1' as MachineId,
+    userId: 'user-1',
+    token: '',
+    userName: 'User',
+    userEmail: 'user@example.test',
+    machineName: 'Local',
+  };
+  const workspace = { id: 'workspace-1', name: 'Workspace', slug: 'workspace', role: 'owner' };
+  const ownerTarget = {
+    targetMachine: { id: auth.machineId, ownerUserId: auth.userId } as MachineMeta,
+    agentConfig: {
+      id: 'agent-1',
+      machineId: auth.machineId,
+      cliType: 'registry',
+      agentType: 'fixture',
+      prompt: 'System instructions',
+    } as AgentConfigMeta,
+  };
+  const file = {
+    type: 'file' as const,
+    fileId: 'file-1',
+    fileName: 'data.csv',
+    mimeType: 'text/csv',
+    sizeBytes: 3,
+    sha256: 'a'.repeat(64),
+    textPreview: true,
+    transport: 'r2' as const,
+    uploadedAt: 1,
+  };
+  const options = {
+    workspaceMetaPrewriteSatisfied: true,
+    bypassSessionQuota: true,
+    historyBackend: 'loro' as const,
+  };
+
+  it('rejects delegated create and chat without source identity before any publication', async () => {
+    const manager = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('Unexpected side effect');
+        },
+      }
+    );
+    const delegatedRequester = { userId: auth.userId };
+    await expect(
+      prepareSessionInput(
+        auth,
+        workspace,
+        manager as never,
+        'Delegated work',
+        { ...options, delegatedRequester },
+        { inheritSessionDefaults: false, mcpServerIds: [] },
+        ownerTarget
+      )
+    ).rejects.toThrow('missing Agent source identity');
+    await expect(
+      sendSessionChatResult(
+        auth,
+        workspace,
+        manager as never,
+        'target' as SessionId,
+        'Delegated work',
+        {},
+        undefined,
+        undefined,
+        undefined,
+        delegatedRequester
+      )
+    ).rejects.toThrow('missing Agent source identity');
+  });
+
+  it('keeps raw input in history and preserves attachments beside composed execution text', async () => {
+    // Preparation must not write metadata/history or start execution.
+    const manager = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('Unexpected side effect during preparation');
+        },
+      }
+    );
+    const prepared = await prepareSessionInput(
+      auth,
+      workspace,
+      manager as never,
+      'Analyze',
+      {
+        ...options,
+        inputAttachments: [file],
+      },
+      { inheritSessionDefaults: false, mcpServerIds: [] },
+      ownerTarget
+    );
+    expect(prepared.userTurn.items).toEqual([{ type: 'text', text: 'Analyze' }, file]);
+    expect(prepared.userTurn.inputConfig?.prompt).toBe('System instructions\n\nAnalyze');
+    expect(prepared.userTurn.inputConfig?.inputBlocks).toEqual([
+      { type: 'text', text: 'Analyze' },
+      file,
+    ]);
+    expect(prepared.userTurn.status).toBe('prepared');
+    expect(prepared.meta.latestUserMsgId).toBeUndefined();
+  });
+
+  it('appends attachment-only continuations once and rejects a changed attachment on retry', async () => {
+    const doc = new LoroDoc();
+    const sessionId = 'session-attachments' as SessionId;
+    const data = createLoroSessionData({ doc, sessionId });
+    const writer = createHistoryWriter(doc);
+    const sessionDoc = {
+      sessionId,
+      sessionData: data,
+      getMetaState: async () => ({ historyBackend: 'loro' }),
+      appendUserTurn: async (entry: SessionHistoryInput) => {
+        writer.append(entry as never);
+      },
+    };
+    const args = {
+      sessionDoc: sessionDoc as never,
+      prompt: '',
+      inputBlocks: [file],
+      userId: 'user-1',
+      preallocatedId: 'fixed-turn',
+      inputConfig: {
+        prompt: '',
+        inputBlocks: [file],
+        cliType: 'registry' as const,
+        agentType: 'fixture',
+      },
+    };
+    const first = await appendUserPromptHistory(args);
+    expect(await appendUserPromptHistory(args)).toMatchObject({ id: first.id });
+    expect(writer.readStored()).toHaveLength(1);
+    expect(writer.readStored()[0]?.items).toEqual([file]);
+    await expect(
+      appendUserPromptHistory({ ...args, inputBlocks: [{ ...file, fileId: 'other-file' }] })
+    ).rejects.toThrow('already used');
+    expect(writer.readStored()).toHaveLength(1);
+    doc
+      .getList('history')
+      .push({ ...first, items: [{ type: 'text', text: 'later duplicate' }] } as never);
+    doc.commit();
+    expect(await appendUserPromptHistory(args)).toEqual({ ...first, existingStatus: 'pending' });
+    expect(writer.readStored()[0]?.items).toEqual([file]);
+    expect(writer.readStored()[1]?.items).toEqual([{ type: 'text', text: 'later duplicate' }]);
+    expect(writer.readStored()).toHaveLength(2);
+  });
+
+  it('prepares an attachment-only first turn and rejects an empty message before publication', async () => {
+    const manager = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('Unexpected side effect during preparation');
+        },
+      }
+    );
+    const prepared = await prepareSessionInput(
+      auth,
+      workspace,
+      manager as never,
+      '',
+      {
+        ...options,
+        inputAttachments: [file],
+      },
+      { inheritSessionDefaults: false, mcpServerIds: [] },
+      ownerTarget
+    );
+    expect(prepared.userTurn.items).toEqual([file]);
+    await expect(
+      prepareSessionInput(
+        auth,
+        workspace,
+        manager as never,
+        '',
+        {
+          ...options,
+          inputAttachments: [],
+        },
+        { inheritSessionDefaults: false, mcpServerIds: [] },
+        ownerTarget
+      )
+    ).rejects.toThrow('text');
+  });
+});
+
+describe('Machine Flock freshness fallback validation', () => {
+  const workspaceId = 'workspace-id' as WorkspaceId;
+  const agentConfig: AgentConfigMeta = {
+    id: 'config-id' as AgentConfigMeta['id'],
+    machineId: 'machine-id' as MachineId,
+    name: 'Synthetic provider',
+    cliType: 'builtin',
+    agentType: 'codex',
+  };
+  const deadline = () => new FlockSyncTimeoutError('Synthetic Flock freshness deadline');
+  const readFixture = (capability: AcpCapabilityCacheEntry | undefined, syncError?: Error) => {
+    const rows = capability ? [{ key: ['acpCapability', agentConfig.id], value: capability }] : [];
+    const syncFlockDocOrThrow = vi.fn(async () => {
+      if (syncError) throw syncError;
+    });
+    const manager = {
+      syncFlockDocOrThrow,
+      repo: {
+        getDocMeta: async () => ({ meta: {} }),
+        openFlockDoc: async () => ({
+          flock: {
+            scan: (options?: { prefix?: readonly unknown[] }) =>
+              rows.filter(
+                (row) =>
+                  !options?.prefix || options.prefix.every((part, index) => row.key[index] === part)
+              ),
+          },
+        }),
+      },
+    } as unknown as Parameters<typeof readAgentAcpCapability>[0]['manager'];
+    return { manager, syncFlockDocOrThrow };
+  };
+  const resolve = (
+    manager: Parameters<typeof readAgentAcpCapability>[0]['manager'],
+    dispatchConfig: Parameters<
+      typeof resolveEffectiveSessionCreateDispatchConfig
+    >[0]['dispatchConfig'],
+    overrides: Partial<Parameters<typeof resolveEffectiveSessionCreateDispatchConfig>[0]> = {}
+  ) =>
+    resolveEffectiveSessionCreateDispatchConfig({
+      manager,
+      workspaceId,
+      agentConfig,
+      dispatchConfig: { mcpServerIds: [], ...dispatchConfig },
+      ...overrides,
+    });
+
+  it.each([undefined, 1, ACP_CAPABILITY_CACHE_VERSION, ACP_CAPABILITY_CACHE_VERSION + 1])(
+    'validates usable cached ACP values after failed freshness regardless of cacheVersion %s',
+    async (cacheVersion) => {
+      const capability = { ...createAcpCapability(), cacheVersion };
+      const { manager } = readFixture(capability, deadline());
+      await expect(
+        readAgentAcpCapability({
+          manager,
+          workspaceId,
+          machineId: agentConfig.machineId,
+          agentConfigId: agentConfig.id,
+        })
+      ).resolves.toEqual(capability);
+      await expect(
+        resolve(manager, { modeId: 'default', runConfig: { modelId: 'model-a' } })
+      ).resolves.toMatchObject({
+        modeId: 'default',
+        modelId: 'model-a',
+        inheritSessionDefaults: false,
+      });
+    }
+  );
+
+  it.each([
+    { capability: undefined, dispatchConfig: { modelId: 'model-a' } },
+    { capability: createAcpCapability(), dispatchConfig: { modelId: 'new-model' } },
+    { capability: createAcpCapability(), dispatchConfig: { runConfig: { fastMode: true } } },
+    {
+      capability: createAcpCapability(),
+      dispatchConfig: { configOptionValues: { approval_policy: 'new-value' } },
+    },
+  ])(
+    'reports insufficient or stale cached selection as unavailable: %j',
+    async ({ capability, dispatchConfig }) => {
+      const { manager } = readFixture(capability, deadline());
+      await expect(resolve(manager, dispatchConfig)).rejects.toBeInstanceOf(
+        MachineFlockReadUnavailableError
+      );
+    }
+  );
+
+  it('keeps confirmed unsupported selection and malformed option types as input errors', async () => {
+    const confirmed = readFixture(createAcpCapability()).manager;
+    await expect(resolve(confirmed, { modelId: 'unknown' })).rejects.toThrow(
+      'Unsupported ACP model'
+    );
+    try {
+      await resolve(confirmed, { modelId: 'unknown' });
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(MachineFlockReadUnavailableError);
+    }
+    const fallback = readFixture(createAcpCapability(), deadline()).manager;
+    await expect(resolve(fallback, { configOptionValues: { web_search: 'true' } })).rejects.toThrow(
+      'expects a boolean'
+    );
+    try {
+      await resolve(fallback, { configOptionValues: { web_search: 'true' } });
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(MachineFlockReadUnavailableError);
+    }
+  });
+
+  it('does not classify explicit Plan/permission conflicts as stale capability data', async () => {
+    const capability = {
+      ...createAcpCapability(),
+      modes: [
+        { id: 'plan', name: 'Plan' },
+        { id: 'default', name: 'Default' },
+      ],
+    };
+    const { manager } = readFixture(capability, deadline());
+    await expect(
+      resolve(manager, { modeId: 'default', runConfig: { planMode: true } })
+    ).rejects.toThrow('conflicts with explicit mode');
+  });
+
+  it('does not apply a readable capability entry from a different runtime override', async () => {
+    const runtimeOverrides = { codexPath: '/synthetic/selected-codex' };
+    const capability = {
+      ...createAcpCapability(),
+      sourceVersion:
+        'synthetic' +
+        getBuiltinRuntimeOverrideSourceVersionSuffix({ codexPath: '/synthetic/other-codex' }),
+    };
+    const { manager } = readFixture(capability, deadline());
+    await expect(
+      resolve(
+        manager,
+        { modelId: 'model-a' },
+        { agentConfig: { ...agentConfig, runtimeOverrides } }
+      )
+    ).rejects.toBeInstanceOf(MachineFlockReadUnavailableError);
+  });
+
+  it('retains the explicit localOnly path without requesting freshness', async () => {
+    const { manager, syncFlockDocOrThrow } = readFixture(createAcpCapability(), deadline());
+    await expect(
+      resolve(manager, { modeId: 'default', modelId: 'model-a' }, { localOnly: true })
+    ).resolves.toMatchObject({ modelId: 'model-a' });
+    expect(syncFlockDocOrThrow).not.toHaveBeenCalled();
+  });
+
+  it('reports absent cached projects as unavailable without misclassifying malformed selectors', async () => {
+    const { manager } = readFixture(undefined, deadline());
+    await expect(
+      resolveLocalProjectRefOrThrow(manager, workspaceId, agentConfig.machineId, 'missing-project')
+    ).rejects.toBeInstanceOf(MachineFlockReadUnavailableError);
+    await expect(
+      resolveLocalProjectRefOrThrow(manager, workspaceId, agentConfig.machineId, '   ')
+    ).rejects.toThrow('Missing local project selector');
+  });
+
+  it('retains readable Pi override caches when a reader has no launch-source context', async () => {
+    const capability = {
+      ...createAcpCapability(),
+      agentType: 'pi',
+      sourceVersion: 'synthetic+override:fixture',
+    };
+    const { manager } = readFixture(capability, deadline());
+    await expect(
+      readAgentAcpCapability({
+        manager,
+        workspaceId,
+        machineId: agentConfig.machineId,
+        agentConfigId: agentConfig.id,
+      })
+    ).resolves.toMatchObject(capability);
+  });
+
+  it('bounds public selection context and never exposes private diagnostics or option values', () => {
+    const failure = new MachineFlockReadUnavailableError({
+      message: 'private diagnostic containing credentials',
+      cause: new Error('private transport token'),
+      selection: { kind: 'ACP option', id: 'option-' + 'x'.repeat(300) },
+    }).toLodyError();
+    expect(failure.message).toContain('ACP option');
+    expect(failure.message).toContain(('option-' + 'x'.repeat(300)).slice(0, 120));
+    expect(failure.message).not.toContain('x'.repeat(121));
+    expect(failure.message).not.toContain('private');
+    expect(failure.message).not.toContain('credentials');
+  });
+});
+
+describe('Stop protocol negotiation', () => {
+  it('keeps released strict cancel payloads valid and opts modern peers into durable pause', () => {
+    const legacy = z
+      .object({ sessionId: z.string(), turnId: z.string(), timeoutMs: z.number() })
+      .strict();
+    const common = { sessionId: 'session', turnId: 'turn', timeoutMs: 10000 };
+    for (const machine of [undefined, {}, { protocolCapabilities: { operationInbox: 1 } }]) {
+      expect(
+        legacy.parse({ ...common, ...getSessionCancelProtocolFields(machine, 'cancel-id', true) })
+      ).toEqual(common);
+    }
+    expect(
+      getSessionCancelProtocolFields(
+        { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+        'cancel-id',
+        true
+      )
+    ).toEqual({ cancelId: 'cancel-id', pauseInbox: true });
+    expect(
+      getSessionCancelProtocolFields(
+        { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+        'cancel-id',
+        false
+      )
+    ).toEqual({ cancelId: 'cancel-id', pauseInbox: false });
+  });
+});
+
+describe('session command output boundary', () => {
+  it.each([
+    { mode: 'json', fail: false },
+    { mode: 'jsonl', fail: false },
+    { mode: 'human', fail: false },
+    { mode: 'json', fail: true },
+    { mode: 'jsonl', fail: true },
+  ])('preserves $mode output and restores logging (failure=$fail)', async ({ mode, fail }) => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const capture = (chunks: string[]) =>
+      new Writable({
+        write(chunk, _encoding, done) {
+          chunks.push(String(chunk));
+          done();
+        },
+      });
+    vi.stubGlobal('console', new Console({ stdout: capture(out), stderr: capture(err) }));
+    const logger = getLogger('output-regression');
+    const exitCode = process.exitCode;
+    const setup = vi.spyOn(commandRuntime, 'syncCommandTime').mockImplementation(async () => {
+      logger.info('setup diagnostic');
+    });
+    const flush = vi.spyOn(telemetry, 'flushTelemetry').mockImplementation(async () => {
+      logger.info('exit diagnostic');
+    });
+    const withManager = makeWorkspaceCommandManagers();
+    try {
+      await runSessionCommand(mode === 'human' ? {} : { [mode]: true }, async () => {
+        await withManager(
+          'synthetic-workspace',
+          {
+            userId: 'synthetic-user',
+            token: 'synthetic-token',
+            machineId: 'synthetic-machine',
+            authBaseUrl: 'https://example.invalid',
+          },
+          async () => ({
+            cleanUp: async () => {
+              logger.info('transport detached');
+            },
+          }),
+          async () => {
+            if (fail) throw new Error('synthetic failure');
+            commandRuntime.printJson({ ok: true, alreadyStopped: true });
+          },
+          (error) => {
+            throw error;
+          }
+        );
+      });
+      expect(process.exitCode).toBe(fail ? 1 : 0);
+      if (mode === 'human') {
+        expect(out.join('')).toContain('transport detached');
+        expect(err.join('')).toBe('');
+      } else {
+        expect(JSON.parse(out.join(''))).toEqual(
+          fail
+            ? mode === 'json'
+              ? { ok: false, error: 'synthetic failure' }
+              : { type: 'error', error: 'synthetic failure' }
+            : { ok: true, alreadyStopped: true }
+        );
+        for (const diagnostic of ['setup diagnostic', 'transport detached', 'exit diagnostic']) {
+          expect(err.join('')).toContain(diagnostic);
+        }
+      }
+      logger.info('after command');
+      expect(out.join('')).toContain('after command');
+    } finally {
+      process.exitCode = exitCode;
+      setup.mockRestore();
+      flush.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('encrypted one-shot machine access', () => {
+  it('answers from the command replica', async () => {
+    const asked: unknown[] = [];
+    const result = await runWithEncryptedCommandAccess(
+      async (target) => {
+        asked.push(target);
+        return { allowed: false, reason: 'not_visible' };
+      },
+      () =>
+        readSessionMachineAccess({
+          // A service call with this token would reject before any answer.
+          auth: { token: '', userId: 'machine-account', machineId: 'machine' } as never,
+          workspaceId: 'workspace' as never,
+          machineId: 'other-machine' as never,
+        })
+    );
+    expect(result).toEqual({ allowed: false, reason: 'not_visible' });
+    expect(asked).toEqual([{ machineId: 'other-machine', requesterUserId: 'machine-account' }]);
+  });
+});
+
+describe('encrypted daemon machine access', () => {
+  const access = (delegated: boolean) => {
+    const asked: unknown[] = [];
+    const daemon = {
+      workspaceId: 'workspace',
+      userId: 'machine-account',
+      machineId: 'machine',
+      manager: {},
+      readInvocation: () => ({ active: false }),
+      checkEncryptedMachineAccess: async (target: unknown) => {
+        asked.push(target);
+        return { allowed: true as const };
+      },
+    } as never;
+    const result = runWithDaemonWorkspace(daemon, () =>
+      readSessionMachineAccess({
+        // A service call with this token would reject before any answer.
+        auth: { token: '', userId: 'machine-account', machineId: 'machine' } as never,
+        workspaceId: 'workspace' as never,
+        machineId: 'other-machine' as never,
+        ...(delegated
+          ? {
+              delegatedRequester: {
+                userId: 'e2ee-member:verified',
+                author: { sessionId: 'session', turnId: 'turn' },
+              } as never,
+            }
+          : {}),
+        localProjectId: 'project' as never,
+      })
+    );
+    return { asked, result };
+  };
+
+  it.each([
+    ['a command', false, 'machine-account'],
+    ['a delegated command', true, 'e2ee-member:verified'],
+  ] as const)('answers %s from the daemon', async (_name, delegated, requesterUserId) => {
+    const { asked, result } = access(delegated);
+    await expect(result).resolves.toEqual({ allowed: true });
+    expect(asked).toEqual([
+      { machineId: 'other-machine', requesterUserId, localProjectId: 'project' },
+    ]);
+  });
+});
+
+describe('paired machine billing entitlement while offline', () => {
+  it('waits once, fails open without asking again for 30 seconds, then retries and caches', async () => {
+    const { createCloudE2eeMachinePort } = await import('@/lib/cloud-cli-port');
+    const { getWorkspaceBillingEntitlementBestEffort } = await import('./session');
+    const { evaluateSessionCreateQuota } = await import('@lody/shared');
+    type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+    vi.stubEnv('LODY_PLATFORM', 'cloud');
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    let online = false;
+    let subscriptions = 0;
+    const client: Client = {
+      onUpdate: ((_ref: unknown, _args: unknown, listener: (value: unknown) => void) => {
+        subscriptions += 1;
+        // Offline: the subscription never answers. Online: it answers at once.
+        if (online) listener({ valid: true, effectivePlanTier: 'free', checkoutPending: false });
+        return () => {};
+      }) as unknown as Client['onUpdate'],
+      query: (() => new Promise(() => {})) as Client['query'],
+      close: async () => {},
+    };
+    const workspaceId = 'offline-billing-workspace';
+    const port = createCloudE2eeMachinePort({
+      accountId: 'synthetic-machine-owner',
+      workspaceId,
+      genesisHash: 'ab'.repeat(32),
+      machineId: 'machine',
+      credential: 'a4'.repeat(32),
+      authBaseUrl: 'https://synthetic.convex.cloud',
+      serverBaseUrl: 'https://relay.synthetic.test',
+      logger: getLogger('session'),
+      client,
+    });
+    const manager = { cloudBilling: port.billing } as unknown as Parameters<
+      typeof getWorkspaceBillingEntitlementBestEffort
+    >[0];
+    const workspace = { id: workspaceId, name: 'Offline', slug: null, role: 'member' };
+    const read = () => getWorkspaceBillingEntitlementBestEffort(manager, workspace);
+    try {
+      // The first command waits for the read deadline, then fails open.
+      const first = read();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(first).resolves.toBeNull();
+      expect(subscriptions).toBe(1);
+      // Within 30 seconds the next command fails open at once, with no new read.
+      await vi.advanceTimersByTimeAsync(29_000);
+      await expect(read()).resolves.toBeNull();
+      expect(subscriptions).toBe(1);
+      // After 30 seconds the plan is read again; the connection is back.
+      online = true;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const free = await read();
+      expect(subscriptions).toBe(2);
+      expect(free).toEqual({ effectivePlanTier: 'free', checkoutPending: false });
+      if (!free) throw new Error('expected a Free plan');
+      expect(evaluateSessionCreateQuota({ ...free, sessionCount: 199 }).allowed).toBe(true);
+      expect(evaluateSessionCreateQuota({ ...free, sessionCount: 200 }).allowed).toBe(false);
+      // A successful read is cached normally again.
+      await expect(read()).resolves.toEqual(free);
+      expect(subscriptions).toBe(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
   });
 });

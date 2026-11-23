@@ -1,0 +1,312 @@
+# Code Collab file surfaces in the session UI
+
+Diff pages, the Monaco editor window, session file actions, Markdown viewers,
+and why the viewers are not code-split. Data chain:
+[packages/components/AGENTS.md](../../packages/components/AGENTS.md).
+
+Scope: `packages/components/src/components/sessions`. Binding rules and the
+pointer to this page live in
+[that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
+this page is the full text of the rules summarised there.
+
+Same-machine Electron previews read directly through desktop IPC after checking
+persistent local machine identity. Neither daemon liveness, protocol metadata nor
+the file index gates opening a known path. Relative paths use the cached owner
+session's workspace root; absolute/home paths need no root. Remote targets retain
+bounded Machine RPC reads. Indexing and saving still require the daemon. See the
+[implementation decision](../notes/implemented/bug-fix/2026-10-16-daemon-independent-local-file-preview.md).
+
+Conversation Markdown treats relative paths as candidates until the owning Session's
+index confirms an exact file; absolute paths need no index. Clicking opens the
+known target directly, without Git worktree discovery. Invalid targets copy the
+original path and show copy feedback. The context-menu Copy Path action also copies
+the authored path directly, independent of index/daemon availability. Line anchors
+are navigation metadata, not part of the copied path. The
+[nested-worktree discovery protocol](../notes/implemented/bug-fix/2026-10-21-nested-worktree-file-links.md)
+remains available to explicit protocol callers; conversation clicks and menus do
+not invoke it. A failed conversation index attempt records the original error and
+releases its optional cache lease, so the next Files/Changes acquire can rebuild
+the failed resource. Link confirmation resumes when the conversation is shown
+again; it does not run a background retry loop.
+
+Rendered Markdown file previews enable Session links only when their caller supplies
+the navigation switch. SessionDetail derives it from the same callback used by chat.
+SessionFileContentView wraps both file-provider paths in SessionLinkProvider, which
+dispatches exact destinations through the existing deep-link mechanism. Standalone
+viewers default to inert links. [Decision and limits](../notes/implemented/bug-fix/2026-10-22-markdown-preview-session-links.md).
+
+- Diff page: `session-conversation-diff-panel.tsx`, data from
+  `use-session-conversation-diff-data.ts`. Each file title copies the
+  workspace-relative path and, when wired, opens a file-preview viewer tab
+  through `handleOpenFile` with `pathKind: 'canonical'` (never the markdown
+  href parser).
+- The Changes sidebar's Types view keeps the filename prominent and shows its
+  parent workspace path beneath it, so similarly named files remain identifiable
+  without relying on a hover-only title.
+  Opening the desktop list or mobile files-level changes sheet requests the complete
+  Branch manifest through the existing paged transport. This also applies to visible
+  split panels and reopening a list. Loading and failed/incomplete comparisons remain
+  explicit; the bounded file index only seeds the provider. File bodies stay deferred
+  until opened. The existing supported-file limit bounds manifest collection, and
+  older daemons retain their inline transport, whose `truncated` flag describes
+  deferred file bodies while its file list remains complete.
+  The legacy client combines the main and additional roots into one displayed
+  path set. Non-Git additional roots are omitted from the uncommitted scope.
+  A completed list supplies its text totals and file count to the composer. Unknown
+  line counts show a file count there. Shared session metadata retains its existing
+  publication path.
+  Mobile change-stat presses open this same Types/Files list in
+  `SessionMobileDiffDrawer`; selecting a canonical path enters the All Changes diff
+  with the full path set and a fresh focus request. First-level browsing does not
+  mount a diff panel. Back retains the list's view/expansion/scroll and the mounted
+  diff's state, with its hidden reads paused. Direct conversation-file and comment
+  navigation still enters the precise diff directly. Both levels share one modal
+  and the existing enclosing-session popup host.
+- All Changes compares the resolved merge-base against disk by default. Its header
+  can switch to an uncommitted scope (`HEAD` against disk, including staged,
+  unstaged and untracked non-ignored files) and names the resolved base in both
+  modes. The control is hidden when the machine does not advertise
+  `codeCollabAllChangesScope`; non-Git and unborn worktrees report an explicit
+  unavailable state
+  ([decision](../notes/implemented/feature/2026-10-19-all-changes-diff-scope.md)).
+  Equal text does not establish that a Git file is unchanged: current-diff readers
+  also compare file state against that same repository and pinned base, preserving
+  mode-only changes. Binary placeholders carry no content identity. Git comparison
+  failures remain per-file retryable results instead of hiding the path as unchanged.
+  Historical turn diffs continue to use stored evidence exclusively.
+- Historical diff failures retain the requested turn on Web, Electron, and native
+  iOS/Android. The native runtime passes unavailable reasons/messages to its
+  existing notice UI instead of requesting the current workspace diff. A separate
+  current/All Changes request remains available; later workspace edits cannot
+  replace an unavailable turn. See the [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md).
+- The composer and session sidebar's `diffStats` describe the default workspace
+  comparison, including uncommitted edits, independently of PR association. Code
+  Collab summarizes the complete comparison before trimming the shared index and
+  publishes through `WorkspaceGitService.publishDiffStats`; Git branch/status
+  probes do not replace those totals. Turn summaries and their viewable before/after
+  contents come from the same stored Agent edit evidence. A turn without captured
+  edits has no new file card; terminal-only workspace changes still appear in
+  All Changes. The additive `allChange.files` counts complete changed paths independently of text-line availability. The composer shows text totals when positive and a file count for zero-line changes. See [statistics ownership](../notes/implemented/architecture/2026-11-14-workspace-diff-stat-ownership.md).
+- Diffs opened with a precise file focus open only that file by default; the other
+  cards start collapsed and remain individually expandable. A base (All Changes)
+  diff opened without a focus starts with every card collapsed, while a direct
+  conversation/turn diff without a file focus keeps its all-files-open default.
+  A card still loading draws a pulsing skeleton body only if it will open and
+  is near the scrollport; at most `MAX_DIFF_SKELETON_BODIES` such cards pulse.
+  Other open cards use static placeholders. One pulsing body per file in a diff of a few thousand files made WebKit
+  composite thousands of pulsing layers and killed the iOS WebContent process
+  ([decision](../notes/implemented/bug-fix/2026-10-16-diff-loading-skeleton-cap.md)).
+  On mobile, the diff-header action closes the diff sheet before opening the
+  file drawer so the diff modal cannot cover the destination viewer.
+  `SessionMobileDiffDrawerContent` explicitly portals the diff into the nearest
+  session drawer's popup host. The legacy Vaul/Radix modal locks pointer events
+  on the body; a Base UI drawer portalled there can pass scrolling through to
+  the conversation. Keep this choice local to the mobile diff rather than changing
+  the default container of every modal.
+- Multi-file diff panels keep filename shells and expansion state mounted, but
+  load turn/deferred snapshots and mount code bodies only near the scrollport
+  (600px overscan, with an explicit file focus always included). Hidden panels
+  pause new reads. `use-diff-viewport.ts` preserves the visible file's offset when
+  earlier bodies grow; at the bottom it anchors the last visible file. Measured
+  body placeholders preserve space when code leaves the viewport. Bodies with
+  pointer or keyboard interaction remain mounted to preserve selections, expanded
+  context and unsent comments. Standalone snippets with at most 8,192 combined
+  characters and 256 combined lines parse inline, so first mounts and uncached
+  remounts do not wait behind a busy parse Worker. Other standalone cache misses
+  use the shared parse Worker when available; explicit multi-file and chunked
+  sources use it regardless of size. Syntax highlighting still uses the shared
+  render Worker for small snippets too. Standalone inputs below the former 200,000-character threshold
+  retain full unchanged-line context and their synchronous availability fallback
+  if a Worker is unavailable or fails. Explicit multi-file/chunked and larger
+  inputs keep bounded metadata and fail visibly rather than parsing inline.
+  In-flight reads keep their slots until settlement across
+  viewport/source changes; live batch identity fences old content, including
+  equal-length edits. All Changes retains its existing batched inline transfer
+  and decoding; only deferred reads become viewport-driven. See the
+  [implementation decision](../notes/implemented/bug-fix/2026-10-17-multi-file-diff-opening.md).
+- File-provider trees attach lazy directories through a per-construction sibling
+  index, then sort each changed sibling array once. Directory ids, loaded children,
+  modified flags and directories-before-files order are preserved; the temporary
+  indexes are discarded with construction, never shared across provider snapshots.
+- Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
+  `session-file-content-view.tsx`.
+  File-link line anchors move Monaco's cursor as well as its viewport, using an
+  immediate reveal so initial language setup and wrapped-line layout cannot leave
+  the cursor at line 1 and cancel navigation. The line decoration uses Monaco's
+  themed `rangeHighlight` class. See the
+  [first-click navigation fix](../notes/implemented/bug-fix/2026-10-05-file-link-line-navigation.md).
+  Find action tooltips stay on one line while Find is open to prevent overlap in
+  narrow editors; see the [tooltip decision](../notes/implemented/bug-fix/2026-09-16-session-monaco-find-tooltip.md).
+  The save hook compares the complete editor text with the accepted open/refresh
+  snapshot or successful save result. Undo to that baseline clears Unsaved, disables
+  Save, enables Refresh and releases leave protection; redo restores pending edits.
+  A write in flight keeps protection until it settles, and conflicts invalidate the
+  old baseline. File switches and accepted external replacements fence late results;
+  provider rebuilds alone preserve the baseline and draft. See the
+  [saved-text decision](../notes/implemented/bug-fix/2026-10-05-file-editor-undo-saved-state.md).
+- **What a client may DO with a session file is one model, `hooks/use-session-file-actions.ts`,
+  and three surfaces render it**: the Files tree's right-click menu, the side
+  panel's ⋯ button (left of `+`, and absent unless the active tab is a file),
+  and the file-error card. The split it encodes is the invariant, not a detail:
+  copying a path is offered ANYWHERE (every platform can write to the
+  clipboard), while
+  reaching a shell — `Open in default app` / `Open in browser`
+  (`app.openLocalPath` → `shell.openPath`), `Reveal in file manager` /
+  `Show in Finder` / `Show in File Explorer` (`app.revealLocalPath`, labelled per
+  host OS), and `Open in <editor>` (the user's `session-path-launchers`
+  preference) — lives in the optional `localHost` half, resolved only for
+  Electron + the file's machine being this one. `Download file` is the exact
+  complement: offered only where `localHost` is absent, because with the real
+  file one keystroke away a copy in ~/Downloads is a decoy. It reads through
+  `openFile`, i.e. the preview API's ONE bounded response, so it cannot serve a
+  file past those limits — exactly the files whose error card sent the user
+  looking. That is a known ceiling, not a silent failure: say so
+  (`sessions.fileActions.downloadTooLarge`), because a generic "could not
+  download" reads as a glitch worth retrying. Lifting it needs a ranged or
+  streamed Machine RPC method behind a negotiated `protocolCapabilities` key,
+  never a client-side retry loop. Never promote a
+  local-host action to a surface that cannot perform it, and never re-derive
+  that decision per surface — `lib/session-file-actions.ts` states it once.
+  Native mobile exports those same complete bytes through the Capacitor cache
+  and system share sheet instead of a browser download. The binary notice exposes
+  this as Share file alongside Copy file path only when its binary snapshot has
+  complete bytes (including zero bytes); error cards do not expose sharing.
+  The file menu uses the same action. Only native exports suppress duplicate
+  clicks while pending; browser downloads remain independent. Each export uses an isolated
+  cache filename. No remote host path is passed to the device OS.
+  The path is resolved on the OWNING machine (its Flock `dotlodyPath` /
+  local-project root). The owning daemon publishes a real, normalized project
+  root even for older registrations through a symbolic link, so the renderer's
+  worktree ID matches the directory the daemon created. The file path is built
+  ONLY from that workspace root plus a
+  genuinely workspace-relative viewer path — `lib/session-local-file-path.ts`
+  rejects absolute and `..` paths, so a remote session can never hand this
+  machine's shell a path of its choosing. The Files tree and the side-panel ⋯
+  menu expose that identity as two copy actions — `Copy relative path` always,
+  and `Copy absolute path` only once the workspace root resolves or the path is
+  already absolute; an unresolved root leaves the relative copy alone. The
+  file-error card and the Markdown-link menu keep one `Copy file path` /
+  `Copy Path` action, which copies the absolute path when it resolves and
+  otherwise the path as held. `SessionFileErrorState` owns which error kinds
+  get the row (`offersFileActions`): only too-large and unsupported, never a
+  missing, denied, or offline file where every button would fail. That card has
+  NO status glyph and stacks its actions full-width in one column: a 40px icon
+  column indented one short paragraph for decoration, and buttons sized by their
+  own labels gave three ragged widths on three lines in a side panel, where the
+  width difference reads as meaning. The tree passes the menu items down to its
+  memoized rows, so they must stay referentially stable, and only FILE rows get
+  a menu (`item.children === undefined`; `hasChildren` is false for an empty
+  directory too).
+- Videos use the static `SessionFileVideoPreview` with native controls and inline
+  mobile playback. `video-file-preview.ts` recognizes container candidates, not
+  codec guarantees. Provider bytes become typed object URLs; local resource URLs
+  go directly to the media element. Deactivation destroys the player and releases
+  its blob; document visibility pauses background playback without auto-resuming.
+  Media errors preserve the file-action notice. Remote binary limits still apply;
+  the player adds neither a transport nor transcoding. The mobile project file
+  browser shares the player. Intent: [local file links](../../specs/local-file-link-actions.md).
+- Session PDFs use the PDF.js paged viewer. Electron's `lody-resource://` URL is a
+  custom scheme; PDF.js's URL loader only enables its network range reader for
+  HTTP(S), so passing that URL directly can consume the whole file. Use
+  `PDFDataRangeTransport` to request and validate 64 KiB byte ranges instead. The
+  local resource service classifies `.pdf` paths as binary `application/pdf` and
+  exposes `Accept-Ranges` and `Content-Range` to the cross-origin renderer. Do not
+  copy local PDF bytes into a renderer snapshot. PDF.js virtualizes page rendering,
+  and the viewer caps each page canvas at 8 megapixels. Remote/provider binary
+  limits remain unchanged; parse and read failures return to the existing binary
+  notice with its file actions. The viewer starts at fit width and offers page
+  thumbnails, direct page entry, quarter-turn rotation, zoom modes and percentages,
+  and expandable search. Thumbnail rendering follows the visible sidebar range;
+  file actions remain in the existing side-panel menu. The PDF viewer owns its
+  scrollport in a definite-height panel and reapplies fit zoom on resize; see
+  [PDF side-panel layout](../notes/implemented/bug-fix/2026-10-24-pdf-side-panel-layout.md).
+  Keep the project-owned, bundled Worker entry and its `WorkerMessageHandler`
+  export for the main-thread fallback. Clear the viewer document before aborting
+  its lifetime. The PDF.js patch makes global selection listeners belong to all
+  live text layers, so closing one viewer cannot disable another; removing the
+  final layer releases them. Preserve these responsibilities on dependency
+  upgrades. See [PDF Worker and listener ownership](../notes/implemented/bug-fix/2026-10-17-pdf-worker-build-compatibility.md).
+- Mobile session file viewers open read-only, including when a retained drawer
+  is reopened. The toolbar explicitly enables editing for writable files and can
+  return to read-only without discarding drafts; pending saves and conflicts stay
+  actionable in either mode. Desktop viewers retain their existing editing default.
+- Markdown file viewers copy the latest complete source text (including unsaved
+  editor changes) from the top toolbar. On mobile, source mode uses the native
+  text surface instead of Monaco so long-press keeps the OS selection menu;
+  rendered Markdown is selectable through `MarkdownRenderer`'s
+  `data-text-selectable` marker.
+- v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
+  turn diff RPC: `packages/shared/src/code-collab.ts`.
+- Content-addressed diff transport is capability-gated by `codeCollabDiffBlobs` v1: paged manifests
+  identify immutable Git/store/disk bytes and leave All Changes bodies deferred
+  until visible. Reads assemble raw byte ranges, verify the full hash, then decode.
+  Whole-list manifests omit patches. Opening a large remote file requests its
+  single-file manifest and bounded partial patch; Pierre's expand action
+  hydrates full files through the same verified cache. Ordinary remote blobs use
+  bounded IndexedDB; protected/local blobs stay in memory. Opaque file generations
+  invalidate individual entries even if line counts stay equal; comparison-base
+  changes and the first publication after restart invalidate changed paths. Opens
+  revalidate metadata even with unchanged index hints. Writer diff activity separately
+  renews index publication; encrypted diff calls retain writer authority and execution claims. Hunk-budget overflow falls back
+  to full blobs. Expired context loaders renew once; changed identities refresh the
+  entire comparison and base header. Other expansion failures offer retry. Unsupported
+  non-regular files, operational errors and file-read containment refusals stay local
+  to their file; request authorization and validation still reject. A descriptor
+  capture retries single-file stale errors once; permission refusals retain their
+  category. Completed Branch manifests update the
+  provider's live Changes list and notify the sidebar summary without awaiting
+  history or writing shared Flock rows. Failed/partial/superseded results and other
+  scopes cannot replace that list. Comparison refresh retains the coherent old
+  batch until its manifest completes, reuses unchanged content/viewer context,
+  preserves card state and viewport anchoring, and remounts only a failed viewer
+  on retry. Partial loaders stay out of the immutable turn cache.
+  Older machines keep the existing RPCs. See the
+  [transport decision](../notes/implemented/architecture/2026-10-31-remote-diff-transport.md)
+  and [protocol/privacy draft](../../specs/remote-diff-delivery.md).
+- DOCX, XLSX, and PPTX enter through the static `SessionFileOfficePreview` shell.
+  An active preview schedules a bounded read at idle and then imports only that
+  format's renderer and worker-backed engine. The local resource URL is read
+  into at most 25 MiB; remote providers must first pass their own binary limit.
+  Hiding the panel aborts the read and discards a late import. XLSX uses a
+  read-only virtual grid, DOCX requires worker parsing, and PPTX virtualizes its
+  slide list. Parse failures return to the file-action notice. Legacy `.doc`,
+  `.xls`, and `.ppt` are not parsed.
+- CSV and TSV keep the existing text `Source` tab. Their default table preview
+  starts a worker only while active, parses at most 50,000 rows, 256 columns,
+  and 200,000 cells, and virtualizes rows and columns. Search also stays in the
+  worker. Hiding the panel terminates the worker; source editing stays in the
+  existing Monaco/native text surface.
+- CSV/TSV and XLSX support preview-only resize and rectangular selection copy.
+  Clipboard values preserve table structure; XLSX reads from its worker through
+  a bounded adapter. See the [decision](../notes/implemented/feature/2026-10-09-spreadsheet-preview-controls.md).
+- PDF/Office/image previews with an open session composer support source-labelled
+  text/cell references and screenshot regions with comments. The screenshot icon shares
+  the reading toolbar; native text selection opens an anchored comment card with
+  retained source highlighting. Typed drafts survive scrolling away and back.
+  PDF rotation lives in More; PDF/CSV search expands below the reading controls.
+  Captures are clipped to
+  the authorized preview, preserve display pixel density within a 4-megapixel
+  output budget, and keep their logical preview size. PDF page crops preserve
+  source alignment, including regions crossing page boundaries. Changing source or hiding
+  the surface discards unfinished preparation. Context uses existing expandable
+  text drafts and images use existing attachments. These are captured snapshots,
+  without revision-aware source navigation. Existing image drafts can be marked
+  up and replaced after acceptance. Markup exports a size-bounded JPEG on white;
+  attachments sent without accepting markup keep their original format, and document crops stay PNG.
+  See the [selection decision](../notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md)
+  and [markup JPEG decision](../notes/implemented/bug-fix/2026-11-03-image-markup-jpeg.md).
+- **Core viewers are intentionally NOT code-split** (file viewer, diff viewer,
+  diff panel, inner Monaco/Markdown remain static imports). The old
+  `lazy(() => import())` wrappers produced stale-chunk load failures in the
+  local Electron bundle and must not return. Office format engines are the
+  narrow exception: their WASM/worker cost is deferred until an active file
+  actually needs them. The static entry shell handles loading and errors.
+
+## Recovering failed previews
+
+An explicit reopen of the same failed file tab starts another read, including when
+the tab is already active. The error card also offers Retry. Focus requests on a
+successful preview do not reload its snapshot or discard unsaved edits. Existing
+load-effect cleanup fences late results after a retry, file switch, or unmount;
+there is no background retry loop. See the
+[failure classification and recovery note](../notes/implemented/bug-fix/2026-10-16-file-preview-failure-recovery.md).

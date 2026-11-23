@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type {
+  AgentConfigId,
   LocalProjectHistoryCatalogResult,
   LocalProjectHistoryProvider,
-  LocalProjectHistorySyncSummary,
   LocalProjectId,
   MachineId,
   ACPSessionId,
@@ -10,10 +10,7 @@ import type {
   SessionMeta,
 } from '@lody/shared';
 
-import {
-  getVisibleLocalProjectHistoryFailures,
-  reconcileLocalProjectHistoryCatalog,
-} from '../src/lib/local-project-history-catalog';
+import { reconcileLocalProjectHistoryCatalog } from '../src/lib/local-project-history-catalog';
 
 const machineId = 'machine-1' as MachineId;
 const localProjectId = 'project-1' as LocalProjectId;
@@ -66,6 +63,24 @@ function importedSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
 }
 
 describe('reconcileLocalProjectHistoryCatalog', () => {
+  it('does not label another account’s matching native ID as already imported', () => {
+    const selected = { ...provider, agentConfigId: 'account-a' as AgentConfigId };
+    const reconcile = (binding: string) =>
+      reconcileLocalProjectHistoryCatalog({
+        catalog: catalog('available'),
+        machineId,
+        localProjectId,
+        provider: selected,
+        sessionMetas: [importedSession({ agentConfigId: binding as AgentConfigId })],
+      });
+    expect(reconcile('account-b')?.sessions[0]).toMatchObject({ status: 'available' });
+    expect(reconcile('account-b')?.sessions[0].importedSessionId).toBeUndefined();
+    expect(reconcile('account-a')?.sessions[0]).toMatchObject({
+      status: 'imported',
+      importedSessionId: 'session-1',
+    });
+  });
+
   it('marks stale imported catalog rows available when the Lody session no longer exists', () => {
     expect(
       reconcileLocalProjectHistoryCatalog({
@@ -134,27 +149,5 @@ describe('reconcileLocalProjectHistoryCatalog', () => {
         ],
       })?.sessions[0]?.status
     ).toBe('available');
-  });
-});
-
-describe('getVisibleLocalProjectHistoryFailures', () => {
-  it('bounds displayed failures and reports the remaining count', () => {
-    const summary = {
-      listed: 5,
-      imported: 0,
-      refreshed: 0,
-      skipped: 0,
-      conflicted: 0,
-      failed: 5,
-      failures: Array.from({ length: 5 }, (_, index) => ({
-        acpSessionId: `acp-${index}` as ACPSessionId,
-        message: `failure-${index}`,
-      })),
-    } satisfies LocalProjectHistorySyncSummary;
-
-    expect(getVisibleLocalProjectHistoryFailures(summary)).toEqual({
-      failures: summary.failures.slice(0, 3),
-      remaining: 2,
-    });
   });
 });

@@ -2,7 +2,23 @@
 
 Shared mention primitive used by composer autocomplete surfaces.
 
+The input is one Lexical contenteditable that edits and paints text, caret,
+selection, IME preedit and chips; it replaced a textarea under a painted mirror
+([decision](../../../../../.agents/notes/implemented/architecture/2026-11-10-composer-lexical-editor.md)).
+It keeps textarea semantics: an owner-assigned value puts the caret at the end
+and clears the editor's own undo history,
+focus keeps the caret, `rows` sets the height, and the placeholder takes a
+textarea's colour. Code outside the primitive reads and writes text and caret
+only through `composer-input.ts`, which also serves the plain textarea of a
+composer without mention sources.
+
 ## Invariants
+
+- `onMentionAdd` rejects disabled registered items before any text/range mutation;
+  filtering them from keyboard navigation alone is insufficient.
+- Row clicks restore focus and the saved selection before starting preparation:
+  WebKit can expose a zero caret during focus and cancel an in-flight request.
+  Preparation keeps loading/error rows visible until commit or dismissal.
 
 - Inserted text comes from the item, not from the trigger. `MentionItem`'s
   `insertText` (commit) and `navigateText` (drill-down) replace the whole span
@@ -24,6 +40,17 @@ Shared mention primitive used by composer autocomplete surfaces.
   commits a highlighted non-navigation item the same way Enter does.
   Shift+Tab still closes the menu so the composer mode-cycle binding
   is not stolen.
+- A committed mention is one inline decorator node, so a caret cannot rest
+  inside it; a requested offset inside snaps to the nearer edge. Non-collapsed
+  selections stay native so copy and whole-region edits can span mentions; only a
+  collapsed caret decides triggers. The `{text, mentions}` boundary
+  (`composer-document.ts`) is the only place offsets are computed. With a chip
+  resolver, disable spellcheck. Text uses system selection colours; chips suppress
+  native highlighting and paint one selected surface. Render icons and labels in
+  normal layout without invisible character boxes. Keep an empty editable TextNode
+  before mentions without preceding text. Never add placeholder characters or
+  disable native selection. The owner hears
+  IME text only once committed; no owner write is applied mid-composition.
 - The pop-back itself is `context.onNavigateBack()`, owned by the root next to
   `onMentionAdd`: it has to interleave the controlled value commit with caret
   restoration, so a menu's own Back affordance calls it rather than restaging the
@@ -42,7 +69,9 @@ Shared mention primitive used by composer autocomplete surfaces.
   its whitespace resolved against the INPUT's value
   (`resolveMentionInsertPrefix`), not the caller's copy of it, which can trail
   by a keystroke. Stays product-neutral: text, payload, and kind are all
-  arguments.
+  arguments. Pass an array to insert multiple mentions in one transaction; each
+  index and separator is resolved against the preceding result, then text, ranges,
+  selected values, and caret are committed together.
 - `MentionKind` stays product-neutral: `pasted_text` is the only member the
   primitive branches on, and every other kind is an opaque tag the menu chooses.
   Adding a mention category must not edit this package.
@@ -64,29 +93,32 @@ Shared mention primitive used by composer autocomplete surfaces.
   match the search term against each item's `value` hides rows whose payload
   happens not to contain it, and a hidden row renders null, which strips its node
   from the collection and breaks arrow-key movement across groups.
-- Desktop `MentionContent` is caret-anchored vertically but horizontally constrained
-  to the textarea range via its virtual collision boundary and
-  `--mention-input-width`.
-- `MentionContent positionAnchor="input-top"` places top-side menus against the
-  input wrapper's top edge instead of the current caret line.
+- Desktop `MentionContent` follows the caret through DOM ranges on the editor,
+  snapped to its line grid under scroll, transforms and zoom; its
+  `contextElement` is the editor. Caret measurement inserts no DOM.
+  Bottom menus flip; explicit top menus stay above while a row fits and
+  scroll within that room. Both obey the virtual boundary and `--mention-input-width`.
+- `positionAnchor="composer"` anchors to the input's nearest `[data-mention-frame]`
+  (else its wrapper), left-aligned and no wider. It picks its side once per open
+  — above unless there is no room — and never flips: a level change resizes it
+  in place, and its height is capped to that side's room. An explicit `side`
+  pins the side instead of the room pick.
 - Menu callers should include `var(--mention-input-width)` in desktop `max-w`
   classes; viewport-only caps let wide menus escape the composer.
-- Mobile mention content bypasses floating-ui and docks through
-  `MentionMobilePanel`; desktop positioning classes do not control mobile layout.
+- Mobile `MentionMobilePanel` bypasses floating-ui and desktop positioning.
+  It docks above `[data-mention-frame]` (else the input) and caps to visible
+  room without covering the frame or top inset.
+  The docked strip is the only scroller: menus pass `docked` and drop their own.
+- Full-height composers use `mobilePanelPlacement="bottom"` (dock above footer).
+- Desktop content, the mobile strip and rows share `mention-surface.ts`: the
+  `@lody/ui` popup surface restated in semantic tokens (no border, no Tailwind).
+  StyleX cannot read `data-highlighted`, so `ui/mention.tsx` derives the row
+  highlight from `highlightedItem.value`; row values must stay unique per menu.
+  Rows, group headings and status messages keep `flexShrink: 0` so wrapped text
+  determines their height; the capped list scrolls instead of letting one block
+  paint over its neighbour.
+  The entrance rises from the side the menu landed on (`--mention-rise`).
 
 ## Files
 
-- `mention-root.tsx` owns open state, active trigger, selected values, mention
-  ranges, item registration, filtering, and insertion.
-- `mention-input-core.ts` holds the pure text/range algebra both insertion
-  routes and every edit share.
-- `mention-input.tsx` owns textarea behavior: trigger detection, virtual caret
-  anchor creation, controlled value sync, selection restore, and highlighter
-  interaction.
-- `mention-content.tsx` renders the desktop floating listbox and provides the
-  input-width CSS variable; it delegates mobile rendering to `mention-mobile-content.tsx`.
-- `mention-mobile-content.tsx` docks the mobile panel above the composer and
-  handles drawer-safe portal placement.
-- `mention-item.tsx`, `mention-label.tsx`, `mention-highlighter.tsx`, and
-  `mention-trigger.ts` provide row selection, accessibility label, inline
-  highlighting, and trigger/drill-down-prefix parsing helpers.
+File ownership: [README.md](README.md).

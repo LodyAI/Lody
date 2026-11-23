@@ -8,9 +8,47 @@
  * indent (the prose used to carry `sm:px-2` and sat 8px right of the chevrons).
  */
 import type { Meta, StoryObj } from '@storybook/react';
-import type { SessionHistoryParsed, SessionId } from '@lody/shared';
+import { Provider, createStore, useAtomValue } from 'jotai';
+import { expect, userEvent, waitFor } from 'storybook/test';
+import { useState, type ReactNode } from 'react';
+import {
+  getSessionRoomId,
+  type MessageContent,
+  type SessionHistoryParsed,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
+import { runtimeAtom } from '@/atoms';
+import { CONVERSATION_CONTENT_WIDTH_CLASS } from '@/lib/conversation-layout';
+import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { conversation } from '../components/ai-gui/conversation.tokens.stylex';
+import { conversationFontSizeAtom } from '@/atoms/settings';
+import { InterfaceFontController } from '@/components/interface-font-controller';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import { SessionPinContext } from '@/components/sessions/session-pin-context';
+import { createConversationViewFromHistory, type ConversationView } from '@/lib/conversation-view';
+
+/**
+ * `usePermissionResponse` reports `isReady: !!runtime`, and a NOT-ready card
+ * renders its disabled-state footer ("Permission actions are disabled in this
+ * environment") and is taller than the real one. That state belongs to a
+ * workspace whose runtime has not opened — not to plan mode — so a story about
+ * plan-mode geometry must stub the runtime or it measures the wrong card.
+ * Same stub as `FloatingPermissionRequest.stories.tsx`: click handlers reject
+ * if exercised, screenshots show the active design.
+ */
+const stubRuntime = { withSessionStore: () => Promise.reject(new Error('stub')) };
+const storyStore = createStore();
+storyStore.set(runtimeAtom, stubRuntime as never);
+
+const WithRuntime = ({ children }: { children: ReactNode }) => (
+  <Provider store={storyStore}>{children}</Provider>
+);
 
 const meta = {
   title: 'Sessions/AssistantTurnAlignment',
@@ -30,6 +68,487 @@ const renderMessageRow: SessionChatStreamViewProps['renderMessageRow'] = ({
   message,
   sessionId: storySessionId,
 }) => <MessageRowView message={message} sessionId={storySessionId} />;
+
+const rhythmStyles = stylex.create({
+  frame: { height: '1500px', width: '100%', backgroundColor: colors.background },
+  phone: { width: '390px' },
+});
+const rhythmTheme = stylex.createTheme(conversation, {
+  bubbleFill: 'rgb(24 64 80)',
+  readingLeading: '24px',
+  paragraphGap: '16px',
+  activityPitch: '28px',
+  responseGap: '48px',
+  roundGap: '80px',
+  surfaceGap: '24px',
+});
+
+const rhythmMessages: SessionHistoryParsed[] = [
+  {
+    id: 'rhythm-user-1',
+    role: 'user',
+    timestamp: '2026-10-01T08:00:00.000Z',
+    read: true,
+    items: [
+      {
+        type: 'text',
+        text: '检查文件重命名后搜索结果是否及时更新。Please preserve the open draft.\n\n验收：中文、English、数字 512 和标点都应正常。',
+      },
+    ],
+  },
+  {
+    id: 'rhythm-assistant-1',
+    role: 'assistant',
+    timestamp: '2026-10-01T08:00:01.000Z',
+    read: true,
+    finished: true,
+    items: [
+      {
+        type: 'tool_call',
+        toolCallId: 'rhythm-read',
+        kind: 'read',
+        title: 'Read search-index.ts',
+        status: 'completed',
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'rhythm-run',
+        kind: 'execute',
+        title: 'pnpm test search-index',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: '12 passed · 0 failed' } }],
+      },
+      {
+        type: 'text',
+        text: '索引更新与文件重命名共享一次提交。The open draft remains available.\n\n1. 保留会话标识与工作目录。\n2. 失败时返回明确的错误。\n3. 检查中文、English、512 和 punctuation。\n\n```ts\nconst generation = index.version;\nawait index.rename("新标题", { preserveDraft: true });\n```\n\n> Review: verify mixed text and punctuation in the same viewport.',
+      },
+    ],
+  },
+  {
+    id: 'rhythm-user-2',
+    role: 'user',
+    timestamp: '2026-10-01T08:01:00.000Z',
+    read: true,
+    items: [
+      {
+        type: 'text',
+        text: '补充验证说明，包含中英文混排。Add the verification results to the report.',
+      },
+    ],
+  },
+  {
+    id: 'rhythm-assistant-2',
+    role: 'assistant',
+    timestamp: '2026-10-01T08:01:01.000Z',
+    read: true,
+    finished: true,
+    items: [
+      {
+        type: 'tool_call',
+        toolCallId: 'rhythm-report',
+        kind: 'read',
+        title: 'Read verification.md',
+        status: 'completed',
+      },
+      {
+        type: 'text',
+        text: '验证说明已准备好。The results are ready for review.\n\n- 中文：标点、字面与换行。\n- English: rhythm, punctuation, and ambiguous glyphs.\n- Mixed text: baseline and CJK / Latin balance.',
+      },
+    ],
+  },
+];
+const rhythmItems: ChatStreamItem[] = rhythmMessages.map((message, turnIndex) => ({
+  type: 'message',
+  sessionId,
+  message,
+  turnIndex,
+}));
+
+// Finished turns with a recorded end, so the mobile footer leads with its duration.
+const mobileRhythmItems: ChatStreamItem[] = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.role === 'assistant'
+    ? {
+        ...item,
+        message: { ...item.message, endedAt: Date.parse(item.message.timestamp) + 8_000 },
+      }
+    : item
+);
+
+export const ConversationRhythm: Story = {
+  args: { sessionId, items: rhythmItems, renderMessageRow },
+  render: () => <ConversationRhythmScene />,
+};
+
+const backgroundTaskItems: ChatStreamItem[] = [
+  {
+    type: 'message',
+    sessionId,
+    turnIndex: 0,
+    message: {
+      id: 'background-task-user',
+      role: 'user',
+      timestamp: '2026-10-01T08:00:00.000Z',
+      read: true,
+      items: [{ type: 'text', text: 'Run a background build and answer before it finishes.' }],
+    },
+  },
+  {
+    type: 'message',
+    sessionId,
+    turnIndex: 1,
+    message: {
+      id: 'background-task-assistant',
+      role: 'assistant',
+      timestamp: '2026-10-01T08:00:01.000Z',
+      finished: true,
+      read: true,
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'background-build-call',
+          kind: 'execute',
+          title: 'pnpm build',
+          status: 'completed',
+        },
+        { type: 'text', text: 'The answer is ready; the build is still running.' },
+        {
+          type: 'subagent_task',
+          taskId: 'background-build',
+          taskKind: 'background',
+          actor: 'Bash',
+          status: 'in_progress',
+          description: 'pnpm build',
+          isBackgrounded: true,
+        },
+        {
+          type: 'subagent_task',
+          taskId: 'background-check',
+          taskKind: 'background',
+          actor: 'Bash',
+          status: 'completed',
+          description: 'Check generated files',
+          isBackgrounded: true,
+        },
+      ],
+    },
+  },
+];
+
+export const FinishedAnswerWithRunningBackgroundTasks: Story = {
+  ...ConversationRhythm,
+  name: 'Finished answer with a running background task',
+  args: { ...ConversationRhythm.args, items: backgroundTaskItems },
+  render: () => <ConversationRhythmScene items={backgroundTaskItems} />,
+};
+
+/**
+ * The same rounds on a phone. Every left edge — prose, the "Ran N commands"
+ * label, and the footer's "Worked for …" — sits on one rail; only the newest
+ * turn's buttons rest visible, and a tap on an older turn reveals its own. The
+ * round gap sits below the always-visible footer instead of around it.
+ */
+export const MobileConversationRhythm: Story = {
+  args: { sessionId, items: rhythmItems, renderMessageRow },
+  render: () => (
+    <ForceMobileLayoutProvider force>
+      <div {...stylex.props(rhythmStyles.phone)}>
+        <ConversationRhythmScene
+          items={mobileRhythmItems}
+          lastAssistantMessageId="rhythm-assistant-2"
+        />
+      </div>
+    </ForceMobileLayoutProvider>
+  ),
+};
+
+const phoneTool = (id: string, kind: 'read' | 'execute', title: string): MessageContent => ({
+  type: 'tool_call',
+  toolCallId: id,
+  kind,
+  title,
+  status: 'completed',
+});
+
+/** A phone session mid-turn, shaped like the bug report: an answered round, a
+ *  short follow-up, and a live turn with folded command groups. */
+// The live turn started 2m 34s before the story opens, as in the report.
+const phoneLiveStart = new Date(Date.now() - 154_000).toISOString();
+const phoneModelInfo = { modelId: 'claude-opus-5-5', name: 'Opus 5.5' };
+const phoneMessages: SessionHistoryParsed[] = [
+  {
+    id: 'phone-assistant-1',
+    role: 'assistant',
+    timestamp: '2026-10-14T06:48:00.000Z',
+    endedAt: Date.parse('2026-10-14T06:48:08.000Z'),
+    read: true,
+    finished: true,
+    modelInfo: phoneModelInfo,
+    items: [
+      {
+        type: 'text',
+        text: '5. 补回归测试：新写法和现有的全量写法得到相同的历史，且没改到的记录原样保留。\n\n要现在开始实现吗？如果你想先小步验证，可以只做第 1、2 步加测试，后面几步拆到另一个 PR。',
+      },
+    ],
+  },
+  {
+    id: 'phone-user-1',
+    role: 'user',
+    timestamp: '2026-10-14T06:49:00.000Z',
+    read: true,
+    items: [{ type: 'text', text: '好，请完成实现' }],
+  },
+  {
+    id: 'phone-assistant-2',
+    role: 'assistant',
+    timestamp: phoneLiveStart,
+    read: true,
+    finished: false,
+    modelInfo: phoneModelInfo,
+    items: [
+      {
+        type: 'text',
+        text: "I'll start by reading the parts of the writer and the applier the change will touch, then measure how fast the history can be scanned for tool calls without `toJSON`.",
+      },
+      phoneTool('phone-run-1', 'execute', 'rg -n applyHistoryAction'),
+      phoneTool('phone-run-2', 'execute', 'git log --oneline -5'),
+      phoneTool('phone-run-3', 'execute', 'node bench/scan-history.mjs'),
+      phoneTool('phone-read-1', 'read', 'Read history-writer.ts'),
+      phoneTool('phone-read-2', 'read', 'Read history-applier.ts'),
+      {
+        type: 'text',
+        text: 'Now the applier itself. I need to know every way it can change a turn, to decide what a partial view has to include.',
+      },
+      phoneTool('phone-run-4', 'execute', 'rg -n "case ." history-applier.ts'),
+      phoneTool('phone-read-3', 'read', 'Read history-applier.test.ts'),
+    ],
+  },
+];
+const phoneItems: ChatStreamItem[] = phoneMessages.map((message, turnIndex) => ({
+  type: 'message',
+  sessionId,
+  message,
+  turnIndex,
+}));
+const phonePin = { pinnedHistoryId: null, onPin: () => undefined };
+
+/**
+ * The reported phone screen, for before/after comparison of the left rail,
+ * round spacing, and resting message actions.
+ */
+export const MobileReportedSession: Story = {
+  args: { sessionId, items: phoneItems, renderMessageRow },
+  render: () => (
+    <ForceMobileLayoutProvider force>
+      <SessionPinContext.Provider value={phonePin}>
+        <div {...stylex.props(rhythmStyles.frame, rhythmStyles.phone)}>
+          <SessionChatStreamView
+            sessionId={sessionId}
+            items={phoneItems}
+            lastAssistantMessageId="phone-assistant-2"
+            lastCompletedAssistantMessageId="phone-assistant-1"
+            onCopyContext={() => undefined}
+            onForkLastAssistant={() => undefined}
+            agentActivityLabel="Working"
+            agentActivityShimmer
+            renderMessageRow={({ message, sessionId: id }) => (
+              <MessageRowView
+                message={message}
+                sessionId={id}
+                onEdit={() => Promise.resolve(true)}
+              />
+            )}
+          />
+        </div>
+      </SessionPinContext.Provider>
+    </ForceMobileLayoutProvider>
+  ),
+};
+
+export const ConversationRhythmTheme: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene themed />,
+};
+
+const rhythmWithoutFooter = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.role === 'assistant'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          finished: false,
+          items: item.message.items.filter((content) => content.type === 'text'),
+        },
+      }
+    : item
+);
+const rhythmWithFiles = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          fileDiff: [
+            { filePath: 'src/search-index.ts', add: 12, del: 4 },
+            { filePath: 'tests/search-index.test.ts', add: 24, del: 2 },
+          ],
+        },
+      }
+    : item
+);
+
+const rhythmReadingItems = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          items: item.message.items.map((content) =>
+            content.type === 'text'
+              ? {
+                  ...content,
+                  text: content.text.replace(
+                    '索引更新与文件重命名共享一次提交。The open draft remains available.',
+                    '索引更新与文件重命名共享一次提交。搜索列表会显示新的标题，已经打开的草稿继续保留光标、选择范围和未保存的内容。我们同时检查了较长的中文说明与 English text，确保自动换行后，每一行仍然容易追踪，不需要在段落之间反复寻找阅读位置。The open draft remains available while the search results refresh, and the same conversation stays selected throughout the update.\n\n验证覆盖普通重命名、连续修改和失败恢复。遇到错误时，界面保留用户已经输入的内容，并明确说明哪些操作没有完成。This paragraph describes the failure path with enough continuous text to compare line spacing, paragraph separation, and the transition from activity rows to the final answer.'
+                  ),
+                }
+              : content
+          ),
+        },
+      }
+    : item
+);
+
+export const ConversationRhythmReading: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmReadingItems} />,
+};
+
+const rhythmProgressItems = rhythmReadingItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          items: [
+            {
+              type: 'text' as const,
+              text: '先检查搜索索引与草稿保存之间的关系，确认文件改名后列表能够及时刷新。接下来会分别检查正常更新和失败恢复，保留用户正在编辑的内容，并记录每一步的验证结果。',
+            },
+            item.message.items[0]!,
+            {
+              type: 'text' as const,
+              text: '已经找到索引更新的入口。现在检查重复修改和失败重试是否会覆盖草稿，并验证较长的文件名在列表中仍然清晰可读。The next check covers the error path and preserves the current selection.',
+            },
+            ...item.message.items.slice(1),
+          ],
+        },
+      }
+    : item
+);
+
+export const ConversationRhythmProgress: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmProgressItems} />,
+};
+
+export const ConversationRhythmProgressStreaming: Story = {
+  ...ConversationRhythm,
+  render: () => (
+    <ConversationRhythmScene
+      items={rhythmProgressItems.map((item) =>
+        item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+          ? { ...item, message: { ...item.message, finished: false } }
+          : item
+      )}
+    />
+  ),
+};
+
+export const ConversationRhythmReadingStreaming: Story = {
+  ...ConversationRhythm,
+  render: () => (
+    <ConversationRhythmScene
+      items={rhythmReadingItems.map((item) =>
+        item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+          ? { ...item, message: { ...item.message, finished: false } }
+          : item
+      )}
+    />
+  ),
+};
+
+export const ConversationRhythmWithoutFooter: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmWithoutFooter} />,
+};
+
+export const ConversationRhythmWithFiles: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmWithFiles} />,
+};
+
+/** Long enough to collapse behind "Show more", with wrapped and short lines mixed. */
+const rhythmLongUserItems = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-user-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          items: [
+            {
+              type: 'text' as const,
+              text: [
+                'Verification only — do not edit, commit, or push anything.',
+                '',
+                '1. Fetch the review branch and confirm HEAD is the expected commit ("fix: keep line breaks in shell output").',
+                '2. Initialize the workspace submodules: packages/extension-core packages/extension-alpha packages/extension-beta.',
+                '3. 安装依赖后运行与终端输出相关的测试，确认中文、English、数字 512 和标点都能正常换行。',
+                '4. Run the static checks and record any failure with its full output.',
+                '5. Open the conversation and compare the collapsed and expanded message.',
+                '6. Report the results in a short summary.',
+                '7. Note which checks were skipped and why.',
+                '8. Keep every command read-only.',
+                '9. Attach the exact commit you verified.',
+                '',
+                'Do not reuse any running application or its data.',
+              ].join('\n'),
+            },
+          ],
+        },
+      }
+    : item
+);
+
+export const ConversationRhythmLongUser: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmLongUserItems} />,
+};
+
+function ConversationRhythmScene({
+  themed = false,
+  items = rhythmItems,
+  lastAssistantMessageId = null,
+}: {
+  themed?: boolean;
+  items?: ChatStreamItem[];
+  lastAssistantMessageId?: string | null;
+}) {
+  const fontSize = useAtomValue(conversationFontSizeAtom);
+  return (
+    <div {...stylex.props(rhythmStyles.frame, themed && rhythmTheme)}>
+      <InterfaceFontController enabled />
+      <SessionChatStreamView
+        sessionId={sessionId}
+        items={items}
+        lastAssistantMessageId={lastAssistantMessageId}
+        conversationFontSize={fontSize}
+        renderMessageRow={({ message, sessionId: id }) => (
+          <MessageRowView message={message} sessionId={id} conversationFontSize={fontSize} />
+        )}
+      />
+    </div>
+  );
+}
 
 const streamingTurn: SessionHistoryParsed = {
   id: 'alignment-assistant',
@@ -87,7 +606,9 @@ const streamingTurn: SessionHistoryParsed = {
   ],
 };
 
-const items: ChatStreamItem[] = [{ type: 'message', sessionId, message: streamingTurn } as const];
+const items: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: streamingTurn, turnIndex: 0 } as const,
+];
 
 /**
  * Finished turn: the "Worked for …" chevron, the edited-files card, and the
@@ -120,7 +641,7 @@ const finishedTurn: SessionHistoryParsed = {
 };
 
 const finishedItems: ChatStreamItem[] = [
-  { type: 'message', sessionId, message: finishedTurn } as const,
+  { type: 'message', sessionId, message: finishedTurn, turnIndex: 0 } as const,
 ];
 
 export const DesktopStreamingTurn: Story = {
@@ -132,11 +653,142 @@ export const DesktopStreamingTurn: Story = {
         items={items}
         sessionId={sessionId}
         renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={streamingTurn.id}
+        onCopyContext={() => undefined}
         agentActivityLabel="Exploring"
         agentActivityTone="warning"
       />
     </div>
   ),
+};
+
+const scrollToLatestTurn: SessionHistoryParsed = {
+  id: 'alignment-scroll-to-latest',
+  role: 'assistant',
+  // Keep the live-duration label representative when the story is opened later.
+  timestamp: new Date(Date.now() - 30_000).toISOString(),
+  read: true,
+  finished: false,
+  items: [
+    {
+      type: 'text',
+      text: Array.from(
+        { length: 36 },
+        (_, index) =>
+          `Streaming output line ${index + 1}: the reader is away from the latest response, so new content keeps arriving below the viewport.`
+      ).join('\n\n'),
+    },
+  ],
+};
+
+const scrollToLatestItems: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: scrollToLatestTurn, turnIndex: 0 } as const,
+];
+
+function moveAwayFromLatest(viewport: HTMLElement): void {
+  // Move away from the real bottom before releasing follow. A wheel event alone
+  // changes the mode but leaves the viewport at the end, which makes the story
+  // show a return control in a state that is already at the latest row.
+  const maxScrollTop = viewport.scrollHeight - viewport.clientHeight;
+  if (maxScrollTop <= 0) throw new Error('Conversation viewport does not overflow');
+  viewport.scrollTop = Math.max(0, maxScrollTop - 200);
+  viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+  viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -20 }));
+}
+
+async function releaseScrollToLatest(canvasElement: HTMLElement): Promise<{
+  button: HTMLButtonElement;
+  viewport: HTMLElement;
+}> {
+  const viewport = await waitFor(() => {
+    const node = canvasElement.querySelector<HTMLElement>('[data-message-selection-scroll]');
+    if (!node) throw new Error('Conversation viewport is not mounted');
+    return node;
+  });
+  await waitFor(() => {
+    moveAwayFromLatest(viewport);
+    return viewport;
+  });
+  const button = await waitFor(() => {
+    const control = canvasElement.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
+    if (!control) throw new Error('Scroll-to-latest control is not visible');
+    return control;
+  });
+  return { button, viewport };
+}
+
+async function expectAtRealBottom(viewport: HTMLElement): Promise<void> {
+  await waitFor(() => {
+    const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    if (distance > 1) throw new Error(`Still ${Math.ceil(distance)}px from the real bottom`);
+    return true;
+  });
+}
+
+async function leaveScrollToLatestVisible(
+  canvasElement: HTMLElement,
+  viewport: HTMLElement
+): Promise<HTMLButtonElement> {
+  await moveAwayFromLatest(viewport);
+  return await waitFor(() => {
+    const button = canvasElement.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
+    if (!button) throw new Error('Scroll-to-latest control did not return');
+    return button;
+  });
+}
+
+export const DesktopScrollToLatestWorking: Story = {
+  args: { sessionId, items: scrollToLatestItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <div className="relative h-[520px] w-full bg-background">
+      <SessionChatStreamView
+        items={scrollToLatestItems}
+        sessionId={sessionId}
+        className="h-full"
+        renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={scrollToLatestTurn.id}
+        agentActivityLabel="Working"
+        agentActivityTone="primary"
+        agentActivityShimmer
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const { button, viewport } = await releaseScrollToLatest(canvasElement);
+    await expect(button.querySelector('.animate-spin')).not.toBeNull();
+    await button.click();
+    await expectAtRealBottom(viewport);
+    const visibleButton = await leaveScrollToLatestVisible(canvasElement, viewport);
+    await expect(visibleButton.querySelector('.animate-spin')).not.toBeNull();
+  },
+};
+
+export const DesktopScrollToLatestWaiting: Story = {
+  args: { sessionId, items: scrollToLatestItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <div className="relative h-[520px] w-full bg-background">
+      <SessionChatStreamView
+        items={scrollToLatestItems}
+        sessionId={sessionId}
+        className="h-full"
+        renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={scrollToLatestTurn.id}
+        agentActivityLabel="Waiting for permission"
+        agentActivityTone="warning"
+        agentActivityShimmer={false}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const { button, viewport } = await releaseScrollToLatest(canvasElement);
+    await expect(button.querySelector('.lucide-arrow-down')).not.toBeNull();
+    await button.click();
+    await expectAtRealBottom(viewport);
+    const visibleButton = await leaveScrollToLatestVisible(canvasElement, viewport);
+    await expect(visibleButton.querySelector('.lucide-arrow-down')).not.toBeNull();
+  },
 };
 
 export const DesktopFinishedTurn: Story = {
@@ -153,4 +805,949 @@ export const DesktopFinishedTurn: Story = {
       />
     </div>
   ),
+};
+
+/**
+ * A view whose last history update landed `silentForMs` ago: the same turns
+ * arriving once more from the "backend", stamped by an injected clock.
+ */
+function useSilentConversationView(turn: SessionHistoryParsed, silentForMs: number) {
+  const [view] = useState<ConversationView>(() => {
+    let history = [turn];
+    let notify: () => void = () => undefined;
+    const next = createConversationViewFromHistory({
+      sessionId,
+      getHistory: () => history as never,
+      subscribe: (listener) => {
+        notify = listener;
+        return () => undefined;
+      },
+      now: () => Date.now() - silentForMs,
+    });
+    history = history.slice();
+    notify();
+    return next;
+  });
+  return view;
+}
+
+async function openTurnInfo(canvasElement: HTMLElement): Promise<HTMLElement> {
+  const findTrigger = () =>
+    waitFor(() => {
+      const node = canvasElement.querySelector<HTMLElement>('[aria-label="Turn configuration"]');
+      if (!node) throw new Error('Turn configuration button is not mounted');
+      return node;
+    });
+  // Row overlays mount once a pointer arms their row; arming remounts the trigger.
+  (await findTrigger())
+    .closest('[data-virtual-index]')
+    ?.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  // Click once: a retried click would toggle the popover shut again.
+  (await findTrigger()).click();
+  return await waitFor(() => {
+    const timing = document.querySelector<HTMLElement>('[data-turn-timing]');
+    if (!timing) throw new Error('Turn timing did not open');
+    return timing;
+  });
+}
+
+const timingModelInfo = {
+  modelId: 'claude-opus-5-5',
+  name: 'Claude Opus 5.5',
+  _meta: { lodyThoughtLevel: 'high' },
+};
+
+const silentLiveTurn: SessionHistoryParsed = {
+  id: 'alignment-timing-live',
+  role: 'assistant',
+  // Opened later, the story still reads "8m 40s" in, "4m" silent.
+  timestamp: new Date(Date.now() - 520_000).toISOString(),
+  read: true,
+  finished: false,
+  modelInfo: timingModelInfo,
+  items: [
+    {
+      type: 'tool_call',
+      toolCallId: 'alignment-timing-lint',
+      title: 'Run pnpm check',
+      kind: 'execute',
+      status: 'in_progress',
+    },
+    { type: 'text', text: 'Running the lint gate before committing.' },
+  ],
+};
+
+/**
+ * A live turn that has received nothing for four minutes: the status line says
+ * so, and the turn popover shows start, running time and a warned Last update.
+ */
+export const DesktopTurnTimingLive: Story = {
+  args: { sessionId, items: [], renderMessageRow },
+  globals: { theme: 'dark' },
+  render: function Render() {
+    const view = useSilentConversationView(silentLiveTurn, 250_000);
+    // Live sync opened well before the last update, so that update counts.
+    const [historyLive] = useState(() => ({ sync: 'live' as const, since: Date.now() - 600_000 }));
+    return (
+      <div className="h-[520px] w-full bg-background">
+        <SessionChatStreamView
+          items={[{ type: 'message', sessionId, message: silentLiveTurn, turnIndex: 0 }]}
+          sessionId={sessionId}
+          conversationView={view}
+          liveTurnActivity="working"
+          historyLive={historyLive}
+          renderMessageRow={renderMessageRow}
+          lastAssistantMessageId={silentLiveTurn.id}
+          agentActivityLabel="Working"
+          agentActivityTone="primary"
+          agentActivityShimmer
+        />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const timing = await openTurnInfo(canvasElement);
+    // Seconds keep ticking while the story loads; assert the minute.
+    await expect(timing.textContent).toMatch(/running 8m \d\ds/);
+    await expect(timing.querySelector('[data-stale]')?.textContent).toMatch(/^4m \d\ds ago$/);
+  },
+};
+
+const timedFinishedTurn: SessionHistoryParsed = {
+  ...finishedTurn,
+  id: 'alignment-timing-finished',
+  modelInfo: timingModelInfo,
+};
+
+/** A finished turn: Started, Ended and the Worked-for duration; no liveness row. */
+export const DesktopTurnTimingFinished: Story = {
+  args: { sessionId, items: [], renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <div className="h-[520px] w-full bg-background">
+      <SessionChatStreamView
+        items={[{ type: 'message', sessionId, message: timedFinishedTurn, turnIndex: 0 }]}
+        sessionId={sessionId}
+        renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={timedFinishedTurn.id}
+        lastCompletedAssistantMessageId={timedFinishedTurn.id}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const timing = await openTurnInfo(canvasElement);
+    await expect(timing.textContent).toContain('Ended');
+    await expect(timing.textContent).not.toContain('Last update');
+  },
+};
+
+export const DesktopForkingTurn: Story = {
+  args: { sessionId, items: finishedItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <div className="h-[520px] w-full bg-background">
+      <SessionChatStreamView
+        items={finishedItems}
+        sessionId={sessionId}
+        renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={finishedTurn.id}
+        lastCompletedAssistantMessageId={finishedTurn.id}
+        onForkLastAssistant={() => undefined}
+        forkingAssistantMessageId={finishedTurn.id}
+      />
+    </div>
+  ),
+};
+
+/**
+ * PLAN-MODE TURN — the widest set of top-level row shells in one column.
+ *
+ * A plan approval cuts one turn into two regions (`isPlanExitBlock` in
+ * `assistant-turn-render-blocks.ts`), so a single turn shows two worked
+ * headers, the `switch_mode` approval card, its resolved permission card, an
+ * image group, a file card, and the proposed-plan card — plus the next turn's
+ * prose. Those are all SIBLINGS in one `ConversationColumn`, so EVERY one of
+ * them starts on the guide line. Measure with `getBoundingClientRect` against
+ * the guide; do not eyeball it.
+ *
+ * Each of those shells used to carry a private horizontal pad, which rendered
+ * the turn as a 0 / 8 / 16px ladder — the `switch_mode` title 8px right of the
+ * chevrons above it (and 8px right of its OWN `px-0` body), the resolved
+ * permission card 16px right of everything. The pads are gone; a new shell that
+ * re-adds one shows up here immediately.
+ *
+ * GEOMETRY CONTRACT for those rows (`ai-gui/AGENTS.md` points here; it is at its
+ * 8 KiB ceiling, so the numbers live where they are rendered):
+ *
+ *   - One radius. Every top-level card is `rounded-xl` — proposed plan, file
+ *     card, image frame, the resolved permission record.
+ *   - No indent, ever. An expanded region's contents start on the rail too —
+ *     the worked section, the activity group, and a tool call's own body. The
+ *     chevron and the header carry the hierarchy; expanding reveals rows, it
+ *     never shifts them right. Hover pills bleed with `-mx-1` instead.
+ *   - One gap. A row that PAINTS a surface takes `cardSiblingGap` (12px);
+ *     prose keeps `turnSiblingGap` (4px) because its leading already separates
+ *     it. Add a new card-shaped content type to `CARD_CONTENT_TYPES` or it
+ *     silently inherits the prose gap and reads as a stack of strips.
+ *   - The gap between rows is never smaller than the padding inside one. That
+ *     is what broke before: cards 4-8px apart with 10-12px of internal padding.
+ *   - No surface inside a surface. The plan-exit body renders bare; a nested
+ *     panel cannot be concentric with a 12px card that has 12px padding, and it
+ *     reads as a frame around nothing.
+ *   - Order. When a turn carries a plan, agent attachments sort BELOW it
+ *     (`AGENT_ATTACHMENT_TYPES`): a plan runs long, and a file card stranded
+ *     above one is a small thing to find mid-markdown. The answer text still
+ *     reads above that whole tail.
+ *   - One plan surface, whatever the adapter. Claude and Kimi carry the plan in
+ *     the approval card's `content`, Codex in `rawInput` plus a separate
+ *     `proposed_plan` row. `plan-surface.ts` resolves the carrier and they all
+ *     render one `PlanPanel` — see `DesktopPlanAdapterParity`.
+ *   - One panel. Every framed block — command, tool input/output, permission,
+ *     proposed plan — uses `conversation-panel.ts`: the HEADER carries the
+ *     raised fill, the body sits on the frame. Never the reverse, and never an
+ *     accent-tinted frame for one panel among neutral siblings. The header tint
+ *     is a FOREGROUND alpha, because Vesper's `--muted` equals `--background`
+ *     and a `bg-muted` header measured as a zero-step band in dark.
+ *   - A settled permission is ONE LINE, not a card: check/cross plus the option
+ *     that was chosen (`resolvePermissionRecord`). Pending keeps the full card —
+ *     it is still a decision. A withdrawn request renders nothing, and
+ *     `ToolCallCard` drops its body so the card does not open onto empty
+ *     padding. Covered by `DesktopPlanDenied` / `DesktopPlanWithdrawn`.
+ *   - The plan and its approval are ONE unit. The plan renders directly above
+ *     the card that approves it (`buildAssistantMessageRenderItems` moves it
+ *     there), and the card has NO title — "Implement this plan?" stacked on
+ *     "Yes, implement this plan" asked and answered the same question twice.
+ *     The plan panel clamps and expands from its header, because it now sits
+ *     near the top of the turn, above everything it produced — but ONLY once it
+ *     is history. While the approval is unanswered (or the plan is still
+ *     streaming) it opens in full: `hasUnansweredPlanApproval`. Hiding two
+ *     thirds of a plan behind a chevron at the moment someone is asked to
+ *     approve it is the one state where clamping is unacceptable. See
+ *     `DesktopPlanAwaitingDecision`.
+ *   - ONE icon tone. Every icon in a turn is `text-muted-foreground` at full
+ *     opacity — no per-icon `opacity-60/70/80/90`, and no hue on the outcome
+ *     icon (check vs cross already carries approved vs denied). An interactive
+ *     icon rests at that tone too and brightens on hover; resting DIMMER than
+ *     the static chrome around it read as disabled.
+ *
+ * The guide line below is story-only chrome; it marks where
+ * `ConversationColumn`'s content box starts (`CONVERSATION_GUTTER_X_CLASS`).
+ */
+const planModeTurn: SessionHistoryParsed = {
+  id: 'alignment-plan-mode',
+  role: 'assistant',
+  timestamp: '2026-08-11T09:10:00.000Z',
+  read: true,
+  finished: true,
+  endedAt: Date.parse('2026-08-11T09:38:35.000Z'),
+  items: [
+    /* Region 1 — the work that produced the plan. Folds under "Finished
+       working": an earlier region never shows a duration. */
+    { type: 'thought', text: '先确认这一页的布局来源,再决定改哪一层。' },
+    {
+      type: 'tool_call',
+      toolCallId: 'plan-read-1',
+      title: 'Read packages/components/src/components/ai-gui/view.tsx',
+      kind: 'read',
+      status: 'completed',
+      locations: [{ path: 'packages/components/src/components/ai-gui/view.tsx' }],
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'plan-search-1',
+      title: 'rg ConversationColumn packages/components/src',
+      kind: 'search',
+      status: 'completed',
+    },
+    /* CODEX's plan exit: the plan goes in `rawInput` (never rendered) and the
+       readable plan is the separate `proposed_plan` below, which
+       `buildAssistantMessageRenderItems` moves up to sit directly above this
+       card. So this row contributes only the decision. Claude's shape — plan in
+       `content`, no `proposed_plan` — is covered by `DesktopPlanDenied`. NEVER
+       give one card both: it prints the plan twice, which no adapter does. */
+    {
+      type: 'tool_call',
+      toolCallId: 'plan-review:plan-1',
+      title: 'Implement this plan?',
+      kind: 'switch_mode',
+      status: 'completed',
+      rawInput: { plan: '# Plan' },
+      permissionRequest: {
+        requestId: 'plan-exit-permission-1',
+        options: [
+          { optionId: 'implement', name: 'Yes, implement this plan', kind: 'allow_once' },
+          {
+            optionId: 'revise',
+            name: 'No, and tell Codex what to do differently',
+            kind: 'reject_once',
+          },
+        ],
+        outcome: { outcome: 'selected', optionId: 'implement' },
+      },
+    },
+    /* Region 2 — the approved implementation. Last region, so it owns the
+       duration: "Worked for 28m 35s". */
+    { type: 'thought', text: '按计划先改 ToolCallCard 的外壳内边距。' },
+    {
+      type: 'tool_call',
+      toolCallId: 'plan-edit-1',
+      title: 'Edit packages/components/src/components/ai-gui/view.tsx',
+      kind: 'edit',
+      status: 'completed',
+      locations: [{ path: 'packages/components/src/components/ai-gui/view.tsx' }],
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'plan-edit-2',
+      title: 'Edit packages/components/src/stories/AssistantTurnAlignment.stories.tsx',
+      kind: 'edit',
+      status: 'completed',
+      locations: [{ path: 'packages/components/src/stories/AssistantTurnAlignment.stories.tsx' }],
+    },
+    {
+      type: 'image_group',
+      images: [
+        {
+          imageId: 'alignment-plan-shot-1',
+          mimeType: 'image/png',
+          fileName: 'plan-mode-turn.png',
+          sizeBytes: 40_000,
+          width: 320,
+          height: 200,
+        },
+      ],
+    },
+    {
+      type: 'text',
+      text: '计划卡、权限卡、附件和正文都落在同一条左轨上,任何外壳自带的水平内边距都会在这条参考线上暴露出来。',
+    },
+    {
+      type: 'file',
+      fileId: 'alignment-plan-file-1',
+      fileName: 'plan-mode-alignment.md',
+      mimeType: 'text/markdown',
+      sizeBytes: 2048,
+      sha256: 'f'.repeat(64),
+      textPreview: true,
+      uploadedAt: Date.parse('2026-08-11T09:38:30.000Z'),
+      transport: 'local',
+      machineId: 'machine-alignment-storybook',
+    },
+    {
+      type: 'proposed_plan',
+      turnId: 'alignment-plan-turn',
+      status: 'completed',
+      isLatest: true,
+      markdown: [
+        '## Goal',
+        'Keep every top-level row of a plan-mode turn on one left rail.',
+        '## Steps',
+        '1. No per-shell horizontal pad on the `switch_mode` card.',
+        '2. The resolved permission card sits on the rail, not on its own `ml-4`.',
+      ].join('\n'),
+    },
+  ],
+};
+
+const planModeItems: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: planModeTurn, turnIndex: 0 } as const,
+];
+
+/** Story-only guide at the column's content edge. */
+const RailGuide = () => (
+  <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
+    <div className={cn(CONVERSATION_CONTENT_WIDTH_CLASS, 'relative h-full')}>
+      {/* `left-4` == the `sm:px-4` gutter, i.e. where every top-level row starts. */}
+      <div className="absolute inset-y-0 left-4 w-px bg-status-danger/70" />
+    </div>
+  </div>
+);
+
+/**
+ * The other two outcomes of the same card. A settled permission is one line —
+ * check + what was chosen, or a cross when it was denied — and a WITHDRAWN
+ * request (interrupted turn) renders nothing at all, not an empty card.
+ */
+const planExitOutcomeTurn = (
+  id: string,
+  outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' }
+): SessionHistoryParsed => ({
+  id,
+  role: 'assistant',
+  timestamp: '2026-08-11T09:10:00.000Z',
+  read: true,
+  finished: true,
+  endedAt: Date.parse('2026-08-11T09:10:20.000Z'),
+  items: [
+    {
+      type: 'tool_call',
+      toolCallId: 'read-1',
+      title: 'Read view.tsx',
+      kind: 'read',
+      status: 'completed',
+    },
+    {
+      type: 'tool_call',
+      toolCallId: `${id}-plan-exit`,
+      title: 'Ready to code?',
+      kind: 'switch_mode',
+      status:
+        outcome.outcome === 'selected' && outcome.optionId === 'reject' ? 'failed' : 'completed',
+      // Claude retains the plan input when rejection replaces the tool content.
+      rawInput: {
+        plan: '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+      },
+      content: [
+        {
+          type: 'content',
+          content: {
+            type: 'text',
+            text:
+              outcome.outcome === 'selected' && outcome.optionId === 'reject'
+                ? "The user doesn't want to proceed with this tool use."
+                : '**Plan**\n\n1. Drop the per-shell horizontal pads.\n2. Re-measure against the rail guide.',
+          },
+        },
+      ],
+      permissionRequest: {
+        requestId: `${id}-permission`,
+        options: [
+          { optionId: 'approve', name: 'Yes, implement the plan', kind: 'allow_once' },
+          { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
+        ],
+        outcome,
+      },
+    },
+    { type: 'text', text: 'Recorded the decision above.' },
+  ],
+});
+
+const outcomeStory = (message: SessionHistoryParsed, height = 'h-[320px]'): Story => ({
+  args: {
+    sessionId,
+    items: [{ type: 'message', sessionId, message, turnIndex: 0 } as const],
+    renderMessageRow,
+  },
+  globals: { theme: 'dark' },
+  render: () => (
+    <WithRuntime>
+      <div className={cn('relative w-full bg-background', height)}>
+        <SessionChatStreamView
+          items={[{ type: 'message', sessionId, message, turnIndex: 0 } as const]}
+          sessionId={sessionId}
+          renderMessageRow={renderMessageRow}
+          lastAssistantMessageId={message.id}
+          lastCompletedAssistantMessageId={message.id}
+        />
+        <RailGuide />
+      </div>
+    </WithRuntime>
+  ),
+});
+
+/**
+ * The moment the plan matters most: the approval is unanswered, so the plan
+ * opens IN FULL and the pending permission card keeps all its options. Compare
+ * with `DesktopPlanModeTurn`, where the same plan is clamped because the
+ * decision is already made.
+ */
+const planAwaitingDecisionTurn: SessionHistoryParsed = {
+  id: 'alignment-plan-pending',
+  role: 'assistant',
+  timestamp: '2026-08-11T09:10:00.000Z',
+  read: true,
+  finished: false,
+  items: [
+    {
+      type: 'tool_call',
+      toolCallId: 'pending-read-1',
+      title: 'Read packages/components/src/components/ai-gui/view.tsx',
+      kind: 'read',
+      status: 'completed',
+    },
+    {
+      type: 'proposed_plan',
+      turnId: 'alignment-pending-turn',
+      status: 'completed',
+      isLatest: true,
+      markdown: [
+        '## Goal',
+        'Keep every top-level row of a plan-mode turn on one left rail.',
+        '## Steps',
+        '1. No per-shell horizontal pad on the `switch_mode` card.',
+        '2. The resolved permission card sits on the rail.',
+        '3. Attachments sort below the plan.',
+        '4. One icon tone for the whole turn.',
+      ].join('\n'),
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'plan-review:pending',
+      title: 'Implement this plan?',
+      kind: 'switch_mode',
+      status: 'pending',
+      rawInput: { plan: '# Plan' },
+      permissionRequest: {
+        requestId: 'pending-permission',
+        options: [
+          { optionId: 'implement', name: 'Yes, implement this plan', kind: 'allow_once' },
+          {
+            optionId: 'revise',
+            name: 'No, and tell Codex what to do differently',
+            kind: 'reject_once',
+          },
+        ],
+      },
+    },
+  ],
+};
+
+/**
+ * ADAPTER PARITY. The bundled agents put the plan in different places
+ * (`plan-surface.ts`), and the turn must not show it: Claude and Kimi carry it
+ * in the card's `content`, Codex in `rawInput` plus a separate `proposed_plan`
+ * row. All three render the same panel here. If one of these starts looking
+ * different, an adapter grew a carrier `resolvePlanExitMarkdown` does not know.
+ */
+const PARITY_PLAN = [
+  '## Goal',
+  'Render the same plan panel whichever adapter produced it.',
+  '## Steps',
+  '1. Resolve the carrier in `plan-surface.ts`.',
+  '2. Feed every carrier into one `PlanPanel`.',
+].join('\n');
+
+const parityTurn = (
+  id: string,
+  label: string,
+  planExit: Record<string, unknown>,
+  extraItems: MessageContent[] = []
+): SessionHistoryParsed =>
+  ({
+    id,
+    role: 'assistant',
+    timestamp: '2026-08-11T09:10:00.000Z',
+    read: true,
+    finished: true,
+    endedAt: Date.parse('2026-08-11T09:10:30.000Z'),
+    items: [
+      { type: 'text', text: label },
+      ...extraItems,
+      {
+        type: 'tool_call',
+        toolCallId: `${id}-exit`,
+        kind: 'switch_mode',
+        status: 'completed',
+        permissionRequest: {
+          requestId: `${id}-permission`,
+          options: [
+            { optionId: 'approve', name: 'Yes, implement this plan', kind: 'allow_once' },
+            { optionId: 'reject', name: 'No, keep planning', kind: 'reject_once' },
+          ],
+          outcome: { outcome: 'selected', optionId: 'approve' },
+        },
+        ...planExit,
+      },
+    ],
+  }) as unknown as SessionHistoryParsed;
+
+const parityTurns: SessionHistoryParsed[] = [
+  // Claude: `ExitPlanMode` puts the plan in a `content` text block.
+  parityTurn('parity-claude', 'Claude — plan in the card `content`', {
+    title: 'Ready to code?',
+    content: [{ type: 'content', content: { type: 'text', text: PARITY_PLAN } }],
+  }),
+  // Kimi: same carrier, with the `Plan saved to:` prefix its adapter composes.
+  parityTurn('parity-kimi', 'Kimi — same carrier, plus its trailing action summary', {
+    title: 'ExitPlanMode',
+    content: [
+      {
+        type: 'content',
+        content: { type: 'text', text: `Plan saved to: /tmp/plan.md\n\n${PARITY_PLAN}` },
+      },
+      // `buildPermissionToolCallUpdate` always appends this after the plan; it
+      // must not end up inside the plan panel.
+      { type: 'content', content: { type: 'text', text: 'Requesting approval to exit plan mode' } },
+    ],
+  }),
+  // Codex: `rawInput` plus a separate `proposed_plan` row, which wins.
+  parityTurn(
+    'parity-codex',
+    'Codex — `rawInput` plus a separate plan row',
+    { title: 'Implement this plan?', rawInput: { plan: PARITY_PLAN } },
+    [
+      {
+        type: 'proposed_plan',
+        turnId: 'parity-codex-turn',
+        markdown: PARITY_PLAN,
+        status: 'completed',
+        isLatest: true,
+      } as MessageContent,
+    ]
+  ),
+];
+
+export const DesktopPlanAdapterParity: Story = {
+  args: {
+    sessionId,
+    items: parityTurns.map(
+      (message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const
+    ),
+    renderMessageRow,
+  },
+  globals: { theme: 'dark' },
+  render: () => (
+    <WithRuntime>
+      <div className="relative h-[1100px] w-full bg-background">
+        <SessionChatStreamView
+          items={parityTurns.map(
+            (message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const
+          )}
+          sessionId={sessionId}
+          renderMessageRow={renderMessageRow}
+        />
+        <RailGuide />
+      </div>
+    </WithRuntime>
+  ),
+};
+
+export const DesktopPlanAwaitingDecision: Story = outcomeStory(
+  planAwaitingDecisionTurn,
+  'h-[760px]'
+);
+
+export const DesktopPlanDenied: Story = outcomeStory(
+  planExitOutcomeTurn('alignment-plan-denied', { outcome: 'selected', optionId: 'reject' })
+);
+
+export const DesktopPlanWithdrawn: Story = outcomeStory(
+  planExitOutcomeTurn('alignment-plan-cancelled', { outcome: 'cancelled' })
+);
+
+/**
+ * COMMAND STEPS — the expanded activity group's verb contract.
+ *
+ * Command tool calls title themselves with the raw command, so the step gets
+ * its verb from the renderer: "Running" while the call is in flight (the verb
+ * shimmers, like every other step's), "Ran" once it lands. Searches and reads
+ * keep the verbs their own titles already carry. Click the group header to
+ * expand the list the screenshot below describes.
+ */
+const commandStepsTurn: SessionHistoryParsed = {
+  id: 'alignment-command-steps',
+  role: 'assistant',
+  timestamp: new Date(Date.now() - 47_000).toISOString(),
+  read: true,
+  finished: false,
+  items: [
+    {
+      type: 'text',
+      text: 'dev 服务器起不来,先看启动脚本,再确认依赖解析和 vite 配置。',
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-sed',
+      title: "sed -n '1,240p' apps/electron/scripts/dev-local.mjs",
+      kind: 'execute',
+      status: 'completed',
+      content: [
+        {
+          type: 'terminal_command',
+          command: '/bin/bash',
+          args: ['-lc', "sed -n '1,240p' apps/electron/scripts/dev-local.mjs"],
+          cwd: '/repo',
+        },
+      ],
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-git',
+      title: 'git status --short',
+      kind: 'execute',
+      status: 'completed',
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-search',
+      title: "Search for 'buildWith|transformAsync|unplugin'",
+      kind: 'search',
+      status: 'completed',
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-read',
+      title: 'Read packages/components/src/components/ai-gui/view.tsx',
+      kind: 'read',
+      status: 'completed',
+      locations: [{ path: 'packages/components/src/components/ai-gui/view.tsx' }],
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-pnpm',
+      title: 'pnpm --dir apps/electron exec electron-vite dev --mode oss',
+      kind: 'execute',
+      status: 'in_progress',
+    },
+  ],
+};
+
+export const DesktopCommandSteps: Story = {
+  args: {
+    sessionId,
+    items: [{ type: 'message', sessionId, message: commandStepsTurn, turnIndex: 0 } as const],
+    renderMessageRow,
+  },
+  globals: { theme: 'dark' },
+  render: () => (
+    <WithRuntime>
+      <div className="relative h-[380px] w-full bg-background">
+        <SessionChatStreamView
+          items={[{ type: 'message', sessionId, message: commandStepsTurn, turnIndex: 0 } as const]}
+          sessionId={sessionId}
+          renderMessageRow={renderMessageRow}
+          lastAssistantMessageId={commandStepsTurn.id}
+          agentActivityLabel="Working"
+        />
+      </div>
+    </WithRuntime>
+  ),
+};
+
+export const DesktopPlanModeTurn: Story = {
+  args: { sessionId, items: planModeItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <WithRuntime>
+      <div className="relative h-[900px] w-full bg-background">
+        <SessionChatStreamView
+          items={planModeItems}
+          sessionId={sessionId}
+          renderMessageRow={renderMessageRow}
+          lastAssistantMessageId={planModeTurn.id}
+          lastCompletedAssistantMessageId={planModeTurn.id}
+        />
+        <RailGuide />
+      </div>
+    </WithRuntime>
+  ),
+};
+
+const dshStore = createStore();
+dshStore.set(runtimeAtom, stubRuntime as never);
+dshStore.set(sessionMetaCacheAtom, {
+  [getSessionRoomId(sessionId)]: { cliType: 'builtin', agentType: 'deepseek' } as SessionMeta,
+});
+const dshMessage: SessionHistoryParsed = {
+  id: 'dsh-independent-prose',
+  role: 'assistant',
+  read: true,
+  timestamp: '2026-10-22T08:00:00.000Z',
+  finished: true,
+  items: [
+    { type: 'thought', text: '先检查输入边界，再执行测试。' },
+    {
+      type: 'tool_call',
+      toolCallId: 'dsh-command',
+      kind: 'execute',
+      status: 'completed',
+      title: 'pnpm test',
+      content: [{ type: 'content', content: { type: 'text', text: 'Synthetic command output' } }],
+    },
+    { type: 'thought', text: '命令完成，先核对输出。' },
+    { type: 'text', text: '测试已经返回，继续核对结果。' },
+    { type: 'thought', text: '命令完成后，这段思考仍然独立可读。' },
+    { type: 'text', text: '检查完成。' },
+  ],
+};
+const dshItems: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: dshMessage, turnIndex: 0 },
+];
+
+/** Completed DSH work folds together; expanded prose retains answer typography. */
+export const DeepSeekIndependentProse: Story = {
+  play: async ({ canvasElement }) => {
+    const workedButton = () =>
+      canvasElement.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    await waitFor(async () => {
+      await expect(workedButton()).not.toBeNull();
+      await expect(canvasElement.textContent).toContain('检查完成。');
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).not.toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(
+        canvasElement.querySelectorAll('button[data-conversation-disclosure="group"]').length
+      ).toBe(3);
+    });
+    await userEvent.click(
+      canvasElement.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')[1]!
+    );
+    await waitFor(async () => {
+      const paragraphs = Array.from(canvasElement.querySelectorAll('p'));
+      const thought = paragraphs.find(
+        (node) => node.textContent === '先检查输入边界，再执行测试。'
+      );
+      const answer = paragraphs.find((node) => node.textContent === '检查完成。');
+      await expect(thought).toBeDefined();
+      await expect(answer).toBeDefined();
+      const thoughtStyle = getComputedStyle(thought!);
+      const answerStyle = getComputedStyle(answer!);
+      for (const property of ['font-family', 'font-size', 'font-weight', 'line-height']) {
+        await expect(thoughtStyle.getPropertyValue(property)).toBe(
+          answerStyle.getPropertyValue(property)
+        );
+      }
+      await expect(thoughtStyle.color).not.toBe(answerStyle.color);
+      await expect(
+        Math.abs(thought!.getBoundingClientRect().left - answer!.getBoundingClientRect().left)
+      ).toBeLessThan(1);
+      await expect(canvasElement.textContent).toContain('命令完成，先核对输出。');
+      await expect(canvasElement.textContent).not.toContain('Synthetic command output');
+      await expect(canvasElement.textContent).toContain('测试已经返回，继续核对结果。');
+    });
+    await userEvent.click(workedButton());
+    await waitFor(async () => {
+      await expect(canvasElement.textContent).not.toContain('先检查输入边界，再执行测试。');
+      await expect(canvasElement.textContent).toContain('检查完成。');
+    });
+  },
+  args: { sessionId, items: dshItems, renderMessageRow },
+  render: () => (
+    <Provider store={dshStore}>
+      <ConversationRhythmScene items={dshItems} />
+    </Provider>
+  ),
+};
+
+/** A streaming DSH turn with the same rail guide as the plan examples. */
+export const DeepSeekThinking: Story = {
+  args: { sessionId, items: dshItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => {
+    const message: SessionHistoryParsed = {
+      ...dshMessage,
+      id: 'dsh-thinking-preview',
+      finished: false,
+      items: [
+        {
+          type: 'thought',
+          text: [
+            'First, trace the message from the provider to the conversation view. The output can contain **structured Markdown**, not just plain paragraphs.',
+            '',
+            '| Content | Expected behavior | Check |',
+            '| --- | --- | --- |',
+            '| Paragraph | Align with the thought label | Inspect the left edge |',
+            '| Table | Keep columns readable | Scroll if the viewport is narrow |',
+            '| Code block | Preserve syntax highlighting | Compare both edges with the answer |',
+            '',
+            'Next, verify the rendering path:',
+            '',
+            '1. Find the `thought` item and preserve its original text.',
+            '2. Render Markdown while the response is streaming.',
+            '3. Check the finished state and search highlighting.',
+            '',
+            '```ts',
+            'const visibleItems = message.items.filter((item) =>',
+            "  item.type === 'thought' || item.type === 'text'",
+            ');',
+            '',
+            'for (const item of visibleItems) {',
+            '  renderMarkdown(item.text);',
+            '}',
+            '```',
+            '',
+            '> Keep the original order when a tool call arrives between thoughts.',
+          ].join('\n'),
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'preview-read',
+          title: 'Read conversation layout',
+          kind: 'read',
+          status: 'completed',
+        },
+        { type: 'text', text: 'The layout uses a shared left edge for the conversation.' },
+        {
+          type: 'thought',
+          text: 'The tool returned successfully. Check the remaining cases:\n\n- A long line should wrap without moving the whole conversation.\n- Inline `code` and **emphasis** should remain readable.\n- A [link](https://example.com) should keep its usual treatment.',
+        },
+        { type: 'text', text: 'The updated display is ready for review.\n\n```sh\npnpm test\n```' },
+      ],
+    };
+    return (
+      <Provider store={dshStore}>
+        <div className="relative h-[900px] w-full bg-background">
+          <SessionChatStreamView
+            sessionId={sessionId}
+            items={[{ type: 'message', sessionId, message, turnIndex: 0 }]}
+            lastAssistantMessageId={message.id}
+            renderMessageRow={renderMessageRow}
+          />
+          <RailGuide />
+        </div>
+      </Provider>
+    );
+  },
+};
+
+/** Alternating thoughts and commands share one disclosure while work streams. */
+export const AdjacentThoughtsAndTools: Story = {
+  args: { sessionId, items: [], renderMessageRow },
+  globals: { theme: 'dark', locale: 'zh_CN' },
+  render: () => {
+    const message: SessionHistoryParsed = {
+      ...dshMessage,
+      id: 'adjacent-thoughts-and-tools',
+      finished: false,
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'adjacent-inspect',
+          kind: 'execute',
+          status: 'completed',
+          title: 'git diff --stat',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'adjacent-find',
+          kind: 'execute',
+          status: 'completed',
+          title: 'rg activity_group view.tsx',
+        },
+        { type: 'thought', text: '找到分组逻辑了，接下来检查展开状态。' },
+        {
+          type: 'tool_call',
+          toolCallId: 'adjacent-test',
+          kind: 'execute',
+          status: 'completed',
+          title: 'pnpm test chat-virtual-rows-identity',
+        },
+        { type: 'thought', text: '相邻思考和工具已合并，继续确认内容顺序。' },
+        {
+          type: 'tool_call',
+          toolCallId: 'adjacent-check',
+          kind: 'execute',
+          status: 'completed',
+          title: 'git diff --check',
+        },
+        { type: 'thought', text: '检查通过，展开后仍按原来的顺序显示。' },
+      ],
+    };
+    return (
+      <Provider store={dshStore}>
+        <div {...stylex.props(rhythmStyles.frame)}>
+          <SessionChatStreamView
+            sessionId={sessionId}
+            items={[{ type: 'message', sessionId, message, turnIndex: 0 }]}
+            lastAssistantMessageId={message.id}
+            renderMessageRow={renderMessageRow}
+          />
+        </div>
+      </Provider>
+    );
+  },
 };

@@ -3,14 +3,13 @@ import { atom } from 'jotai';
 /** Group key for the "Chats" (no-repo) sidebar group. */
 export const ONLY_CHATS_KEY = '__only_chats__';
 
-/**
- * Focus layer for keyboard navigation.
- *
- * L1 = sidebar list selection (arrow keys move highlight)
- * L2 = session browse (arrow keys scroll chat)
- * L3 = input mode (typing in composer)
- */
-export type FocusLayer = 'L1' | 'L2' | 'L3';
+export const WORKSPACE_FOCUS_SCOPES = {
+  chatLanding: 'chat-landing',
+  sessionConversation: 'session-conversation',
+  sessionSidePanel: 'session-side-panel',
+  sidebar: 'workspace-sidebar',
+  content: 'workspace-content',
+} as const;
 
 /**
  * Represents a navigable item in the sidebar flat list.
@@ -18,19 +17,9 @@ export type FocusLayer = 'L1' | 'L2' | 'L3';
 export type SidebarNavItem =
   | { kind: 'group-header'; groupKey: string; collapsed: boolean }
   | { kind: 'session'; sessionId: string; groupKey: string }
-  | { kind: 'show-more'; groupKey: string; expanded: boolean }
+  | { kind: 'show-more'; groupKey: string }
+  | { kind: 'show-less'; groupKey: string }
   | { kind: 'local-project'; machineId: string; localProjectId: string; collapsed: boolean };
-
-/**
- * Current keyboard focus layer. Default is L3 (input mode).
- */
-export const focusLayerAtom = atom<FocusLayer>('L3');
-
-/**
- * Index of the highlighted item in the sidebar flat list.
- * -1 means no item is highlighted.
- */
-export const sidebarHighlightIndexAtom = atom<number>(-1);
 
 /**
  * Flat list of navigable sidebar items, written by the sidebar and read by
@@ -56,11 +45,13 @@ export type SidebarNavCallbacks = {
 export const sidebarNavCallbacksAtom = atom<SidebarNavCallbacks | null>(null);
 
 /**
- * Per-group "show full list" toggle state, shared between SessionList and
- * keyboard navigation so the flat nav list stays in sync with the
+ * Per-group incremental reveal state: extra top-level rows a capped sidebar
+ * list shows beyond its preview. "Show more" adds one page; "Show less" resets
+ * to the preview. Absent keys render the preview only. Shared between the
+ * lists and keyboard navigation so the flat nav list stays in sync with the
  * rendered sidebar.
  */
-export const sidebarShowFullListAtom = atom<Record<string, boolean>>({});
+export const sidebarRevealedRowsAtom = atom<Record<string, number>>({});
 
 /**
  * Opener session ids whose MCP-opened independent Sessions are collapsed in the

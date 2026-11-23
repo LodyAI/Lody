@@ -4,10 +4,12 @@ import { ChevronLeft } from 'lucide-react';
 import { useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { ScrollArea } from '@/ui';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import type { MobileWorkspaceTab, MobileWorkspaceTabBarLabels } from './mobile-workspace-tabbar';
 import { MobileDrillPageLayout, useMobileDrillAnimatedBack } from './mobile-drill-page-layout';
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
+import { MobileSettingsFoldContext } from './mobile-settings-fold-context';
 
 export type MobileSettingsLayoutProps = {
   title: string;
@@ -76,7 +78,7 @@ export function MobileSettingsLayout({
             <div ref={setDetailHeaderTarget} className="col-span-2 min-w-0" />
           ) : (
             <>
-              <h1 className="truncate text-center text-[0.98rem] font-semibold tracking-tight">
+              <h1 className="truncate text-center text-[0.98rem] font-normal tracking-tight">
                 {title}
               </h1>
               <div aria-hidden="true" />
@@ -105,6 +107,17 @@ function SettingsInnerContent({
 }) {
   const location = useLocation();
   const pathname = location.pathname;
+  const [main, setMain] = useState<HTMLElement | null>(null);
+  const isCategoryList = /\/settings\/?$/.test(pathname);
+  const isUsagePage = /\/settings\/ai-usage\/?$/.test(pathname);
+  const isWorkspacePage = /\/settings\/workspace\/?$/.test(pathname);
+  const isFoldDetailPage = /\/settings\/(account|appearance|preferences|about|github)\/?$/.test(
+    pathname
+  );
+  const fold = useHorizontalFoldLayout(
+    main,
+    isCategoryList || isUsagePage || isWorkspacePage || isFoldDetailPage || isAgentConfigTab
+  );
 
   /* Suppress the inner drill on the very first commit: the outer
      `MobileDrillPageLayout` already animates the whole settings
@@ -125,12 +138,20 @@ function SettingsInnerContent({
   );
 
   return (
-    <main className="min-h-0 min-w-0 flex-1">
-      {isAgentConfigTab ? (
-        <div className="h-full min-h-0">{body}</div>
-      ) : (
-        <ScrollArea className="h-full">{body}</ScrollArea>
-      )}
+    <main ref={setMain} className="min-h-0 min-w-0 flex-1">
+      <MobileSettingsFoldContext.Provider value={fold}>
+        {isAgentConfigTab ? (
+          <div className={cn('h-full min-h-0', fold && 'overflow-hidden')}>{body}</div>
+        ) : (
+          <ScrollArea
+            className="h-full"
+            viewportClassName={fold ? '[&>div]:h-full' : undefined}
+            viewportStyle={fold ? { overflowY: 'hidden' } : undefined}
+          >
+            {body}
+          </ScrollArea>
+        )}
+      </MobileSettingsFoldContext.Provider>
     </main>
   );
 }
@@ -144,14 +165,14 @@ function SettingsInnerContent({
  *     outer drill is already animating; skip the inner one.
  *   - `hasMounted === true` and `consumeMobileBackNavigation()`
  *     returns true → this mount is the destination of a back-nav
- *     (the back chip / edge swipe set the flag), so skip the
- *     forward-direction slide-in.
+ *     (the back chip / edge swipe set the flag): play the parallax
+ *     reveal under the sliding-off page instead of a forward push.
  *   - Otherwise → forward navigation, run the drill.
  */
 function SettingsInnerBody({ children, hasMounted }: { children: ReactNode; hasMounted: boolean }) {
-  const [skipDrill] = useState(() => {
-    if (!hasMounted) return true;
-    return consumeMobileBackNavigation();
+  const [entrance] = useState<'none' | 'reveal' | 'push'>(() => {
+    if (!hasMounted) return 'none';
+    return consumeMobileBackNavigation() ? 'reveal' : 'push';
   });
 
   return (
@@ -165,7 +186,8 @@ function SettingsInnerBody({ children, hasMounted }: { children: ReactNode; hasM
            Pages with their own scroll regions (agent-config) opt out
            by overriding inside their own component. */
         'pb-safe-4',
-        !skipDrill && 'mobile-drill-in'
+        entrance === 'push' && 'mobile-drill-in',
+        entrance === 'reveal' && 'mobile-drill-reveal'
       )}
     >
       {children}

@@ -6,22 +6,37 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
+    "./seat-invite-preview": {
+      "types": "./src/seat-invite-preview.ts",
+      "import": "./src/seat-invite-preview.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./e2ee-epoch-staging": {
+      "types": "./src/e2ee-epoch-staging.ts",
+      "import": "./src/e2ee-epoch-staging.ts"
+    },
+    "./e2ee-recovery-vault": {
+      "types": "./src/e2ee-recovery-vault.ts",
+      "import": "./src/e2ee-recovery-vault.ts"
     }
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "format": "prettier --write src/**/*.ts",
-    "format:check": "prettier --check src/**/*.ts"
+    "format": "oxfmt 'src/**/*.ts'",
+    "format:check": "oxfmt --check 'src/**/*.ts'"
   },
   "dependencies": {
+    "@lody/e2ee-core": "workspace:*",
     "@lody/shared": "workspace:*",
     "acp-extension-core": "workspace:*",
-    "convex": "catalog:"
+    "convex": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
+    "oxfmt": "^0.65.0",
     "@types/node": "catalog:",
     "typescript": "catalog:"
   }

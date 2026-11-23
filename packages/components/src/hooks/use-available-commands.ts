@@ -1,15 +1,18 @@
 import { useMemo } from 'react';
 import {
   getAcpCapabilityCacheKey,
-  isAcpCapabilityCacheEntryCurrentForRuntimeOverrides,
+  getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   type AcpCommandSummary,
 } from '@lody/shared';
 import type { AcpSelectorTarget } from '@/components/shared/acp-selector-options';
 
 /**
- * Hook that extracts available slash commands from the ACP capabilities cache.
+ * Use the session's actual list, including [], once reported; otherwise show the probe preview.
  */
-export function useAvailableCommands(target?: AcpSelectorTarget): AcpCommandSummary[] {
+export function useAvailableCommands(
+  target?: AcpSelectorTarget,
+  sessionCommands?: AcpCommandSummary[]
+): AcpCommandSummary[] {
   const configId = target?.configId;
   const cliType = target?.cliType;
   const agentType = target?.agentType;
@@ -17,12 +20,15 @@ export function useAvailableCommands(target?: AcpSelectorTarget): AcpCommandSumm
   const machine = target?.machine;
 
   return useMemo(() => {
+    if (sessionCommands !== undefined) return sessionCommands;
     if (!configId || !cliType || !agentType) return [];
     const key = getAcpCapabilityCacheKey(configId);
-    const capability = machine?.acpCapabilities?.[key];
-    if (!isAcpCapabilityCacheEntryCurrentForRuntimeOverrides(capability, runtimeOverrides)) {
-      return [];
-    }
-    return capability.availableCommands ?? [];
-  }, [configId, cliType, agentType, runtimeOverrides, machine]);
+    const capability = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+      machine?.acpCapabilities?.[key],
+      runtimeOverrides
+    );
+    return capability?.cliType === cliType && capability.agentType === agentType
+      ? (capability.availableCommands ?? [])
+      : [];
+  }, [configId, cliType, agentType, runtimeOverrides, machine, sessionCommands]);
 }

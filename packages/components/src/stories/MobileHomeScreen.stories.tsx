@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useState } from 'react';
 import { fn } from 'storybook/test';
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 
 import type { FilterPill } from '@/components/mobile/mobile-filter-pill-bar';
 import { StuckConnectionBanner } from '@/components/stuck-connection-banner';
@@ -198,6 +201,7 @@ function MobileHomeScreenStory({
   initialTab = 'chat',
   showInboxTab = false,
   inboxItems: inboxItemsProp = [],
+  workspaceSwitcher = false,
 }: {
   theme: 'ios' | 'material';
   connectionUiState?: 'online' | 'loading' | 'offline' | 'reconnecting';
@@ -219,6 +223,7 @@ function MobileHomeScreenStory({
   initialTab?: MobileHomeTab;
   showInboxTab?: boolean;
   inboxItems?: MobileInboxItem[];
+  workspaceSwitcher?: boolean;
 }) {
   const [selectedTab, setSelectedTab] = useState<MobileHomeTab>(initialTab);
   const [selectedProjectsSubTab, setSelectedProjectsSubTab] =
@@ -270,35 +275,82 @@ function MobileHomeScreenStory({
             localTab: '本地',
             githubTab: 'GitHub',
             chatTab: 'Chat',
+            schedulesTab: '定时任务',
+            newSchedule: '新建定时任务',
             settingsTab: '设置',
             newChatAriaLabel: '新建对话',
             recentProjectsHeading: '最近常用',
             allLocalProjectsHeading: '全部项目',
             allGitHubReposHeading: '全部仓库',
-            allChatsHeading: '全部对话',
             emptyLocalProjects: '当前 workspace 没有已加入的本地项目',
             emptyGitHubProjects: '当前 workspace 没有已授权的 GitHub 仓库',
             emptyChats: '当前 workspace 还没有对话',
             emptySearch: '没有匹配的结果',
             onboarding: {
-              title: 'Lody runs on your computer',
-              description: 'Download the desktop app to get started.',
-              downloadButton: 'Download Lody',
+              title: 'Connect a machine to start',
+              description: 'Agents run on a computer you own — this app is mission control.',
+              commandHeading: 'One command — on any machine',
+              command: 'npx lody daemon start',
+              commandHint:
+                'Run it on a server, VM, or your own computer (Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x)). It signs the machine into your account — a machine without a browser prints a link you can open on this phone.',
+              copyCommandLabel: 'Copy command',
+              shareCommandLabel: 'Send to computer',
+              desktopHeading: 'Or on your computer',
+              desktopHint:
+                'Install the desktop app and sign in — it starts the agent runtime automatically.',
+              shareDownloadLabel: 'Send to computer',
+              copyDownloadLabel: 'Copy download link',
+              nextStepsHeading: 'Once a machine is online',
+              nextStepMachine: 'It shows up in this workspace automatically.',
+              nextStepProject: 'Add a project folder on it from Projects → +.',
+              nextStepAgent: 'Pick an agent in Settings → Agents, then send your first task.',
             },
           }}
           onWorkspaceSelect={fn()}
+          onWorkspaceMenuOpen={workspaceSwitcher ? fn() : undefined}
           onTabSelect={setSelectedTab}
           onLocalProjectSelect={fn()}
           onGitHubRepositorySelect={fn()}
           onChatSelect={fn()}
           onSettingsOpen={fn()}
           onNewChat={fn()}
-          onDownloadClient={fn()}
+          onboardingDownloadUrl="https://lody.ai/download"
         />
       </div>
     </div>
   );
 }
+
+/* Schedules tab mounts the real workspace, which asks the platform for
+   machine rows. The local platform has no cloud capabilities, so those
+   queries skip instead of throwing. */
+const schedulesStoryPlatform = createLocalPlatformProvider({
+  session: createStaticStore({ status: 'authenticated', user: { id: 'owner', name: 'Lody' } }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [{ id: 'lody', name: 'Lody', slug: null, role: 'owner' }],
+    activeWorkspaceId: 'lody',
+  }),
+});
+
+/** Phone schedules tab: home header and bottom dock, not the standalone list. */
+export const SchedulesTab: Story = {
+  args: {
+    workspace: { id: 'lody', name: 'Lody' },
+    machines,
+    selectedTab: 'schedules',
+    localProjects,
+    githubRepositories,
+    chats,
+  },
+  render: () => (
+    <ForceMobileLayoutProvider force>
+      <PlatformContext.Provider value={schedulesStoryPlatform}>
+        <MobileHomeScreenStory theme="ios" initialTab="schedules" workspaceSwitcher />
+      </PlatformContext.Provider>
+    </ForceMobileLayoutProvider>
+  ),
+};
 
 export const IOS: Story = {
   args: {
@@ -310,6 +362,32 @@ export const IOS: Story = {
     chats,
   },
   render: () => <MobileHomeScreenStory theme="ios" />,
+};
+
+/** A synthetic, non-square logo makes both the cover fit and circular crop visible. */
+export const WorkspaceLogo: Story = {
+  args: {
+    ...IOS.args,
+    theme: 'ios',
+    workspace: {
+      id: 'lody',
+      name: 'Lody',
+      avatarUrl: `data:image/svg+xml,${encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100"><rect width="160" height="100" fill="#f7c56c"/><path d="M0 0h40v100H0zM120 0h40v100h-40z" fill="#df7356"/><circle cx="80" cy="50" r="24" fill="#315e73"/></svg>'
+      )}`,
+    },
+    onWorkspaceMenuOpen: fn(),
+  },
+  render: (args) => (
+    <div style={{ width: 393, height: 852 }}>
+      <MobileHomeScreen {...args} />
+    </div>
+  ),
+};
+
+export const WorkspaceLogoWithoutSwitcher: Story = {
+  ...WorkspaceLogo,
+  args: { ...WorkspaceLogo.args, onWorkspaceMenuOpen: undefined },
 };
 
 export const Material: Story = {
@@ -442,11 +520,11 @@ export const StuckConnectionHint: Story = {
       <StuckConnectionBanner
         labels={{
           title: '连接时间较长',
-          description: '通常是本地缓存异常导致',
-          clearCache: '清空缓存',
+          description: '可能是登录、网络或本地数据异常',
+          recover: '恢复选项',
           dismissAriaLabel: '关闭',
         }}
-        onClearCache={fn()}
+        onRecover={fn()}
         onDismiss={fn()}
       />
     </>

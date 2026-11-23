@@ -1,7 +1,10 @@
+import { fileURLToPath } from 'node:url';
+import { withFileIsolation } from '../../scripts/vitest-file-isolation.mjs';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  test: {
+  test: withFileIsolation(fileURLToPath(new URL('.', import.meta.url)), {
+    server: { deps: { inline: ['@effect/vitest'] } },
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     // `local-project.test.ts` spawns real `git` subprocesses and each
@@ -10,5 +13,5 @@ export default defineConfig({
     // is generous enough to absorb the load-induced variance while still
     // surfacing real hangs.
     testTimeout: 30_000,
-  },
+  }),
 });

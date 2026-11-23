@@ -1,0 +1,551 @@
+import { onProductWindowMessage } from './ipc/product-window-ipc-service'
+import { closeDesktopE2eeAccount, resumeDesktopE2eeAccount } from './services/e2ee-account-runtime'
+import { makeApplicationRuntime } from '@lody/shared/node/application-runtime'
+import {
+  LoginShellCacheLive,
+  loginShellEnvLayer,
+  recoverLoginShellCacheShutdown
+} from '@lody/shared/node/login-shell-env'
+import { squashProcessFailure } from '@lody/shared/node/process'
+import { Layer } from 'effect'
+import { bindUserShellEnvCacheLegacy } from './services/shell-env'
+import { handleWindowContentReady } from './window-target'
+import { installPowerStateBroadcast } from './power-state-broadcast'
+import { installLocalFileResourceProtocol } from './services/local-file-resource-protocol'
+import { app, BrowserWindow, dialog, safeStorage } from 'electron'
+import { electronApp, optimizer } from '@electron-toolkit/utils'
+import dns from 'node:dns'
+import { writeHeapSnapshot } from 'node:v8'
+import icon from '../../resources/icon.png?asset'
+import macIcon from '../../build/icon-mac.padded.png?asset'
+import aquaIcon from '../../resources/app-icons/aqua.png?asset'
+import { createElectronAppIconService } from './services/app-icon-service'
+import { handleDeepLink, initializeAuthDeepLinks } from './deep-link'
+import type { DesktopLaunchEvent } from './services/desktop-launch-buffer'
+import { registerLodyProtocolClient } from './protocol-client'
+import { getDesktopCallbackProtocol } from './desktop-channel'
+import { registerIpcServices } from './ipc/register-services'
+import {
+  openMainWindow,
+  openOrFocusMainWindow,
+  reloadMainWindowForDevbar,
+  setMainWindowOnboardingReloadTarget,
+  setMainWindowProductReloadTarget
+} from './window'
+import {
+  getMainWindow,
+  isAppQuitting,
+  productWindows,
+  setAppQuitting,
+  setWindowsTrayAvailable
+} from './window-state'
+import { CliService } from './services/cli-service'
+import { createElectronStorageGuard } from './services/storage-guard-electron'
+import { observeCliStorageWriteFailures } from './services/storage-guard-cli'
+import type { DesktopExecutionHost } from './services/desktop-execution-host'
+import {
+  createDesktopQuitBarrier,
+  drainMainProcessQuitResources,
+  finishUnconfirmedDesktopQuit,
+  recordUnconfirmedDesktopQuit,
+  reportPreviousUnconfirmedDesktopQuit,
+  waitForQuitRecovery
+} from './services/desktop-shutdown'
+import { cancelRequestedRelaunch, relaunchIfRequested } from './relaunch-intent'
+import { applyPendingDesktopLocalReset } from './services/local-reset-service'
+import { TerminalRelay } from './services/terminal-relay'
+import { LoroDataPlaneRelay } from './services/loro-data-plane-relay'
+import { NotificationService } from './services/notification-service'
+import { AuthService } from './services/auth-service'
+import { authClient } from './auth'
+import { AppUpdaterService } from './services/app-updater-service'
+import { shouldConstructUpdaterEnabled } from './services/app-updater-sparkle-policy'
+import { startDevbarDevframeService, stopDevbarDevframeService } from './services/devbar/service'
+import { GlobalShortcutsService } from './services/global-shortcuts-service'
+import { WindowsTrayService } from './services/windows-tray-service'
+import {
+  WindowBadgeService,
+  bindWindowBadgeToBrowserWindows
+} from './services/window-badge-service'
+import { setupApplicationMenu, translateAppText } from './menu'
+import { isRendererReloadShortcut } from './reload-shortcut'
+import { requestRendererReload } from './renderer-recovery'
+import { closeProductWindowsForQuit } from './renderer-unload'
+import {
+  flushElectronMainErrorReporting,
+  installElectronMainErrorReporting
+} from './posthog-error-reporting'
+import { IPC_PUSH_CHANNELS, IPC_SEND_CHANNELS } from '@lody/shared/electron-ipc'
+import { PublicBrowserService } from './services/public-browser-service'
+import { desktopInstallationProfile, isLocalPlatform } from './platform'
+import { mainPlatformKind } from './platform'
+import { getLocalDaemonRunFilePath, readLocalDaemonRunFile } from '@lody/shared/node/local-ipc'
+import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
+import {
+  getInitialDesktopPath,
+  markOnboardingCompleted,
+  resetOnboardingCompleted
+} from './onboarding-state'
+import { handlePreparedWindowState, handleWindowWarmReady } from './window-warm-service'
+import { extractDeepLinkFromArgv } from './deep-link-url'
+import { shouldHideMainWindowOnAutoLaunch } from './auto-launch-policy'
+import {
+  getAutoLaunchInvocationStatus,
+  getHideWindowOnAutoLaunchEnabled
+} from './auto-launch-settings'
+
+const LODY_PROTOCOL = desktopInstallationProfile.desktopProtocol
+const PRODUCT_NAME = desktopInstallationProfile.desktopProductName
+const DESKTOP_FILE_NAME = `${desktopInstallationProfile.desktopAppId}.desktop`
+const DEEP_LINK_DEBUG_PREFIX = '[electron-auth-debug]'
+const IS_E2E = !app.isPackaged && process.env.LODY_E2E === '1'
+declare const __LODY_DESKTOP_BUILD_JSON__: string | null
+
+type E2EBootDiagnostic = { stage: string; error?: string }
+type E2EGlobal = typeof globalThis & {
+  __LODY_E2E_BOOT_DIAGNOSTIC__?: E2EBootDiagnostic
+  __LODY_E2E_WRITE_HEAP_SNAPSHOT__?: (path: string) => string
+}
+
+export function startApplication(executionHost?: DesktopExecutionHost): void {
+  const createShellRuntime = () =>
+    makeApplicationRuntime(LoginShellCacheLive.pipe(Layer.provide(loginShellEnvLayer())), {
+      recover: recoverLoginShellCacheShutdown,
+      project: squashProcessFailure
+    })
+  let applicationRuntime = createShellRuntime()
+  bindUserShellEnvCacheLegacy(applicationRuntime)
+  if (typeof __LODY_DESKTOP_BUILD_JSON__ === 'string') {
+    console.info('[desktop-build]', __LODY_DESKTOP_BUILD_JSON__)
+  }
+  if (IS_E2E) {
+    ;(globalThis as E2EGlobal).__LODY_E2E_WRITE_HEAP_SNAPSHOT__ = (path) => writeHeapSnapshot(path)
+  }
+
+  function recordE2EBootDiagnostic(stage: string, error?: unknown): void {
+    if (!IS_E2E) return
+    const diagnostic: E2EBootDiagnostic = { stage }
+    if (error !== undefined) {
+      diagnostic.error = error instanceof Error ? (error.stack ?? error.message) : String(error)
+    }
+    const e2eGlobal = globalThis as E2EGlobal
+    e2eGlobal.__LODY_E2E_BOOT_DIAGNOSTIC__ = diagnostic
+  }
+
+  function logDeepLinkDebug(message: string, meta?: Record<string, unknown>): void {
+    if (meta) {
+      console.info(DEEP_LINK_DEBUG_PREFIX, message, meta)
+      return
+    }
+    console.info(DEEP_LINK_DEBUG_PREFIX, message)
+  }
+
+  if (!isLocalPlatform()) {
+    installElectronMainErrorReporting()
+  }
+
+  try {
+    dns.setDefaultResultOrder('ipv4first')
+  } catch (error) {
+    console.warn('[Auth] Failed to set DNS result order to ipv4first', error)
+  }
+
+  if (!isLocalPlatform()) {
+    authClient.setupMain({
+      csp: false,
+      bridges: true,
+      scheme: false,
+      // Pin the target to the main window so Better Auth events always reach the
+      // visible renderer that owns login state and CLI restart.
+      getWindow: () => getMainWindow()
+    })
+    logDeepLinkDebug('authClient.setupMain initialized', {
+      csp: false,
+      bridges: true,
+      scheme: false
+    })
+  }
+
+  function createGlobalShortcutsService(iconPath: string): GlobalShortcutsService {
+    return new GlobalShortcutsService(
+      [
+        {
+          id: 'app.focus',
+          handler: () => {
+            openOrFocusMainWindow({ icon: iconPath })
+          }
+        }
+      ],
+      {
+        onTriggered: (payload) => {
+          const target =
+            getMainWindow() ?? BrowserWindow.getAllWindows().find((window) => !window.isDestroyed())
+          target?.webContents.send(IPC_PUSH_CHANNELS.appGlobalShortcut, payload)
+        }
+      }
+    )
+  }
+
+  registerLodyProtocolClient({
+    protocol: getDesktopCallbackProtocol(desktopInstallationProfile),
+    productName: PRODUCT_NAME,
+    desktopFileName: DESKTOP_FILE_NAME,
+    iconPath: icon,
+    log: logDeepLinkDebug
+  })
+
+  recordE2EBootDiagnostic('waiting-for-app-ready')
+  const appReady = app.whenReady().then(async () => {
+    installLocalFileResourceProtocol()
+    // Before any window can reopen the local stores: a reset armed with
+    // `lody app reset-cache` is the way back for a user whose renderer is wedged,
+    // so it has to run while nothing holds that storage open.
+    await applyPendingDesktopLocalReset()
+    await startDevbarDevframeService()
+    recordE2EBootDiagnostic('initializing-services')
+    installPowerStateBroadcast()
+    if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
+    const appIconService = createElectronAppIconService(macIcon, aquaIcon)
+    if (process.platform === 'darwin' && app.isPackaged) {
+      void Promise.resolve()
+        .then(() => appIconService.getState())
+        .catch((error: unknown) => {
+          console.warn('[Electron] Failed to restore app icon', error)
+        })
+    }
+
+    logDeepLinkDebug('app.whenReady resolved', {
+      isDefaultProtocolClient: app.isDefaultProtocolClient(LODY_PROTOCOL),
+      protocol: LODY_PROTOCOL
+    })
+    const authService = new AuthService(
+      (state) => {
+        // Only redacted lifecycle data goes to diagnostics, never the session.
+        console.info('[Auth] login transition', {
+          attemptId: state.attemptId,
+          phase: state.phase,
+          error: state.error
+        })
+        for (const window of productWindows) {
+          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+            try {
+              window.webContents.send('auth.loginState', state)
+            } catch {
+              // A closing renderer cannot roll back the authoritative result.
+              console.warn('[Auth] Login state delivery failed; snapshot remains available')
+            }
+          }
+        }
+      },
+      () => {
+        void cliService.restartAutoStart().catch(() => console.warn('[Auth] CLI restart failed'))
+      }
+    )
+    const storageGuard = createElectronStorageGuard()
+    const observeStorageFailure = observeCliStorageWriteFailures(storageGuard)
+    const cliService = new CliService({
+      executionHost,
+      onRuntimeState: (runtime) => {
+        void observeStorageFailure(runtime).catch((error) =>
+          console.warn('[Storage guard] Could not observe CLI storage failure', error)
+        )
+      },
+      resolveBootstrapSession: async () => {
+        return await authService.getBootstrapSession()
+      }
+    })
+    if (!isLocalPlatform()) {
+      initializeAuthDeepLinks(async (token) => {
+        await authService.login.complete(token)
+      })
+    }
+    let terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
+    let loroDataPlaneRelay = new LoroDataPlaneRelay(() => {
+      const run = readLocalDaemonRunFile(getLocalDaemonRunFilePath(mainPlatformKind))
+      if (!run.token || !run.dataPlaneSocketPath) throw new Error('local_ipc_credentials_missing')
+      return { socketPath: run.dataPlaneSocketPath, token: run.token }
+    })
+    loroDataPlaneRelay.setEnabled(cliService.getCliAutoStartEnabled())
+
+    const appUpdaterService = new AppUpdaterService({
+      enabled: shouldConstructUpdaterEnabled({
+        localPlatform: isLocalPlatform(),
+        forceEnable: process.env.LODY_ELECTRON_ENABLE_UPDATER === '1'
+      })
+    })
+    const notificationService = new NotificationService(() => getMainWindow())
+    const windowsTrayService = new WindowsTrayService({
+      iconPath: icon,
+      productName: PRODUCT_NAME,
+      openOrFocusMainWindow: () => openOrFocusMainWindow({ icon })
+    })
+    const windowBadgeService = new WindowBadgeService()
+    const publicBrowserService = new PublicBrowserService(() => getMainWindow())
+    bindWindowBadgeToBrowserWindows(windowBadgeService)
+
+    if (!isLocalPlatform() && !safeStorage.isEncryptionAvailable()) {
+      const isLinux = process.platform === 'linux'
+      const hint = isLinux
+        ? 'gnome-libsecret was already configured automatically. ' +
+          'Ensure gnome-keyring-daemon is running, or try launching with ' +
+          '--password-store=kwallet5 or --password-store=basic'
+        : 'Check that your OS keychain is configured and accessible.'
+      console.warn(
+        `[Auth] safeStorage encryption is not available. Authentication may fail. ${hint}`
+      )
+    }
+
+    electronApp.setAppUserModelId(desktopInstallationProfile.desktopAppId)
+    const globalShortcutsService = createGlobalShortcutsService(icon)
+    globalShortcutsService.registerAll()
+    app.once('will-quit', () => globalShortcutsService.dispose())
+    app.on('browser-window-created', (_, window) => {
+      // Keep Electron's native Cmd/Ctrl zoom shortcuts available. The toolkit
+      // blocks Minus and shifted Equal by default when zoom is not enabled.
+      optimizer.watchWindowShortcuts(window, { zoom: true })
+      // electron-toolkit deliberately blocks the production reload shortcut.
+      // Restore the normal desktop-app behavior requested by the user while
+      // routing both reload shortcuts through the renderer reload path.
+      window.webContents.on('before-input-event', (event, input) => {
+        if (isRendererReloadShortcut(input, process.platform)) {
+          event.preventDefault()
+          requestRendererReload(window, { ignoreCache: input.shift })
+        }
+      })
+    })
+
+    const completeOnboarding = (window: BrowserWindow): void => {
+      markOnboardingCompleted()
+      setMainWindowProductReloadTarget(window)
+    }
+    const restartOnboarding = (window: BrowserWindow): void => {
+      resetOnboardingCompleted()
+      setMainWindowOnboardingReloadTarget(window)
+      requestRendererReload(window)
+    }
+    const ipcDeps = {
+      appIconService,
+      cliService,
+      appUpdaterService,
+      authService,
+      notificationService,
+      terminalRelay,
+      publicBrowserService,
+      storageGuard,
+      loroDataPlaneRelay,
+      windowBadgeService,
+      globalShortcutsService,
+      getMainWindow,
+      completeOnboarding,
+      restartOnboarding,
+      reloadMainWindowForDevbar
+    }
+    registerIpcServices(ipcDeps)
+
+    setupApplicationMenu({
+      appUpdaterService,
+      getMainWindow,
+      openOrFocusMainWindow: () => openOrFocusMainWindow({ icon })
+    })
+    const initialPath = getInitialDesktopPath()
+    const loginItemSettings = getAutoLaunchInvocationStatus()
+    const hideWindowOnAutoLaunch = shouldHideMainWindowOnAutoLaunch({
+      preferenceEnabled: getHideWindowOnAutoLaunchEnabled(),
+      launchedAtLogin: loginItemSettings.launchedAtLogin,
+      initialPath,
+      hasInitialDeepLink: Boolean(extractDeepLinkFromArgv(process.argv))
+    })
+    recordE2EBootDiagnostic('opening-main-window')
+    openMainWindow({ icon, initialPath, hideWindowOnAutoLaunch })
+    recordE2EBootDiagnostic('main-window-opened')
+    // Startup notification delivery never gates rendering or a subsequent quit.
+    void reportPreviousUnconfirmedDesktopQuit(app.getPath('userData'), () => {
+      if (isAppQuitting()) return Promise.resolve({ shown: false })
+      return notificationService.showQuitWarning({
+        title: translateAppText('desktop.quitUnconfirmed.title'),
+        body: translateAppText('desktop.quitUnconfirmed.detail')
+      })
+    }).catch(() => console.warn('[Electron] Previous quit warning remains pending'))
+    // Warmup is off by default and only enabled from Developer mode. When it is
+    // enabled, session-windows primes the spare after an auxiliary request so
+    // ordinary single-window sessions never pay an idle renderer cost.
+    onProductWindowMessage(IPC_SEND_CHANNELS.appWindowReady, (event) =>
+      handleWindowWarmReady(event.sender.id)
+    )
+    onProductWindowMessage(IPC_SEND_CHANNELS.appPreparedWindowState, (event, state) => {
+      if (event.senderFrame === event.sender.mainFrame)
+        handlePreparedWindowState(event.sender.id, state)
+    })
+    onProductWindowMessage(IPC_SEND_CHANNELS.appWindowContentReady, (event, target) => {
+      if (event.senderFrame === event.sender.mainFrame)
+        handleWindowContentReady(event.sender.id, target)
+    })
+    console.info('[Electron] Initial desktop surface selected', {
+      initialPath,
+      hideWindowOnAutoLaunch
+    })
+    setWindowsTrayAvailable(windowsTrayService.start())
+    cliService.autoStart(getMainWindow()?.webContents ?? undefined)
+    appUpdaterService.start()
+
+    let quitRecoveryOnly = false
+    app.on('activate', () => {
+      if (quitRecoveryOnly) return
+      const windows = BrowserWindow.getAllWindows()
+      if (windows.length === 0) {
+        openMainWindow({ icon })
+        return
+      }
+      openOrFocusMainWindow({ icon })
+    })
+
+    const unconfirmedQuitResources = new Set<string>()
+    const beforeQuit = createDesktopQuitBarrier({
+      // Every renderer approves unload (closing its window) before anything is
+      // torn down, so a Stay answer leaves relays and the CLI running.
+      prepare: () => closeProductWindowsForQuit(() => unconfirmedQuitResources.add('renderer')),
+      stop: async () => {
+        setAppQuitting(true)
+        setWindowsTrayAvailable(false)
+        windowsTrayService.stop()
+        windowBadgeService.reset()
+        terminalRelay.destroy()
+        loroDataPlaneRelay.destroy()
+        appUpdaterService.stop()
+        publicBrowserService.destroyAll()
+        const [cliResult, shellResult] = await Promise.allSettled([
+          cliService.shutdownForQuit(),
+          applicationRuntime.closeLegacy(),
+          drainMainProcessQuitResources(
+            [
+              { name: 'e2ee', close: () => closeDesktopE2eeAccount({ quit: true }) },
+              { name: 'error-reporting', close: flushElectronMainErrorReporting },
+              { name: 'devbar', close: stopDevbarDevframeService }
+            ],
+            15_000,
+            (resource, state) => console.info('[Electron] Quit resource', { resource, state })
+          ).then((unconfirmed) => {
+            for (const resource of unconfirmed) unconfirmedQuitResources.add(resource)
+          })
+        ])
+        const failures = [cliResult, shellResult].flatMap((result) =>
+          result.status === 'rejected' ? [result.reason] : []
+        )
+        if (failures.length > 0)
+          throw new AggregateError(failures, 'Desktop resource cleanup failed')
+      },
+      quit: () => {
+        if (unconfirmedQuitResources.size === 0) {
+          app.quit()
+          return
+        }
+        // Only main-owned work may end at process termination. The CLI and shell
+        // process owners above must first confirm release; never orphan them.
+        cancelRequestedRelaunch()
+        // A second menu/dock Quit while marker I/O is pending must not replace
+        // the nonzero terminal exit.
+        app.on('before-quit', (event) => event.preventDefault())
+        console.error('[Electron] Quit persistence unconfirmed', {
+          resources: [...unconfirmedQuitResources]
+        })
+        // No shutdown UI, including update installation and OS shutdown/logout.
+        void finishUnconfirmedDesktopQuit({
+          record: () => recordUnconfirmedDesktopQuit(app.getPath('userData')),
+          exit: (code) => app.exit(code)
+        })
+      },
+      recover: async () => {
+        // One bounded owner retry before rebuilding services, never a second live CLI.
+        const retried = await waitForQuitRecovery(
+          Promise.allSettled([
+            cliService.shutdownForQuit(),
+            applicationRuntime.closeLegacy(),
+            closeDesktopE2eeAccount({ quit: true })
+          ])
+        )
+        if (!retried || retried.some((result) => result.status === 'rejected')) return false
+        if (!applicationRuntime.isReleased()) return false
+        applicationRuntime = createShellRuntime()
+        bindUserShellEnvCacheLegacy(applicationRuntime)
+        terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
+        loroDataPlaneRelay = new LoroDataPlaneRelay(() => {
+          const run = readLocalDaemonRunFile(getLocalDaemonRunFilePath(mainPlatformKind))
+          if (!run.token || !run.dataPlaneSocketPath)
+            throw new Error('local_ipc_credentials_missing')
+          return { socketPath: run.dataPlaneSocketPath, token: run.token }
+        })
+        loroDataPlaneRelay.setEnabled(cliService.getCliAutoStartEnabled())
+        ipcDeps.terminalRelay = terminalRelay
+        ipcDeps.loroDataPlaneRelay = loroDataPlaneRelay
+        quitRecoveryOnly = false
+        setAppQuitting(false)
+        setWindowsTrayAvailable(windowsTrayService.start())
+        appUpdaterService.start()
+        resumeDesktopE2eeAccount()
+        cliService.autoStart(undefined)
+        openOrFocusMainWindow({ icon })
+        return true
+      },
+      reportFailure: (error, recovered) => {
+        // A timeout does not prove exit. Keep ownership until quit succeeds.
+        console.error('[Electron] Quit blocked by owned resources', error)
+        if (recovered) return
+        quitRecoveryOnly = true
+        // Both actions re-enter the ownership barrier; neither force-exits a live owner.
+        dialog.showMessageBoxSync({
+          type: 'error',
+          title: PRODUCT_NAME,
+          message: translateAppText('Lody could not fully quit. Please restart Lody.'),
+          buttons: [translateAppText('desktop.unloadConfirm.quit'), translateAppText('Retry quit')],
+          defaultId: 1,
+          cancelId: 1
+        })
+        queueMicrotask(() => app.quit())
+      },
+      cancelled: () => {
+        unconfirmedQuitResources.clear()
+        resumeDesktopE2eeAccount()
+        cancelRequestedRelaunch()
+      }
+    })
+    app.on('will-quit', relaunchIfRequested)
+    app.on('before-quit', (event) => {
+      void beforeQuit(event)
+    })
+
+    process.on('exit', () => {
+      setWindowsTrayAvailable(false)
+      windowsTrayService.stop()
+      terminalRelay.destroy()
+      loroDataPlaneRelay.destroy()
+      cliService.killAllProcesses()
+      appUpdaterService.stop()
+      publicBrowserService.destroyAll()
+    })
+  })
+  void appReady.catch(async (error: unknown) => {
+    recordE2EBootDiagnostic('failed', error)
+    console.error('[Electron] Fatal error while creating the main window', error)
+    try {
+      await applicationRuntime.closeLegacy()
+    } catch (cleanupError) {
+      console.error('[Electron] Startup resource cleanup failed', cleanupError)
+    }
+    if (!IS_E2E) app.exit(1)
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
+    }
+  })
+}
+
+// The entry retains launch events while it acquires ownership and loads this module.
+export function handleDesktopLaunch(event: DesktopLaunchEvent): void {
+  if (event.url) handleDeepLink(event.url)
+  if (event.activate) {
+    const window = getMainWindow()
+    if (window && !window.isDestroyed()) openOrFocusMainWindow({ icon })
+  }
+}

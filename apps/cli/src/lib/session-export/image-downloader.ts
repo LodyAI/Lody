@@ -1,11 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import {
-  buildSessionImageApiUrl,
-  getSessionImageDownloadApiPath,
-} from '@lody/shared';
+import { buildSessionImageApiUrl, getSessionImageDownloadApiPath } from '@lody/shared';
+import { downloadEncryptedSessionImageBytes } from '../session-image-download';
+import type { SessionId, WorkspaceId } from '@lody/shared';
 import { LODY_SERVER_URL } from '@/utils/const';
-import type { ExportAttachmentRecord } from './types';
+import type { ExportAttachmentRecord, ExportAttachmentSource } from './types';
 import { ensurePathWithinBase } from './path-utils';
 import { formatErrorMessage } from '@/utils/format-error';
 
@@ -37,9 +36,7 @@ function resolveOutputPath(
   }
 
   const extension =
-    MIME_EXTENSION_MAP[attachment.mimeType] ||
-    path.extname(attachment.fileName ?? '').trim() ||
-    '';
+    MIME_EXTENSION_MAP[attachment.mimeType] || path.extname(attachment.fileName ?? '').trim() || '';
   const fileName = attachment.fileName?.trim()
     ? sanitizeFileStem(attachment.fileName)
     : `${sanitizeFileStem(attachment.imageId)}${extension}`;
@@ -56,7 +53,19 @@ export async function downloadSessionAttachment(args: {
   authToken: string;
   sessionDir: string;
   attachment: ExportAttachmentRecord;
+  source?: ExportAttachmentSource;
+  contentMode?: 'plaintext' | 'e2ee';
+  attachmentToken?: () => Promise<string>;
 }): Promise<{ attachment: ExportAttachmentRecord; warning: string | null }> {
+  if (
+    (args.contentMode === 'e2ee' && !args.source?.encryption) ||
+    (args.source?.encryption && !args.attachmentToken)
+  ) {
+    return {
+      attachment: { ...args.attachment, relativePath: null },
+      warning: 'Encrypted attachment unavailable: missing E2EE manifest or attachment credentials.',
+    };
+  }
   const serverUrl = LODY_SERVER_URL?.trim();
   if (!serverUrl) {
     return {
@@ -69,12 +78,37 @@ export async function downloadSessionAttachment(args: {
   }
 
   const { absolutePath, relativePath } = resolveOutputPath(args.sessionDir, args.attachment);
-  const downloadUrl = buildSessionImageApiUrl(
-    serverUrl,
-    getSessionImageDownloadApiPath(args.workspaceId, args.sessionId, args.attachment.imageId)
-  );
 
   try {
+    if (args.source?.encryption) {
+      const downloaded = await downloadEncryptedSessionImageBytes({
+        workspaceId: args.workspaceId as WorkspaceId,
+        sessionId: (args.source?.storageSessionId ?? args.sessionId) as SessionId,
+        imageId: args.attachment.imageId,
+        encryption: args.source?.encryption,
+        attachmentToken: args.attachmentToken,
+        serverBaseUrl: serverUrl,
+      });
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      await fs.writeFile(absolutePath, downloaded.bytes);
+      return {
+        attachment: {
+          ...args.attachment,
+          relativePath,
+          mimeType: downloaded.mimeType,
+          sizeBytes: downloaded.sizeBytes,
+        },
+        warning: null,
+      };
+    }
+    const downloadUrl = buildSessionImageApiUrl(
+      serverUrl,
+      getSessionImageDownloadApiPath(
+        args.workspaceId,
+        args.source?.storageSessionId ?? args.sessionId,
+        args.attachment.imageId
+      )
+    );
     const response = await fetch(downloadUrl, {
       headers: {
         Authorization: `Bearer ${args.authToken}`,
@@ -109,7 +143,9 @@ export async function downloadSessionAttachment(args: {
         ...args.attachment,
         relativePath: null,
       },
-      warning: formatErrorMessage(error),
+      warning: args.source?.encryption
+        ? `Encrypted attachment unavailable: ${formatErrorMessage(error)}`
+        : formatErrorMessage(error),
     };
   }
 }

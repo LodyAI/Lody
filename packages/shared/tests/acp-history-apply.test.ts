@@ -3,12 +3,18 @@ import * as path from 'path';
 
 import { describe, expect, it } from 'vitest';
 
-import type { MessageContent } from '../src/ai';
+import type { MessageContent, SubagentTaskPayload } from '../src/ai';
+import { mergeSubagentTaskPayload } from '../src/acp/claude-subagent-task';
+import { parseCodexCollabAgentTasks } from '../src/acp/codex-collab-agent-task';
 import {
+  getDevinSubagentContextId,
+  parseDevinSubagentTaskMeta,
+} from '../src/acp/devin-subagent-task';
+
+import {
+  MAX_STORED_TERMINAL_COMMAND_BYTES,
   MAX_STORED_TERMINAL_OUTPUT_BYTES,
-  applyMessageContentsBatch,
   applyNotificationOnHistory,
-  truncateTerminalOutputForHistory,
 } from '../src/acp/history-apply';
 import {
   parseSessionNotification,
@@ -89,6 +95,173 @@ const ACP_NOTIFICATION_FIXTURES = [
 ] as const;
 
 describe('acp history apply', () => {
+  it('preserves phase boundaries across batches, tags, and legacy metadata', () => {
+    const chunk = (text: string, meta?: object) =>
+      makeNotification({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text },
+        ...(meta ? { _meta: meta } : {}),
+      });
+    const notifications = [
+      chunk('Checking ', { lody: { messagePhase: 'commentary' } }),
+      chunk('now', { lody: { messagePhase: 'commentary' } }),
+      chunk('<thinking>reason</thinking>\nDone', { codex: { phase: 'final_answer' } }),
+      chunk(' unphased'),
+      chunk(' invalid', { lody: { messagePhase: 'unknown' } }),
+    ];
+    for (const sizes of [[1], [5], [2, 3]]) {
+      expect(replayInChunks(notifications, sizes)[0]?.items).toEqual([
+        { type: 'text', text: 'Checking now', messagePhase: 'commentary' },
+        { type: 'thought', text: 'reason' },
+        { type: 'text', text: '\nDone', messagePhase: 'final_answer' },
+        { type: 'text', text: ' unphased invalid' },
+      ]);
+    }
+  });
+
+  it('replaces sparse ACP tool lists, preserves omitted fields, and clears explicit empty lists', () => {
+    const text = (value: string) => ({ type: 'content', content: { type: 'text', text: value } });
+    const updates = [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'sparse',
+        title: 'Lookup',
+        kind: 'other',
+        status: 'in_progress',
+        content: [text('old')],
+        locations: [{ path: '/old' }],
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'sparse',
+        content: [text('new')],
+        locations: [{ path: '/new' }],
+      },
+      { sessionUpdate: 'tool_call_update', toolCallId: 'sparse', status: 'completed' },
+    ].map(makeNotification);
+    for (const chunkSizes of [[1], [3]]) {
+      const history = replayInChunks(updates, chunkSizes);
+      expect(history[0]?.items).toEqual([
+        expect.objectContaining({
+          toolCallId: 'sparse',
+          title: 'Lookup',
+          kind: 'other',
+          status: 'completed',
+          content: [text('new')],
+          locations: [{ path: '/new' }],
+        }),
+      ]);
+      const cleared = applyNotificationOnHistory(history, [
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'sparse',
+          content: [],
+          locations: [],
+        }),
+      ]);
+      expect(cleared[0]?.items).toEqual([
+        expect.objectContaining({
+          title: 'Lookup',
+          kind: 'other',
+          status: 'completed',
+          content: [],
+          locations: [],
+        }),
+      ]);
+    }
+  });
+
+  it('uses the previous tool kind and Core name when sparse updates omit them', () => {
+    const history = replayInChunks(
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'read',
+          title: 'Read',
+          kind: 'read',
+          status: 'in_progress',
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'read',
+          content: [{ type: 'content', content: { type: 'text', text: 'private file body' } }],
+          rawOutput: 'private file body',
+          status: 'completed',
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'cron',
+          title: 'CronCreate',
+          kind: 'other',
+          status: 'in_progress',
+          _meta: { lody: { toolName: 'CronCreate' } },
+          rawInput: { cron: '* * * * *', prompt: 'synthetic reminder' },
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'cron',
+          status: 'completed',
+          rawOutput: { id: 'job' },
+        }),
+      ],
+      [1]
+    );
+    expect(JSON.stringify(history)).not.toContain('private file body');
+    expect(history[0]?.items).toEqual([
+      expect.objectContaining({ toolCallId: 'read', kind: 'read', status: 'completed' }),
+      expect.objectContaining({
+        toolCallId: 'cron',
+        toolName: 'CronCreate',
+        rawInput: { cron: '* * * * *', prompt: 'synthetic reminder' },
+        rawOutput: { id: 'job' },
+      }),
+    ]);
+  });
+
+  it('stores ACP markdown plans beside their mode-switch card without duplicating updates', () => {
+    const plan = (content: string) =>
+      makeNotification({
+        sessionUpdate: 'plan_update',
+        plan: { type: 'markdown', planId: '1:submit_plan', content },
+        _meta: { lody: { turnId: '0' } },
+      });
+    const history = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: '1:submit_plan',
+          title: 'ExitPlanMode',
+          kind: 'switch_mode',
+          status: 'in_progress',
+        }),
+        plan('# Draft'),
+        plan('# Final plan\n\n- Verify the adapter.'),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: '1:submit_plan',
+          status: 'completed',
+        }),
+      ]
+    );
+    expect(history).toHaveLength(1);
+    const items = history[0]!.items as unknown as MessageContent[];
+    expect(items.filter((item) => item.type === 'proposed_plan')).toEqual([
+      {
+        type: 'proposed_plan',
+        turnId: '1:submit_plan',
+        markdown: '# Final plan\n\n- Verify the adapter.',
+        status: 'delta',
+        isLatest: true,
+      },
+    ]);
+    expect(items.find((item) => item.type === 'tool_call')).toMatchObject({
+      toolCallId: '1:submit_plan',
+      kind: 'switch_mode',
+      status: 'completed',
+    });
+  });
+
   it('persists the provider turn id on the assistant entry', () => {
     const history = applyNotificationOnHistory(
       [],
@@ -121,17 +294,6 @@ describe('acp history apply', () => {
     ]);
   });
 
-  it('keeps a valid UTF-8 terminal tail within the shared byte budget', () => {
-    const input = `${'a'.repeat(900)}${'界'.repeat(100)}${'🙂'.repeat(100)}`;
-    const result = truncateTerminalOutputForHistory(input);
-
-    expect(result.didTruncate).toBe(true);
-    expect(new TextEncoder().encode(result.output).byteLength).toBeLessThanOrEqual(
-      MAX_STORED_TERMINAL_OUTPUT_BYTES
-    );
-    expect(result.output).toBe(input.slice(input.length - result.output.length));
-  });
-
   it('shares the terminal history budget across stdout and stderr', () => {
     const history = applyNotificationOnHistory(
       [],
@@ -158,6 +320,64 @@ describe('acp history apply', () => {
     expect(
       new TextEncoder().encode((outputs[0] as { output: string }).output).byteLength
     ).toBeLessThanOrEqual(MAX_STORED_TERMINAL_OUTPUT_BYTES);
+  });
+
+  it('stores at most 1 KiB of a command that inlines a base64 image', () => {
+    const base64 = 'iVBORw0KGgo'.repeat(40_000);
+    const storedTool = (rawInput: Record<string, unknown>, title?: string) => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          makeNotification({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'inline-image',
+            kind: 'execute',
+            status: 'completed',
+            title,
+            rawInput,
+          }),
+        ]
+      );
+      return ((history[0]?.items ?? []) as unknown as MessageContent[]).find(
+        (item) => item.type === 'tool_call'
+      ) as Extract<MessageContent, { type: 'tool_call' }>;
+    };
+    const commandOf = (rawInput: Record<string, unknown>) =>
+      storedTool(rawInput).content?.find((block) => block.type === 'terminal_command') as {
+        command: string;
+        args?: string[];
+        truncated?: boolean;
+      };
+    const storedBytes = (block: { command: string; args?: string[] }) =>
+      [block.command, ...(block.args ?? [])].reduce(
+        (sum, part) => sum + new TextEncoder().encode(part).byteLength,
+        0
+      );
+
+    const claude = commandOf({ command: `echo ${base64} | base64 -d > out.png` });
+    expect(claude.command.startsWith(`echo ${base64.slice(0, 100)}`)).toBe(true);
+    expect(claude.command.endsWith('…')).toBe(true);
+    expect(claude.truncated).toBe(true);
+    expect(storedBytes(claude)).toBeLessThanOrEqual(MAX_STORED_TERMINAL_COMMAND_BYTES);
+
+    // Codex puts the script in args: `bash -lc <script>` shares the same budget.
+    const codex = commandOf({ command: ['bash', '-lc', `echo ${base64}`, 'trailing'] });
+    expect(codex.command).toBe('bash');
+    expect(codex.args).toHaveLength(2);
+    expect(codex.args?.[0]).toBe('-lc');
+    expect(codex.args?.[1]?.endsWith('…')).toBe(true);
+    expect(codex.truncated).toBe(true);
+    expect(commandOf({ command: 'ls -la' }).truncated).toBeUndefined();
+    expect(storedBytes(codex)).toBeLessThanOrEqual(MAX_STORED_TERMINAL_COMMAND_BYTES);
+
+    // Claude's adapter titles a Bash call with the command itself.
+    const command = `echo ${base64} | base64 -d > out.png`;
+    const title = storedTool({ command }, command).title ?? '';
+    expect(title.startsWith('echo iVBORw0KGgo')).toBe(true);
+    expect(title.endsWith('…')).toBe(true);
+    expect(new TextEncoder().encode(title).byteLength).toBeLessThanOrEqual(
+      MAX_STORED_TERMINAL_COMMAND_BYTES
+    );
   });
 
   it('preserves context compaction and retry activity markers across tool updates', () => {
@@ -264,63 +484,6 @@ describe('acp history apply', () => {
     expect((items[1] as { text?: string }).text).toBe('\nAnswer.');
   });
 
-  it('parses raw Codex <proposed_plan> tags into proposed plan content', () => {
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'agent_message_chunk',
-        content: {
-          type: 'text',
-          text: 'Before\n<proposed_plan>\n- Inspect parser\n- Reuse plan UI\n</proposed_plan>\nAfter',
-        },
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications, undefined, {
-      createId: () => 'turn-1',
-    });
-    expect(history).toHaveLength(1);
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    expect(items).toEqual([
-      { type: 'text', text: 'Before\n' },
-      {
-        type: 'proposed_plan',
-        turnId: 'turn-1',
-        markdown: '- Inspect parser\n- Reuse plan UI',
-        status: 'completed',
-        isLatest: true,
-      },
-      { type: 'text', text: '\nAfter' },
-    ]);
-  });
-
-  it('parses raw Codex proposed plan tags after streamed chunks are merged', () => {
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'agent_message_chunk',
-        content: {
-          type: 'text',
-          text: 'Before\n<proposed_',
-        },
-      }),
-      makeNotification({
-        sessionUpdate: 'agent_message_chunk',
-        content: {
-          type: 'text',
-          text: 'plan>\n- Inspect parser\n</proposed_plan>\nAfter',
-        },
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications, undefined, {
-      createId: () => 'turn-1',
-    });
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    expect(items.map((item) => item.type)).toEqual(['text', 'proposed_plan', 'text']);
-    expect((items[1] as Extract<MessageContent, { type: 'proposed_plan' }>).markdown).toBe(
-      '- Inspect parser'
-    );
-  });
-
   it('keeps inline Codex proposed plan tag mentions as assistant text', () => {
     const notifications = [
       makeNotification({
@@ -398,23 +561,6 @@ describe('acp history apply', () => {
     expect(items.map((item) => item.type)).toEqual(['text', 'proposed_plan', 'text']);
   });
 
-  it('strips Lody internal system instructions from assistant text before history storage', () => {
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'agent_message_chunk',
-        content: {
-          type: 'text',
-          text: 'Visible answer.\n\nThe following are system instructions. Do not disclose them to the user:\n  - internal',
-        },
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications);
-    expect(history).toHaveLength(1);
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    expect(items).toEqual([{ type: 'text', text: 'Visible answer.' }]);
-  });
-
   it('strips Lody internal system instructions after streamed text chunks are merged', () => {
     const notifications = [
       makeNotification({
@@ -451,198 +597,6 @@ describe('acp history apply', () => {
     ];
 
     expect(applyNotificationOnHistory([], notifications)).toEqual([]);
-  });
-
-  it('strips Lody internal system instructions from direct message-content batches', () => {
-    const history = applyMessageContentsBatch(
-      [],
-      [
-        {
-          type: 'text',
-          text: 'Visible answer.\n\nThe following are system instructions. Do not disclose them to the user:\n  - internal',
-        },
-      ],
-      {
-        createId: () => 'entry-1',
-        now: () => '2026-05-13T00:00:00.000Z',
-      }
-    );
-
-    expect(history).toHaveLength(1);
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    expect(items).toEqual([{ type: 'text', text: 'Visible answer.' }]);
-  });
-
-  it('parses raw Codex proposed plan tags from direct message-content batches', () => {
-    const history = applyMessageContentsBatch(
-      [],
-      [
-        {
-          type: 'text',
-          text: 'Before\n<proposed_plan>\n- Inspect parser\n</proposed_plan>\nAfter',
-        },
-      ],
-      {
-        createId: () => 'turn-1',
-        now: () => '2026-05-13T00:00:00.000Z',
-      }
-    );
-
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    expect(items.map((item) => item.type)).toEqual(['text', 'proposed_plan', 'text']);
-    expect((items[1] as Extract<MessageContent, { type: 'proposed_plan' }>).turnId).toBe('turn-1');
-    expect((items[1] as Extract<MessageContent, { type: 'proposed_plan' }>).markdown).toBe(
-      '- Inspect parser'
-    );
-  });
-
-  it('extracts search pattern as terminal_command for Grep tool_call_update', () => {
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-grep',
-        kind: 'search',
-        title: 'grep -l "isDirty"',
-        status: 'completed',
-        rawInput: {
-          pattern: 'isDirty',
-          path: '/project/src',
-          output_mode: 'files_with_matches',
-        },
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications);
-    expect(history).toHaveLength(1);
-
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    const toolCall = items.find((i) => i.type === 'tool_call') as
-      | Extract<MessageContent, { type: 'tool_call' }>
-      | undefined;
-    expect(toolCall).toBeDefined();
-    expect(toolCall?.kind).toBe('search');
-
-    const content = toolCall?.content ?? [];
-    const terminalCommand = content.find((b) => b.type === 'terminal_command') as
-      | { type: 'terminal_command'; command?: string; args?: string[] }
-      | undefined;
-    expect(terminalCommand).toBeDefined();
-    expect(terminalCommand?.command).toBe('isDirty');
-    expect(terminalCommand?.args).toEqual(['/project/src']);
-  });
-
-  it('extracts search pattern as terminal_command for Glob tool_call_update', () => {
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-glob',
-        kind: 'search',
-        title: 'Find `src/**/*.ts`',
-        status: 'completed',
-        rawInput: {
-          pattern: 'src/**/*.ts',
-        },
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications);
-    expect(history).toHaveLength(1);
-
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    const toolCall = items.find((i) => i.type === 'tool_call') as
-      | Extract<MessageContent, { type: 'tool_call' }>
-      | undefined;
-    expect(toolCall).toBeDefined();
-
-    const content = toolCall?.content ?? [];
-    const terminalCommand = content.find((b) => b.type === 'terminal_command') as
-      | { type: 'terminal_command'; command?: string; args?: string[] }
-      | undefined;
-    expect(terminalCommand).toBeDefined();
-    expect(terminalCommand?.command).toBe('src/**/*.ts');
-    expect(terminalCommand?.args).toEqual([]);
-  });
-
-  it('does not generate terminal_command for search with empty pattern', () => {
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-empty',
-        kind: 'search',
-        status: 'completed',
-        rawInput: {
-          pattern: '',
-        },
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications);
-    expect(history).toHaveLength(1);
-
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    const toolCall = items.find((i) => i.type === 'tool_call') as
-      | Extract<MessageContent, { type: 'tool_call' }>
-      | undefined;
-    expect(toolCall).toBeDefined();
-
-    const content = toolCall?.content ?? [];
-    const terminalCommand = content.find((b) => b.type === 'terminal_command');
-    expect(terminalCommand).toBeUndefined();
-  });
-
-  it('extracts search pattern when kind is omitted on tool_call_update (heuristic)', () => {
-    // Simulates a tool_call_update that carries rawInput but omits kind
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-no-kind',
-        // kind is intentionally omitted
-        status: 'completed',
-        rawInput: {
-          pattern: 'handleError',
-          path: '/project',
-        },
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications);
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    const toolCall = items.find((i) => i.type === 'tool_call') as
-      | Extract<MessageContent, { type: 'tool_call' }>
-      | undefined;
-    expect(toolCall).toBeDefined();
-
-    const content = toolCall?.content ?? [];
-    const terminalCommand = content.find((b) => b.type === 'terminal_command') as
-      | { type: 'terminal_command'; command?: string; args?: string[] }
-      | undefined;
-    expect(terminalCommand).toBeDefined();
-    expect(terminalCommand?.command).toBe('handleError');
-    expect(terminalCommand?.args).toEqual(['/project']);
-  });
-
-  it('does not persist string rawOutput as terminal_output for edit tools', () => {
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-edit',
-        kind: 'edit',
-        status: 'completed',
-        rawOutput: 'The file was edited successfully.',
-        _meta: { claudeCode: { toolName: 'Edit' } },
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications);
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    const toolCall = items.find((i) => i.type === 'tool_call') as
-      | Extract<MessageContent, { type: 'tool_call' }>
-      | undefined;
-    expect(toolCall).toBeDefined();
-
-    const content = toolCall?.content ?? [];
-    const terminalOutput = content.find((b) => b.type === 'terminal_output');
-    expect(terminalOutput).toBeUndefined();
   });
 
   it('persists rawInput/rawOutput and pins title=toolName for scheduling tools', () => {
@@ -689,174 +643,118 @@ describe('acp history apply', () => {
     expect(toolCall?.schedulingTimeZone?.length).toBeGreaterThan(0);
   });
 
-  it('recognizes a scheduling tool from _meta.lody.toolName', () => {
-    // Agents that describe their calls (Kimi titles a cron call "Scheduling
-    // cron …") publish the canonical name neutrally rather than under the
-    // Claude Code namespace; the panel must derive from that just the same.
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'tool_call',
-        toolCallId: 'cron-tc-2',
-        title: 'Scheduling cron */5 * * * *',
-        status: 'in_progress',
-        rawInput: { cron: '*/5 * * * *', recurring: true, prompt: 'check CI' },
-        _meta: { lody: { toolName: 'CronCreate' } },
-      }),
-      makeNotification({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'cron-tc-2',
-        status: 'completed',
-      }),
-    ];
+  it('stamps a scheduling tool call with its first-persisted time and never moves it', () => {
+    // The scheduled-tasks deriver anchors a one-shot cron at this stamp; the turn entry's
+    // endedAt cannot serve (merged cron-fire turns push it past the fire minute).
+    const t0 = '2026-09-03T03:18:43.000+08:00';
+    const t1 = '2026-09-04T03:39:15.000+08:00';
+    const readCall = (history: ReturnType<typeof applyNotificationOnHistory>) =>
+      ((history[0]?.items ?? []) as MessageContent[]).find((i) => i.type === 'tool_call') as
+        | Extract<MessageContent, { type: 'tool_call' }>
+        | undefined;
 
-    const history = applyNotificationOnHistory([], notifications);
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    const toolCall = items.find((i) => i.type === 'tool_call') as
-      | Extract<MessageContent, { type: 'tool_call' }>
-      | undefined;
-    expect(toolCall?.title).toBe('Scheduling cron */5 * * * *');
-    expect(toolCall?.toolName).toBe('CronCreate');
-    expect(toolCall?.status).toBe('completed');
-    expect(toolCall?.rawInput).toEqual({
-      cron: '*/5 * * * *',
-      recurring: true,
-      prompt: 'check CI',
-    });
-    expect(toolCall?.schedulingTimeZone?.length).toBeGreaterThan(0);
-  });
-
-  it('still strips rawInput/rawOutput for non-scheduling tools', () => {
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'read-tc-1',
-        kind: 'read',
-        status: 'completed',
-        rawInput: { file_path: '/etc/secret' },
-        rawOutput: { contents: 'top secret' },
-        _meta: { claudeCode: { toolName: 'Read' } },
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications);
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    const toolCall = items.find((i) => i.type === 'tool_call') as
-      | Extract<MessageContent, { type: 'tool_call' }>
-      | undefined;
-    expect(toolCall).toBeDefined();
-    expect(toolCall?.rawInput).toBeUndefined();
-    expect(toolCall?.rawOutput).toBeUndefined();
-  });
-
-  it('extracts terminal_command from Kimi-style JSON content blocks via rawInput injection', () => {
-    // Kimi streams the shell command as JSON in content blocks, not in rawInput.
-    // The enrichment step (enrichTerminalDataFromContent) injects rawInput on the
-    // completed update, but this test verifies the shared history-apply layer handles
-    // the injected rawInput correctly.
-    const notifications = [
-      makeNotification({
-        sessionUpdate: 'tool_call',
-        toolCallId: 'kimi-tc-1',
-        title: 'Shell',
-        status: 'in_progress',
-        content: [{ type: 'content', content: { type: 'text', text: '' } }],
-      }),
-      makeNotification({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'kimi-tc-1',
-        title: '',
-        status: 'completed',
-        // rawInput injected by enrichTerminalDataFromContent (simulated here)
-        rawInput: { command: 'cat /etc/hostname' },
-        rawOutput: 'my-server\n',
-        content: [{ type: 'content', content: { type: 'text', text: 'my-server\n' } }],
-      }),
-    ];
-
-    const history = applyNotificationOnHistory([], notifications);
-    expect(history).toHaveLength(1);
-
-    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
-    const toolCall = items.find((i) => i.type === 'tool_call') as
-      | Extract<MessageContent, { type: 'tool_call' }>
-      | undefined;
-    expect(toolCall).toBeDefined();
-
-    const content = toolCall?.content ?? [];
-    const terminalCommand = content.find((b) => b.type === 'terminal_command') as
-      | { type: 'terminal_command'; command?: string }
-      | undefined;
-    expect(terminalCommand).toBeDefined();
-    expect(terminalCommand?.command).toBe('cat /etc/hostname');
-
-    const terminalOutput = content.find((b) => b.type === 'terminal_output') as
-      | { type: 'terminal_output'; output?: string }
-      | undefined;
-    expect(terminalOutput).toBeDefined();
-    expect(terminalOutput?.output).toContain('my-server');
-
-    // Plain text content block should be deduped (matches terminal_output)
-    const textContentBlocks = content.filter(
-      (b) =>
-        b.type === 'content' &&
-        'content' in b &&
-        b.content.type === 'text' &&
-        b.content.text.trim().length > 0
+    const created = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'cron-tc-3',
+          title: 'Scheduling one-shot 33 3 3 9 *',
+          status: 'in_progress',
+          rawInput: { cron: '33 3 3 9 *', recurring: false, prompt: 'p' },
+          _meta: { lody: { toolName: 'CronCreate' } },
+        }),
+      ],
+      undefined,
+      { now: () => t0 }
     );
-    expect(textContentBlocks).toHaveLength(0);
+    expect(readCall(created)?.recordedAtMs).toBe(Date.parse(t0));
+
+    // A later replayed/retried update for the same call must keep the original stamp.
+    const updated = applyNotificationOnHistory(
+      created,
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'cron-tc-3',
+          status: 'completed',
+        }),
+      ],
+      undefined,
+      { now: () => t1 }
+    );
+    expect(readCall(updated)?.recordedAtMs).toBe(Date.parse(t0));
   });
 
-  it('extracts Claude Code terminal output from tool_call_update _meta', () => {
+  it('stores Pi bash results as terminal output with their line breaks', () => {
+    // Pi reports a shell result as `{ content, details }` and mirrors it, and
+    // every streamed partial snapshot, as plain text content blocks.
+    const command = 'echo one; echo two';
+    const output = '  774  -  com.apple.quicklook\n==== two ====\nline 2\n';
     const notifications = [
       makeNotification({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'pi-bash-1',
+        title: 'bash',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command },
+      }),
+      makeNotification({
         sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc1',
+        toolCallId: 'pi-bash-1',
+        title: 'bash',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command },
+        content: [
+          { type: 'content', content: { type: 'text', text: '  774  -  com.apple.quicklook\n' } },
+        ],
+      }),
+      makeNotification({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'pi-bash-1',
+        title: 'bash',
+        kind: 'execute',
         status: 'completed',
-        _meta: {
-          claudeCode: {
-            toolName: 'mcp__acp__Bash',
-            toolResponse: [
-              {
-                type: 'text',
-                text: 'Exited with code 0.Final output:\n\nHello from terminal\n',
-              },
-            ],
-          },
-        },
+        rawInput: { command },
+        rawOutput: { content: [{ type: 'text', text: output }], details: {} },
+        content: [{ type: 'content', content: { type: 'text', text: output } }],
       }),
     ];
 
     const history = applyNotificationOnHistory([], notifications);
-    expect(history).toHaveLength(1);
-
     const items = (history[0]?.items ?? []) as unknown as MessageContent[];
     const toolCall = items.find((i) => i.type === 'tool_call') as
       | Extract<MessageContent, { type: 'tool_call' }>
       | undefined;
-    expect(toolCall).toBeDefined();
-
     const content = toolCall?.content ?? [];
-    const terminalOutput = content.find((b) => b.type === 'terminal_output') as
-      | { type: 'terminal_output'; output?: string; exitStatus?: { exitCode?: number | null } }
-      | undefined;
-    expect(terminalOutput?.output).toBe('Hello from terminal\n');
-    expect(terminalOutput?.exitStatus?.exitCode).toBe(0);
+
+    expect(content.find((b) => b.type === 'terminal_command')).toMatchObject({ command });
+    const outputs = content.filter((b) => b.type === 'terminal_output');
+    expect(outputs).toEqual([expect.objectContaining({ output })]);
+    expect(content.filter((b) => b.type === 'content')).toHaveLength(0);
   });
 
-  it.each(ACP_NOTIFICATION_FIXTURES)(
-    'produces the same history when replaying %s as a batch or per notification',
-    (fixture) => {
-      const notifications = loadFixtureNotifications(fixture);
-      const batched = applyNotificationOnHistory([], notifications);
+  it('keeps a Pi result off terminal output for non-shell tools', () => {
+    const notifications = [
+      makeNotification({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'pi-edit-1',
+        title: 'edit',
+        kind: 'edit',
+        status: 'completed',
+        rawOutput: { content: [{ type: 'text', text: 'Edited a.ts' }], details: {} },
+      }),
+    ];
 
-      let streamed: ReturnType<typeof applyNotificationOnHistory> = [];
-      for (const notification of notifications) {
-        streamed = applyNotificationOnHistory(streamed, [notification]);
-      }
-
-      expect(normalizeHistory(batched)).toEqual(normalizeHistory(streamed));
-    }
-  );
+    const history = applyNotificationOnHistory([], notifications);
+    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
+    const toolCall = items.find((i) => i.type === 'tool_call') as
+      | Extract<MessageContent, { type: 'tool_call' }>
+      | undefined;
+    expect(toolCall?.content?.some((b) => b.type === 'terminal_output') ?? false).toBe(false);
+  });
 
   it.each(ACP_NOTIFICATION_FIXTURES)(
     'produces the same history for %s across varied notification chunk groupings',
@@ -880,4 +778,297 @@ describe('acp history apply', () => {
       }
     }
   );
+
+  describe('devin subagent internals', () => {
+    const started = (agentId: string) =>
+      makeNotification({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: agentId,
+        status: 'in_progress',
+        _meta: {
+          'cognition.ai/subagent_started': { agentId, title: `Task ${agentId}` },
+        },
+      });
+    const context = (parentAgentId: string) => ({
+      'cognition.ai/subagent_context': { parentAgentId },
+    });
+
+    it('suppresses subagent output once its task row exists, on live and replayed batches', () => {
+      const notifications = [
+        started('agent-1'),
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'internal' },
+          _meta: context('agent-1'),
+        }),
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'visible' },
+        }),
+      ];
+      for (const history of [
+        applyNotificationOnHistory([], notifications),
+        replayInChunks(notifications, [1]),
+      ]) {
+        const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+        expect(items).toEqual([
+          expect.objectContaining({ type: 'subagent_task', taskId: 'agent-1' }),
+          { type: 'text', text: 'visible' },
+        ]);
+      }
+    });
+
+    it('keeps context-tagged output when no task row names the owner', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          makeNotification({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'unknown-owner' },
+            _meta: context('never-started'),
+          }),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([{ type: 'text', text: 'unknown-owner' }]);
+    });
+
+    it('suppresses a subagent tool call but merges updates into a permission-written row', () => {
+      const seeded = applyNotificationOnHistory(
+        [],
+        [
+          makeNotification({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'approved-tool',
+            title: 'Approved tool',
+            status: 'pending',
+          }),
+          started('agent-1'),
+        ]
+      );
+      const history = applyNotificationOnHistory(seeded, [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'silent-tool',
+          title: 'Silent tool',
+          status: 'in_progress',
+          _meta: context('agent-1'),
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'approved-tool',
+          status: 'completed',
+          _meta: context('agent-1'),
+        }),
+      ]);
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'tool_call',
+          toolCallId: 'approved-tool',
+          status: 'completed',
+        }),
+        expect.objectContaining({ type: 'subagent_task', taskId: 'agent-1' }),
+      ]);
+    });
+
+    it('materializes a tagged nested lifecycle row with parentTaskId', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('parent'),
+          makeNotification({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'child',
+            status: 'in_progress',
+            _meta: {
+              ...context('parent'),
+              'cognition.ai/subagent_started': { agentId: 'child', title: 'Nested' },
+            },
+          }),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({ type: 'subagent_task', taskId: 'parent' }),
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'child',
+          parentTaskId: 'parent',
+        }),
+      ]);
+    });
+
+    it('passes tagged updates carrying an unrecognized subagent payload through', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('agent-1'),
+          makeNotification({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'new-protocol' },
+            _meta: { ...context('agent-1'), 'cognition.ai/subagent_future': { x: 1 } },
+          }),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toContainEqual({ type: 'text', text: 'new-protocol' });
+    });
+
+    it('keeps a completed task terminal when a started row replays late', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('agent-1'),
+          makeNotification({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'agent-1',
+            status: 'completed',
+            _meta: {
+              'cognition.ai/subagent_completed': { agentId: 'agent-1', summary: 'done' },
+            },
+          }),
+          started('agent-1'),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'agent-1',
+          status: 'completed',
+          summary: 'done',
+        }),
+      ]);
+    });
+  });
+
+  describe('subagent task payload helpers', () => {
+    it('mergeSubagentTaskPayload preserves earlier-event fields while later events win', () => {
+      const started: SubagentTaskPayload = {
+        taskId: 'task-1',
+        status: 'in_progress',
+        event: 'task_started',
+        subagentType: 'Explore',
+        description: 'Find codex refresh logic',
+      };
+      const notification: SubagentTaskPayload = {
+        taskId: 'task-1',
+        status: 'completed',
+        event: 'task_notification',
+        summary: 'All done',
+      };
+
+      expect(mergeSubagentTaskPayload(started, notification)).toEqual({
+        taskId: 'task-1',
+        status: 'completed',
+        event: 'task_notification',
+        summary: 'All done',
+        subagentType: 'Explore',
+        description: 'Find codex refresh logic',
+      });
+    });
+
+    it('parses Devin subagent failure metadata and subagent context scope', () => {
+      expect(
+        parseDevinSubagentTaskMeta({
+          'cognition.ai/subagent_completed': {
+            agentId: '1514ced7',
+            success: false,
+            summary: 'Exploration aborted',
+          },
+        })
+      ).toMatchObject({
+        status: 'failed',
+        summary: 'Exploration aborted',
+        error: 'Exploration aborted',
+      });
+
+      expect(
+        getDevinSubagentContextId({
+          'cognition.ai/subagent_context': { parentAgentId: '1514ced7' },
+        })
+      ).toBe('1514ced7');
+      expect(
+        getDevinSubagentContextId({
+          'cognition.ai/subagent_context': { parentAgentId: 'root' },
+        })
+      ).toBeNull();
+      expect(getDevinSubagentContextId({})).toBeNull();
+      expect(getDevinSubagentContextId(undefined)).toBeNull();
+      expect(getDevinSubagentContextId({ 'cognition.ai/subagent_context': 'nope' })).toBeNull();
+    });
+
+    it('maps Codex collab-agent tasks and merges start/completion by receiver thread id', () => {
+      const collabInput = (overrides: Record<string, unknown> = {}) => ({
+        prompt: 'Inspect the goal implementation.',
+        senderThreadId: 'thread-main',
+        receiverThreadIds: ['thread-worker'],
+        agentsStates: {
+          'thread-worker': { status: 'running', message: 'Reading files' },
+        },
+        status: 'inProgress',
+        ...overrides,
+      });
+
+      const tasks = parseCodexCollabAgentTasks(
+        'wait',
+        collabInput({
+          receiverThreadIds: ['thread-a'],
+          agentsStates: {
+            'thread-a': { status: 'completed', message: 'Done' },
+            'thread-b': { status: 'errored', message: 'Tests failed' },
+          },
+          status: 'completed',
+        })
+      );
+      expect(tasks).toHaveLength(2);
+      expect(tasks[0]).toMatchObject({ taskId: 'thread-a', status: 'completed' });
+      expect(tasks[1]).toMatchObject({
+        taskId: 'thread-b',
+        status: 'failed',
+        error: 'Tests failed',
+      });
+
+      const started = parseSessionNotification({
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'call-1',
+          kind: 'other',
+          title: 'spawnAgent',
+          status: 'in_progress',
+          rawInput: collabInput(),
+        },
+      });
+      const completed = parseSessionNotification({
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'call-1',
+          title: 'spawnAgent',
+          status: 'completed',
+          rawInput: collabInput({
+            agentsStates: {
+              'thread-worker': { status: 'completed', message: 'Goal code located' },
+            },
+            status: 'completed',
+          }),
+        },
+      });
+
+      const history = applyNotificationOnHistory([], [started, completed]);
+      const items = history.flatMap((entry) => entry.items ?? []);
+      expect(items.filter((item) => item.type === 'tool_call')).toHaveLength(0);
+      expect(items.filter((item) => item.type === 'subagent_task')).toEqual([
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'thread-worker',
+          status: 'completed',
+          description: 'Inspect the goal implementation.',
+          summary: 'Goal code located',
+        }),
+      ]);
+    });
+  });
 });

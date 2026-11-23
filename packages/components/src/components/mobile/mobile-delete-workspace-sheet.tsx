@@ -1,17 +1,14 @@
+import { useFoldAwareSheetHeight } from './use-vertical-division';
+import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Loader2, X } from 'lucide-react';
+import { AlertTriangle, X } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerTitle,
-} from '@/ui/drawer';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { cn } from '@/lib/utils';
 
 export type MobileDeleteWorkspaceSheetProps = {
@@ -23,8 +20,7 @@ export type MobileDeleteWorkspaceSheetProps = {
   /** Caller's destructive action. The sheet awaits this and shows
      a spinner on the delete button while it's in flight. */
   onConfirm: () => Promise<void>;
-  /** Extra billing warning (e.g. deleting ends a cancel-scheduled
-     subscription immediately). Rendered above the type-to-confirm card. */
+  /** Remaining billing obligations, rendered above the type-to-confirm card. */
   warningText?: string | null;
 };
 
@@ -53,6 +49,8 @@ export function MobileDeleteWorkspaceSheet({
   warningText = null,
 }: MobileDeleteWorkspaceSheetProps) {
   const { t } = useTranslation();
+  const keyboard = useKeyboardAwareSheet({ chromeHeight: '9rem' });
+  const maxHeight = useFoldAwareSheetHeight(92, true);
   const [confirmText, setConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -85,12 +83,11 @@ export function MobileDeleteWorkspaceSheet({
       <DrawerContent
         className={cn(
           'mobile-delete-workspace-sheet',
-          'h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60',
-          'bottom-[var(--native-keyboard-height,0px)]!'
+          'h-auto! rounded-t-2xl border-border/60',
+          keyboard.contentClassName
         )}
         style={{
-          transition: 'bottom 320ms cubic-bezier(0.32, 0.72, 0, 1)',
-          willChange: 'bottom',
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
       >
         <div className="flex max-h-full min-h-0 flex-col">
@@ -117,12 +114,15 @@ export function MobileDeleteWorkspaceSheet({
           <DrawerDescription className="px-4 pb-3 text-[0.78rem] leading-relaxed text-muted-foreground">
             {t('workspace.danger.deleteWorkspace.confirmDescription', {
               workspace: workspaceName,
-              defaultValue:
-                'Permanently delete "{{workspace}}". This action cannot be undone.',
+              defaultValue: 'Permanently delete "{{workspace}}". This action cannot be undone.',
             })}
           </DrawerDescription>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+          <div
+            ref={keyboard.scrollRef}
+            style={{ ...keyboard.scrollStyle, paddingBottom: '0.5rem' }}
+            className="min-h-0 flex-1 overflow-y-auto px-4 pb-2"
+          >
             {warningText ? (
               <p className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[0.72rem] font-medium leading-relaxed text-amber-950 dark:text-amber-100">
                 {warningText}
@@ -134,7 +134,7 @@ export function MobileDeleteWorkspaceSheet({
                 'shadow-[0_0_0_3px_hsl(var(--destructive)/0.04)]'
               )}
             >
-              <Label
+              <UiField.Label
                 htmlFor="mobile-delete-workspace-confirm"
                 className="text-[0.78rem] font-medium text-foreground"
               >
@@ -142,7 +142,7 @@ export function MobileDeleteWorkspaceSheet({
                   workspace: workspaceName,
                   defaultValue: 'Type "{{workspace}}" to confirm',
                 })}
-              </Label>
+              </UiField.Label>
               <Input
                 id="mobile-delete-workspace-confirm"
                 value={confirmText}
@@ -179,7 +179,7 @@ export function MobileDeleteWorkspaceSheet({
           >
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               className="flex-1"
               onClick={() => onOpenChange(false)}
               disabled={isDeleting}
@@ -195,7 +195,7 @@ export function MobileDeleteWorkspaceSheet({
             >
               {isDeleting ? (
                 <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
                   {t('common.processing', 'Processing...')}
                 </>
               ) : (

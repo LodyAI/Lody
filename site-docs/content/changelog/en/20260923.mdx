@@ -1,0 +1,29 @@
+---
+title: "20260923"
+version: 0.100.0
+date: 2026-09-23
+description: Add support for Opus 5.5, GPT-6-Sol, GPT-6-Luna, and Dimcode while improving agents, desktop windows, long conversations, the sidebar, and file syncing.
+---
+
+Version 0.100.0
+
+### ✨ New Features
+
+- Add support for Opus 5.5, GPT-6-Sol, and GPT-6-Luna.
+- Add Dimcode as a built-in Agent that can be configured and used to create sessions directly in Lody.
+
+### 🐛 Fixes & Improvements
+
+- Upgrade the built-in Claude Code, Codex, Grok, Kimi, and Pi runtimes to improve Agent reliability and session startup.
+- Improve desktop window warmup and content loading to reduce blank screens, error pages, and brief loading states when opening sessions.
+- Improve background loading for long conversations to prevent content flicker, misplaced messages, and lost text selections.
+- Improve the sidebar filter layout and keep filter controls available when the task list is empty.
+- Fix cases where opening another local worktree file from a session could target the wrong file.
+- Prevent DeepSeek Harness child processes from repeatedly opening console windows on Windows.
+- Retry Machine Flock remote sync failures automatically and report a clear failure state.
+- Preserve executable and private POSIX file permissions when Code Collab saves text files.
+- Refine the share entry point and session header interface.
+
+### 🙏 Thanks to External Contributors
+
+- Thanks to ladydd for preserving POSIX permissions when Code Collab saves files.

@@ -1,8 +1,9 @@
+import type { MessagePort } from 'node:worker_threads';
 import { opendir } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
-  buildCodeCollabFileIndexState,
+  buildBoundedCodeCollabFileIndexState,
   type CodeCollabV2AllChangesState,
   type CodeCollabV2FileIndexState,
   type CodeCollabV2FileTreeValue,
@@ -11,14 +12,23 @@ import {
 import { closeDirectoryQuietly } from './directory-handle';
 import {
   computeAllChanges,
+  computeProjectAllChanges,
+  resolveProjectGitDirectory,
+  type ProjectGitMember,
   isInsideGitWorktree,
   joinWorkspacePath,
   pathSegmentComparisonKey,
   scanGitDirectoryEntries,
+  createGitIgnoreScanFilter,
+  relativeScanDirectory,
 } from './file-index-scan-core';
+import { CODE_COLLAB_IGNORED_DIRECTORY_NAMES } from './workspace-watch-path-policy';
 
 export type FileIndexScanWorkerInput = {
   readonly kind?: 'scan';
+  readonly cancellationPort?: MessagePort;
+  readonly cancellationId?: string;
+  readonly signal?: AbortSignal;
   readonly directoryAbsolutePath: string;
   readonly directoryWorkspacePath: string;
   readonly maxRawTextBytes: number;
@@ -33,9 +43,14 @@ export type FileIndexScanWorkerResult = {
 
 export type FileIndexFullStateWorkerInput = {
   readonly kind: 'full-state';
+  readonly projectMembers?: readonly ProjectGitMember[];
+  readonly cancellationPort?: MessagePort;
+  readonly cancellationId?: string;
+  readonly signal?: AbortSignal;
   readonly workspaceRoot: string;
   readonly maxRawTextBytes: number;
   readonly entryBudget: number;
+  readonly priorityDirectories?: readonly string[];
   readonly preferredBaseBranch?: string;
   readonly providedAllChanges?: {
     readonly source: 'diff-store';
@@ -54,6 +69,8 @@ export type FileIndexFullStateWorkerResult =
       readonly allChangesSource: 'git' | 'diff-store';
       readonly changedPaths: number;
       readonly pathCount: number;
+      /** Complete-state rows left out by `CODE_COLLAB_FILE_INDEX_LIMITS`. */
+      readonly omittedPaths: number;
       readonly durationMs: number;
       readonly scanMs: number;
       readonly allChangesMs: number;
@@ -68,23 +85,43 @@ export type FileIndexFullStateWorkerResult =
 export type FileIndexWorkerInput = FileIndexScanWorkerInput | FileIndexFullStateWorkerInput;
 export type FileIndexWorkerResult = FileIndexScanWorkerResult | FileIndexFullStateWorkerResult;
 
-const DEFAULT_IGNORED_DIRECTORY_NAMES = new Set([
-  '.git',
-  'node_modules',
-  '.next',
-  'dist',
-  'build',
-  'target',
-]);
-
 export default async function fileIndexScanWorker(
   input: FileIndexWorkerInput
 ): Promise<FileIndexWorkerResult> {
-  if (input.kind === 'full-state') {
-    return await computeFullFileIndexState(input);
+  const controller = new AbortController();
+  const abort = () => controller.abort(new DOMException('File-index scan cancelled', 'AbortError'));
+  const port = input.cancellationPort;
+  port?.on('message', abort);
+  const signal = input.signal
+    ? AbortSignal.any([input.signal, controller.signal])
+    : controller.signal;
+  const onMessage = (message: unknown) => {
+    if (
+      typeof message === 'object' &&
+      message !== null &&
+      'cancellationId' in message &&
+      message.cancellationId === input.cancellationId &&
+      'type' in message &&
+      message.type === 'code-collab-abort'
+    )
+      abort();
+  };
+  try {
+    if (input.cancellationId) {
+      process.on('message', onMessage);
+      process.send?.({ cancellationId: input.cancellationId, type: 'code-collab-ready' });
+    }
+    signal.throwIfAborted();
+    if (input.kind === 'full-state') {
+      return await computeFullFileIndexState({ ...input, signal });
+    }
+    const entries = await scanDirectoryEntries({ ...input, signal });
+    return { kind: 'scan', entries: [...entries] };
+  } finally {
+    if (input.cancellationId) process.off('message', onMessage);
+    port?.off('message', abort);
+    port?.close();
   }
-  const entries = await scanDirectoryEntries(input);
-  return { kind: 'scan', entries: [...entries] };
 }
 
 async function computeFullFileIndexState(
@@ -106,12 +143,32 @@ async function computeFullFileIndexState(
     directoryWorkspacePath: '',
     maxRawTextBytes: input.maxRawTextBytes,
     entryBudget: input.entryBudget,
-    recursive: true,
+    recursive: !input.projectMembers,
+    signal: input.signal,
   });
+  if (input.projectMembers) {
+    for (const member of input.projectMembers) {
+      const directory = await resolveProjectGitDirectory(input.workspaceRoot, member.path);
+      const entries = await scanDirectoryEntries({
+        directoryAbsolutePath: directory,
+        directoryWorkspacePath: member.path,
+        maxRawTextBytes: input.maxRawTextBytes,
+        entryBudget: Math.max(0, input.entryBudget - fileTreeEntries.size),
+        recursive: true,
+        signal: input.signal,
+      });
+      input.signal?.throwIfAborted();
+      for (const entry of entries) fileTreeEntries.set(...entry);
+    }
+  }
   const scanMs = Date.now() - scanStartedAtMs;
   const fileTree = Object.fromEntries(fileTreeEntries);
   const buildStartedAtMs = Date.now();
-  const fileIndex = buildCodeCollabFileIndexState(fileTree, allChangesResult.allChanges);
+  const { fileIndex, omittedPaths } = buildBoundedCodeCollabFileIndexState(
+    fileTree,
+    allChangesResult.allChanges,
+    { priorityDirectories: input.priorityDirectories }
+  );
   const buildMs = Date.now() - buildStartedAtMs;
   return {
     kind: 'full-state',
@@ -122,6 +179,7 @@ async function computeFullFileIndexState(
     allChangesSource: allChangesResult.source,
     changedPaths: Object.keys(allChangesResult.allChanges).length,
     pathCount: Object.keys(fileIndex).length,
+    omittedPaths,
     durationMs: Date.now() - startedAtMs,
     scanMs,
     allChangesMs: allChangesResult.allChangesMs,
@@ -146,13 +204,23 @@ async function resolveFullStateAllChanges(input: FileIndexFullStateWorkerInput):
       allChangesMs: input.providedAllChanges.computeMs,
     };
   }
-  if (!(await isInsideGitWorktree(input.workspaceRoot))) {
+  if (input.projectMembers) {
+    const started = Date.now();
+    return {
+      status: 'ok',
+      source: 'git',
+      allChanges: await computeProjectAllChanges(input.workspaceRoot, input.projectMembers),
+      allChangesMs: Date.now() - started,
+    };
+  }
+  if (!(await isInsideGitWorktree(input.workspaceRoot, input.signal))) {
     return { status: 'needs-provided-all-changes', reason: 'not-git' };
   }
 
   const allChangesStartedAtMs = Date.now();
   const allChanges = await computeAllChanges(input.workspaceRoot, {
     preferredBaseBranch: input.preferredBaseBranch,
+    signal: input.signal,
   });
   return {
     status: 'ok',
@@ -178,8 +246,14 @@ async function scanDirectoryEntries(
     },
   ];
   let remainingEntries = Math.max(0, options.entryBudget);
+  // Prune `.gitignore`d entries before reading into them; null outside Git.
+  const ignoreFilter = await createGitIgnoreScanFilter(
+    options.directoryAbsolutePath,
+    options.signal
+  );
 
   while (queue.length > 0 && remainingEntries > 0) {
+    options.signal?.throwIfAborted();
     const currentDirectory = queue.shift();
     if (!currentDirectory) {
       break;
@@ -197,8 +271,21 @@ async function scanDirectoryEntries(
     if (!directoryEntries) {
       continue;
     }
-    const collisionKeys = findDirectoryEntryCollisionKeys(directoryEntries);
-    for (const { entry, comparisonKey } of directoryEntries) {
+    const ignoredNames = ignoreFilter
+      ? await ignoreFilter.ignoredEntryNames(
+          relativeScanDirectory(options.directoryWorkspacePath, currentDirectory.workspacePath),
+          directoryEntries.map(({ entry }) => ({
+            name: entry.name,
+            isDirectory: entry.isDirectory(),
+          }))
+        )
+      : undefined;
+    const visibleEntries =
+      ignoredNames && ignoredNames.size > 0
+        ? directoryEntries.filter(({ entry }) => !ignoredNames.has(entry.name))
+        : directoryEntries;
+    const collisionKeys = findDirectoryEntryCollisionKeys(visibleEntries);
+    for (const { entry, comparisonKey } of visibleEntries) {
       if (remainingEntries <= 0) {
         break;
       }
@@ -288,7 +375,7 @@ function classifyDirectoryEntry(entry: {
   isSymbolicLink(): boolean;
 }): CodeCollabV2FileTreeValue | undefined {
   if (entry.isDirectory()) {
-    return DEFAULT_IGNORED_DIRECTORY_NAMES.has(entry.name)
+    return CODE_COLLAB_IGNORED_DIRECTORY_NAMES.has(entry.name)
       ? undefined
       : ({ kind: 'lazy' } as const);
   }

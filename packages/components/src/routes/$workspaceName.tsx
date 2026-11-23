@@ -1,9 +1,11 @@
-import { createFileRoute, Navigate, notFound, Outlet, redirect } from '@tanstack/react-router';
+import { createFileRoute, notFound, Outlet, redirect } from '@tanstack/react-router';
+import { BootNavigate } from '@/components/boot-navigate';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useCloudQuery } from '@lody/platform/react';
+import { WorkspaceAdmissionGate } from '@/components/workspace-admission-gate';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   clearPreferredWorkspaceSlugIfMatch,
@@ -13,12 +15,13 @@ import {
 import { useWorkspaceContextAtoms } from '@/hooks/use-workspace-context-atoms';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import {
+  clearWorkspaceAccessDenied,
+  recordWorkspaceAccessDenied,
   resolveOptimisticWorkspaceRouteGuard,
   resolveWorkspaceAccessDeniedFallback,
 } from '@/lib/workspace-route-guard';
 import { RouteMessage } from '@/components/route-message';
-import { LoadingPlaceholder } from '@/components/loading-placeholder';
-import { clearLastAppRoutePathIfWorkspaceMatch } from '@/lib/last-app-route';
+import { BlockingWaitPlaceholder } from '@/components/blocking-wait-placeholder';
 import {
   WORKSPACE_SLUG_RESERVED_LANDING_EXACT_PATHS,
   WORKSPACE_SLUG_RESERVED_LANDING_PREFIXES,
@@ -28,6 +31,7 @@ import { WorkspaceRouteTargetProvider } from '../providers/workspace-route-targe
 import {
   getLocalWorkspaceSlug,
   useLocalPlatformWorkspacesState,
+  retryLocalPlatformSnapshot,
 } from '../providers/local-platform-provider';
 
 // Paths that are served by the CF Pages middleware as landing pages.
@@ -118,15 +122,19 @@ function LocalWorkspaceGuardRoute() {
   if (workspacesState.status === 'error') {
     return (
       <RouteMessage
+        gate="workspace_list_error"
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
+        onRetry={retryLocalPlatformSnapshot}
       />
     );
   }
 
   if (!workspace) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="local_workspace_starting"
+        variant="boot"
         title={t('workspace.route.localStartingTitle')}
         description={t('workspace.route.localStartingDescription')}
       />
@@ -137,7 +145,9 @@ function LocalWorkspaceGuardRoute() {
   // its canonical slug instead of rendering under a mismatched URL.
   const canonicalSlug = getLocalWorkspaceSlug(workspace);
   if (workspaceName !== canonicalSlug) {
-    return <Navigate to="/$workspaceName/chat" params={{ workspaceName: canonicalSlug }} replace />;
+    return (
+      <BootNavigate to="/$workspaceName/chat" params={{ workspaceName: canonicalSlug }} replace />
+    );
   }
 
   return <Outlet />;
@@ -173,9 +183,21 @@ function CloudWorkspaceGuardRoute() {
   // Establish the workspace-context atoms (slug + id) from the URL param.
   useWorkspaceContextAtoms(workspaceName, access);
 
+  // A confirmed membership clears this slug from the denied-fallback memory,
+  // so a re-invite restores automatic fallback TO this workspace.
+  useEffect(() => {
+    if (access?.status === 'member') {
+      clearWorkspaceAccessDenied(workspaceName);
+    }
+  }, [access?.status, workspaceName]);
+
   const renderWorkspaceAccessDeniedFallback = () => {
-    clearLastAppRoutePathIfWorkspaceMatch(workspaceName);
     clearPreferredWorkspaceSlugIfMatch(workspaceName);
+    /* Both callers gate on a DEFINITIVE denial (`not_found` / `not_member`),
+       so recording here cannot poison the set with transient errors. The set
+       is what keeps a stale org list from bouncing between two denied
+       workspaces forever — see `resolveWorkspaceAccessDeniedFallback`. */
+    recordWorkspaceAccessDenied(workspaceName);
     const fallback = resolveWorkspaceAccessDeniedFallback({
       workspaceName,
       organizations,
@@ -185,25 +207,24 @@ function CloudWorkspaceGuardRoute() {
 
     if (fallback.kind === 'workspace') {
       return (
-        <Navigate to="/$workspaceName/chat" params={{ workspaceName: fallback.slug }} replace />
+        <BootNavigate to="/$workspaceName/chat" params={{ workspaceName: fallback.slug }} replace />
       );
     }
 
     if (fallback.kind === 'create-workspace') {
-      return <Navigate to="/workspace/create" replace />;
+      return <BootNavigate to="/workspace/create" replace />;
     }
 
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_access_denied_fallback"
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
     );
   };
 
-  // ==========================================================================
-  // OPTIMISTIC RENDERING PATH (hasLocalToken = true)
-  // ==========================================================================
   // When user has a locally cached auth token, we skip blocking loading states
   // and render content immediately for better perceived performance.
   //
@@ -226,9 +247,16 @@ function CloudWorkspaceGuardRoute() {
   // The critical distinction: we only skip loading states when access is
   // UNKNOWN. Once server confirms denial, we block rendering to prevent
   // unauthorized access to workspace UI.
-  // ==========================================================================
   if (confirmedUnauthenticated) {
-    return null;
+    // The root sign-out path redirects from here; if it never does, this wait
+    // still has to offer a way out.
+    return (
+      <BlockingWaitPlaceholder
+        gate="sign_out_pending"
+        variant="boot"
+        title={t('workspace.route.signingInTitle')}
+      />
+    );
   }
 
   if (hasLocalToken) {
@@ -237,7 +265,7 @@ function CloudWorkspaceGuardRoute() {
     // and the sidebar will show offline status.
     if (sessionSettled && !isPending && !isRetrying && !sessionError && !session?.user) {
       const currentPath = getAppCurrentPathWithSearch();
-      return <Navigate to="/login" search={{ redirect: currentPath }} replace />;
+      return <BootNavigate to="/login" search={{ redirect: currentPath }} replace />;
     }
 
     // Check access denial only when we have confirmed access response
@@ -268,7 +296,9 @@ function CloudWorkspaceGuardRoute() {
   // No local token - use the original loading flow
   if (!sessionSettled) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="session_loading"
+        variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
       />
@@ -277,12 +307,14 @@ function CloudWorkspaceGuardRoute() {
 
   if (!session?.user || sessionError) {
     const currentPath = getAppCurrentPathWithSearch();
-    return <Navigate to="/login" search={{ redirect: currentPath }} replace />;
+    return <BootNavigate to="/login" search={{ redirect: currentPath }} replace />;
   }
 
   if (isPending || isRetrying || access === undefined) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_access_loading"
+        variant="boot"
         title={t('workspace.route.accessLoadingTitle')}
         description={t('workspace.route.accessLoadingDescription')}
       />
@@ -295,7 +327,9 @@ function CloudWorkspaceGuardRoute() {
 
   if (access.status === 'unauthenticated') {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="session_loading"
+        variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
       />
@@ -316,7 +350,15 @@ function CloudWorkspaceGuardRoute() {
   );
 }
 
-function WorkspaceAuthedRoute({
+function WorkspaceAuthedRoute(props: Parameters<typeof PlaintextWorkspaceAuthedRoute>[0]) {
+  return (
+    <WorkspaceAdmissionGate workspaceName={props.workspaceName}>
+      <PlaintextWorkspaceAuthedRoute {...props} />
+    </WorkspaceAdmissionGate>
+  );
+}
+
+function PlaintextWorkspaceAuthedRoute({
   workspaceName,
   organizations,
   organizationsLoading,
@@ -366,15 +408,20 @@ function WorkspaceAuthedRoute({
 
       if (fallbackSlug) {
         return (
-          <Navigate to="/$workspaceName/chat" params={{ workspaceName: fallbackSlug }} replace />
+          <BootNavigate
+            to="/$workspaceName/chat"
+            params={{ workspaceName: fallbackSlug }}
+            replace
+          />
         );
       }
-      return <Navigate to="/workspace/create" replace />;
+      return <BootNavigate to="/workspace/create" replace />;
     }
 
     if (optimisticGuard === 'switch-error') {
       return (
         <RouteMessage
+          gate="workspace_switch_error"
           title={t('workspace.route.openErrorTitle')}
           description={t('workspace.route.openErrorDescription')}
         />
@@ -383,7 +430,9 @@ function WorkspaceAuthedRoute({
 
     if (optimisticGuard === 'wait-for-switch') {
       return (
-        <LoadingPlaceholder
+        <BlockingWaitPlaceholder
+          gate="workspace_switch_pending"
+          variant="boot"
           title={t('workspace.route.switchingTitle')}
           description={t('workspace.route.switchingDescription')}
         />
@@ -397,7 +446,9 @@ function WorkspaceAuthedRoute({
   // No local token - use the original loading flow
   if (!orgSettled) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_list_loading"
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
@@ -407,7 +458,9 @@ function WorkspaceAuthedRoute({
   const hasOrganizations = Array.isArray(organizations);
   if (organizationsLoading || !hasOrganizations) {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_list_loading"
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
@@ -435,15 +488,16 @@ function WorkspaceAuthedRoute({
 
     if (fallbackSlug) {
       return (
-        <Navigate to="/$workspaceName/chat" params={{ workspaceName: fallbackSlug }} replace />
+        <BootNavigate to="/$workspaceName/chat" params={{ workspaceName: fallbackSlug }} replace />
       );
     }
-    return <Navigate to="/workspace/create" replace />;
+    return <BootNavigate to="/workspace/create" replace />;
   }
 
   if (workspaceGuard === 'switch-error') {
     return (
       <RouteMessage
+        gate="workspace_switch_error"
         title={t('workspace.route.openErrorTitle')}
         description={t('workspace.route.openErrorDescription')}
       />
@@ -452,7 +506,9 @@ function WorkspaceAuthedRoute({
 
   if (workspaceGuard === 'wait-for-switch') {
     return (
-      <LoadingPlaceholder
+      <BlockingWaitPlaceholder
+        gate="workspace_switch_pending"
+        variant="boot"
         title={t('workspace.route.switchingTitle')}
         description={t('workspace.route.switchingDescription')}
       />

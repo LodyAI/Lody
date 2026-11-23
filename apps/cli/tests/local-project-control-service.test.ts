@@ -1,7 +1,8 @@
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LocalProjectControlService } from '../src/lib/local-project-control-service';
 import type { LocalProjectId } from '@lody/shared';
@@ -13,11 +14,147 @@ const noopLogger: Logger = {
   error: () => undefined,
   success: () => undefined,
   debug: () => undefined,
+  trace: () => undefined,
   setLevel: () => undefined,
   setDebug: () => undefined,
   child: () => noopLogger,
   close: async () => undefined,
 };
+
+describe('LocalProjectControlService.createDirectory', () => {
+  let parent: string;
+  const service = new LocalProjectControlService(noopLogger);
+
+  beforeEach(async () => {
+    parent = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lody-create-directory-')));
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    await rm(parent, { recursive: true, force: true });
+  });
+
+  it('creates one empty directory under the canonical parent, without registration', async () => {
+    await mkdir(path.join(parent, 'real parent'));
+    await symlink(path.join(parent, 'real parent'), path.join(parent, 'alias'), 'junction');
+    const result = await service.createDirectory(path.join(parent, 'alias'), '新项目 with spaces');
+    expect(result.path).toBe(path.join(parent, 'real parent', '新项目 with spaces'));
+    expect((await fs.promises.stat(result.path)).isDirectory()).toBe(true);
+    expect(await readdir(result.path)).toEqual([]);
+    expect((await service.browseDirectory({ absolutePath: result.path })).path).toBe(result.path);
+  });
+
+  it.each([
+    '',
+    ' ',
+    '.',
+    '..',
+    '../escape',
+    'a/b',
+    'a\\b',
+    '/absolute',
+    'a\0b',
+    'a\nb',
+    ' padded',
+    'padded ',
+  ])('rejects a non-single name %j without writing', async (name) => {
+    await expect(service.createDirectory(parent, name)).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+    expect(await readdir(parent)).toEqual([]);
+  });
+
+  it.each([
+    'CON',
+    'nul.txt',
+    'COM1',
+    'LPT9.ext',
+    'COM¹',
+    'trailing.',
+    'a:b',
+    'a*',
+    'a?',
+    'a|b',
+    'a<b',
+  ])('rejects Windows reserved or invalid name %j', async (name) => {
+    vi.stubGlobal('process', { ...process, platform: 'win32' });
+    await expect(service.createDirectory(parent, name)).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+    expect(await readdir(parent)).toEqual([]);
+  });
+
+  it('requires an absolute, existing directory parent and never creates intermediate parents', async () => {
+    await writeFile(path.join(parent, 'file'), 'preserve');
+    for (const invalid of [
+      '',
+      'relative',
+      `${parent}\0`,
+      path.join(parent, 'missing'),
+      path.join(parent, 'file'),
+    ]) {
+      await expect(service.createDirectory(invalid, 'child')).rejects.toMatchObject({
+        code: 'path_invalid',
+      });
+    }
+    expect(await readdir(parent)).toEqual(['file']);
+    expect(await fs.promises.readFile(path.join(parent, 'file'), 'utf8')).toBe('preserve');
+  });
+
+  it('never overwrites a directory, file, or dangling symlink', async () => {
+    await mkdir(path.join(parent, 'directory'));
+    await writeFile(path.join(parent, 'file'), 'preserve');
+    await symlink(path.join(parent, 'missing'), path.join(parent, 'link'), 'junction');
+    for (const name of ['directory', 'file', 'link']) {
+      await expect(service.createDirectory(parent, name)).rejects.toMatchObject({
+        code: 'already_exists',
+      });
+    }
+    expect(await fs.promises.readFile(path.join(parent, 'file'), 'utf8')).toBe('preserve');
+    expect((await fs.promises.lstat(path.join(parent, 'link'))).isSymbolicLink()).toBe(true);
+    expect(await readdir(parent)).toEqual(['directory', 'file', 'link']);
+  });
+
+  it('allows exactly one concurrent creation and rejects retries', async () => {
+    const results = await Promise.allSettled([
+      service.createDirectory(parent, 'child'),
+      service.createDirectory(parent, 'child'),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.find((result) => result.status === 'rejected')).toMatchObject({
+      reason: { code: 'already_exists' },
+    });
+    await expect(service.createDirectory(parent, 'child')).rejects.toMatchObject({
+      code: 'already_exists',
+    });
+    expect(await readdir(parent)).toEqual(['child']);
+    expect(await readdir(path.join(parent, 'child'))).toEqual([]);
+  });
+
+  it.each(['EACCES', 'EPERM', 'EROFS'])(
+    'reports mkdir %s without changing the parent',
+    async (code) => {
+      // chmod cannot reliably deny the root user running CI; inject the OS failure at mkdir.
+      vi.spyOn(fs.promises, 'mkdir').mockRejectedValueOnce(
+        Object.assign(new Error(code), { code })
+      );
+      await expect(service.createDirectory(parent, 'child')).rejects.toMatchObject({
+        code: 'access_denied',
+      });
+      expect(await readdir(parent)).toEqual([]);
+    }
+  );
+
+  it('reports an unreadable parent', async () => {
+    vi.spyOn(fs.promises, 'realpath').mockRejectedValueOnce(
+      Object.assign(new Error('denied'), { code: 'EACCES' })
+    );
+    await expect(service.createDirectory(parent, 'child')).rejects.toMatchObject({
+      code: 'access_denied',
+    });
+    expect(await readdir(parent)).toEqual([]);
+  });
+});
 
 describe('LocalProjectControlService.listProjectDirectory', () => {
   let rootPath: string;
@@ -109,6 +246,54 @@ describe('LocalProjectControlService.listProjectDirectory', () => {
     expect(result.truncated).toBe(false);
   });
 
+  it('still lists the directory when a registered path or a child name is missing', async () => {
+    const directoryPath = await realpath(rootPath);
+    const srcRealPath = await realpath(path.join(rootPath, 'src'));
+    const realReaddir = fs.promises.readdir.bind(fs.promises);
+    const readdir = vi.spyOn(fs.promises, 'readdir').mockImplementation(async (target, options) => {
+      const entries = await realReaddir(target, options);
+      if (String(target) !== directoryPath) return entries;
+      entries.unshift({
+        name: undefined,
+        isDirectory: () => true,
+        isSymbolicLink: () => false,
+      } as unknown as fs.Dirent);
+      return entries;
+    });
+
+    try {
+      const result = await service.browseDirectory({
+        absolutePath: rootPath,
+        registeredProjects: {
+          ['missing-path' as LocalProjectId]: undefined as unknown as string,
+          ['blank-path' as LocalProjectId]: '   ',
+          ['project-src' as LocalProjectId]: srcRealPath,
+        },
+      });
+
+      expect(result.path).toBe(directoryPath);
+      expect(result.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'src',
+            absolutePath: srcRealPath,
+            registeredProjectId: 'project-src',
+          }),
+          expect.objectContaining({ name: 'ignored-dir' }),
+        ])
+      );
+      expect(result.entries.every((entry) => typeof entry.name === 'string' && entry.name)).toBe(
+        true
+      );
+      expect(result.entries.map((entry) => entry.registeredProjectId)).not.toContain(
+        'missing-path'
+      );
+      expect(result.entries.map((entry) => entry.registeredProjectId)).not.toContain('blank-path');
+    } finally {
+      readdir.mockRestore();
+    }
+  });
+
   it('supports hidden directories and cursor pagination while browsing', async () => {
     const firstPage = await service.browseDirectory({
       absolutePath: rootPath,
@@ -130,5 +315,164 @@ describe('LocalProjectControlService.listProjectDirectory', () => {
 
     expect(secondPage.entries).toHaveLength(1);
     expect(secondPage.entries[0]?.name).toBe('ignored-dir');
+  });
+});
+
+describe('LocalProjectControlService.readProjectFile', () => {
+  let rootPath: string;
+  let service: LocalProjectControlService;
+
+  beforeEach(async () => {
+    rootPath = await mkdtemp(path.join(os.tmpdir(), 'lody-local-project-read-'));
+    service = new LocalProjectControlService(noopLogger);
+    await mkdir(path.join(rootPath, '.git'));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(rootPath, { recursive: true, force: true });
+  });
+
+  /**
+   * The read sizes its buffer from `fstat`, so a file APPENDED between the stat
+   * and the read fills that buffer exactly. Under-reporting the size is the
+   * deterministic way to reproduce that race: it is the same state the read
+   * observes, without racing a writer.
+   */
+  const understateSize = (byBytes: number): void => {
+    const realFstat = fs.fstatSync.bind(fs);
+    vi.spyOn(fs, 'fstatSync').mockImplementation(((fd: number, options?: unknown) => {
+      const stat = realFstat(fd, options as never);
+      if (!stat.isFile()) return stat;
+      Object.defineProperty(stat, 'size', { value: Math.max(0, stat.size - byBytes) });
+      return stat;
+    }) as typeof fs.fstatSync);
+  };
+
+  it('reads the whole file when it grew past the stat-sized buffer', async () => {
+    const content = 'x'.repeat(5_000);
+    await writeFile(path.join(rootPath, 'grows.txt'), content);
+    understateSize(4_900);
+
+    const result = service.readProjectFile(rootPath, 'grows.txt', { maxBytes: 1024 * 1024 });
+
+    // A full buffer is not proof of EOF; the prefix must not be served as the file.
+    expect(result?.content).toBe(content);
+    expect(result?.truncated).toBe(false);
+  });
+
+  it('still reports truncation when a grown file passes the budget', async () => {
+    await writeFile(path.join(rootPath, 'grows-past-budget.txt'), 'y'.repeat(5_000));
+    understateSize(4_900);
+
+    const result = service.readProjectFile(rootPath, 'grows-past-budget.txt', { maxBytes: 200 });
+
+    expect(result?.content).toHaveLength(200);
+    expect(result?.truncated).toBe(true);
+  });
+});
+
+describe('LocalProjectControlService.searchProjectFiles', () => {
+  let rootPath: string;
+
+  beforeEach(async () => {
+    rootPath = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lody-local-project-search-')));
+    await mkdir(path.join(rootPath, 'src', 'components'), { recursive: true });
+    await mkdir(path.join(rootPath, 'docs'), { recursive: true });
+    await writeFile(path.join(rootPath, 'src', 'components', 'button.tsx'), '');
+    await writeFile(path.join(rootPath, 'src', 'components', 'button-group.tsx'), '');
+    await writeFile(path.join(rootPath, 'docs', 'buttons.md'), '');
+    await writeFile(path.join(rootPath, 'package.json'), '{}');
+  });
+
+  afterEach(async () => {
+    await rm(rootPath, { recursive: true, force: true });
+  });
+
+  it('returns only the best matches up to the limit', async () => {
+    const service = new LocalProjectControlService(noopLogger);
+
+    await expect(
+      service.searchProjectFiles(rootPath, { query: 'button.tsx', limit: 2 })
+    ).resolves.toEqual({
+      // The exact name ranks first; the fuzzy (in-order) match follows it.
+      paths: ['src/components/button.tsx', 'src/components/button-group.tsx'],
+      truncated: false,
+    });
+    await expect(
+      service.searchProjectFiles(rootPath, { query: 'button', limit: 2 })
+    ).resolves.toEqual({
+      paths: ['docs/buttons.md', 'src/components/button.tsx'],
+      truncated: false,
+    });
+    await expect(service.searchProjectFiles(rootPath, { query: 'readme' })).resolves.toMatchObject({
+      paths: [],
+    });
+    await expect(service.searchProjectFiles(rootPath, { query: 'scbt' })).resolves.toMatchObject({
+      paths: ['src/components/button.tsx', 'src/components/button-group.tsx'],
+    });
+  });
+
+  it('reuses one project scan across keystrokes and rescans once it expires', async () => {
+    let nowMs = 1_000;
+    const service = new LocalProjectControlService(noopLogger, { now: () => nowMs });
+
+    await service.searchProjectFiles(rootPath, { query: 'b' });
+    await writeFile(path.join(rootPath, 'docs', 'banner.md'), '');
+
+    nowMs += 5_000;
+    expect((await service.searchProjectFiles(rootPath, { query: 'banner' })).paths).toEqual([]);
+
+    nowMs += 10_000;
+    expect((await service.searchProjectFiles(rootPath, { query: 'banner' })).paths).toEqual([
+      'docs/banner.md',
+    ]);
+  });
+});
+
+describe('LocalProjectControlService.browseDirectory symlinks', () => {
+  it('lists linked directories under their real path and drops links to files', async () => {
+    const rootPath = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lody-browse-links-')));
+    try {
+      await mkdir(path.join(rootPath, 'real'));
+      await mkdir(path.join(rootPath, 'target'));
+      await writeFile(path.join(rootPath, 'file.txt'), '');
+      try {
+        await symlink(path.join(rootPath, 'target'), path.join(rootPath, 'b-link'), 'dir');
+        await symlink(path.join(rootPath, 'file.txt'), path.join(rootPath, 'c-file-link'));
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'EPERM' || code === 'EACCES') return;
+        throw error;
+      }
+      const service = new LocalProjectControlService(noopLogger);
+
+      const firstPage = await service.browseDirectory({ absolutePath: rootPath, limit: 2 });
+      expect(firstPage.entries).toEqual([
+        {
+          name: 'b-link',
+          absolutePath: path.join(rootPath, 'target'),
+          isSymlink: true,
+          hidden: false,
+        },
+        {
+          name: 'real',
+          absolutePath: path.join(rootPath, 'real'),
+          isSymlink: false,
+          hidden: false,
+        },
+      ]);
+      expect(firstPage.truncated).toBe(true);
+
+      const secondPage = await service.browseDirectory({
+        absolutePath: rootPath,
+        limit: 2,
+        cursor: firstPage.nextCursor,
+      });
+      expect(secondPage.entries.map((entry) => entry.name)).toEqual(['target']);
+      expect(secondPage.truncated).toBe(false);
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
   });
 });

@@ -1,3 +1,4 @@
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import {
   useCallback,
   useEffect,
@@ -9,11 +10,11 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { useCloudMutation } from '@lody/platform/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
-  getLocalProjectHistoryProviderKey,
+  getLocalProjectHistoryCatalogKey,
+  machineSupportsHistoryProviderSelection,
   resolveWorktreeSetupShellForPlatform,
   type AgentConfigMeta,
   type LocalProjectHistoryCatalogItem,
@@ -32,6 +33,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
+import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import {
   canUseProjectHistoryProjectControl,
@@ -43,6 +45,7 @@ import { reconcileLocalProjectHistoryCatalog } from '@/lib/local-project-history
 import { worktreeCleanupConfigCache, worktreeSetupConfigCache } from '@/lib/local-storage-cache';
 import { projectSharingReducer } from '@/lib/project-sharing-state';
 import { useAppCapability } from '@/lib/app-platform';
+import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import type {
   ProjectHistoryImportState,
   ProjectSettingsRow,
@@ -93,13 +96,18 @@ export type LocalProjectsAdminData = {
 
 function buildHistoryProvidersForMachine(
   configs: AgentConfigMeta[],
-  machineId: MachineId
+  machineId: MachineId,
+  supportsProviderSelection: boolean
 ): LocalProjectHistoryProvider[] {
   const byKey = new Map<LocalProjectHistoryProviderKey, LocalProjectHistoryProvider>();
   for (const config of configs) {
     if (config.machineId !== machineId) continue;
-    const provider = { cliType: config.cliType, agentType: config.agentType };
-    byKey.set(getLocalProjectHistoryProviderKey(provider), provider);
+    const provider = {
+      cliType: config.cliType,
+      agentType: config.agentType,
+      ...(supportsProviderSelection ? { agentConfigId: config.id } : {}),
+    };
+    byKey.set(getLocalProjectHistoryCatalogKey(provider), provider);
   }
   return [...byKey.values()];
 }
@@ -179,13 +187,17 @@ function useWorktreeScriptConfigState(cache: WorktreeScriptConfigCache) {
  * `ProjectSettingsComponent` and exposes the sections + handlers it
  * needs. Both `ProjectSettingsComponent` and `MobileLocalProjectSettings`
  * call this hook so they share the same data model and produce
- * identical `ProjectSettingsRow` shapes.
+ * identical `ProjectSettingsRow` shapes. Script reads are opt-in: pass only the
+ * project whose worktree editor is visible; list-only consumers omit the key.
  */
-export function useLocalProjectsAdmin(): LocalProjectsAdminData {
+export function useLocalProjectsAdmin(
+  worktreeProjectKey: string | null = null
+): LocalProjectsAdminData {
   const { t } = useTranslation();
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
+  const onlineMachineIds = useOnlineMachineIds();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
   /* Read the raw runtime, NOT `activeWorkspaceRuntimeAtom`.
      `activeWorkspaceRuntimeAtom` returns `null` whenever the route's
@@ -200,13 +212,13 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   const runtime = useAtomValue(runtimeAtom);
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const sessionMetas = useAtomValue(sessionMetaCacheAtom);
-  const { projects, accessByProjectKey, isLoading } = useVisibleLocalProjects();
+  const { projects, accessByProjectKey, accessByMachineId, isLoading } = useVisibleLocalProjects();
   const getConvexErrorMessage = useConvexErrorMessage();
   // Team sharing is cloud-only; on the local platform the sharing controls are
   // hidden and canUpdateSharing stays false as a logic-gate.
   const teamSharingAvailable = useAppCapability('teamSharing');
   const sessionMetaList = useMemo(() => Object.values(sessionMetas), [sessionMetas]);
-  const setLocalProjectSharedWithTeam = useCloudMutation(
+  const setLocalProjectSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
 
@@ -260,11 +272,17 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   }, [accessByProjectKey, sharingByKey]);
 
   useEffect(() => {
-    if (!runtime || !workspaceId || !currentUserId) return;
+    if (!worktreeProjectKey || !runtime || !workspaceId || !currentUserId) return;
     if (typeof window !== 'undefined' && window.__LODY_ELECTRON__ && !localMachineId) return;
-    const ownedEntries = Array.from(projects.values()).filter(
-      (entry) => entry.machine.ownerUserId === currentUserId
-    );
+    const target = projects.get(worktreeProjectKey);
+    const ownedEntries = (target ? [target] : []).filter((entry) => {
+      if (entry.machine.ownerUserId !== currentUserId) return false;
+      // Offline remotes have no RPC stream. Probing them surfaces
+      // `machine_rpc_unavailable` in the worktree editors. The local
+      // machine still answers even if presence is stale.
+      if (localMachineId && entry.machineId === localMachineId) return true;
+      return onlineMachineIds.has(entry.machineId);
+    });
 
     const loadPhase = (
       phase: WorktreeConfigPhase,
@@ -277,7 +295,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         cache: WorktreeScriptConfigCache;
       }
     ) => {
-      /* Reconcile every owned project against the CLI exactly once per mount.
+      /* Reconcile only the visible project against the CLI once per mount.
          The cache may already populate `byKey`, so dedup on the requested-set
          rather than on value presence — otherwise cached entries would never
          refetch. */
@@ -378,8 +396,10 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
       cache: worktreeCleanupConfigCache,
     });
   }, [
+    worktreeProjectKey,
     currentUserId,
     localMachineId,
+    onlineMachineIds,
     projects,
     runtime,
     setWorktreeCleanupByKey,
@@ -396,6 +416,14 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   ]);
 
   const sections = useMemo(() => {
+    const conversationCountByKey = new Map<string, number>();
+    for (const session of sessionMetaList) {
+      const project = session.project;
+      if (project?.kind !== 'local') continue;
+      const key = getLocalProjectVisibilityKey(session.machineId, project.localProjectId);
+      conversationCountByKey.set(key, (conversationCountByKey.get(key) ?? 0) + 1);
+    }
+
     const grouped = new Map<MachineId, ProjectSettingsSection>();
 
     for (const entry of projects.values()) {
@@ -404,10 +432,14 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
       const machineName = entry.machine.name.trim() || entry.machine.id;
       const sharingUpdate = sharingByKey[entry.key];
       const canUseHistoryProjectControl = Boolean(workspaceId);
-      const historyProviders = buildHistoryProvidersForMachine(agentConfigs, entry.machineId);
+      const historyProviders = buildHistoryProvidersForMachine(
+        agentConfigs,
+        entry.machineId,
+        machineSupportsHistoryProviderSelection(entry.machine)
+      );
       const historyImports: ProjectHistoryImportState[] = historyProviders.map((provider) => {
         const key = historyStateKey(entry.key, provider);
-        const providerKey = getLocalProjectHistoryProviderKey(provider);
+        const providerKey = getLocalProjectHistoryCatalogKey(provider);
         const rawCatalog = catalogByKey[key] ?? catalogFromProject(entry.project, provider);
         const resolvingSessionIds = Object.entries(resolvingByKey[key] ?? {})
           .filter(([, resolving]) => resolving)
@@ -437,6 +469,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         return {
           provider,
           providerKey,
+          providerLabel: agentConfigs.find((config) => config.id === provider.agentConfigId)?.name,
           canSync:
             canUseHistoryProjectControl &&
             canUseProjectHistoryProjectControl({
@@ -458,18 +491,21 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         key: entry.key,
         machineId: entry.machineId,
         machineName,
+        machineOwnerUserId: entry.machine.ownerUserId ?? null,
         shell: resolveWorktreeSetupShellForPlatform(entry.machine.os),
         project: entry.project,
         sharedWithTeam: sharingUpdate?.desired ?? access?.sharedWithTeam ?? false,
+        machineSharedWithTeam: accessByMachineId.get(entry.machineId)?.sharedWithTeam ?? false,
+        conversationCount: conversationCountByKey.get(entry.key) ?? 0,
         // Keep the control locked until the reactive query confirms the write.
         // This prevents a second toggle from racing a delayed first query result.
         isUpdating: sharingUpdate !== undefined,
         canUpdateSharing: Boolean(
           teamSharingAvailable &&
-            workspaceId &&
-            isAuthenticated &&
-            !isConvexAuthLoading &&
-            entry.isMachineRegistered
+          workspaceId &&
+          isAuthenticated &&
+          !isConvexAuthLoading &&
+          entry.isMachineRegistered
         ),
         worktreeSetup: worktreeSetupByKey[entry.key] ?? EMPTY_WORKTREE_SETUP,
         isWorktreeSetupLoading: worktreeSetupLoadingByKey[entry.key] === true,
@@ -489,6 +525,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         grouped.set(entry.machineId, {
           machineId: entry.machineId,
           machineName,
+          sharedWithTeam: accessByMachineId.get(entry.machineId)?.sharedWithTeam ?? false,
           rows: [row],
         });
       }
@@ -501,6 +538,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
       }))
       .sort((left, right) => left.machineName.localeCompare(right.machineName));
   }, [
+    accessByMachineId,
     accessByProjectKey,
     agentConfigs,
     catalogByKey,
@@ -628,7 +666,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         setErrorByKey((current) => ({ ...current, [key]: 'Workspace is not ready.' }));
         return;
       }
-      const providerKey = getLocalProjectHistoryProviderKey(provider);
+      const providerKey = getLocalProjectHistoryCatalogKey(provider);
       const state = row.historyImports.find((item) => item.providerKey === providerKey);
       if (!state || state.selectedSessionIds.length === 0) return;
       setImportingByKey((current) => ({ ...current, [key]: true }));

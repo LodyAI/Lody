@@ -1,5 +1,8 @@
+import { machinePairCommand } from './machine-pair';
 import { Command } from 'commander';
+import { addDiscoveryOptions, runDiscoveryList, type DiscoveryCommandOptions } from './discovery';
 import {
+  ACP_CAPABILITY_ROW_FAMILIES,
   getMachineFlockAcpCapabilities,
   getMachineFlockDocId,
   getMachineFlockRateLimits,
@@ -25,17 +28,31 @@ import {
 } from '@/lib/command-runtime';
 import { renderTerminalTable } from '@/lib/terminal-table';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
+import type { MachinePresenceView } from '@/lib/loro/doc';
+import { classifyMachinePresence } from './session-machine-presence';
 
-type MachineListOptions = CommonCommandOptions & {
-  onlineOnly?: boolean;
-  includeAcpCapabilities?: boolean;
-  includeAgents?: boolean;
-};
+type MachineListOptions = CommonCommandOptions &
+  DiscoveryCommandOptions & {
+    onlineOnly?: boolean;
+    includeAcpCapabilities?: boolean;
+    includeAgents?: boolean;
+  };
 
 type MachineRateLimits = MachineViewMeta['raceLimits'];
+/**
+ * Machine liveness is THREE-state. Without a joined presence room, a machine lacking a
+ * fresh heartbeat is "unknown", never "offline" (`lib/loro/AGENTS.md`). `online` keeps
+ * its original meaning — KNOWN online — and `onlineStatus` is additive so a `--json`
+ * consumer can tell "we checked and it is down" from "we could not check". Previously
+ * only a stderr warning carried that distinction, so anything parsing stdout recorded
+ * an unreachable presence room as a confident offline.
+ */
+type MachineOnlineStatus = 'online' | 'offline' | 'unknown';
+
 type MachineListEntry = MachineMeta &
   Pick<MachineViewMeta, 'acpCapabilities' | 'raceLimits'> & {
     online: boolean;
+    onlineStatus: MachineOnlineStatus;
     agentConfigs?: AgentConfigMeta[];
   };
 
@@ -72,16 +89,18 @@ export function formatMachineCli(machine: Pick<MachineMeta, 'supportRegistryAgen
   return unique.length > 0 ? unique.join(',') : '-';
 }
 
-function toMachineListEntry(
+export function toMachineListEntry(
   machine: MachineMeta,
-  onlineMachineIds: ReadonlySet<MachineId>
+  presence: MachinePresenceView
 ): MachineListEntry {
   const legacy = machine as MachineLegacyMetaFields;
+  const onlineStatus = classifyMachinePresence(presence, machine.id);
   return {
     ...machine,
     acpCapabilities: legacy.acpCapabilities,
     raceLimits: legacy.raceLimits ?? {},
-    online: onlineMachineIds.has(machine.id),
+    online: onlineStatus === 'online',
+    onlineStatus,
   };
 }
 
@@ -131,7 +150,9 @@ async function mergeMachineFlockJsonState(
 ): Promise<MachineListEntry> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machine.id));
   const rows = readMachineFlockRowsFromFlock(handle.flock, {
-    families: includeAcpCapabilities ? ['acpCapability', 'rateLimit'] : ['rateLimit'],
+    families: includeAcpCapabilities
+      ? [...ACP_CAPABILITY_ROW_FAMILIES, 'rateLimit']
+      : ['rateLimit'],
   });
   const acpCapabilities = includeAcpCapabilities ? getMachineFlockAcpCapabilities(rows) : {};
   const rateLimits = getMachineFlockRateLimits(rows);
@@ -231,7 +252,7 @@ function printHumanMachineList(
         const row = [
           machine.id,
           machine.id === currentMachineId ? `${machine.name} (current)` : machine.name,
-          machine.online ? 'online' : 'offline',
+          machine.onlineStatus,
           formatMachineCli(machine),
         ];
         if (includeAgents) {
@@ -244,17 +265,37 @@ function printHumanMachineList(
 }
 
 export const machineCommand = new Command('machine')
-  .description('Inspect registered machines')
+  .description('Inspect and pair machines')
+  .addCommand(machinePairCommand)
   .addCommand(
-    new Command('list')
+    addDiscoveryOptions(new Command('list'))
       .description('List machines in a workspace')
       .option('--workspace <selector>', 'Target workspace id, slug, or name')
       .option('--online-only', 'Only include machines with a recent heartbeat')
+      .option('--online-status <state>', 'online, offline or unknown')
       .option('--json', 'Print JSON output')
       .option('--include-acp-capabilities', 'Include acpCapabilities in JSON output')
       .option('--include-agents', 'Include agent config summaries per machine')
       .option('--debug', 'Enable debug output')
       .action(async (options: MachineListOptions) => {
+        if (!options.includeAgents && !options.includeAcpCapabilities) {
+          await runDiscoveryList('machine', {
+            ...options,
+            onlineStatus: options.onlineOnly ? 'online' : options.onlineStatus,
+          });
+          return;
+        }
+        if (
+          options.query ||
+          options.cursor ||
+          options.limit ||
+          options.allPages ||
+          options.onlineStatus
+        ) {
+          throw new Error(
+            'Detailed legacy machine output cannot be combined with catalog paging/filter options. Use agent-config list/get for capabilities.'
+          );
+        }
         await runOneShotCommand('machine', options, async () => {
           const auth = getAuthContextOrThrow('machine');
           const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
@@ -262,22 +303,21 @@ export const machineCommand = new Command('machine')
           await withWorkspaceManager(auth, workspace, 'machine', async (manager) => {
             // Online status comes from the ephemeral presence room, not from
             // durable machine meta (whose lastSeen is a legacy registration
-            // timestamp). A null snapshot means presence could not be joined.
-            const onlineMachineIds = await manager.getOnlineMachineIds();
-            if (onlineMachineIds === null) {
+            // timestamp). An unjoined room cannot prove a machine offline.
+            const presence = await manager.getMachinePresenceView();
+            if (!presence.synced) {
               console.error(
-                'Warning: presence room unavailable; machine online status is unknown and shown as offline.'
+                'Warning: presence room not joined; machines without a fresh heartbeat are reported as onlineStatus "unknown".'
               );
             }
-            const onlineIds = onlineMachineIds ?? new Set<MachineId>();
             let machines = sortMachineMetas(
               (await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId)).map(
                 (entry) => entry.meta
               ),
-              onlineIds,
+              presence.online,
               auth.machineId
             )
-              .map((machine) => toMachineListEntry(machine, onlineIds))
+              .map((machine) => toMachineListEntry(machine, presence))
               .filter((machine) => !options.onlineOnly || machine.online);
 
             if (options.includeAgents === true) {

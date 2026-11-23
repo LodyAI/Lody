@@ -1,3 +1,10 @@
+import { assertEncryptedAttachmentReference } from '@lody/shared';
+import {
+  readEncryptedAttachment,
+  encryptedAttachmentPath,
+  getSessionFileDownloadApiPath,
+  type EncryptedAttachment,
+} from '@lody/shared';
 import {
   buildSessionImageApiUrl,
   getSessionImageDownloadApiPath,
@@ -16,6 +23,8 @@ type DownloadSessionImageAsPromptBlockArgs = {
   workspaceId: WorkspaceId;
   sessionId: SessionId;
   imageId: string;
+  encryption?: EncryptedAttachment;
+  attachmentToken?: () => Promise<string>;
   expectedMimeType: string;
   serverBaseUrl: string;
   token: string;
@@ -117,6 +126,38 @@ const readResponseErrorDetail = async (response: Response): Promise<string> => {
   return errorBody ? `: ${errorBody.slice(0, 200)}` : '';
 };
 
+export async function downloadEncryptedSessionImageBytes(
+  args: Pick<
+    DownloadSessionImageAsPromptBlockArgs,
+    'workspaceId' | 'sessionId' | 'imageId' | 'attachmentToken' | 'serverBaseUrl' | 'fetchImpl'
+  > & { encryption: EncryptedAttachment }
+): Promise<{ bytes: Buffer; mimeType: string; sizeBytes: number }> {
+  const fetchImpl = args.fetchImpl ?? globalThis.fetch;
+  assertEncryptedAttachmentReference('image', args.imageId, args.encryption);
+  if (!args.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+  const token = await args.attachmentToken();
+  const parts: Uint8Array[] = [];
+  for await (const bytes of readEncryptedAttachment({
+    ...args,
+    encryption: args.encryption,
+    fetchPart: (fileId) =>
+      fetchImpl(
+        buildSessionImageApiUrl(
+          args.serverBaseUrl,
+          encryptedAttachmentPath(
+            getSessionFileDownloadApiPath(args.workspaceId, args.sessionId, fileId),
+            'image'
+          )
+        ),
+        { headers: { Authorization: `Bearer ${token}` } }
+      ),
+  }))
+    parts.push(bytes);
+  const bytes = Buffer.concat(parts);
+  const mimeType = args.encryption.mimeType;
+  return { bytes, mimeType, sizeBytes: bytes.length };
+}
+
 export async function downloadSessionImageForPrompt(
   args: DownloadSessionImageAsPromptBlockArgs
 ): Promise<DownloadedSessionImagePromptBlock> {
@@ -125,6 +166,20 @@ export async function downloadSessionImageForPrompt(
     throw new Error('Session image download requires fetch');
   }
 
+  if (args.encryption) {
+    const downloaded = await downloadEncryptedSessionImageBytes({
+      ...args,
+      encryption: args.encryption,
+    });
+    return {
+      ...downloaded,
+      block: {
+        type: 'image',
+        mimeType: downloaded.mimeType,
+        data: downloaded.bytes.toString('base64'),
+      },
+    };
+  }
   const sleep = args.sleep ?? defaultSleep;
   const imageUrl = buildSessionImageApiUrl(
     args.serverBaseUrl,

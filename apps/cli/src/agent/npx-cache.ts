@@ -75,6 +75,15 @@ export type ReadyNpxInstallState = Readonly<
   {
     kind: 'ready';
     dirs: NonEmptyReadonlyArray<string>;
+    /**
+     * The installed package version, present only when every ready dir agrees.
+     *
+     * A dist-tag spec (`pkg@alpha`) names the requested install, not the build that
+     * will run, so callers that must name the running build (capability provenance)
+     * read it here. Disagreement means the launch target is ambiguous and the caller
+     * must fall back to the spec instead of asserting a version it cannot observe.
+     */
+    resolvedVersion?: string;
   } & NpxInstallStateBrand
 >;
 
@@ -308,12 +317,21 @@ function createMissingNpxInstallState(): MissingNpxInstallState {
   return brandNpxInstallState({ kind: 'missing' });
 }
 
-function createReadyNpxInstallState(dirs: readonly string[]): ReadyNpxInstallState {
+function createReadyNpxInstallState(
+  dirs: readonly string[],
+  versions: readonly string[] = []
+): ReadyNpxInstallState {
   const nonEmptyDirs = toNonEmptyReadonlyArray([...new Set(dirs)]);
   if (!nonEmptyDirs) {
     throw new Error('ready npx install state requires at least one directory');
   }
-  return brandNpxInstallState({ kind: 'ready', dirs: nonEmptyDirs });
+  const distinctVersions = new Set(versions.filter((version) => version.length > 0));
+  const resolvedVersion = distinctVersions.size === 1 ? [...distinctVersions][0] : undefined;
+  return brandNpxInstallState({
+    kind: 'ready',
+    dirs: nonEmptyDirs,
+    ...(resolvedVersion === undefined ? {} : { resolvedVersion }),
+  });
 }
 
 function createBrokenNpxInstallState(
@@ -438,6 +456,7 @@ export function inspectNpxInstallState(
   const io = options.io ?? defaultIo;
   const roots = options.roots ?? getNpxCacheRoots(options);
   const readyDirs: string[] = [];
+  const readyVersions: string[] = [];
   const problems: NpxInstallProblem[] = [];
 
   for (const dir of listNpxCacheDirs(roots, io)) {
@@ -499,7 +518,14 @@ export function inspectNpxInstallState(
       continue;
     }
 
-    if (packageRead.value.version !== version) {
+    // A dist-tag names the requested install, not the installed semver. Only
+    // accept it when the root metadata identifies this exact requested tag.
+    const isTaggedInstall =
+      rootReferencesPackage &&
+      /^[A-Za-z][A-Za-z0-9._-]*$/.test(version) &&
+      typeof packageRead.value.version === 'string' &&
+      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(packageRead.value.version);
+    if (packageRead.value.version !== version && !isTaggedInstall) {
       if (rootReferencesPackage) {
         problems.push({
           dir,
@@ -536,6 +562,9 @@ export function inspectNpxInstallState(
     }
 
     readyDirs.push(dir);
+    readyVersions.push(
+      typeof packageRead.value.version === 'string' ? packageRead.value.version : ''
+    );
   }
 
   if (problems.length > 0) {
@@ -543,7 +572,7 @@ export function inspectNpxInstallState(
   }
 
   if (readyDirs.length > 0) {
-    return createReadyNpxInstallState(readyDirs);
+    return createReadyNpxInstallState(readyDirs, readyVersions);
   }
 
   return createMissingNpxInstallState();

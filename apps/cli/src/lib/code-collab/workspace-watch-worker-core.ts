@@ -1,4 +1,5 @@
 import { readdirSync, watch, type FSWatcher, type WatchOptions } from 'node:fs';
+import path from 'node:path';
 import {
   normalizeWorkspaceWatchFilename,
   shouldIgnoreWorkspaceWatchFilename,
@@ -113,6 +114,9 @@ export function startWorkspaceWatchWorker(options: {
 
     for (const target of planWorkspaceWatchTargets(root, entries)) {
       const isRootWatch = target.directory === root;
+      const targetPrefix = isRootWatch
+        ? ''
+        : `${path.relative(root, target.directory).split(path.sep).join('/')}/`;
       try {
         const watcher = watchFactory(
           target.directory,
@@ -127,7 +131,14 @@ export function startWorkspaceWatchWorker(options: {
               // the very handle currently dispatching it.
               scheduleReplan(root);
             }
-            options.send({ type: 'code-collab-watch/dirty', generation, root });
+            options.send({
+              type: 'code-collab-watch/dirty',
+              generation,
+              root,
+              ...(normalized === null || normalized === '.'
+                ? {}
+                : { path: `${targetPrefix}${normalized}` }),
+            });
           }
         );
         watcher.on('error', (error: NodeJS.ErrnoException) => failRoot(error));

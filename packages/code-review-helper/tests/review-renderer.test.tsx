@@ -7,44 +7,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReviewRenderer } from '../src/react';
 import type { ReviewBundle } from '../src/types';
 
-vi.mock('@pierre/diffs', () => ({
-  parseDiffFromFile: vi.fn(() => ({
-    name: 'src/a.ts',
-    prevName: undefined,
-    type: 'change',
-    oldLines: ['export const value = 1;\n', ''],
-    newLines: ['export const value = 2;\n', 'export const next = 3;\n', ''],
-    splitLineCount: 1,
-    unifiedLineCount: 2,
-    hunks: [
-      {
-        collapsedBefore: 42,
-        splitLineStart: 42,
-        splitLineCount: 1,
-        unifiedLineStart: 42,
-        unifiedLineCount: 2,
-        additionCount: 1,
-        additionStart: 1,
-        additionLines: 1,
-        deletionCount: 1,
-        deletionStart: 1,
-        deletionLines: 1,
-        hunkContent: [
-          {
-            type: 'change',
-            deletions: ['export const value = 1;\n'],
-            additions: ['export const value = 2;\n'],
-            noEOFCRDeletions: false,
-            noEOFCRAdditions: false,
-          },
-        ],
-        hunkContext: undefined,
-        hunkSpecs: '@@ -1,1 +1,1 @@',
-      },
-    ],
-  })),
-}));
-
 vi.mock('@pierre/diffs/react', () => ({
   FileDiff: ({
     fileDiff,
@@ -53,8 +15,8 @@ vi.mock('@pierre/diffs/react', () => ({
     options,
   }: {
     fileDiff?: {
-      oldLines?: unknown;
-      newLines?: unknown;
+      deletionLines?: unknown;
+      additionLines?: unknown;
       hunks?: Array<{ collapsedBefore?: number }>;
     };
     lineAnnotations?: Array<{ metadata: unknown }>;
@@ -71,8 +33,8 @@ vi.mock('@pierre/diffs/react', () => ({
     <div
       data-testid="mock-file-diff"
       data-diff-style={options?.diffStyle}
-      data-has-old-lines={String(fileDiff?.oldLines !== undefined)}
-      data-has-new-lines={String(fileDiff?.newLines !== undefined)}
+      data-has-old-lines={String(fileDiff?.deletionLines !== undefined)}
+      data-has-new-lines={String(fileDiff?.additionLines !== undefined)}
       data-collapsed-before={String(fileDiff?.hunks?.[0]?.collapsedBefore)}
     >
       <button

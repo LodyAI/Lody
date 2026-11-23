@@ -2,17 +2,74 @@ import { builtinModules } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
-import topLevelAwait from 'vite-plugin-top-level-await';
 import wasm from 'vite-plugin-wasm';
+import { validateNightlyBuildIdentity } from '../electron/nightly-candidate.mjs';
+import { validateNightlyVersion } from '../electron/nightly-version.mjs';
+import desktopPackage from '../electron/package.json';
+import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
+import { externalWasmPlugin } from './scripts/external-wasm.mjs';
+import { inlinePackageManifestPlugin } from './scripts/inline-package-manifest.mjs';
+import { workspaceModuleSideEffects } from './scripts/workspace-module-side-effects.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const platform = process.env.LODY_PLATFORM?.trim() || 'local';
+if (!['local', 'cloud'].includes(platform))
+  throw new Error(`Unsupported LODY_PLATFORM: ${platform}`);
+const cloud = platform === 'cloud';
+const runtimeEnv = cloud ? (process.env.LODY_ENV ?? '') : '';
+if (
+  cloud &&
+  process.env.LODY_RELEASE_CHANNEL === 'nightly' &&
+  (process.env.LODY_CLI_INLINE_DEPLOY_ENV !== '0' || runtimeEnv !== 'production')
+) {
+  throw new Error('Nightly CLI provenance requires the production desktop bundle');
+}
+// Keep CLI-only installs independent of Electron's packaging dependencies.
+function nightlyDesktopBuild() {
+  const identity = {
+    buildNumber: process.env.LODY_NIGHTLY_BUILD_NUMBER,
+    sourceSha: process.env.LODY_SOURCE_SHA,
+    builtAt: process.env.LODY_BUILD_TIMESTAMP,
+    runId: process.env.LODY_BUILD_RUN_ID,
+  };
+  validateNightlyBuildIdentity(identity);
+  const number = Number(identity.buildNumber);
+  return {
+    channel: 'nightly',
+    version: validateNightlyVersion(process.env.LODY_NIGHTLY_VERSION, desktopPackage.version),
+    ...identity,
+    nativeVersion: `${1 + Math.floor(number / 10000)}.${Math.floor(number / 100) % 100}.${number % 100}`,
+  };
+}
+const desktopBuild =
+  cloud && process.env.LODY_RELEASE_CHANNEL === 'nightly' ? nightlyDesktopBuild() : null;
+const desktopBuildJson = desktopBuild ? JSON.stringify(desktopBuild) : null;
+
 const inlineEnv = {
-  // The public bundle is local-only. Deployment endpoints must never be baked
-  // into it from a developer shell or an untracked environment file.
-  'process.env.LODY_PLATFORM': JSON.stringify('local'),
-  'process.env.LODY_ENV': JSON.stringify(''),
+  // Public production builds cannot opt into the E2E clock at runtime.
+  __LODY_E2E_CLOCK_BUILD__: 'false',
+  // The bundle uses loro-crdt's `bundler` entry, whose wasm memory is read
+  // through the shared wasm module (see lib/loro/wasm-runtime-health.ts).
+  __LODY_BUNDLED_LORO_WASM__: 'true',
+  __LODY_E2E_DAEMON_LOSS__: JSON.stringify(
+    process.env.LODY_E2E_DAEMON_LOSS_BUILD === '1' &&
+      !process.env.LODY_ENV &&
+      !process.env.LODY_RELEASE_CHANNEL
+  ),
+  // Local builds ignore deployment endpoints; cloud builds use explicit caller values.
+  'process.env.LODY_PLATFORM': JSON.stringify(platform),
+  'process.env.LODY_ENV': JSON.stringify(runtimeEnv),
+  __LODY_DESKTOP_BUILD_JSON__: JSON.stringify(desktopBuildJson),
+  ...(cloud && process.env.LODY_CLI_INLINE_DEPLOY_ENV !== '0'
+    ? Object.fromEntries(
+        ['LODY_AUTH_URL', 'LODY_AUTH_SITE_URL', 'LODY_SERVER_URL', 'SITE_URL'].map((key) => [
+          `process.env.${key}`,
+          JSON.stringify(process.env[key] ?? ''),
+        ])
+      )
+    : {}),
   'process.env.WS_NO_BUFFER_UTIL': JSON.stringify('true'),
   'process.env.WS_NO_UTF_8_VALIDATE': JSON.stringify('true'),
 };
@@ -23,6 +80,8 @@ const bundledNodeBuiltins = new Set([
 ]);
 
 const explicitlyExternal = new Set([
+  '@loro-dev/roost-node',
+  '@napi-rs/keyring',
   'better-sqlite3',
   '@lydell/node-pty',
   '@sqlite.org/sqlite-wasm',
@@ -36,30 +95,81 @@ const explicitlyExternal = new Set([
   'tinypool',
 ]);
 
-export default defineConfig({
-  plugins: [wasm(), topLevelAwait()],
+// Packaging builds these process entry graphs sequentially so the CLI and ACP
+// adapters do not retain all transformed sources and maps in one Node heap.
+// Other modes (including build:watch) preserve the existing combined graph.
+const runtimeEntries = {
+  index: path.resolve(__dirname, 'src/index.ts'),
+  'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
+  'baguette-worker': path.resolve(__dirname, 'src/ios-simulator/baguette-worker.ts'),
+  'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
+  'file-index-scan-worker': path.resolve(
+    __dirname,
+    'src/lib/code-collab/file-index-scan-worker.ts'
+  ),
+  'turn-diff-store-worker': path.resolve(
+    __dirname,
+    'src/lib/code-collab/turn-diff-store-worker.ts'
+  ),
+  'code-collab-watch-worker': path.resolve(
+    __dirname,
+    'src/lib/code-collab/workspace-watch-worker.ts'
+  ),
+};
+const adapterEntries = {
+  'codex-acp': path.resolve(__dirname, 'src/codex-acp-entry.ts'),
+  'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
+  'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),
+  'devin-acp': path.resolve(__dirname, 'src/devin-acp-entry.ts'),
+  'grok-acp': path.resolve(__dirname, 'src/grok-acp-entry.ts'),
+};
+
+export default defineConfig(({ mode }) => ({
+  // Node 22 supports native top-level await, including wasm initialization.
+  // The browser compatibility transform reparses every emitted chunk into an
+  // additional SWC AST and exhausts the 2 GB packaging heap on this bundle.
+  plugins: [
+    wasm(),
+    externalWasmPlugin(),
+    inlinePackageManifestPlugin(),
+    devinRuntimeContractPlugin(),
+    {
+      name: 'lody-cli-desktop-provenance',
+      generateBundle() {
+        if (desktopBuildJson !== null)
+          this.emitFile({
+            type: 'asset',
+            fileName: 'lody-desktop-build.json',
+            source: `${desktopBuildJson}\n`,
+          });
+      },
+    },
+  ],
+
   define: inlineEnv,
   resolve: {
-    alias: {
+    alias: [
       // loro-crdt >=1.13 routes the `node` condition to its CJS nodejs entry,
       // which locates loro_wasm_bg.wasm via __dirname + fs and cannot be inlined
       // into this ESM bundle (rejected: externalizing — the electron-embedded CLI
       // ships dist/ only, with no node_modules to resolve loro-crdt from).
       // Pin the ESM bundler entry so vite-plugin-wasm embeds the wasm like 1.12.x.
-      'loro-crdt': 'loro-crdt/bundler',
-      '@/pkg': path.resolve(__dirname, 'package.json'),
-      '@': path.resolve(__dirname, 'src'),
-      src: path.resolve(__dirname, 'src'),
-    },
+      // Exact match: `loro-crdt/bundler/*` subpaths must resolve unchanged.
+      { find: /^loro-crdt$/, replacement: 'loro-crdt/bundler' },
+      { find: '@/pkg', replacement: path.resolve(__dirname, 'package.json') },
+      { find: '@', replacement: path.resolve(__dirname, 'src') },
+      { find: 'src', replacement: path.resolve(__dirname, 'src') },
+    ],
   },
   ssr: {
-    external: ['bufferutil', 'utf-8-validate', 'typescript'],
+    external: ['bufferutil', 'utf-8-validate', 'typescript', '@loro-dev/roost-node'],
     noExternal: true,
   },
   build: {
     target: 'node22',
     outDir: './dist',
-    emptyOutDir: true,
+    // The second packaging pass adds flat adapter entries and hashed chunks.
+    emptyOutDir: mode !== 'acp-adapters',
     sourcemap: true,
     minify: false,
     ssr: true,
@@ -69,34 +179,40 @@ export default defineConfig({
       // bundles emitted as siblings so each pool can resolve it next to index.js.
       // turn-diff-store-worker bundles the TypeScript workspace package while keeping
       // better-sqlite3 external, just like the main CLI entry.
-      input: {
-        index: path.resolve(__dirname, 'src/index.ts'),
-        'codex-acp': path.resolve(__dirname, 'src/codex-acp-entry.ts'),
-        'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
-        'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),
-        'grok-acp': path.resolve(__dirname, 'src/grok-acp-entry.ts'),
-        'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
-        'file-index-scan-worker': path.resolve(
-          __dirname,
-          'src/lib/code-collab/file-index-scan-worker.ts'
-        ),
-        'turn-diff-store-worker': path.resolve(
-          __dirname,
-          'src/lib/code-collab/turn-diff-store-worker.ts'
-        ),
-        'code-collab-watch-worker': path.resolve(
-          __dirname,
-          'src/lib/code-collab/workspace-watch-worker.ts'
-        ),
-      },
+      input:
+        mode === 'cli-runtime'
+          ? runtimeEntries
+          : mode === 'acp-adapters'
+            ? adapterEntries
+            : { ...runtimeEntries, ...adapterEntries },
       external: (id) =>
-        id.endsWith('.node') || bundledNodeBuiltins.has(id) || explicitlyExternal.has(id),
+        id.endsWith('.node') ||
+        bundledNodeBuiltins.has(id) ||
+        explicitlyExternal.has(id) ||
+        id.includes('/node_modules/@loro-dev/roost-node/'),
+      treeshake: {
+        moduleSideEffects: workspaceModuleSideEffects(path.resolve(__dirname, '../../packages')),
+      },
       output: {
+        // Keep dependency sourcemaps out of the large CLI entry.
+        manualChunks(id) {
+          if (id === '\0commonjsHelpers.js') return 'commonjs-helpers';
+          const dependency = id.split('/node_modules/').at(-1);
+          if (!id.includes('/node_modules/') || !dependency) return undefined;
+          const segments = dependency.split('/');
+          const name = dependency.startsWith('@') ? segments.slice(0, 2).join('-') : segments[0];
+          return `vendor-${name}`;
+        },
         format: 'es',
         entryFileNames: '[name].js',
-        chunkFileNames: 'chunks/[name]-[hash].js',
+        // Application modules resolve workers relative to import.meta.url. Keep
+        // split application code beside the flat entries, just like index.js.
+        chunkFileNames: ({ name }) =>
+          name.startsWith('vendor-') || name === 'commonjs-helpers'
+            ? 'chunks/[name]-[hash].js'
+            : '[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
       },
     },
   },
-});
+}));

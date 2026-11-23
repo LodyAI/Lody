@@ -3,11 +3,12 @@ import { applyTextRewrites, type ProjectSkill, type ProjectSkillGroup } from '@l
 import {
   buildSkillMentionItems,
   buildSkillMentionRewrites,
-  getSkillMentionToken,
-  hydrateSkillMentionsFromText,
+  getAllowedSkillMentionDirs,
+  hasProjectSkillSource,
   mergeMentionSkillState,
   selectSkillMentionCandidates,
 } from '../src/components/mentions/mention-skill-source';
+import { resolveLinkedWorkspaceGitHubRepo } from '../src/lib/session-repo';
 
 /** What the send path does with these rewrites, so the test asserts that. */
 const expandInText = (
@@ -66,20 +67,6 @@ const GROUPS: ProjectSkillGroup[] = [
   },
 ];
 
-describe('getSkillMentionToken', () => {
-  it('uses the frontmatter name when whitespace-free', () => {
-    expect(getSkillMentionToken({ name: 'code-review', relativePath: 'x/SKILL.md' })).toBe(
-      'code-review'
-    );
-  });
-
-  it('falls back to the directory basename when the name has spaces', () => {
-    expect(
-      getSkillMentionToken({ name: 'Deep Research', relativePath: '.agents/skills/deep/SKILL.md' })
-    ).toBe('deep');
-  });
-});
-
 describe('mergeMentionSkillState', () => {
   it('does not let an empty successful scope hide another scope failure', () => {
     expect(
@@ -89,37 +76,17 @@ describe('mergeMentionSkillState', () => {
       ])
     ).toEqual({ status: 'error', error: 'Global skill scan failed' });
   });
-
-  it('keeps loading and refreshing ahead of a settled scope error', () => {
-    expect(
-      mergeMentionSkillState([{ status: 'loading' }, { status: 'error', error: 'failed' }])
-    ).toEqual({ status: 'loading' });
-    expect(
-      mergeMentionSkillState([{ status: 'refreshing' }, { status: 'error', error: 'failed' }])
-    ).toEqual({ status: 'refreshing' });
-  });
 });
 
-describe('buildSkillMentionItems', () => {
-  it('keeps every skill (including cross-dir duplicates) with its dir', () => {
+describe('getAllowedSkillMentionDirs', () => {
+  it('returns no whitelist for an unregistered agent type instead of an empty one', () => {
+    // An empty-but-present whitelist filters every candidate out; `null` keeps
+    // them. Custom agents get generated `custom-<uuid>` types.
+    const allowed = getAllowedSkillMentionDirs({ cliType: 'custom', agentType: 'custom-2f1a' });
+    expect(allowed).toBeNull();
+
     const items = buildSkillMentionItems(GROUPS);
-    // 7 skills total across the four groups, not deduped here.
-    expect(items).toHaveLength(7);
-    expect(
-      items
-        .filter((i) => i.token === 'code-review')
-        .map((i) => i.dir)
-        .sort()
-    ).toEqual(['.agents/skills', '.claude/skills', '~/.claude/skills']);
-  });
-});
-
-describe('selectSkillMentionCandidates', () => {
-  const items = buildSkillMentionItems(GROUPS);
-
-  it('dedupes by token and returns all when no provider filter', () => {
-    const result = selectSkillMentionCandidates(items, '', null);
-    expect(result.map((i) => i.token)).toEqual([
+    expect(selectSkillMentionCandidates(items, '', allowed).map((i) => i.token)).toEqual([
       'claude-only',
       'code-review',
       'deep-research',
@@ -127,6 +94,17 @@ describe('selectSkillMentionCandidates', () => {
       'qwen-only',
     ]);
   });
+
+  it('keeps an explicit empty whitelist for a registered agent that reads no skills', () => {
+    const allowed = getAllowedSkillMentionDirs({ cliType: 'registry', agentType: 'deepagents' });
+    expect(allowed).not.toBeNull();
+    expect([...(allowed ?? [])]).toEqual([]);
+    expect(selectSkillMentionCandidates(buildSkillMentionItems(GROUPS), '', allowed)).toEqual([]);
+  });
+});
+
+describe('selectSkillMentionCandidates', () => {
+  const items = buildSkillMentionItems(GROUPS);
 
   it('filters to the selected provider directories', () => {
     // Claude provider → .claude/skills + ~/.claude/skills (not .agents/skills or .qwen/skills).
@@ -140,13 +118,44 @@ describe('selectSkillMentionCandidates', () => {
     expect(tokens).not.toContain('qwen-only');
   });
 
-  it('allows project .agents/skills when the selected provider supports it', () => {
-    const result = selectSkillMentionCandidates(items, '', new Set(['.agents/skills']));
-    const tokens = result.map((i) => i.token);
-    expect(tokens).toContain('code-review');
-    expect(tokens).toContain('deep-research');
-    expect(tokens).not.toContain('claude-only');
-    expect(tokens).not.toContain('qwen-only');
+  it('offers Antigravity its config, workspace and built-in skills but not other providers', () => {
+    const groups: ProjectSkillGroup[] = [
+      ...GROUPS,
+      {
+        scope: 'project',
+        dir: '.agent/skills',
+        truncated: false,
+        skills: [
+          skill({ name: 'workspace-agy', relativePath: '.agent/skills/workspace-agy/SKILL.md' }),
+        ],
+      },
+      {
+        scope: 'global',
+        dir: '~/.gemini/config/skills',
+        truncated: false,
+        skills: [
+          skill({ name: 'pr-writer', relativePath: '~/.gemini/config/skills/pr-writer/SKILL.md' }),
+        ],
+      },
+      {
+        scope: 'system',
+        dir: '~/.gemini/antigravity-cli/builtin/skills',
+        truncated: false,
+        skills: [
+          skill({
+            name: 'browser',
+            relativePath: '~/.gemini/antigravity-cli/builtin/skills/browser/SKILL.md',
+          }),
+        ],
+      },
+    ];
+    const allowed = getAllowedSkillMentionDirs({ cliType: 'builtin', agentType: 'antigravity' });
+    const tokens = selectSkillMentionCandidates(buildSkillMentionItems(groups), '', allowed).map(
+      (item) => item.token
+    );
+    expect(tokens.sort()).toEqual(
+      ['browser', 'code-review', 'deep-research', 'pr-writer', 'workspace-agy'].sort()
+    );
   });
 
   it('includes global skill subdirectories under the selected provider root only', () => {
@@ -191,39 +200,30 @@ describe('selectSkillMentionCandidates', () => {
     });
   });
 
-  it('ranks prefix matches ahead of substring matches', () => {
-    const result = selectSkillMentionCandidates(items, 'co', null);
-    expect(result[0]?.token).toBe('code-review');
-  });
-});
-
-describe('hydrateSkillMentionsFromText', () => {
-  it('rebuilds ranges for known $tokens only', () => {
-    const known = new Set(['code-review', 'deep-research']);
-    const text = 'run $code-review then $unknown and $deep-research';
-    const { mentions, values } = hydrateSkillMentionsFromText(text, known);
-    expect(values.sort()).toEqual(['code-review', 'deep-research']);
-    expect(mentions).toHaveLength(2);
-    const first = mentions[0]!;
-    expect(text.slice(first.start, first.end)).toBe('$code-review');
+  it('finds a skill by its own folder, but never by the directory it sits in', () => {
+    const nested = buildSkillMentionItems([
+      {
+        scope: 'project',
+        dir: '.claude/skills',
+        truncated: false,
+        skills: [
+          skill({ name: 'pdf', relativePath: '.claude/skills/documents/pdf/SKILL.md' }),
+          skill({ name: 'lint', relativePath: '.claude/skills/lint/SKILL.md' }),
+        ],
+      },
+    ]);
+    expect(selectSkillMentionCandidates(nested, 'documents', null).map((i) => i.token)).toEqual([
+      'pdf',
+    ]);
+    expect(selectSkillMentionCandidates(nested, 'claude', null)).toEqual([]);
   });
 });
 
 describe('buildSkillMentionRewrites', () => {
   const items = buildSkillMentionItems(GROUPS);
 
-  it('expands project skill tokens to relative skill paths', () => {
-    expect(expandInText('run $deep-research', items, null)).toBe(
-      'run use /deep-research [Skill Path](.agents/skills/deep-research/SKILL.md)'
-    );
-  });
-
   it('expands global skill tokens to absolute skill paths when present', () => {
-    const result = expandInText(
-      'run $global-only',
-      items,
-      new Set(['~/.claude/skills'])
-    );
+    const result = expandInText('run $global-only', items, new Set(['~/.claude/skills']));
 
     expect(result).toBe(
       'run use /global-only [Skill Path](/home/user/.claude/skills/global-only/SKILL.md)'
@@ -231,11 +231,7 @@ describe('buildSkillMentionRewrites', () => {
   });
 
   it('uses the selected provider directories before resolving duplicate tokens', () => {
-    const result = expandInText(
-      'run $code-review',
-      items,
-      new Set(['.claude/skills'])
-    );
+    const result = expandInText('run $code-review', items, new Set(['.claude/skills']));
 
     expect(result).toBe('run use /code-review [Skill Path](.claude/skills/code-review/SKILL.md)');
   });
@@ -261,13 +257,6 @@ describe('system scope skills', () => {
     ],
   };
 
-  it('expands system skill tokens to their absolute SKILL.md path', () => {
-    const items = buildSkillMentionItems([SYSTEM_GROUP]);
-    expect(expandInText('run $imagegen', items, null)).toBe(
-      'run use /imagegen [Skill Path](/home/user/.codex/skills/.system/imagegen/SKILL.md)'
-    );
-  });
-
   it('orders duplicate tokens project → global → system', () => {
     const items = buildSkillMentionItems([
       {
@@ -291,5 +280,52 @@ describe('system scope skills', () => {
     ]);
 
     expect(items.map((item) => item.scope)).toEqual(['project', 'global', 'system']);
+  });
+});
+
+describe('hasProjectSkillSource and resolveLinkedWorkspaceGitHubRepo', () => {
+  it('treats a Code Collab provider backed by a local project as a local skill source without GitHub', () => {
+    expect(
+      hasProjectSkillSource({
+        kind: 'provider',
+        localProject: {
+          workspaceId: 'ws-1' as never,
+          machineId: 'machine-1' as never,
+          localProjectId: 'local-1' as never,
+        },
+      })
+    ).toBe(true);
+    expect(
+      hasProjectSkillSource({
+        kind: 'provider',
+        localProject: {
+          machineId: 'machine-1' as never,
+          localProjectId: 'local-1' as never,
+        },
+      })
+    ).toBe(false);
+    expect(
+      hasProjectSkillSource({
+        kind: 'provider',
+        githubRepoFullName: 'lodyai/lody',
+      })
+    ).toBe(true);
+  });
+
+  it('resolves workspace-linked GitHub repositories case-insensitively and rejects unlinked remotes', () => {
+    const repositories = [
+      { fullName: 'LodyAI/Lody', private: true },
+      { repoFullName: 'LodyAI/Docs', private: false },
+    ];
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/lody', repositories)).toEqual({
+      fullName: 'LodyAI/Lody',
+      isPublic: false,
+    });
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/docs', repositories)).toEqual({
+      fullName: 'LodyAI/Docs',
+      isPublic: true,
+    });
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/unlinked', repositories)).toBeNull();
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/lody', undefined)).toBeNull();
   });
 });

@@ -1,8 +1,15 @@
 import type { SessionId } from '@lody/shared';
-import { createFileRoute } from '@tanstack/react-router';
+import { lazy, Suspense } from 'react';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { AppThemeShell } from '@/components/app-theme-shell';
-import SessionDetail from '@/components/sessions/session-detail';
+
+/* Lazy so the multi-MB session-detail graph is not modulepreloaded at app
+   entry; it loads when this route's component first renders. Only the render
+   is deferred — `validateSearch`/`beforeLoad` below stay synchronous. */
+const SessionDetail = lazy(() => import('@/components/sessions/session-detail'));
 import { useIsMobile } from '@/hooks/use-mobile';
+import { readStoredLastActiveTabState } from '@/lib/session-draft-tabs';
+import { formatSessionTabSearch } from '@/lib/session-tab-url';
 
 export type SessionDetailSearch = {
   tab?: string;
@@ -10,6 +17,8 @@ export type SessionDetailSearch = {
   pr?: number;
   /** When true, opens the full-screen Browser view on mobile. */
   browser?: boolean;
+  /** When true, opens the full-screen iOS Simulator view on mobile. */
+  simulator?: boolean;
 };
 
 const SessionDetailRoute = () => {
@@ -39,12 +48,15 @@ const SessionDetailRoute = () => {
 
   return (
     <AppThemeShell>
-      <SessionDetail
+      <Suspense fallback={null}>
+        <SessionDetail
         sessionId={sessionId as SessionId}
         urlTab={search.tab}
         urlPrNumber={search.pr}
         urlBrowser={search.browser}
-      />
+        urlSimulator={search.simulator}
+        />
+      </Suspense>
     </AppThemeShell>
   );
 };
@@ -74,6 +86,32 @@ export const Route = createFileRoute('/$workspaceName/_auth/sessions/$sessionId'
     tab: typeof search.tab === 'string' ? search.tab : undefined,
     pr: parsePrNumber(search.pr),
     browser: parseBrowserFlag(search.browser),
+    simulator: parseBrowserFlag(search.simulator),
   }),
+  /* Entry-scoped last-active-tab restoration. An ABSENT `?tab` means "no
+     explicit choice" (external entries: sidebar rows, notifications, pasted
+     URLs) and is filled in from the per-session last-active store as ONE
+     replace redirect before anything renders. In-session tab activation
+     always writes an explicit value — the parent tab included
+     (`formatExplicitSessionTabSearch`) — so a user's return to the parent is
+     never re-restored, and the replace keeps tab-less entries out of the
+     history stack. SessionDetail may also replace a positively closed current
+     tab with an open neighbour or `empty`; missing metadata never redirects. */
+  beforeLoad: ({ params, search }) => {
+    if (search.tab !== undefined) {
+      return;
+    }
+    const storedTabId = readStoredLastActiveTabState(params.sessionId as SessionId)?.sessionTabId;
+    const tab = storedTabId ? formatSessionTabSearch(storedTabId, params.sessionId) : undefined;
+    if (tab === undefined) {
+      return;
+    }
+    throw redirect({
+      to: '/$workspaceName/sessions/$sessionId',
+      params,
+      search: { ...search, tab },
+      replace: true,
+    });
+  },
   component: SessionDetailRoute,
 });

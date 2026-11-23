@@ -1,23 +1,54 @@
-import { useState } from 'react';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
+import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
+import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, usePlatform } from '@lody/platform/react';
+import { e2eeWorkspaceCreationFeatureEnabledAtom } from '@/atoms/settings';
+import { useE2eeAccountId } from '@/lib/e2ee-account';
+import {
+  canResumePendingCreation,
+  createPreparedE2eeWorkspace,
+  deleteSavedE2eeCreation,
+  E2eeCreationDeleteError,
+  e2eeCreationAvailability,
+  e2eeCreationIntent,
+  isE2eeCreationNotEnabled,
+  keepSameRequestLists,
+  pendingCreationRemoved,
+  type PendingE2eeRequestLists,
+} from '@/lib/create-e2ee-workspace';
+import {
+  isPendingE2eeCreationStorageKey,
+  listPendingE2eeWorkspacesByArchive,
+  savePendingE2eeWorkspace,
+  setPendingE2eeWorkspaceArchived,
+  type PendingE2eeWorkspace,
+} from '@/lib/e2ee-workspace-storage';
+import { E2eeCreationRequestList } from '@/components/pages/e2ee-creation-request-list';
+import { E2eeWorkspaceCreationOption } from '@/components/pages/e2ee-workspace-creation-option';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Alert } from '@lody/ui/alert';
 import { useOrganization } from '../../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../../hooks/useWorkspaceSlugField';
 import { cn } from '@/lib/utils';
+
+const NO_REQUESTS: PendingE2eeRequestLists = { active: [], archived: [] };
 
 export type MobileCreateWorkspaceSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Fired with the new workspace's slug after a successful create.
-     Caller is expected to navigate the user into the new workspace. */
-  onCreated?: (slug: string) => void;
+     Caller is expected to navigate the user into the new workspace.
+     `workspaceId` is present for an encrypted create so the caller can open
+     its device/ledger control page instead of an ordinary chat route. */
+  onCreated?: (slug: string, workspaceId?: string) => void;
 };
 
 /**
@@ -33,8 +64,7 @@ export type MobileCreateWorkspaceSheetProps = {
  * `mobile-filter-drawer`):
  *   - vaul `Drawer` with `rounded-t-2xl border-border/60`
  *   - Centered title + close button on the right
- *   - `bottom-[var(--native-keyboard-height,0px)]!` so the sheet
- *     rises with the soft keyboard on iOS Capacitor
+ *   - The shared keyboard-aware sheet contract lifts and scrolls the form
  *   - Safe-area aware footer
  *   - Single shared validation hook (`useWorkspaceSlugField`) so
  *     the slug rules / availability check match the desktop dialog
@@ -45,25 +75,199 @@ export function MobileCreateWorkspaceSheet({
   onCreated,
 }: MobileCreateWorkspaceSheetProps) {
   const { t } = useTranslation();
-  const { createOrganization } = useOrganization();
+  const keyboard = useKeyboardAwareSheet({ chromeHeight: '9rem' });
+  const maxHeight = useFoldAwareSheetHeight(92, true);
+  const { createOrganization, deleteOrganization } = useOrganization();
+  const platform = usePlatform();
+  const creationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
+  const accountId = useE2eeAccountId(creationEnabled);
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [encrypted, setEncrypted] = useState(false);
+  const [pendingCreation, setPendingCreation] = useState<PendingE2eeWorkspace | null>(null);
+  const [requestLists, setRequestLists] = useState<PendingE2eeRequestLists>(NO_REQUESTS);
+  const submitInFlight = useRef(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [intentReadFailed, setIntentReadFailed] = useState(false);
+  const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
+  const accountRef = useRef(accountId);
+  accountRef.current = accountId;
+  // Presentation only: keeps the "continuing a saved request" notice steady
+  // through a retry instead of flashing it in for a first-time submit.
+  const [resumeNoticeShown, setResumeNoticeShown] = useState(false);
   const creationAvailability = useCloudQuery(
     cloudOperations.billing.getWorkspaceCreationAvailability
   );
-  const creationAvailable = creationAvailability?.canCreateFree === true;
-  const creationBlocked = creationAvailability?.canCreateFree === false;
+  // A submitted request may already have consumed the free slot and taken the
+  // slug. Resume must not be blocked by checks that only apply to a new workspace.
+  const pendingOwned = canResumePendingCreation(pendingCreation, accountId);
+  const creationState = e2eeCreationAvailability(
+    pendingOwned ? pendingCreation : null,
+    creationAvailability
+  );
+  const resumable = creationState.resumable;
+  const creationAvailable = creationState.canCreate;
+  const creationBlocked = creationState.blocked;
+  const encryptionSupported = Boolean(platform.e2eeWorkspaces?.prepareCreation);
   const { slug, setSlug, resetSlug, canReset, isChecking, isAvailable, error } =
     useWorkspaceSlugField(name);
+  const fieldsDisabled = pendingOwned || creating;
+  const showResumeNotice = pendingOwned && resumeNoticeShown;
+  const formAlert = intentReadFailed ? t('e2ee.create.storageFailed') : createError;
 
+  // Recover the exact saved intent on every open. A lost create response must
+  // retry this requestId, name and handle, never mint a second device identity.
+  useEffect(() => {
+    if (!open || !accountId) {
+      setRequestLists(NO_REQUESTS);
+      return;
+    }
+    try {
+      const lists = listPendingE2eeWorkspacesByArchive(localStorage, accountId);
+      setRequestLists((previous) => keepSameRequestLists(previous, lists));
+      // Archived requests stay saved but are never resumed automatically.
+      const pending = lists.active[0] ?? null;
+      setPendingCreation(pending);
+      setResumeNoticeShown(Boolean(pending));
+      setIntentReadFailed(false);
+      setCreateError(null);
+      if (pending) {
+        setName(pending.name);
+        setSlug(pending.slug);
+        setEncrypted(true);
+      }
+    } catch {
+      setIntentReadFailed(true);
+    }
+  }, [accountId, open, setSlug]);
+
+  const pendingCreationRef = useRef(pendingCreation);
+  pendingCreationRef.current = pendingCreation;
+  // Leave the selected saved request untouched and start an independent new intent.
+  // Never used for a request this sheet is still submitting.
+  const detachFromRequest = useCallback(() => {
+    setPendingCreation(null);
+    setResumeNoticeShown(false);
+    setName('');
+    setEncrypted(false);
+    resetSlug();
+  }, [resetSlug]);
+  const refreshRequestLists = useCallback(
+    (owner: string) => {
+      try {
+        const lists = listPendingE2eeWorkspacesByArchive(localStorage, owner);
+        setRequestLists((previous) => keepSameRequestLists(previous, lists));
+        setIntentReadFailed(false);
+        const selected = pendingCreationRef.current;
+        if (
+          selected &&
+          !submitInFlight.current &&
+          lists.archived.some((request) => request.requestId === selected.requestId)
+        )
+          detachFromRequest();
+        return lists;
+      } catch {
+        setIntentReadFailed(true);
+        return null;
+      }
+    },
+    [detachFromRequest]
+  );
+  useEffect(() => {
+    if (!open || !accountId) return undefined;
+    const refresh = (event: StorageEvent) => {
+      if (isPendingE2eeCreationStorageKey(event.key)) refreshRequestLists(accountId);
+    };
+    window.addEventListener('storage', refresh);
+    return () => window.removeEventListener('storage', refresh);
+  }, [accountId, open, refreshRequestLists]);
+
+  const handleDeleteRequest = async (requestId: string) => {
+    if (!accountId || creating || submitInFlight.current) return;
+    const request = [...requestLists.active, ...requestLists.archived].find(
+      (item) => item.requestId === requestId && item.accountId === accountId
+    );
+    const port = platform.e2eeWorkspaces;
+    if (!request) return;
+    if (!port?.prepareCreation) {
+      setCreateError(t('e2ee.create.deleteFailed'));
+      return;
+    }
+    submitInFlight.current = true;
+    setDeletingRequestId(requestId);
+    setCreateError(null);
+    try {
+      await deleteSavedE2eeCreation({
+        port,
+        storage: localStorage,
+        pending: request,
+        deleteWorkspace: (id) => deleteOrganization(id, { isEncrypted: true }),
+        isCurrent: () => accountRef.current === accountId,
+      });
+      if (accountRef.current !== accountId) return;
+      if (pendingCreationRef.current?.requestId === requestId) detachFromRequest();
+    } catch (err) {
+      if (accountRef.current !== accountId) return;
+      console.error('Failed to delete saved creation request:', err);
+      setCreateError(
+        err instanceof E2eeCreationDeleteError && err.stage === 'delete'
+          ? t('e2ee.create.deleteWorkspaceFailed')
+          : t('e2ee.create.deleteFailed')
+      );
+    } finally {
+      submitInFlight.current = false;
+      setDeletingRequestId(null);
+      if (accountRef.current === accountId) refreshRequestLists(accountId);
+    }
+  };
+
+  const handleArchiveRequest = (requestId: string, archived: boolean) => {
+    if (!accountId || creating || deletingRequestId || submitInFlight.current) return;
+    const request = (archived ? requestLists.active : requestLists.archived).find(
+      (item) => item.requestId === requestId && item.accountId === accountId
+    );
+    if (!request) return;
+    try {
+      setPendingE2eeWorkspaceArchived(localStorage, request, archived);
+      setCreateError(null);
+    } catch (err) {
+      console.error('Failed to change saved creation request archive:', err);
+      setCreateError(t('e2ee.create.archiveFailed'));
+    }
+    refreshRequestLists(accountId);
+  };
+
+  const handleSelectRequest = (requestId: string) => {
+    if (creating || deletingRequestId || submitInFlight.current || !accountId) return;
+    const request = requestLists.active.find(
+      (item) => item.requestId === requestId && item.accountId === accountId
+    );
+    if (!request) return;
+    setPendingCreation(request);
+    setResumeNoticeShown(true);
+    setName(request.name);
+    setSlug(request.slug);
+    setEncrypted(true);
+    setCreateError(null);
+  };
+
+  // Account changes drop only this component's recovered intent. The saved
+  // request stays on disk for that same account's next open.
+  useEffect(() => {
+    if (pendingCreation && (!accountId || pendingCreation.accountId !== accountId))
+      setPendingCreation(null);
+  }, [accountId, pendingCreation]);
+
+  const slugReady = resumable || (!!slug && !error && !isChecking && isAvailable);
   const canSubmit =
     creationAvailable &&
     !!name.trim() &&
-    !!slug &&
-    !error &&
-    !isChecking &&
-    isAvailable &&
-    !creating;
+    slugReady &&
+    !creating &&
+    !deletingRequestId &&
+    !intentReadFailed &&
+    (!pendingCreation || pendingOwned) &&
+    (!encrypted || encryptionSupported);
 
   /* While the create mutation is in flight (and during the close
      animation right after success), suppress the slug field's error
@@ -79,9 +283,12 @@ export function MobileCreateWorkspaceSheet({
      `creating` is true bridges that window cleanly — the canSubmit
      check above already rules out re-submitting from this state, so
      hiding the message has no functional risk. */
-  const showError = !creating && error;
-  const showCheckingHint = !creating && slug && isChecking;
-  const showAvailableHint = !creating && slug && isAvailable && !error;
+  // An untouched form has nothing to correct yet: "required" only appears once
+  // a typed name produced no usable slug (or the slug was cleared).
+  const showError =
+    !creating && !resumable && error && (error !== 'required' || name.trim().length > 0);
+  const showCheckingHint = !creating && !resumable && slug && isChecking;
+  const showAvailableHint = !creating && !resumable && slug && isAvailable && !error;
 
   const handleClose = (next: boolean) => {
     onOpenChange(next);
@@ -90,21 +297,74 @@ export function MobileCreateWorkspaceSheet({
          previously-typed name would still be there. The slug field's
          own reset is wired separately so it follows the name. */
       setName('');
+      setEncrypted(false);
+      setPendingCreation(null);
+      setRequestLists(NO_REQUESTS);
+      setResumeNoticeShown(false);
+      setCreateError(null);
       resetSlug();
     }
   };
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || submitInFlight.current) return;
+    submitInFlight.current = true;
     setCreating(true);
+    setCreateError(null);
+    let submitted: PendingE2eeWorkspace | null = null;
     try {
+      if (encrypted) {
+        const port = platform.e2eeWorkspaces;
+        if (!port?.prepareCreation || !accountId) throw new Error('e2ee_creation_unavailable');
+        const intent = e2eeCreationIntent(
+          accountId,
+          pendingOwned ? pendingCreation : null,
+          name,
+          slug
+        );
+        // Persist before producing a device identity or sending a request. A lost
+        // response retries these exact fields on this device.
+        savePendingE2eeWorkspace(localStorage, intent);
+        submitted = intent;
+        setPendingCreation(intent);
+        refreshRequestLists(accountId);
+        const created = await createPreparedE2eeWorkspace(port, localStorage, intent);
+        handleClose(false);
+        onCreated?.(created.slug, created.workspaceId);
+        return;
+      }
       const created = await createOrganization(name.trim(), slug);
       const targetSlug = created?.slug ?? slug;
       handleClose(false);
       onCreated?.(targetSlug);
     } catch (err) {
+      if (encrypted) {
+        const removed = Boolean(
+          submitted && pendingCreationRemoved(localStorage, accountId, submitted.requestId)
+        );
+        const lists = accountId ? refreshRequestLists(accountId) : null;
+        if (removed) {
+          setPendingCreation(null);
+          setResumeNoticeShown(false);
+        } else if (
+          submitted &&
+          lists?.archived.some((request) => request.requestId === submitted?.requestId)
+        ) {
+          // Archived in another window during this submit: keep it archived and
+          // free this form instead of reviving the request here.
+          detachFromRequest();
+        } else if (!isE2eeCreationNotEnabled(err)) {
+          setResumeNoticeShown(true);
+        }
+        setCreateError(
+          isE2eeCreationNotEnabled(err) ? t('e2ee.create.notEnabled') : t('e2ee.create.failed')
+        );
+      } else {
+        setCreateError(t('organization.createFailed'));
+      }
       console.error('Failed to create organization:', err);
     } finally {
+      submitInFlight.current = false;
       setCreating(false);
     }
   };
@@ -114,15 +374,11 @@ export function MobileCreateWorkspaceSheet({
       <DrawerContent
         className={cn(
           'mobile-create-workspace-sheet',
-          'h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60',
-          'bottom-[var(--native-keyboard-height,0px)]!'
+          'h-auto! rounded-t-2xl border-border/60',
+          keyboard.contentClassName
         )}
         style={{
-          /* Match the new-chat sheet's keyboard-rise easing so the
-             two bottom-sheets feel like the same family when the user
-             toggles between them. */
-          transition: 'bottom 320ms cubic-bezier(0.32, 0.72, 0, 1)',
-          willChange: 'bottom',
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
       >
         <div className="flex max-h-full min-h-0 flex-col">
@@ -152,21 +408,46 @@ export function MobileCreateWorkspaceSheet({
           </DrawerDescription>
 
           {creationAvailable ? (
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+            <div
+              ref={keyboard.scrollRef}
+              style={{ ...keyboard.scrollStyle, paddingBottom: '0.5rem' }}
+              className="min-h-0 flex-1 overflow-y-auto px-4 pb-2"
+            >
               <div className="flex flex-col gap-4">
+                {showResumeNotice && pendingCreation ? (
+                  <Alert.Root tone="neutral" data-testid="mobile-create-workspace-resume">
+                    <Alert.Title>{t('e2ee.create.savedRequest')}</Alert.Title>
+                    <Alert.Description>{t('e2ee.create.pending')}</Alert.Description>
+                  </Alert.Root>
+                ) : null}
+
+                <E2eeCreationRequestList
+                  requests={requestLists.active}
+                  archivedRequests={requestLists.archived}
+                  selectedRequestId={pendingOwned ? (pendingCreation?.requestId ?? null) : null}
+                  disabled={creating}
+                  onSelectRequest={handleSelectRequest}
+                  onArchiveRequest={(requestId) => handleArchiveRequest(requestId, true)}
+                  onRestoreRequest={(requestId) => handleArchiveRequest(requestId, false)}
+                  onDeleteRequest={(requestId) => {
+                    void handleDeleteRequest(requestId);
+                  }}
+                  deletingRequestId={deletingRequestId}
+                />
+
                 <div className="space-y-1.5">
-                  <Label
+                  <UiField.Label
                     htmlFor="mobile-create-workspace-name"
                     className="text-[0.78rem] font-medium"
                   >
                     {t('organization.workspaceName', 'Workspace name')}
-                  </Label>
+                  </UiField.Label>
                   <Input
                     id="mobile-create-workspace-name"
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                     placeholder={t('organization.workspaceNamePlaceholder', 'Enter workspace name')}
-                    disabled={creating}
+                    disabled={fieldsDisabled}
                     autoFocus
                     enterKeyHint="next"
                   />
@@ -174,13 +455,13 @@ export function MobileCreateWorkspaceSheet({
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <Label
+                    <UiField.Label
                       htmlFor="mobile-create-workspace-slug"
                       className="text-[0.78rem] font-medium"
                     >
                       {t('organization.workspaceSlug', 'Workspace slug')}
-                    </Label>
-                    {canReset ? (
+                    </UiField.Label>
+                    {canReset && !fieldsDisabled ? (
                       <button
                         type="button"
                         onClick={resetSlug}
@@ -199,7 +480,7 @@ export function MobileCreateWorkspaceSheet({
                     value={slug}
                     onChange={(event) => setSlug(event.target.value)}
                     placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
-                    disabled={creating}
+                    disabled={fieldsDisabled}
                     className={showError ? 'border-destructive' : ''}
                     autoCapitalize="none"
                     autoCorrect="off"
@@ -226,7 +507,30 @@ export function MobileCreateWorkspaceSheet({
                     </p>
                   ) : null}
                 </div>
+
+                {creationEnabled ? (
+                  /* Same choice and cost disclosure as the desktop create page.
+                     Saved requests and the resume notice are rendered above, so
+                     the option shows neither; a resumed request locks the choice. */
+                  <E2eeWorkspaceCreationOption
+                    selected={encrypted}
+                    supported={encryptionSupported}
+                    pending={false}
+                    disabled={fieldsDisabled || !accountId}
+                    paidRequired={false}
+                    onChange={setEncrypted}
+                    encryptedChoiceTestId="mobile-create-workspace-encrypted"
+                  />
+                ) : null}
               </div>
+            </div>
+          ) : null}
+
+          {formAlert != null ? (
+            <div className="shrink-0 px-4 pb-3">
+              <Alert.Root tone="danger">
+                <Alert.Description>{formAlert}</Alert.Description>
+              </Alert.Root>
             </div>
           ) : null}
 
@@ -244,7 +548,7 @@ export function MobileCreateWorkspaceSheet({
           >
             <Button
               type="button"
-              variant={creationBlocked ? 'default' : 'outline'}
+              variant={creationBlocked ? 'primary' : 'secondary'}
               className="flex-1"
               onClick={() => handleClose(false)}
               disabled={creating}
@@ -258,7 +562,11 @@ export function MobileCreateWorkspaceSheet({
                 onClick={() => void handleSubmit()}
                 disabled={!canSubmit}
               >
-                {creating ? t('common.creating', 'Creating...') : t('common.create', 'Create')}
+                {creating
+                  ? t('common.creating', 'Creating...')
+                  : resumable
+                    ? t('e2ee.create.resume', 'Continue saved creation')
+                    : t('common.create', 'Create')}
               </Button>
             ) : null}
           </div>

@@ -89,21 +89,38 @@ export function createStdoutReadableStream(
   let streamStarted = false;
   let pendingController: ReadableStreamDefaultController<Uint8Array> | null = null;
   let stdoutEnded = false;
+  let controllerClosed = false;
 
-  stdout.on('data', (chunk: Buffer) => {
+  const onData = (chunk: Buffer): void => {
+    if (controllerClosed) return;
     if (streamStarted && pendingController) {
       pendingController.enqueue(chunk);
     } else {
       bufferedChunks.push(chunk);
     }
-  });
+  };
 
-  stdout.on('end', () => {
+  const closeController = (): void => {
+    if (!pendingController || controllerClosed) return;
+    controllerClosed = true;
+    const controller = pendingController;
+    pendingController = null;
+    controller.close();
+  };
+
+  const onEnd = (): void => {
     stdoutEnded = true;
-    if (streamStarted && pendingController) {
-      pendingController.close();
-    }
-  });
+    if (streamStarted) closeController();
+    detach();
+  };
+
+  const detach = (): void => {
+    stdout.removeListener('data', onData);
+    stdout.removeListener('end', onEnd);
+  };
+
+  stdout.on('data', onData);
+  stdout.on('end', onEnd);
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -117,8 +134,17 @@ export function createStdoutReadableStream(
 
       // If stdout already ended before we started, close the controller
       if (stdoutEnded) {
-        controller.close();
+        closeController();
       }
+    },
+    cancel() {
+      // A consumer can cancel before the Node stream emits `end`. Detach so a
+      // later child-process shutdown cannot close or enqueue into an already
+      // cancelled Web Stream controller.
+      controllerClosed = true;
+      pendingController = null;
+      bufferedChunks.length = 0;
+      detach();
     },
   });
 }

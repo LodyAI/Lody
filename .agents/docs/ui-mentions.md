@@ -1,0 +1,256 @@
+# The mention pipeline
+
+Why the mention sources in
+[`packages/components/src/components/mentions`](../../packages/components/src/components/mentions/AGENTS.md)
+are shaped the way they are. The rules live in that `AGENTS.md`; the file index
+lives in its `README.md`.
+
+## One mention, five stages
+
+1. **Trigger and menu.** `@` opens the two-level menu; `$`, `￥`, or `¥` opens skills and `/` or `、`
+   opens commands/shortcuts. The [skill trigger Spec](../../specs/skill-mention-triggers.md)
+   defines canonical insertion and unselected-text behavior. `#` remains hydration-only. `enableAtMentions` decides what `@` can reach, and it
+   gates both trigger registration and whether `<Mention>` mounts at all — a
+   source missing from that list silently degrades the composer to a plain
+   textarea and drops its type.
+2. **Candidates.** Each category builds its own rows; aggregate results are capped.
+   The Role category lists the full readable catalog. A row is a
+   registered collection item that arrow-key movement walks, so an uncapped source
+   degrades navigation, not just render time. Ranking the file index is the
+   expensive one, which is why `getCandidates` must stay lazy and a bare `@` calls
+   none of them.
+3. **Commit.** The candidate's `insertText` is what the user sees in the prompt;
+   the committed _range_ is what carries structured identity (a session id, a Role
+   id) that no text form could.
+4. **Draft persistence and hydration.** Ranges are stored beside the draft, and
+   rebuilding them from text is only a fallback.
+5. **Before send.** One hook rewrites the ranges that need rewriting, and the
+   resulting spans are frozen into the message.
+
+## Scheduled task prompts
+
+`ScheduleMentionForm` connects the shared mention input to `ScheduleForm`'s prompt
+slot. Its sources follow the task's project (or destination chat's project) and
+selected Agent. Saving runs `useMentionPromptExpansion` before handing the prompt
+to the schedule repository, so the stored string contains durable Session links,
+Role instructions and Skill paths instead of display tokens. Reopening shows that
+stored text; schedule documents do not persist composer ranges or transcript spans.
+
+## Menu placement
+
+The main desktop chat composer follows the editor's laid-out caret and
+prefers the space above it. Its height is capped to that upper space while a
+heading and option fit; otherwise it may open below. The dialog composer and
+inline editor follow the caret but prefer below and flip at viewport edges.
+Soft wraps, internal scrolling, and scaled editor containers move these
+popups with the insertion point. The caret is measured from a DOM range on the
+editor and snapped to its line grid; the virtual element retains the editor as
+its observation target so layout shifts also update the menu. All stay within
+the input's usable width and scroll when their contents exceed visible room.
+An explicit `positionAnchor="composer"` caller instead anchors to the whole
+frame and locks its side for the lifetime of the open menu.
+
+Desktop content changes also request positioning in a layout effect. Entering
+`@role:` or filtering rows can change the popup height before resize observation
+arrives; updating with the content commit keeps an upward menu's bottom edge
+at its anchor. Resize observation still handles later layout changes. The
+[position synchronization decision](../notes/implemented/bug-fix/2026-10-08-mention-layout-position-sync.md)
+records the frame-level evidence.
+
+The mobile composer uses a separate docked strip. Its boundary is the whole
+`data-mention-frame` (input, controls, and attachments), so the strip cannot
+cover content above the editor. Its height is limited by the actual room
+above that frame, including the top inset. Inline edit-and-resend opts out of
+the dock and keeps the floating caret menu. The
+[placement Spec](../../specs/composer-mention-menu-placement.md) owns these
+visible guarantees.
+
+Hovering a candidate may show or hide a desktop detail pane. The menu keeps
+the candidate list mounted across that change so its scroll position and
+registered rows survive; only the pane and layout styles change. The
+[scroll continuity decision](../notes/implemented/bug-fix/2026-10-08-mention-detail-scroll-continuity.md)
+records the reproduction and verification.
+
+Row selection saves the editor selection, restores focus and that selection,
+then starts insertion/preparation. WebKit touch taps can blur the editor and
+expose a temporary zero caret during refocus; starting an asynchronous Shortcut
+before that focus cycle lets the empty-query handler cancel it. Preparation keeps
+the menu open for loading and retry feedback. See the
+[touch focus note](../notes/implemented/bug-fix/2026-10-07-shortcut-touch-focus.md).
+
+Committed mentions are atomic caret ranges. Left and Right Arrow cross a mention
+without placing the caret inside it. On macOS, the default Emacs text-navigation
+bindings Control+B and Control+F use that same movement at a mention edge; away
+from mentions, the browser retains its normal shortcut behavior. Other macOS
+Emacs bindings such as Control+A/E and Control+P/N move by line, so this
+character-movement rule leaves them with the browser. See the
+[caret navigation decision](../notes/implemented/bug-fix/2026-10-27-mention-emacs-caret-navigation.md).
+
+The composer input is one Lexical contenteditable
+(`ui/mention/mention-input.tsx`). It edits and paints prose, chips, selection,
+the caret and IME preedit itself, so the caret cannot fall onto a different line
+than the glyphs being edited. That had happened with the previous textarea under
+a character-aligned mirror whenever the two laid out differently, as with a
+scrollbar narrowing only the textarea
+([decision](../notes/implemented/architecture/2026-11-10-composer-lexical-editor.md)).
+A committed mention is an inline decorator node that renders the chip through
+`getMentionChip`. Icons and labels use normal layout; canonical label delimiters
+never occupy invisible character boxes. Chips paint one selected surface while
+text uses the native range selection, and pointer drags or Shift-click do not
+activate their preview. The owner still holds a plain string and UTF-16 ranges;
+`ui/mention/composer-document.ts` converts between that model and the editor's
+single paragraph. Callers read and write text and caret only through
+`ui/mention/composer-input.ts`. A composer without mention sources keeps a plain
+`@lody/ui` textarea, which that API serves too.
+
+## Ranking
+
+Typed `@` searches merge the capped source results into one list. Selectable
+matches come first, Agent Roles take priority, and fuzzy scores order the
+remaining matches across sources. Equal scores retain source order. Each row
+shows its source, with matching category links after the results; source loading
+and error messages remain visible. Bare `@` and namespaced searches retain their
+category navigation and source-specific ordering.
+
+File menus use `useMentionFileSearch`: a Worker owns the file/directory index,
+path metadata, and matching. The registry reads only the bounded current result.
+Opening a file query creates the Worker; leaving file search, closing the menu,
+changing the entry, or unmounting terminates it. One query runs at a time and the
+client retains only the latest pending query. The Worker yields between batches
+so cancellation can interrupt scoring. Entry identity and query revisions prevent
+old results from reaching a new menu; failures remain visible and reopening retries.
+
+The file scorer reuses matrix rows without reconstructing unused match positions.
+A subsequence check rejects impossible matches, and a worst-first heap retains
+only the best 120 candidates. Path ordering, default 60-result limit, lazy directory
+navigation, and VS Code score semantics remain unchanged. Aggregate loading/error
+groups stay visible even before they have candidates. Draft token hydration remains
+a separate synchronous path; this worker does not perform file discovery or I/O.
+
+Issues and PRs rank their own cached slices so one kind cannot starve the other.
+Local projects often carry a GitHub remote URL that has not been linked to the
+current Lody workspace, so callers pass `githubRepoFullName` into `mentionSource`
+only when `getWorkspaceRepositories` confirms the workspace link, and
+`useRepoIssuesAndPRs` treats `repo_not_linked`, `installation_not_found`,
+`repo_not_authorized`, and missing `githubIntegration` capabilities as
+`unavailable` rather than surfacing duplicate alert rows in aggregate `@`
+searches. Non-row list blocks (`groupLabel`, `message`, `notice`, `emptyState`)
+also set `flexShrink: 0` inside the capped menu scroller so multi-line messages
+scroll cleanly instead of compressing over adjacent headings.
+Files, sessions, roles, issues and PRs retain VS Code non-contiguous matching, with
+consecutive, separator, path, case, and camel-case bonuses. Skills keep their
+own ranking. A typed `/` or `、` query ranks Prompt Shortcuts and Agent Commands
+together after each source applies visibility and availability gates. Exact,
+prefix, word-prefix, substring, and subsequence matches precede description-only
+matches; available rows precede disabled exact shortcuts. A bare command trigger
+keeps the two source groups. The
+[command trigger Spec](../../specs/command-mention-triggers.md) owns that intent,
+and the [ranking evaluation](../../packages/components/benchmarks/slash-search/README.md)
+records synthetic quality and timing observations. The
+[file search Spec](../../specs/composer-file-search.md)
+owns responsiveness and freshness intent; the
+[benchmark note](../notes/implemented/bug-fix/2026-09-20-composer-file-search-worker.md)
+records measurements and remaining limits.
+
+## Activation is not revalidation
+
+An aggregate query activates every category, so an unconditional refetch would
+bill a mention aimed somewhere else. The fetch timestamp rides on the cached entry
+(like the file source's `fetchedAt`) so it survives the IndexedDB round trip;
+stored beside the entry instead, every reload would look unfetched and refetch on
+the first `@`.
+
+## Drafts, hydration, and the reasons behind them
+
+A mention that had to be rebuilt from text needed its source loaded, so it spent
+every return looking like plain text — and never came back at all if the source
+never loaded. Hence persistence of the narrow `PersistedMentionRange`: the live
+range carries callbacks, which `JSON.stringify` writes as `{}`.
+
+`mergeHydratedMentions` rejects an _overlapping_ range, not just an exact
+duplicate, because a session and a path are now the same shape: two sources can
+each claim `@fix-ci` at different ends, and only rejecting overlaps keeps the
+restored range authoritative.
+
+`draftKey` exists because a composer that swaps drafts in place cannot otherwise
+tell a swap from a very large edit: the outgoing draft's ranges stay committed and
+land on the incoming text at their old offsets, while hydration — which arms once
+per mount — has already fired, so the incoming draft's mentions never appear.
+
+Hydration latches the first non-empty text rather than the first render's, because
+a persisted draft is not there on mount: `atomWithStorage` initialises with its
+default and reads storage in `onMount`, so latching at mount latches `''` and the
+"only hydrate the text I measured" guard never passes again.
+
+## Sessions
+
+A session mention commits as a plain `@<title-slug>`: the old `session:` marker
+was only ever an anchor for the before-send rewrite, and the user had to read it.
+It is still the only type whose displayed text differs from what the agent
+receives.
+
+Dropping the marker is why hydration has to break a tie:
+`hydrateSessionMentionsFromText` skips any token the file source already knows.
+Paths are the common case, and mistaking one for a session silently turns a file
+reference into a history query, where the reverse only leaves a token unexpanded —
+which the user can see. For the same reason a token with no committed range is
+sent verbatim: a stale token the agent can ignore beats a confidently wrong
+session id.
+
+The slug → id store is synchronous on purpose, since expansion runs on the send
+path and an async store would make that whole path async. Its write is skipped
+when the serialized map is unchanged, because the session list ticks several times
+a second while an agent streams and `setItem` blocks.
+
+`useSessionMentionItems` is a single owner because the composer and
+`useMentionPromptExpansion` are both mounted on a session screen, and deriving
+items separately re-slugged every visible session twice a tick. It reads the
+child-inclusive projection because mentioning is an addressing surface, and
+review/task child sessions are exactly what gets referenced.
+
+The Sessions menu filters that complete list by project before ranking the
+query. Its scope-empty message and "View all projects" action appear only when
+the selected current-project scope has no candidates. If candidates exist but
+the query matches none, the menu shows the localized "Nothing matches" message
+with the query. Scope controls remain available, switching scope retains the
+query and input focus, and clearing the query restores the selected scope's list.
+
+A drop must produce a real range: a token with no range is sent verbatim, so a
+text-only append would look right in the composer and reach the agent as a word.
+The overlay lives on the conversation column rather than inside each keep-alive
+tab page, where hidden panes and draft tabs would make it vanish or stack on the
+wrong surface.
+
+## Agent Roles
+
+Role visibility and selection follow [the Role mention Spec](../../specs/agent-role-mentions.md).
+Every composer, including a Local Project one, can reach all authorized
+machines. The menu keeps readable Roles that are loading or unavailable, with
+an explanation below the name. They follow available matches and cannot be
+selected. Hydration and before-send expansion independently reject those rows,
+so showing a stale Role never creates a new dispatch instruction.
+
+A Role mention borrows the session mention's shape with a different payload. The
+emoji replaces the category glyph because the category header already says these
+are Agent Roles, so a second generic glyph only crowds out the Role's own mark;
+the emoji uses the same layout box as other mention icons. The committed range
+carries only the Role id, and only the composer holds the live catalog, which is why the
+composer wraps the caller's chip resolver.
+
+The transcript freezes the mark with the span so renaming or re-marking a Role
+later cannot repaint history, and painting a bubble never waits on a mutable
+catalog. `MessageTextSpanSchema` is `.strict()`, so a span field missing from
+`sanitizeMessageTextSpans` fails the whole block list and the send path answers a
+real message with "please enter something to discuss" rather than dropping one
+chip.
+
+`agent_role` is the one kind the copy button collapses back to its label: the
+rewritten region is an instruction addressed to this agent and means nothing
+pasted elsewhere, while the chip on screen says `@Reviewer`.
+
+The Role's own pane replaced the neutral detail rows because a Role is one object
+with one reading — which agent, which machine, which values it pins, and its
+instruction — so the neutral rows were a second description that had already
+drifted (printing stored ids raw, labelling the permission mode "Reasoning"). That
+pane is desktop-only: the docked mobile strip is too narrow and has no hover to
+preview with.

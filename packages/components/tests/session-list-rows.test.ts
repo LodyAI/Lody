@@ -1,3 +1,8 @@
+import {
+  getEffectiveSessionActivitySummary as getTaskActivitySummary,
+  mapSessionMetaToTaskListTask,
+} from '../src/components/sessions/session-tasklist-mapping';
+import { getSessionGitHubState } from '../src/lib/session-github-state';
 import { describe, expect, test } from 'vitest';
 
 import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/shared';
@@ -5,11 +10,30 @@ import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/sha
 import {
   buildChildSessionsByParent,
   buildSessionListRows,
-  getEffectiveLatestMessageAt,
+  selectSidebarTaskSessions,
   getEffectiveSessionActivitySummary,
 } from '../src/components/sessions/session-list-rows';
 
 const machineId = 'machine-1' as MachineId;
+
+test('shows unavailable encrypted local-project history as a chat without adding a project or changing ordinary lists', () => {
+  const chat = makeSession({ id: 'chat' });
+  const project = makeSession({
+    id: 'project-history',
+    project: { kind: 'local', localProjectId: 'private-project' as never },
+  });
+  const projects = new Map();
+  const rows = buildSessionListRows(selectSidebarTaskSessions([chat, project], projects, true), {
+    scope: 'team',
+    currentUserId: 'new-member',
+    defaultTitle: 'History',
+  });
+  expect(rows.map((row) => row.sessionId)).toEqual(['chat', 'project-history']);
+  expect(projects.size).toBe(0);
+  expect(selectSidebarTaskSessions([chat, project], projects)).toEqual([chat]);
+  projects.set(`${machineId}:private-project`, {});
+  expect(selectSidebarTaskSessions([chat, project], projects, true)).toEqual([chat]);
+});
 
 function makeSession(overrides: Partial<SessionMeta> & { id: string }): SessionMeta {
   return {
@@ -22,69 +46,6 @@ function makeSession(overrides: Partial<SessionMeta> & { id: string }): SessionM
     ...overrides,
   } as SessionMeta;
 }
-
-describe('getEffectiveLatestMessageAt', () => {
-  test('returns session lastMessageAt when there are no children', () => {
-    const session = makeSession({
-      id: 'parent',
-      lastMessageAt: 1_000,
-    });
-    expect(getEffectiveLatestMessageAt(session, new Map())).toBe(1_000);
-  });
-
-  test('falls back to createdAt when lastMessageAt is missing', () => {
-    const session = makeSession({
-      id: 'parent',
-      createdAt: '2026-05-09T10:00:00.000Z',
-    });
-    const expected = Date.parse('2026-05-09T10:00:00.000Z');
-    expect(getEffectiveLatestMessageAt(session, new Map())).toBe(expected);
-  });
-
-  test('returns the max of the session and its children', () => {
-    const parent = makeSession({ id: 'parent', lastMessageAt: 1_000 });
-    const childA = makeSession({
-      id: 'child-a',
-      parentSessionId: 'parent' as SessionId,
-      lastMessageAt: 5_000,
-    });
-    const childB = makeSession({
-      id: 'child-b',
-      parentSessionId: 'parent' as SessionId,
-      lastMessageAt: 3_000,
-    });
-    const map = buildChildSessionsByParent([parent, childA, childB]);
-    expect(getEffectiveLatestMessageAt(parent, map)).toBe(5_000);
-  });
-
-  test('keeps parent time when no child has a newer message', () => {
-    const parent = makeSession({ id: 'parent', lastMessageAt: 10_000 });
-    const child = makeSession({
-      id: 'child-a',
-      parentSessionId: 'parent' as SessionId,
-      lastMessageAt: 5_000,
-    });
-    const map = buildChildSessionsByParent([parent, child]);
-    expect(getEffectiveLatestMessageAt(parent, map)).toBe(10_000);
-  });
-
-  test('ignores archived children', () => {
-    const parent = makeSession({ id: 'parent', lastMessageAt: 1_000 });
-    const liveChild = makeSession({
-      id: 'child-live',
-      parentSessionId: 'parent' as SessionId,
-      lastMessageAt: 2_000,
-    });
-    const archivedChild = makeSession({
-      id: 'child-archived',
-      parentSessionId: 'parent' as SessionId,
-      lastMessageAt: 9_000,
-      isArchived: true,
-    });
-    const map = buildChildSessionsByParent([parent, liveChild, archivedChild]);
-    expect(getEffectiveLatestMessageAt(parent, map)).toBe(2_000);
-  });
-});
 
 describe('buildSessionListRows child-time aggregation', () => {
   test("parent task's latestMessageAt reflects the most recent child activity", () => {
@@ -128,33 +89,6 @@ describe('buildSessionListRows child-time aggregation', () => {
     );
 
     expect(tasks[0]?.latestMessageAt).toBe(7_000);
-  });
-
-  test('parent task is working when a child has live presence', () => {
-    const parent = makeSession({
-      id: 'parent',
-      title: 'Parent',
-      status: { type: 'idle' },
-    });
-    const child = makeSession({
-      id: 'child',
-      parentSessionId: 'parent' as SessionId,
-      status: { type: 'idle' },
-    });
-    const liveSessionStatuses = new Map<string, SessionStatus>([[child.id, { type: 'running' }]]);
-
-    const tasks = buildSessionListRows(
-      [parent],
-      {
-        scope: 'my',
-        currentUserId: 'user-1',
-        defaultTitle: 'Untitled',
-        liveSessionStatuses,
-      },
-      [parent, child]
-    );
-
-    expect(tasks[0]?.isWorking).toBe(true);
   });
 
   test('does not treat durable running status as working without live presence', () => {
@@ -214,45 +148,6 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
     expect(activity.latestMessageAt).toBe(permissionChild.lastMessageAt);
   });
 
-  test('marks the parent working when a child session has live presence', () => {
-    const parent = makeSession({
-      id: 'parent',
-      status: { type: 'idle' },
-      lastRunningSeen: 1,
-    });
-    const child = makeSession({
-      id: 'child',
-      parentSessionId: 'parent' as SessionId,
-      status: { type: 'idle' },
-    });
-    const map = buildChildSessionsByParent([parent, child]);
-    const liveSessionStatuses = new Map<string, SessionStatus>([[child.id, { type: 'running' }]]);
-
-    expect(getEffectiveSessionActivitySummary(parent, map, liveSessionStatuses).isWorking).toBe(
-      true
-    );
-  });
-
-  test('marks the parent waiting when a child session has live permission presence', () => {
-    const parent = makeSession({
-      id: 'parent',
-      status: { type: 'idle' },
-    });
-    const child = makeSession({
-      id: 'child',
-      parentSessionId: 'parent' as SessionId,
-      status: { type: 'idle' },
-    });
-    const map = buildChildSessionsByParent([parent, child]);
-    const liveSessionStatuses = new Map<string, SessionStatus>([
-      [child.id, { type: 'requestPermission' }],
-    ]);
-
-    expect(
-      getEffectiveSessionActivitySummary(parent, map, liveSessionStatuses).isWaitingPermission
-    ).toBe(true);
-  });
-
   test('ignores archived child status when building the child lookup', () => {
     const now = Date.now();
     const parent = makeSession({
@@ -275,90 +170,90 @@ describe('getEffectiveSessionActivitySummary child-status aggregation', () => {
       isWorking: false,
       isWaitingPermission: false,
       hasUnreadMessages: false,
+      hasFailedTurn: false,
       latestMessageAt: parent.lastMessageAt,
     });
+  });
+
+  test('shows a failed latest turn until a later turn finishes, rolling in child Tabs', () => {
+    const failed = makeSession({
+      id: 'failed',
+      title: 'Failed',
+      lastFailedUserMsgId: 'turn-2',
+      lastHandledUserMsgId: 'turn-2',
+    });
+    // A later turn that succeeded or was canceled moved the handled pointer past the failure.
+    const recovered = makeSession({
+      id: 'recovered',
+      title: 'Recovered',
+      lastFailedUserMsgId: 'turn-2',
+      lastHandledUserMsgId: 'turn-3',
+    });
+    const parent = makeSession({ id: 'parent', title: 'Parent', lastHandledUserMsgId: 'turn-1' });
+    const failedTab = makeSession({
+      id: 'failed-tab',
+      parentSessionId: parent.id,
+      lastFailedUserMsgId: 'tab-turn',
+      lastHandledUserMsgId: 'tab-turn',
+    });
+
+    const rows = buildSessionListRows(
+      [failed, recovered, parent],
+      { scope: 'my', currentUserId: 'user-1', defaultTitle: 'Untitled' },
+      [failed, recovered, parent, failedTab]
+    );
+
+    expect(
+      Object.fromEntries(rows.map((row) => [row.sessionId, Boolean(row.hasFailedTurn)]))
+    ).toEqual({ failed: true, recovered: false, parent: true });
+  });
+});
+
+test('marks only the row whose Auto delivery stopped', () => {
+  const at = { updatedAt: 1, prUrl: 'https://github.com/example/api/pull/7' };
+  const stalled = makeSession({
+    id: 'stalled',
+    autoDelivery: { ...at, state: 'stalled', reason: 'ci_limit' },
+  });
+  const waiting = makeSession({ id: 'waiting', autoDelivery: { ...at, state: 'ci' } });
+  const rows = buildSessionListRows([stalled, waiting], {
+    scope: 'my',
+    currentUserId: 'user-1',
+    defaultTitle: 'Untitled',
+  });
+  expect(Object.fromEntries(rows.map((row) => [row.sessionId, row.deliveryStalled]))).toEqual({
+    stalled: true,
+    waiting: false,
   });
 });
 
 describe('buildSessionListRows repo + PR mapping', () => {
-  test('resolves repoFullName from a github project when legacy repoFullName is absent', () => {
+  test("shows a Project group's default-repository PR, matching the Info Bar", () => {
+    const api = 'https://github.com/example/api/pull/7';
+    const web = 'https://github.com/example/web/pull/9';
     const session = makeSession({
       id: 'session',
-      title: 'GitHub session',
-      project: { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'main' },
+      title: 'Group session',
+      project: { kind: 'github', repoFullName: 'example/api', branch: 'main' },
+      projectRun: { name: 'group', members: {} } as unknown as SessionMeta['projectRun'],
+      pullRequests: [
+        { url: api, status: 'merged' },
+        { url: web, status: 'open' },
+      ],
+      pullRequestState: { [web]: { s: 'f', t: 1 } },
     });
 
-    const tasks = buildSessionListRows([session], {
+    const [row] = buildSessionListRows([session], {
       scope: 'my',
       currentUserId: 'user-1',
       defaultTitle: 'Untitled',
     });
+    const task = mapSessionMetaToTaskListTask(session, 'Untitled');
+    const infoBar = getSessionGitHubState(session);
 
-    expect(tasks[0]?.repoFullName).toBe('loro-dev/lody');
-  });
-
-  test('resolves repoFullName from a local project linked to a GitHub repo', () => {
-    const session = makeSession({
-      id: 'session',
-      title: 'Local session',
-      project: {
-        kind: 'local',
-        localProjectId: 'project-1',
-        githubRepoFullName: 'loro-dev/lody',
-      },
-    });
-
-    const tasks = buildSessionListRows([session], {
-      scope: 'my',
-      currentUserId: 'user-1',
-      defaultTitle: 'Untitled',
-    });
-
-    expect(tasks[0]?.repoFullName).toBe('loro-dev/lody');
-  });
-
-  test('falls back to the legacy repoFullName when there is no project', () => {
-    const session = makeSession({
-      id: 'session',
-      title: 'Legacy session',
-      repoFullName: 'loro-dev/lody',
-    });
-
-    const tasks = buildSessionListRows([session], {
-      scope: 'my',
-      currentUserId: 'user-1',
-      defaultTitle: 'Untitled',
-    });
-
-    expect(tasks[0]?.repoFullName).toBe('loro-dev/lody');
-  });
-
-  test('maps the latest pull request onto the task', () => {
-    const session = makeSession({
-      id: 'session',
-      title: 'PR session',
-      project: { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'main' },
-      pullRequests: [{ url: 'https://github.com/loro-dev/lody/pull/42', status: 'open' }],
-      pullRequestState: {
-        'https://github.com/loro-dev/lody/pull/42': {
-          s: 's',
-          m: 'c',
-          t: 1_752_000_000,
-        },
-      },
-    });
-
-    const tasks = buildSessionListRows([session], {
-      scope: 'my',
-      currentUserId: 'user-1',
-      defaultTitle: 'Untitled',
-    });
-
-    expect(tasks[0]?.prUrl).toBe('https://github.com/loro-dev/lody/pull/42');
-    expect(tasks[0]?.prNumber).toBe(42);
-    expect(tasks[0]?.prStatus).toBe('open');
-    expect(tasks[0]?.prCiState).toBe('s');
-    expect(tasks[0]?.prReadiness).toBe('y');
+    expect(infoBar.latestPr?.url).toBe(api);
+    expect([row?.prUrl, row?.prStatus, row?.prCiState]).toEqual([api, 'merged', null]);
+    expect([task.prUrl, task.prStatus, task.prCiState]).toEqual([api, 'merged', null]);
   });
 
   test('derives no readiness when the PR merge state is not clean', () => {
@@ -389,23 +284,6 @@ describe('buildSessionListRows repo + PR mapping', () => {
 });
 
 describe('buildSessionListRows opened-by provenance', () => {
-  test('carries openedBySessionId onto the row so the sidebar can nest it', () => {
-    const opener = makeSession({ id: 'opener' });
-    const opened = makeSession({
-      id: 'opened',
-      openedBySessionId: 'opener' as SessionId,
-    });
-
-    const rows = buildSessionListRows([opener, opened], {
-      scope: 'my',
-      currentUserId: 'user-1',
-      defaultTitle: 'Untitled',
-    });
-
-    expect(rows.find((row) => row.sessionId === 'opener')?.openedBySessionId).toBeNull();
-    expect(rows.find((row) => row.sessionId === 'opened')?.openedBySessionId).toBe('opener');
-  });
-
   test('a parentSessionId child keeps its own child aggregation and is not confused with an opened session', () => {
     // The sidebar never receives child sessions (they are filtered upstream by
     // `sessionListAtom`), but a child that also carries `openedBySessionId`
@@ -428,4 +306,47 @@ describe('buildSessionListRows opened-by provenance', () => {
     expect(rows[0]?.sessionId).toBe('parent');
     expect(rows[0]?.latestMessageAt).toBe(5_000);
   });
+});
+
+describe.each([getEffectiveSessionActivitySummary, getTaskActivitySummary])(
+  'closed conversation activity',
+  (summarize) => {
+    test('ignores closed output while retaining live status and open child unread', () => {
+      const parent = makeSession({ id: 'parent', isTabClosed: true, lastMessageAt: 100 });
+      const child = makeSession({
+        id: 'child',
+        parentSessionId: parent.id,
+        isTabClosed: true,
+        lastMessageAt: 200,
+      });
+      const children = new Map([[parent.id, [child]]]);
+      const presence = new Map<string, SessionStatus>([[child.id, { type: 'requestPermission' }]]);
+      expect(summarize(parent, children, presence)).toMatchObject({
+        hasUnreadMessages: false,
+        isWorking: true,
+        isWaitingPermission: true,
+        latestMessageAt: 200,
+      });
+      child.isTabClosed = false;
+      expect(summarize(parent, children, presence).hasUnreadMessages).toBe(true);
+      child.lastReadAt = 200;
+      expect(summarize(parent, children, presence).hasUnreadMessages).toBe(false);
+    });
+  }
+);
+
+test('My rows exclude other members even on my machines', () => {
+  const rows = buildSessionListRows(
+    [
+      makeSession({ id: 'assigned', userId: 'me', machineId: 'other' as MachineId }),
+      makeSession({ id: 'transferred', userId: 'colleague' }),
+      makeSession({ id: 'unrelated', userId: 'colleague', machineId: 'other' as MachineId }),
+    ],
+    {
+      scope: 'my',
+      currentUserId: 'me',
+      defaultTitle: 'Chat',
+    }
+  );
+  expect(rows.map((row) => row.sessionId)).toEqual(['assigned']);
 });

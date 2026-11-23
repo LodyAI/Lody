@@ -8,9 +8,70 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./automations": {
+      "types": "./src/automations/index.ts",
+      "import": "./src/automations/index.ts"
+    },
+    "./node/e2ee-clock": "./src/node/e2ee-clock.ts",
+    "./node/e2ee-identity": "./src/node/e2ee-identity.ts",
+    "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
+    "./workspace-streams-persistence": "./src/workspace-streams-persistence.ts",
+    "./workspace-streams-content": "./src/workspace-streams-content.ts",
+    "./notifications": {
+      "types": "./src/notifications/index.ts",
+      "import": "./src/notifications/index.ts"
+    },
+    "./loro-sync-errors": {
+      "types": "./src/loro-sync-errors/index.ts",
+      "import": "./src/loro-sync-errors/index.ts"
+    },
+    "./session-link-export": {
+      "types": "./src/session-link-export.ts",
+      "import": "./src/session-link-export.ts"
+    },
+    "./session-link": {
+      "types": "./src/session-link.ts",
+      "import": "./src/session-link.ts"
+    },
+    "./transient-gateway": {
+      "types": "./src/transient-gateway.ts",
+      "import": "./src/transient-gateway.ts"
+    },
+    "./streams-snapshot-codec": {
+      "types": "./src/streams-snapshot-codec.ts",
+      "import": "./src/streams-snapshot-codec.ts"
+    },
+    "./prompt-shortcuts": {
+      "types": "./src/prompt-shortcuts/index.ts",
+      "import": "./src/prompt-shortcuts/index.ts"
+    },
+    "./prompt-shortcuts/*": {
+      "types": "./src/prompt-shortcuts/*.ts",
+      "import": "./src/prompt-shortcuts/*.ts"
+    },
+    "./status-view": {
+      "types": "./src/status-view/index.ts",
+      "import": "./src/status-view/index.ts"
+    },
+    "./session-sharing": {
+      "types": "./src/session-sharing.ts",
+      "import": "./src/session-sharing.ts"
+    },
+    "./session-share-credentials": {
+      "types": "./src/session-share-credentials.ts",
+      "import": "./src/session-share-credentials.ts"
+    },
+    "./session-share-delivery": {
+      "types": "./src/session-share-delivery.ts",
+      "import": "./src/session-share-delivery.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./acp-startup-budget": {
+      "types": "./src/acp-startup-budget.ts",
+      "import": "./src/acp-startup-budget.ts"
     },
     "./visual-annotation-inspector": {
       "types": "./src/visual-annotation-inspector.ts",
@@ -28,9 +89,20 @@
       "types": "./src/visual-annotation-inspector-global.ts",
       "import": "./src/visual-annotation-inspector-global.ts"
     },
+    "./path-launchers": "./src/path-launchers.ts",
+    "./workspace-bundle-control": {
+      "types": "./src/workspace-bundle-control.ts",
+      "import": "./src/workspace-bundle-control.ts",
+      "default": "./src/workspace-bundle-control.ts"
+    },
     "./electron-ipc": {
       "types": "./src/electron-ipc.ts",
-      "import": "./src/electron-ipc.ts"
+      "import": "./src/electron-ipc.ts",
+      "default": "./src/electron-ipc.ts"
+    },
+    "./devbar": {
+      "types": "./src/devbar.ts",
+      "import": "./src/devbar.ts"
     },
     "./proxy-env": {
       "types": "./src/proxy-env.ts",
@@ -40,6 +112,14 @@
       "types": "./src/browser-url.ts",
       "import": "./src/browser-url.ts"
     },
+    "./schedule-repository": {
+      "types": "./src/schedule-repository.ts",
+      "import": "./src/schedule-repository.ts"
+    },
+    "./session-doc-schemas": {
+      "types": "./src/session-doc-schemas.ts",
+      "import": "./src/session-doc-schemas.ts"
+    },
     "./local-loro-data-plane": {
       "types": "./src/local-loro-data-plane.ts",
       "import": "./src/local-loro-data-plane.ts"
@@ -48,13 +128,21 @@
       "types": "./src/local-loro-data-plane-server.ts",
       "import": "./src/local-loro-data-plane-server.ts"
     },
-    "./local-loro-data-plane-scheduler": {
-      "types": "./src/local-loro-data-plane-scheduler.ts",
-      "import": "./src/local-loro-data-plane-scheduler.ts"
-    },
     "./local-loro-transport": {
       "types": "./src/local-loro-transport.ts",
       "import": "./src/local-loro-transport.ts"
+    },
+    "./image-file-types": {
+      "types": "./src/image-file-types.ts",
+      "import": "./src/image-file-types.ts"
+    },
+    "./file-preview": {
+      "types": "./src/file-preview.ts",
+      "import": "./src/file-preview.ts"
+    },
+    "./local-file-preview": {
+      "types": "./src/local-file-preview.ts",
+      "import": "./src/local-file-preview.ts"
     },
     "./local-machine-rpc": {
       "types": "./src/local-machine-rpc.ts",
@@ -64,6 +152,10 @@
       "types": "./src/message-schemas.ts",
       "import": "./src/message-schemas.ts"
     },
+    "./session-data": {
+      "types": "./src/session-data/index.ts",
+      "import": "./src/session-data/index.ts"
+    },
     "./terminal-protocol": {
       "types": "./src/terminal-protocol.ts",
       "import": "./src/terminal-protocol.ts"
@@ -71,6 +163,10 @@
     "./ids": {
       "types": "./src/ids.ts",
       "import": "./src/ids.ts"
+    },
+    "./bug-report-client-log": {
+      "types": "./src/bug-report-client-log.ts",
+      "import": "./src/bug-report-client-log.ts"
     },
     "./platform-kind": {
       "types": "./src/platform-kind.ts",
@@ -108,6 +204,45 @@
       "types": "./src/node/*.ts",
       "import": "./src/node/*.ts",
       "require": "./src/node/*.cjs"
+    },
+    "./local-loro-writer": {
+      "types": "./src/local-loro-writer/index.ts",
+      "import": "./src/local-loro-writer/index.ts"
+    },
+    "./local-loro-writer/legacy": {
+      "types": "./src/local-loro-writer/legacy.ts",
+      "import": "./src/local-loro-writer/legacy.ts"
+    },
+    "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts",
+    "./e2ee-rpc": "./src/e2ee-rpc.ts",
+    "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts",
+    "./session-mirror": {
+      "types": "./src/session-mirror.ts",
+      "import": "./src/session-mirror.ts"
+    },
+    "./session-control-plane": {
+      "types": "./src/session-control-plane.ts",
+      "import": "./src/session-control-plane.ts"
+    },
+    "./history-writer": {
+      "types": "./src/history-writer.ts",
+      "import": "./src/history-writer.ts"
+    },
+    "./schedule-schema": {
+      "types": "./src/schedule-schema.ts",
+      "import": "./src/schedule-schema.ts"
+    },
+    "./schedule-authorization": {
+      "types": "./src/schedule-authorization.ts",
+      "import": "./src/schedule-authorization.ts"
+    },
+    "./preview-comment-schema": {
+      "types": "./src/preview-comment-schema.ts",
+      "import": "./src/preview-comment-schema.ts"
+    },
+    "./prompt-suggestions": {
+      "types": "./src/prompt-suggestions.ts",
+      "import": "./src/prompt-suggestions.ts"
     }
   },
   "scripts": {
@@ -116,6 +251,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "mdast-util-from-markdown": "^2.0.2",
+    "immer": "^10.2.0",
+    "fzstd": "0.1.1",
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@loro-dev/streams-crdt": "catalog:",
     "acp-extension-dsh": "workspace:*",
@@ -126,18 +264,22 @@
     "loro-mirror": "catalog:",
     "@agentclientprotocol/sdk": "catalog:",
     "acp-extension-core": "workspace:*",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "croner": "10.0.1",
+    "@effect/platform-node-shared": "catalog:"
   },
   "peerDependencies": {
     "loro-crdt": "catalog:",
     "loro-repo": "catalog:"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "esbuild": "0.27.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/dockerode": "^3.3.47",
     "@types/node": "catalog:",
     "loro-repo": "catalog:",
     "typescript": "catalog:",
-    "vitest": "^3.2.4"
+    "vitest": "catalog:"
   }
 }

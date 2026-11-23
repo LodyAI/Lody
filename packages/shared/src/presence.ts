@@ -2,9 +2,24 @@ import { z } from 'zod';
 import type { MachineId, SessionId } from './index';
 import type { SessionStatus } from './schema';
 
+/**
+ * The workspace liveness channel. It is a SHARED, SERIAL delivery budget: one ephemeral
+ * transport per workspace, one update in flight, and a FIFO that neither coalesces nor
+ * prioritizes the machine heartbeat. A writer that outruns the network therefore delays
+ * the heartbeat, whose `updatedAt` is stamped at creation rather than at send, so it can
+ * arrive already past {@link LODY_PRESENCE_TTL_MS} and read as offline while the room
+ * still reports `joined`.
+ *
+ * Publish only small, low-frequency liveness state here. Drive writes from a timer, a
+ * lifecycle transition, or a user navigation — never from a stream/progress/chunk
+ * callback — and keep every field size-bounded below.
+ * Bounds and rationale: `specs/loro-ephemeral-presence-channel.md`.
+ */
 export const LODY_PRESENCE_CHANNEL = 'presence';
 export const LODY_PRESENCE_TTL_MS = 90_000;
 export const LODY_PRESENCE_HEARTBEAT_MS = 30_000;
+/** Upper bound for any free-text presence detail; presence is not a transcript store. */
+export const LODY_PRESENCE_DETAIL_MAX_LENGTH = 280;
 
 export type LodyPresenceInstanceId = string & { __brand: 'LodyPresenceInstanceId' };
 
@@ -43,10 +58,27 @@ export type LodySessionViewingPresenceState = {
   updatedAt: number;
 };
 
+/**
+ * "User U has a focused Lody desktop window" — published only by the Electron
+ * renderer while its window is visible and focused, and only when that desktop's
+ * own setting allows it. A Host that finishes a turn for U skips the mobile push
+ * while a fresh entry exists. Written on focus transitions (debounced) and the
+ * shared 30s heartbeat, actively deleted on blur/hide/teardown; the TTL is only
+ * the crash fallback. One entry per app instance.
+ */
+export type LodyDesktopForegroundPresenceState = {
+  kind: 'desktop-foreground';
+  /** Auth user id of the desktop's signed-in account. */
+  userId: string;
+  instanceId: LodyPresenceInstanceId;
+  updatedAt: number;
+};
+
 export type LodyPresenceState =
   | LodyMachinePresenceState
   | LodySessionPresenceState
-  | LodySessionViewingPresenceState;
+  | LodySessionViewingPresenceState
+  | LodyDesktopForegroundPresenceState;
 export type LodyPresenceStateMap = Record<string, LodyPresenceState>;
 
 // Loro values (docs and the ephemeral store) cannot represent `undefined`:
@@ -70,6 +102,9 @@ const ActiveSessionStatusSchema = z.preprocess(
     z.object({
       type: z.literal('running'),
       activity: z.enum(['image_generation']).optional(),
+      // Optional so an older running parser strips it and keeps `{ type: 'running' }`.
+      // Do not encode this as `activity`: an unknown activity enum drops the entry.
+      phase: z.literal('finalizing').optional(),
     }),
     z.object({
       type: z.literal('requestPermission'),
@@ -77,7 +112,10 @@ const ActiveSessionStatusSchema = z.preprocess(
     z.object({
       type: z.literal('initializing'),
       stage: z.enum(['git-clone', 'managed-runtime', 'acp', 'resuming']).optional(),
-      detail: z.string().optional(),
+      // Presence is a liveness channel, not a data path: every field is size-bounded so
+      // no producer can inflate the presence document. See
+      // specs/loro-ephemeral-presence-channel.md.
+      detail: z.string().max(LODY_PRESENCE_DETAIL_MAX_LENGTH).optional(),
     }),
   ])
 );
@@ -126,10 +164,102 @@ const PresenceSessionViewingStateSchema = z.object({
   updatedAt: z.number().finite(),
 });
 
+const PresenceDesktopForegroundStateSchema = z.object({
+  kind: z.literal('desktop-foreground'),
+  userId: z.string().min(1),
+  instanceId: PresenceInstanceIdSchema,
+  updatedAt: z.number().finite(),
+});
+
 export const LodyPresenceStateSchema = z.discriminatedUnion('kind', [
   PresenceMachineStateSchema,
   PresenceSessionStateSchema,
   PresenceSessionViewingStateSchema,
+  PresenceDesktopForegroundStateSchema,
+]);
+
+// Minimal metadata must not accept arbitrary strings disguised as branded IDs.
+// Route-supplied session IDs require UUIDs; timestamp-shaped text proves no provenance.
+// Only internally generated instance IDs retain the legacy browser fallback.
+const MinimalUuidIdSchema = z.string().length(36).uuid();
+const MinimalBrowserInstanceIdSchema = z
+  .string()
+  .max(30)
+  .regex(/^\d{13}-[0-9a-z]{1,16}$(?![\s\S])/);
+const MinimalSessionIdSchema = MinimalUuidIdSchema.transform((value) => value as SessionId);
+const MinimalInstanceIdSchema = z
+  .union([MinimalUuidIdSchema, MinimalBrowserInstanceIdSchema])
+  .transform((value) => value as LodyPresenceInstanceId);
+// New installations use UUIDs; retained legacy machine identities may be SHA-256 hex.
+const MinimalMachineIdSchema = z
+  .union([
+    MinimalUuidIdSchema,
+    z
+      .string()
+      .length(64)
+      .regex(/^[0-9a-f]{64}$/),
+  ])
+  .transform((value) => value as MachineId);
+// Auth IDs use 32 alphanumerics (or UUID); local identities use local:<32 hex>.
+const MinimalUserIdSchema = z.union([
+  z
+    .string()
+    .length(32)
+    .regex(/^[0-9A-Za-z]{32}$/),
+  MinimalUuidIdSchema,
+  z
+    .string()
+    .length(38)
+    .regex(/^local:[0-9a-f]{32}$/),
+]);
+
+/** Independent allowlist: adding an ordinary detail never widens encrypted-workspace metadata. */
+const MinimalActiveSessionStatusSchema = z.preprocess(
+  omitNullValues,
+  z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('running'),
+      activity: z.enum(['image_generation']).optional(),
+      phase: z.literal('finalizing').optional(),
+    }),
+    z.object({ type: z.literal('requestPermission') }),
+    z.object({
+      type: z.literal('initializing'),
+      stage: z.enum(['git-clone', 'managed-runtime', 'acp', 'resuming']).optional(),
+    }),
+  ])
+);
+
+/** Only IDs, fixed discriminators/enums and timestamps; z.object strips extra fields. */
+export const MinimalLodyPresenceStateSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('machine'),
+    machineId: MinimalMachineIdSchema,
+    instanceId: MinimalInstanceIdSchema,
+    updatedAt: z.number().finite(),
+  }),
+  z.object({
+    kind: z.literal('session'),
+    sessionId: MinimalSessionIdSchema,
+    machineId: MinimalMachineIdSchema,
+    instanceId: MinimalInstanceIdSchema,
+    status: MinimalActiveSessionStatusSchema,
+    updatedAt: z.number().finite(),
+  }),
+  z.object({
+    kind: z.literal('session-viewing'),
+    userId: MinimalUserIdSchema,
+    instanceId: MinimalInstanceIdSchema,
+    sessionId: MinimalSessionIdSchema,
+    since: z.number().finite(),
+    updatedAt: z.number().finite(),
+  }),
+  z.object({
+    kind: z.literal('desktop-foreground'),
+    userId: MinimalUserIdSchema,
+    instanceId: MinimalInstanceIdSchema,
+    updatedAt: z.number().finite(),
+  }),
 ]);
 
 export const getLodyMachinePresenceKey = (
@@ -147,16 +277,25 @@ export const getLodySessionViewingPresenceKey = (
   instanceId: LodyPresenceInstanceId
 ): string => `viewing:${encodeURIComponent(userId)}:${encodeURIComponent(instanceId)}`;
 
+export const getLodyDesktopForegroundPresenceKey = (
+  userId: string,
+  instanceId: LodyPresenceInstanceId
+): string => `desktop:${encodeURIComponent(userId)}:${encodeURIComponent(instanceId)}`;
+
 export const toLodyPresenceStreamUrl = (durableStreamUrl: string): string => {
   const url = new URL(durableStreamUrl);
   url.searchParams.set('ephemeral', LODY_PRESENCE_CHANNEL);
   return url.toString();
 };
 
-export const parseLodyPresenceStates = (states: Record<string, unknown>): LodyPresenceStateMap => {
+export const parseLodyPresenceStates = (
+  states: Record<string, unknown>,
+  options: { minimal?: boolean } = {}
+): LodyPresenceStateMap => {
+  const schema = options.minimal ? MinimalLodyPresenceStateSchema : LodyPresenceStateSchema;
   const parsed: LodyPresenceStateMap = {};
   for (const [key, value] of Object.entries(states)) {
-    const result = LodyPresenceStateSchema.safeParse(value);
+    const result = schema.safeParse(value);
     if (!result.success) continue;
     parsed[key] = result.data;
   }
@@ -241,4 +380,24 @@ export const collectOnlineMachineIdsFromPresence = (
     online.add(state.machineId);
   }
   return online;
+};
+
+/**
+ * Whether any of the given snapshots holds a fresh focused-desktop entry for
+ * `userId`. Absence, staleness and unreadable snapshots all answer false, so a
+ * caller deciding whether to suppress a mobile push falls back to sending it.
+ */
+export const hasFreshDesktopForegroundPresence = (
+  snapshots: Iterable<LodyPresenceStateMap>,
+  userId: string,
+  nowMs: number,
+  ttlMs: number = LODY_PRESENCE_TTL_MS
+): boolean => {
+  for (const states of snapshots) {
+    for (const state of Object.values(states)) {
+      if (state.kind !== 'desktop-foreground' || state.userId !== userId) continue;
+      if (isFreshLodyPresenceState(state, nowMs, ttlMs)) return true;
+    }
+  }
+  return false;
 };

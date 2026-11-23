@@ -1,9 +1,24 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { AvatarEditor } from '@/components/settings/avatar-editor';
+import { AvatarCropDialog } from '@/components/settings/avatar-crop-dialog';
 import { ChangePasswordButton } from '@/components/settings/change-password-button';
 import { LinkedAccountsList } from '@/components/settings/linked-accounts-list';
 
 const noop = async () => {};
+
+const cropDemoFile = () =>
+  new File(
+    [
+      Uint8Array.from(
+        atob(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+        ),
+        (character) => character.charCodeAt(0)
+      ),
+    ],
+    'avatar.png',
+    { type: 'image/png' }
+  );
 
 const mockAccounts = [
   { id: 'acc-1', providerId: 'github', accountId: 'gh-1', createdAt: new Date('2025-01-15') },
@@ -40,6 +55,18 @@ export const UserAvatarWithImage: Story = {
 
 export const WorkspaceAvatar: Story = {
   render: () => <AvatarEditor kind="workspace" name="Acme Corp" onUpload={noop} />,
+};
+
+export const AvatarCropper: Story = {
+  render: () => (
+    <AvatarCropDialog
+      file={cropDemoFile()}
+      kind="user"
+      open
+      onOpenChange={() => {}}
+      onConfirm={async () => true}
+    />
+  ),
 };
 
 export const LinkedAccounts: Story = {

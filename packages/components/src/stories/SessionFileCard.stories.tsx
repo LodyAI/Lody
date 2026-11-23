@@ -1,3 +1,9 @@
+import { localProbeResultAtom } from '@/atoms/local-probe';
+import { Provider, createStore } from 'jotai';
+import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { currentWorkspaceIdAtom } from '@/atoms';
+import { LocalAttachmentCard } from '@/components/ai-gui/view';
+import type { SessionId } from '@lody/shared';
 import type { Meta, StoryObj } from '@storybook/react';
 import { getServerNow, type SessionFilePayload } from '@lody/shared';
 import { SESSION_FILE_RETENTION_MS } from '@/lib/session-file-presentation';
@@ -50,6 +56,33 @@ export const PreviewableMarkdown: Story = {
   render: (args) => wrap(<SessionFileCard {...args} />),
 };
 
+const htmlArgs = {
+  file: baseFile({
+    fileId: 'file-html',
+    fileName: 'lody-one-flyer.html',
+    mimeType: 'text/html',
+    sizeBytes: 16_300,
+    textPreview: true,
+  }),
+  onPreview: () => {},
+  onDownload: () => {},
+};
+
+/**
+ * An HTML attachment's click opens the rendered page, so the card carries a
+ * second action for the source file — the only card variant with two controls.
+ */
+export const PreviewableHtml: Story = {
+  args: htmlArgs,
+  render: (args) => wrap(<SessionFileCard {...args} />),
+};
+
+/** That second action spins on its own while the source download is in flight. */
+export const PreviewableHtmlDownloading: Story = {
+  args: { ...htmlArgs, isDownloading: true },
+  render: (args) => wrap(<SessionFileCard {...args} />),
+};
+
 export const PendingLocalTransport: Story = {
   args: {
     file: baseFile({
@@ -87,7 +120,10 @@ export const Downloading: Story = {
   render: (args) => wrap(<SessionFileCard {...args} />),
 };
 
-/** All the extension-driven icon buckets at a glance. */
+/**
+ * One of each kind of page the sheet draws, and the type label beside the size. A name
+ * with no short extension (`Dockerfile`, `.env`, a five-letter `ipynb`) shows the size alone.
+ */
 export const IconsByExtension: Story = {
   args: { file: baseFile({}) },
   render: () =>
@@ -104,6 +140,8 @@ export const IconsByExtension: Story = {
           { fileName: 'clip.mp4', mimeType: 'video/mp4' },
           { fileName: 'doc.pdf', mimeType: 'application/pdf' },
           { fileName: 'unknown.bin', mimeType: 'application/octet-stream' },
+          { fileName: 'Dockerfile', mimeType: 'text/plain', textPreview: true },
+          { fileName: 'analysis.ipynb', mimeType: 'application/json', textPreview: true },
         ].map((spec, index) => (
           <SessionFileCard
             key={spec.fileName}
@@ -112,6 +150,23 @@ export const IconsByExtension: Story = {
         ))}
       </div>
     ),
+};
+
+/**
+ * A long name and a long status both truncate with an ellipsis (the status keeps a
+ * hover title), and neither pushes the action off the card.
+ */
+export const LongNameAndStatus: Story = {
+  args: {
+    file: baseFile({
+      fileId: 'file-long',
+      fileName: 'a-very-long-generated-file-name-that-keeps-going-for-the-whole-quarter.pdf',
+      transport: 'local',
+      machineId: 'machine-abc',
+    }),
+    pendingMachineName: "Leon's MacBook Pro in the second-floor studio",
+  },
+  render: (args) => wrap(<SessionFileCard {...args} />),
 };
 
 /** Adjacent file blocks aggregate into one list (decision #3). */
@@ -148,4 +203,82 @@ export const AggregatedList: Story = {
         />
       </SessionFileCardList>
     ),
+};
+
+const remoteAttachmentStore = createStore();
+remoteAttachmentStore.set(currentWorkspaceIdAtom, 'attachment-demo' as never);
+remoteAttachmentStore.set(runtimeAtom, {
+  requestFileDownloadChunk: async () => ({ status: 'error', code: 'machine_offline' }),
+} as unknown as WorkspaceRuntime);
+
+/** A second device explicitly downloads; this fixture demonstrates the offline result. */
+export const LocalOnlyAttachment: Story = {
+  args: { file: baseFile({ fileName: '设计说明.pdf' }) },
+  render: () => (
+    <Provider store={remoteAttachmentStore}>
+      {wrap(
+        <LocalAttachmentCard
+          sessionId={'local-preview' as SessionId}
+          attachment={{
+            type: 'local_attachment',
+            machineId: 'original-computer',
+            kind: 'file',
+            path: '/demo/设计说明.pdf',
+            fileName: '设计说明.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 24000,
+          }}
+        />
+      )}
+    </Provider>
+  ),
+};
+
+const localImageStore = createStore();
+localImageStore.set(currentWorkspaceIdAtom, 'attachment-demo' as never);
+localImageStore.set(localProbeResultAtom, { ok: true, machineId: 'original-computer' });
+
+/** The original desktop previews the local image without an upload or a click. */
+export const LocalImageAttachment: Story = {
+  args: { file: baseFile({ fileName: 'screenshot.png' }) },
+  beforeEach: () => {
+    const previous = window.ipc;
+    window.ipc = {
+      ...previous,
+      invoke: async (channel: string) => {
+        if (channel === 'machineRpc.previewFile')
+          return {
+            status: 'resource',
+            kind: 'binary',
+            url:
+              'data:image/svg+xml,' +
+              encodeURIComponent(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320"><rect width="480" height="320" fill="#dbeafe"/><circle cx="240" cy="145" r="70" fill="#3b82f6"/><text x="240" y="265" text-anchor="middle" font-family="sans-serif" font-size="24">Local image preview</text></svg>'
+              ),
+          };
+        throw new Error('Unexpected story IPC');
+      },
+    } as typeof window.ipc;
+    return () => {
+      window.ipc = previous;
+    };
+  },
+  render: () => (
+    <Provider store={localImageStore}>
+      {wrap(
+        <LocalAttachmentCard
+          sessionId={'local-preview' as SessionId}
+          attachment={{
+            type: 'local_attachment',
+            machineId: 'original-computer',
+            kind: 'image',
+            path: '/demo/screenshot.png',
+            fileName: 'screenshot.png',
+            mimeType: 'image/png',
+            sizeBytes: 24000,
+          }}
+        />
+      )}
+    </Provider>
+  ),
 };

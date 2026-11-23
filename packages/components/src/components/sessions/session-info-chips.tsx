@@ -1,17 +1,20 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { toast } from '@/lib/toast';
 import {
   AlarmClock,
   ChevronDown,
   CircleCheck,
   CircleDot,
   CircleMinus,
+  CircleSlash,
   CircleX,
   Clock,
   Folder,
   GitBranch,
   Github,
-  ListTodo,
   Pause,
   Play,
   Target,
@@ -20,36 +23,44 @@ import {
 import { useTranslation } from 'react-i18next';
 import {
   getSessionPullRequestLegacyFields,
+  hasWorkspaceChanges,
   isSessionGoalCleared,
+  isSessionGoalResumable,
   parseGitHubPrNumber,
   sanitizeGoalObjective,
+  type GitHubCheckRun,
   type GitHubMergeMethod,
+  type LineChange,
   type PendingScheduledTask,
   type PrStatus,
   type SessionGoalCommand,
   type SessionGoalMessage,
+  type SessionPullRequestCiState,
   type SessionPullRequestMeta,
+  type SessionPullRequestView,
 } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
-import { formatDurationCompact, type DurationUnitLabels } from '@/lib/format-duration';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
+import { INFO_BAR_PROSE_CLASS, INFO_BAR_TEXT_CLASS } from './info-bar-type';
 import { ClusterChip, StageChip } from './info-chip';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { Popover } from '@lody/ui/popover';
+import { Menu } from '@/ui/menu';
 import { GoalActionButton, formatTokensCompact } from './session-goal-banner';
 import { ScheduledTaskList, useResolvedScheduledTasks } from './scheduled-tasks-panel';
+import { SessionPrIcon } from '@/components/sidebar-row-shared';
 import { PR_STATUS_META } from './pull-request-badge';
 import { useSessionStatusPresentation, type SessionStatusStripState } from './session-status-strip';
-import { PrMergeButton } from './pr-merge-button';
+import { PrMergeButton, PrMergeMethodLabel } from './pr-merge-button';
+import {
+  SessionPullRequestLinksPanel,
+  type SessionPullRequestLinksProps,
+} from './session-pr-links';
 
 /**
  * Shared contract: the bar renders each item either collapsed in the cluster
@@ -60,25 +71,18 @@ export type InfoBarItemMode = { mode: 'cluster'; onPromote: () => void } | { mod
 
 /* ── Status (offline / removed) ──────────────────────────────────────── */
 
-/**
- * The task this session belongs to.
- *
- * Ambient and neutral like the other context chips — a task link is not a status,
- * so it carries no semantic colour. Its one job is being the way back to the task
- * from inside the work.
- */
-export function TaskChip({
+export function ScheduleSourceChip({
   title,
   onOpen,
   ...itemMode
 }: { title: string; onOpen?: (() => void) | undefined } & InfoBarItemMode) {
   const { t } = useTranslation();
-  const label = title.trim() || t('tasks.untitled', 'Untitled task');
+  const label = title.trim() || t('schedules.source', 'Scheduled task');
 
   if (itemMode.mode === 'cluster') {
     return (
       <ClusterChip
-        icon={ListTodo}
+        icon={Clock}
         label={label}
         textClassName="text-muted-foreground"
         onPromote={itemMode.onPromote}
@@ -88,7 +92,7 @@ export function TaskChip({
 
   return (
     <StageChip
-      icon={ListTodo}
+      icon={Clock}
       label={label}
       textClassName="text-muted-foreground"
       summary={label}
@@ -167,16 +171,11 @@ export function GoalChip({
   const showPause =
     goal.status === 'active' && commands?.includes('pause') === true && onGoalCommand != null;
   const showResume =
-    goal.status === 'paused' && commands?.includes('resume') === true && onGoalCommand != null;
-  const showClear =
-    !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
+    isSessionGoalResumable(goal) && commands?.includes('resume') === true && onGoalCommand != null;
+  const showClear = !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
   const showDismiss = isCleared && onDismiss != null;
 
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   const timeUsedMs = Math.max(0, Math.floor((goal.timeUsedSeconds ?? 0) * 1000));
   const timeLabel = timeUsedMs > 0 ? formatDurationCompact(timeUsedMs, durationUnitLabels) : '';
   const tokensUsed = Math.max(0, Math.floor(goal.tokensUsed ?? 0));
@@ -210,19 +209,14 @@ export function GoalChip({
         kind: 'popover',
         ariaLabel: t('sessions.goal.banner.label', 'Goal'),
         content: (
-          <div className="flex flex-col gap-2 p-3 text-xs">
+          <div className={cn('flex flex-col gap-2 p-3', INFO_BAR_TEXT_CLASS)}>
             <div className="flex items-center gap-2">
               <Target className={cn('h-4 w-4 shrink-0', meta.textClassName)} aria-hidden="true" />
-              <span
-                className={cn(
-                  'text-[11px] font-semibold uppercase tracking-wide',
-                  meta.textClassName
-                )}
-              >
+              <span className={cn('font-medium  ', meta.textClassName)}>
                 {t('sessions.goal.banner.label', 'Goal')}
               </span>
               <span className={cn('font-medium', meta.textClassName)}>{statusLabel}</span>
-              <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
                 {timeLabel ? (
                   <span
                     className="inline-flex items-center gap-1 tabular-nums leading-none"
@@ -235,7 +229,12 @@ export function GoalChip({
                 {tokensLabel ? <span className="tabular-nums">{tokensLabel}</span> : null}
               </span>
             </div>
-            <p className="scrollbar-pro max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-snug text-foreground">
+            <p
+              className={cn(
+                'scrollbar-pro max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-foreground',
+                INFO_BAR_PROSE_CLASS
+              )}
+            >
               {objective}
             </p>
             {showPause || showResume || showClear || showDismiss ? (
@@ -273,11 +272,12 @@ export function GoalChip({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
+                    size="small"
+                    icon
                     onClick={() => onDismiss?.(goal)}
                     aria-label={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
                     title={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
-                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                    className="shrink-0"
                   >
                     <X className="h-3.5 w-3.5" aria-hidden="true" />
                   </Button>
@@ -351,7 +351,7 @@ export function ScheduleChip({
         ariaLabel: heading,
         content: (
           <div className="flex flex-col gap-1.5 p-3">
-            <div className="flex items-center gap-1.5 text-xs">
+            <div className={cn('flex items-center gap-1.5', INFO_BAR_TEXT_CLASS)}>
               <AlarmClock className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
               <span className="font-medium text-foreground">{heading}</span>
               <span className="text-muted-foreground">· {summary}</span>
@@ -365,13 +365,6 @@ export function ScheduleChip({
 }
 
 /* ── PR / repo context ───────────────────────────────────────────────── */
-
-const PR_STATUS_TEXT: Record<PrStatus, string> = {
-  open: 'text-github-open',
-  merged: 'text-github-merged',
-  closed: 'text-github-closed',
-  draft: 'text-github-draft',
-};
 
 /**
  * The session's work context. Cluster = the PR status icon + "#1234" (the
@@ -426,24 +419,34 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
     );
   }
 
-  const standardOverflowActions = overflowActions.filter(
-    (action): action is ContextChipStandardAction => action.kind !== 'merge'
-  );
-
   return (
-    <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-foreground/[0.08] bg-foreground/[0.03] dark:border-transparent dark:bg-muted-foreground/[0.08]">
+    <div className="flex min-w-12 shrink-[8] items-center overflow-hidden rounded-md bg-foreground/[0.05] dark:bg-muted-foreground/[0.08]">
       <button
         type="button"
         onClick={primaryAction.onClick}
         disabled={primaryAction.disabled}
         title={primaryAction.label}
-        className="flex shrink-0 select-none items-center px-1.5 py-0.5 text-xs font-medium text-muted-foreground outline-none transition-colors enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+        className={cn(
+          'flex min-w-0 shrink select-none items-center px-1.5 py-0.5 font-medium text-muted-foreground outline-none transition-colors enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]',
+          INFO_BAR_TEXT_CLASS
+        )}
       >
         <span className="truncate">{primaryAction.label}</span>
       </button>
-      {standardOverflowActions.length > 0 ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+      {overflowActions.length > 0 ? (
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <button
+                type="button"
+                aria-label={t('sessions.moreActions', 'More actions')}
+                title={t('sessions.moreActions', 'More actions')}
+                className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+              >
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            }
+          >
             <button
               type="button"
               aria-label={t('sessions.moreActions', 'More actions')}
@@ -452,19 +455,34 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
             >
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="end" sideOffset={6}>
-            {standardOverflowActions.map((action) => (
-              <DropdownMenuItem
-                key={action.id}
-                disabled={action.disabled}
-                onSelect={action.onClick}
-              >
-                {action.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </Menu.Trigger>
+          <Menu.Content side="top" align="end" sideOffset={6}>
+            {overflowActions.map((action) =>
+              // Merge can be demoted out of the primary slot (unpublished work
+              // outranks it) and must stay reachable rather than silently vanish.
+              // Here it collapses to one item performing the already-selected
+              // method; picking a different method remains the split button's
+              // job, which is back as soon as merge leads again.
+              action.kind === 'merge' ? (
+                <Menu.Item
+                  key={action.id}
+                  disabled={action.disabled || action.isMerging}
+                  onClick={() => void action.onMerge(action.method)}
+                >
+                  {action.isMerging ? (
+                    t('sessions.prTab.merging', 'Merging…')
+                  ) : (
+                    <PrMergeMethodLabel method={action.method} />
+                  )}
+                </Menu.Item>
+              ) : (
+                <Menu.Item key={action.id} disabled={action.disabled} onClick={action.onClick}>
+                  {action.label}
+                </Menu.Item>
+              )
+            )}
+          </Menu.Content>
+        </Menu.Root>
       ) : null}
     </div>
   );
@@ -516,36 +534,38 @@ function LocationControl({
   const glyph = <Icon className={cn('h-3.5 w-3.5 shrink-0', className)} />;
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          {canCopy ? (
-            <button
-              type="button"
-              onClick={handleCopy}
-              aria-label={label}
-              // -mr-1 cancels the stage's icon→summary gap so the glyph sits
-              // close to the repo/branch text (a lone icon otherwise floats).
-              className="-mr-1 flex h-6 shrink-0 select-none items-center rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
-            >
-              {glyph}
-            </button>
-          ) : (
-            <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
-              {glyph}
-            </span>
-          )}
-        </TooltipTrigger>
-        <TooltipContent side="top">
+    <Tooltip.Provider delay={300}>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          render={
+            canCopy ? (
+              <button
+                type="button"
+                onClick={handleCopy}
+                aria-label={label}
+                // -mr-1 cancels the stage's icon→summary gap so the glyph sits
+                // close to the repo/branch text (a lone icon otherwise floats).
+                className="-mr-1 flex h-6 shrink-0 select-none items-center rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
+              >
+                {glyph}
+              </button>
+            ) : (
+              <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
+                {glyph}
+              </span>
+            )
+          }
+        />
+        <Tooltip.Content side="top">
           <span className="font-medium text-foreground">{label}</span>
           {canCopy ? (
             <span className="ml-1.5 text-muted-foreground">
               {t('sessions.infoBar.copyPathHint', 'click to copy path')}
             </span>
           ) : null}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+        </Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }
 
@@ -555,11 +575,15 @@ export function ContextChip({
   workspaceLocation,
   pr,
   onOpenPr,
+  prHistory,
+  onOpenHistoryPr,
+  prLinks,
   actions,
   onOpenAllChanges,
   diffStat,
   prCiRuns,
   onOpenPrCiRun,
+  prCiState,
   ...itemMode
 }: {
   projectName?: string | null;
@@ -571,16 +595,27 @@ export function ContextChip({
   workspaceLocation?: { kind: WorkspaceLocationKind; path?: string | null } | null;
   pr?: SessionPullRequestMeta | null;
   onOpenPr?: () => void;
+  /** Every PR of this context, `pr` first (see `resolveSessionPullRequestHistory`).
+   *  With more than one, the PR marker opens this list instead of `pr` directly. */
+  prHistory?: readonly SessionPullRequestView[];
+  /** Open an older PR from the history list; the first entry uses `onOpenPr`. */
+  onOpenHistoryPr?: (view: SessionPullRequestView) => void;
+  /** Linked pull requests of the Session. When set, the PR marker opens this
+   *  list (link, unlink, open) instead of `prHistory`. */
+  prLinks?: SessionPullRequestLinksProps;
   /** Agent-driven PR/worktree actions pinned after the context summary. */
   actions?: readonly ContextChipAction[];
   /** Open the complete working-tree diff. */
   onOpenAllChanges?: () => void;
-  diffStat?: { add: number; del: number } | null;
+  diffStat?: LineChange | null;
   prCiRuns?: readonly PrCiRun[];
   onOpenPrCiRun?: (run: PrCiRun) => void;
+  /** CI verdict from session metadata, the same value the sidebar shows. Live
+   *  runs only list the checks; they never change this summary. */
+  prCiState?: SessionPullRequestCiState | null;
 } & InfoBarItemMode) {
   const { t } = useTranslation();
-  const hasDiff = diffStat != null && diffStat.add + diffStat.del > 0;
+  const hasDiff = hasWorkspaceChanges(diffStat);
   const trimmedBranch = branch?.trim() || '';
   if (!pr && !projectName && !trimmedBranch && !hasDiff && !actions?.length) return null;
 
@@ -604,9 +639,8 @@ export function ContextChip({
   // cluster stays uniform-width (the "#1234" label lived only here and caused
   // the layout jump on hand-off).
   const StatusIcon = statusMeta?.icon ?? LocationIcon;
-  const statusText = status ? PR_STATUS_TEXT[status] : '';
   const prNumber = pr
-    ? (getSessionPullRequestLegacyFields(pr).number ?? parseGitHubPrNumber(pr.url))
+    ? (parseGitHubPrNumber(pr.url) ?? getSessionPullRequestLegacyFields(pr).number)
     : null;
   const value = pr ? (prNumber ? `#${prNumber}` : 'PR') : undefined;
   const label = pr
@@ -627,29 +661,35 @@ export function ContextChip({
     });
   };
 
+  const prMarker = (
+    <>
+      <SessionPrIcon prStatus={status ?? 'open'} prCiState={prCiState} />
+      {value ? <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span> : null}
+    </>
+  );
   const prControl = pr ? (
-    onOpenPr ? (
+    prLinks ? (
+      <LinkedPrControl links={prLinks}>{prMarker}</LinkedPrControl>
+    ) : prHistory && prHistory.length > 1 ? (
+      <PrHistoryControl history={prHistory} onOpenCurrent={onOpenPr} onOpenOlder={onOpenHistoryPr}>
+        {prMarker}
+      </PrHistoryControl>
+    ) : onOpenPr ? (
       <button
         type="button"
         onClick={onOpenPr}
         aria-label={t('sessions.pr.openTab', 'Open pull request')}
         title={t('sessions.pr.openTab', 'Open pull request')}
         className={cn(
-          'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs font-semibold transition-colors hover:bg-muted-foreground/10',
-          statusText
+          'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+          INFO_BAR_TEXT_CLASS
         )}
       >
-        <StatusIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        {value ? (
-          <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
-        ) : null}
+        {prMarker}
       </button>
     ) : (
-      <span className={cn('flex h-6 shrink-0 items-center gap-1 px-1 font-semibold', statusText)}>
-        <StatusIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        {value ? (
-          <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
-        ) : null}
+      <span className="flex h-6 shrink-0 items-center gap-1 px-1 font-medium text-muted-foreground">
+        {prMarker}
       </span>
     )
   ) : undefined;
@@ -665,26 +705,50 @@ export function ContextChip({
           onClick={handleCopyBranch}
           aria-label={`${copyBranchLabel}: ${trimmedBranch}`}
           title={copyBranchLabel}
-          className="-mx-1 flex h-6 min-w-0 shrink items-center rounded-md px-1 text-foreground/85 transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
+          className="-mx-1 flex h-6 min-w-0 shrink items-center rounded-md px-1 text-reading transition-colors hover:bg-muted-foreground/10"
         >
           <span className="truncate">{trimmedBranch}</span>
         </button>
       ) : null}
-      {hasDiff ? (
-        <button
-          type="button"
-          onClick={onOpenAllChanges}
-          disabled={!onOpenAllChanges}
-          aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
-          title={t('sessions.detailTabs.allChanges', 'All Changes')}
-          className="-mx-1 flex h-6 shrink-0 items-center gap-1 rounded-md px-1 tabular-nums transition-colors enabled:hover:bg-muted-foreground/10 disabled:pointer-events-none"
-        >
-          <span className="text-code-added">+{diffStat.add}</span>
-          <span className="text-code-removed">−{diffStat.del}</span>
-        </button>
-      ) : null}
     </span>
   );
+
+  // The line totals sit on the right edge in their own tinted chip, colored
+  // like GitHub's (the PR's green and red), apart from the repo/branch text.
+  // Under squeeze the action label truncates first; the totals clip last,
+  // inside their own chip rather than past the bar.
+  const diffChip =
+    hasDiff && diffStat ? (
+      <button
+        type="button"
+        onClick={onOpenAllChanges}
+        disabled={!onOpenAllChanges}
+        aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
+        title={t('sessions.detailTabs.allChanges', 'All Changes')}
+        className={cn(
+          'flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none',
+          INFO_BAR_TEXT_CLASS
+        )}
+      >
+        {diffStat.add + diffStat.del > 0 ? (
+          <>
+            <span className="text-github-addition">+{diffStat.add}</span>
+            <span className="text-github-deletion">−{diffStat.del}</span>
+          </>
+        ) : (
+          <span>
+            {t('sessions.fileProvider.fileCount', '{{count}} files', { count: diffStat.files })}
+          </span>
+        )}
+      </button>
+    ) : null;
+  const trailing =
+    diffChip || actions?.length ? (
+      <>
+        {diffChip}
+        {actions?.length ? <ContextChipActions actions={actions} /> : null}
+      </>
+    ) : undefined;
 
   const locationControl = workspaceLocation ? (
     <LocationControl kind={workspaceLocation.kind} path={workspaceLocation.path} />
@@ -706,20 +770,213 @@ export function ContextChip({
             {/* CI pill stays adjacent to the PR number; the location control
                 trails it, sitting right before the repo/branch summary. */}
             <span className="hidden @[420px]:contents">
-              <PrCiPill runs={prCiRuns} onOpenRun={onOpenPrCiRun} />
+              <PrCiPill runs={prCiRuns} state={prCiState} onOpenRun={onOpenPrCiRun} />
             </span>
             {locationControl}
           </>
         ) : undefined
       }
-      trailing={actions?.length ? <ContextChipActions actions={actions} /> : undefined}
+      trailing={trailing}
     />
+  );
+}
+
+const prHistoryStyles = stylex.create({
+  header: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: space[2],
+    padding: `${space[2]} ${space[2]} ${space[1]}`,
+    fontSize: text.footnoteSize,
+  },
+  title: { color: colors.label, fontWeight: 500 },
+  count: { color: colors.secondaryLabel },
+  list: { maxHeight: 280, overflowY: 'auto', padding: space[1], margin: 0, listStyle: 'none' },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: '100%',
+    minHeight: '28px',
+    paddingInline: space[1.5],
+    borderWidth: 0,
+    borderRadius: '6px',
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    color: 'inherit',
+    font: 'inherit',
+    fontSize: text.footnoteSize,
+    textAlign: 'left',
+    cursor: 'pointer',
+  },
+  rowStatic: { cursor: 'default', backgroundColor: 'transparent' },
+  number: { flex: 1, color: colors.label, fontVariantNumeric: 'tabular-nums' },
+});
+
+/**
+ * The context stage's PR marker when the conversation has created more than
+ * one PR. The marker still shows the current PR; one click lists every PR so
+ * an earlier one is never lost when a newer one takes the stage.
+ */
+function PrHistoryControl({
+  history,
+  onOpenCurrent,
+  onOpenOlder,
+  children,
+}: {
+  history: readonly SessionPullRequestView[];
+  onOpenCurrent?: () => void;
+  onOpenOlder?: (view: SessionPullRequestView) => void;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const label = t('sessions.pr.history', 'Pull requests ({{count}})', { count: history.length });
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            title={label}
+            className={cn(
+              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+              INFO_BAR_TEXT_CLASS,
+              open && 'bg-muted-foreground/10'
+            )}
+          >
+            {children}
+            <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+          </button>
+        }
+      />
+      <Popover.Content
+        side="top"
+        align="start"
+        sideOffset={8}
+        aria-label={label}
+        className="w-max max-w-[min(20rem,90vw)] border-border/60 p-0 shadow-xl"
+      >
+        {/* One child: the popup surface spaces its direct children apart. */}
+        <div>
+          <div {...stylex.props(prHistoryStyles.header)}>
+            <span {...stylex.props(prHistoryStyles.title)}>
+              {t('sessions.pr.historyTitle', 'Pull requests')}
+            </span>
+            <span {...stylex.props(prHistoryStyles.count)}>{history.length}</span>
+          </div>
+          <ul {...stylex.props(prHistoryStyles.list)}>
+            {history.map((view, index) => {
+              const isCurrent = index === 0;
+              const openPr = isCurrent
+                ? onOpenCurrent
+                : onOpenOlder
+                  ? () => onOpenOlder(view)
+                  : undefined;
+              const content = (
+                <>
+                  <SessionPrIcon prStatus={view.status} prCiState={view.ci} />
+                  <span {...stylex.props(prHistoryStyles.number)}>
+                    {view.number != null ? `#${view.number}` : 'PR'}
+                  </span>
+                  {isCurrent ? <Badge>{t('sessions.pr.historyCurrent', 'Current')}</Badge> : null}
+                </>
+              );
+              return (
+                <li key={view.url}>
+                  {openPr ? (
+                    <button
+                      type="button"
+                      title={view.url}
+                      aria-current={isCurrent ? 'true' : undefined}
+                      onClick={() => {
+                        setOpen(false);
+                        openPr();
+                      }}
+                      {...stylex.props(prHistoryStyles.row)}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <span {...stylex.props(prHistoryStyles.row, prHistoryStyles.rowStatic)}>
+                      {content}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+
+/**
+ * The PR marker of a Session whose links are manageable: one click lists every
+ * pull request the Session holds (primary first, any repository), with Unlink
+ * on each row and a paste field to link another.
+ */
+function LinkedPrControl({
+  links,
+  children,
+}: {
+  links: SessionPullRequestLinksProps;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const label = t('sessions.prLinks.title', 'Linked pull requests');
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            title={label}
+            className={cn(
+              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+              INFO_BAR_TEXT_CLASS,
+              open && 'bg-muted-foreground/10'
+            )}
+          >
+            {children}
+            {links.items.length > 1 ? (
+              <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+            ) : null}
+          </button>
+        }
+      />
+      <Popover.Content
+        side="top"
+        align="start"
+        sideOffset={8}
+        aria-label={label}
+        className="w-[min(22rem,90vw)] border-border/60 p-0 shadow-xl"
+      >
+        <SessionPullRequestLinksPanel
+          {...links}
+          onOpen={(item) => {
+            setOpen(false);
+            links.onOpen?.(item);
+          }}
+        />
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 
 /* ── PR CI checks ────────────────────────────────────────────────────── */
 
-export type PrCiRunStatus = 'success' | 'failure' | 'running' | 'queued' | 'skipped';
+export type PrCiRunStatus =
+  | 'success'
+  | 'failure'
+  | 'running'
+  | 'queued'
+  | 'skipped'
+  /** Cancelled/stale: aborted rather than failed, so it never turns CI red. */
+  | 'cancelled';
 
 export type PrCiRun = {
   name: string;
@@ -737,6 +994,33 @@ export function summarizePrCiRuns(runs: readonly PrCiRun[]): PrCiOverall {
   return 'passing';
 }
 
+export function mapGitHubCheckRunToPrCiRun(run: GitHubCheckRun): PrCiRun {
+  const status: PrCiRun['status'] =
+    run.status === 'queued'
+      ? 'queued'
+      : run.status === 'in_progress'
+        ? 'running'
+        : run.conclusion === 'success'
+          ? 'success'
+          : run.conclusion === 'neutral' || run.conclusion === 'skipped'
+            ? 'skipped'
+            : run.conclusion === 'cancelled' || run.conclusion === 'stale'
+              ? 'cancelled'
+              : 'failure';
+  const startedAtMs = run.startedAt ? Date.parse(run.startedAt) : Number.NaN;
+  const completedAtMs = run.completedAt ? Date.parse(run.completedAt) : Number.NaN;
+  const durationMs =
+    Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
+      ? Math.max(0, completedAtMs - startedAtMs)
+      : undefined;
+  return {
+    name: run.name,
+    status,
+    ...(durationMs === undefined ? {} : { durationMs }),
+    ...(run.htmlUrl ? { url: run.htmlUrl } : {}),
+  };
+}
+
 export const PR_CI_RUN_ICON: Record<
   PrCiRunStatus,
   { Icon: typeof CircleCheck; className: string }
@@ -746,58 +1030,74 @@ export const PR_CI_RUN_ICON: Record<
   running: { Icon: CircleDot, className: 'text-status-warning' },
   queued: { Icon: CircleDot, className: 'text-muted-foreground' },
   skipped: { Icon: CircleMinus, className: 'text-muted-foreground/70' },
+  cancelled: { Icon: CircleSlash, className: 'text-muted-foreground/70' },
 };
 
-export function usePrCiPresentation(runs: readonly PrCiRun[]) {
+/** Session metadata CI code as a pill verdict; null when metadata has none. */
+function getPrCiOverallFromState(
+  state: SessionPullRequestCiState | null | undefined
+): PrCiOverall | null {
+  if (state === 's') return 'passing';
+  if (state === 'f' || state === 'e') return 'failing';
+  if (state === 'p' || state === 'x') return 'running';
+  return null;
+}
+
+/** The verdict is the metadata CI code, the same one the sidebar and the Fix CI
+ *  gate read; without one the pill only lists the runs. */
+export function usePrCiPresentation(
+  runs: readonly PrCiRun[],
+  state?: SessionPullRequestCiState | null
+) {
   const { t } = useTranslation();
-  const overall = summarizePrCiRuns(runs);
+  const overall = getPrCiOverallFromState(state);
   const settled = runs.filter((run) => run.status !== 'running' && run.status !== 'queued').length;
   const overallLabel =
     overall === 'passing'
       ? t('sessions.prCi.passing', 'CI passed')
       : overall === 'failing'
         ? t('sessions.prCi.failing', 'CI failed')
-        : t('sessions.prCi.running', 'CI running');
+        : overall === 'running'
+          ? t('sessions.prCi.running', 'CI running')
+          : null;
   const toneClassName =
     overall === 'passing'
       ? 'text-status-success'
       : overall === 'failing'
         ? 'text-destructive'
-        : 'text-status-warning';
-  const tintClassName =
-    overall === 'passing'
-      ? 'bg-status-success/12'
-      : overall === 'failing'
-        ? 'bg-destructive/12'
-        : 'bg-status-warning/12';
+        : overall === 'running'
+          ? 'text-status-warning'
+          : 'text-muted-foreground';
   const VerdictIcon =
     overall === 'passing' ? CircleCheck : overall === 'failing' ? CircleX : CircleDot;
-  return { overall, settled, overallLabel, toneClassName, tintClassName, VerdictIcon };
+  return { overall, settled, overallLabel, toneClassName, VerdictIcon };
 }
 
 function PrCiPopoverBody({
   runs,
+  state,
   onOpenRun,
 }: {
   runs: readonly PrCiRun[];
+  state?: SessionPullRequestCiState | null;
   onOpenRun?: (run: PrCiRun) => void;
 }) {
   const { t } = useTranslation();
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
-  const { settled, overallLabel, toneClassName } = usePrCiPresentation(runs);
+  const durationUnitLabels = getDurationUnitLabels(t);
+  const { settled, overallLabel, toneClassName } = usePrCiPresentation(runs, state);
   return (
     <div className="flex flex-col gap-1.5 p-3">
-      <div className="flex items-center gap-1.5 text-xs">
-        <span className={cn('font-medium', toneClassName)}>{overallLabel}</span>
+      <div className={cn('flex items-center gap-1.5', INFO_BAR_TEXT_CLASS)}>
+        <span className={cn('font-medium', toneClassName)}>
+          {overallLabel ?? t('sessions.prCi.label', 'CI checks')}
+        </span>
         <span className="text-muted-foreground">
           · {settled}/{runs.length}
         </span>
       </div>
-      <ul className="scrollbar-pro flex max-h-56 flex-col overflow-y-auto text-xs">
+      <ul
+        className={cn('scrollbar-pro flex max-h-56 flex-col overflow-y-auto', INFO_BAR_TEXT_CLASS)}
+      >
         {runs.map((run) => {
           const { Icon: RunIcon, className: runClassName } = PR_CI_RUN_ICON[run.status];
           const duration =
@@ -835,77 +1135,67 @@ function PrCiPopoverBody({
 }
 
 /**
- * PR CI verdict as a compact "CI" text pill. It only appears INSIDE the PR
+ * PR CI verdict as a compact icon button. It only appears INSIDE the PR
  * context when that item is expanded on the stage (never a standalone cluster
- * icon). The pill is tinted by verdict (green passing / red failing / amber
- * running, with "done/total" while running); a single click opens the
- * check-run list.
+ * icon). The verdict icon carries the color (green passing / red failing /
+ * amber running, with a muted "done/total" while running); there is no tinted
+ * fill, so the bar stays quiet. A single click opens the check-run list.
  */
 export function PrCiPill({
   runs,
+  state,
   onOpenRun,
 }: {
   runs: readonly PrCiRun[] | undefined;
+  /** Session metadata CI code; it decides the verdict when present. */
+  state?: SessionPullRequestCiState | null;
   /** Open a check run (e.g. its GitHub Actions page). */
   onOpenRun?: (run: PrCiRun) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
   const hasRuns = !!runs && runs.length > 0;
-  const presentation = usePrCiPresentation(hasRuns ? runs! : []);
+  const presentation = usePrCiPresentation(hasRuns ? runs! : [], state);
   if (!hasRuns) return null;
 
-  const { overall, settled, overallLabel, toneClassName, tintClassName, VerdictIcon } =
-    presentation;
-  const label = `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`;
+  const { overall, settled, overallLabel, toneClassName, VerdictIcon } = presentation;
+  const label = overallLabel
+    ? `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`
+    : t('sessions.prCi.label', 'CI checks');
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverAnchor asChild>
-        <button
-          ref={anchorRef}
-          type="button"
-          aria-label={label}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          title={label}
-          onClick={() => setOpen((value) => !value)}
-          className={cn(
-            'flex h-5 shrink-0 select-none items-center gap-1 rounded px-1.5 text-[11px] font-semibold uppercase tracking-wide',
-            tintClassName,
-            toneClassName
-          )}
-        >
-          <VerdictIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
-          CI
-          {overall === 'running' ? (
-            <span className="tabular-nums">
-              {settled}/{runs!.length}
-            </span>
-          ) : null}
-          <ChevronDown
-            className={cn('h-3 w-3 shrink-0 opacity-60 transition-transform', open && 'rotate-180')}
-            aria-hidden="true"
-          />
-        </button>
-      </PopoverAnchor>
-      <PopoverContent
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            title={label}
+            className={cn(
+              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+              INFO_BAR_TEXT_CLASS,
+              open && 'bg-muted-foreground/10'
+            )}
+          >
+            <VerdictIcon className={cn('h-3.5 w-3.5 shrink-0', toneClassName)} aria-hidden="true" />
+            {overall === 'running' ? (
+              <span className="tabular-nums">
+                {settled}/{runs!.length}
+              </span>
+            ) : null}
+          </button>
+        }
+      />
+      <Popover.Content
         side="top"
         align="start"
         sideOffset={8}
         aria-label={t('sessions.prCi.label', 'CI checks')}
-        onPointerDownOutside={(event) => {
-          const target = event.target as Node | null;
-          if (target && anchorRef.current?.contains(target)) {
-            event.preventDefault();
-          }
-        }}
         className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
       >
-        <PrCiPopoverBody runs={runs!} onOpenRun={onOpenRun} />
-      </PopoverContent>
-    </Popover>
+        <PrCiPopoverBody runs={runs!} state={state} onOpenRun={onOpenRun} />
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

@@ -84,3 +84,26 @@ export const CheckboxPillRequired: Story = {
     />
   ),
 };
+
+export const ContextPill: Story = {
+  args: CheckboxPill.args,
+  render: () => (
+    <WorktreeCheckboxPill
+      checked
+      onCheckedChange={() => undefined}
+      surface="context"
+    />
+  ),
+};
+
+export const ContextPillRequired: Story = {
+  args: CheckboxPillRequired.args,
+  render: () => (
+    <WorktreeCheckboxPill
+      checked
+      disabled
+      disabledReason="GitHub projects always run in an isolated worktree."
+      surface="context"
+    />
+  ),
+};

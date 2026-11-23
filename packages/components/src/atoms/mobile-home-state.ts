@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { useAtom, type PrimitiveAtom } from 'jotai';
+import { atom, useAtom, type PrimitiveAtom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 
 /**
@@ -23,14 +23,15 @@ import { atomWithStorage } from 'jotai/utils';
    (rather than imported) so this atoms file stays free of React-only
    imports — keeping atoms framework-agnostic makes them cheaper to
    test and avoids a circular-import risk between atoms ↔ components. */
-/* Home Chat Group pill: Project or Date only (No Group removed).
-   `'none'` is not a valid stored value; older localStorage entries
-   are coerced to `'project'` at the read site. */
-export type MobileChatViewModeValue = 'project' | 'date';
+/**
+ * Home Chat Group pill. Status is the default for an install with no stored
+ * choice; a stored Project or Date is kept, and retired values read as Project.
+ */
+export type MobileChatViewModeValue = 'status' | 'project' | 'date';
 
 export const mobileHomeChatViewModeAtom = atomWithStorage<MobileChatViewModeValue>(
   'lody-mobile-home-chat-view-mode',
-  'project'
+  'status'
 );
 
 /* Each "excluded set" atom holds the option ids the user has explicitly
@@ -74,6 +75,12 @@ export const mobileHomeProjectsSubTabAtom = atomWithStorage<MobileProjectsSubTab
   'lody-mobile-home-projects-sub-tab',
   'local'
 );
+
+/* One-shot handoff when a phone leaves the schedule editor (or opens the
+   bare /schedules URL). The home screen reads it on mount and then clears
+   it, so a later visit to Chat does not stay stuck on Schedules. Not
+   persisted: this only has to survive the navigation that remounts home. */
+export const mobileHomeReturnTabAtom = atom<'schedules' | null>(null);
 
 /**
  * Thin adapter that exposes a `string[]`-backed atom as if it were a

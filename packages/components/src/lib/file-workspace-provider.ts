@@ -1,3 +1,4 @@
+import type { PagedFileSource } from './paged-file-source';
 import type {
   CodeCollabContentUnavailableReason,
   CodeCollabFileKind,
@@ -30,6 +31,7 @@ export type FileWorkspaceProviderEntry = {
 
 export type FileWorkspaceTextSnapshot = {
   readonly kind: 'text';
+  readonly truncated?: boolean;
   readonly text: string;
   readonly eol?: 'lf' | 'crlf' | 'mixed' | 'unknown';
 };
@@ -38,6 +40,7 @@ export type FileWorkspaceBinarySnapshot = {
   readonly kind: 'binary';
   readonly bytes?: Uint8Array;
   readonly mimeType?: string;
+  readonly url?: string;
 };
 
 export type FileWorkspaceUnavailableSnapshot = {
@@ -47,6 +50,7 @@ export type FileWorkspaceUnavailableSnapshot = {
 };
 
 export type FileWorkspaceSnapshot =
+  | { readonly kind: 'paged-text'; readonly source: PagedFileSource }
   | FileWorkspaceTextSnapshot
   | FileWorkspaceBinarySnapshot
   | FileWorkspaceUnavailableSnapshot;
@@ -85,11 +89,14 @@ export interface FileWorkspaceProvider {
   searchFiles(query: string): Promise<readonly FileWorkspaceProviderEntry[]>;
   getFile(pathOrFileId: string): Promise<FileWorkspaceProviderEntry | null>;
   openFile(pathOrFileId: string): Promise<FileWorkspaceOpenResult>;
+  downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   saveText(pathOrFileId: string, text: string): Promise<FileWorkspaceOpenResult>;
   updateLiveText?(pathOrFileId: string, text: string): Promise<void>;
   subscribeText?(pathOrFileId: string, callback: (text: string) => void): () => void;
   getHostLivenessStatus?(): Promise<FileWorkspaceHostLivenessSnapshot>;
-  subscribeHostLiveness?(callback: (snapshot: FileWorkspaceHostLivenessSnapshot) => void): () => void;
+  subscribeHostLiveness?(
+    callback: (snapshot: FileWorkspaceHostLivenessSnapshot) => void
+  ): () => void;
   resolveSaveConflict?(
     pathOrFileId: string,
     params: {
@@ -232,7 +239,9 @@ class FakeFileWorkspaceProvider implements FileWorkspaceProvider {
     return this.hostLiveness;
   }
 
-  subscribeHostLiveness(callback: (snapshot: FileWorkspaceHostLivenessSnapshot) => void): () => void {
+  subscribeHostLiveness(
+    callback: (snapshot: FileWorkspaceHostLivenessSnapshot) => void
+  ): () => void {
     callback(this.hostLiveness);
     return () => undefined;
   }

@@ -4,7 +4,10 @@ import {
   type EmojiPickerListRowProps,
   EmojiPicker as EmojiPickerPrimitive,
 } from 'frimousse';
-import { LoaderIcon, SearchIcon } from 'lucide-react';
+import { SearchIcon } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -12,9 +15,21 @@ import { cn } from '@/lib/utils';
 
 /**
  * shadcn's `frimousse` emoji picker, kept as the registry ships it apart from
- * two changes this repo requires: the `"use client"` banner is dropped (there is
- * no RSC boundary here) and its two visible strings go through i18n.
+ * three changes this repo requires: the `"use client"` banner is dropped (there
+ * is no RSC boundary here), its two visible strings go through i18n, and it
+ * carries no surface color of its own. The registry's `bg-popover` resolves to
+ * `--popover`, which `vscode-theme-css.ts` derives from the theme's widget
+ * background — under Vesper that is `#101010`, darker than the `@lody/ui`
+ * popup surface (`colors.raisedBackground`) the picker always renders inside,
+ * so the picker sat as a near-black slab on a lighter panel. The root is
+ * therefore transparent, and the one part that still needs a fill — the sticky
+ * category header — takes the popup rung's color directly.
  */
+const styles = stylex.create({
+  // frimousse sticks category headers to the viewport's top while their rows
+  // scroll underneath, so the header needs the surface's own opaque color.
+  categoryHeader: { backgroundColor: colors.raisedBackground },
+});
 
 function EmojiPicker({
   className,
@@ -22,10 +37,7 @@ function EmojiPicker({
 }: React.ComponentProps<typeof EmojiPickerPrimitive.Root>) {
   return (
     <EmojiPickerPrimitive.Root
-      className={cn(
-        'bg-popover text-popover-foreground isolate flex h-full w-fit flex-col overflow-hidden rounded-md',
-        className
-      )}
+      className={cn('isolate flex h-full w-fit flex-col overflow-hidden rounded-md', className)}
       data-slot="emoji-picker"
       {...props}
     />
@@ -72,7 +84,10 @@ function EmojiPickerEmoji({ emoji, className, ...props }: EmojiPickerListEmojiPr
     <button
       {...props}
       className={cn(
-        'data-[active]:bg-accent flex size-7 items-center justify-center rounded-sm text-base',
+        // The registry's `bg-accent` is dead here: `--accent` is never
+        // declared, so the fill silently resolved to nothing. Use the overlay
+        // list hover fill the rest of the app's floating surfaces use.
+        'data-[active]:bg-foreground/[0.05] dark:data-[active]:bg-white/[0.10] flex size-7 items-center justify-center rounded-sm text-base',
         className
       )}
       data-slot="emoji-picker-emoji"
@@ -82,11 +97,17 @@ function EmojiPickerEmoji({ emoji, className, ...props }: EmojiPickerListEmojiPr
   );
 }
 
-function EmojiPickerCategoryHeader({ category, ...props }: EmojiPickerListCategoryHeaderProps) {
+function EmojiPickerCategoryHeader({
+  category,
+  style,
+  ...props
+}: EmojiPickerListCategoryHeaderProps) {
+  const sx = stylex.props(styles.categoryHeader);
   return (
     <div
       {...props}
-      className="bg-popover text-muted-foreground px-3 pb-2 pt-3.5 text-xs leading-none"
+      className={cn(sx.className, 'text-muted-foreground px-3 pb-2 pt-3.5 text-xs leading-none')}
+      style={{ ...sx.style, ...style }}
       data-slot="emoji-picker-category-header"
     >
       {category.label}
@@ -109,7 +130,7 @@ function EmojiPickerContent({
         className="absolute inset-0 flex items-center justify-center text-muted-foreground"
         data-slot="emoji-picker-loading"
       >
-        <LoaderIcon className="size-4 animate-spin" />
+        <Spinner className="size-4" />
       </EmojiPickerPrimitive.Loading>
       <EmojiPickerPrimitive.Empty
         className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm"

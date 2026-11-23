@@ -1,8 +1,10 @@
 import { globalShortcut } from 'electron'
 import Conf from 'conf'
+import { createSettingsStoreWithFallback } from '../settings-store-core'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
   bindingToElectronAccelerator,
+  migrateLegacyShortcutBinding,
   type GlobalShortcutBinding,
   type GlobalShortcutId,
   type GlobalShortcutTriggeredPayload,
@@ -52,17 +54,23 @@ const ConfConstructor: typeof Conf = resolvedConf
  * else (persistence, listing, rebinding, conflict handling) is generic here.
  */
 export class GlobalShortcutsService {
-  private readonly store = new ConfConstructor<GlobalShortcutsSchema>({
-    projectName: 'lody-desktop',
-    configName: 'global-shortcuts',
-    defaults: { overrides: {} },
-    schema: {
-      overrides: {
-        type: 'object',
-        additionalProperties: { anyOf: [{ type: 'string' }, { type: 'null' }] }
-      }
-    }
-  })
+  private readonly store = createSettingsStoreWithFallback<GlobalShortcutsSchema>(
+    () =>
+      new ConfConstructor<GlobalShortcutsSchema>({
+        projectName: 'lody-desktop',
+        configName: 'global-shortcuts',
+        defaults: { overrides: {} },
+        schema: {
+          overrides: {
+            type: 'object',
+            additionalProperties: {
+              anyOf: [{ type: 'string' }, { type: 'null' }]
+            }
+          }
+        }
+      }),
+    { configName: 'global-shortcuts', defaults: { overrides: {} } }
+  )
 
   private readonly handlers = new Map<GlobalShortcutId, () => void>()
   /** id -> the Electron accelerator currently registered for it. */
@@ -174,9 +182,10 @@ export class GlobalShortcutsService {
 
   private effectiveBinding(id: GlobalShortcutId): string | null {
     const overrides = this.store.get('overrides')
-    return Object.prototype.hasOwnProperty.call(overrides, id)
+    const binding = Object.prototype.hasOwnProperty.call(overrides, id)
       ? (overrides[id] ?? null)
       : GLOBAL_SHORTCUT_DEFAULTS[id]
+    return binding === null ? null : migrateLegacyShortcutBinding(binding)
   }
 
   private persistOverride(id: GlobalShortcutId, binding: string | null): void {

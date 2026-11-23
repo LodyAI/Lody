@@ -1,4 +1,36 @@
 import {
+  LOCAL_E2EE_PAIRING_PATH,
+  LOCAL_E2EE_RESET_PATH,
+  LocalE2eeResetRequestSchema,
+  LocalE2eeResetResponseSchema,
+  LocalE2eePairingFailureSchema,
+  LocalE2eeRecoveryFailureSchema,
+  type LocalE2eeResetRequest,
+  type LocalE2eeResetResponse,
+  LocalE2eePairingRequestSchema,
+  LocalE2eePrepareReplySchema,
+  LocalE2eeActivateResponseSchema,
+  type LocalE2eePairingRequest,
+  type LocalE2eePrepareReply,
+  type LocalE2eeActivateResponse,
+} from '@lody/shared/e2ee-local-pairing';
+import {
+  LOCAL_WORKSPACE_BUNDLE_PATH,
+  WorkspaceBundleControlRequestSchema,
+  type WorkspaceBundleControlRequest,
+  type WorkspaceBundleControlResponse,
+  LOCAL_SCHEDULE_CONTROL_PATH,
+  ScheduleControlRequestSchema,
+  type ScheduleControlRequest,
+  type ScheduleControlResponse,
+} from '@lody/shared';
+import {
+  AUTOMATION_CONTROL_PATH,
+  automationControlRequestSchema,
+  type AutomationControlRequest,
+  type AutomationControlResponse,
+} from '@lody/shared/automations';
+import {
   LOCAL_MACHINE_RPC_PATH,
   LocalMachineRpcResponseSchema,
   LocalProjectControlRequestSchema,
@@ -28,6 +60,15 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
   LocalProjectControlRequestSchema.options.map((option) => option.shape.type.value);
 
 export interface LocalSessionControlConfig {
+  dispatchAutomation?: (message: AutomationControlRequest) => Promise<AutomationControlResponse>;
+  dispatchE2eeReset?: (message: LocalE2eeResetRequest) => Promise<LocalE2eeResetResponse>;
+  dispatchE2eePairing?: (
+    message: LocalE2eePairingRequest
+  ) => Promise<LocalE2eePrepareReply | LocalE2eeActivateResponse>;
+  dispatchSchedule?: (message: ScheduleControlRequest) => Promise<ScheduleControlResponse>;
+  dispatchWorkspaceBundle?: (
+    message: WorkspaceBundleControlRequest
+  ) => Promise<WorkspaceBundleControlResponse>;
   machineId: MachineId;
   logger: Logger;
   dispatchSession: (
@@ -38,7 +79,8 @@ export interface LocalSessionControlConfig {
     message: LocalProjectControlRequestValidated
   ) => Promise<LocalProjectControlResponse>;
   dispatchMachineRpc?: (
-    message: LocalMachineRpcRequestValidated
+    message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ) => Promise<LocalMachineRpcResponse>;
 }
 
@@ -122,9 +164,10 @@ async function handleSessionControlRequest(
   }
 
   const message = parsed.data;
-  config.logger.debug(
-    `[local-control:${requestId}] session request parsed: type=${message.type} workspaceId=${message.workspaceId}`
-  );
+  // The parse step has no record of its own: a request that gets past it is
+  // described by the completion record below, and one that does not is reported
+  // by the parse-failure, machine-mismatch or dispatch-failure branches.
+  const startedAtMs = Date.now();
   if (message.machineId !== config.machineId) {
     config.logger.debug(
       `[local-control:${requestId}] session machine mismatch: expected=${config.machineId} actual=${message.machineId}`
@@ -149,7 +192,7 @@ async function handleSessionControlRequest(
     }
 
     config.logger.debug(
-      `[local-control:${requestId}] session request completed: type=${message.type} responses=${responses.length}`
+      `[local-control:${requestId}] session request completed: type=${message.type} workspaceId=${'workspaceId' in message ? message.workspaceId : '-'} responses=${responses.length} duration=${Date.now() - startedAtMs}ms`
     );
     return handlerResponse(200, { ok: true, responses });
   } catch (error) {
@@ -235,7 +278,8 @@ async function handleProjectControlRequest(
 async function handleMachineRpcRequest(
   config: LocalSessionControlConfig,
   raw: string,
-  requestId: number
+  requestId: number,
+  signal?: AbortSignal
 ): Promise<LocalControlHandlerResponse> {
   const parsed = safeParseLocalMachineRpcRequest(raw);
   if (!parsed.success) {
@@ -264,7 +308,7 @@ async function handleMachineRpcRequest(
   }
 
   try {
-    const response = await config.dispatchMachineRpc(message);
+    const response = await config.dispatchMachineRpc(message, signal);
     const validated = LocalMachineRpcResponseSchema.safeParse(response).success;
     if (!validated) {
       config.logger.error('Local machine RPC produced invalid response payload');
@@ -278,6 +322,35 @@ async function handleMachineRpcRequest(
   }
 }
 
+/**
+ * A control route whose request names this machine: invalid JSON or schema is 400,
+ * another machine 403, an absent dispatcher 501 and a thrown dispatcher 500.
+ */
+async function handleMachineScopedControl<T extends { machineId: string }>(
+  machineId: MachineId,
+  rawBody: string,
+  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+  dispatch: ((message: T) => Promise<Record<string, unknown>>) | undefined,
+  errors: { unsupported: string; failed: string }
+): Promise<LocalControlHandlerResponse> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(rawBody);
+  } catch {
+    return handlerResponse(400, { ok: false, error: 'invalid_request' });
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
+  if (parsed.data.machineId !== machineId)
+    return handlerResponse(403, { ok: false, error: 'machine_mismatch' });
+  if (!dispatch) return handlerResponse(501, { ok: false, error: errors.unsupported });
+  try {
+    return handlerResponse(200, await dispatch(parsed.data));
+  } catch {
+    return handlerResponse(500, { ok: false, error: errors.failed });
+  }
+}
+
 export class LocalControlHandler {
   constructor(private readonly config: LocalSessionControlConfig) {}
 
@@ -286,14 +359,128 @@ export class LocalControlHandler {
     rawBody: string;
     requestId: number;
     onSessionResponse?: (response: LocalSessionControlResponse) => void;
+    signal?: AbortSignal;
   }): Promise<LocalControlHandlerResponse> {
+    if (request.path === AUTOMATION_CONTROL_PATH) {
+      return (async () => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.rawBody);
+        } catch {
+          return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        }
+        const parsed = automationControlRequestSchema.safeParse(raw);
+        if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        if (parsed.data.machineId !== this.config.machineId)
+          return handlerResponse(403, { ok: false, error: 'machine_mismatch' });
+        if (!this.config.dispatchAutomation)
+          return handlerResponse(501, { ok: false, error: 'automations_unsupported' });
+        try {
+          return handlerResponse(200, await this.config.dispatchAutomation(parsed.data));
+        } catch {
+          return handlerResponse(500, { ok: false, error: 'automation_control_failed' });
+        }
+      })();
+    }
+    if (request.path === LOCAL_E2EE_RESET_PATH) {
+      return (async () => {
+        const parsed = LocalE2eeResetRequestSchema.safeParse(
+          (() => {
+            try {
+              return JSON.parse(request.rawBody);
+            } catch {
+              return null;
+            }
+          })()
+        );
+        if (!parsed.success)
+          return handlerResponse(400, { ok: false, error: 'e2ee_invalid_input' });
+        if (parsed.data.machineId !== this.config.machineId)
+          return handlerResponse(403, { ok: false, error: 'e2ee_machine_mismatch' });
+        if (!this.config.dispatchE2eeReset)
+          return handlerResponse(501, { ok: false, error: 'e2ee_reset_unavailable' });
+        try {
+          const result = LocalE2eeResetResponseSchema.parse(
+            await this.config.dispatchE2eeReset(parsed.data)
+          );
+          return handlerResponse(200, result);
+        } catch {
+          return handlerResponse(503, { ok: false, error: 'e2ee_reset_unavailable' });
+        }
+      })();
+    }
+    if (request.path === LOCAL_E2EE_PAIRING_PATH) {
+      return (async () => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.rawBody);
+        } catch {
+          return handlerResponse(400, { ok: false, error: 'e2ee_invalid_input' });
+        }
+        const parsed = LocalE2eePairingRequestSchema.safeParse(raw);
+        if (!parsed.success)
+          return handlerResponse(400, { ok: false, error: 'e2ee_invalid_input' });
+        if (parsed.data.machineId !== this.config.machineId)
+          return handlerResponse(403, { ok: false, error: 'e2ee_machine_mismatch' });
+        if (!this.config.dispatchE2eePairing)
+          return handlerResponse(501, { ok: false, error: 'e2ee_pairing_unavailable' });
+        try {
+          const response = await this.config.dispatchE2eePairing(parsed.data);
+          const valid =
+            parsed.data.type === 'prepare'
+              ? LocalE2eePrepareReplySchema.safeParse(response)
+              : LocalE2eeActivateResponseSchema.safeParse(response);
+          if (!valid.success)
+            return handlerResponse(500, { ok: false, error: 'e2ee_invalid_response' });
+          return handlerResponse(200, valid.data);
+        } catch (error) {
+          const code =
+            error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+          const recovery = LocalE2eeRecoveryFailureSchema.safeParse({
+            ok: false,
+            error: `e2ee_${code}`,
+          });
+          if (recovery.success) return handlerResponse(503, recovery.data);
+          // Fixed pairing refusals are thrown as their exact code; nothing else crosses IPC.
+          const refusal = LocalE2eePairingFailureSchema.safeParse({
+            ok: false,
+            error: error instanceof Error ? error.message : undefined,
+          });
+          return handlerResponse(
+            503,
+            refusal.success ? refusal.data : { ok: false, error: 'e2ee_pairing_unavailable' }
+          );
+        }
+      })();
+    }
+    if (request.path === LOCAL_WORKSPACE_BUNDLE_PATH)
+      return handleMachineScopedControl(
+        this.config.machineId,
+        request.rawBody,
+        WorkspaceBundleControlRequestSchema,
+        this.config.dispatchWorkspaceBundle,
+        { unsupported: 'workspace_bundle_unsupported', failed: 'workspace_bundle_failed' }
+      );
+    if (request.path === LOCAL_SCHEDULE_CONTROL_PATH)
+      return handleMachineScopedControl(
+        this.config.machineId,
+        request.rawBody,
+        ScheduleControlRequestSchema,
+        this.config.dispatchSchedule,
+        { unsupported: 'schedules_unsupported', failed: 'schedule_control_failed' }
+      );
     if (request.path === LOCAL_SESSION_CONTROL_PATH) {
       return handleSessionControlRequest(this.config, request.rawBody, request.requestId, {
         onResponse: request.onSessionResponse,
       });
     }
     if (request.path === LOCAL_MACHINE_RPC_PATH) {
-      return handleMachineRpcRequest(this.config, request.rawBody, request.requestId);
+      return handleMachineRpcRequest(
+        this.config,
+        request.rawBody,
+        request.requestId,
+        request.signal
+      );
     }
     if (request.path === LOCAL_PROJECT_CONTROL_PATH) {
       return handleProjectControlRequest(this.config, request.rawBody, request.requestId);

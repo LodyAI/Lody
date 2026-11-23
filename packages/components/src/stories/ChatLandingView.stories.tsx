@@ -3,11 +3,15 @@ import { useRef, useState } from 'react';
 import { Bot, Github, Monitor } from 'lucide-react';
 import { fn } from 'storybook/test';
 
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
+import type { WorkspaceId } from '@lody/shared';
+
 import { ChatLandingView } from '@/components/chat/chat-landing-view';
+import { HomeDashboard } from '@/components/chat/home/home-dashboard';
 import { useChatLandingKeyboardNav } from '@/hooks/use-chat-landing-keyboard-nav';
 import { ContextSwitch } from '@/components/chat/context-switch';
 import type { SessionContextType } from '@/components/chat/context-switch';
-import { getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
 import { AcpBottomBarModeSelector, AcpFooterSelectorGroup } from '@/components/shared';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
@@ -17,9 +21,35 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
+import {
+  HOME_WEEK_NOW,
+  HOME_WEEK_USAGE_SOURCES,
+  homeNowFixture,
+  homeWeekFixture,
+  homeWeekAgentIcon,
+  homeWeekAgentLabel,
+  homeWeekUsageFixture,
+} from './fixtures/home-week';
+import { ConvertDialogPreview } from './fixtures/convert-dialog';
+import { PinSectionTargetPill } from '@/components/chat/pin-section-target-pill';
 
 const samplePromptPlaceholder = "Press '/' for commands, '@' for mentions.";
 const sampleZhCnPromptPlaceholder = "按 '/' 使用命令，'@' 添加提及。";
+
+const STORY_WORKSPACE_ID = 'workspace-storybook-chat-landing' as WorkspaceId;
+const storyPlatform = createLocalPlatformProvider({
+  session: createStaticStore({
+    status: 'authenticated',
+    user: { id: 'local:storybook-user', name: 'Storybook user' },
+  }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [
+      { id: STORY_WORKSPACE_ID, name: 'Storybook Workspace', slug: 'storybook', role: 'owner' },
+    ],
+    activeWorkspaceId: STORY_WORKSPACE_ID,
+  }),
+});
 
 const meta = {
   title: 'Chat/ChatLandingView',
@@ -199,19 +229,16 @@ const zhCnPastedText = [
   '[错误摘要]',
   '在切换到中文后，用户把一整段日志直接粘贴进输入框。',
   '之前的行为是整段文本全部撑开输入区域，真正的问题描述会被顶到折叠线以下。',
-  '',
   '[期望]',
   '1. 输入框里只保留一段内联提示。',
   '2. 用户仍然知道自己已经粘贴了大量上下文。',
   '3. 点击这段提示后，可以看到完整内容并继续发送。',
-  '',
   '[原始日志片段]',
   'RangeError: Invalid language tag: zh_CN',
   '    at new NumberFormat (<anonymous>)',
   '    at ChatLanding (chat-landing.tsx:219:27)',
   '    at renderWithHooks (react-dom-client.development.js:5529:22)',
   '    at updateFunctionComponent (react-dom-client.development.js:8897:19)',
-  '',
   '补充说明：',
   '这类日志在实际使用里通常会更长，里面还会包含堆栈、请求参数、环境信息和用户自己的描述。',
 ].join('\n');
@@ -242,9 +269,10 @@ interface DemoLandingProps {
   initialPastedTextDrafts?: PastedTextDraft[];
   /** Mount the desktop keyboard-nav controller (arrows/Esc over the config controls). */
   enableKeyboardNav?: boolean;
+  pinSectionName?: string;
 }
 
-function DemoLanding({
+function DemoLandingContent({
   tone,
   isMobile = false,
   hintType = null,
@@ -256,6 +284,7 @@ function DemoLanding({
   initialPrompt = 'Write a quick plan for the CRDT metadata cleanup.',
   initialPastedTextDrafts = [],
   enableKeyboardNav = false,
+  pinSectionName,
 }: DemoLandingProps) {
   const navRef = useRef<HTMLDivElement>(null);
   // Landing mode: scoped to navRef, native Tab so focus can leave.
@@ -280,8 +309,6 @@ function DemoLanding({
     verbosity: 'balanced',
   });
 
-  const selectorTagClassName = getSelectorTagClassName(tone);
-
   // Top selector: repo (shown above textarea)
   const topSelectorNode = (
     <div className="flex items-center gap-1">
@@ -291,12 +318,14 @@ function DemoLanding({
         onSelect={(option) => setSelectedRepo(option.value)}
         placeholder="Select repo"
         placeholderIcon={Github}
-        tone={tone}
         searchable
         searchPlaceholder="Search repos"
         className="h-6 gap-1 rounded-md border-none bg-transparent px-1 [&_span]:text-[11px] [&_span]:leading-tight"
         contentClassName="w-72"
       />
+      {pinSectionName ? (
+        <PinSectionTargetPill sectionId="maintenance" name={pinSectionName} onClear={fn()} />
+      ) : null}
     </div>
   );
 
@@ -323,8 +352,6 @@ function DemoLanding({
           onSelect={(option) => setSelectedMachine(option.value)}
           placeholder="Machine"
           placeholderIcon={Monitor}
-          tone={tone}
-          className={selectorTagClassName}
           contentClassName="w-56"
           renderTriggerValue={(option) => (
             <div className="flex min-w-0 items-center gap-1.5">
@@ -345,8 +372,6 @@ function DemoLanding({
           onSelect={(option) => setSelectedAgent(option.value)}
           placeholder="Select agent"
           placeholderIcon={Bot}
-          tone={tone}
-          className={selectorTagClassName}
           contentClassName="w-64"
         />
       </div>
@@ -412,6 +437,21 @@ function DemoLanding({
       tone={tone}
       isMobile={isMobile}
       title={title}
+      ambient={
+        isMobile ? undefined : (
+          <HomeDashboard
+            now={homeNowFixture('busy')}
+            week={homeWeekFixture('busy')}
+            agentLabel={homeWeekAgentLabel}
+            agentIcon={homeWeekAgentIcon}
+            usage={homeWeekUsageFixture()}
+            usageSources={HOME_WEEK_USAGE_SOURCES}
+            usageSourceId={HOME_WEEK_USAGE_SOURCES[0]!.id}
+            nowMs={HOME_WEEK_NOW.getTime()}
+            animate={false}
+          />
+        )
+      }
       promptValue={prompt}
       onPromptChange={setPrompt}
       promptPlaceholder={promptPlaceholder}
@@ -432,6 +472,14 @@ function DemoLanding({
   );
 }
 
+function DemoLanding(props: DemoLandingProps) {
+  return (
+    <PlatformContext.Provider value={storyPlatform}>
+      <DemoLandingContent {...props} />
+    </PlatformContext.Provider>
+  );
+}
+
 export const DesktopDark: Story = {
   render: () => <DemoLanding tone="dark" />,
 };
@@ -448,8 +496,41 @@ export const DesktopKeyboardNav: Story = {
   render: () => <DemoLanding tone="dark" initialPrompt="" enableKeyboardNav />,
 };
 
+/**
+ * Today's "Convert to task": the dialog layout — breadcrumb header, the prompt
+ * as the page, the desktop selectors as one pill row, and a footer with "+",
+ * Cancel and Start task. Shared with the Today stories.
+ */
+export const DialogLayout: Story = {
+  render: () => (
+    <ConvertDialogPreview
+      open
+      prompt={'Plan the launch\n  Draft the release notes\n  Ping design'}
+      onOpenChange={() => {}}
+      onStart={() => {}}
+    />
+  ),
+};
+
+export const DialogLayoutNoMachine: Story = {
+  render: () => (
+    <ConvertDialogPreview
+      open
+      prompt="Plan the launch"
+      hintType="no-machine"
+      onOpenChange={() => {}}
+      onStart={() => {}}
+    />
+  ),
+  globals: { theme: 'light' },
+};
+
 export const DesktopLight: Story = {
   render: () => <DemoLanding tone="light" />,
+};
+
+export const DesktopLightPinSection: Story = {
+  render: () => <DemoLanding tone="light" pinSectionName="Maintenance" />,
 };
 
 export const MobileDark: Story = {

@@ -1,57 +1,28 @@
 import * as React from 'react';
-import { ClipboardList, MessagesSquare, UserRoundCog } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { ClipboardList, MessagesSquare, UserRoundCog, Quote } from 'lucide-react';
 
 import { MonochromeFileIcon, MonochromeFolderIcon } from '@/components/icons/file-icons';
 import type { Mention, MentionChip, MentionChipResolver } from '@/ui/mention/index';
 
 /**
- * Chip styling for composer mention ranges.
- *
- * Product-side on purpose: the mention primitive knows how to *paint* a chip
- * without disturbing the caret, but never which kinds are chips or what they
- * look like.
- *
- * ## The one rule
- *
- * A mention may not change the advance width of the range it decorates. The
- * highlighter mirrors the textarea character for character; a decoration one
- * pixel wider than its raw text drags every following glyph out from under the
- * caret. So the classes below set colour and nothing else — no padding, no
- * border, no font change. That constraint is also why there is no background:
- * a fill would need padding to look like anything, and padding is the one thing
- * that cannot be spent here.
- *
- * ## Which mentions get an icon
- *
- * Only the ones where an icon says more than the trigger character already
- * does. An icon has to be painted over characters the range already contains
- * and may not hang past them, so it can never be wider than what it replaces —
- * which makes it a poor trade against a `#`, `$`, or `/` that already names the
- * type perfectly well. Those keep their sigil and take the colour instead.
- *
- * Four exceptions earn the space:
- *
- * - `@file` / `@dir`, where the glyph carries information the text does not:
- *   which kind of file it is. `@` is also the widest trigger, so it is the one
- *   with room worth spending.
- * - `@session`, whose committed text is a bare `@<title-slug>` — nothing in it
- *   says "session", so without a glyph it is indistinguishable from a path.
- * - `@agent_role`, a bare `@<mentionSlug>` for the same reason, and one whose
- *   consequence — creating a Session — is worth being able to see at a glance.
- * - Pasted text, which has no trigger at all and buys a gutter with real
- *   characters — a figure space (U+2007, digit-width and non-breaking) at each
- *   end of the `[Pasted N chars]` label. Widths match exactly because the
- *   spaces really are in the text, and the label still degrades to something
- *   readable if the range is ever lost.
+ * Product appearance for atomic Lexical mentions. Icons and labels participate
+ * in normal layout; the canonical string's delimiters never buy visual space.
+ * Saved pasted-text labels retain their figure-space/bracket format, so the
+ * resolver removes that prefix/suffix from presentation only.
  */
-
-/** Pads the pasted-text label so its chip has an icon gutter and right padding. */
 const CHIP_PAD = '\u2007';
+const styles = stylex.create({
+  quote: {
+    marginInline: 1,
+    paddingRight: space[1.5],
+  },
+});
 export const wrapPastedTextChipLabel = (label: string) => `${CHIP_PAD}${label}${CHIP_PAD}`;
 
 /**
- * Sized in `em` so it tracks the surrounding font size. In the composer the
- * slot clamps it further — it can never exceed the character it covers.
+ * Sized in `em` so it tracks the surrounding font size in its own layout box.
  */
 export const MENTION_ICON_CLASS_NAME = 'size-[1.05em] shrink-0';
 
@@ -80,11 +51,13 @@ const CHIP_KINDS: ReadonlySet<string> = new Set([
   'skill',
   'session',
   'command',
+  'prompt_shortcut',
   'agent_role',
   'issue',
   'pr',
   'mention',
   'pasted_text',
+  'message_quote',
 ]);
 
 /**
@@ -108,14 +81,13 @@ export function getMentionKindIcon(
   // nothing in it says the token is a Role rather than a path.
   if (kind === 'agent_role') return <UserRoundCog className={className} />;
   if (kind === 'pasted_text') return <ClipboardList className={className} aria-hidden="true" />;
+  if (kind === 'message_quote') return <Quote className={className} aria-hidden="true" />;
   return null;
 }
 
 /**
- * A draft saved before the gutter existed still holds a bare `[Pasted N chars]`,
- * so the slot count is read off the text rather than assumed. Without the
- * figure space there is only the bracket to paint over — cramped, but never
- * misaligned, and it heals as soon as the draft is re-created.
+ * Older drafts have bare brackets; newer ones also carry figure-space gutters.
+ * Both formats keep their canonical text, with delimiters omitted from the view.
  */
 const pastedTextChip = (text: string): MentionChip => {
   const padded = text.startsWith(CHIP_PAD);
@@ -123,8 +95,8 @@ const pastedTextChip = (text: string): MentionChip => {
     icon: getMentionKindIcon('pasted_text'),
     className: MENTION_NEUTRAL_CHIP_CLASS_NAME,
     // figure space + '['  ...  ']' + figure space
-    iconSlots: padded ? 2 : 1,
-    trailingSlots: padded ? 2 : 1,
+    textPrefixLength: padded ? 2 : 1,
+    textSuffixLength: padded ? 2 : 1,
   };
 };
 
@@ -137,22 +109,32 @@ const getMentionPath = (mention: Mention, text: string): string =>
   (mention.value || text).replace(/^@/, '');
 
 /**
- * The composer's chip resolver. Stable across renders so the highlighter's memo
- * still holds.
+ * The composer's chip resolver. Module-level, so it stays stable across renders
+ * and chip views do not re-render for nothing.
  *
- * It decides only slot geometry — which is the composer-specific half. Which
+ * It decides the visible label and icon — the composer-specific half. Which
  * glyph and which colour come from the shared table above, so the transcript
  * cannot disagree with it.
  */
 export const getComposerMentionChip: MentionChipResolver = (mention: Mention, text: string) => {
   const kind = mention.kind ?? 'mention';
   if (kind === 'pasted_text') return pastedTextChip(text);
+  if (kind === 'message_quote')
+    return {
+      ...pastedTextChip(text),
+      icon: getMentionKindIcon(kind),
+      className: `${stylex.props(styles.quote).className} text-markdown-link`,
+    };
   if (!CHIP_KINDS.has(kind)) return null;
 
   const icon = getMentionKindIcon(kind, { path: getMentionPath(mention, text) });
   // No glyph means the range keeps its own sigil visible and is coloured,
-  // nothing more — so it surrenders no character to an icon slot.
-  return { icon: icon ?? undefined, className: MENTION_CHIP_CLASS_NAME, iconSlots: icon ? 1 : 0 };
+  // nothing more, without removing any prefix.
+  return {
+    icon: icon ?? undefined,
+    className: MENTION_CHIP_CLASS_NAME,
+    textPrefixLength: icon ? 1 : 0,
+  };
 };
 
 /**
@@ -163,9 +145,8 @@ export const getComposerMentionChip: MentionChipResolver = (mention: Mention, te
  * composer already holds. The emoji is what the user picked the Role by, so the
  * committed `@Reviewer` should show it rather than the generic category glyph.
  *
- * The span is boxed to the icon slot and clipped, because the slot covers ONE
- * character of real text and an emoji glyph is wider than a latin one — an
- * unconstrained span would drag every following glyph out from under the caret.
+ * The emoji gets the same layout box as other icons and does not alter the
+ * canonical mention text or its string offsets.
  */
 export const applyAgentRoleEmojiChip = (chip: MentionChip, emoji: string): MentionChip => ({
   ...chip,
@@ -177,5 +158,5 @@ export const applyAgentRoleEmojiChip = (chip: MentionChip, emoji: string): Menti
       {emoji}
     </span>
   ),
-  iconSlots: 1,
+  textPrefixLength: 1,
 });

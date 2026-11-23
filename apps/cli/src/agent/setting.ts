@@ -1,17 +1,25 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { existsSync } from 'node:fs';
+import { prepareMagpieRuntime } from './magpie-runtime';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { inspectNpxInstallState } from './npx-cache';
 
 import {
   type AgentConfigCliType,
+  DEEPSEEK_HARNESS_BASE_URL_ENV,
   type BuiltinRuntimeOverrides,
   type CliType,
   type CustomAcpLaunchSpec,
   getBuiltinRuntimeOverrideSourceVersionSuffix,
   getRegistryAcpLaunchKind,
+  getManagedBuiltinRuntimeByAgentType,
   isBuiltinAgentType,
   isManagedBuiltinAgentType,
+  type ManagedBuiltinAgentType,
   REGISTRY_ACP_AGENTS,
   type RegistryAcpAgent,
   type RegistryNpxDistribution,
@@ -26,15 +34,21 @@ import {
   BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION,
   CLAUDE_ACP_ADAPTER_VERSION,
   CLAUDE_AGENT_SDK_VERSION,
+  ANTIGRAVITY_RUNTIME_VERSION,
   CODEX_ACP_ADAPTER_VERSION,
   getManagedAgentRuntimeManager,
   GROK_ACP_ADAPTER_VERSION,
+  DEVIN_ACP_ADAPTER_VERSION,
+  DEVIN_RUNTIME_VERSION,
   KIMI_CODE_VERSION,
+  PI_EXTENSIONS_SUPPORTED,
+  PI_RUNTIME_VERSION,
   type ManagedRuntimeLaunch,
   type ManagedRuntimeName,
   type ManagedRuntimeProgressCallback,
 } from '@/agent/managed-agent-runtime';
 import { getManagedRuntimeUpdateCoordinator } from '@/agent/managed-runtime-update-coordinator';
+import { getGhShimSessionBinRoot } from '@/lib/gh-shim-script';
 import {
   DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION,
   resolveDeepSeekHarnessProcessLaunch,
@@ -64,6 +78,10 @@ export type ResolveACPSettingInput = {
    */
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
+  magpieGatewayUrl?: string;
+  /** Environment values that can alter an agent's advertised capabilities. */
+  env?: NodeJS.ProcessEnv;
 };
 
 export type ResolvedACPSetting = {
@@ -115,6 +133,17 @@ export type ResolveBuiltinAuthenticationProcessLaunchInput = ResolveACPSettingIn
 };
 
 export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
+  antigravity: { packageName: 'antigravity', version: ANTIGRAVITY_RUNTIME_VERSION, binName: 'agy' },
+  devin: {
+    packageName: 'acp-extension-devin',
+    version: DEVIN_ACP_ADAPTER_VERSION,
+    binName: 'devin',
+  },
+  pi: {
+    packageName: 'acp-extension-pi',
+    version: PI_RUNTIME_VERSION,
+    binName: 'acp-extension-pi',
+  },
   kimi: {
     packageName: '@moonshot-ai/kimi-code',
     version: KIMI_CODE_VERSION,
@@ -143,6 +172,25 @@ export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
   },
 };
 
+/**
+ * Capability-cache source version for Bub. Bub is a user-installed CLI
+ * (`bub acp`) that Lody does not manage or version; the static key keeps
+ * a capability probe valid until the next explicit refresh.
+ */
+const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
+
+// User-managed version; refresh capabilities explicitly after upgrading.
+const BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION = 'builtin-dimcode:local-acp';
+/**
+ * Sorbet ships runtime fixes on its own cadence, so Lody launches the dist-tag and never
+ * pins a version. The tag names the requested install, not the build that runs: the
+ * capability source version below reports the installed version when the npx cache can
+ * name it and falls back to this tag when it cannot.
+ */
+const SORBET_ACP_PACKAGE_NAME = '@sorbetai/acp';
+const SORBET_ACP_DIST_TAG = 'alpha';
+const SORBET_ACP_PACKAGE = `${SORBET_ACP_PACKAGE_NAME}@${SORBET_ACP_DIST_TAG}`;
+
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are
 // exact-version pinned, so a cache hit is immutable and integrity-checked —
@@ -169,6 +217,99 @@ const KIMI_CODE_ACP_PATH_RELATIVE_DIR = '.kimi-code/bin';
 const registryAgentsById: Record<string, RegistryAcpAgent> = Object.fromEntries(
   REGISTRY_ACP_AGENTS.map((agent) => [agent.id, agent])
 );
+// Keep existing providers and stored turns runnable until their owner chooses
+// migration. This compatibility entry is deliberately absent from the catalog.
+registryAgentsById['antigravity-acp'] = {
+  id: 'antigravity-acp',
+  name: 'Antigravity ACP (Legacy)',
+  version: '1.5.0',
+  description: 'Google’s AI coding agent',
+  icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/antigravity-acp.svg',
+  distribution: {
+    binary: {
+      'darwin-aarch64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.5.0-darwin-arm64.zip',
+        cmd: './agy_acp_server.par',
+      },
+      'darwin-x86_64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.5.0-darwin-x86_64.zip',
+        cmd: './agy_acp_server.par',
+      },
+      'linux-x86_64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.5.0-linux-x86_64.zip',
+        cmd: './agy_acp_server.par',
+        args: ['--uid='],
+      },
+      'linux-aarch64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.5.0-linux-arm64.zip',
+        cmd: './agy_acp_server.par',
+        args: ['--uid='],
+      },
+      'windows-x86_64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.5.0-windows-x86_64.zip',
+        cmd: './agy_acp_server.exe',
+      },
+      'windows-aarch64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.5.0-windows-arm64.zip',
+        cmd: './agy_acp_server.exe',
+      },
+    },
+  },
+};
+registryAgentsById['pi-acp'] = {
+  id: 'pi-acp',
+  name: 'Pi ACP (legacy)',
+  version: '0.0.33',
+  distribution: { npx: { package: 'pi-acp@0.0.33' } },
+};
+
+// Removed from discovery only: persisted registry providers retain their launch contract.
+for (const id of ['kimi', 'kimi-code']) {
+  registryAgentsById[id] = {
+    id,
+    name: id === 'kimi' ? 'Kimi CLI' : 'Kimi Code CLI',
+    version: 'local',
+    distribution: { local: { command: 'kimi', args: ['acp'], versionArgs: ['-V'] } },
+  };
+}
+registryAgentsById.dimcode = {
+  id: 'dimcode',
+  name: 'DimCode',
+  version: '0.5.12',
+  distribution: { npx: { package: 'dimcode@0.5.12', args: ['acp'] } },
+};
+registryAgentsById.devin = {
+  id: 'devin',
+  name: 'Devin',
+  version: '3000.12.28',
+  distribution: {
+    binary: Object.fromEntries(
+      (
+        [
+          ['darwin-aarch64', 'aarch64-apple-darwin'],
+          ['darwin-x86_64', 'x86_64-apple-darwin'],
+          ['linux-aarch64', 'aarch64-unknown-linux'],
+          ['linux-x86_64', 'x86_64-unknown-linux'],
+          ['windows-aarch64', 'aarch64-pc-windows'],
+          ['windows-x86_64', 'x86_64-pc-windows'],
+        ] as const
+      ).map(([platform, target]) => [
+        platform,
+        {
+          archive: `https://static.devin.ai/cli/3000.12.28/devin-3000.12.28-${target}.${platform.startsWith('windows-') ? 'zip' : 'tar.gz'}`,
+          cmd: platform.startsWith('windows-') ? './bin/devin.exe' : './bin/devin',
+          args: ['acp'],
+        },
+      ])
+    ),
+  },
+};
 
 export function resolveBuiltinACPSetting(agentType: string): ResolvedACPSetting {
   if (!isBuiltinAgentType(agentType)) {
@@ -181,10 +322,38 @@ export function resolveBuiltinACPSetting(agentType: string): ResolvedACPSetting 
   );
 }
 
+/**
+ * The Sorbet build an npx launch would run, when the local cache can name it.
+ *
+ * `@sorbetai/acp@alpha` names the requested install, so a capability entry stamped
+ * with the tag cannot say which build produced it. Reading the installed
+ * `package.json` version fixes that for provenance and for future targeted
+ * invalidations, while a cold or ambiguous cache falls back to the tag instead of
+ * asserting a build Lody has not observed. Nothing keys a cache hit on this value:
+ * `resolveExpectedAcpCapabilitySourceVersion` always re-probes Sorbet.
+ */
+function resolveSorbetInstalledAcpVersion(): string | undefined {
+  const state = inspectNpxInstallState(SORBET_ACP_PACKAGE_NAME, SORBET_ACP_DIST_TAG);
+  return state.kind === 'ready' ? state.resolvedVersion : undefined;
+}
+
 export function getAcpCapabilitySourceVersion(
   input: ResolveACPSettingInput,
-  managedRuntimeVersion?: string
+  managedRuntimeVersion?: string,
+  /** The Sorbet build the npx cache would run; omitted when it cannot be named. */
+  sorbetInstalledVersion?: string
 ): string {
+  if (input.cliType === 'builtin' && input.magpieGatewayUrl) {
+    const { magpieGatewayUrl: gateway, ...nativeInput } = input;
+    const base = getAcpCapabilitySourceVersion(
+      nativeInput,
+      managedRuntimeVersion,
+      sorbetInstalledVersion
+    );
+    const suffix = getBuiltinRuntimeOverrideSourceVersionSuffix(input.runtimeOverrides);
+    const prefix = suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) : base;
+    return `${prefix}+magpie-v1:${createHash('sha256').update(gateway).digest('hex').slice(0, 12)}${suffix}`;
+  }
   if (input.cliType === 'custom') {
     // Derive from the launch spec itself so editing the command invalidates
     // cached capabilities; there is no package version to key on.
@@ -197,6 +366,9 @@ export function getAcpCapabilitySourceVersion(
       const runtimeOverrideSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(
         input.runtimeOverrides
       );
+      if (input.agentType === 'antigravity') {
+        return `builtin-antigravity:${managedRuntimeVersion ?? ANTIGRAVITY_RUNTIME_VERSION}${runtimeOverrideSuffix}`;
+      }
       if (input.agentType === 'codex') {
         return managedRuntimeVersion
           ? `builtin-codex-acp:${CODEX_ACP_ADAPTER_VERSION}+codex:${managedRuntimeVersion}`
@@ -212,13 +384,33 @@ export function getAcpCapabilitySourceVersion(
           ? `builtin-kimi:${managedRuntimeVersion}`
           : `${BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
+      if (input.agentType === 'pi') {
+        return `builtin-pi:${managedRuntimeVersion ?? PI_RUNTIME_VERSION}${runtimeOverrideSuffix}`;
+      }
+      if (input.agentType === 'devin') {
+        return `builtin-devin-acp:${DEVIN_ACP_ADAPTER_VERSION}+official-devin:${managedRuntimeVersion ?? DEVIN_RUNTIME_VERSION}${runtimeOverrideSuffix}`;
+      }
       if (input.agentType === 'grok') {
         return managedRuntimeVersion
           ? `builtin-grok-acp:${GROK_ACP_ADAPTER_VERSION}+official-grok:${managedRuntimeVersion}`
           : `${BUILTIN_GROK_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
       if (input.agentType === 'deepseek') {
-        return DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
+        const baseUrl = input.env?.[DEEPSEEK_HARNESS_BASE_URL_ENV];
+        return baseUrl?.trim()
+          ? `${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION}+endpoint:${createHash('sha256').update(baseUrl).digest('hex').slice(0, 12)}`
+          : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
+      }
+      if (input.agentType === 'sorbet') {
+        return `builtin-sorbet:${SORBET_ACP_PACKAGE_NAME}@${sorbetInstalledVersion ?? SORBET_ACP_DIST_TAG}+auth-discovery:1`;
+      }
+      if (input.agentType === 'dimcode') {
+        return BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION;
+      }
+      if (input.agentType === 'bub') {
+        // Bub is a user-installed CLI whose version Lody does not own, so the
+        // cache key is static. A manual refresh re-probes after an upgrade.
+        return BUILTIN_BUB_CAPABILITY_SOURCE_VERSION;
       }
     }
     return `builtin:${input.agentType}:unknown`;
@@ -232,10 +424,81 @@ export function getAcpCapabilitySourceVersion(
   return `${agent.id}@${agent.version}`;
 }
 
+/**
+ * Runtime-override path that replaces each managed builtin runtime, or `null`
+ * when the builtin has none. Declared exhaustively so a new managed builtin
+ * fails to compile until someone decides here how its overrides change the
+ * launched binary, because an unconsidered override would silently keep
+ * answering capability refreshes from the managed runtime's cached entry.
+ */
+const MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS = {
+  antigravity: 'antigravityPath',
+  kimi: 'kimiPath',
+  grok: 'grokPath',
+  devin: 'devinPath',
+  claude: 'claudeCodeExecutable',
+  codex: 'codexPath',
+  // Pi keeps its managed adapter binary; piPath overrides the CLI the adapter
+  // spawns via LODY_PI_PATH and takes part in the override cache suffix.
+  pi: null,
+} as const satisfies Record<ManagedBuiltinAgentType, keyof BuiltinRuntimeOverrides | null>;
+
+/**
+ * The `capabilitySourceVersion` a real probe would stamp, resolved without
+ * starting an agent, downloading a runtime, or touching the network.
+ *
+ * `undefined` means the version cannot be named without doing that work — a
+ * managed runtime that is not installed yet has no version to key on, and
+ * substituting the bundled target version would let a cached entry outlive an
+ * install that never happened. Callers must treat `undefined` as "probe".
+ */
+export async function resolveExpectedAcpCapabilitySourceVersion(
+  input: ResolveACPSettingInput
+): Promise<string | undefined> {
+  if (input.cliType === 'builtin' && input.agentType === 'sorbet') {
+    // The tag may move without changing the launch spec, and the build stamped into a
+    // cached entry is provenance only. Always probe on refresh.
+    return undefined;
+  }
+  if (input.cliType !== 'builtin' || !isManagedBuiltinAgentType(input.agentType)) {
+    return getAcpCapabilitySourceVersion(input);
+  }
+  const overrideKey = MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS[input.agentType];
+  if (overrideKey && trimRuntimeOverride(input.runtimeOverrides?.[overrideKey])) {
+    // An override launches the user's own binary; the launcher stamps the static
+    // adapter version plus the override suffix, never a managed runtime version.
+    return getAcpCapabilitySourceVersion(input);
+  }
+  const runtime = getManagedBuiltinRuntimeByAgentType(input.agentType);
+  if (!runtime) {
+    return undefined;
+  }
+  const status = await getManagedAgentRuntimeManager().getRuntimeStatus(runtime.runtimeName);
+  if (status.kind !== 'installed') {
+    return undefined;
+  }
+  if (
+    input.agentType === 'pi' &&
+    (input.runtimeOverrides?.piExtensions?.length ?? 0) > 0 &&
+    status.version !== status.targetVersion
+  ) {
+    // With extensions the launcher calls ensureCurrentRuntime, which installs the
+    // target version before starting; an older installed version is not what a
+    // probe would run, so it cannot name the version a probe would stamp.
+    return undefined;
+  }
+  if (status.updateAvailable) {
+    // Mirror resolveManagedRuntimeForLaunch: discovering a newer runtime is the
+    // launch path's job today, and answering from the cache must not be the
+    // reason a managed runtime stops updating on an otherwise idle machine.
+    getManagedRuntimeUpdateCoordinator().enqueue(runtime.runtimeName);
+  }
+  return getAcpCapabilitySourceVersion(input, status.version);
+}
+
 export function resolveRegistryAgentACPSetting(agent: RegistryAcpAgent): ResolvedACPSetting {
   if (agent.distribution.local?.command) {
-    const isNpx = agent.distribution.local.command === 'npx';
-    const args = [...(isNpx ? [NPX_CACHE_MODE_ARG] : []), ...(agent.distribution.local.args ?? [])];
+    const args = [...(agent.distribution.local.args ?? [])];
     return {
       status: {
         agent: `${agent.name}@${agent.version}`,
@@ -305,10 +568,13 @@ export function resolveCustomACPSetting(
   agentType: string,
   customAcp: CustomAcpLaunchSpec | undefined
 ): ResolvedACPSetting {
-  const command = customAcp?.command.trim();
-  if (!command) {
+  const configured = customAcp?.command.trim();
+  if (!configured) {
     throw new Error(`Custom ACP ${agentType} has no launch command configured`);
   }
+  // The launch command is typed by a human, so it can start with `~`. spawn()
+  // does not expand it and the agent would fail to start with ENOENT.
+  const command = expandHomePath(configured);
   return {
     status: { agent: `custom:${agentType}`, command },
     exec: { command, args: [...(customAcp?.args ?? [])] },
@@ -328,12 +594,64 @@ export function resolveACPSetting(input: ResolveACPSettingInput): ResolvedACPSet
   throw new Error(`Unsupported ACP cliType: ${input.cliType as string}`);
 }
 
-function expandHomePath(pathValue: string): string {
-  if (pathValue === '~') return homedir();
+export function expandHomePath(pathValue: string, homeDir = homedir()): string {
+  if (!homeDir) return pathValue;
+  if (pathValue === '~' || pathValue === '$HOME' || pathValue === '${HOME}') {
+    return homeDir;
+  }
   if (pathValue.startsWith('~/') || pathValue.startsWith('~\\')) {
-    return join(homedir(), pathValue.slice(2));
+    return join(homeDir, pathValue.slice(2));
+  }
+  if (pathValue.startsWith('$HOME/') || pathValue.startsWith('$HOME\\')) {
+    return join(homeDir, pathValue.slice('$HOME/'.length));
+  }
+  if (pathValue.startsWith('${HOME}/') || pathValue.startsWith('${HOME}\\')) {
+    return join(homeDir, pathValue.slice('${HOME}/'.length));
   }
   return pathValue;
+}
+
+const AGENT_HOME_PATH_ENV_KEYS = [
+  'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_EXECUTABLE',
+  'CLAUDE_CODE_HOST_CREDS_FILE',
+  'CODEX_HOME',
+  'GROK_HOME',
+  'GROK_CONFIG',
+  'XDG_CONFIG_HOME',
+] as const;
+
+/**
+ * Expands leading `~`, `$HOME`, and `${HOME}` in filesystem-path environment
+ * variables configured in Lody's Agent Config UI. Unlike a terminal shell,
+ * JSON/UI environment maps do not undergo shell word expansion before `spawn()`,
+ * and downstream SDKs (such as `@anthropic-ai/claude-agent-sdk` reading
+ * `CLAUDE_CONFIG_DIR`) treat unexpanded `$HOME/...` or `~/.claude-...` as
+ * non-absolute paths.
+ */
+export function normalizeAgentProcessEnv(
+  env: NodeJS.ProcessEnv,
+  homeDir = env.HOME?.trim() || homedir()
+): NodeJS.ProcessEnv {
+  let out: NodeJS.ProcessEnv | undefined;
+  for (const key of AGENT_HOME_PATH_ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      if (key === 'CLAUDE_CONFIG_DIR') {
+        out ??= { ...env };
+        delete out[key];
+      }
+      continue;
+    }
+    const expanded = expandHomePath(trimmed, homeDir);
+    if (expanded !== raw) {
+      out ??= { ...env };
+      out[key] = expanded;
+    }
+  }
+  return out ?? env;
 }
 
 function trimRuntimeOverride(value: string | undefined): string | undefined {
@@ -355,8 +673,8 @@ async function resolveManagedRuntimeForLaunch(
   return launch;
 }
 
-function resolveCliAdapterEntry(
-  adapter: 'claude-acp' | 'codex-acp' | 'deepseek-acp' | 'grok-acp'
+export function resolveCliAdapterEntry(
+  adapter: 'claude-acp' | 'codex-acp' | 'deepseek-acp' | 'grok-acp' | 'devin-acp'
 ): [string] {
   const argvEntry = process.argv[1] ? resolve(process.argv[1]) : undefined;
   const candidates: string[] = [];
@@ -384,6 +702,7 @@ async function resolveBuiltinACPProcessLaunch(
     const [adapterPath] = resolveCliAdapterEntry('deepseek-acp');
     const launch = await resolveDeepSeekHarnessProcessLaunch({
       adapterPath,
+      providerId: input.agentConfigId,
       extraArgs: input.extraArgs,
     });
     return {
@@ -391,8 +710,100 @@ async function resolveBuiltinACPProcessLaunch(
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
     };
   }
+  if (input.agentType === 'sorbet') {
+    return {
+      command: 'npx',
+      args: ['-y', SORBET_ACP_PACKAGE, '--no-session-title', ...(input.extraArgs ?? [])],
+      env: {
+        // Bound npm's registry requests; npm can use cached metadata when offline.
+        npm_config_fetch_retries: '0',
+        npm_config_fetch_timeout: '5000',
+        // Third-party state: the agent owns this store's format, atomicity and migration.
+        // Lody only passes the path, and only reaches it through the bounded credentials
+        // operations. Never parse, rewrite, export or preview it from Lody.
+        SORBET_DATA_DIR: join(getLodyDataDir(), 'sorbet'),
+        SORBET_OBSERVABILITY_RECORDING: 'false',
+        SORBET_OBSERVABILITY_CONFIG: '',
+      },
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(
+        input,
+        undefined,
+        resolveSorbetInstalledAcpVersion()
+      ),
+    };
+  }
+  if (input.agentType === 'dimcode') {
+    return {
+      command: 'dimcode',
+      args: ['acp', ...(input.extraArgs ?? [])],
+      // Version changes belong to the user, including standalone installations.
+      env: { DIMCODE_DISABLE_AUTOUPDATE: '1', DIMCODE_AUTOUPDATE: '0' },
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+    };
+  }
+  if (input.agentType === 'bub') {
+    // Bub ships its own `bub acp` ACP server and is installed by the user
+    // (`bub install bub-acp-server`). Lody neither downloads nor versions it;
+    // when the command is missing the spawn fails and the UI points at the
+    // install guide. `bub` is resolved from the same augmented PATH as other
+    // user-installed local ACP agents.
+    return {
+      command: 'bub',
+      args: ['acp', ...(input.extraArgs ?? [])],
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+    };
+  }
   if (!isManagedBuiltinAgentType(input.agentType)) {
     throw new Error(`Unsupported managed builtin ACP type: ${input.agentType}`);
+  }
+  if (input.agentType === 'antigravity') {
+    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.antigravityPath);
+    const runtime = overridePath
+      ? { command: overridePath, version: undefined }
+      : await resolveManagedRuntimeForLaunch('antigravity', input);
+    return {
+      command: runtime.command,
+      args: [
+        'acp',
+        '--process-per-session',
+        '--disable-telemetry',
+        ...(input.runtimeOverrides?.antigravitySkipPermissions === true
+          ? ['--dangerously-skip-permissions']
+          : []),
+        ...(input.extraArgs ?? []),
+      ],
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
+    };
+  }
+  if (input.agentType === 'pi') {
+    const extensions = input.runtimeOverrides?.piExtensions ?? [];
+    if (extensions.length && !PI_EXTENSIONS_SUPPORTED) {
+      throw new Error(
+        'This Pi runtime does not support selected extensions. Update the managed runtime.'
+      );
+    }
+    const runtime = extensions.length
+      ? await getManagedAgentRuntimeManager().ensureCurrentRuntime('pi', {
+          onProgress: input.onManagedRuntimeProgress,
+          signal: input.signal,
+        })
+      : await resolveManagedRuntimeForLaunch('pi', input);
+    // The managed runtime is the Pi ACP adapter; piPath overrides the Pi CLI
+    // the adapter spawns via LODY_PI_PATH. The empty string intentionally
+    // shadows inherited values; the adapter's trim-falsy check treats it as
+    // unset, so do not revert to a conditional undefined env.
+    const piPath = trimRuntimeOverride(input.runtimeOverrides?.piPath);
+    return {
+      command: getCliNodeExecutable(),
+      args: [
+        runtime.command,
+        ...extensions.flatMap((path) => ['-e', path]),
+        ...(input.extraArgs ?? []),
+      ],
+      env: { LODY_PI_PATH: piPath ?? '' },
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
+    };
   }
   if (input.agentType === 'kimi') {
     const overridePath = trimRuntimeOverride(input.runtimeOverrides?.kimiPath);
@@ -400,7 +811,7 @@ async function resolveBuiltinACPProcessLaunch(
       ? { command: overridePath, version: undefined }
       : await resolveManagedRuntimeForLaunch('kimi-code', input);
     return {
-      command: overridePath ? runtime.command : process.execPath,
+      command: overridePath ? runtime.command : getCliNodeExecutable(),
       args: overridePath
         ? ['acp', ...(input.extraArgs ?? [])]
         : [runtime.command, 'acp', ...(input.extraArgs ?? [])],
@@ -410,47 +821,31 @@ async function resolveBuiltinACPProcessLaunch(
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
     };
   }
-  if (input.agentType === 'codex') {
-    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.codexPath);
-    const runtime = overridePath
-      ? { command: overridePath, version: undefined }
-      : await resolveManagedRuntimeForLaunch('codex', input);
-    return {
-      command: process.execPath,
-      args: [
-        ...resolveCliAdapterEntry('codex-acp'),
-        ...(BuiltinACPSetting.codex.args ?? []),
-        ...(input.extraArgs ?? []),
-      ],
-      env: { CODEX_PATH: runtime.command },
-      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
-    };
-  }
-  if (input.agentType === 'grok') {
-    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.grokPath);
-    const runtime = overridePath
-      ? { command: overridePath, version: undefined }
-      : await resolveManagedRuntimeForLaunch('grok-build', input);
-    return {
-      command: process.execPath,
-      args: [...resolveCliAdapterEntry('grok-acp'), ...(input.extraArgs ?? [])],
-      env: { GROK_PATH: runtime.command, GROK_DISABLE_AUTOUPDATER: '1' },
-      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
-    };
-  }
-
-  const overridePath = trimRuntimeOverride(input.runtimeOverrides?.claudeCodeExecutable);
+  const agentType = input.agentType;
+  const nativeRuntime = {
+    codex: ['codex', 'CODEX_PATH'],
+    devin: ['devin', 'DEVIN_PATH'],
+    grok: ['grok-build', 'GROK_PATH'],
+    claude: ['claude-code', 'CLAUDE_CODE_EXECUTABLE'],
+  } as const;
+  const [runtimeName, executableEnv] = nativeRuntime[agentType];
+  const overridePath = trimRuntimeOverride(
+    input.runtimeOverrides?.[MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS[agentType]]
+  );
   const runtime = overridePath
     ? { command: overridePath, version: undefined }
-    : await resolveManagedRuntimeForLaunch('claude-code', input);
+    : await resolveManagedRuntimeForLaunch(runtimeName, input);
   return {
-    command: process.execPath,
+    command: getCliNodeExecutable(),
     args: [
-      ...resolveCliAdapterEntry('claude-acp'),
-      ...(BuiltinACPSetting.claude.args ?? []),
+      ...resolveCliAdapterEntry(`${agentType}-acp`),
+      ...(BuiltinACPSetting[agentType].args ?? []),
       ...(input.extraArgs ?? []),
     ],
-    env: { CLAUDE_CODE_EXECUTABLE: runtime.command },
+    env: {
+      [executableEnv]: runtime.command,
+      ...(agentType === 'grok' ? { GROK_DISABLE_AUTOUPDATER: '1' } : {}),
+    },
     capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
   };
 }
@@ -467,6 +862,30 @@ export async function resolveBuiltinAuthenticationProcessLaunch(
 ): Promise<ResolvedACPProcessLaunch | null> {
   if (input.cliType !== 'builtin' || !isManagedBuiltinAgentType(input.agentType)) {
     throw new Error(`Unsupported builtin authentication type: ${input.agentType}`);
+  }
+
+  if (input.agentType === 'devin') {
+    if (input.action === 'status') return null;
+    throw new Error(`${input.agentType} authentication uses the ACP authentication flow.`);
+  }
+  if (input.agentType === 'pi') {
+    if (input.action === 'status') return null;
+    throw new Error(
+      'Configure Pi credentials through provider environment variables or Pi settings.'
+    );
+  }
+
+  if (input.agentType === 'antigravity') {
+    if (input.action === 'status') return null;
+    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.antigravityPath);
+    const runtime = overridePath
+      ? { command: overridePath }
+      : await resolveManagedRuntimeForLaunch('antigravity', input);
+    return {
+      command: runtime.command,
+      args: ['acp', '--login', '--disable-telemetry'],
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+    };
   }
 
   if (input.agentType === 'kimi') {
@@ -534,7 +953,15 @@ export async function resolveACPProcessLaunchAsync(
   input: ResolveACPProcessLaunchInput
 ): Promise<ResolvedACPProcessLaunch> {
   if (input.cliType === 'builtin') {
-    return await resolveBuiltinACPProcessLaunch(input);
+    const launch = await resolveBuiltinACPProcessLaunch(input);
+    const gateway = input.magpieGatewayUrl;
+    if (!gateway) return launch;
+    const magpie = await prepareMagpieRuntime(input.agentType, gateway, input.signal);
+    return {
+      ...launch,
+      env: { ...launch.env, ...magpie.env },
+      args: [...launch.args, ...magpie.args],
+    };
   }
   if (input.cliType === 'registry') {
     const agent = registryAgentsById[input.agentType];
@@ -570,6 +997,33 @@ function normalizePathEntry(entry: string): string {
   return normalized.length > 1 ? normalized.replace(/[\\/]+$/, '') : normalized;
 }
 
+/**
+ * Returns the base PATH's first entry when it is a `gh` shim dir. The shim (and its
+ * sibling `git` transport) is what selects per-command GitHub credentials; a native
+ * `gh` found earlier in PATH runs without them. Agent shells (Claude Code's shell
+ * snapshot) inherit this order verbatim, so `BASH_ENV` alone cannot restore it.
+ * Only a LEADING entry counts: `prependGhShimBinDirToPath` puts the session's own
+ * dir first, while a shim dir elsewhere may be another workspace's, inherited by a
+ * daemon started inside a Lody agent, and must never be promoted.
+ */
+function getLeadingGhShimBinDir(parts: string[]): string | undefined {
+  const first = parts[0];
+  if (first === undefined) {
+    return undefined;
+  }
+  return dirname(normalizePathEntry(first)) === normalizePathEntry(getGhShimSessionBinRoot())
+    ? first
+    : undefined;
+}
+
+function withLeadingEntry(parts: string[], leading: string | undefined): string[] {
+  if (leading === undefined) {
+    return parts;
+  }
+  const normalized = normalizePathEntry(leading);
+  return [leading, ...parts.filter((entry) => normalizePathEntry(entry) !== normalized)];
+}
+
 export function getDefaultAcpPathEntries(homeDir = homedir(), agentType?: string): string[] {
   if (!homeDir) {
     return [];
@@ -585,31 +1039,35 @@ export function withDefaultAcpPathEntries(
   env: NodeJS.ProcessEnv,
   agentType?: string
 ): NodeJS.ProcessEnv {
+  const normalizedEnv = normalizeAgentProcessEnv(env);
   const defaultEntries = getDefaultAcpPathEntries(homedir(), agentType);
   if (defaultEntries.length === 0) {
-    return env;
+    return normalizedEnv;
   }
 
-  const pathKey = getPathEnvKey(env);
-  const currentParts = (env[pathKey] ?? '').split(delimiter).filter(Boolean);
+  const pathKey = getPathEnvKey(normalizedEnv);
+  const currentParts = (normalizedEnv[pathKey] ?? '').split(delimiter).filter(Boolean);
   const defaultEntrySet = new Set(defaultEntries.map(normalizePathEntry));
   const currentWithoutDefaults = currentParts.filter(
     (entry) => !defaultEntrySet.has(normalizePathEntry(entry))
   );
-  const nextPath = [...defaultEntries, ...currentWithoutDefaults].join(delimiter);
+  const nextPath = withLeadingEntry(
+    [...defaultEntries, ...currentWithoutDefaults],
+    getLeadingGhShimBinDir(currentParts)
+  ).join(delimiter);
 
-  if (env[pathKey] === nextPath) {
-    return env;
+  if (normalizedEnv[pathKey] === nextPath) {
+    return normalizedEnv;
   }
 
   return {
-    ...env,
+    ...normalizedEnv,
     [pathKey]: nextPath,
   };
 }
 
 /**
- * Overlay a login-shell environment (see `getLoginShellEnv`) onto a base env when
+ * Overlay a login-shell environment (see `getLoginShellEnvLegacy`) onto a base env when
  * spawning ACP agents.
  *
  * - Non-PATH vars: base wins. The base carries lody-injected values (e.g.
@@ -619,7 +1077,9 @@ export function withDefaultAcpPathEntries(
  *   resolve from wherever the user actually put them (homebrew/cargo/volta/asdf/
  *   `~/.local/bin`/...). A GUI/daemon launch inherits a minimal PATH, so without
  *   this `opencode acp` & friends fail with ENOENT. Base-only entries (e.g.
- *   runtime-injected `node_modules/.bin`) are appended so nothing is lost.
+ *   runtime-injected `node_modules/.bin`) are appended so nothing is lost. The
+ *   one exception is a `gh` shim dir leading the base PATH, which stays first
+ *   (`getLeadingGhShimBinDir`).
  *
  * Hardcoding a few dirs (see `withDefaultAcpPathEntries`) was rejected: it cannot
  * cover the open-ended set of locations different users install tools into.
@@ -629,7 +1089,7 @@ export function mergeLoginShellEnv(
   shellEnv: NodeJS.ProcessEnv | null | undefined
 ): NodeJS.ProcessEnv {
   if (!shellEnv || Object.keys(shellEnv).length === 0) {
-    return base;
+    return normalizeAgentProcessEnv(base);
   }
 
   const merged: NodeJS.ProcessEnv = { ...shellEnv, ...base };
@@ -651,8 +1111,8 @@ export function mergeLoginShellEnv(
   }
 
   if (ordered.length > 0) {
-    merged[pathKey] = ordered.join(delimiter);
+    merged[pathKey] = withLeadingEntry(ordered, getLeadingGhShimBinDir(baseParts)).join(delimiter);
   }
 
-  return merged;
+  return normalizeAgentProcessEnv(merged);
 }

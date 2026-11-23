@@ -50,6 +50,8 @@ export function buildTerminalTheme(host: HTMLElement): ITheme {
   probe.style.position = 'absolute';
   probe.style.visibility = 'hidden';
   probe.style.pointerEvents = 'none';
+  // Global reduced-motion styles must not animate synchronous color reads.
+  probe.style.transitionProperty = 'none';
   host.appendChild(probe);
   try {
     const theme: ITheme = {};

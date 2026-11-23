@@ -1,21 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAgentBrandId, resolveAgentBrandId, type AgentBrandId } from '../src/agent-brand';
-
-describe('isAgentBrandId', () => {
-  it('accepts known brand ids', () => {
-    expect(isAgentBrandId('deepseek')).toBe(true);
-    expect(isAgentBrandId('mimo')).toBe(true);
-    expect(isAgentBrandId('minimax')).toBe(true);
-    expect(isAgentBrandId('glm')).toBe(true);
-  });
-
-  it('rejects unknown values', () => {
-    expect(isAgentBrandId('claude')).toBe(false);
-    expect(isAgentBrandId(undefined)).toBe(false);
-    expect(isAgentBrandId(null)).toBe(false);
-    expect(isAgentBrandId(123)).toBe(false);
-  });
-});
+import { resolveAgentBrandId, type AgentBrandId } from '../src/agent-brand';
 
 describe('resolveAgentBrandId', () => {
   it('prefers an explicit brandId over env', () => {

@@ -22,6 +22,9 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import { registerBuiltInCommands } from '@/lib/commands';
+
+registerBuiltInCommands();
 
 /**
  * The desktop composer's two consolidated footer buttons: the run-config
@@ -126,15 +129,11 @@ const selectors: AcpConfigOptionSelector[] = [
     ],
   },
   {
-    type: 'select',
-    configId: 'collaboration_mode',
-    category: 'collaboration_mode',
-    label: 'Collaboration mode',
-    currentValue: 'default',
-    options: [
-      { value: 'default', label: 'Default' },
-      { value: 'plan', label: 'Plan' },
-    ],
+    type: 'boolean',
+    configId: 'plan_mode',
+    label: 'Plan',
+    currentValue: false,
+    options: [],
   },
   {
     type: 'select',
@@ -195,7 +194,13 @@ const grokSelectors: AcpConfigOptionSelector[] = [
   },
 ];
 
-function StoryShell({ isEmptyConversation }: { isEmptyConversation: boolean }) {
+function StoryShell({
+  isEmptyConversation,
+  machineSelected = true,
+}: {
+  isEmptyConversation: boolean;
+  machineSelected?: boolean;
+}) {
   const store = useMemo(() => {
     const s = createStore();
     s.set(
@@ -215,10 +220,12 @@ function StoryShell({ isEmptyConversation }: { isEmptyConversation: boolean }) {
     <Provider store={store}>
       <div className="flex min-h-dvh items-end bg-background p-8">
         {/* Mimic the composer footer row the buttons live in. */}
-        <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
           <DesktopRunConfigMenu
-            agentSelection={{ agentId: codexId, machineId }}
-            allowedMachineIds={[machineId]}
+            agentSelection={machineSelected ? { agentId: codexId, machineId } : null}
+            allowedMachineIds={machineSelected ? [machineId] : []}
+            availableAgentConfigs={agents}
+            disabledReason={machineSelected ? undefined : 'Select a machine first'}
             agentLocked={!isEmptyConversation}
             onAgentConfigChange={fn()}
             modelOptions={modelOptions}
@@ -266,6 +273,28 @@ function MachineScopeShell() {
   );
 }
 
+function OfflineMachineScopeShell() {
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-background p-8">
+      {['build-machine', 'ubuntu-gpu-workstation-shanghai-02'].map((name) => (
+        <div key={name} className="flex items-center gap-2">
+          <DesktopMachineMenu
+            value={'machine-remote' as MachineId}
+            selectedLabel={name}
+            offline
+            options={[{ value: machineId, label: 'zx-macbook' }]}
+            onChange={fn()}
+            onAddMachine={fn()}
+          />
+          <div className="flex h-6 items-center rounded-md bg-foreground/[0.06] px-2 text-xs font-normal text-foreground/80">
+            lody
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function GrokConfigShell() {
   const store = useMemo(() => {
     const next = createStore();
@@ -284,7 +313,7 @@ function GrokConfigShell() {
   return (
     <Provider store={store}>
       <div className="flex min-h-dvh items-end bg-background p-8">
-        <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
           <DesktopRunConfigMenu
             agentSelection={{ agentId: grokId, machineId }}
             allowedMachineIds={[machineId]}
@@ -308,7 +337,7 @@ function GrokConfigShell() {
   );
 }
 
-function DeepSeekWarningShell() {
+function DeepSeekConfigShell() {
   const store = useMemo(() => {
     const next = createStore();
     next.set(
@@ -322,7 +351,7 @@ function DeepSeekWarningShell() {
   return (
     <Provider store={store}>
       <div className="flex min-h-dvh items-end bg-background p-8">
-        <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
           <DesktopRunConfigMenu
             agentSelection={{ agentId: deepseekId, machineId }}
             availableAgentConfigs={agents}
@@ -343,6 +372,127 @@ function DeepSeekWarningShell() {
             onModelChange={setModel}
           />
         </div>
+      </div>
+    </Provider>
+  );
+}
+
+/** A provider-prefixed id longer than the old 10rem face cap. */
+const longModelOptions: AcpSessionSelectOption[] = [
+  {
+    value: 'openrouter/anthropic/claude-sonnet-5-5-thinking',
+    label: 'openrouter/anthropic/claude-sonnet-5-5-thinking',
+  },
+];
+
+/**
+ * The model label at several composer widths, inside the same
+ * `@container/composer-face` slot the composer footer gives it: in full while
+ * there is room, then losing its prefix, then the compact square.
+ */
+function LongModelNameShell() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(agents.map((agent) => [getAgentConfigRoomId(agent.id), agent]))
+    );
+    return next;
+  }, []);
+  const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
+    Object.fromEntries(selectors.map((sel) => [sel.configId, sel.currentValue]))
+  );
+  const updateConfig = (id: string, value: AcpConfigOptionValue) =>
+    setValues((previous) => ({ ...previous, [id]: value }));
+
+  return (
+    <Provider store={store}>
+      <div className="flex min-h-dvh flex-col items-start justify-end gap-4 bg-background p-8">
+        {[720, 480, 360, 260].map((width) => (
+          <div
+            key={width}
+            data-long-model-row={width}
+            style={{ width }}
+            className="flex items-center gap-1.5 rounded-xl bg-input/90 px-2 py-1.5"
+          >
+            <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
+              <DesktopRunConfigMenu
+                agentSelection={{ agentId: codexId, machineId }}
+                allowedMachineIds={[machineId]}
+                availableAgentConfigs={agents}
+                agentLocked
+                modelOptions={longModelOptions}
+                selectedModelId={longModelOptions[0]!.value}
+                configOptionSelectors={selectors}
+                configOptionValues={values}
+                onConfigOptionChange={updateConfig}
+              />
+              <DesktopPermissionModeButton
+                modeOptions={modeOptions}
+                selectedModeId={modeOptions[0]?.value ?? null}
+                configOptionSelectors={selectors}
+                configOptionValues={values}
+                onConfigOptionChange={updateConfig}
+              />
+            </div>
+            <div className="size-7 shrink-0 rounded-full bg-foreground/80" />
+          </div>
+        ))}
+      </div>
+    </Provider>
+  );
+}
+
+const speedTierSelectors: AcpConfigOptionSelector[] = [
+  selectors[0]!,
+  {
+    type: 'select',
+    configId: 'fast-mode',
+    category: 'fast-mode',
+    label: 'Speed',
+    currentValue: 'off',
+    options: [
+      { value: 'off', label: 'Standard' },
+      { value: 'fast', label: 'Fast' },
+      { value: 'ultrafast', label: 'Ultrafast' },
+    ],
+  },
+];
+
+/** The face for each speed tier: no glyph, the Fast bolt, and the stacked Ultrafast bolts. */
+function SpeedTierShell() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(agents.map((agent) => [getAgentConfigRoomId(agent.id), agent]))
+    );
+    return next;
+  }, []);
+  return (
+    <Provider store={store}>
+      <div className="flex min-h-dvh flex-col items-start justify-end gap-4 bg-background p-8">
+        {['off', 'fast', 'ultrafast'].map((tier) => (
+          <div
+            key={tier}
+            data-speed-tier-row={tier}
+            style={{ width: 420 }}
+            className="@container/composer-face flex items-center rounded-xl bg-input/90 px-2 py-1.5"
+          >
+            <DesktopRunConfigMenu
+              agentSelection={{ agentId: codexId, machineId }}
+              allowedMachineIds={[machineId]}
+              availableAgentConfigs={agents}
+              showAgentNameInTrigger
+              agentLocked
+              modelOptions={modelOptions}
+              selectedModelId={modelOptions[0]!.value}
+              configOptionSelectors={speedTierSelectors}
+              configOptionValues={{ reasoning_effort: 'medium', 'fast-mode': tier }}
+              onConfigOptionChange={fn()}
+            />
+          </div>
+        ))}
       </div>
     </Provider>
   );
@@ -376,19 +526,38 @@ type Story = StoryObj<typeof meta>;
 
 export const LockedAgent: Story = { args: { isEmptyConversation: false } };
 export const EmptyConversationAgentPickable: Story = { args: { isEmptyConversation: true } };
+export const MachineRequired: Story = {
+  args: { isEmptyConversation: true, machineSelected: false },
+};
 export const GrokInteractionAndPermission: Story = {
   args: { isEmptyConversation: false },
   render: () => <GrokConfigShell />,
 };
-export const DeepSeekDelegationWarning: Story = {
+export const DeepSeekModels: Story = {
   args: { isEmptyConversation: false },
-  render: () => <DeepSeekWarningShell />,
+  render: () => <DeepSeekConfigShell />,
 };
 export const MachineScope: Story = {
   args: { isEmptyConversation: true },
   render: () => <MachineScopeShell />,
 };
+export const MachineScopeOffline: Story = {
+  args: { isEmptyConversation: true },
+  render: () => <OfflineMachineScopeShell />,
+};
+export const MachineScopeOfflineLight: Story = {
+  ...MachineScopeOffline,
+  globals: { theme: 'light' },
+};
 export const MachineScopeEmpty: Story = {
   args: { isEmptyConversation: true },
   render: () => <EmptyMachineScopeShell />,
+};
+export const LongModelName: Story = {
+  args: { isEmptyConversation: false },
+  render: () => <LongModelNameShell />,
+};
+export const SpeedTiers: Story = {
+  args: { isEmptyConversation: false },
+  render: () => <SpeedTierShell />,
 };

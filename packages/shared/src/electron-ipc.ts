@@ -30,6 +30,17 @@ export type RendererFatalErrorReport = {
 
 export type WindowBadgeInput = { unread: number; waiting: number };
 
+/**
+ * Route a product window should show. Sent to a pre-warmed auxiliary window
+ * when it is reused, so the renderer can bind the target without a reload.
+ */
+export type ElectronWindowTarget = {
+  workspace: string;
+  sessionId?: string;
+};
+
+export type PreparedWindowTarget = ElectronWindowTarget & { preparationId: string };
+
 export type SessionControlSendInput = {
   requestId: string;
   message: LocalSessionControlRequest;
@@ -88,7 +99,7 @@ export const ElectronPublicBrowserBoundsInputSchema = ElectronPublicBrowserIdInp
 }).strict();
 
 export const ElectronPublicBrowserVisibilityInputSchema = ElectronPublicBrowserIdInputSchema.extend(
-  { visible: z.boolean() }
+  { visible: z.boolean(), trackInteraction: z.boolean().optional() }
 ).strict();
 
 export type ElectronPublicBrowserCreateInput = z.infer<
@@ -123,6 +134,11 @@ export type ElectronPublicBrowserResult =
   | { ok: false; error: string };
 
 export const ELECTRON_PUBLIC_BROWSER_STATE_CHANNEL = 'publicBrowser.state';
+
+export type ElectronPublicBrowserInteraction = {
+  browserId: string;
+  source: 'pointer' | 'pointerdown' | 'pointerleave' | 'wheel' | 'keyboard';
+};
 
 const LocalPathLauncherStringSchema = z
   .string()
@@ -163,6 +179,28 @@ export const LaunchLocalPathInputSchema = z.discriminatedUnion('kind', [
 
 export type LaunchLocalPathInput = z.infer<typeof LaunchLocalPathInputSchema>;
 
+export const PathLauncherRequestSchema = z
+  .object({
+    launcherId: z.string().trim().min(1).max(200),
+    targetPath: LocalPathLauncherStringSchema,
+    targetKind: z.enum(['file', 'directory']).default('directory'),
+  })
+  .strict();
+export type PathLauncherRequest = z.infer<typeof PathLauncherRequestSchema>;
+export const CustomPathLauncherApprovalSchema = z
+  .object({
+    id: z.string().trim().min(1).max(80),
+    label: z.string().trim().min(1).max(48),
+    commandTemplate: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+export type CustomPathLauncherApproval = z.infer<typeof CustomPathLauncherApprovalSchema>;
+export const PathLauncherProbeSchema = z
+  .object({
+    launchers: z.array(PathLauncherRequestSchema).max(30),
+  })
+  .strict();
+
 export type LaunchLocalPathResult =
   | {
       launched: true;
@@ -183,6 +221,8 @@ export type LaunchLocalPathResult =
     };
 
 export type ShowSessionCompletionNotificationInput = {
+  /** New renderers already checked visibility of this specific source. */
+  allowWhileForeground?: boolean;
   sessionId: string;
   workspaceSlug?: string;
   title: string;
@@ -279,6 +319,32 @@ export const CliRuntimeStateSchema = z
       .strict()
       .optional(),
     connectedWorkspaces: z.array(CliRuntimeWorkspaceSchema).optional(),
+    // Keep additive runtime-state extensions at this passthrough top level.
+    // Older v1 consumers reject unknown keys inside the strict backend and
+    // workspace objects, but safely ignore an unknown top-level field.
+    connectionAges: z
+      .object({
+        backendNotConnectedSinceMs: z.number().int().nonnegative().optional(),
+        workspaceNotConnectedSinceMs: z
+          .record(z.string().min(1), z.number().int().nonnegative())
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    /** Encrypted workspaces whose execution relies on the backend-outage window of
+     * specs/e2ee/execution-freshness-outage.md, keyed by workspace ID. Wall-clock ends
+     * of the window from the last successful ledger read; display only, never authority. */
+    e2eeAccessWindows: z
+      .record(
+        z.string().min(1),
+        z
+          .object({
+            executionUntilMs: z.number().int().nonnegative(),
+            readUntilMs: z.number().int().nonnegative(),
+          })
+          .strict()
+      )
+      .optional(),
     machineId: z.string().min(1).optional(),
     pid: z.number().int(),
     updatedAtMs: z.number(),
@@ -312,6 +378,11 @@ export type ElectronCliState = {
   runtime?: CliRuntimeState;
   runtimeOwnership?: 'owned' | 'external';
   message?: string;
+  /**
+   * Fatal because a Host owns the runtime endpoint but refuses this desktop
+   * (on Windows, typically one started elevated or in a service session).
+   */
+  hostAccessDenied?: true;
   retryAttempt?: number;
   retryInMs?: number;
   lastExitCode?: number | null;
@@ -374,6 +445,55 @@ export const ElectronAuthCallbackSessionSchema = z
   .strict();
 
 export type ElectronAuthCallbackSession = z.infer<typeof ElectronAuthCallbackSessionSchema>;
+
+export type ElectronLoginState = {
+  revision: number;
+  attemptId: string | null;
+  phase: 'idle' | 'waiting' | 'exchanging' | 'authenticated' | 'error';
+  session: ElectronAuthCallbackSession | null;
+  error:
+    | 'browser_open_failed'
+    | 'authorization_expired'
+    | 'exchange_failed'
+    | 'exchange_certificate_failed'
+    | 'exchange_rejected'
+    | 'exchange_timeout'
+    | 'secure_storage_unavailable'
+    | 'restart_required'
+    | null;
+  /** Credential-free failure summary (HTTP status/server code or local error) for support. */
+  errorDetail: string | null;
+};
+
+/** Which Lody process reported the storage write failure that started a check. */
+export type ElectronStorageGuardSource = 'renderer' | 'cli';
+
+export type ElectronStorageGuardVolume = {
+  freeBytes: number;
+  totalBytes: number;
+  /** Free space this volume needs before Lody resumes. */
+  resumeFreeBytes: number;
+};
+
+/**
+ * Whether the desktop has stopped Lody until disk space is freed. Set only when a
+ * storage write failed AND a volume holding Lody data was then found short of space.
+ */
+export type ElectronStorageGuardState = {
+  blocked: boolean;
+  source?: ElectronStorageGuardSource;
+  /** The most constrained volume holding Lody data, at the last check. */
+  volume?: ElectronStorageGuardVolume;
+};
+
+export type ElectronStorageGuardRelaunchOutcome =
+  | 'quitting'
+  | 'cancelled'
+  | 'still_low'
+  | 'check_failed';
+
+/** `CliRuntimeIssue.code` the CLI reports when a write to its local repository fails. */
+export const CLI_STORAGE_WRITE_FAILED_ISSUE_CODE = 'storage_write_failed';
 
 export type ElectronUpdaterPhase =
   | 'idle'
@@ -449,6 +569,9 @@ export type SessionCompletionNotificationClickPayload = {
   sessionId: string;
   workspaceSlug?: string;
 };
+
+/** OS power/session transition forwarded from Electron's `powerMonitor`. */
+export type ElectronPowerState = 'suspend' | 'resume' | 'lock-screen' | 'unlock-screen';
 
 export type SendLocalSessionControlResult =
   | {
@@ -653,12 +776,20 @@ export const GLOBAL_SHORTCUT_TRIGGERED_CHANNEL = 'app.globalShortcut';
 
 /**
  * Default binding per global shortcut, in the renderer's binding-string syntax
- * (`$mod+Shift+n`). The main process converts these to Electron accelerators via
+ * (`Mod+Shift+n`). The main process converts these to Electron accelerators via
  * `bindingToElectronAccelerator`.
  */
 export const GLOBAL_SHORTCUT_DEFAULTS: Record<GlobalShortcutId, string | null> = {
-  'app.focus': '$mod+Shift+l',
+  'app.focus': 'Mod+Shift+l',
 };
+
+/** Rewrite the pre-TanStack `$mod` token and normalize surrounding token whitespace. */
+export function migrateLegacyShortcutBinding(binding: string): string {
+  return binding
+    .split('+')
+    .map((token) => (token.trim().toLowerCase() === '$mod' ? 'Mod' : token.trim()))
+    .join('+');
+}
 
 /** A global shortcut's effective + default binding, surfaced to the renderer. */
 export type GlobalShortcutBinding = {
@@ -689,6 +820,7 @@ export type SetGlobalShortcutResult =
   | { ok: false; error: GlobalShortcutSetError };
 
 const GLOBAL_SHORTCUT_MODIFIER_TO_ACCELERATOR: Record<string, string> = {
+  // `$mod` remains read-compatible for settings persisted before the TanStack migration.
   $mod: 'CommandOrControl',
   mod: 'CommandOrControl',
   cmd: 'Command',
@@ -761,7 +893,7 @@ export function globalShortcutBindingHasModifier(binding: string | null | undefi
 }
 
 /**
- * Convert a binding-string (`$mod+Shift+l`) into an Electron accelerator
+ * Convert a binding-string (`Mod+Shift+l`) into an Electron accelerator
  * (`CommandOrControl+Shift+L`). Returns `null` when it can't be a usable global
  * accelerator — an unknown token, no key, or no primary modifier. Shift may be part
  * of the combo, but Shift-only globals would capture normal capitalization typing.

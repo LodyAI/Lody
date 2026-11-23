@@ -1,15 +1,8 @@
-import { getServerNow, isAllowedPreviewPublicUrl, type PreviewConnection } from '@lody/shared';
-import { previewPublicBaseDomain } from './preview-public-config';
-
-const isLeaseExpired = (connection: PreviewConnection | null | undefined, now: number): boolean =>
-  connection?.status === 'active' &&
-  typeof connection.leaseExpiresAt === 'number' &&
-  connection.leaseExpiresAt <= now;
+import { isQuickTunnelViewerUrl, type PreviewConnection } from '@lody/shared';
 
 export const hasUsableManagedPreviewUrl = (
-  connection: PreviewConnection | null | undefined,
-  now: number = getServerNow()
+  connection: PreviewConnection | null | undefined
 ): connection is PreviewConnection & { status: 'active'; publicUrl: string } =>
   connection?.status === 'active' &&
-  !isLeaseExpired(connection, now) &&
-  isAllowedPreviewPublicUrl(connection.publicUrl, previewPublicBaseDomain);
+  Boolean(connection.endpointId && connection.target) &&
+  isQuickTunnelViewerUrl(connection.publicUrl);

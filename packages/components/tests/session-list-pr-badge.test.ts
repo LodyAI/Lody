@@ -1,17 +1,24 @@
 // @vitest-environment jsdom
-
-import React from 'react';
+import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { Provider } from 'jotai';
+import { createStore, Provider } from 'jotai';
+import { sessionSendStatusesAtom } from '../src/atoms/session-send-status';
+import {
+  clearSessionPrMergeStatus,
+  OPTIMISTIC_PR_MERGED_TTL_MS,
+  setSessionPrMergeFailed,
+  setSessionPrMergedOptimistic,
+  setSessionPrMerging,
+} from '../src/atoms/session-pr-merge-status';
 import { SessionList } from '../src/components/session-list';
-import { SessionPrIcon, SessionRowLeadingSlot } from '../src/components/sidebar-row-shared';
 import { initI18n } from '../src/i18n';
+import { WORKING_HAND_OVER_MS } from '../src/ui/working-status-mark';
 
 const PR_STATUS_CASES = [
   ['open', '.lucide-git-pull-request', 'text-github-open'],
-  ['merged', '.lucide-git-merge', 'text-github-merged'],
+  ['merged', '.lucide-git-merge', 'text-pr-merged'],
   ['closed', '.lucide-git-pull-request-closed', 'text-github-closed'],
   ['draft', '.lucide-git-pull-request-draft', 'text-github-draft'],
 ] as const;
@@ -135,79 +142,6 @@ describe('SessionList PR badge', () => {
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 
-  it('keeps PR status rightmost and line diff immediately before it', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    flushSync(() => {
-      root?.render(
-        React.createElement(SessionList, {
-          sessions: [
-            {
-              sessionId: 'session-with-pr',
-              title: 'Session with PR',
-              repoFullName: 'loro-dev/lody',
-              branchName: 'fix/session-with-pr',
-              prUrl: 'https://github.com/loro-dev/lody/pull/42',
-              prStatus: 'open',
-              prCiState: 's',
-              latestMessageAt: '2026-04-22T00:00:00.000Z',
-              addedLines: 12,
-              deletedLines: 4,
-              isWorking: false,
-              hasUnreadMessages: false,
-              isOffline: false,
-              isWaitingPermission: false,
-            },
-            {
-              sessionId: 'session-without-pr',
-              title: 'Session without PR',
-              repoFullName: 'loro-dev/lody',
-              branchName: 'fix/session-without-pr',
-              latestMessageAt: '2026-04-21T00:00:00.000Z',
-              addedLines: 8,
-              deletedLines: 2,
-              isWorking: false,
-              hasUnreadMessages: false,
-              isOffline: false,
-              isWaitingPermission: false,
-            },
-          ],
-          repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
-        })
-      );
-    });
-
-    const rowWithPr = container.querySelector('[data-sidebar-session-id="session-with-pr"]');
-    const rowWithoutPr = container.querySelector('[data-sidebar-session-id="session-without-pr"]');
-
-    const passedPrIcon = rowWithPr?.querySelector('svg[data-pr-ci-verdict="success"]');
-    const passedBase = passedPrIcon?.querySelector('.lucide-git-pull-request');
-    const passedVerdict = passedPrIcon?.querySelector('.lucide-check');
-    expect(passedPrIcon).not.toBeNull();
-    expect(passedPrIcon?.querySelector('mask')).not.toBeNull();
-    expect(passedBase?.getAttribute('width')).toBe('14');
-    expect(passedBase?.getAttribute('height')).toBe('14');
-    expect(passedBase?.classList.contains('text-github-open')).toBe(true);
-    expect(passedVerdict).not.toBeNull();
-    expect(passedVerdict?.parentElement?.getAttribute('transform')).toBe('translate(7 7)');
-    expect(passedVerdict?.getAttribute('width')).toBe('10');
-    expect(passedVerdict?.getAttribute('height')).toBe('10');
-    expect(passedVerdict?.classList.contains('text-status-success')).toBe(true);
-    expect(passedPrIcon?.querySelector('.bg-sidebar')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-code-added')?.textContent).toBe('+12');
-    expect(rowWithPr?.querySelector('.text-code-removed')?.textContent).toBe('-4');
-    expect(
-      Array.from(
-        rowWithPr?.querySelectorAll('.text-code-removed, [data-pr-ci-verdict="success"]') ?? []
-      )
-    ).toEqual([rowWithPr?.querySelector('.text-code-removed'), passedPrIcon]);
-    expect(rowWithoutPr?.querySelector('[data-pr-ci-verdict]')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-code-added')?.textContent).toBe('+8');
-    expect(rowWithoutPr?.querySelector('.text-code-removed')?.textContent).toBe('-2');
-  });
-
   it('replaces diff stats with a Mergeable pill only while the ready session is inactive', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -242,9 +176,13 @@ describe('SessionList PR badge', () => {
 
     const row = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(row?.querySelector('[data-session-mergeable-pill]')?.textContent).toBe('Mergeable');
-    expect(row?.querySelector('.text-code-added')).toBeNull();
-    expect(row?.querySelector('.text-code-removed')).toBeNull();
-    expect(row?.querySelector('.lucide-git-pull-request')).not.toBeNull();
+    expect(row?.querySelector('.text-github-addition')).toBeNull();
+    expect(row?.querySelector('.text-github-deletion')).toBeNull();
+    const anchor = row?.querySelector('[data-session-pr-icon-anchor]');
+    expect(anchor).not.toBeNull();
+    expect(anchor?.className).toContain('w-5');
+    expect(anchor?.querySelector('.lucide-git-pull-request')).not.toBeNull();
+    expect(anchor?.querySelector('[data-session-mergeable-pill]')).toBeNull();
 
     flushSync(() => {
       root?.render(
@@ -258,61 +196,202 @@ describe('SessionList PR badge', () => {
 
     const selectedRow = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(selectedRow?.querySelector('[data-session-mergeable-pill]')).toBeNull();
-    expect(selectedRow?.querySelector('.text-code-added')).toBeNull();
-    expect(selectedRow?.querySelector('.text-code-removed')).toBeNull();
-    expect(selectedRow?.querySelector('.lucide-git-pull-request')).not.toBeNull();
+    expect(selectedRow?.querySelector('.text-github-addition')).toBeNull();
+    expect(selectedRow?.querySelector('.text-github-deletion')).toBeNull();
+    const selectedAnchor = selectedRow?.querySelector('[data-session-pr-icon-anchor]');
+    expect(selectedAnchor?.className).toBe(anchor?.className);
+    expect(selectedAnchor?.querySelector('.lucide-git-pull-request')).not.toBeNull();
   });
 
-  it.each(PR_STATUS_CI_CASES)(
-    'keeps the $prStatus PR tone independent from CI $prCiState',
-    ({
-      prStatus,
-      baseSelector,
-      baseToneClassName,
-      prCiState,
-      verdict,
-      verdictSelector,
-      verdictToneClassName,
-      cutoutRadius,
-    }) => {
-      container = document.createElement('div');
-      document.body.appendChild(container);
-      root = createRoot(container);
+  it('keeps the PR mark in the same trailing box when a sibling row has no Mergeable pill', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const row = (sessionId: string, prReadiness?: 'y') => ({
+      sessionId,
+      title: sessionId,
+      repoFullName: 'loro-dev/lody',
+      branchName: sessionId,
+      prUrl: `https://github.com/loro-dev/lody/pull/${sessionId}`,
+      prStatus: 'open' as const,
+      prCiState: 's' as const,
+      prReadiness,
+      latestMessageAt: '2026-04-22T00:00:00.000Z',
+      addedLines: 1,
+      deletedLines: 0,
+      isWorking: false,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+    });
 
+    flushSync(() => {
+      root?.render(
+        React.createElement(SessionList, {
+          sessions: [row('plain'), row('ready', 'y')],
+          repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+        })
+      );
+    });
+
+    const anchorOf = (sessionId: string) =>
+      container?.querySelector(
+        `[data-sidebar-session-id="${sessionId}"] [data-session-pr-icon-anchor]`
+      );
+    const plain = anchorOf('plain');
+    const ready = anchorOf('ready');
+    expect(plain).not.toBeNull();
+    expect(ready?.className).toBe(plain?.className);
+    expect(
+      container?.querySelector('[data-sidebar-session-id="plain"] [data-session-mergeable-pill]')
+    ).toBeNull();
+    const readyPill = container?.querySelector(
+      '[data-sidebar-session-id="ready"] [data-session-mergeable-pill]'
+    );
+    expect(readyPill).not.toBeNull();
+    expect(ready?.contains(readyPill ?? null)).toBe(false);
+  });
+
+  it('keeps a folded repo group telling what its hidden sessions are doing', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const row = (sessionId: string, status: Partial<Record<string, boolean>>) => ({
+      sessionId,
+      title: sessionId,
+      repoFullName: 'loro-dev/lody',
+      branchName: sessionId,
+      latestMessageAt: '2026-04-22T00:00:00.000Z',
+      addedLines: 0,
+      deletedLines: 0,
+      isWorking: false,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+      ...status,
+    });
+    const renderList = (collapsed: boolean, sessions: ReturnType<typeof row>[]) => {
       flushSync(() => {
-        root?.render(React.createElement(SessionPrIcon, { prStatus, prCiState }));
+        root?.render(
+          React.createElement(
+            Provider,
+            null,
+            React.createElement(SessionList, {
+              sessions,
+              repos: [{ repoFullName: 'loro-dev/lody', collapsed }],
+              onToggleRepoCollapsed: () => undefined,
+            })
+          )
+        );
       });
+      return container?.querySelector('[data-sidebar-group-key="loro-dev/lody"]');
+    };
 
-      const icon = container.querySelector(`svg[data-pr-ci-verdict="${verdict}"]`);
-      const baseIcon = icon?.querySelector(baseSelector);
-      const cutout = icon?.querySelector('mask circle');
-      const verdictIcon = icon?.querySelector(verdictSelector);
-      expect(icon).not.toBeNull();
-      expect(baseIcon).not.toBeNull();
-      expect(baseIcon?.classList.contains(baseToneClassName)).toBe(true);
-      expect(baseIcon?.classList.contains(verdictToneClassName)).toBe(false);
-      expect(cutout?.getAttribute('cx')).toBe('12');
-      expect(cutout?.getAttribute('cy')).toBe('12');
-      expect(cutout?.getAttribute('r')).toBe(cutoutRadius);
-      expect(verdictIcon).not.toBeNull();
-      expect(verdictIcon?.classList.contains(verdictToneClassName)).toBe(true);
-      expect(verdictIcon?.classList.contains(baseToneClassName)).toBe(false);
-      expect(verdictIcon?.parentElement?.getAttribute('transform')).toBe('translate(7 7)');
-      expect(icon?.querySelector('.bg-sidebar')).toBeNull();
-      expect(icon?.querySelector('.rounded-full')).toBeNull();
-      if (verdict === 'pending') {
-        expect(verdictIcon?.getAttribute('cx')).toBe('5');
-        expect(verdictIcon?.getAttribute('cy')).toBe('5');
-        expect(verdictIcon?.getAttribute('r')).toBe('2.5');
-        expect(verdictIcon?.getAttribute('fill')).toBe('currentColor');
-        expect(icon?.querySelector('.lucide-loader-circle')).toBeNull();
-        expect(icon?.querySelector('.animate-spin')).toBeNull();
-      }
-    }
-  );
+    const sessions = [
+      row('running', { isWorking: true }),
+      row('finished', { hasUnreadMessages: true }),
+      row('read'),
+    ];
+    let header = renderList(false, sessions);
+    expect(header?.querySelector('[data-sidebar-group-activity]')).toBeNull();
 
-  it('does not update shared list state during render', () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    header = renderList(true, sessions);
+    expect(container.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(0);
+    const mark = header?.querySelector('[data-sidebar-group-activity]');
+    expect(mark?.querySelector('[data-working-grid]')).not.toBeNull();
+    expect(mark?.getAttribute('aria-label')).toBe('1 working · 1 unread');
+
+    // Work stops with nothing new to read: like a row, the group holds its grid
+    // briefly in case the unread write is still on its way, then goes quiet.
+    vi.useFakeTimers();
+    header = renderList(true, [row('read')]);
+    expect(header?.querySelector('[data-working-grid]')).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(WORKING_HAND_OVER_MS);
+    });
+    expect(header?.querySelector('[data-session-row-indicator]')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('rolls local send failures and uploads into a folded group by row priority', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const store = createStore();
+    const row = (sessionId: string, isWorking = false) => ({
+      sessionId,
+      title: sessionId,
+      repoFullName: 'loro-dev/lody',
+      latestMessageAt: '2026-04-22T00:00:00.000Z',
+      addedLines: 0,
+      deletedLines: 0,
+      isWorking,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+    });
+    const status = (state: 'sending' | 'failed') => ({
+      state,
+      progress: 40,
+      sentBytes: 400,
+      totalBytes: 1000,
+      unsentNewConversation: false,
+    });
+    const render = (collapsed: boolean) => {
+      flushSync(() => {
+        root?.render(
+          React.createElement(
+            Provider,
+            { store },
+            React.createElement(SessionList, {
+              sessions: [row('broken', true), row('running', true), row('uploading')],
+              repos: [{ repoFullName: 'loro-dev/lody', collapsed }],
+              onToggleRepoCollapsed: () => undefined,
+            })
+          )
+        );
+      });
+      return container!.querySelector('[data-sidebar-group-key="loro-dev/lody"]');
+    };
+    const groupMark = () =>
+      container!.querySelector<HTMLElement>(
+        '[data-sidebar-group-activity] [data-session-row-indicator]'
+      );
+
+    flushSync(() => {
+      store.set(sessionSendStatusesAtom, {
+        broken: status('failed'),
+        uploading: status('sending'),
+      });
+    });
+    render(false);
+    // Expanded, each row draws its own mark; a failed send outranks the agent working.
+    const rowMark = (id: string) =>
+      container!.querySelector<HTMLElement>(
+        `[data-sidebar-session-id="${id}"] [data-session-row-indicator]`
+      );
+    expect(rowMark('broken')?.dataset.sessionSendState).toBe('failed');
+    expect(rowMark('running')?.querySelector('[data-working-grid]')).not.toBeNull();
+    expect(rowMark('uploading')?.querySelector('[data-session-send-ring]')).not.toBeNull();
+
+    const header = render(true);
+    expect(groupMark()?.dataset.sessionSendState).toBe('failed');
+    expect(header?.querySelector('[data-sidebar-group-activity]')?.getAttribute('aria-label')).toBe(
+      '1 not sent · 1 working · 1 sending'
+    );
+
+    flushSync(() => {
+      store.set(sessionSendStatusesAtom, { uploading: status('sending') });
+    });
+    expect(groupMark()?.querySelector('[data-working-grid]')).not.toBeNull();
+    expect(
+      container!.querySelector('[data-sidebar-group-activity]')?.getAttribute('aria-label')
+    ).toBe('2 working · 1 sending');
+  });
+
+  it('shows merging spinner, optimistic merged icon, and failed alert in the sidebar row', () => {
+    vi.useFakeTimers();
+    const store = createStore();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -321,68 +400,82 @@ describe('SessionList PR badge', () => {
       root?.render(
         React.createElement(
           Provider,
-          null,
+          { store },
           React.createElement(SessionList, {
+            repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
             sessions: [
               {
-                sessionId: 'session-1',
-                title: 'Fix sidebar state sync',
+                sessionId: 'session-merge',
+                title: 'Mergeable PR',
                 repoFullName: 'loro-dev/lody',
-                branchName: 'fix/sidebar-state-sync',
+                branchName: 'feat/merge-feedback',
+                prUrl: 'https://github.com/loro-dev/lody/pull/42',
+                prNumber: 42,
+                prStatus: 'open',
+                prReadiness: 'y',
                 latestMessageAt: '2026-04-22T00:00:00.000Z',
-                addedLines: 0,
-                deletedLines: 0,
+                addedLines: 5,
+                deletedLines: 1,
                 isWorking: false,
                 hasUnreadMessages: false,
                 isOffline: false,
                 isWaitingPermission: false,
               },
             ],
-            repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
           })
         )
       );
     });
 
-    const emittedRenderUpdateWarning = consoleError.mock.calls.some((call) =>
-      call.some((arg) => typeof arg === 'string' && arg.includes('Cannot update a component'))
+    const row = () => container!.querySelector<HTMLElement>('[data-sidebar-session-id="session-merge"]');
+    expect(row()?.querySelector('[data-session-mergeable-pill]')).not.toBeNull();
+
+    flushSync(() => {
+      setSessionPrMerging(store, 'session-merge', { prNumber: 42, repoFullName: 'loro-dev/lody' });
+    });
+    expect(row()?.querySelector('[data-session-mergeable-pill]')).toBeNull();
+    const mergingIndicator = row()?.querySelector<HTMLElement>('[data-session-row-indicator]');
+    expect(mergingIndicator?.dataset.sessionPrMergePhase).toBe('merging');
+    expect(mergingIndicator?.getAttribute('aria-label')).toBe('Merging PR #42…');
+    expect(mergingIndicator?.querySelector('[data-session-send-ring]')?.className).toContain(
+      'text-pr-merged'
     );
-    expect(emittedRenderUpdateWarning).toBe(false);
-  });
-
-  it('keeps the working animation on an active-only fixed SVG', () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
 
     flushSync(() => {
-      root?.render(
-        React.createElement(SessionRowLeadingSlot, {
-          isWorking: true,
-          menuLabel: 'More actions',
-        })
-      );
+      setSessionPrMergedOptimistic(store, 'session-merge', {
+        prNumber: 42,
+        repoFullName: 'loro-dev/lody',
+      });
     });
+    expect(row()?.querySelector('[data-session-row-indicator]')).toBeNull();
+    expect(row()?.querySelector('[data-session-mergeable-pill]')).toBeNull();
+    expect(row()?.querySelector('.lucide-git-merge')?.getAttribute('class')).toContain(
+      'text-pr-merged'
+    );
 
-    const spinner = container.querySelector('[data-session-working-spinner]');
-    expect(spinner?.tagName).toBe('svg');
-    expect(spinner?.classList.contains('h-3')).toBe(true);
-    expect(spinner?.classList.contains('w-3')).toBe(true);
-    expect(spinner?.classList.contains('shrink-0')).toBe(true);
-    expect(spinner?.classList.contains('animate-spin')).toBe(true);
-    expect(spinner?.classList.contains('will-change-transform')).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(OPTIMISTIC_PR_MERGED_TTL_MS);
+    });
+    expect(row()?.querySelector('[data-session-mergeable-pill]')).not.toBeNull();
 
     flushSync(() => {
-      root?.render(
-        React.createElement(SessionRowLeadingSlot, {
-          isWorking: false,
-          hasUnreadMessages: true,
-          menuLabel: 'More actions',
-        })
-      );
+      setSessionPrMergeFailed(store, 'session-merge', {
+        prNumber: 42,
+        repoFullName: 'loro-dev/lody',
+        error: 'Merge conflict',
+      });
     });
+    const failedIndicator = row()?.querySelector<HTMLElement>('[data-session-row-indicator]');
+    expect(failedIndicator?.dataset.sessionPrMergePhase).toBe('failed');
+    expect(failedIndicator?.getAttribute('aria-label')).toBe(
+      'Failed to merge PR #42: Merge conflict'
+    );
+    expect(failedIndicator?.querySelector('.lucide-circle-alert')).not.toBeNull();
 
-    expect(container.querySelector('[data-session-working-spinner]')).toBeNull();
-    expect(container.querySelector('.will-change-transform')).toBeNull();
+    flushSync(() => {
+      clearSessionPrMergeStatus(store, 'session-merge', 'failed');
+    });
+    expect(row()?.querySelector('[data-session-row-indicator]')).toBeNull();
+    vi.useRealTimers();
   });
 });

@@ -7,6 +7,7 @@ import {
   FileText,
   GitBranch,
   GitFork,
+  Image,
   Link,
   Monitor,
   Pencil,
@@ -72,6 +73,12 @@ const actions: MobileSessionMenuAction[] = [
     onClick: fn(),
   },
   { id: 'copy-url', icon: <Link className="h-3.5 w-3.5" />, label: 'Copy URL', onClick: fn() },
+  {
+    id: 'share-image',
+    icon: <Image className="h-3.5 w-3.5" />,
+    label: 'Share as image…',
+    onClick: fn(),
+  },
   {
     id: 'archive',
     icon: <Archive className="h-3.5 w-3.5" />,

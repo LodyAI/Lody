@@ -2,9 +2,21 @@
 
 Lody desktop application built with Electron, React, and TypeScript.
 
+The desktop pins Electron 44.9.3 and requires macOS 13 or newer on Mac.
+This runtime is compatible with the pinned DeepSeek Harness native loader;
+see the [runtime compatibility decision](../../.agents/notes/implemented/bug-fix/2026-10-10-dsh-electron-runtime.md).
+
+## Conversation links
+
+All versions generate `lody://session/<id>?workspace=<id>`. In-app links stay in
+the current installation; external links use the OS default selected in Settings →
+About. Startup does not replace an existing default; packaged Windows fills an absent handler after first launch. Version-specific schemes remain for
+explicit handoff and login callbacks. The shared packaging hook advertises both
+resource and callback protocols; see the [deep-link contract](../../specs/deep-links.md).
+
 ## Recommended IDE Setup
 
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
+- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Oxc](https://marketplace.visualstudio.com/items?itemName=oxc.oxc-vscode)
 
 ## Project Setup
 
@@ -13,6 +25,12 @@ Lody desktop application built with Electron, React, and TypeScript.
 ```bash
 $ pnpm install
 ```
+
+Postinstall prepares the Electron binary and, on macOS, builds Sparkle through its
+own installer. SQLite and the embedded CLI native packages use their shipped
+Node-API prebuilds; installation does not rebuild them for an Electron ABI.
+Packaging stages the target platform/architecture binaries and probes them before
+signing.
 
 ### Open-source desktop development
 
@@ -31,6 +49,134 @@ instance.
 an OSS build that has already been prepared. It deliberately skips rebuilding
 and should not be used as the normal development command.
 
+CLI diagnostics share `<data dir>/logs/<local date>.log`. The `cli-probe` scope
+records failed runtime-state requests and recovery, including error type, duration,
+PID and consecutive request failures; healthy polling stays silent. The count
+includes startup/reconcile reads, so it differs from the supervisor's poll counter.
+Use these traces with `cli-supervisor` state transitions to distinguish local probe
+failure from backend reconnecting with an available runtime. See the
+[identity investigation](../../.agents/notes/implemented/bug-fix/2026-10-11-sidebar-machine-order-stability.md).
+
+### Test builds
+
+For a local test artifact, run `pnpm --dir apps/electron build:app:test` after
+building and syncing the embedded CLI. Run `pnpm check` separately. This explicit
+entry uses `scripts/electron.vite.test.config.ts`, skips duplicate typechecking and
+minification, disables source maps and compressed-size reporting, and targets
+native modern renderer syntax. Outputs are isolated under `.test-build/electron/out` at the repository root and include `test-build.json`.
+Main externals, renderer entries, CSP and native probes are preserved. These
+artifacts are for tests; normal build and packaging commands retain the original
+release configuration.
+
+### Cloud builds and packaging
+
+Builds default to `local`. An official cloud build explicitly sets
+`VITE_LODY_PLATFORM=cloud` and `LODY_ENV=production` or `staging`, then runs
+`pnpm --dir apps/electron build`. This also rebuilds and stages the cloud CLI.
+Required values are `VITE_CONVEX_DEPLOY_URL`, `VITE_CONVEX_SITE_URL`,
+`VITE_SERVER_URL`, `VITE_SITE_URL`, `VITE_ELECTRON_UPDATE_URL`, and `VITE_ELECTRON_UPDATE_CHANNEL` (`latest`,
+`next`, or `nightly` matching the selected release).
+Missing values fail the build; neither platform discovers deployment dotenv files.
+Package through `pnpm --dir apps/electron package -- --production` (or
+`--staging`) with the same platform and update values. Packaging checks the built
+update config and release identity before invoking electron-builder. Native macOS
+signing and notarization use electron-builder directly on the release runner.
+
+Set `LODY_LORO_STREAMS_WS_ENABLED=1` (or `true`) when building Cloud Electron
+to opt the renderer and bundled daemon presence into Streams WebSocket. An unset
+flag defaults to off. For compatibility, the Cloud build still accepts
+`VITE_LORO_STREAMS_WS_ENABLED` when the primary flag is absent. For a standalone
+daemon, set `LODY_LORO_STREAMS_WS_ENABLED=1` when starting it.
+
+Nightly candidates freeze the `LodyAI/Lody` main commit as `sourceSha`. Exported
+build values use `LODY_SOURCE_SHA`, `LODY_NIGHTLY_BUILD_NUMBER`,
+`LODY_BUILD_RUN_ID`, `LODY_BUILD_TIMESTAMP`, and the reserved
+`LODY_NIGHTLY_VERSION`. A retry must restore its original candidate. Publication
+keeps immutable artifacts and a recoverable metadata journal. Historical two-repository
+records remain readable for recovery and version floors. At cutover, pass a
+`LODY_NIGHTLY_BUILD_NUMBER` above the old repository counter to preserve native
+version ordering; otherwise the new workflow run number is used. Mobile publication
+also uses the shared `.github/scripts/android-version-code.mjs` helper.
+
+### Cloud browser login
+
+Cloud composition uses a main-process login coordinator; the OSS composition never
+starts it. System callbacks settle independently of renderer lifetime, and windows
+subscribe to revisioned login snapshots. Organization hydration is separately
+retryable and cannot sign the user out. See the
+[login contract](../../specs/desktop-browser-login.md) and
+[decision](../../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.md).
+
+Main authentication requests use Chromium networking after app readiness, retaining
+Better Auth's credential storage hooks and cancellation. Certificate failures explain
+which clock, network, or trust settings to check before starting a fresh attempt.
+
+### Desktop performance bar
+
+Devbar ships in Dev, Staging, and Prod builds and is off at each launch. In the
+primary Desktop window, open Settings > About, double-click `Open Source Licenses`
+to reveal Developer Mode, enable it, then select `Open Devbar`. The app starts the
+loopback Hub and reloads that window through the Devbar-only renderer entry. Use
+`Stop Devbar` to close the Hub and return to the normal entry.
+
+`LODY_DEVBAR=true` remains an automation override for smoke tests that need Devbar
+active before the first renderer loads:
+
+```bash
+LODY_DEVBAR=true pnpm start:local
+LODY_DEVBAR=true pnpm --dir apps/electron preview:local
+```
+
+The override does not select a deployment; the public build remains local-only.
+Product users do not need an environment variable or a separate artifact.
+
+The right side shows renderer animation-callback FPS, Long Task duration for the
+latest interval, session-window CLS,
+aggregate Electron RSS/CPU, current renderer `Heap xxxM`, and GPU-process CPU/RSS
+in one `GPU xx% xxxM` field
+(M = MiB, explained on hover). GPU CPU is **not** hardware
+utilization, and GPU RSS is **not** VRAM. RSS sums resident working sets (shared
+pages may be counted more than once); CLI/agent descendants outside Electron's
+metrics are excluded. Missing/warming-up measurements show `—`. Sampling pauses
+while the window is hidden. Values stay in memory and are never uploaded.
+Heap uses Chromium's JS heap estimate for the current renderer, not other
+worker/renderer heaps or total app memory. A Devbar opened after app launch prefixes
+the bucketed estimate with `~`; the automation override enables precise Chromium
+memory readings before app readiness. Unavailable readings display `Heap —`.
+
+Select `DEVBAR` to activate Main Thread in Devframe's official floating Hub UI.
+The same Hub is available from its loopback URL as a standalone viewer. It also
+includes the Devframe Inspector and Accessibility Inspector. The performance view
+shows live metric cards, a bounded recent Long Task list, and collapsible metric
+and blocking summaries. A Lody-owned `custom-render` module mounts the
+stock view and appends live canvas line charts inside the same Main thread
+dock, covering the time-series surface the official JSON-render catalog has no
+primitive for. Chromium reports the blocking interval but not a
+JavaScript stack, so exact function attribution still needs a CPU profile. The
+installation-profile deep link `<protocol>://devbar?view=main-thread` opens the same
+view (`lody://...` in the public build).
+
+While enabled, Desktop starts a loopback-only Devframe Hub on the first free port
+from 9765 through 9785. It serves the official viewer and dock, live RPC streams,
+and shared state. The Devbar renderer and embedded dock authenticate to the Hub's
+RPC transport with a per-process token delivered over IPC; Hub pages on the
+loopback origin and non-browser callers without an Origin header stay inside the
+boundary, while opaque origins such as `null` cannot call RPC methods without it.
+The running Hub always includes the aggregate HTTP MCP
+endpoint and Terminals panel: enabling Devbar is the single consent step. Coding
+agents can then read the performance snapshot and Inspector resources, and
+Terminals can start local subprocesses. Arbitrary
+command requests are disabled, but the interactive shell remains a privileged
+process-control capability. Stopping Devbar removes both capabilities. See the
+[current behavior and security boundary](../../specs/desktop-devbar.md#devframe-hub).
+
+While Devbar runs, configure a coding-agent host once with
+the stdio command `apps/electron/node_modules/.bin/devframe connect`. The connector
+discovers the runtime-selected port and connects as a local non-browser caller,
+which the Hub trusts without an Origin header. In Lody, review and
+select the resulting MCP catalog entry in trusted UI/CLI before starting a later
+agent session.
+
 ### Build
 
 Every build command below uses the local OSS renderer, embeds the local-only
@@ -46,3 +192,16 @@ $ pnpm build:mac
 # For Linux
 $ pnpm build:linux
 ```
+
+## Runtime dependency packaging
+
+Electron Builder collects the production dependency graph from this app's manifest
+for both desktop compositions. Renderer-only `@tanstack/react-router` and `jotai`
+are development dependencies because Vite ships their code in renderer assets.
+Keep Devframe resource loaders, native addons, and their runtime dependencies in
+production dependencies; Cloud composition also consumes this manifest.
+
+Run `node apps/electron/scripts/verify-runtime-dependencies.mjs` from the repository
+root to check the installed production graph using Electron Builder's traversal
+collector. This checks dependency selection, including transitive dependencies;
+full packaging and native afterPack probes remain required release validation.

@@ -1,5 +1,7 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 /**
  * Closing slogan + platform-aware primary download CTA.
  * Detection shared with hero via `landing-platform-download.ts`.
@@ -20,7 +22,8 @@ export type LandingCtaCopy = {
   lead: string;
   allPlatforms: string;
   allPlatformsHref: string;
-  webApp: string;
+  github: string;
+  githubHref: string;
   webAppHref: string;
   /** Low-key "book a call with the founder" link in the secondary row. */
   bookCall: string;
@@ -40,9 +43,9 @@ export function LandingCtaSection({ copy }: { copy: LandingCtaCopy }) {
       resolvePrimaryDownloadAction({
         platform,
         labels: copy.labels,
-        webAppHref: copy.webAppHref,
+        allPlatforms: { label: copy.allPlatforms, href: copy.allPlatformsHref },
       }),
-    [copy.labels, copy.webAppHref, platform]
+    [copy.allPlatforms, copy.allPlatformsHref, copy.labels, platform]
   );
 
   return (
@@ -54,15 +57,15 @@ export function LandingCtaSection({ copy }: { copy: LandingCtaCopy }) {
         <p className="uw-cta__lead">{copy.lead}</p>
 
         <div className="uw-cta__actions">
-          <a
+          <SiteAnchor
             className="uw-cta__book-call underwater-btn underwater-btn--ghost"
             href={copy.bookCallHref}
             rel="noreferrer"
             target="_blank"
           >
             {copy.bookCall}
-          </a>
-          <a
+          </SiteAnchor>
+          <SiteAnchor
             className="uw-cta__primary underwater-btn underwater-btn--primary"
             href={primary.href}
             {...(primary.external
@@ -72,21 +75,33 @@ export function LandingCtaSection({ copy }: { copy: LandingCtaCopy }) {
                 : {})}
           >
             {primary.label}
-          </a>
+          </SiteAnchor>
+          <SiteAnchor
+            className="uw-cta__book-call underwater-btn underwater-btn--ghost"
+            href={copy.webAppHref}
+          >
+            {copy.labels.browser}
+          </SiteAnchor>
           <div className="uw-cta__secondary">
-            <a href={copy.allPlatformsHref}>{copy.allPlatforms}</a>
-            <span className="uw-cta__dot" aria-hidden="true">
-              ·
-            </span>
-            <a href={copy.webAppHref}>{copy.webApp}</a>
+            {primary.key !== 'browser' ? (
+              <>
+                <SiteAnchor href={copy.allPlatformsHref}>{copy.allPlatforms}</SiteAnchor>
+                <span className="uw-cta__dot" aria-hidden="true">
+                  ·
+                </span>
+              </>
+            ) : null}
+            <SiteAnchor href={copy.githubHref} rel="noreferrer" target="_blank">
+              {copy.github}
+            </SiteAnchor>
             {platform === 'mac-arm' ? (
               <>
                 <span className="uw-cta__dot" aria-hidden="true">
                   ·
                 </span>
-                <a href={`${DOWNLOAD_BASE}/Lody-latest-x64.dmg`} download>
+                <SiteAnchor href={`${DOWNLOAD_BASE}/Lody-latest-x64.dmg`} download>
                   {copy.labels.macIntel}
-                </a>
+                </SiteAnchor>
               </>
             ) : null}
           </div>

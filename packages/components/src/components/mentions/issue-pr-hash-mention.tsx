@@ -1,26 +1,29 @@
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
 import { CircleDot, Github, GitPullRequest } from 'lucide-react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import { githubFetchIssuesAndPRs, type GitHubIssueOrPR } from '@lody/shared';
 import type { IssuePRMention } from '@lody/shared';
 
+import { CloudCapabilityUnavailableError } from '@lody/platform';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { normalizeGithubFetchErrorCode } from '@/components/mentions/mention-analytics';
+import { scoreMentionMatch } from '@/components/mentions/mention-rank';
 import {
   useMentionHydration,
   type HydratedMentions,
 } from '@/components/mentions/mention-hydration';
-import { withGitHubTokenRetry } from '@/lib/github-token';
+import {
+  GitHubClientTokenError,
+  subscribeGitHubWorkspaceInvalidation,
+  withGitHubTokenRetry,
+} from '@/lib/github-token';
 import { cn } from '@/lib/utils';
 import { useMentionContext } from '@/ui/mention';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-
-// ============================================================================
-// Types
-// ============================================================================
+import { getComposerCaretRect, getComposerRangeRects } from '@/ui/mention/composer-input';
+import { Popover } from '@lody/ui/popover';
 
 type IssueOrPR = {
   number: number;
@@ -49,11 +52,6 @@ export type ItemSuggestion = {
   token: string;
   label: string;
   searchableNumber: string;
-  searchableTitle: string;
-};
-
-type FuseInstance<T> = {
-  search: (pattern: string, options?: { limit?: number }) => Array<{ item: T; score?: number }>;
 };
 
 export type IssuePrKnownItem = {
@@ -65,7 +63,7 @@ export type IssuePrKnownItem = {
 
 export type IssuePrMentionData = {
   entry: RepoIssuesAndPRsResult | null;
-  status: 'idle' | 'loading' | 'ready' | 'refreshing' | 'error';
+  status: 'idle' | 'loading' | 'ready' | 'refreshing' | 'unavailable' | 'error';
   error?: string;
 };
 
@@ -74,10 +72,6 @@ type UseRepoIssuesAndPRsResult = IssuePrMentionData & {
   refresh: (options?: { force?: boolean }) => Promise<void>;
 };
 
-// ============================================================================
-// Cache + Fetch
-// ============================================================================
-
 const MAX_ISSUE_PR_SUGGESTIONS = 50;
 
 const ISSUE_PR_DB_NAME = 'lody:repo-issues-prs';
@@ -85,7 +79,25 @@ const DB_VERSION = 1;
 
 const issuePrMemoryCache = new Map<string, RepoIssuesAndPRsResult>();
 const issuePrInFlightRequests = new Map<string, Promise<RepoIssuesAndPRsResult>>();
+const issuePrUnavailableKeys = new Set<string>();
 const issuePrCacheListeners = new Map<string, Set<(entry: RepoIssuesAndPRsResult) => void>>();
+
+subscribeGitHubWorkspaceInvalidation((workspaceId) => {
+  const prefix = `${workspaceId}:`;
+  for (const key of issuePrUnavailableKeys) {
+    if (key.startsWith(prefix)) issuePrUnavailableKeys.delete(key);
+  }
+});
+
+export function isUnlinkedIssuePrRepoError(err: unknown): boolean {
+  if (err instanceof CloudCapabilityUnavailableError) return true;
+  return (
+    err instanceof GitHubClientTokenError &&
+    (err.code === 'repo_not_linked' ||
+      err.code === 'installation_not_found' ||
+      err.code === 'repo_not_authorized')
+  );
+}
 
 /**
  * How long a completed fetch stays authoritative.
@@ -107,11 +119,8 @@ function isIssuePrEntryFresh(entry: RepoIssuesAndPRsResult, now: number) {
 export function __resetIssuePrFetchFreshnessForTests() {
   issuePrMemoryCache.clear();
   issuePrInFlightRequests.clear();
+  issuePrUnavailableKeys.clear();
 }
-
-// ============================================================================
-// Analytics
-// ============================================================================
 
 function fnv1a32(value: string) {
   let hash = 0x811c9dc5;
@@ -205,15 +214,12 @@ function subscribeIssuePrCache(key: string, listener: (entry: RepoIssuesAndPRsRe
 }
 
 function publishIssuePrCacheEntry(key: string, entry: RepoIssuesAndPRsResult) {
+  issuePrUnavailableKeys.delete(key);
   issuePrMemoryCache.set(key, entry);
   void idbSet(ISSUE_PR_DB_NAME, key, entry);
   const listeners = issuePrCacheListeners.get(key);
   listeners?.forEach((listener) => listener(entry));
 }
-
-// ============================================================================
-// Mention Utils
-// ============================================================================
 
 export function buildItemSuggestions(items: IssueOrPR[]): ItemSuggestion[] {
   return items.map((item) => {
@@ -226,38 +232,19 @@ export function buildItemSuggestions(items: IssueOrPR[]): ItemSuggestion[] {
       token: `#${numberLabel}`,
       label: numberLabel,
       searchableNumber: numberLabel,
-      searchableTitle: item.title.toLowerCase(),
     };
   });
 }
 
-export function getIssuePrFuseOptions() {
-  return {
-    keys: ['searchableNumber', 'searchableTitle'],
-    includeScore: true,
-    threshold: 0.4,
-    ignoreLocation: true,
-    minMatchCharLength: 1,
-    shouldSort: true,
-  } as const;
-}
-
-// Module-level cache for the dynamically-imported Fuse constructor. Lifting
-// this out of component state means once it has loaded for any consumer, every
-// other consumer reads it synchronously during render — no extra Effect, no
-// "wait one extra commit before fuzzy search activates".
 function githubIssuePrUrl(repoFullName: string, type: 'issue' | 'pr', number: number) {
   const safeRepo = repoFullName.trim();
   const segment = type === 'pr' ? 'pull' : 'issues';
   return `https://github.com/${safeRepo}/${segment}/${number}`;
 }
 
-export function getIssuePrSuggestions(
-  suggestions: ItemSuggestion[],
-  term: string,
-  fuse: FuseInstance<ItemSuggestion> | null
-) {
-  const trimmed = term.trim().toLowerCase();
+export function getIssuePrSuggestions(suggestions: ItemSuggestion[], term: string) {
+  const query = term.trim();
+  const trimmed = query.toLowerCase();
 
   if (!trimmed) {
     const issues = suggestions.filter((s) => s.type === 'issue');
@@ -267,18 +254,25 @@ export function getIssuePrSuggestions(
 
   const isNumericQuery = /^[0-9]+$/.test(trimmed);
 
-  const candidates: Array<{ item: ItemSuggestion; score: number | null }> = (() => {
-    if (fuse) {
-      const results = fuse.search(trimmed, { limit: MAX_ISSUE_PR_SUGGESTIONS * 2 });
-      return results.map((r) => ({
-        item: r.item,
-        score: typeof r.score === 'number' ? r.score : null,
-      }));
-    }
-    return suggestions
-      .filter((s) => s.searchableNumber.includes(trimmed) || s.searchableTitle.includes(trimmed))
-      .map((item) => ({ item, score: null }));
-  })();
+  type Candidate = {
+    item: ItemSuggestion;
+    /** Higher is better, following VS Code's fuzzy scorer. */
+    fuzzyScore: number;
+  };
+
+  const candidates: Candidate[] = [];
+  for (const item of suggestions) {
+    const numberScore = scoreMentionMatch(query, item.searchableNumber);
+    const titleScore = scoreMentionMatch(query, item.title);
+    const fuzzyScore =
+      numberScore === null
+        ? titleScore
+        : titleScore === null
+          ? numberScore
+          : Math.max(numberScore, titleScore);
+    if (fuzzyScore === null) continue;
+    candidates.push({ item, fuzzyScore });
+  }
 
   const sorted = candidates.sort((a, b) => {
     const aExactNumber = a.item.searchableNumber === trimmed;
@@ -295,8 +289,8 @@ export function getIssuePrSuggestions(
       return a.item.type === 'issue' ? -1 : 1;
     }
 
-    if (a.score !== null && b.score !== null && a.score !== b.score) {
-      return a.score - b.score;
+    if (a.fuzzyScore !== b.fuzzyScore) {
+      return b.fuzzyScore - a.fuzzyScore;
     }
 
     if (isNumericQuery && a.item.type !== b.item.type) {
@@ -395,10 +389,6 @@ export function extractIssuePRMentionsFromText(
   return mentions;
 }
 
-// ============================================================================
-// Data Hook
-// ============================================================================
-
 function toRepoIssuesAndPRsResult(
   repoFullName: string,
   items: GitHubIssueOrPR[]
@@ -442,6 +432,14 @@ export function useRepoIssuesAndPRs(
         setData((prev) => (prev.entry === cached ? prev : { entry: cached, status: 'ready' }));
         return;
       }
+      if (!options?.force && !cached && issuePrUnavailableKeys.has(key)) {
+        setData((prev) =>
+          prev.status === 'unavailable' && prev.entry === null
+            ? prev
+            : { entry: null, status: 'unavailable' }
+        );
+        return;
+      }
 
       setData((prev) => ({
         entry: prev.entry,
@@ -455,6 +453,13 @@ export function useRepoIssuesAndPRs(
           const entry = await existingRequest;
           setData({ entry, status: 'ready' });
         } catch (err) {
+          if (isUnlinkedIssuePrRepoError(err)) {
+            issuePrUnavailableKeys.add(key);
+            setData((prev) =>
+              prev.entry ? { entry: prev.entry, status: 'ready' } : { entry: null, status: 'unavailable' }
+            );
+            return;
+          }
           const message = toErrorMessage(err);
           setData((prev) => {
             if (prev.entry) {
@@ -499,6 +504,13 @@ export function useRepoIssuesAndPRs(
       try {
         await request;
       } catch (err) {
+        if (isUnlinkedIssuePrRepoError(err)) {
+          issuePrUnavailableKeys.add(key);
+          setData((prev) =>
+            prev.entry ? { entry: prev.entry, status: 'ready' } : { entry: null, status: 'unavailable' }
+          );
+          return;
+        }
         const message = toErrorMessage(err);
         setData((prev) => ({
           entry: prev.entry,
@@ -537,12 +549,20 @@ export function useRepoIssuesAndPRs(
       if (cancelled) return;
       setData({ entry, status: 'ready' });
     });
+    const unsubscribeInvalidation = subscribeGitHubWorkspaceInvalidation((invalidatedId) => {
+      if (cancelled || invalidatedId !== workspaceIdValue) return;
+      setData((prev) =>
+        prev.status === 'unavailable' ? { entry: null, status: 'loading' } : prev
+      );
+    });
 
     async function run() {
       const mem = issuePrMemoryCache.get(key);
 
       if (mem) {
         setData({ entry: mem, status: 'ready' });
+      } else if (issuePrUnavailableKeys.has(key)) {
+        setData({ entry: null, status: 'unavailable' });
       } else {
         setData((prev) => ({ ...prev, status: 'loading' }));
         const persisted = await idbGet<RepoIssuesAndPRsResult>(ISSUE_PR_DB_NAME, key);
@@ -562,12 +582,13 @@ export function useRepoIssuesAndPRs(
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubscribeInvalidation();
     };
   }, [isPublic, postHog, refresh, repoFullName, workspaceId]);
 
-  // Stable between renders: the menu keys its issue/PR slices and Fuse indexes
-  // off this object, so a fresh one per keystroke re-partitions the cached list
-  // and rebuilds both indexes while the user is only typing.
+  // Stable between renders: the menu keys its issue/PR slices off this object,
+  // so a fresh one per keystroke re-partitions the cached list while the user
+  // is only typing.
   return React.useMemo(() => ({ ...data, refresh }), [data, refresh]);
 }
 
@@ -592,10 +613,6 @@ export function useKnownIssuePrItems(repoFullName?: string, isPublic?: boolean) 
   return { knownItems, issuePrData, status: issuePrData.status, error: issuePrData.error };
 }
 
-// ============================================================================
-// Hydrator
-// ============================================================================
-
 export function IssuePrMentionHydrator({
   text,
   knownItems,
@@ -614,10 +631,6 @@ export function IssuePrMentionHydrator({
 
   return null;
 }
-
-// ============================================================================
-// UI Components
-// ============================================================================
 
 function getItemIconMeta(type: 'issue' | 'pr') {
   if (type === 'pr') {
@@ -638,126 +651,10 @@ type IssuePrMentionMeta = {
   type: 'issue' | 'pr';
 };
 
-function getLineHeight(input: HTMLTextAreaElement) {
-  const style = window.getComputedStyle(input);
-  const parsed = Number.parseInt(style.lineHeight, 10);
-  return Number.isFinite(parsed) ? parsed : input.offsetHeight;
-}
-
-function getTextWidth(text: string, input: HTMLTextAreaElement) {
-  const style = window.getComputedStyle(input);
-  const measureSpan = document.createElement('span');
-  measureSpan.style.cssText = `
-    position: absolute;
-    visibility: hidden;
-    white-space: pre;
-    font: ${style.font};
-    letter-spacing: ${style.letterSpacing};
-    text-transform: ${style.textTransform};
-  `;
-  measureSpan.textContent = text;
-  document.body.appendChild(measureSpan);
-  const width = measureSpan.offsetWidth;
-  document.body.removeChild(measureSpan);
-  return width;
-}
-
-function rectFromEdges({
-  left,
-  top,
-  right,
-  bottom,
-}: {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}) {
-  return DOMRect.fromRect({
-    x: left,
-    y: top,
-    width: Math.max(0, right - left),
-    height: Math.max(0, bottom - top),
-  });
-}
-
-function calculateCaretRect(input: HTMLTextAreaElement, cursorPosition: number) {
-  const rect = input.getBoundingClientRect();
-  const textBeforeCursor = input.value.slice(0, cursorPosition);
-  const lines = textBeforeCursor.split('\n');
-  const currentLine = lines.length - 1;
-  const currentLineText = lines[currentLine] ?? '';
-  const textWidth = getTextWidth(currentLineText, input);
-
-  const style = window.getComputedStyle(input);
-  const lineHeight = getLineHeight(input);
-  const paddingLeft = Number.parseFloat(style.getPropertyValue('padding-left') ?? '0');
-  const paddingRight = Number.parseFloat(style.getPropertyValue('padding-right') ?? '0');
-  const paddingTop = Number.parseFloat(style.getPropertyValue('padding-top') ?? '0');
-
-  const containerWidth = input.clientWidth - paddingLeft - paddingRight;
-  const wrappedLines = containerWidth > 0 ? Math.floor(textWidth / containerWidth) : 0;
-  const totalLines = currentLine + wrappedLines;
-
-  const scrollTop = input.scrollTop;
-  const scrollLeft = input.scrollLeft;
-
-  const effectiveTextWidth = containerWidth > 0 ? textWidth % containerWidth : textWidth;
-  const isRTL = style.direction === 'rtl';
-  const x = isRTL
-    ? Math.min(rect.right - paddingRight - effectiveTextWidth + scrollLeft, rect.right - 10)
-    : Math.min(rect.left + paddingLeft + effectiveTextWidth - scrollLeft, rect.right - 10);
-  const y = rect.top + paddingTop + (totalLines * lineHeight - scrollTop);
-
-  return rectFromEdges({ left: x, top: y, right: x, bottom: y + lineHeight });
-}
-
 function pointInRect(clientX: number, clientY: number, rect: DOMRect) {
   return (
     clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
   );
-}
-
-function getMentionHitRects(input: HTMLTextAreaElement, start: number, end: number) {
-  const startRect = calculateCaretRect(input, start);
-  const endRect = calculateCaretRect(input, end);
-  const lineHeight = getLineHeight(input);
-  const style = window.getComputedStyle(input);
-  const paddingLeft = Number.parseFloat(style.getPropertyValue('padding-left') ?? '0');
-  const paddingRight = Number.parseFloat(style.getPropertyValue('padding-right') ?? '0');
-
-  const inputRect = input.getBoundingClientRect();
-  const singleLine = Math.abs(endRect.top - startRect.top) < lineHeight / 2;
-
-  if (singleLine) {
-    const right = Math.max(endRect.left, startRect.left + 1);
-    return [
-      rectFromEdges({
-        left: startRect.left,
-        right,
-        top: startRect.top,
-        bottom: startRect.top + lineHeight,
-      }),
-    ];
-  }
-
-  // Wrapped: split into two hit rects (mentions are short, so 2 lines max is a safe approximation).
-  const firstLineRight = inputRect.right - paddingRight;
-  const secondLineLeft = inputRect.left + paddingLeft;
-  return [
-    rectFromEdges({
-      left: startRect.left,
-      right: firstLineRight,
-      top: startRect.top,
-      bottom: startRect.top + lineHeight,
-    }),
-    rectFromEdges({
-      left: secondLineLeft,
-      right: Math.max(endRect.left, secondLineLeft + 1),
-      top: endRect.top,
-      bottom: endRect.top + lineHeight,
-    }),
-  ];
 }
 
 export function IssuePrMentionTitleHint({
@@ -849,10 +746,10 @@ export function IssuePrMentionTitleHint({
       if (issuePrMentions.length === 0) return false;
 
       for (const meta of issuePrMentions) {
-        const rects = getMentionHitRects(input, meta.start, meta.end);
+        const rects = getComposerRangeRects(input, meta.start, meta.end);
         if (rects.some((r) => pointInRect(clientX, clientY, r))) {
           cancelScheduledClose();
-          const anchorRect = calculateCaretRect(input, meta.start);
+          const anchorRect = getComposerCaretRect(input, meta.start);
           setActive({ meta, anchor: { left: anchorRect.left, top: anchorRect.top } });
           setOpen(true);
           return true;
@@ -865,7 +762,7 @@ export function IssuePrMentionTitleHint({
   );
 
   React.useEffect(() => {
-    const input = context.inputRef.current;
+    const input: HTMLElement | null = context.inputRef.current;
     if (!input) return undefined;
     if (!enabled) return undefined;
 
@@ -934,26 +831,28 @@ export function IssuePrMentionTitleHint({
   const { Icon, iconClassName } = getItemIconMeta(active.meta.type);
 
   return (
-    <Popover
+    <Popover.Root
       open={open}
       onOpenChange={(next) => {
         if (!next) close();
       }}
     >
-      <PopoverTrigger asChild>
-        <span
-          aria-hidden="true"
-          style={{
-            position: 'fixed',
-            left: active.anchor.left,
-            top: active.anchor.top,
-            width: 1,
-            height: 1,
-            pointerEvents: 'none',
-          }}
-        />
-      </PopoverTrigger>
-      <PopoverContent
+      <Popover.Trigger
+        render={
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'fixed',
+              left: active.anchor.left,
+              top: active.anchor.top,
+              width: 1,
+              height: 1,
+              pointerEvents: 'none',
+            }}
+          />
+        }
+      />
+      <Popover.Content
         side="top"
         align="start"
         className="max-w-[320px] p-3"
@@ -990,7 +889,7 @@ export function IssuePrMentionTitleHint({
             {active.meta.title}
           </p>
         </div>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }

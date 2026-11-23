@@ -1,5 +1,11 @@
 import { Suspense, type ReactNode } from 'react';
 
-export function RouteSuspense({ children }: { children: ReactNode }) {
-  return <Suspense fallback={null}>{children}</Suspense>;
+export function RouteSuspense({
+  children,
+  fallback = null,
+}: {
+  children: ReactNode;
+  fallback?: ReactNode;
+}) {
+  return <Suspense fallback={fallback}>{children}</Suspense>;
 }

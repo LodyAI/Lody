@@ -1,0 +1,181 @@
+import * as stylex from '@stylexjs/stylex';
+import { useEffect, useState } from 'react';
+import { CircleAlert, File as FileIcon, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { SessionSendProgressRing } from '@/components/sidebar-row-shared';
+import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
+import type { PendingSessionSend } from '@/lib/session-pending-sends';
+import { deriveSessionSendProgress } from '@/lib/session-send-status';
+import { cn } from '@/lib/utils';
+import { QUEUE_LINE, queuePreviewStyle, queueSurface } from './surface';
+import { IconAction, TextAction } from './message-queue-row';
+
+const MAX_INLINE_ATTACHMENTS = 3;
+/**
+ * A retry whose cause persists fails again within milliseconds. The row keeps
+ * its loading state at least this long so the click visibly registers.
+ */
+const RETRY_FEEDBACK_MS = 600;
+
+/** Same first-line box as a queued row's index and actions. */
+const FIRST_LINE_BOX_CLASS = 'flex shrink-0 items-center';
+const FIRST_LINE_BOX_STYLE = { height: QUEUE_LINE };
+
+function LocalThumbnail({ attachment }: { attachment: SessionAttachmentDraft }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (attachment.kind !== 'image' || !attachment.source) return undefined;
+    const next = URL.createObjectURL(attachment.source);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [attachment.kind, attachment.source]);
+  return (
+    <span
+      className="flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-background/60"
+      title={attachment.name}
+    >
+      {url ? (
+        <img src={url} alt={attachment.name} className="h-full w-full object-cover" />
+      ) : (
+        <FileIcon className="size-2.5 text-muted-foreground" aria-hidden="true" />
+      )}
+    </span>
+  );
+}
+
+function queuedText(record: PendingSessionSend): string {
+  const task = (record.queue as { task?: unknown } | undefined)?.task;
+  if (typeof task === 'string' && task.trim()) return task;
+  return (
+    record.entry.items?.flatMap((item) => (item.type === 'text' ? [item.text] : [])).join('\n') ??
+    ''
+  );
+}
+
+/**
+ * A message routed to the queue while its attachments are still uploading (or
+ * behind one that is). It exists only in renderer memory: it is not a queue
+ * item yet, so it cannot be dragged, edited or used to steer. It takes the position the real
+ * item will be appended to, and gives way to it in the same render when that
+ * item syncs in.
+ */
+export function PendingQueueRow({
+  record,
+  index,
+  busy,
+  onRetry,
+  onCancel,
+}: {
+  record: PendingSessionSend;
+  index: number;
+  busy: boolean;
+  onRetry: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const status = deriveSessionSendProgress(record);
+  const [retrying, setRetrying] = useState(false);
+  useEffect(() => {
+    if (!retrying) return undefined;
+    const timer = setTimeout(() => setRetrying(false), RETRY_FEEDBACK_MS);
+    return () => clearTimeout(timer);
+  }, [retrying]);
+  const failed = status.state === 'failed' && !retrying;
+  // Nothing to upload: it reads as queued, not as sending.
+  const attachments = record.attachments;
+  const instant = !failed && !retrying && attachments.length === 0;
+  const inline = attachments.slice(0, MAX_INLINE_ATTACHMENTS);
+  const overflow = attachments.length - inline.length;
+  const showProgress = status.state === 'sending' && status.totalBytes > 0;
+  const statusLabel = showProgress
+    ? t('sessions.attachmentUploading', { progress: status.progress })
+    : t('sessions.sendStatus.sendingWithoutSize');
+
+  return (
+    <div
+      {...stylex.props(queueSurface.row)}
+      data-pending-queue-row={record.id}
+      data-pending-queue-state={status.state}
+    >
+      <div
+        aria-hidden="true"
+        style={FIRST_LINE_BOX_STYLE}
+        className={cn(
+          FIRST_LINE_BOX_CLASS,
+          'w-4 translate-y-px justify-center text-[11px] font-medium tabular-nums text-muted-foreground/70'
+        )}
+      >
+        {index + 1}
+      </div>
+      <div className="flex min-w-0 flex-1 items-start gap-1.5">
+        {inline.length > 0 ? (
+          <div className="flex shrink-0 items-center gap-0.5 pt-px">
+            {inline.map((attachment) => (
+              <LocalThumbnail key={attachment.id} attachment={attachment} />
+            ))}
+            {overflow > 0 ? (
+              <span className="ml-0.5 text-[10px] text-muted-foreground/70 tabular-nums">
+                +{overflow}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          {/* Muted until it is a real queue item, like an unsent conversation's title. */}
+          <div
+            className={cn(
+              'overflow-hidden',
+              stylex.props(queueSurface.text, !instant && queueSurface.preparingText).className
+            )}
+            style={queuePreviewStyle(false)}
+          >
+            {queuedText(record)}
+          </div>
+          {/* The sender must see what failed and what to do before continuing. */}
+          {failed ? (
+            <div role="alert" {...stylex.props(queueSurface.failureReason)}>
+              {record.error}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div
+        className={cn('flex shrink-0 items-center', stylex.props(queueSurface.actions).className)}
+      >
+        {failed ? (
+          <>
+            <CircleAlert
+              className="size-3 text-destructive"
+              strokeWidth={2.25}
+              aria-label={t('sessions.pendingMessageUploadFailed')}
+            />
+            <TextAction
+              text={t('sessions.retryPendingSend')}
+              ariaLabel={t('sessions.retryPendingSend')}
+              onClick={() => {
+                if (busy) return;
+                setRetrying(true);
+                onRetry();
+              }}
+            />
+          </>
+        ) : instant ? null : (
+          <span
+            role="status"
+            className="flex items-center gap-1 text-[11px] text-muted-foreground tabular-nums"
+          >
+            <SessionSendProgressRing progress={showProgress ? status.progress : undefined} />
+            {statusLabel}
+          </span>
+        )}
+        <IconAction
+          icon={X}
+          label={t('sessions.cancelPendingSend')}
+          destructive
+          disabled={busy}
+          onClick={onCancel}
+        />
+      </div>
+    </div>
+  );
+}

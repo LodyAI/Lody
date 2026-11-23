@@ -32,6 +32,7 @@ let cachedProvider: PlatformProvider | null = null;
 let cachedSessionStore: MutableStore<PlatformSessionState> | null = null;
 let cachedWorkspacesStore: MutableStore<WorkspacesState> | null = null;
 let snapshotPollingStarted = false;
+let retrySnapshot: (() => void) | undefined;
 
 const CLOUD_WORKSPACES_STORE: ReadonlyStore<WorkspacesState> = createStaticStore({
   status: 'loading',
@@ -40,15 +41,18 @@ const CLOUD_WORKSPACES_STORE: ReadonlyStore<WorkspacesState> = createStaticStore
 function startLocalPlatformSnapshotPolling(
   sessionStore: MutableStore<PlatformSessionState>,
   workspacesStore: MutableStore<WorkspacesState>
-): void {
-  let intervalId: ReturnType<typeof setInterval> | null = null;
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = 1_000;
   let inFlight = false;
   let settled = false;
   const poll = async (): Promise<void> => {
     if (inFlight || settled) {
       return;
     }
+    clearTimeout(timer);
     inFlight = true;
+    let delay = IMPLICIT_WORKSPACE_POLL_INTERVAL_MS;
     try {
       const snapshot = await getIpcServices()?.localPlatform.getSnapshot();
       if (!snapshot) {
@@ -71,27 +75,19 @@ function startLocalPlatformSnapshotPolling(
         activeWorkspaceId: summary.id,
       });
       settled = true;
-      if (intervalId !== null) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       workspacesStore.set({ status: 'error', message });
-      settled = true;
-      if (intervalId !== null) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
+      delay = retryDelay;
+      retryDelay = Math.min(retryDelay * 2, 30_000);
       console.error('local-platform: bootstrap snapshot failed', error);
     } finally {
       inFlight = false;
+      if (!settled) timer = setTimeout(() => void poll(), delay);
     }
   };
-  intervalId = setInterval(() => {
-    void poll();
-  }, IMPLICIT_WORKSPACE_POLL_INTERVAL_MS);
   void poll();
+  return () => void poll();
 }
 
 function getLocalWorkspacesStore(): MutableStore<WorkspacesState> {
@@ -113,7 +109,12 @@ function ensureLocalPlatformSnapshotPolling(): void {
   snapshotPollingStarted = true;
   const sessionStore = getLocalSessionStore();
   const workspacesStore = getLocalWorkspacesStore();
-  startLocalPlatformSnapshotPolling(sessionStore, workspacesStore);
+  retrySnapshot = startLocalPlatformSnapshotPolling(sessionStore, workspacesStore);
+}
+
+/** Retry only the snapshot read; concurrent callers share the active read. */
+export function retryLocalPlatformSnapshot(): void {
+  if (isLocalAppPlatform()) retrySnapshot?.();
 }
 
 /**

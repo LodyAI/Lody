@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { PanelRight } from 'lucide-react';
 import {
@@ -7,14 +7,20 @@ import {
   SessionSidePanelTabBar,
   type SessionSidePanelOption,
   type SessionSidePanelTabItem,
+  type SidePanelTabSplit,
 } from '@/components/sessions/session-side-panel-tab-bar';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
+import {
+  SIDE_PANEL_SPLIT_RATIO_VAR,
+  SidePanelSplitHandle,
+} from '@/components/sessions/side-panel-split-handle';
 
 const ALL_PANELS: SessionSidePanelOption[] = [
   { id: 'side-session', label: 'Side Chat', kind: 'session' },
   { id: 'files', label: 'Files', kind: 'files' },
   { id: 'changes', label: 'All Changes', kind: 'changes' },
   { id: 'browser', label: 'Browser', kind: 'browser' },
+  { id: 'ios-simulator', label: 'iOS Simulator', kind: 'ios-simulator' },
   { id: 'pr', label: 'PR', kind: 'pr' },
 ];
 const INITIAL_TABS: SessionSidePanelTabItem[] = [
@@ -54,7 +60,10 @@ function SidePanelTabBarStory() {
 
   return (
     <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[620px] flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]">
+      <div
+        data-testid="side-panel-story-frame"
+        className="flex h-[520px] w-[620px] flex-col overflow-hidden border-l border-border/70 bg-background"
+      >
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -92,7 +101,7 @@ function SidePanelTabBarStory() {
           addPanelLabel="Add panel"
           closeTabLabel={(label) => `Close ${label}`}
           endSlot={
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
+            <Button variant="ghost" size="small" icon>
               <PanelRight className="h-4 w-4" />
             </Button>
           }
@@ -100,6 +109,84 @@ function SidePanelTabBarStory() {
         />
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           {tabs.find((tab) => tab.id === activeTabId)?.label}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const DEVICE_TABS: SessionSidePanelTabItem[] = [
+  { id: 'files', label: 'Files', kind: 'files', closeable: true },
+  { id: 'ios-simulator', label: 'iOS Simulator', kind: 'ios-simulator', closeable: true },
+  { id: 'browser', label: 'Browser', kind: 'browser', closeable: true },
+  { id: 'android-emulator', label: 'Android Emulator', kind: 'android-emulator', closeable: true },
+];
+
+function DeviceSplitStory({ initialSplit }: { initialSplit: SidePanelTabSplit | null }) {
+  const [tabs, setTabs] = useState(DEVICE_TABS);
+  const [activeTabId, setActiveTabId] = useState<string | null>('ios-simulator');
+  const [split, setSplit] = useState<SidePanelTabSplit | null>(initialSplit);
+  const [ratio, setRatio] = useState(0.5);
+  const splitShown = split?.includes(activeTabId ?? '') ?? false;
+  const shownIds = splitShown && split ? split : [activeTabId];
+
+  return (
+    <div className="min-h-screen bg-background p-8 text-foreground">
+      <div
+        data-testid="side-panel-story-frame"
+        className="flex h-[520px] w-[720px] flex-col overflow-hidden border-l border-border/70 bg-background"
+      >
+        <SessionSidePanelTabBar
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onTabSelect={setActiveTabId}
+          onTabClose={(tabId) => {
+            setTabs((current) => current.filter((tab) => tab.id !== tabId));
+            setSplit((current) => (current?.includes(tabId) ? null : current));
+            setActiveTabId((current) =>
+              current === tabId
+                ? getSidePanelTabCloseFallback(
+                    tabs.map((tab) => tab.id),
+                    tabId
+                  )
+                : current
+            );
+          }}
+          closeTabLabel={(label) => `Close ${label}`}
+          split={split}
+          onTabsSplit={(next, draggedTabId) => {
+            setSplit(next);
+            setActiveTabId(draggedTabId);
+          }}
+          onTabUnsplit={(tabId) => {
+            setSplit(null);
+            setActiveTabId(tabId);
+          }}
+          className="border-b border-border/60"
+        />
+        <div
+          className="relative flex flex-1 divide-x divide-border/70 text-sm text-muted-foreground"
+          style={{ [SIDE_PANEL_SPLIT_RATIO_VAR]: ratio } as CSSProperties}
+        >
+          {shownIds.map((id, index) => (
+            <div
+              key={id}
+              className="flex items-center justify-center"
+              style={{
+                flexBasis:
+                  shownIds.length > 1 ? `${(index === 0 ? ratio : 1 - ratio) * 100}%` : '100%',
+              }}
+            >
+              {tabs.find((tab) => tab.id === id)?.label}
+            </div>
+          ))}
+          {splitShown ? (
+            <SidePanelSplitHandle
+              ratio={ratio}
+              label="Resize split view"
+              onRatioChange={setRatio}
+            />
+          ) : null}
         </div>
       </div>
     </div>
@@ -129,10 +216,19 @@ export const UnifiedTabs: Story = {
   render: () => <SidePanelTabBarStory />,
 };
 
+/** Drag one device tab onto the other to pair them; drag a member out to split them again. */
+export const DeviceTabs: Story = {
+  render: () => <DeviceSplitStory initialSplit={null} />,
+};
+
+export const DeviceSplit: Story = {
+  render: () => <DeviceSplitStory initialSplit={['ios-simulator', 'android-emulator']} />,
+};
+
 export const EmptyState: Story = {
   render: () => (
     <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[420px] flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-background shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]">
+      <div className="flex h-[520px] w-[420px] flex-col overflow-hidden border-l border-border/70 bg-background">
         <SessionSidePanelTabBar
           tabs={[]}
           activeTabId={null}
@@ -143,7 +239,7 @@ export const EmptyState: Story = {
           addPanelLabel="Add panel"
           closeTabLabel={(label) => `Close ${label}`}
           endSlot={
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
+            <Button variant="ghost" size="small" icon>
               <PanelRight className="h-4 w-4" />
             </Button>
           }
@@ -154,7 +250,6 @@ export const EmptyState: Story = {
             panels={ALL_PANELS}
             onPanelOpen={() => {}}
             title="Open a panel"
-            description="Choose what you want to see in this sidebar."
           />
         </div>
       </div>

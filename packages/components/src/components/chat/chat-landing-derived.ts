@@ -1,5 +1,10 @@
 import type { ChatLandingHintType } from './chat-landing-view';
 import type { SessionContextType } from './context-switch';
+import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
+import {
+  getLocalProjectVisibilityKey,
+  type LocalProjectVisibilityAccess,
+} from '@/lib/visible-local-project-index';
 
 type ChatLandingProjectRefLike =
   | {
@@ -20,15 +25,45 @@ export type ChatLandingProjectSession = {
   machineId: string;
   project?: ChatLandingProjectRefLike | null;
   repoFullName?: string | null;
+  /** Set when the session was started from a multi-member project. */
+  projectRun?: { id: string } | null;
   lastMessageAt?: number | null;
 };
 
 export type ChatLandingProjectRecency = {
   byRepo: ReadonlyMap<string, number>;
   byProject: ReadonlyMap<string, number>;
+  /** Multi-member projects by id, so they rank among recently used projects. */
+  byGroup: ReadonlyMap<string, number>;
 };
 
 export type SharingReviewActionTarget = 'machines' | 'projects' | null;
+
+/** Composer reminders concern only the resources selected for this conversation. */
+export function getChatLandingSharingReviewActionTarget({
+  currentUserId,
+  machineId,
+  localProjectIds,
+  machineAccessByMachineId,
+  localProjectAccessByKey,
+}: {
+  currentUserId: string | null;
+  machineId: string | null;
+  localProjectIds: readonly string[];
+  machineAccessByMachineId: ReadonlyMap<string, MachineVisibilityAccess>;
+  localProjectAccessByKey: ReadonlyMap<string, LocalProjectVisibilityAccess>;
+}): SharingReviewActionTarget {
+  if (!currentUserId || !machineId) return null;
+  const machine = machineAccessByMachineId.get(machineId);
+  if (machine?.ownerUserId !== currentUserId) return null;
+  if (!machine.sharedWithTeam) return 'machines';
+  return localProjectIds.some((id) => {
+    const project = localProjectAccessByKey.get(getLocalProjectVisibilityKey(machineId, id));
+    return project?.ownerUserId === currentUserId && !project.sharedWithTeam;
+  })
+    ? 'projects'
+    : null;
+}
 
 export function getSharingReviewActionTarget({
   privateMachineCount,
@@ -196,6 +231,8 @@ export interface ChatLandingSubmitDisabledArgs {
   isRuntimeInitializing: boolean;
   isLoadingLocalGitState: boolean;
   hasLocalGitStateError: boolean;
+  /** The MCP selection still waits on project defaults that have not been read. */
+  mcpDefaultsPending?: boolean;
 }
 
 export type ChatLandingComposerStatus<TMessage = unknown> = {
@@ -307,11 +344,13 @@ export function getChatLandingProjectRecency(
 ): ChatLandingProjectRecency {
   const byRepo = new Map<string, number>();
   const byProject = new Map<string, number>();
+  const byGroup = new Map<string, number>();
   for (const session of sessions) {
     recordLatestTimestamp(byRepo, getSessionGitHubRepoFullName(session), session.lastMessageAt);
     recordLatestTimestamp(byProject, getSessionLocalProjectKey(session), session.lastMessageAt);
+    recordLatestTimestamp(byGroup, session.projectRun?.id ?? null, session.lastMessageAt);
   }
-  return { byRepo, byProject };
+  return { byRepo, byProject, byGroup };
 }
 
 export function compareChatLandingRepositoryByRecency(
@@ -440,6 +479,16 @@ export function getChatLandingLocalProjectAvailability({
   return isMachineFlockRemoteSynced ? 'unavailable' : 'pending';
 }
 
+export function shouldReportLocalProjectUnavailable({
+  availability,
+  removalInProgress,
+}: {
+  availability: 'pending' | 'available' | 'unavailable';
+  removalInProgress: boolean;
+}): boolean {
+  return availability === 'unavailable' && !removalInProgress;
+}
+
 export function getChatLandingSelectedMachineProjectStatus({
   contextType,
   selectedMachineId,
@@ -472,6 +521,30 @@ export function isChatLandingMachineReachable({
 }: ChatLandingMachineReachableArgs): boolean {
   if (machineId === localMachineId) return true;
   return machines.has(machineId) && isMachineOnline(machineId);
+}
+
+export type ChatLandingSelectedMachineState = 'none' | 'available' | 'unknown' | 'offline';
+
+/**
+ * Only 'offline' may stop a send. 'unknown' means presence cannot answer, so the
+ * chat proceeds and fails against the machine's own deadline if it really is down.
+ */
+export function getChatLandingSelectedMachineState({
+  machineId,
+  localMachineId,
+  machines,
+  isMachineOnline,
+  onlineStatus,
+}: Omit<ChatLandingMachineReachableArgs, 'machineId'> & {
+  machineId: string | null;
+  onlineStatus: 'online' | 'offline' | 'unknown';
+}): ChatLandingSelectedMachineState {
+  if (!machineId) return 'none';
+  if (isChatLandingMachineReachable({ machineId, localMachineId, machines, isMachineOnline })) {
+    return 'available';
+  }
+  if (!machines.has(machineId)) return 'none';
+  return onlineStatus === 'offline' ? 'offline' : 'unknown';
 }
 
 export function getChatLandingHasAnyOnlineMachine({
@@ -545,8 +618,15 @@ export function getChatLandingSubmitDisabled({
   isRuntimeInitializing,
   isLoadingLocalGitState,
   hasLocalGitStateError,
+  mcpDefaultsPending = false,
 }: ChatLandingSubmitDisabledArgs): boolean {
-  if (submitting || hasBlockingImages || hasBlockingFiles || !hasSendableContent) {
+  if (
+    submitting ||
+    hasBlockingImages ||
+    hasBlockingFiles ||
+    !hasSendableContent ||
+    mcpDefaultsPending
+  ) {
     return true;
   }
 
@@ -574,4 +654,180 @@ export function getChatLandingVisibleComposerStatus<TMessage>({
   // Raw local Git / RPC transport failures have a scoped retry control and
   // must not take over the landing composer as status copy.
   return selectedMachineProjectStatus ?? null;
+}
+
+export type ChatLandingPreSelectionIntent = {
+  context: 'local' | 'github' | 'chat' | 'group' | undefined;
+  machine: string | undefined;
+  project: string | undefined;
+  repo: string | undefined;
+  /** Project group id; only meaningful with `context: 'group'`. */
+  group?: string | undefined;
+};
+
+/** Identity of one URL-named selection (pre-selection intent or mirrored state). */
+export function buildChatLandingPreSelectionKey({
+  context,
+  machine,
+  project,
+  repo,
+  group,
+}: ChatLandingPreSelectionIntent): string {
+  // A group id is appended only when present, so existing keys keep their shape.
+  const base = `${context}|${machine}|${project}|${repo}`;
+  return group ? `${base}|${group}` : base;
+}
+
+/** Search-parameter contract of the `/$workspaceName/chat` route. */
+export type ChatLandingSearch = {
+  /** Installation advice survives the desktop settings route-to-modal handoff. */
+  github_install_error?: string;
+  context?: 'local' | 'github' | 'chat' | 'group';
+  machine?: string;
+  project?: string;
+  repo?: string;
+  /** Project group id, with `context: 'group'`. */
+  group?: string;
+  pinSection?: string;
+};
+
+export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
+  return {
+    github_install_error:
+      typeof search.github_install_error === 'string' ? search.github_install_error : undefined,
+    context:
+      search.context === 'local' ||
+      search.context === 'github' ||
+      search.context === 'chat' ||
+      search.context === 'group'
+        ? search.context
+        : undefined,
+    machine: typeof search.machine === 'string' ? search.machine : undefined,
+    project: typeof search.project === 'string' ? search.project : undefined,
+    repo: typeof search.repo === 'string' ? search.repo : undefined,
+    group: typeof search.group === 'string' ? search.group : undefined,
+    pinSection:
+      typeof search.pinSection === 'string' && search.pinSection ? search.pinSection : undefined,
+  };
+}
+
+/**
+ * `machineId:localProjectId` named by the current URL, or null. Shared by the
+ * sidebar's row highlight and by the selection-URL mirror's participation
+ * checks over the same URL contract.
+ */
+export function getSelectedLocalProjectKey(
+  pathname: string,
+  workspaceSlug: string | null,
+  search?: Record<string, unknown>
+): string | null {
+  const workspacePrefix = workspaceSlug ? `/${workspaceSlug}` : '';
+  const normalizedPath =
+    workspaceSlug && pathname.startsWith(workspacePrefix)
+      ? pathname.slice(workspacePrefix.length) || '/'
+      : pathname;
+
+  const segments = normalizedPath.split('/').filter(Boolean);
+
+  // New route: /chat?context=local&machine=X&project=Y
+  if (
+    segments[0] === 'chat' &&
+    search?.context === 'local' &&
+    typeof search?.machine === 'string' &&
+    typeof search?.project === 'string'
+  ) {
+    return `${search.machine}:${search.project}`;
+  }
+
+  // Legacy route: /local/$machineId/$localProjectId
+  if (segments[0] !== 'local') return null;
+  const machineId = segments[1];
+  const localProjectId = segments[2];
+  if (!machineId || !localProjectId) return null;
+  return `${machineId}:${localProjectId}`;
+}
+
+export type ChatLandingEffectiveSelection = {
+  contextType: 'local' | 'github' | 'chat' | 'group';
+  machineId: string | null;
+  localProjectId: string | null;
+  repoFullName: string | null;
+  /** Selected Project group, with `contextType: 'group'`. */
+  projectGroupId?: string | null;
+};
+
+/**
+ * The chat-route search params that truthfully name the composer's current
+ * selection. An incomplete selection (a context with nothing chosen yet) maps
+ * to an empty search: the URL then names nothing rather than something stale.
+ */
+export function getChatLandingSelectionSearch({
+  contextType,
+  machineId,
+  localProjectId,
+  repoFullName,
+  projectGroupId,
+}: ChatLandingEffectiveSelection): ChatLandingSearch {
+  if (contextType === 'chat') {
+    return { context: 'chat' };
+  }
+  if (contextType === 'group' && projectGroupId) {
+    return { context: 'group', group: projectGroupId };
+  }
+  if (contextType === 'local' && machineId && localProjectId) {
+    return { context: 'local', machine: machineId, project: localProjectId };
+  }
+  if (contextType === 'github' && repoFullName) {
+    return { context: 'github', repo: repoFullName };
+  }
+  return {};
+}
+
+export type ChatLandingSelectionSyncDecision = 'skip' | 'arm' | 'sync';
+
+/**
+ * Whether the landing should mirror its effective selection back into the URL.
+ *
+ * Once the URL names a selection it must keep telling the truth: steering or
+ * clearing the composer selection would otherwise leave a stale project in the
+ * URL, making that project's sidebar row an identical-URL no-op. A URL that
+ * names nothing stays untouched, so restored defaults and auto-selection never
+ * rewrite a plain landing address.
+ *
+ * `arm` covers the commit in which a URL intent was just applied: the observed
+ * selection still predates the application, so mirroring would race the intent
+ * and write the stale selection back over it. The caller arms the mirror and
+ * compares again once the applied selection has rendered.
+ */
+export function getChatLandingSelectionSyncDecision({
+  urlNamesSelection,
+  intentApplied,
+  armed,
+  urlKey,
+  selectionKey,
+}: {
+  urlNamesSelection: boolean;
+  intentApplied: boolean;
+  armed: boolean;
+  urlKey: string;
+  selectionKey: string;
+}): ChatLandingSelectionSyncDecision {
+  if (!urlNamesSelection || !intentApplied) return 'skip';
+  if (!armed) return 'arm';
+  return selectionKey === urlKey ? 'skip' : 'sync';
+}
+
+export function compareUnifiedProjectOptions(
+  left: { label: string; value: string; lastUsedAt?: number },
+  right: { label: string; value: string; lastUsedAt?: number }
+): number {
+  if (left.lastUsedAt !== undefined && right.lastUsedAt !== undefined) {
+    if (left.lastUsedAt !== right.lastUsedAt) return right.lastUsedAt - left.lastUsedAt;
+  } else if (left.lastUsedAt !== undefined) {
+    return -1;
+  } else if (right.lastUsedAt !== undefined) {
+    return 1;
+  }
+  const labelComparison = left.label.localeCompare(right.label);
+  return labelComparison !== 0 ? labelComparison : left.value.localeCompare(right.value);
 }

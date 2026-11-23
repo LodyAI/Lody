@@ -1,0 +1,693 @@
+{
+  "date": "2026-09-23",
+  "desktopSource": "20dbf378",
+  "entries": 3000,
+  "discardedWarmupsPerRun": 3,
+  "boundary": "Probe-only prepared target, 100% hit rate; timing starts at target-navigation IPC (current) or prepared-host presentation IPC (prepared). Input uses unique Chromium insertText token retained after a frame, not physical keyboard/IME. Sequential runs, existing CLI artifact.",
+  "runs": {
+    "current": {
+      "n": 5,
+      "showMedianMs": 443.8161250000012,
+      "showRangeMs": [
+        439.28908299999966,
+        451.75637500000084
+      ],
+      "inputMedianMs": 490.77750000000015,
+      "inputRangeMs": [
+        465.82645799999955,
+        502.38708399999814
+      ],
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "7f76c5416cf9bbf5a72d5754db9c548299fc50c7bf741748dc9c1eca8bfdae7a",
+        "runtimeProviderSha256": "805b81429d4bde42beb62cf66aa65ab37a058add071dd65cac4d2420ea5497bc",
+        "rendererIndexSha256": "3670875e29cfb1a18f756a9747ab35e3cff67e048590f8b32b9949828ca06a0f"
+      },
+      "samples": [
+        {
+          "claimToShowMs": 483.83550000000014,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-2",
+            "claimToInputObservedMs": 527.0662080000002
+          },
+          "preparationMs": null,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 439.03162500000053,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 489.1280000000006
+          },
+          "preparationMs": null,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 455.60812499999975,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 492.4270839999999
+          },
+          "preparationMs": null,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 439.28908299999966,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 465.82645799999955
+          },
+          "preparationMs": null,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 444.2705420000002,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 493.8610840000001
+          },
+          "preparationMs": null,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 440.7665420000012,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 490.77750000000015
+          },
+          "preparationMs": null,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 443.8161250000012,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 488.2482920000002
+          },
+          "preparationMs": null,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 451.75637500000084,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 502.38708399999814
+          },
+          "preparationMs": null,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        }
+      ]
+    },
+    "prepared": {
+      "n": 5,
+      "showMedianMs": 38.314250000001266,
+      "showRangeMs": [
+        34.71087500000067,
+        55.92699999999968
+      ],
+      "inputMedianMs": 84.64362500000061,
+      "inputRangeMs": [
+        72.55566700000054,
+        122.62620799999786
+      ],
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": true,
+        "nativeMode": false,
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "7f76c5416cf9bbf5a72d5754db9c548299fc50c7bf741748dc9c1eca8bfdae7a",
+        "runtimeProviderSha256": "805b81429d4bde42beb62cf66aa65ab37a058add071dd65cac4d2420ea5497bc",
+        "rendererIndexSha256": "3670875e29cfb1a18f756a9747ab35e3cff67e048590f8b32b9949828ca06a0f"
+      },
+      "samples": [
+        {
+          "claimToShowMs": 36.98558299999968,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-2",
+            "claimToInputObservedMs": 107.4032500000003
+          },
+          "preparationMs": 479.18833299999915,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 27.457792000000154,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 69.05870899999991
+          },
+          "preparationMs": 406.3456669999996,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 36.12024999999994,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 73.44129200000134
+          },
+          "preparationMs": 407.25787499999933,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 38.314250000001266,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 84.64362500000061
+          },
+          "preparationMs": 402.38466600000174,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 42.58558300000004,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 76.63166699999965
+          },
+          "preparationMs": 418.3343329999989,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 36.48533300000054,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 72.55566700000054
+          },
+          "preparationMs": 389.13345800000025,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 34.71087500000067,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 85.1741660000007
+          },
+          "preparationMs": 411.0490000000009,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 55.92699999999968,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 122.62620799999786
+          },
+          "preparationMs": 408.85233300000255,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        }
+      ]
+    },
+    "preparedNative": {
+      "n": 10,
+      "showMedianMs": 40.76216699999895,
+      "showRangeMs": [
+        32.849999999998545,
+        75.7232499999991
+      ],
+      "inputMedianMs": 90.1456249999992,
+      "inputRangeMs": [
+        80.72620800000004,
+        144.70241700000042
+      ],
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": true,
+        "nativeMode": true,
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "7f76c5416cf9bbf5a72d5754db9c548299fc50c7bf741748dc9c1eca8bfdae7a",
+        "runtimeProviderSha256": "805b81429d4bde42beb62cf66aa65ab37a058add071dd65cac4d2420ea5497bc",
+        "rendererIndexSha256": "3670875e29cfb1a18f756a9747ab35e3cff67e048590f8b32b9949828ca06a0f"
+      },
+      "samples": [
+        {
+          "claimToShowMs": 39.3628749999998,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-2",
+            "claimToInputObservedMs": 90.109958
+          },
+          "preparationMs": 470.89287500000046,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 32.86045800000011,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 80.48362500000076
+          },
+          "preparationMs": 406.5744999999997,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 34.98524999999972,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 81.75745900000038
+          },
+          "preparationMs": 408.84029199999895,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 37.17270800000006,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 87.601458000001
+          },
+          "preparationMs": 386.0540830000009,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 40.3951249999991,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 130.65404200000012
+          },
+          "preparationMs": 408.8470409999991,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 38.61999999999898,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 80.72620800000004
+          },
+          "preparationMs": 409.3829170000008,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 44.99262500000259,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 90.40112500000032
+          },
+          "preparationMs": 410.17354200000045,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 75.7232499999991,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 126.13037500000064
+          },
+          "preparationMs": 402.226375000002,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 50.9798750000009,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 144.70241700000042
+          },
+          "preparationMs": 411.1652499999982,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 41.12920899999881,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-11",
+            "claimToInputObservedMs": 89.89012499999808
+          },
+          "preparationMs": 399.90258299999914,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 45.70658299999923,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-12",
+            "claimToInputObservedMs": 94.53941599999962
+          },
+          "preparationMs": 398.4735830000027,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 32.849999999998545,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-13",
+            "claimToInputObservedMs": 83.86633299999812
+          },
+          "preparationMs": 409.8649579999983,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 32.853917000000365,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-14",
+            "claimToInputObservedMs": 83.53516700000182
+          },
+          "preparationMs": 416.35662500000035,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        }
+      ]
+    }
+  }
+}

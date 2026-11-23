@@ -1,0 +1,1009 @@
+import { inheritHistoryStreamText } from './history-stream-text';
+import { historyValuesEqual } from './history-values-equal';
+export { historyValuesEqual } from './history-values-equal';
+import { Immer } from 'immer';
+import { isContainer, LoroMap, type LoroDoc, type LoroList } from 'loro-crdt';
+import { z } from 'zod';
+import type { SessionHistory, SessionHistoryInput } from './schema';
+import { sessionHistorySchema } from './session-doc-schemas';
+import type { PermissionOutcome } from './message';
+import {
+  MessageContentSchema,
+  PermissionOutcomeSchema,
+  ToolCallMessageSchema,
+  ToolCallContentSchema,
+  SessionHistoryInputConfigSchema,
+  TaskProposalMetaSchema,
+} from './message-schemas';
+import {
+  HistoryEntryWriteSchema,
+  HistoryWriteError,
+  parseHistoryWrite,
+  historyUnionCandidates,
+} from './history-write-schema';
+import { diffHistoryContainer, populateContainer } from './history-materializer';
+import { applyRespondPermission } from './session-data/planner';
+import { createAgentHistoryWindow, type AgentHistoryTargets } from './history-agent-window';
+import {
+  getOperationProgressTurnId,
+  planOperationProgress,
+} from './session-data/operation-progress';
+import type { HistoryAction } from './session-data/history-actions';
+import { historyQueryRow, type HistoryQueryRow } from './session-data/history-selection';
+
+const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** Inspect stored metadata without materializing sibling payloads; accept legacy JSON too. */
+const storedField = (value: unknown, key: string): unknown =>
+  isContainer(value)
+    ? value.kind() === 'Map'
+      ? (value as LoroMap).get(key)
+      : undefined
+    : record(value)
+      ? value[key]
+      : undefined;
+const storedScalar = (value: unknown): unknown =>
+  isContainer(value) && value.kind() === 'Text' ? value.toString() : value;
+
+declare const storedHistoryBrand: unique symbol;
+/** Provenance, not a way to bless caller-supplied JSON. history is a detached copy. */
+export interface StoredHistorySnapshot {
+  readonly [storedHistoryBrand]: true;
+  readonly history: SessionHistoryInput[];
+}
+const storedHistories = new WeakMap<StoredHistorySnapshot, SessionHistoryInput[]>();
+
+/** Capture a backend's stored values using the writer's common provenance registry. */
+export function captureStoredHistory(
+  history: readonly SessionHistoryInput[]
+): StoredHistorySnapshot {
+  const stored = structuredClone(history) as SessionHistoryInput[];
+  const snapshot = Object.freeze({
+    get history() {
+      return structuredClone(stored);
+    },
+  }) as StoredHistorySnapshot;
+  storedHistories.set(snapshot, stored);
+  return snapshot;
+}
+
+/** Preflight the complete copy before either backend changes its target. */
+export function prepareStoredHistoryCopy(
+  snapshot: StoredHistorySnapshot,
+  selection: readonly SessionHistoryInput[],
+  previous: readonly SessionHistoryInput[]
+): SessionHistoryInput[] {
+  const source = storedHistories.get(snapshot);
+  if (!source) throw new HistoryWriteError([{ path: ['history'], code: 'invalid_snapshot' }]);
+  const ids = new Set(previous.map((entry) => entry.id));
+  for (const entry of selection) {
+    if (ids.has(entry.id))
+      throw new HistoryWriteError([{ path: ['history'], code: 'copy_target_conflict' }]);
+    ids.add(entry.id);
+  }
+  const sourceById = new Map<string, SessionHistoryInput>();
+  for (const old of source) if (!sourceById.has(old.id)) sourceById.set(old.id, old);
+  return selection.map((entry) => {
+    const old = sourceById.get(entry.id);
+    return (
+      old ? prepareReplacement(old, entry) : cleanNew(HistoryEntryWriteSchema, entry)
+    ) as SessionHistoryInput;
+  });
+}
+
+/** New unknown keys are filtered; unknown keys already stored are never scrubbed. */
+function preserveUnknown(
+  schema: z.core.$ZodType,
+  old: unknown,
+  input: unknown,
+  parsed: unknown
+): unknown {
+  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable)
+    return preserveUnknown(schema.unwrap(), old, input, parsed);
+  if (schema instanceof z.ZodUnion) {
+    const candidates = historyUnionCandidates(schema, parsed);
+    const option =
+      candidates.length === 1
+        ? candidates[0]
+        : candidates.find((candidate) => z.safeParse(candidate, parsed).success);
+    return option ? preserveUnknown(option, old, input, parsed) : parsed;
+  }
+  if (schema instanceof z.ZodObject && record(parsed)) {
+    // A different union variant is a new value, not a carrier for the old one's extensions.
+    if (
+      record(old) &&
+      Object.entries(schema.shape).some(
+        ([key, field]) =>
+          field instanceof z.ZodLiteral &&
+          record(old) &&
+          Object.hasOwn(old, key) &&
+          old[key] !== parsed[key]
+      )
+    )
+      old = undefined;
+    const result: Record<string, unknown> = Object.create(null);
+    // Explicit protocol extension dictionaries (e.g. ACP content metadata) are
+    // open in the shared parser. Respect that contract, not an invented whitelist.
+    for (const key of Object.keys(parsed)) {
+      if (key !== '$cid' && !Object.hasOwn(schema.shape, key)) result[key] = parsed[key];
+    }
+    const open = schema.def.catchall && !(schema.def.catchall instanceof z.ZodNever);
+    if (record(old))
+      for (const key of Object.keys(old)) {
+        if (
+          key !== '$cid' &&
+          !Object.hasOwn(schema.shape, key) &&
+          (!open || !Object.hasOwn(parsed, key))
+        )
+          result[key] = old[key];
+      }
+    for (const [key, field] of Object.entries(schema.shape)) {
+      if (!Object.hasOwn(parsed, key)) continue;
+      result[key] = preserveUnknown(
+        field as z.ZodType,
+        record(old) ? old[key] : undefined,
+        record(input) ? input[key] : undefined,
+        parsed[key]
+      );
+    }
+    return result;
+  }
+  if (schema instanceof z.ZodArray && Array.isArray(parsed))
+    return parsed.map((value, i) =>
+      preserveUnknown(
+        schema.element,
+        Array.isArray(old) ? old[i] : undefined,
+        Array.isArray(input) ? input[i] : undefined,
+        value
+      )
+    );
+  return parsed;
+}
+
+const cleanNew = (schema: z.ZodType, input: unknown, old?: unknown): unknown => {
+  const parsed = parseHistoryWrite(schema, input);
+  // There is no stored extension to merge for a newly authored value.
+  const result = old === undefined ? parsed : preserveUnknown(schema, old, input, parsed);
+  inheritHistoryStreamText(input, result);
+  return result;
+};
+
+// One independently editable group, derived from the message definition rather
+// than a second set of validators. Tool identity stays outside this group.
+const ToolStateWriteSchema = ToolCallMessageSchema.omit({
+  type: true,
+  toolCallId: true,
+});
+
+function prepareObjectFields(
+  schema: z.ZodObject,
+  old: Record<string, unknown>,
+  input: Record<string, unknown>
+) {
+  const result = { ...old };
+  for (const [key, field] of Object.entries(schema.shape)) {
+    if (historyValuesEqual(old[key], input[key])) continue;
+    const value = cleanNew(field as z.ZodType, input[key], old[key]);
+    if (value === undefined) delete result[key];
+    else result[key] = value;
+  }
+  return result;
+}
+
+/** Permission producers also enrich descriptions; they do not author old content. */
+function prepareToolState(old: unknown, input: unknown): Record<string, unknown> | undefined {
+  if (!record(old) || !record(input) || old.type !== 'tool_call' || input.type !== 'tool_call')
+    return undefined;
+  const payload = (value: Record<string, unknown>) =>
+    Object.fromEntries(
+      Object.entries(value).filter(([key]) => !Object.hasOwn(ToolStateWriteSchema.shape, key))
+    );
+  if (!historyValuesEqual(payload(old), payload(input))) return undefined;
+  const result = { ...old };
+  for (const [key, schema] of Object.entries(ToolStateWriteSchema.shape)) {
+    if (historyValuesEqual(old[key], input[key])) continue;
+    if (key === 'content' && Array.isArray(input.content)) {
+      const previous = Array.isArray(old.content) ? old.content : [];
+      const used = new Set<number>();
+      result.content = input.content.map((block, i) => {
+        const retained = previous.findIndex(
+          (value, index) => !used.has(index) && historyValuesEqual(value, block)
+        );
+        if (retained >= 0) {
+          used.add(retained);
+          return previous[retained];
+        }
+        return cleanNew(ToolCallContentSchema, block, previous[i]);
+      });
+      continue;
+    }
+    const oldRequest = old.permissionRequest;
+    const permissionRequest = input.permissionRequest;
+    // Answering an existing request does not author its options or tool content.
+    if (key === 'permissionRequest' && record(oldRequest) && record(permissionRequest)) {
+      const { outcome: _oldOutcome, ...oldInfo } = oldRequest;
+      const { outcome, ...info } = permissionRequest;
+      if (historyValuesEqual(oldInfo, info)) {
+        const parsed = cleanNew(PermissionOutcomeSchema.optional(), outcome, oldRequest.outcome);
+        result.permissionRequest = { ...oldRequest, outcome: parsed };
+        continue;
+      }
+    }
+    const parsed = cleanNew(schema, input[key], old[key]);
+    if (parsed === undefined) delete result[key];
+    else result[key] = parsed;
+  }
+  return result;
+}
+
+/** Only a read acknowledgement on a newly inserted pending user row is benign. */
+export function matchesRollbackReceipt(
+  before: readonly unknown[],
+  after: readonly unknown[],
+  current: readonly unknown[]
+): boolean {
+  const previousIds = new Set(before.filter(record).map((entry) => entry.id));
+  return (
+    after.length === current.length &&
+    after.every((expected, i) => {
+      const actual = current[i];
+      if (historyValuesEqual(expected, actual)) return true;
+      if (
+        !record(expected) ||
+        !record(actual) ||
+        previousIds.has(expected.id) ||
+        expected.role !== 'user' ||
+        expected.status !== 'pending' ||
+        (expected.read !== undefined && expected.read !== false) ||
+        actual.status !== 'seen' ||
+        actual.read !== true
+      )
+        return false;
+      return historyValuesEqual(expected, {
+        ...actual,
+        status: expected.status,
+        read: expected.read,
+      });
+    })
+  );
+}
+
+export function prepareReplacement(previous: unknown, incoming: unknown): Record<string, unknown> {
+  if (!record(previous) || !record(incoming))
+    throw new HistoryWriteError([{ path: [], code: 'invalid_turn' }]);
+  const result = { ...previous };
+  for (const [key, schema] of Object.entries(HistoryEntryWriteSchema.shape)) {
+    if (historyValuesEqual(previous[key], incoming[key])) continue;
+    if (key === 'items' && Array.isArray(incoming.items)) {
+      const oldItems = Array.isArray(previous.items) ? previous.items : [];
+      // Retained items anchor each edited block, including an opaque item shifted
+      // by deletion. Align replacements within the block, never across an anchor.
+      let lastOld = -1;
+      const anchors = incoming.items.map((item) => {
+        let index = -1;
+        for (let i = lastOld + 1; i < oldItems.length; i++) {
+          if (historyValuesEqual(oldItems[i], item)) {
+            index = i;
+            break;
+          }
+        }
+        if (index >= 0) lastOld = index;
+        return index;
+      });
+      let following = oldItems.length;
+      const followingAnchors = new Array<number>(anchors.length);
+      for (let i = anchors.length - 1; i >= 0; i--) {
+        followingAnchors[i] = following;
+        if (anchors[i]! >= 0) following = anchors[i]!;
+      }
+      let oldStart = 0;
+      let newStart = 0;
+      result.items = incoming.items.map((item, i) => {
+        const unchanged = anchors[i]!;
+        if (unchanged >= 0) {
+          oldStart = unchanged + 1;
+          newStart = i + 1;
+          return oldItems[unchanged];
+        }
+        const nextAnchor = followingAnchors[i]!;
+        const oldIndex = oldStart + i - newStart;
+        const old = oldIndex < nextAnchor ? oldItems[oldIndex] : undefined;
+        const toolState = prepareToolState(old, item);
+        if (toolState !== undefined) return toolState;
+        if (
+          record(old) &&
+          record(item) &&
+          old.type === 'system_notice' &&
+          item.type === old.type &&
+          old.name === 'task_proposal' &&
+          item.name === old.name &&
+          record(old.meta) &&
+          record(item.meta) &&
+          old.meta.proposalId === item.meta.proposalId &&
+          historyValuesEqual({ ...old, meta: undefined }, { ...item, meta: undefined })
+        ) {
+          return { ...old, meta: prepareObjectFields(TaskProposalMetaSchema, old.meta, item.meta) };
+        }
+        return cleanNew(
+          MessageContentSchema,
+          item,
+          record(old) && record(item) && old.type === item.type ? old : undefined
+        );
+      });
+    } else if (
+      key === 'inputConfig' &&
+      record(previous.inputConfig) &&
+      record(incoming.inputConfig)
+    ) {
+      result.inputConfig = prepareObjectFields(
+        SessionHistoryInputConfigSchema,
+        previous.inputConfig,
+        incoming.inputConfig
+      );
+    } else {
+      const value = cleanNew(schema, incoming[key], previous[key]);
+      if (value === undefined) delete result[key];
+      else result[key] = value;
+    }
+  }
+  return result;
+}
+
+export interface HistoryWriter {
+  forEachStored(visit: (entry: SessionHistoryInput) => void): void;
+  readQuery(options?: { transcriptVisibility?: boolean }): HistoryQueryRow[];
+  readSelected(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    options?: { transcriptVisibility?: boolean }
+  ): SessionHistoryInput[];
+  /** Plan selected bodies; changes to metadata-only rows are rejected. */
+  updateSelected(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): void;
+  updateSelectedWithRollback(
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): () => void;
+  /** Detached stored JSON for inspection/hashing; not copy/rollback provenance. */
+  readStored(): SessionHistoryInput[];
+  capture(): StoredHistorySnapshot;
+  /** Prepend copied history, retaining target initialization rows; ids must not collide. */
+  copyFrom(snapshot: StoredHistorySnapshot, history: SessionHistoryInput[]): void;
+  /** Restore the changed range only; retain edits to untouched rows. */
+  updateWithRollback(
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): () => void;
+  append(entry: SessionHistory): void;
+  replace(turnId: string, entry: SessionHistory): boolean;
+  /**
+   * Stage a single-turn replacement without writing. Validates only changed
+   * fields/items through the shared prepare rule (unchanged opaque stored
+   * content is retained), so a `HistoryWriteError` thrown here is a pre-write
+   * rejection. Returns a commit closure, or `undefined` when the turn is absent.
+   */
+  prepareReplace(turnId: string, entry: SessionHistory): (() => void) | undefined;
+  read(turnId: string): SessionHistory | undefined;
+  /** Existing typed callback API; only its changed turns/items reach the writer. */
+  update(updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]): void;
+  /** Read only this operation's cards, once each; never export the history. */
+  updateOperationProgress(action: Extract<HistoryAction, { kind: 'operation-progress' }>): boolean;
+  /** Mutate an existing turn without producing/planning the entire history. */
+  updateEntry(id: string, updater: (entry: SessionHistoryInput) => SessionHistoryInput): boolean;
+  /**
+   * Streaming output over sparse rows in stored order: requested tools/tasks/runs
+   * and each owning turn's contiguous text/thought tail. Runs themselves expose
+   * only requested child tools/plans and their output tail. Appends stay at the
+   * actual end of the owning list. All changes are preflighted together.
+   * Returns false without writing for missing/duplicated target turns or inline
+   * turn/item-list storage; structural legacy updates may then use `update`.
+   * A string array retains the original tool-only call contract.
+   */
+  updateTail(
+    turnId: string,
+    targets: readonly string[] | AgentHistoryTargets,
+    updater: (rows: SessionHistoryInput[]) => SessionHistoryInput[]
+  ): boolean;
+  /**
+   * Mutate every stored row carrying `id`, oldest first. Concurrent producers
+   * can insert the same turn twice; this keeps those copies in step. Every
+   * replacement is prepared before the first CRDT mutation.
+   */
+  updateCopies(id: string, updater: (copies: SessionHistoryInput[]) => void): boolean;
+  setField<K extends Exclude<keyof SessionHistoryInput, '$cid' | 'items' | 'id'>>(
+    turnId: string,
+    key: K,
+    value: SessionHistoryInput[K] | undefined
+  ): boolean;
+  respondPermission(
+    requestId: string,
+    outcome: PermissionOutcome,
+    options?: { turnId?: string }
+  ): boolean;
+}
+
+/** Shared extraction of #376's writer. No ConversationView or feature-flag dependency. */
+export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly SessionHistory[]) {
+  const list = doc.getList('history');
+  const readAll = () => readHistory?.() ?? (list.toJSON() as SessionHistory[]);
+  // No subscription lifetime to manage. Unknown writes/imports/checkout invalidate
+  // this metadata-only directory, including edits in an uncommitted transaction.
+  let progressDirectory: { stamp: string; rows: Map<string, number[]> } | undefined;
+  const progressPositions = (id: string) => {
+    const stamp = JSON.stringify([doc.opCount(), doc.frontiers(), doc.getPendingTxnLength()]);
+    if (progressDirectory?.stamp !== stamp) {
+      const rows = new Map<string, number[]>();
+      for (let index = 0; index < list.length; index++) {
+        const value = list.get(index);
+        const rowId = storedScalar(storedField(value, 'id'));
+        if (typeof rowId !== 'string' || !rowId.startsWith('operation-progress:')) continue;
+        if (storedScalar(storedField(value, 'role')) !== 'system') continue;
+        const copies = rows.get(rowId) ?? [];
+        copies.push(index);
+        rows.set(rowId, copies);
+      }
+      progressDirectory = { stamp, rows };
+    }
+    const prefix = `${id}:duplicate:`;
+    const positions = [...(progressDirectory.rows.get(id) ?? [])];
+    for (const [rowId, copies] of progressDirectory.rows)
+      if (rowId.startsWith(prefix)) positions.push(...copies);
+    return positions.sort((a, b) => a - b);
+  };
+  const rowWithId = (index: number, id: string) => {
+    const map = list.get(index);
+    if (isContainer(map) && map.kind() === 'Map' && (map as LoroMap).get('id') === id)
+      return { map: map as LoroMap, inline: undefined, index };
+    if (!isContainer(map) && record(map) && map.id === id)
+      return { map: undefined, inline: map as unknown as SessionHistoryInput, index };
+    return undefined;
+  };
+  const locate = (id: string) => {
+    for (let index = list.length - 1; index >= 0; index--) {
+      const found = rowWithId(index, id);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  const agentWindow = createAgentHistoryWindow(
+    doc,
+    (old, next) => prepareReplacement(old, next),
+    historyValuesEqual
+  );
+
+  // Preparation is separate so a malformed update cannot leave half-written CRDT ops.
+  const planWrite = (
+    previous: readonly SessionHistory[],
+    next: readonly SessionHistory[],
+    prepareValue: (old: SessionHistory | undefined, value: SessionHistory) => unknown = (
+      old,
+      value
+    ) =>
+      old === undefined ? cleanNew(HistoryEntryWriteSchema, value) : prepareReplacement(old, value),
+    offset = 0
+  ) => {
+    const used = new Set<number>();
+    const byId = new Map<unknown, number[]>();
+    const byRef = new Map<unknown, number>();
+    previous.forEach((entry, i) => {
+      byRef.set(entry, i);
+      const id = record(entry) ? entry.id : undefined;
+      const matches = byId.get(id) ?? [];
+      matches.push(i);
+      byId.set(id, matches);
+    });
+    let last = -1;
+    const plan = next.map((entry) => {
+      const ref = byRef.get(entry);
+      const candidates = byId.get(record(entry) ? entry.id : undefined) ?? [];
+      const index =
+        ref !== undefined && !used.has(ref) ? ref : candidates.find((i) => !used.has(i));
+      if (index === undefined) return { value: prepareValue(undefined, entry), index: -1 };
+      if (index < last)
+        throw new HistoryWriteError([{ path: ['history'], code: 'unsupported_reorder' }]);
+      last = index;
+      used.add(index);
+      if (historyValuesEqual(previous[index], entry)) return { index };
+      const map = list.get(offset + index);
+      if (!isContainer(map) && record(map))
+        return { index, inline: true, value: prepareValue(previous[index], entry) };
+      if (!isContainer(map) || map.kind() !== 'Map')
+        throw new HistoryWriteError([{ path: ['history', index], code: 'invalid_stored_turn' }]);
+      return { index, map, value: prepareValue(previous[index], entry) };
+    });
+    return () => {
+      for (let i = previous.length - 1; i >= 0; i--) if (!used.has(i)) list.delete(offset + i, 1);
+      plan.forEach((op, i) => {
+        if (op.index < 0)
+          populateContainer(
+            list.insertContainer(offset + i, new LoroMap()),
+            sessionHistorySchema,
+            op.value,
+            undefined
+          );
+        else if ('inline' in op && op.inline) {
+          list.delete(offset + i, 1);
+          list.insert(offset + i, op.value as Parameters<LoroList['insert']>[1]);
+        } else if (op.value !== undefined && isContainer(op.map))
+          diffHistoryContainer(
+            op.map,
+            sessionHistorySchema,
+            previous[op.index],
+            op.value,
+            undefined
+          );
+      });
+      doc.commit();
+    };
+  };
+  const prepare = (previous: readonly SessionHistory[], next: readonly SessionHistory[]) =>
+    planWrite(previous, next);
+
+  const readQuery = (options?: { transcriptVisibility?: boolean }): HistoryQueryRow[] =>
+    Array.from({ length: list.length }, (_, index) =>
+      historyQueryRow(
+        list.get(index),
+        {
+          field: storedField,
+          scalar: (value) => {
+            const scalar = storedScalar(value);
+            if (isContainer(scalar)) return scalar.kind() === 'List' ? [] : {};
+            return scalar && typeof scalar === 'object'
+              ? Array.isArray(scalar)
+                ? []
+                : {}
+              : scalar;
+          },
+          keys: (value) =>
+            isContainer(value) && value.kind() === 'Map'
+              ? [...(value as LoroMap).keys()]
+              : record(value)
+                ? Object.keys(value)
+                : [],
+          length: (value) =>
+            Array.isArray(value)
+              ? value.length
+              : isContainer(value) && value.kind() === 'List'
+                ? (value as LoroList).length
+                : 0,
+          at: (value, itemIndex) =>
+            Array.isArray(value) ? value[itemIndex] : (value as LoroList).get(itemIndex),
+        },
+        options?.transcriptVisibility
+      )
+    );
+  const storedAt = (index: number): SessionHistoryInput => {
+    const value = list.get(index);
+    return structuredClone(isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
+  };
+  const storedRange = (from: number, to: number) =>
+    Array.from({ length: to - from }, (_, index) => storedAt(from + index));
+  const membership = () =>
+    Array.from({ length: list.length }, (_, index) => {
+      const row = list.get(index);
+      return {
+        id: storedScalar(storedField(row, 'id')),
+        record: isContainer(row) ? row.kind() === 'Map' : record(row),
+      };
+    });
+  const selectedPlan = (
+    select: (rows: readonly HistoryQueryRow[]) => readonly number[],
+    updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]
+  ) => {
+    const query = readQuery();
+    const positions = new Set(select(query));
+    for (const index of positions)
+      if (!Number.isSafeInteger(index) || index < 0 || index >= query.length)
+        throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
+    const untouched = new Set<unknown>();
+    const before = query.map((row, index) => {
+      if (positions.has(index)) return storedAt(index);
+      untouched.add(row);
+      return row as unknown as SessionHistoryInput;
+    });
+    const next = immer.produce(before, (draft) => {
+      const result = updater(draft);
+      if (result && result !== draft) draft.splice(0, draft.length, ...result);
+    });
+    const commit = planWrite(before, next, (old, value) => {
+      if (untouched.has(old))
+        throw new HistoryWriteError([{ path: ['history'], code: 'unselected_change' }]);
+      return old === undefined
+        ? cleanNew(HistoryEntryWriteSchema, value)
+        : prepareReplacement(old, value);
+    });
+    return { before, next, commit };
+  };
+
+  const writer: HistoryWriter = {
+    forEachStored(visit) {
+      for (let index = 0; index < list.length; index++) {
+        const value = storedAt(index);
+        if (record(value)) visit(value);
+      }
+    },
+    readQuery,
+    readSelected(select, options) {
+      const rows = readQuery(options);
+      return select(rows).map((index) => {
+        if (!Number.isSafeInteger(index) || index < 0 || index >= list.length)
+          throw new HistoryWriteError([{ path: ['history'], code: 'invalid_selection' }]);
+        return storedAt(index);
+      });
+    },
+    updateSelected(select, updater) {
+      selectedPlan(select, updater).commit();
+    },
+    updateSelectedWithRollback(select, updater) {
+      const beforeMembers = membership();
+      const { before, next, commit } = selectedPlan(select, updater);
+      let start = 0,
+        suffix = 0;
+      while (
+        start < before.length &&
+        start < next.length &&
+        historyValuesEqual(before[start], next[start])
+      )
+        start++;
+      while (
+        suffix < before.length - start &&
+        suffix < next.length - start &&
+        historyValuesEqual(before[before.length - 1 - suffix], next[next.length - 1 - suffix])
+      )
+        suffix++;
+      const removed = storedRange(start, before.length - suffix);
+      commit();
+      const afterMembers = membership();
+      const end = afterMembers.length - suffix;
+      const after = storedRange(start, end);
+      let consumed = false;
+      return () => {
+        const currentMembers = membership();
+        const sameRows =
+          currentMembers.length >= afterMembers.length &&
+          afterMembers.every(
+            (row, index) =>
+              row.record && currentMembers[index]?.record && row.id === currentMembers[index]!.id
+          );
+        if (consumed || !sameRows)
+          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        const currentRange = storedRange(start, end);
+        if (
+          !matchesRollbackReceipt(
+            beforeMembers.filter((row) => row.record),
+            after,
+            currentRange
+          )
+        )
+          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        // Align only complete values in the owned range. Later appends cannot
+        // consume restored IDs; unchanged containers inside the range survive.
+        planWrite(currentRange, removed, (_old, value) => value, start)();
+        consumed = true;
+      };
+    },
+    readStored() {
+      return list.toJSON() as SessionHistoryInput[];
+    },
+    capture() {
+      // Read the actual document, not a normalized projection or caller-owned array.
+      return captureStoredHistory(writer.readStored());
+    },
+    copyFrom(snapshot, history) {
+      const previous = list.toJSON() as SessionHistory[];
+      // Incoming ids were proven unique above. Match each to the first stored
+      // occurrence once instead of rescanning the entire source for every turn.
+      const values = prepareStoredHistoryCopy(snapshot, history, previous);
+      // Values are either unchanged stored data or preflighted authored changes.
+      planWrite(previous, [...values, ...previous] as SessionHistory[], (_old, value) => value)();
+    },
+    updateWithRollback(updater) {
+      const before = readAll();
+      const next = immer.produce(before, updater);
+      // Unchanged rows are not owned by this operation. Capture only the range
+      // it changed, retaining the current values outside it during compensation.
+      let start = 0;
+      while (
+        start < before.length &&
+        start < next.length &&
+        historyValuesEqual(before[start], next[start])
+      )
+        start++;
+      let suffix = 0;
+      while (
+        suffix < before.length - start &&
+        suffix < next.length - start &&
+        historyValuesEqual(before[before.length - 1 - suffix], next[next.length - 1 - suffix])
+      )
+        suffix++;
+      // Capture only the owned range from storage, including fields the reader hides.
+      const removed = before.slice(start, before.length - suffix).map((_, offset) => {
+        const value = list.get(start + offset);
+        return isContainer(value) ? value.toJSON() : value;
+      });
+      planWrite(before, next)();
+      const after = readAll();
+      let consumed = false;
+      return () => {
+        const current = readAll();
+        // Structural changes remain conservative: an index is safe only while
+        // every row still has the same identity and order as the receipt.
+        const sameRows =
+          current.length >= after.length &&
+          after.every((row, i) => record(row) && record(current[i]) && row.id === current[i].id);
+        if (
+          consumed ||
+          !sameRows ||
+          !matchesRollbackReceipt(
+            before,
+            after.slice(start, after.length - suffix),
+            current.slice(start, after.length - suffix)
+          )
+        )
+          throw new HistoryWriteError([{ path: ['history'], code: 'stale_rollback' }]);
+        // Only this closure can restore its captured values. Never reparse old data
+        // as new input, and never overwrite intervening local/remote history edits
+        // other than the discarded replacement's automatic read acknowledgement.
+        const restored = [
+          ...current.slice(0, start),
+          ...removed,
+          ...current.slice(after.length - suffix),
+        ];
+        planWrite(current as SessionHistory[], restored, (_old, value) => value)();
+        consumed = true;
+      };
+    },
+    append(entry) {
+      const value = cleanNew(HistoryEntryWriteSchema, entry);
+      populateContainer(
+        list.insertContainer(list.length, new LoroMap()),
+        sessionHistorySchema,
+        value,
+        undefined
+      );
+      doc.commit();
+    },
+    replace(id, entry) {
+      const commit = writer.prepareReplace(id, entry);
+      if (!commit) return false;
+      commit();
+      return true;
+    },
+    prepareReplace(id, entry) {
+      const target = locate(id);
+      if (!target) return undefined;
+      const { map, inline, index } = target;
+      if (entry.id !== id) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
+      // Validate only changed fields/items and retain unchanged opaque stored
+      // content; this runs before any CRDT mutation.
+      const previous = map ? (map.toJSON() as SessionHistoryInput) : inline!;
+      const value = prepareReplacement(previous, entry);
+      return () => {
+        if (map) diffHistoryContainer(map, sessionHistorySchema, previous, value, undefined);
+        else {
+          list.delete(index, 1);
+          list.insert(index, value as Parameters<LoroList['insert']>[1]);
+        }
+        doc.commit();
+      };
+    },
+    read(id) {
+      const target = locate(id);
+      return (target?.map ? target.map.toJSON() : target?.inline) as SessionHistory | undefined;
+    },
+    update(updater) {
+      const previous = readAll();
+      const next = immer.produce(previous as SessionHistoryInput[], (draft) => {
+        // Callers may mutate the draft, return a replacement, or both. Immer
+        // rejects a recipe that does both, so a distinct return value is written
+        // back into the draft and the draft stays the one result (the legacy
+        // Mirror updater had the same rule).
+        const result = updater(draft);
+        if (result && result !== (draft as unknown)) {
+          (draft as SessionHistoryInput[]).splice(
+            0,
+            draft.length,
+            ...(result as SessionHistoryInput[])
+          );
+        }
+        return undefined;
+      });
+      prepare(previous, next)();
+    },
+    updateOperationProgress(action) {
+      const { operation } = action;
+      if (operation.kind !== 'session_create' && operation.kind !== 'session_create_many')
+        return false;
+      const id = getOperationProgressTurnId(operation.requesterSessionId, operation.operationId);
+      const positions = progressPositions(id);
+      const previous = positions.map((index) => {
+        const value = list.get(index);
+        // The planner needs detached values to preserve legacy/unknown card fields.
+        // Export each matching card once; unrelated turns are never materialized.
+        return (isContainer(value) ? value.toJSON() : value) as SessionHistoryInput;
+      });
+      const next = planOperationProgress(previous, operation, action.timestamp, action.statuses);
+      if (next === previous) return false;
+      // A changed operation projection contains exactly one canonical card.
+      // Keep that card's container/position, or rename the first legacy alias.
+      const canonicalIndex = previous.findIndex((entry) => entry.id === id);
+      const retainedIndex = canonicalIndex >= 0 ? canonicalIndex : previous.length ? 0 : -1;
+      const old = previous[retainedIndex];
+      const prepared = old
+        ? prepareReplacement(old, next[0])
+        : cleanNew(HistoryEntryWriteSchema, next[0]);
+      // Preflight above must finish before replacing or deleting any stored row.
+      if (retainedIndex < 0) {
+        populateContainer(
+          list.insertContainer(list.length, new LoroMap()),
+          sessionHistorySchema,
+          prepared,
+          undefined
+        );
+      } else {
+        const position = positions[retainedIndex]!;
+        const value = list.get(position);
+        if (isContainer(value)) {
+          diffHistoryContainer(value, sessionHistorySchema, old, prepared, undefined);
+        } else {
+          list.delete(position, 1);
+          list.insert(position, prepared as Parameters<LoroList['insert']>[1]);
+        }
+        for (let i = positions.length - 1; i >= 0; i--)
+          if (i !== retainedIndex) list.delete(positions[i]!, 1);
+      }
+      doc.commit();
+      return true;
+    },
+    updateEntry(id, updater) {
+      const target = locate(id);
+      if (!target) return false;
+      const { map, inline, index } = target;
+      const previous =
+        readHistory?.()[index] ?? (map ? (map.toJSON() as SessionHistoryInput) : inline!);
+      const next = immer.produce(previous, (draft) => {
+        // Same normalization as `update`: a caller may rewrite the draft's
+        // fields, return a replacement entry, or both.
+        const result = updater(draft);
+        if (result && result !== (draft as unknown)) {
+          const replacement = draft as unknown as Record<string, unknown>;
+          for (const key of Object.keys(replacement)) delete replacement[key];
+          Object.assign(replacement, result);
+        }
+        return undefined;
+      });
+      if (next.id !== id) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
+      if (historyValuesEqual(previous, next)) return true;
+      const prepared = prepareReplacement(previous, next);
+      if (map) diffHistoryContainer(map, sessionHistorySchema, previous, prepared, undefined);
+      else {
+        list.delete(index, 1);
+        list.insert(index, prepared as Parameters<LoroList['insert']>[1]);
+      }
+      doc.commit();
+      return true;
+    },
+    updateTail(id, targets, updater) {
+      return agentWindow.update(
+        id,
+        Array.isArray(targets)
+          ? { toolCallIds: targets, taskIds: [], runs: [] }
+          : (targets as AgentHistoryTargets),
+        updater
+      );
+    },
+    updateCopies(id, updater) {
+      const targets: NonNullable<ReturnType<typeof rowWithId>>[] = [];
+      for (let index = 0; index < list.length; index++) {
+        const found = rowWithId(index, id);
+        if (found) targets.push(found);
+      }
+      if (targets.length === 0) return false;
+      const projected = readHistory?.();
+      const previous = targets.map(({ map, inline, index }) => {
+        const read = projected?.[index];
+        if (record(read) && read.id === id) return read as SessionHistoryInput;
+        return map ? (map.toJSON() as SessionHistoryInput) : inline!;
+      });
+      const next = immer.produce(previous, (draft) => {
+        updater(draft);
+      });
+      if (next.length !== previous.length)
+        throw new HistoryWriteError([{ path: ['history'], code: 'unsupported_reorder' }]);
+      const prepared = next.map((entry, i) => {
+        if (entry.id !== id) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
+        return historyValuesEqual(previous[i], entry)
+          ? undefined
+          : prepareReplacement(previous[i]!, entry);
+      });
+      if (prepared.every((value) => value === undefined)) return true;
+      targets.forEach(({ map, index }, i) => {
+        const value = prepared[i];
+        if (value === undefined) return;
+        if (map) diffHistoryContainer(map, sessionHistorySchema, previous[i], value, undefined);
+        else {
+          list.delete(index, 1);
+          list.insert(index, value as Parameters<LoroList['insert']>[1]);
+        }
+      });
+      doc.commit();
+      return true;
+    },
+    setField(id, key, value) {
+      const target = locate(id);
+      if (!target) return false;
+      const { map } = target;
+      const field = HistoryEntryWriteSchema.shape[key];
+      if (
+        !Object.hasOwn(HistoryEntryWriteSchema.shape, key) ||
+        key === ('id' as string) ||
+        key === ('items' as string)
+      )
+        throw new HistoryWriteError([{ path: [key], code: 'invalid_field' }]);
+      if (!map)
+        return writer.updateEntry(id, (entry) => {
+          const next = { ...entry };
+          if (value === undefined) delete next[key];
+          else Object.assign(next, { [key]: value });
+          return next;
+        });
+      const stored = map.get(key);
+      const previous = isContainer(stored) ? stored.toJSON() : stored;
+      if (historyValuesEqual(previous, value)) return true;
+      const parsed = cleanNew(field, value, previous);
+      // A partial field diff cannot add or move an indexed item.
+      agentWindow.preserveIndex(() => {
+        diffHistoryContainer(
+          map,
+          sessionHistorySchema,
+          { [key]: previous },
+          { [key]: parsed },
+          undefined
+        );
+        doc.commit();
+      });
+      return true;
+    },
+    respondPermission(requestId, outcome, options) {
+      parseHistoryWrite(PermissionOutcomeSchema, outcome);
+      const target = options?.turnId ? locate(options.turnId) : undefined;
+      if (options?.turnId && !target) return false;
+      for (let i = target?.index ?? list.length - 1; i >= (target?.index ?? 0); i--) {
+        const row = list.get(i);
+        const id = storedScalar(storedField(row, 'id'));
+        if (typeof id !== 'string') continue;
+        const storedItems = storedField(row, 'items');
+        const items =
+          isContainer(storedItems) && storedItems.kind() === 'List'
+            ? (storedItems as LoroList)
+            : Array.isArray(storedItems)
+              ? storedItems
+              : undefined;
+        if (!items) continue;
+        for (let at = 0; at < items.length; at++) {
+          const item = Array.isArray(items) ? items[at] : items.get(at);
+          if (storedScalar(storedField(item, 'type')) !== 'tool_call') continue;
+          const request = storedField(item, 'permissionRequest');
+          if (storedScalar(storedField(request, 'requestId')) !== requestId) continue;
+          // Only the matching turn enters the validated local-update path. The
+          // "write the outcome" rule itself is the shared planner, so the Loro
+          // and in-memory backends cannot drift.
+          let applied = false;
+          const updated = writer.updateEntry(id, (turn) => {
+            applied = applyRespondPermission(
+              turn as unknown as Record<string, unknown>,
+              requestId,
+              outcome
+            );
+            return turn;
+          });
+          return updated && applied;
+        }
+      }
+      return false;
+    },
+  };
+  return { ...writer, prepare };
+}

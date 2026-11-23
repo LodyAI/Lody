@@ -1,8 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionHistory, SessionId } from '@lody/shared';
-import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { buildChatStreamItems as buildChatStreamItemsFromView } from '../src/components/ai-gui/build-chat-stream-items';
+import { createConversationViewFromHistory } from '../src/lib/conversation-view';
+import { resolveSessionHistoryDurationMs } from '../src/lib/session-history-duration';
 
 const sessionId = 'session-test' as SessionId;
+
+/** The builder over a fully hydrated view of `history`, as the rollback path feeds it. */
+const buildChatStreamItems = (
+  history: readonly SessionHistory[],
+  id: SessionId,
+  previousCache?: Parameters<typeof buildChatStreamItemsFromView>[2]
+) =>
+  buildChatStreamItemsFromView(
+    createConversationViewFromHistory({
+      sessionId: id,
+      getHistory: () => history,
+      subscribe: () => () => {},
+    }),
+    id,
+    previousCache
+  );
 
 const entry = (partial: {
   id: string;
@@ -23,54 +41,62 @@ const renderedIds = (items: ReturnType<typeof buildChatStreamItems>['items']): s
   items.map((item) => (item.type === 'message' ? item.message.id : 'empty'));
 
 describe('buildChatStreamItems', () => {
-  it('preserves the ACP turn id on rendered assistant messages', () => {
-    const { items } = buildChatStreamItems(
-      [
-        {
-          ...entry({ id: 'assistant-1', role: 'assistant', items: [text('answer')] }),
-          acpTurnId: 'turn_answer_1',
-        },
-      ],
-      sessionId
-    );
-
-    expect(items[0]).toMatchObject({
-      type: 'message',
-      message: { id: 'assistant-1', acpTurnId: 'turn_answer_1' },
+  it('preserves authors through projection and refreshes cached identity when metadata arrives', () => {
+    const human = { v: 1, kind: 'human', userId: 'human' } as const;
+    const agent = {
+      v: 1,
+      kind: 'agent',
+      sessionId: 'source',
+      turnId: 'source-turn',
+      name: 'Agent',
+      role: { id: 'reviewer', revision: 1, name: 'Reviewer', emoji: '🔎' },
+    } as const;
+    const turns = [
+      { ...entry({ id: 'input', role: 'user', items: [text('task')] }), author: human },
+      { ...entry({ id: 'output', role: 'assistant', items: [text('answer')] }), author: agent },
+    ] as SessionHistory[];
+    const first = buildChatStreamItems(turns, sessionId);
+    expect(first.items.map((item) => item.type === 'message' && item.message.author)).toEqual([
+      human,
+      agent,
+    ]);
+    // A live mirror can retain the entry object while replacing metadata.
+    Object.assign(turns[0]!, { author: agent });
+    const second = buildChatStreamItems(turns, sessionId, first.cache);
+    expect(second.items.map((item) => item.type === 'message' && item.message.author)).toEqual([
+      agent,
+      agent,
+    ]);
+    expect(first.items[0]?.type === 'message' && first.items[0].message.author).toEqual(human);
+  });
+  it('keeps offscreen bodies as placeholders while inheriting their user configuration', () => {
+    const question = {
+      ...entry({ id: 'question', role: 'user', items: [text('question')] }),
+      inputConfig: { cliType: 'builtin', agentType: 'claude', modelId: 'test-model' },
+    } as SessionHistory;
+    const answer = entry({ id: 'answer', role: 'assistant', items: [text('answer')] });
+    const view = createConversationViewFromHistory({
+      sessionId,
+      getHistory: () => [question, answer],
+      subscribe: () => () => {},
     });
-  });
-
-  it('maps history to items 1:1 in order and tracks the last assistant id', () => {
-    const { items, lastAssistantMessageId, lastCompletedAssistantMessageId } = buildChatStreamItems(
-      [
-        entry({ id: 'u1', role: 'user', items: [text('hello')] }),
-        {
-          ...entry({ id: 'a1', role: 'assistant', items: [text('hi there')] }),
-          finished: true,
-        },
-      ],
-      sessionId
+    const cached = buildChatStreamItemsFromView(view, sessionId);
+    const result = buildChatStreamItemsFromView(
+      view,
+      sessionId,
+      cached.cache,
+      (index) => index === 1
     );
-
-    expect(renderedIds(items)).toEqual(['u1', 'a1']);
-    expect(lastAssistantMessageId).toBe('a1');
-    expect(lastCompletedAssistantMessageId).toBe('a1');
-  });
-
-  it('tracks the last completed assistant separately from a streaming suffix', () => {
-    const { lastAssistantMessageId, lastCompletedAssistantMessageId } = buildChatStreamItems(
-      [
-        {
-          ...entry({ id: 'a1', role: 'assistant', items: [text('done')] }),
-          finished: true,
-        },
-        entry({ id: 'a2', role: 'assistant', items: [text('streaming')] }),
-      ],
-      sessionId
-    );
-
-    expect(lastAssistantMessageId).toBe('a2');
-    expect(lastCompletedAssistantMessageId).toBe('a1');
+    expect(result.items[0]).toMatchObject({ type: 'placeholder', row: { id: 'question' } });
+    expect(result.items[1]).toMatchObject({
+      type: 'message',
+      message: {
+        id: 'answer',
+        inputConfig: { modelId: 'test-model' },
+      },
+    });
+    expect(result.cache.has('question')).toBe(false);
+    view.dispose();
   });
 
   it('drops empty assistant entries (no items, no plan) left by interrupted turns', () => {
@@ -95,104 +121,74 @@ describe('buildChatStreamItems', () => {
     expect(lastAssistantMessageId).toBe('a-plan');
   });
 
-  it('de-duplicates entries that share an id, keeping the first occurrence', () => {
+  it('copies permissionWaitMs onto rendered assistant messages so Worked-for can subtract it', () => {
+    const opened = '2026-06-18T00:00:00.000Z';
     const { items } = buildChatStreamItems(
       [
-        entry({ id: 'dup', role: 'assistant', items: [text('first')] }),
-        entry({ id: 'dup', role: 'assistant', items: [text('second')] }),
+        {
+          ...entry({ id: 'assistant-1', role: 'assistant', items: [text('done')] }),
+          timestamp: opened,
+          endedAt: Date.parse(opened) + 87_000,
+          permissionWaitMs: 62_269,
+          finished: true,
+        },
       ],
       sessionId
     );
 
-    expect(renderedIds(items)).toEqual(['dup']);
-    const first = items[0];
-    expect(first?.type === 'message' && first.message.items[0]).toMatchObject(text('first'));
+    const item = items[0];
+    expect(item?.type).toBe('message');
+    if (item?.type !== 'message') return;
+    expect(item.message.permissionWaitMs).toBe(62_269);
+    expect(resolveSessionHistoryDurationMs(item.message)).toBe(87_000 - 62_269);
   });
+});
 
-  it('returns a single empty placeholder for empty history', () => {
-    const { items, lastAssistantMessageId } = buildChatStreamItems([], sessionId);
+describe('live create progress in the stream', () => {
+  describe('agent notices fold onto the turn that emitted them', () => {
+    const notice = (id: string, name: string, message: string): SessionHistory =>
+      ({
+        id,
+        role: 'system',
+        timestamp: '2026-06-18T00:00:00.000Z',
+        fileDiff: [],
+        items: [{ type: 'system_notice', name, meta: { message } }],
+      }) as unknown as SessionHistory;
 
-    expect(items).toEqual([{ type: 'empty' }]);
-    expect(lastAssistantMessageId).toBeNull();
-  });
+    const itemTypes = (items: ReturnType<typeof buildChatStreamItems>['items'], id: string) =>
+      items
+        .flatMap((item) =>
+          item.type === 'message' && item.message.id === id ? [item.message] : []
+        )
+        .flatMap((message) => message.items.map((entryItem) => entryItem.type));
 
-  it('returns the empty placeholder when every entry is an empty assistant', () => {
-    const { items, lastAssistantMessageId } = buildChatStreamItems(
-      [
-        entry({ id: 'a1', role: 'assistant', items: [] }),
-        entry({ id: 'a2', role: 'assistant', items: [] }),
-      ],
-      sessionId
-    );
+    it('keeps a notice in place when the previous turn is not an assistant turn', () => {
+      const { items } = buildChatStreamItems(
+        [
+          entry({ id: 'user-1', role: 'user', items: [text('go')] }),
+          notice('fail-1', 'chat_failed', 'the agent exited'),
+        ],
+        sessionId
+      );
 
-    expect(items).toEqual([{ type: 'empty' }]);
-    expect(lastAssistantMessageId).toBeNull();
-  });
-
-  it('points lastAssistantMessageId at the last rendered (non-empty) assistant', () => {
-    const { lastAssistantMessageId } = buildChatStreamItems(
-      [
-        entry({ id: 'a1', role: 'assistant', items: [text('done')] }),
-        entry({ id: 'a2-trailing-empty', role: 'assistant', items: [] }),
-      ],
-      sessionId
-    );
-
-    expect(lastAssistantMessageId).toBe('a1');
-  });
-
-  it('reuses unchanged message item objects across shallow history array copies', () => {
-    const assistantTurn = entry({
-      id: 'assistant-1',
-      role: 'assistant',
-      items: [text('hello')],
+      expect(renderedIds(items)).toEqual(['user-1', 'fail-1']);
     });
-    const first = buildChatStreamItems([assistantTurn], sessionId);
-    const second = buildChatStreamItems([assistantTurn], sessionId, first.cache);
 
-    expect(second.items[0]).toBe(first.items[0]);
-    expect(second.lastAssistantMessageId).toBe('assistant-1');
-  });
+    it('does not lose a later notice to a cached copy of its host turn', () => {
+      const history = [
+        entry({ id: 'user-1', role: 'user', items: [text('go')] }),
+        entry({ id: 'assistant-1', role: 'assistant', items: [text('answer')] }),
+      ];
+      const first = buildChatStreamItems(history, sessionId);
+      // The host entry is untouched by the notice arriving, so a cache keyed on
+      // it alone would happily serve the pre-merge copy forever.
+      const { items } = buildChatStreamItems(
+        [...history, notice('warn-1', 'agent_warning', 'fell back')],
+        sessionId,
+        first.cache
+      );
 
-  it('does not reuse a message item when render-relevant entry fields change', () => {
-    const assistantTurn = entry({
-      id: 'assistant-1',
-      role: 'assistant',
-      items: [text('hello')],
+      expect(itemTypes(items, 'assistant-1')).toEqual(['text', 'system_notice']);
     });
-    const changedAssistantTurn = entry({
-      id: 'assistant-1',
-      role: 'assistant',
-      items: [text('hello again')],
-    });
-    const first = buildChatStreamItems([assistantTurn], sessionId);
-    const second = buildChatStreamItems([changedAssistantTurn], sessionId, first.cache);
-
-    expect(second.items[0]).not.toBe(first.items[0]);
-  });
-
-  it('tracks the last rendered assistant when reusing cached duplicate ids', () => {
-    const firstAssistant = entry({
-      id: 'assistant-1',
-      role: 'assistant',
-      items: [text('first')],
-    });
-    const secondAssistant = entry({
-      id: 'assistant-2',
-      role: 'assistant',
-      items: [text('second')],
-    });
-    const first = buildChatStreamItems(
-      [firstAssistant, secondAssistant, firstAssistant],
-      sessionId
-    );
-    const second = buildChatStreamItems(
-      [firstAssistant, secondAssistant, firstAssistant],
-      sessionId,
-      first.cache
-    );
-
-    expect(renderedIds(second.items)).toEqual(['assistant-1', 'assistant-2']);
-    expect(second.lastAssistantMessageId).toBe('assistant-2');
   });
 });

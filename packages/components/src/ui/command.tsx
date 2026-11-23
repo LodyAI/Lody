@@ -1,11 +1,10 @@
 import * as React from 'react';
-import { type DialogProps } from '@radix-ui/react-dialog';
 import { Command as CommandPrimitive } from 'cmdk';
 import { Search } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { Dialog, DialogContentWithoutClose } from './dialog';
-import { ScrollArea } from './scroll-area';
+import { Dialog } from './dialog';
+import { ScrollArea } from '@lody/ui/scroll-area';
 
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
@@ -26,23 +25,26 @@ const CommandDialog = ({
   children,
   shouldFilter,
   ...props
-}: DialogProps & { shouldFilter?: boolean }) => {
+}: Omit<React.ComponentProps<typeof Dialog.Root>, 'children'> & {
+  children?: React.ReactNode;
+  shouldFilter?: boolean;
+}) => {
   return (
-    <Dialog {...props}>
+    <Dialog.Root {...props}>
       {/* The mention / slash-command popover in the chat composer carries a hardcoded
           z-index: 50 (from @diceui/shared's anchored positioner), and the shared dialog's
           `z-[var(--z-dialog)]` resolves to `auto` (that CSS var is never defined). Without
           an explicit z-index the palette renders *under* an open mention popover. Pin the
-          overlay AND content above it via --z-command-palette (registry value 85, with an
-          inline fallback so it works even though the var isn't globally defined).
-          See packages/components/src/lib/editor-overlay-z-index.ts for the layer scale. */}
+          overlay AND content above it via --z-command-palette (with an inline fallback
+          so it works even though the var isn't globally defined). */}
       {/* Fixed, screen-relative height (flex column overrides the dialog's default grid)
           so the panel never resizes or shifts as the result list grows / shrinks / filters —
           the list scrolls inside instead. */}
-      <DialogContentWithoutClose
+      <Dialog.Content
+        closeButton={false}
         noAnimation
         className="z-[var(--z-command-palette,85)] flex h-[min(640px,72vh)] max-w-2xl flex-col gap-0 overflow-hidden border-0 bg-transparent p-0 shadow-none sm:p-0"
-        overlayClassName="z-[var(--z-command-palette,85)] bg-black/40 backdrop-blur-[2px]"
+        backdropClassName="z-[var(--z-command-palette,85)] bg-black/40 backdrop-blur-[2px]"
       >
         <Command
           shouldFilter={shouldFilter}
@@ -50,8 +52,8 @@ const CommandDialog = ({
         >
           {children}
         </Command>
-      </DialogContentWithoutClose>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 };
 
@@ -149,7 +151,7 @@ const CommandItem = React.forwardRef<
   <CommandPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-default gap-2 select-none items-center rounded-xs px-2 py-1.5 text-sm outline-hidden data-[disabled=true]:pointer-events-none data-[selected=true]:bg-hover data-[selected=true]:text-hover-foreground data-[disabled=true]:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&_svg]:shrink-0",
+      "relative flex cursor-default gap-2 select-none items-center rounded-xs px-2 py-1.5 text-sm outline-hidden data-[disabled=true]:pointer-events-none data-[selected=true]:bg-foreground/[0.05] data-[selected=true]:text-foreground data-[disabled=true]:opacity-50 dark:data-[selected=true]:bg-white/[0.10] dark:data-[selected=true]:text-foreground [&_svg]:pointer-events-none [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&_svg]:shrink-0",
       className
     )}
     {...props}

@@ -1,16 +1,28 @@
+import { SessionInputAttachmentsSchema } from '@/lib/session-input-content';
+import {
+  AgentMessageAuthorSchema,
+  AgentRoleSnapshotSchema,
+  buildAgentMessageAuthor,
+  MemoryBindingSchema,
+} from '@lody/shared';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { InboxSqlite } from './inbox/sqlite';
+import type { InboxBatch, InboxScope } from './inbox/model';
+import { cancelManuallyStoppedTargets } from './inbox/rules';
 
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { z } from 'zod';
+import { OrchestrationConnection } from './platform/database';
 
+import { discoveryCursor, DiscoveryPageShape } from '@/lib/discovery-query';
 import {
   LODY_OPERATION_COMMAND_MAX_BYTES,
   LODY_OPERATION_COMPLETION_MAX_BYTES,
-  LodyErrorSchema,
   LodyOperationIdSchema,
+  LodyOperationCompletionSchema as OperationCompletionSchema,
+  LodyOperationItemSchema as OperationItemSchema,
   type FrozenOperationContinuationConfig,
   type LodyError,
   type LodyOperationCompletion,
@@ -19,16 +31,23 @@ import {
   type LodyOperationSnapshot,
   type MachineId,
   type SessionId,
-  type StoredLodyDelivery,
   type StoredLodyOperation,
   type WorkspaceId,
 } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
+export const OperationListQuerySchema = z
+  .object({
+    limit: DiscoveryPageShape.limit,
+    cursor: DiscoveryPageShape.cursor,
+    state: z.enum(['active', 'finished']).optional(),
+  })
+  .strict();
+export type OperationListQuery = z.input<typeof OperationListQuerySchema>;
+
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const TERMINAL_RETENTION_MS = 7 * DAY_MS;
 export const MATERIALIZATION_CLAIM_MS = 60_000;
-
 const OperationKindSchema = z.enum([
   'session_create',
   'session_create_many',
@@ -36,93 +55,37 @@ const OperationKindSchema = z.enum([
   'session_chat_many',
 ]);
 
-const OperationTargetSchema = z.object({ sessionId: z.string(), userTurnId: z.string() }).strict();
-const OperationOutputPreviewSchema = z
-  .object({
-    text: z.string(),
-    truncated: z.literal(true).optional(),
-    omittedBytes: z.number().int().nonnegative().optional(),
-  })
-  .strict();
-
-const OperationItemSchema = z.discriminatedUnion('status', [
-  z
-    .object({
-      status: z.literal('active'),
-      label: z.string().optional(),
-      target: OperationTargetSchema,
-      inputDurable: z.boolean(),
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('succeeded'),
-      label: z.string().optional(),
-      target: OperationTargetSchema,
-      assistantTurnId: z.string(),
-      output: OperationOutputPreviewSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('failed'),
-      label: z.string().optional(),
-      target: OperationTargetSchema.optional(),
-      error: LodyErrorSchema,
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('cancelled'),
-      label: z.string().optional(),
-      target: OperationTargetSchema.optional(),
-    })
-    .strict(),
-]);
-
-const OperationResultSchema = z.object({ items: z.array(OperationItemSchema) }).strict();
-const CompletionTruncationSchema = z
-  .object({ truncated: z.literal(true), omittedBytes: z.number().int().nonnegative() })
-  .strict();
-const OperationCompletionSchema = z.discriminatedUnion('type', [
-  z
-    .object({
-      type: z.literal('result'),
-      value: OperationResultSchema,
-      truncation: CompletionTruncationSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('error'),
-      error: LodyErrorSchema,
-      truncation: CompletionTruncationSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('cancelled'),
-      partial: OperationResultSchema.optional(),
-      truncation: CompletionTruncationSchema.optional(),
-    })
-    .strict(),
-]);
-
 const FrozenConfigSchema = z
   .object({
     agentConfigId: z.string().optional(),
     inputConfig: z.record(z.string(), z.unknown()),
+    sourceTurnId: z.string().trim().min(1).optional(),
+    notificationOriginTurnIds: z.array(z.string().min(1)).optional(),
     targetDispatchConfigs: z
       .array(
         z
           .object({
+            mcpServerIds: z.array(z.string()).optional(),
             modeId: z.string().optional(),
+            builtinDefaultModeId: z.string().optional(),
+            inheritedBuiltinDefaultModeId: z.string().optional(),
+            inheritedDispatchConfig: z
+              .object({
+                modeId: z.string().optional(),
+                modelId: z.string().optional(),
+                configOptionValues: z
+                  .record(z.string(), z.union([z.string(), z.boolean()]))
+                  .optional(),
+              })
+              .strict()
+              .optional(),
             modelId: z.string().optional(),
             configOptionValues: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
-            taskToolsEnabled: z.boolean().optional(),
+            memory: MemoryBindingSchema.optional(),
             inheritSessionDefaults: z.literal(false).optional(),
           })
-          .strict()
+          // Older stored configs may still carry `taskToolsEnabled`; drop it.
+          .strip()
           .nullable()
       )
       .optional(),
@@ -147,21 +110,6 @@ const OperationRowSchema = z
     items_json: z.string(),
     completion_json: z.string().nullable(),
     finished_at: z.string().nullable(),
-  })
-  .strict();
-
-const DeliveryRowSchema = z
-  .object({
-    sequence: z.number().int().positive(),
-    workspace_id: z.string(),
-    requester_session_id: z.string(),
-    operation_id: LodyOperationIdSchema,
-    delivery_id: z.string(),
-    system_turn_id: z.string(),
-    state: z.enum(['pending', 'consumed']),
-    initiator_chain_depth: z.number().int().nonnegative(),
-    completion_json: z.string(),
-    consumed_at: z.string().nullable(),
   })
   .strict();
 
@@ -289,7 +237,10 @@ const boundCompletionFreeText = (
   const boundError = (error: LodyError): LodyError => {
     const bounded = truncateUtf8(error.message, maxBytesPerText);
     omittedBytes += bounded.omittedBytes;
-    return { ...error, message: bounded.value };
+    if (error.detail === undefined) return { ...error, message: bounded.value };
+    const boundedDetail = truncateUtf8(error.detail, maxBytesPerText);
+    omittedBytes += boundedDetail.omittedBytes;
+    return { ...error, message: bounded.value, detail: boundedDetail.value };
   };
   const boundResult = (result: { items: LodyOperationItemResult[] }) => ({
     items: result.items.map((item): LodyOperationItemResult => {
@@ -354,10 +305,12 @@ export const canonicalizeLodyCommand = (value: unknown): string => {
 export const fingerprintLodyCommand = (kind: LodyOperationKind, canonical: string): string =>
   createHash('sha256').update(kind).update('\0').update(canonical).digest('hex');
 
-export const getLodyOperationStorePath = (
-  machineId = process.env.LODY_MCP_MACHINE_ID ?? process.env.LODY_PREVIEW_MCP_MACHINE_ID ?? 'local',
-  homeDir = os.homedir()
-): string => {
+// machineId is deliberately required: an env-derived default here once made the
+// daemon-hosted HTTP MCP transport (whose process has no LODY_MCP_MACHINE_ID)
+// silently fall back to a 'local'-keyed store that no coordinator reconciles,
+// so accepted Operations were never finalized or delivered. Callers must pass
+// the machine id they authenticated (session context, coordinator options).
+export const getLodyOperationStorePath = (machineId: string, homeDir = os.homedir()): string => {
   const machineKey = createHash('sha256').update(machineId).digest('hex').slice(0, 24);
   return path.join(
     getLodyDataDir(undefined, homeDir),
@@ -374,20 +327,18 @@ export type AcceptOperationInput = Omit<
 
 export type AcceptOperationOptions = {
   materializationClaimToken?: string;
+  /**
+   * Request identity for retry matching when the stored command embeds text read at
+   * acceptance (quoted messages). Defaults to the canonical command itself.
+   */
+  fingerprintCommand?: unknown;
 };
-
-export const getOperationDeliveryId = (
-  requesterSessionId: SessionId,
-  operationId: string
-): string => `operation:${requesterSessionId}:${operationId}:completion`;
-
-export const getOperationCompletionTurnId = (
-  requesterSessionId: SessionId,
-  operationId: string
-): string => `operation-completion:${requesterSessionId}:${operationId}`;
 
 export class LodyOperationStore {
   private readonly db: Database.Database;
+  private readonly connection: OrchestrationConnection;
+  private ownsConnection: boolean;
+  readonly inbox: InboxSqlite;
 
   /**
    * `maintenance: false` skips the open-time repair/cleanup write transactions.
@@ -396,29 +347,45 @@ export class LodyOperationStore {
    * daemon-side coordinator keeps the default and owns maintenance.
    */
   constructor(
-    dbPath = getLodyOperationStorePath(),
+    dbPath: string,
     private readonly now: () => number = Date.now,
-    options: { maintenance?: boolean } = {}
+    options: { maintenance?: boolean; connection?: OrchestrationConnection } = {}
   ) {
-    const storeDirectory = path.dirname(dbPath);
-    mkdirSync(storeDirectory, { recursive: true, mode: 0o700 });
-    chmodSync(storeDirectory, 0o700);
-    this.db = new Database(dbPath);
-    // Operations contain canonical prompts and bounded assistant output. Keep
-    // both the database and SQLite sidecars private to the local account.
-    chmodSync(dbPath, 0o600);
-    this.db.pragma('busy_timeout = 5000');
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
-    this.migrate();
-    if (options.maintenance !== false) {
-      this.repairTerminalDeliveries();
-      this.cleanupExpired(false);
+    this.ownsConnection = !options.connection;
+    this.connection =
+      options.connection ??
+      new OrchestrationConnection(
+        dbPath === ':memory:' ? { kind: 'memory' } : { kind: 'disk', path: dbPath }
+      );
+    this.db = this.connection.raw;
+    try {
+      this.migrate();
+      InboxSqlite.migrate(this.db);
+      this.inbox = new InboxSqlite(
+        this.db,
+        () => new Date(this.now()).toISOString(),
+        this.connection
+      );
+      if (options.maintenance !== false) this.cleanupExpired(false);
+    } catch (cause) {
+      if (this.ownsConnection) this.connection.close();
+      throw cause;
     }
   }
 
+  private transaction<A>(body: () => A) {
+    return { immediate: () => this.connection.withImmediate(body as () => never) as A };
+  }
+
+  /** Platform composition transfers the sole close authority into a scoped Database Layer. */
+  takeConnectionOwnership(): OrchestrationConnection {
+    if (!this.ownsConnection) throw new Error('Database ownership already transferred');
+    this.ownsConnection = false;
+    return this.connection;
+  }
+
   close(): void {
-    this.db.close();
+    if (this.ownsConnection) this.connection.close();
   }
 
   accept(
@@ -427,18 +394,55 @@ export class LodyOperationStore {
   ): { created: boolean; operation: StoredLodyOperation; claimedItemIndexes: number[] } {
     LodyOperationIdSchema.parse(input.operationId);
     const canonical = canonicalizeLodyCommand(input.canonicalCommand);
-    const fingerprint = fingerprintLodyCommand(input.kind, canonical);
+    const fingerprint = fingerprintLodyCommand(
+      input.kind,
+      options.fingerprintCommand === undefined
+        ? canonical
+        : canonicalizeLodyCommand(options.fingerprintCommand)
+    );
     const frozenConfig = FrozenConfigSchema.parse(input.frozenContinuationConfig);
     const items = z.array(OperationItemSchema).parse(input.items);
-    const transaction = this.db.transaction(
+    const targetAttachments = input.targetInputAttachments
+      ? z.array(SessionInputAttachmentsSchema).max(20).parse(input.targetInputAttachments)
+      : undefined;
+    if (targetAttachments && targetAttachments.length !== items.length)
+      throw new Error('Target attachments must match Operation items.');
+    const targetRoles = input.targetRoleSnapshots
+      ? z.array(AgentRoleSnapshotSchema.nullable()).max(20).parse(input.targetRoleSnapshots)
+      : undefined;
+    if (targetRoles && targetRoles.length !== items.length)
+      throw new Error('Target Role snapshots must match Operation items.');
+    const author = input.author ? AgentMessageAuthorSchema.parse(input.author) : undefined;
+    if (
+      author &&
+      (author.sessionId !== input.requesterSessionId || author.turnId !== frozenConfig.sourceTurnId)
+    ) {
+      throw new Error('Operation author does not match its source turn.');
+    }
+    const transaction = this.transaction(
       (): { created: boolean; operation: StoredLodyOperation; claimedItemIndexes: number[] } => {
         const existing = this.getStored(input.requesterSessionId, input.operationId);
         if (existing)
           return {
             created: false,
-            operation: this.assertMatching(existing, input.kind, fingerprint),
+            operation: this.assertMatching(
+              existing,
+              input.kind,
+              fingerprint,
+              input.requesterUserId,
+              frozenConfig.sourceTurnId
+            ),
             claimedItemIndexes: [],
           };
+        this.assertOperationIdNotRetired(input.requesterSessionId, input.operationId);
+        const duplicate = this.findActiveDuplicateCreate(
+          input.requesterSessionId,
+          input.kind,
+          fingerprint,
+          input.requesterUserId,
+          frozenConfig.sourceTurnId
+        );
+        if (duplicate) return { created: false, operation: duplicate, claimedItemIndexes: [] };
         const inserted = this.db
           .prepare(
             `INSERT OR IGNORE INTO operations (
@@ -462,6 +466,25 @@ export class LodyOperationStore {
             input.deadlineAt,
             JSON.stringify(items)
           );
+        if (inserted.changes === 1 && (author || targetRoles)) {
+          this.db
+            .prepare(
+              `INSERT INTO operation_authors (requester_session_id, operation_id, author_json, target_roles_json) VALUES (?, ?, ?, ?)`
+            )
+            .run(
+              input.requesterSessionId,
+              input.operationId,
+              author ? JSON.stringify(author) : null,
+              targetRoles ? JSON.stringify(targetRoles) : null
+            );
+        }
+        if (inserted.changes === 1 && targetAttachments) {
+          this.db
+            .prepare(
+              'INSERT INTO operation_inputs (requester_session_id, operation_id, attachments_json) VALUES (?, ?, ?)'
+            )
+            .run(input.requesterSessionId, input.operationId, JSON.stringify(targetAttachments));
+        }
         const operation = this.getStored(input.requesterSessionId, input.operationId);
         if (!operation) throw new Error('Accepted Operation was not readable after insert.');
         const claimedItemIndexes: number[] = [];
@@ -486,7 +509,13 @@ export class LodyOperationStore {
         }
         return {
           created: inserted.changes === 1,
-          operation: this.assertMatching(operation, input.kind, fingerprint),
+          operation: this.assertMatching(
+            operation,
+            input.kind,
+            fingerprint,
+            input.requesterUserId,
+            frozenConfig.sourceTurnId
+          ),
           claimedItemIndexes,
         };
       }
@@ -517,12 +546,23 @@ export class LodyOperationStore {
     requesterSessionId: SessionId,
     operationId: string,
     kind: LodyOperationKind,
-    canonicalCommand: unknown
+    canonicalCommand: unknown,
+    requesterUserId: string,
+    sourceTurnId?: string
   ): StoredLodyOperation | undefined {
     const existing = this.getStored(requesterSessionId, operationId);
-    if (!existing) return undefined;
     const fingerprint = fingerprintLodyCommand(kind, canonicalizeLodyCommand(canonicalCommand));
-    return this.assertMatching(existing, kind, fingerprint);
+    if (!existing) {
+      this.assertOperationIdNotRetired(requesterSessionId, operationId);
+      return this.findActiveDuplicateCreate(
+        requesterSessionId,
+        kind,
+        fingerprint,
+        requesterUserId,
+        sourceTurnId
+      );
+    }
+    return this.assertMatching(existing, kind, fingerprint, requesterUserId, sourceTurnId);
   }
 
   listActive(workspaceId: WorkspaceId, ownerMachineId: MachineId): StoredLodyOperation[] {
@@ -536,22 +576,175 @@ export class LodyOperationStore {
     return rows.map((row) => this.decodeOperation(row));
   }
 
+  listForRequester(
+    scope: { workspaceId: WorkspaceId; requesterSessionId: SessionId; requesterUserId: string },
+    input: OperationListQuery = {}
+  ) {
+    const query = OperationListQuerySchema.parse(input);
+    const cursor = discoveryCursor(
+      { limit: query.limit, cursor: query.cursor },
+      JSON.stringify([
+        'operations',
+        scope.workspaceId,
+        scope.requesterSessionId,
+        scope.requesterUserId,
+        query.state ?? null,
+      ])
+    );
+    const rows = this.db
+      .prepare(`SELECT * FROM operations WHERE workspace_id = ? AND requester_session_id = ?
+      AND requester_user_id = ? AND (? IS NULL OR state = ?) AND (? IS NULL OR operation_id > ?)
+      ORDER BY operation_id ASC LIMIT ?`)
+      .all(
+        scope.workspaceId,
+        scope.requesterSessionId,
+        scope.requesterUserId,
+        query.state ?? null,
+        query.state ?? null,
+        cursor.after ?? null,
+        cursor.after ?? null,
+        cursor.limit + 1
+      );
+    const operations = rows.slice(0, cursor.limit).map((row) => this.decodeOperation(row));
+    const last = operations.at(-1);
+    const hasMore = rows.length > cursor.limit;
+    return {
+      ok: true as const,
+      items: operations.map((operation) => ({
+        operationId: operation.operationId,
+        kind: operation.kind,
+        state: operation.state,
+        createdAt: operation.createdAt,
+        deadlineAt: operation.deadlineAt,
+        itemCount: operation.items.length,
+      })),
+      hasMore,
+      ...(hasMore && last ? { nextCursor: cursor.encode(last.operationId) } : {}),
+    };
+  }
+
+  /** Read the entire fixed membership, never just the Agent's bounded preview. */
+  notificationOriginsForBatch(batch: InboxBatch): string[] {
+    return this.db
+      .prepare(`SELECT DISTINCT origin.value AS origin
+      FROM inbox_members m JOIN inbox_results r USING(sequence)
+      JOIN operations o ON o.requester_session_id=r.session_id AND o.operation_id=r.operation_id,
+        json_each(o.frozen_config_json, '$.notificationOriginTurnIds') origin
+      WHERE m.batch_id=? AND o.workspace_id=? AND o.requester_session_id=? AND o.requester_user_id=?`)
+      .all(batch.batchId, batch.workspaceId, batch.sessionId, batch.userId)
+      .map((row) => (row as { origin: string }).origin);
+  }
+
+  /** Pending Operations and unconsumed results are the existing completion authority. */
+  pendingNotificationOrigins(scope: InboxScope, origins: readonly string[]): Set<string> {
+    if (!origins.length) return new Set();
+    return new Set(
+      this.db
+        .prepare(`SELECT DISTINCT origin.value AS origin
+      FROM operations o, json_each(o.frozen_config_json, '$.notificationOriginTurnIds') origin
+      WHERE o.workspace_id=? AND o.requester_session_id=? AND o.requester_user_id=?
+        AND origin.value IN (SELECT value FROM json_each(?))
+        AND (o.state='active' OR EXISTS (
+          SELECT 1 FROM inbox_results r WHERE r.session_id=o.requester_session_id
+            AND r.operation_id=o.operation_id AND r.consumed=0))`)
+        .all(scope.workspaceId, scope.sessionId, scope.userId, JSON.stringify(origins))
+        .map((row) => (row as { origin: string }).origin)
+    );
+  }
+
+  hasPendingWorkForRequester(workspaceId: WorkspaceId, requesterSessionId: SessionId): boolean {
+    return (
+      !!this.db
+        .prepare(
+          `SELECT 1 FROM operations WHERE workspace_id=? AND requester_session_id=? AND state='active'
+      LIMIT 1`
+        )
+        .get(workspaceId, requesterSessionId) ||
+      this.hasTurnWorkForRequester(workspaceId, requesterSessionId)
+    );
+  }
+
+  /** Inbox work that occupies the requester's own Turns; running delegated Operations do not. */
+  hasTurnWorkForRequester(workspaceId: WorkspaceId, requesterSessionId: SessionId): boolean {
+    return this.inbox.hasRunnableWork(workspaceId, requesterSessionId);
+  }
+
+  // Absence of a settlement is the durable obligation, including for Operations
+  // created before this table existed. Inbox consumption does not discharge it.
+  listPendingProgress(workspaceId: WorkspaceId, ownerMachineId: MachineId): StoredLodyOperation[] {
+    return this.db
+      .prepare(
+        `SELECT operations.* FROM operations
+      WHERE workspace_id = ? AND owner_machine_id = ? AND state = 'finished'
+        AND kind IN ('session_create', 'session_create_many')
+        AND NOT EXISTS (SELECT 1 FROM operation_progress_settlements p
+          WHERE p.requester_session_id = operations.requester_session_id
+            AND p.operation_id = operations.operation_id)
+      ORDER BY created_at, requester_session_id, operation_id`
+      )
+      .all(workspaceId, ownerMachineId)
+      .map((row) => this.decodeOperation(row));
+  }
+
+  settleProgress(requesterSessionId: SessionId, operationId: string): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO operation_progress_settlements
+        (requester_session_id, operation_id)
+        SELECT requester_session_id, operation_id FROM operations
+        WHERE requester_session_id = ? AND operation_id = ? AND state = 'finished'
+          AND kind IN ('session_create', 'session_create_many')`
+        )
+        .run(requesterSessionId, operationId);
+    }).immediate();
+  }
+
   updateItems(
     requesterSessionId: SessionId,
     operationId: string,
     items: LodyOperationItemResult[]
   ): StoredLodyOperation {
     z.array(OperationItemSchema).parse(items);
-    const result = this.db
-      .prepare(
-        `UPDATE operations SET items_json = ?
-         WHERE requester_session_id = ? AND operation_id = ? AND state = 'active'`
-      )
-      .run(JSON.stringify(items), requesterSessionId, operationId);
-    if (result.changes === 0) {
+    return this.transaction(() => {
+      const current = this.get(requesterSessionId, operationId);
+      if (current.state !== 'active') return current;
+      const merged = items.map((item, index) => {
+        const existing = current.items[index];
+        if (
+          item.status === 'active' &&
+          !item.inputDurable &&
+          existing?.status === 'active' &&
+          existing.inputDurable
+        ) {
+          return { ...item, inputDurable: true };
+        }
+        return item;
+      });
+      this.db
+        .prepare(
+          `UPDATE operations SET items_json = ?
+           WHERE requester_session_id = ? AND operation_id = ? AND state = 'active'`
+        )
+        .run(JSON.stringify(merged), requesterSessionId, operationId);
       return this.get(requesterSessionId, operationId);
-    }
-    return this.get(requesterSessionId, operationId);
+    }).immediate();
+  }
+
+  releaseItemMaterializationClaim(
+    requesterSessionId: SessionId,
+    operationId: string,
+    itemIndex: number,
+    claimToken: string
+  ): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `DELETE FROM operation_item_materializations
+           WHERE requester_session_id = ? AND operation_id = ? AND item_index = ? AND claim_token = ?`
+        )
+        .run(requesterSessionId, operationId, itemIndex, claimToken);
+    }).immediate();
   }
 
   claimItemMaterialization(
@@ -561,35 +754,33 @@ export class LodyOperationStore {
     claimToken: string,
     claimDurationMs = MATERIALIZATION_CLAIM_MS
   ): { claimed: boolean; retryAtMs?: number } {
-    return this.db
-      .transaction(() => {
-        const operation = this.get(requesterSessionId, operationId);
-        const item = operation.items[itemIndex];
-        if (!item || item.status !== 'active' || item.inputDurable) return { claimed: false };
-        const row = this.db
-          .prepare(
-            `SELECT claim_token, claimed_at_ms FROM operation_item_materializations
+    return this.transaction(() => {
+      const operation = this.get(requesterSessionId, operationId);
+      const item = operation.items[itemIndex];
+      if (!item || item.status !== 'active' || item.inputDurable) return { claimed: false };
+      const row = this.db
+        .prepare(
+          `SELECT claim_token, claimed_at_ms FROM operation_item_materializations
            WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
-          )
-          .get(requesterSessionId, operationId, itemIndex) as
-          | { claim_token: string; claimed_at_ms: number }
-          | undefined;
-        const nowMs = this.now();
-        if (row && row.claim_token !== claimToken && row.claimed_at_ms + claimDurationMs > nowMs) {
-          return { claimed: false, retryAtMs: row.claimed_at_ms + claimDurationMs };
-        }
-        this.db
-          .prepare(
-            `INSERT INTO operation_item_materializations (
+        )
+        .get(requesterSessionId, operationId, itemIndex) as
+        | { claim_token: string; claimed_at_ms: number }
+        | undefined;
+      const nowMs = this.now();
+      if (row && row.claim_token !== claimToken && row.claimed_at_ms + claimDurationMs > nowMs) {
+        return { claimed: false, retryAtMs: row.claimed_at_ms + claimDurationMs };
+      }
+      this.db
+        .prepare(
+          `INSERT INTO operation_item_materializations (
              requester_session_id, operation_id, item_index, claim_token, claimed_at_ms
            ) VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(requester_session_id, operation_id, item_index)
            DO UPDATE SET claim_token = excluded.claim_token, claimed_at_ms = excluded.claimed_at_ms`
-          )
-          .run(requesterSessionId, operationId, itemIndex, claimToken, nowMs);
-        return { claimed: true };
-      })
-      .immediate();
+        )
+        .run(requesterSessionId, operationId, itemIndex, claimToken, nowMs);
+      return { claimed: true };
+    }).immediate();
   }
 
   markItemInputDurable(
@@ -598,40 +789,38 @@ export class LodyOperationStore {
     itemIndex: number,
     claimToken?: string
   ): StoredLodyOperation {
-    return this.db
-      .transaction(() => {
-        const operation = this.get(requesterSessionId, operationId);
-        const item = operation.items[itemIndex];
-        if (!item || item.status !== 'active' || item.inputDurable) return operation;
-        if (claimToken) {
-          const claim = this.db
-            .prepare(
-              `SELECT claim_token FROM operation_item_materializations
+    return this.transaction(() => {
+      const operation = this.get(requesterSessionId, operationId);
+      const item = operation.items[itemIndex];
+      if (!item || item.status !== 'active' || item.inputDurable) return operation;
+      if (claimToken) {
+        const claim = this.db
+          .prepare(
+            `SELECT claim_token FROM operation_item_materializations
              WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
-            )
-            .get(requesterSessionId, operationId, itemIndex) as { claim_token: string } | undefined;
-          if (claim?.claim_token !== claimToken) return operation;
-        }
-        const items = operation.items.map((candidate, index) =>
-          index === itemIndex && candidate.status === 'active'
-            ? { ...candidate, inputDurable: true }
-            : candidate
-        );
-        this.db
-          .prepare(
-            `UPDATE operations SET items_json = ?
+          )
+          .get(requesterSessionId, operationId, itemIndex) as { claim_token: string } | undefined;
+        if (claim?.claim_token !== claimToken) return operation;
+      }
+      const items = operation.items.map((candidate, index) =>
+        index === itemIndex && candidate.status === 'active'
+          ? { ...candidate, inputDurable: true }
+          : candidate
+      );
+      this.db
+        .prepare(
+          `UPDATE operations SET items_json = ?
            WHERE requester_session_id = ? AND operation_id = ? AND state = 'active'`
-          )
-          .run(JSON.stringify(items), requesterSessionId, operationId);
-        this.db
-          .prepare(
-            `DELETE FROM operation_item_materializations
+        )
+        .run(JSON.stringify(items), requesterSessionId, operationId);
+      this.db
+        .prepare(
+          `DELETE FROM operation_item_materializations
            WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
-          )
-          .run(requesterSessionId, operationId, itemIndex);
-        return this.get(requesterSessionId, operationId);
-      })
-      .immediate();
+        )
+        .run(requesterSessionId, operationId, itemIndex);
+      return this.get(requesterSessionId, operationId);
+    }).immediate();
   }
 
   finish(
@@ -641,7 +830,7 @@ export class LodyOperationStore {
     finishedAt = new Date(this.now()).toISOString()
   ): StoredLodyOperation {
     const bounded = this.assertCompletionBound(completion);
-    const transaction = this.db.transaction(() => {
+    const transaction = this.transaction(() => {
       const current = this.getStored(requesterSessionId, operationId);
       if (!current) {
         throw new LodyOperationStoreError(
@@ -650,7 +839,34 @@ export class LodyOperationStore {
           false
         );
       }
-      const durableCompletion = current.state === 'finished' ? current.completion : bounded;
+      const stopped =
+        current.state === 'active' && bounded.type === 'result'
+          ? bounded.value.items.flatMap((item) =>
+              item.target &&
+              this.inbox.inputCancellationReason(
+                current.workspaceId,
+                item.target.sessionId,
+                item.target.userTurnId
+              ) === 'user_stop'
+                ? [item.target]
+                : []
+            )
+          : [];
+      const terminal = this.assertCompletionBound(cancelManuallyStoppedTargets(bounded, stopped));
+      const durableCompletion = current.state === 'finished' ? current.completion : terminal;
+      if (stopped.length) {
+        const items = cancelManuallyStoppedTargets(
+          { type: 'result', value: { items: current.items } },
+          stopped
+        );
+        if (items.type === 'result')
+          this.db
+            .prepare(
+              "UPDATE operations SET items_json=? WHERE requester_session_id=? AND operation_id=? AND state='active'"
+            )
+            .run(JSON.stringify(items.value.items), requesterSessionId, operationId);
+      }
+
       if (!durableCompletion) throw new Error('Finished Operation is missing its completion.');
       if (current.state === 'active') {
         this.db
@@ -659,24 +875,14 @@ export class LodyOperationStore {
              SET state = 'finished', completion_json = ?, finished_at = ?
              WHERE requester_session_id = ? AND operation_id = ? AND state = 'active'`
           )
-          .run(JSON.stringify(bounded), finishedAt, requesterSessionId, operationId);
+          .run(JSON.stringify(terminal), finishedAt, requesterSessionId, operationId);
       }
-      this.db
-        .prepare(
-          `INSERT OR IGNORE INTO deliveries (
-             workspace_id, requester_session_id, operation_id, delivery_id,
-             system_turn_id, state, initiator_chain_depth, completion_json
-           ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
-        )
-        .run(
-          current.workspaceId,
-          current.requesterSessionId,
-          current.operationId,
-          getOperationDeliveryId(current.requesterSessionId, current.operationId),
-          getOperationCompletionTurnId(current.requesterSessionId, current.operationId),
-          current.initiatorChainDepth,
-          JSON.stringify(durableCompletion)
-        );
+      this.inbox.indexCompletion({
+        ...current,
+        state: 'finished',
+        completion: durableCompletion,
+        finishedAt: current.finishedAt ?? finishedAt,
+      });
       const updated = this.getStored(requesterSessionId, operationId);
       if (!updated) {
         throw new Error('Finished Operation disappeared during transaction.');
@@ -690,7 +896,7 @@ export class LodyOperationStore {
     requesterSessionId: SessionId,
     operationId: string
   ): { operation: StoredLodyOperation; didCancel: boolean } {
-    const transaction = this.db.transaction(() => {
+    const transaction = this.transaction(() => {
       const current = this.get(requesterSessionId, operationId);
       if (current.state === 'finished') {
         return { operation: current, didCancel: false };
@@ -707,45 +913,13 @@ export class LodyOperationStore {
     return transaction.immediate();
   }
 
-  listPendingDeliveries(
-    workspaceId: WorkspaceId,
-    requesterSessionId?: SessionId
-  ): StoredLodyDelivery[] {
-    const rows = requesterSessionId
-      ? this.db
-          .prepare(
-            `SELECT * FROM deliveries
-             WHERE workspace_id = ? AND requester_session_id = ? AND state = 'pending'
-             ORDER BY sequence ASC`
-          )
-          .all(workspaceId, requesterSessionId)
-      : this.db
-          .prepare(
-            `SELECT * FROM deliveries
-             WHERE workspace_id = ? AND state = 'pending'
-             ORDER BY sequence ASC`
-          )
-          .all(workspaceId);
-    return rows.map((row) => this.decodeDelivery(row));
-  }
-
-  consumeDelivery(
-    requesterSessionId: SessionId,
-    operationId: string,
-    consumedAt = new Date(this.now()).toISOString()
-  ): void {
-    this.db
-      .prepare(
-        `UPDATE deliveries SET state = 'consumed', consumed_at = ?
-         WHERE requester_session_id = ? AND operation_id = ? AND state = 'pending'`
-      )
-      .run(consumedAt, requesterSessionId, operationId);
-  }
-
   deleteRequesterSession(requesterSessionId: SessionId): void {
-    this.db
-      .prepare('DELETE FROM operations WHERE requester_session_id = ?')
-      .run(requesterSessionId);
+    this.transaction(() => {
+      this.inbox.deleteSession(requesterSessionId);
+      this.db
+        .prepare('DELETE FROM operations WHERE requester_session_id = ?')
+        .run(requesterSessionId);
+    }).immediate();
   }
 
   snapshot(operation: StoredLodyOperation): LodyOperationSnapshot {
@@ -786,12 +960,63 @@ export class LodyOperationStore {
     return row === undefined ? undefined : this.decodeOperation(row);
   }
 
+  /**
+   * An Agent that loses a slow create response, for example to a client tool
+   * timeout, tends to retry under a fresh operationId while the first create
+   * is still running. An identical single create from the same source Turn
+   * that is still active is that retry, so it adopts the accepted Operation
+   * instead of creating a second Session. Finished Operations never match:
+   * creating the same work again after a result or failure stays possible.
+   */
+  private findActiveDuplicateCreate(
+    requesterSessionId: SessionId,
+    kind: LodyOperationKind,
+    fingerprint: string,
+    requesterUserId: string,
+    sourceTurnId: string | undefined
+  ): StoredLodyOperation | undefined {
+    if (kind !== 'session_create' || !sourceTurnId) return undefined;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM operations
+         WHERE requester_session_id = ? AND kind = ? AND fingerprint = ?
+           AND requester_user_id = ? AND state = 'active'
+         ORDER BY created_at ASC, operation_id ASC`
+      )
+      .all(requesterSessionId, kind, fingerprint, requesterUserId);
+    return rows
+      .map((row) => this.decodeOperation(row))
+      .find((operation) => operation.frozenContinuationConfig.sourceTurnId === sourceTurnId);
+  }
+
+  private assertOperationIdNotRetired(requesterSessionId: SessionId, operationId: string): void {
+    const retired = this.db
+      .prepare(
+        'SELECT 1 FROM operation_retired_ids WHERE requester_session_id = ? AND operation_id = ?'
+      )
+      .get(requesterSessionId, operationId);
+    if (retired !== undefined) {
+      throw new LodyOperationStoreError(
+        'OPERATION_ID_REUSED',
+        `Operation id ${operationId} has already completed and its result has expired.`,
+        false
+      );
+    }
+  }
+
   private assertMatching(
     operation: StoredLodyOperation,
     kind: LodyOperationKind,
-    fingerprint: string
+    fingerprint: string,
+    requesterUserId: string,
+    sourceTurnId?: string
   ): StoredLodyOperation {
-    if (operation.kind !== kind || operation.fingerprint !== fingerprint) {
+    if (
+      operation.kind !== kind ||
+      operation.fingerprint !== fingerprint ||
+      operation.requesterUserId !== requesterUserId ||
+      operation.frozenContinuationConfig.sourceTurnId !== sourceTurnId
+    ) {
       throw new LodyOperationStoreError(
         'OPERATION_ID_REUSED',
         `Operation id ${operation.operationId} is already bound to different input.`,
@@ -821,7 +1046,48 @@ export class LodyOperationStore {
           'Operation completion'
         ) as LodyOperationCompletion)
       : undefined;
+    const authorRow = this.db
+      .prepare(
+        'SELECT author_json, target_roles_json FROM operation_authors WHERE requester_session_id = ? AND operation_id = ?'
+      )
+      .get(parsed.requester_session_id, parsed.operation_id) as
+      | { author_json: string | null; target_roles_json: string | null }
+      | undefined;
+    const author = authorRow?.author_json
+      ? parseJson(authorRow.author_json, AgentMessageAuthorSchema, 'Operation author')
+      : frozen.sourceTurnId
+        ? buildAgentMessageAuthor({
+            sessionId: parsed.requester_session_id,
+            turnId: frozen.sourceTurnId,
+          })
+        : undefined;
+    const inputRow = this.db
+      .prepare(
+        'SELECT attachments_json FROM operation_inputs WHERE requester_session_id = ? AND operation_id = ?'
+      )
+      .get(parsed.requester_session_id, parsed.operation_id) as
+      | { attachments_json: string }
+      | undefined;
     return {
+      ...(inputRow
+        ? {
+            targetInputAttachments: parseJson(
+              inputRow.attachments_json,
+              z.array(SessionInputAttachmentsSchema).max(20),
+              'target attachments'
+            ) as NonNullable<StoredLodyOperation['targetInputAttachments']>,
+          }
+        : {}),
+      ...(author ? { author } : {}),
+      ...(authorRow?.target_roles_json
+        ? {
+            targetRoleSnapshots: parseJson(
+              authorRow.target_roles_json,
+              z.array(AgentRoleSnapshotSchema.nullable()),
+              'target Role snapshots'
+            ),
+          }
+        : {}),
       workspaceId: parsed.workspace_id as WorkspaceId,
       ownerMachineId: parsed.owner_machine_id as MachineId,
       requesterSessionId: parsed.requester_session_id as SessionId,
@@ -838,26 +1104,6 @@ export class LodyOperationStore {
       items,
       ...(completion ? { completion } : {}),
       ...(parsed.finished_at ? { finishedAt: parsed.finished_at } : {}),
-    };
-  }
-
-  private decodeDelivery(row: unknown): StoredLodyDelivery {
-    const parsed = DeliveryRowSchema.parse(row);
-    return {
-      sequence: parsed.sequence,
-      workspaceId: parsed.workspace_id as WorkspaceId,
-      requesterSessionId: parsed.requester_session_id as SessionId,
-      operationId: parsed.operation_id,
-      deliveryId: parsed.delivery_id,
-      systemTurnId: parsed.system_turn_id,
-      state: parsed.state,
-      initiatorChainDepth: parsed.initiator_chain_depth,
-      completion: parseJson(
-        parsed.completion_json,
-        OperationCompletionSchema,
-        'Delivery completion'
-      ) as LodyOperationCompletion,
-      ...(parsed.consumed_at ? { consumedAt: parsed.consumed_at } : {}),
     };
   }
 
@@ -897,33 +1143,61 @@ export class LodyOperationStore {
       return;
     }
     const cutoff = new Date(nowMs - TERMINAL_RETENTION_MS).toISOString();
-    this.db
-      .transaction(() => {
-        this.db
-          .prepare(
-            `DELETE FROM operations
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `DELETE FROM operations
            WHERE state = 'finished'
+             AND (kind NOT IN ('session_create', 'session_create_many') OR EXISTS (
+               SELECT 1 FROM operation_progress_settlements p
+               WHERE p.requester_session_id = operations.requester_session_id
+                 AND p.operation_id = operations.operation_id
+             ))
              AND EXISTS (
-               SELECT 1 FROM deliveries
-               WHERE deliveries.requester_session_id = operations.requester_session_id
-                 AND deliveries.operation_id = operations.operation_id
-                 AND deliveries.state = 'consumed'
-                 AND deliveries.consumed_at < ?
+               SELECT 1 FROM inbox_results r
+               WHERE r.session_id=operations.requester_session_id
+                 AND r.operation_id=operations.operation_id
+                 AND r.consumed=1 AND r.consumed_at < ?
              )`
-          )
-          .run(cutoff);
-        this.db
-          .prepare(
-            `INSERT INTO orchestration_meta (key, value) VALUES ('last_cleanup_at_ms', ?)
+        )
+        .run(cutoff);
+      this.inbox.cleanupExpired();
+      this.db
+        .prepare(
+          `INSERT INTO orchestration_meta (key, value) VALUES ('last_cleanup_at_ms', ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-          )
-          .run(String(nowMs));
-      })
-      .immediate();
+        )
+        .run(String(nowMs));
+    }).immediate();
   }
 
   private migrate(): void {
-    this.db.exec(`
+    if (!this.isMigrationRequired()) return;
+
+    this.transaction(() => {
+      const tables = new Set(
+        (
+          this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
+            name: string;
+          }[]
+        ).map((r) => r.name)
+      );
+      const hasInbox = tables.has('inbox_sessions');
+      let sequence = 0;
+      if (tables.has('sqlite_sequence')) {
+        sequence =
+          (
+            this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name='deliveries'").get() as
+              | { seq: number }
+              | undefined
+          )?.seq ?? 0;
+      }
+      // Released Operations and their duplicate guards remain authoritative.
+      // Retire only the old per-result Delivery scheduler; never replay its backlog.
+      this.db.exec(
+        'DROP TRIGGER IF EXISTS inbox_results_insert; DROP TRIGGER IF EXISTS inbox_reject_legacy_submission; DROP TRIGGER IF EXISTS deliveries_insert_execution_state; DROP TABLE IF EXISTS delivery_execution_state; DROP TABLE IF EXISTS deliveries;'
+      );
+      this.db.exec(`
       CREATE TABLE IF NOT EXISTS operations (
         workspace_id TEXT NOT NULL,
         owner_machine_id TEXT NOT NULL,
@@ -947,24 +1221,28 @@ export class LodyOperationStore {
       CREATE INDEX IF NOT EXISTS operations_active_owner
       ON operations (workspace_id, owner_machine_id, state, deadline_at);
 
-      CREATE TABLE IF NOT EXISTS deliveries (
-        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-        workspace_id TEXT NOT NULL,
+      CREATE TABLE IF NOT EXISTS operation_retired_ids (
         requester_session_id TEXT NOT NULL,
         operation_id TEXT NOT NULL,
-        delivery_id TEXT NOT NULL UNIQUE,
-        system_turn_id TEXT NOT NULL UNIQUE,
-        state TEXT NOT NULL CHECK (state IN ('pending', 'consumed')),
-        initiator_chain_depth INTEGER NOT NULL,
-        completion_json TEXT NOT NULL,
-        consumed_at TEXT,
-        FOREIGN KEY (requester_session_id, operation_id)
-          REFERENCES operations (requester_session_id, operation_id)
-          ON DELETE CASCADE
+        PRIMARY KEY (requester_session_id, operation_id)
       );
 
-      CREATE INDEX IF NOT EXISTS deliveries_pending_session
-      ON deliveries (workspace_id, requester_session_id, state, sequence);
+      CREATE TRIGGER IF NOT EXISTS operations_retire_id
+      BEFORE DELETE ON operations WHEN OLD.state = 'finished'
+      BEGIN
+        INSERT OR IGNORE INTO operation_retired_ids (requester_session_id, operation_id)
+        VALUES (OLD.requester_session_id, OLD.operation_id);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS operations_reject_retired_id
+      BEFORE INSERT ON operations
+      WHEN EXISTS (
+        SELECT 1 FROM operation_retired_ids
+        WHERE requester_session_id = NEW.requester_session_id AND operation_id = NEW.operation_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'Operation id has already completed and expired.');
+      END;
 
       CREATE TABLE IF NOT EXISTS operation_item_materializations (
         requester_session_id TEXT NOT NULL,
@@ -978,43 +1256,102 @@ export class LodyOperationStore {
           ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS operation_progress_settlements (
+        requester_session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        PRIMARY KEY (requester_session_id, operation_id),
+        FOREIGN KEY (requester_session_id, operation_id)
+          REFERENCES operations (requester_session_id, operation_id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS operation_authors (
+        requester_session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        author_json TEXT,
+        target_roles_json TEXT,
+        PRIMARY KEY (requester_session_id, operation_id),
+        FOREIGN KEY (requester_session_id, operation_id)
+          REFERENCES operations(requester_session_id, operation_id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS operation_inputs (
+        requester_session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        attachments_json TEXT NOT NULL,
+        PRIMARY KEY (requester_session_id, operation_id),
+        FOREIGN KEY (requester_session_id, operation_id)
+          REFERENCES operations(requester_session_id, operation_id) ON DELETE CASCADE
+      );
       CREATE TABLE IF NOT EXISTS orchestration_meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
     `);
+      if (hasInbox) {
+        // Passive upgrade copies with no batch are legacy backlog, not new work.
+        this.db.exec(`DELETE FROM inbox_results WHERE automatic_eligible=0
+            AND NOT EXISTS(SELECT 1 FROM inbox_members m WHERE m.sequence=inbox_results.sequence);`);
+        sequence = Math.max(
+          sequence,
+          (
+            this.db
+              .prepare('SELECT COALESCE(MAX(sequence),0) AS value FROM inbox_results')
+              .get() as { value: number }
+          ).value
+        );
+      }
+      this.db
+        .prepare(
+          "INSERT INTO orchestration_meta VALUES('inbox_sequence',?) ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT)"
+        )
+        .run(String(sequence));
+      this.db
+        .prepare(
+          "INSERT INTO orchestration_meta VALUES('schema_version','2') ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+        )
+        .run();
+    }).immediate();
   }
 
-  private repairTerminalDeliveries(): void {
-    this.db
-      .transaction(() => {
-        this.db
-          .prepare(
-            `UPDATE deliveries
-           SET delivery_id = 'operation:' || requester_session_id || ':' || operation_id || ':completion',
-               system_turn_id = 'operation-completion:' || requester_session_id || ':' || operation_id`
-          )
-          .run();
-        this.db
-          .prepare(
-            `INSERT OR IGNORE INTO deliveries (
-             workspace_id, requester_session_id, operation_id, delivery_id,
-             system_turn_id, state, initiator_chain_depth, completion_json
-           )
-           SELECT workspace_id, requester_session_id, operation_id,
-             'operation:' || requester_session_id || ':' || operation_id || ':completion',
-             'operation-completion:' || requester_session_id || ':' || operation_id,
-             'pending', initiator_chain_depth, completion_json
-           FROM operations
-           WHERE state = 'finished' AND completion_json IS NOT NULL
-             AND NOT EXISTS (
-               SELECT 1 FROM deliveries
-               WHERE deliveries.requester_session_id = operations.requester_session_id
-                 AND deliveries.operation_id = operations.operation_id
-             )`
-          )
-          .run();
-      })
-      .immediate();
+  private isMigrationRequired(): boolean {
+    const requiredObjects = new Set([
+      'table:operations',
+      'index:operations_active_owner',
+      'table:operation_retired_ids',
+      'trigger:operations_retire_id',
+      'trigger:operations_reject_retired_id',
+      'table:operation_item_materializations',
+      'table:operation_progress_settlements',
+      'table:orchestration_meta',
+      'table:operation_authors',
+      'table:operation_inputs',
+    ]);
+    const existingObjects = this.db
+      .prepare(
+        `SELECT type, name FROM sqlite_master
+         WHERE type IN ('table', 'index', 'trigger')`
+      )
+      .all() as Array<{ type: string; name: string }>;
+    if (existingObjects.some(({ name }) => name === 'orchestration_meta')) {
+      const storedVersion = this.db
+        .prepare("SELECT value FROM orchestration_meta WHERE key='schema_version'")
+        .get() as { value: string } | undefined;
+      if (storedVersion && Number(storedVersion.value) > 2)
+        throw new Error('INBOX_SCHEMA_UNSUPPORTED');
+    }
+    for (const { type, name } of existingObjects) {
+      requiredObjects.delete(`${type}:${name}`);
+    }
+    if (requiredObjects.size > 0) return true;
+
+    const version = this.db
+      .prepare("SELECT value FROM orchestration_meta WHERE key='schema_version'")
+      .get() as { value: string } | undefined;
+    if (version && Number(version.value) > 2) throw new Error('INBOX_SCHEMA_UNSUPPORTED');
+    return (
+      version?.value !== '2' ||
+      existingObjects.some(
+        ({ name }) => name === 'deliveries' || name === 'delivery_execution_state'
+      )
+    );
   }
 }

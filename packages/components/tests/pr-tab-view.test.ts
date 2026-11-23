@@ -1,22 +1,30 @@
 // @vitest-environment jsdom
-
 import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { GitHubCheckRunsSummary, GitHubPullRequestDetails } from '@lody/shared';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import type {
+  GitHubCheckRunsSummary,
+  GitHubPullRequestDetails,
+  GitHubReview,
+  GitHubReviewThread,
+} from '@lody/shared';
 
 import {
   PrTabView,
   type PrTabViewData,
   type PrTabViewState,
 } from '../src/components/sessions/pr-tab-view';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
-  }),
-}));
+const testI18n = createTestI18n();
+
+// Markdown mounts start browser-only lazy imports (including KaTeX copy-tex).
+// Keep this suite's document alive until those imports finish, even when a
+// synchronous layout assertion immediately unmounts the rendered PR view.
+afterAll(async () => {
+  await vi.dynamicImportSettled();
+});
 
 const pullRequest: GitHubPullRequestDetails = {
   number: 42,
@@ -86,14 +94,17 @@ describe('PrTabView refresh button', () => {
 
     flushSync(() => {
       root?.render(
-        createElement(PrTabView, {
-          repoFullName: 'loro-dev/lody',
-          prNumber: 42,
-          state: props.state,
-          data: 'data' in props ? props.data : data,
-          isRefreshing: props.isRefreshing,
-          onRefresh,
-        })
+        withTestI18n(
+          createElement(PrTabView, {
+            repoFullName: 'loro-dev/lody',
+            prNumber: 42,
+            state: props.state,
+            data: 'data' in props ? props.data : data,
+            isRefreshing: props.isRefreshing,
+            onRefresh,
+          }),
+          testI18n
+        )
       );
     });
 
@@ -104,11 +115,46 @@ describe('PrTabView refresh button', () => {
     return { button, onRefresh };
   };
 
+  it('shows GitHub stack layers in order with their statuses and links', () => {
+    renderView({
+      state: 'ready',
+      data: {
+        ...data,
+        pullRequest: {
+          ...pullRequest,
+          stack: {
+            number: 7,
+            position: 2,
+            size: 2,
+            baseRef: 'main',
+            pullRequests: [
+              { number: 41, title: 'Foundation', state: 'closed', draft: false, merged: true },
+              { number: 42, title: 'Feature', state: 'open', draft: false, merged: false },
+            ],
+          },
+        },
+      },
+    });
+    const stack = container?.querySelector('section[aria-label="Pull request stack"]');
+    expect(stack?.textContent).toContain('2 / 2');
+    expect(stack?.querySelector('a[aria-label="Merged: Foundation #41"] svg')).not.toBeNull();
+    expect(
+      stack?.querySelector('a[aria-label="Open: Feature #42"][aria-current="page"] svg')
+    ).not.toBeNull();
+    expect(
+      Array.from(stack?.querySelectorAll('li a') ?? []).map((a) => a.getAttribute('href'))
+    ).toEqual([
+      'https://github.com/loro-dev/lody/pull/42',
+      'https://github.com/loro-dev/lody/pull/41',
+    ]);
+    expect(stack?.textContent).toContain('Merge this stack on GitHub.');
+  });
+
   it('keeps the top refresh button clickable while the initial load is spinning', () => {
     const { button, onRefresh } = renderView({ state: 'loading', data: null });
 
     expect(button.disabled).toBe(false);
-    expect(button.querySelector('svg')?.classList.contains('animate-spin')).toBe(true);
+    expect(button.querySelector('.animate-spin')).not.toBeNull();
 
     flushSync(() => {
       button.click();
@@ -116,80 +162,335 @@ describe('PrTabView refresh button', () => {
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
+});
 
-  it('keeps the top refresh button clickable while revalidating cached PR data', () => {
-    const { button, onRefresh } = renderView({ state: 'ready', isRefreshing: true });
+const hunk = [
+  '@@ -10,6 +10,8 @@ export function load() {',
+  '   const a = 1;',
+  '   const b = 2;',
+  '-  const c = a + b;',
+  '+  const c = add(a, b);',
+  '+  const d = c * 2;',
+  '   return d;',
+].join('\n');
 
-    expect(button.disabled).toBe(false);
-    expect(button.querySelector('svg')?.classList.contains('animate-spin')).toBe(true);
+function makeThread(overrides: Partial<GitHubReviewThread> = {}): GitHubReviewThread {
+  return {
+    id: 7,
+    anchor: { path: 'src/load.ts', line: 15, side: 'RIGHT', startLine: null, startSide: null },
+    comments: [
+      {
+        id: 70,
+        nodeId: 'RC_70',
+        pullRequestReviewId: 9,
+        body: 'Why double it?',
+        path: 'src/load.ts',
+        commitId: 'abc123',
+        originalCommitId: 'abc123',
+        diffHunk: hunk,
+        subjectType: 'line',
+        user: { login: 'bob', id: 2, avatarUrl: '', htmlUrl: 'https://github.com/bob' },
+        authorAssociation: 'MEMBER',
+        createdAt: '2026-05-04T00:10:00.000Z',
+        updatedAt: '2026-05-04T00:10:00.000Z',
+        htmlUrl: 'https://github.com/loro-dev/lody/pull/42#discussion_r70',
+        line: 15,
+        originalLine: 15,
+        side: 'RIGHT',
+        startLine: null,
+        originalStartLine: null,
+        startSide: null,
+      },
+    ],
+    outdated: false,
+    diffHunk: hunk,
+    subjectType: 'line',
+    ...overrides,
+  };
+}
 
+describe('PrTabView document', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  afterEach(() => {
+    if (root) flushSync(() => root?.unmount());
+    root = undefined;
+    container?.remove();
+    container = undefined;
+  });
+
+  const render = (viewData: PrTabViewData) => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
     flushSync(() => {
-      button.click();
+      root?.render(
+        withTestI18n(
+          createElement(PrTabView, {
+            repoFullName: 'loro-dev/lody',
+            prNumber: 42,
+            state: 'ready',
+            data: viewData,
+          }),
+          testI18n
+        )
+      );
+    });
+    return container;
+  };
+
+  it("files a review's thread under the review with its path, line and code", () => {
+    const review: GitHubReview = {
+      id: 9,
+      nodeId: 'PRR_9',
+      body: '',
+      state: 'changes_requested',
+      user: { login: 'alice', id: 1, avatarUrl: '', htmlUrl: 'https://github.com/alice' },
+      authorAssociation: 'MEMBER',
+      commitId: 'abc123',
+      submittedAt: '2026-05-04T00:11:00.000Z',
+      htmlUrl: 'https://github.com/loro-dev/lody/pull/42#pullrequestreview-9',
+    };
+    const el = render({ ...data, reviews: [review], reviewThreads: [makeThread()] });
+
+    const thread = el.querySelector('[data-diff-comment-thread-id="7"]');
+    expect(thread?.closest('article')?.textContent).toContain('requested changes');
+    expect(thread?.textContent).toContain('src/load.ts');
+    expect(thread?.textContent).toContain(':15');
+    const excerpt = thread?.querySelector('[data-thread-excerpt]');
+    expect(excerpt?.lastElementChild?.textContent).toBe('   return d;');
+    expect(thread?.textContent).toContain('Why double it?');
+  });
+
+  it('opens an outdated thread collapsed, to a preview of its first comment', () => {
+    const el = render({
+      ...data,
+      reviewThreads: [makeThread({ id: 8, outdated: true })],
+    });
+    const thread = el.querySelector('[data-diff-comment-thread-id="8"]');
+    const toggle = thread?.querySelector<HTMLButtonElement>('button[aria-expanded]');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(thread?.querySelector('[data-thread-excerpt]')).toBeNull();
+    expect(toggle?.textContent).toContain('bob: Why double it?');
+
+    flushSync(() => toggle?.click());
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(thread?.querySelector('[data-thread-excerpt]')).not.toBeNull();
+  });
+});
+
+describe('PrTabView load failure', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  afterEach(() => {
+    if (root) flushSync(() => root?.unmount());
+    root = undefined;
+    container?.remove();
+    container = undefined;
+  });
+
+  const render = (props: {
+    state: PrTabViewState;
+    data?: PrTabViewData | null;
+    error?: string;
+
+    isRefreshing?: boolean;
+    onRefresh?: () => void | Promise<unknown>;
+    onPostComment?: (body: string) => Promise<void> | void;
+  }) => {
+    if (!container) {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+    }
+    flushSync(() => {
+      root?.render(
+        withTestI18n(
+          createElement(PrTabView, {
+            repoFullName: 'loro-dev/lody',
+            prNumber: 42,
+            ...props,
+          }),
+          testI18n
+        )
+      );
+    });
+    return container;
+  };
+
+  const panel = () => container?.querySelector<HTMLElement>('[data-pr-unavailable]');
+  const retryButton = () =>
+    [...(panel()?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Retry'
+    );
+
+  it('keeps the PR context and offers GitHub + retry instead of a bare failure', () => {
+    const onRefresh = vi.fn();
+    const onGrantChecksPermission = vi.fn();
+    render({
+      state: 'error',
+      data: null,
+      error: 'GitHub request failed: 404 Not Found',
+      onRefresh,
+      onPostComment: vi.fn(),
+      onGrantChecksPermission,
     });
 
+    expect(panel()?.getAttribute('role')).toBe('status');
+    expect(panel()?.textContent).toContain('Failed to load pull request');
+    expect(panel()?.textContent).toContain('A pull request was found for this branch');
+    expect(panel()?.textContent).toContain('You can still view it on GitHub');
+
+    const link = panel()?.querySelector<HTMLAnchorElement>('a[href]');
+    expect(link?.href).toBe('https://github.com/loro-dev/lody/pull/42');
+    expect(link?.textContent).toContain('Open on GitHub');
+
+    // The verbatim error stays visible as a quiet detail line — not the
+    // headline, not a fold.
+    expect(panel()?.textContent).toContain('404 Not Found');
+
+    // A 404 hedges toward the one cause the user can repair: app access.
+    expect(panel()?.textContent).toContain('can also mean the Lody GitHub App');
+    const reviewLink = [...(panel()?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Review app access'
+    );
+    flushSync(() => reviewLink?.click());
+    expect(onGrantChecksPermission).toHaveBeenCalledTimes(1);
+
+    // No affordance that cannot work: no comment composer under a failed load.
+    expect(container?.querySelector('[data-pr-comment-composer]')).toBeNull();
+    expect(container?.querySelector('textarea')).toBeNull();
+
+    flushSync(() => retryButton()?.click());
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
-  it('pins the comment composer below the scrollable PR content', () => {
+  it('keeps a typed comment draft across a failed reload', () => {
     const onPostComment = vi.fn();
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
+    render({ state: 'ready', data, onPostComment });
+    const textarea = container?.querySelector('textarea');
+    expect(textarea).not.toBeNull();
 
     flushSync(() => {
-      root?.render(
-        createElement(PrTabView, {
-          repoFullName: 'loro-dev/lody',
-          prNumber: 42,
-          state: 'ready',
-          data,
-          onPostComment,
-        })
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+        textarea,
+        'still reviewing this'
       );
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    expect(textarea?.value).toBe('still reviewing this');
 
-    const textarea = container.querySelector<HTMLTextAreaElement>(
-      'textarea[placeholder="Leave a comment"]'
-    );
-    const scrollArea = container.querySelector<HTMLElement>('[data-pr-content-scroll-area]');
-    const composer = container.querySelector<HTMLElement>('[data-pr-comment-composer]');
+    // The reload fails: the composer leaves, the draft does not.
+    render({ state: 'error', data: null, error: 'offline', onPostComment });
+    expect(container?.querySelector('textarea')).toBeNull();
 
-    expect(textarea).not.toBeNull();
-    expect(scrollArea).not.toBeNull();
-    expect(scrollArea?.contains(textarea)).toBe(false);
-    expect(composer?.contains(textarea)).toBe(true);
-    expect(scrollArea?.nextElementSibling).toBe(composer);
+    render({ state: 'ready', data, onPostComment });
+    expect(container?.querySelector('textarea')?.value).toBe('still reviewing this');
+  });
+});
+
+describe('PrTabView merge card', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  afterEach(() => {
+    if (root) flushSync(() => root?.unmount());
+    root = undefined;
+    container?.remove();
+    container = undefined;
   });
 
-  it('lets the PR description expand inside the panel scroll area', () => {
+  const render = (pr: GitHubPullRequestDetails, extra: Record<string, unknown> = {}) => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-
     flushSync(() => {
       root?.render(
-        createElement(PrTabView, {
-          repoFullName: 'loro-dev/lody',
-          prNumber: 42,
-          state: 'ready',
-          data: {
-            ...data,
-            pullRequest: {
-              ...pullRequest,
-              body: 'A long pull request description.',
-            },
-          },
-        })
+        withTestI18n(
+          createElement(PrTabView, {
+            repoFullName: 'loro-dev/lody',
+            prNumber: 42,
+            state: 'ready',
+            data: { ...data, pullRequest: pr },
+            onMerge: vi.fn(),
+            onSetState: vi.fn(),
+            ...extra,
+          }),
+          testI18n
+        )
       );
     });
+    const el = container;
+    return {
+      card: el.querySelector<HTMLElement>('[data-pr-merge-card]'),
+      header: el.querySelector<HTMLElement>('header'),
+    };
+  };
 
-    const scrollArea = container.querySelector<HTMLElement>('[data-pr-content-scroll-area]');
-    const description = container.querySelector<HTMLElement>('[data-pr-description]');
-    const panelViewport = scrollArea?.querySelector<HTMLElement>(
-      '[data-radix-scroll-area-viewport]'
+  it('drops the header action once merged with no branch left to delete', () => {
+    const merged = render({ ...pullRequest, state: 'closed', merged: true });
+    expect(
+      merged.header?.querySelector('[role="group"], button[aria-label="More actions"]')
+    ).toBeNull();
+    expect(merged.card?.getAttribute('data-pr-merge-card')).toBe('merged');
+  });
+
+  it('names failed checks as the verdict and keeps merging as neutral context', () => {
+    const run = (id: number, name: string, conclusion: 'success' | 'failure') => ({
+      id,
+      name,
+      status: 'completed' as const,
+      conclusion,
+      htmlUrl: null,
+      startedAt: null,
+      completedAt: null,
+      appName: null,
+    });
+    const failing: GitHubCheckRunsSummary = {
+      status: 'completed',
+      conclusion: 'failure',
+      total: 4,
+      runs: [
+        run(1, 'build', 'success'),
+        run(2, 'lint', 'failure'),
+        run(3, 'typecheck', 'failure'),
+        run(4, 'test', 'success'),
+      ],
+    };
+    const { card, header } = render(pullRequest, { data: { ...data, checkRuns: failing } });
+    expect(card?.getAttribute('data-pr-merge-card')).toBe('ready');
+    expect(card?.textContent).toContain('2 checks failed');
+    expect(card?.textContent).toContain('Can still merge · 4 checks');
+    expect(card?.textContent).not.toContain('Ready to merge');
+    const merge = header?.querySelector<HTMLButtonElement>('[data-pr-merge-action] button');
+    expect(merge?.disabled).toBe(false);
+  });
+
+  it('offers Resolve conflicts as an enabled command while the session can run it', () => {
+    const onResolveConflicts = vi.fn();
+    const { card, header } = render(
+      { ...pullRequest, mergeable: false, mergeableState: 'dirty' },
+      { onResolveConflicts }
     );
+    expect(card?.getAttribute('data-pr-merge-card')).toBe('conflict');
+    expect(card?.textContent).toContain('Conflicts with the base branch');
+    const resolve = [...(header?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Resolve conflicts'
+    );
+    expect(resolve?.disabled).toBe(false);
+    flushSync(() => resolve?.click());
+    expect(onResolveConflicts).toHaveBeenCalled();
+  });
 
-    expect(description).not.toBeNull();
-    expect(description?.closest('[data-radix-scroll-area-viewport]')).toBe(panelViewport);
+  it('shows the disabled merge for a conflict nobody here can resolve', () => {
+    const { card, header } = render({ ...pullRequest, mergeable: false, mergeableState: 'dirty' });
+    expect(card?.textContent).toContain('Conflicts with the base branch');
+    expect(header?.textContent).not.toContain('Resolve conflicts');
+    const merge = [...(header?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Merge'
+    );
+    expect(merge?.disabled).toBe(true);
   });
 });

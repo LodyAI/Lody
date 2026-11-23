@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
-
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
+import { frame, visualElementStore } from 'framer-motion';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import {
-  getSideChatLauncherState,
   getSidePanelTabCloseFallback,
+  getSidePanelTabSelection,
   getSidePanelTabStateAfterClose,
-  SessionSidePanelEmptyState,
   SessionSidePanelTabBar,
   type SessionSidePanelOption,
   type SessionSidePanelTabItem,
@@ -42,6 +41,19 @@ const TABS: SessionSidePanelTabItem[] = [
   },
 ];
 const AVAILABLE_PANELS: SessionSidePanelOption[] = [{ id: 'pr', label: 'PR', kind: 'pr' }];
+
+async function settleLayout() {
+  await act(async () => {
+    await new Promise<void>((resolve) => frame.postRender(() => resolve()));
+    await new Promise<void>((resolve) => frame.postRender(() => resolve()));
+  });
+}
+
+function getProjection(element: Element) {
+  const projection = visualElementStore.get(element)?.projection;
+  if (!projection) throw new Error('Expected the real tab Motion projection');
+  return projection;
+}
 
 describe('getSidePanelTabCloseFallback', () => {
   const tabIds = ['files', 'changes', 'browser'];
@@ -83,17 +95,23 @@ describe('getSidePanelTabStateAfterClose', () => {
   });
 });
 
-describe('getSideChatLauncherState', () => {
-  it('hides unsupported providers and disables an offline supported provider', () => {
-    expect(
-      getSideChatLauncherState({ providerSupportsFork: false, machineOffline: false })
-    ).toBe('hidden');
-    expect(
-      getSideChatLauncherState({ providerSupportsFork: true, machineOffline: true })
-    ).toBe('disabled');
-    expect(
-      getSideChatLauncherState({ providerSupportsFork: true, machineOffline: false })
-    ).toBe('enabled');
+describe('getSidePanelTabSelection', () => {
+  it('keeps fixed panels, side chats, and viewers mutually exclusive', () => {
+    expect(getSidePanelTabSelection('side-session:forked')).toEqual({
+      activeSidebarTabId: null,
+      activeSideSessionId: 'forked',
+      activeViewerTabId: null,
+    });
+    expect(getSidePanelTabSelection('file:README.md')).toEqual({
+      activeSidebarTabId: null,
+      activeSideSessionId: null,
+      activeViewerTabId: 'file:README.md',
+    });
+    expect(getSidePanelTabSelection('files')).toEqual({
+      activeSidebarTabId: 'files',
+      activeSideSessionId: null,
+      activeViewerTabId: null,
+    });
   });
 });
 
@@ -156,20 +174,10 @@ describe('SessionSidePanelTabBar', () => {
     await act(async () => {
       (closeFilesButton as HTMLButtonElement).click();
       (closeFileButton as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     expect(onTabClose.mock.calls).toEqual([['files'], ['file:src/app.tsx']]);
     expect(onTabSelect).not.toHaveBeenCalled();
-  });
-
-  it('selects fixed and dynamic tabs through the same tablist', async () => {
-    await renderTabBar();
-
-    const tabs = Array.from(container?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []);
-    await act(async () => tabs.find((tab) => tab.textContent?.includes('All Changes'))?.click());
-    await act(async () => tabs.find((tab) => tab.textContent?.includes('Browser'))?.click());
-    await act(async () => tabs.find((tab) => tab.textContent?.includes('app.tsx'))?.click());
-
-    expect(onTabSelect.mock.calls).toEqual([['changes'], ['browser'], ['file:src/app.tsx']]);
   });
 
   it('keeps multiple side-session tabs independently selectable and closeable', async () => {
@@ -184,54 +192,135 @@ describe('SessionSidePanelTabBar', () => {
     expect(onTabClose).toHaveBeenCalledWith('side-session:one');
   });
 
-  it('offers only unopened functional panels from the add button', async () => {
-    await renderTabBar();
+  it('releases Review tab layout ownership after close and repeated session unmounts', async () => {
+    function ReviewTabs() {
+      const [tabs, setTabs] = useState<SessionSidePanelTabItem[]>([
+        { id: 'changes', label: 'All Changes', kind: 'changes', closeable: true },
+        { id: 'diff:all-changes', label: 'Review diff', kind: 'diff', closeable: true },
+      ]);
+      return createElement(SessionSidePanelTabBar, {
+        tabs,
+        activeTabId: tabs.at(-1)?.id ?? null,
+        onTabSelect: () => undefined,
+        onTabClose: (id: string) => setTabs((current) => current.filter((tab) => tab.id !== id)),
+        closeTabLabel: (label: string) => `Close ${label}`,
+      });
+    }
 
-    const addButton = container?.querySelector('[aria-label="Add panel"]');
-    expect(addButton).toBeInstanceOf(HTMLButtonElement);
-    await act(async () => {
-      addButton?.dispatchEvent(
-        new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 })
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await act(async () => root?.render(createElement(ReviewTabs)));
+      await settleLayout();
+      const [changes, diff] = Array.from(container.querySelectorAll('[role="tab"]'), getProjection);
+      const projectionRoot = changes.root!;
+      const changesId = changes.options.layoutId!;
+      const diffId = diff.options.layoutId!;
+      expect(projectionRoot.sharedNodes.get(changesId)?.members).toContain(changes);
+      expect(projectionRoot.sharedNodes.get(diffId)?.members).toContain(diff);
+
+      await act(async () =>
+        container?.querySelector<HTMLButtonElement>('[aria-label="Close Review diff"]')?.click()
       );
-    });
+      await settleLayout();
+      expect(projectionRoot.sharedNodes.has(diffId)).toBe(false);
+      expect(projectionRoot.sharedNodes.get(changesId)?.members).toContain(changes);
 
-    const menuItems = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    expect(menuItems.map((item) => item.textContent)).toEqual(['PR']);
-
-    await act(async () => menuItems[0]?.click());
-    expect(onPanelOpen).toHaveBeenCalledWith('pr');
+      await act(async () => root?.render(null));
+      await settleLayout();
+      expect(projectionRoot.sharedNodes.has(changesId)).toBe(false);
+    }
   });
 
-  it('opens a functional panel from the empty state', async () => {
-    if (!container) {
-      container = document.createElement('div');
-      document.body.appendChild(container);
-      root = createRoot(container);
-    }
+  it('preserves device tab shared-layout handoff and releases the completed owner', async () => {
+    const devices: SessionSidePanelTabItem[] = [
+      { id: 'ios-simulator', label: 'iOS', kind: 'ios-simulator', closeable: true },
+      { id: 'android-emulator', label: 'Android', kind: 'android-emulator', closeable: true },
+    ];
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const renderDevices = (split: readonly [string, string] | null) =>
+      act(() =>
+        root?.render(
+          createElement(SessionSidePanelTabBar, {
+            tabs: devices,
+            activeTabId: 'ios-simulator',
+            split,
+            onTabSelect,
+            onTabClose,
+            onTabsSplit: () => undefined,
+            onTabUnsplit: () => undefined,
+            closeTabLabel: (label: string) => `Close ${label}`,
+          })
+        )
+      );
+    renderDevices(null);
+    await settleLayout();
+    const previous = getProjection(container.querySelector('[role="tab"]')!);
+    const projectionRoot = previous.root!;
+    const layoutId = previous.options.layoutId!;
+
+    renderDevices(['ios-simulator', 'android-emulator']);
+    const next = getProjection(container.querySelector('[role="group"] [role="tab"]')!);
+    expect(next).not.toBe(previous);
+    expect(next.options.layoutId).toBe(layoutId);
+    expect(projectionRoot.sharedNodes.get(layoutId)?.lead).toBe(next);
+    expect(next.resumeFrom).toBe(previous);
+    await settleLayout();
+    expect(projectionRoot.sharedNodes.get(layoutId)?.members).toContain(next);
+
+    const layoutIds = Array.from(
+      container.querySelectorAll('[role="tab"]'),
+      (tab) => getProjection(tab).options.layoutId!
+    );
+    await act(async () => root?.render(null));
+    await settleLayout();
+    for (const id of layoutIds) expect(projectionRoot.sharedNodes.has(id)).toBe(false);
+  });
+
+  it('draws a split pair as one group in split order that still selects each member', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
     await act(async () => {
       root?.render(
-        createElement(SessionSidePanelEmptyState, {
-          panels: [
-            { id: 'side-session', label: 'Side Chat', kind: 'session' },
-            { id: 'files', label: 'Files', kind: 'files' },
-            { id: 'changes', label: 'All Changes', kind: 'changes' },
+        createElement(SessionSidePanelTabBar, {
+          tabs: [
+            { id: 'files', label: 'Files', kind: 'files', closeable: true },
+            { id: 'ios-simulator', label: 'iOS', kind: 'ios-simulator', closeable: true },
+            { id: 'browser', label: 'Browser', kind: 'browser', closeable: true },
+            { id: 'android-emulator', label: 'Android', kind: 'android-emulator', closeable: true },
           ],
-          onPanelOpen,
-          title: 'Open a panel',
-          description: 'Choose what to show.',
+          activeTabId: 'ios-simulator',
+          onTabSelect,
+          onTabClose,
+          closeTabLabel: (label: string) => `Close ${label}`,
+          split: ['android-emulator', 'ios-simulator'],
+          onTabsSplit: () => undefined,
+          onTabUnsplit: () => undefined,
         })
       );
     });
 
-    const changesButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('All Changes')
+    const strip = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="tablist"] > *'),
+      (element) =>
+        element.getAttribute('role') === 'group'
+          ? `[${Array.from(element.querySelectorAll('[role="tab"]'), (tab) => tab.textContent).join('|')}]`
+          : element.textContent
     );
-    await act(async () => changesButton?.click());
-    expect(onPanelOpen).toHaveBeenCalledWith('changes');
-    const sideSessionButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('Side Chat')
+    expect(strip).toEqual(['Files', '[Android|iOS]', 'Browser']);
+
+    const android = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]')).find(
+      (tab) => tab.textContent === 'Android'
     );
-    await act(async () => sideSessionButton?.click());
-    expect(onPanelOpen).toHaveBeenCalledWith('side-session');
+    await act(async () => android?.click());
+    expect(onTabSelect).toHaveBeenCalledWith('android-emulator');
+    await act(async () =>
+      container?.querySelector<HTMLButtonElement>('[aria-label="Close Android"]')?.click()
+    );
+    expect(onTabClose).toHaveBeenCalledWith('android-emulator');
   });
 });

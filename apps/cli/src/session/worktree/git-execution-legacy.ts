@@ -1,0 +1,114 @@
+import { probeLocalProjectMember } from './project-member-probe';
+import { NodeFileSystem } from '@effect/platform-node-shared';
+import {
+  checkoutProjectSubmodule,
+  persistProjectSubmoduleBranch,
+  findProjectSubmoduleReference,
+} from './project-submodules';
+import {
+  FileLockCleanupFailed,
+  LockOwnershipLost,
+  LockReleaseFailed,
+} from '@lody/shared/node/file-lock';
+import { Effect } from 'effect';
+import {
+  ProcessCleanupFailed,
+  ProcessReleaseFailed,
+  runPromiseSquashedLegacy,
+} from '@lody/shared/node/process';
+import type { PlatformFacadeOptions } from '@/platform/process-options';
+import {
+  WorktreeGit,
+  WorktreeGitExecutionFailed,
+  WorktreeGitCommandFailed,
+  worktreeGitLayer,
+  type WorktreeGitCommand,
+  type CredentialHelperProbe,
+} from './git-execution';
+
+const executeLegacy = async <A, E>(
+  program: Effect.Effect<A, E, WorktreeGit>,
+  options: PlatformFacadeOptions
+): Promise<A> => {
+  try {
+    return await runPromiseSquashedLegacy(program.pipe(Effect.provide(worktreeGitLayer(options))), {
+      signal: options.signal,
+    });
+  } catch (error) {
+    if (
+      error instanceof WorktreeGitCommandFailed ||
+      error instanceof WorktreeGitExecutionFailed ||
+      error instanceof ProcessCleanupFailed ||
+      error instanceof ProcessReleaseFailed
+    )
+      throw error;
+    // Pure interruption is squashed to an ordinary Error in pinned v4. Keep it
+    // distinguishable from a Git exit, including logger defects at this boundary.
+    throw new WorktreeGitExecutionFailed({
+      message: error instanceof Error ? error.message : 'Worktree Git execution failed',
+      cause: error,
+    });
+  }
+};
+
+/**
+ * @deprecated Only for unmigrated worktree manager and Project group orchestration.
+ * Delete when that owner composes WorktreeGit in its own Effect workflow.
+ */
+// The read-only member probe is also called by MessageHandler machine RPC; remove
+// its Promise bridge when that dispatcher uses the native daemon runtime.
+export const worktreeGitLegacy = {
+  probeLocalProjectMember: (rootPath: string, options: PlatformFacadeOptions = {}) =>
+    executeLegacy(
+      probeLocalProjectMember(rootPath).pipe(Effect.provide(NodeFileSystem.layer)),
+      options
+    ),
+  findProjectSubmoduleReference: (
+    repositoryPath: string,
+    expectedRepositoryUrl: string,
+    options: PlatformFacadeOptions = {}
+  ) =>
+    executeLegacy(
+      findProjectSubmoduleReference(repositoryPath, expectedRepositoryUrl).pipe(
+        Effect.provide(NodeFileSystem.layer)
+      ),
+      options
+    ),
+  persistProjectSubmoduleBranch: (
+    input: Parameters<typeof persistProjectSubmoduleBranch>[0],
+    options: PlatformFacadeOptions = {}
+  ) => executeLegacy(persistProjectSubmoduleBranch(input), options),
+  checkoutProjectSubmodule: (
+    input: Parameters<typeof checkoutProjectSubmodule>[0],
+    options: PlatformFacadeOptions = {}
+  ) => executeLegacy(checkoutProjectSubmodule(input), options),
+  run: (command: WorktreeGitCommand, options: PlatformFacadeOptions = {}) =>
+    executeLegacy(
+      Effect.flatMap(WorktreeGit, (git) => git.run(command)),
+      options
+    ),
+  probeCredentials: (probe: CredentialHelperProbe, options: PlatformFacadeOptions = {}) =>
+    executeLegacy(
+      Effect.flatMap(WorktreeGit, (git) => git.probeCredentials(probe)),
+      options
+    ),
+};
+
+/** Promise catches must not turn a transport or unresolved release into a fallback. */
+export function rethrowWorktreeGitInfrastructureFailure(error: unknown): void {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    if (
+      current instanceof WorktreeGitExecutionFailed ||
+      current instanceof ProcessCleanupFailed ||
+      current instanceof ProcessReleaseFailed ||
+      current instanceof FileLockCleanupFailed ||
+      current instanceof LockReleaseFailed ||
+      current instanceof LockOwnershipLost
+    )
+      throw error;
+    current = (current as { cause?: unknown }).cause;
+  }
+}

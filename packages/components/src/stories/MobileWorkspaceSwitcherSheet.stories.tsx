@@ -6,12 +6,13 @@ import {
   MobileWorkspaceSwitcherSheet,
   type MobileWorkspaceSwitcherWorkspace,
 } from '@/components/mobile/mobile-workspace-switcher-sheet';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const workspaces: MobileWorkspaceSwitcherWorkspace[] = [
   { id: 'lody', name: 'Lody', isActive: true },
   { id: 'loro-dev', name: 'loro-dev', avatarUrl: 'https://github.com/loro-dev.png?size=80' },
   { id: 'personal', name: '个人 / zx' },
+  { id: 'cipher', name: 'Cipher Lab', encrypted: true },
   { id: 'demo', name: 'Demo workspace' },
 ];
 

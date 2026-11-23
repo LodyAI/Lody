@@ -1,9 +1,18 @@
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
-import { applyTextRewrites, type MessageTextSpan } from '@lody/shared';
+import {
+  MessageRowView,
+  SessionChatStreamView,
+  type ChatStreamItem,
+} from '@/components/ai-gui/view';
+import { applyTextRewrites, type MessageTextSpan, type SessionId } from '@lody/shared';
+import { SettingsStoryProviders } from './settings-story-shell';
 import { cn } from '@/lib/utils';
-import { userTextCollapsedHeight } from '@/components/ai-gui/conversation-font-size-classes';
+import {
+  conversationReadingFontSizeStyle,
+  userTextCollapsedStyle,
+} from '@/components/ai-gui/conversation-font-size-classes';
 import { getUserTextRenderSlice } from '@/components/ai-gui/message-copy';
 
 /**
@@ -58,13 +67,12 @@ const SENT = applyTextRewrites(COMPOSER_TEXT, [
   },
   {
     ...at('@session:crdt-metadata-cleanup'),
-    replacement: 'use lody mcp to query session[id: 9f2c-4a11] history',
+    replacement: '[@CRDT metadata cleanup](lody://session/9f2c-4a11?workspace=ws_demo)',
     span: { kind: 'session', label: 'CRDT metadata cleanup', target: '9f2c-4a11' },
   },
   {
     ...at('@Code-Reviewer'),
-    replacement:
-      'use lody mcp to create a session with agent role[id: role-1, name: Code Reviewer]',
+    replacement: '[Agent Role: Code Reviewer (agentRoleId: role-1)]',
     // An Agent Role freezes its emoji into the span, so the bubble paints the
     // same mark the composer did without reading the catalog.
     span: { kind: 'agent_role', label: 'Code-Reviewer', target: 'role-1', mark: '🔍' },
@@ -76,12 +84,17 @@ function Bubble({
   text,
   spans,
   collapsed = false,
+  className,
+  fontSize = 14,
 }: {
   title: string;
   text: string;
   spans?: MessageTextSpan[];
   /** Runs the production collapse: its real slice helper and its real height. */
   collapsed?: boolean;
+  /** Narrows the column, the way a phone or a split pane does. */
+  className?: string;
+  fontSize?: number;
 }) {
   // `getUserTextRenderSlice` is what production truncates with, so the story
   // sees what production sees. Re-implementing the cut here is how the pasted
@@ -89,15 +102,18 @@ function Bubble({
   // never exercised the character budget that dropped the span.
   const slice = collapsed ? getUserTextRenderSlice(text, spans) : undefined;
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div className={cn('flex flex-col items-end gap-1.5', className)}>
       <div className="font-medium text-muted-foreground text-xs">{title}</div>
-      <div className="min-w-0 max-w-full rounded-2xl border border-foreground/[0.08] bg-foreground/[0.05] px-4 py-2.5">
+      <div className="min-w-0 max-w-full rounded-2xl bg-foreground/[0.05] px-4 py-2.5">
         <div
           className={cn(
-            'min-w-0 max-w-full whitespace-pre-wrap text-sm [overflow-wrap:anywhere]',
+            'min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]',
             collapsed && 'overflow-hidden'
           )}
-          style={collapsed ? { maxHeight: userTextCollapsedHeight(14) } : undefined}
+          style={{
+            ...conversationReadingFontSizeStyle(fontSize),
+            ...(collapsed ? userTextCollapsedStyle(fontSize) : {}),
+          }}
         >
           <MessageTextWithChips text={slice?.text ?? text} spans={slice ? slice.spans : spans} />
         </div>
@@ -107,7 +123,7 @@ function Bubble({
 }
 
 /**
- * Long enough that `UserPlainTextBlock` collapses it under its fixed
+ * Long enough that `UserPlainTextBlock` collapses it under its
  * `maxHeight`. That height is a whole number of line boxes, so anything that
  * makes one line taller than the rest shows up here as a half-clipped row —
  * which no short fixture can reveal.
@@ -128,6 +144,28 @@ const LONG = applyTextRewrites(
   ]
 );
 
+/**
+ * One path longer than any bubble it can be shown in.
+ *
+ * A chip that cannot break would pin this to a single line: the bubble grows to
+ * its width cap for the sake of one token, and in a narrow column the label
+ * loses its tail — the file NAME — to the clip. So this fixture is rendered in a
+ * column too narrow to hold it, where wrapping is the only correct outcome.
+ */
+const LONG_PATH_SOURCE =
+  'Look at @packages/components/scripts/generate-chat-workspace-geometry-report.mjs and the design around it';
+const LONG_PATH = applyTextRewrites(LONG_PATH_SOURCE, [
+  {
+    start: LONG_PATH_SOURCE.indexOf('@packages/'),
+    end: LONG_PATH_SOURCE.indexOf('.mjs') + '.mjs'.length,
+    span: {
+      kind: 'file',
+      label: '@packages/components/scripts/generate-chat-workspace-geometry-report.mjs',
+      target: 'packages/components/scripts/generate-chat-workspace-geometry-report.mjs',
+    },
+  },
+]);
+
 function Board({ withSpans }: { withSpans: boolean }) {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-8 bg-background p-8">
@@ -141,6 +179,12 @@ function Board({ withSpans }: { withSpans: boolean }) {
         text={LONG.text}
         spans={withSpans ? LONG.spans : undefined}
         collapsed
+      />
+      <Bubble
+        title="A path wider than the column"
+        text={LONG_PATH.text}
+        spans={withSpans ? LONG_PATH.spans : undefined}
+        className="max-w-[20rem] self-end"
       />
     </div>
   );
@@ -164,4 +208,134 @@ export const WithSpans: Story = { args: { withSpans: true } };
 export const WithSpansDark: Story = {
   args: { withSpans: true },
   globals: { theme: 'dark' },
+};
+
+/** Chinese prose and a paste chip must share a baseline at every text size. */
+export const PastedTextAlignment: Story = {
+  args: { withSpans: true },
+  render: () => {
+    const prefix = '请分析这段示例日志，并说明处理步骤 ';
+    const pasted = applyTextRewrites(`${prefix}[Pasted]`, [
+      {
+        start: prefix.length,
+        end: prefix.length + '[Pasted]'.length,
+        replacement: PASTED_BLOB,
+        span: {
+          kind: 'pasted_text',
+          label: `Pasted ${PASTED_BLOB.length.toLocaleString('en-US')} chars`,
+        },
+      },
+    ]);
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col gap-8 bg-background p-8">
+        {[12, 14, 18].map((fontSize) => (
+          <Bubble
+            key={fontSize}
+            title={`${fontSize}px`}
+            text={pasted.text}
+            spans={pasted.spans}
+            fontSize={fontSize}
+          />
+        ))}
+        <Bubble
+          title="Narrow column"
+          text={pasted.text}
+          spans={pasted.spans}
+          className="max-w-[16rem] self-end"
+        />
+      </div>
+    );
+  },
+};
+
+export const PastedTextAlignmentDark: Story = {
+  ...PastedTextAlignment,
+  globals: { theme: 'dark' },
+};
+
+const rowsSessionId = 'message-text-chips-rows' as SessionId;
+const MIXED_SOURCE =
+  '先看 @src/ui/mention/mention-highlighter.tsx 里 `getComposerMentionChip()` 的实现，再对比 #482 ✅\n\n' +
+  'Then run $review-diff and summarise for @session:crdt-metadata-cleanup — 长中文段落和 English words 混排，'.repeat(
+    4
+  ) +
+  'https://example.com/a/very/long/url/' +
+  'segment'.repeat(30);
+const MIXED = applyTextRewrites(
+  MIXED_SOURCE,
+  (
+    [
+      [
+        '@src/ui/mention/mention-highlighter.tsx',
+        { kind: 'file', target: 'mention-highlighter.tsx' },
+      ],
+      ['#482', { kind: 'issue', target: '482' }],
+      ['$review-diff', { kind: 'skill', target: 'review-diff' }],
+      ['@session:crdt-metadata-cleanup', { kind: 'session', target: '9f2c-4a11' }],
+    ] as const
+  ).map(([token, span]) => {
+    const start = MIXED_SOURCE.indexOf(token);
+    return { start, end: start + token.length, span: { ...span, label: token } };
+  })
+);
+
+/** Sent user rows as the conversation renders them, one per bubble shape. */
+const SENT_ROWS: ChatStreamItem[] = (
+  [
+    { text: '好的' },
+    { text: SENT.text, spans: SENT.spans },
+    {
+      text: '@src/ui/mention/mention-highlighter.tsx',
+      spans: [
+        {
+          start: 0,
+          end: 39,
+          kind: 'file',
+          label: '@src/ui/mention/mention-highlighter.tsx',
+          target: 'a.tsx',
+        },
+      ],
+    },
+    { text: LONG.text, spans: LONG.spans },
+    { text: LONG_PATH.text, spans: LONG_PATH.spans },
+    { text: 'A long steering message that wraps across several lines. '.repeat(14) },
+    { text: '一条很长的中文引导消息，用来检查气泡在不同宽度下的位置。'.repeat(10) },
+    { text: `https://example.com/${'unbreakable'.repeat(40)}` },
+    { text: MIXED.text, spans: MIXED.spans },
+  ] satisfies { text: string; spans?: MessageTextSpan[] }[]
+).map((item, index) => ({
+  type: 'message',
+  sessionId: rowsSessionId,
+  turnIndex: index,
+  message: {
+    id: `layout-user-${index}`,
+    role: 'user',
+    timestamp: '2026-11-01T00:00:00Z',
+    items: [{ type: 'text', ...item }],
+  },
+}));
+
+/**
+ * The same chips inside real conversation rows: every bubble must hug the
+ * avatar's side of its column, at any column width, without touching the avatar.
+ */
+export const SentRows: Story = {
+  args: { withSpans: true },
+  render: () => (
+    <SettingsStoryProviders>
+      <div className="flex h-dvh flex-col bg-background">
+        <SessionChatStreamView
+          sessionId={rowsSessionId}
+          items={SENT_ROWS}
+          renderMessageRow={({ message, sessionId: id }) => (
+            <MessageRowView
+              message={message}
+              sessionId={id}
+              user={{ name: 'Story User', email: 'story@example.com' }}
+            />
+          )}
+        />
+      </div>
+    </SettingsStoryProviders>
+  ),
 };

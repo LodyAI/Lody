@@ -4,7 +4,7 @@ import type { OpenSourceAttributionBundle } from './open-source-attributions';
 // Do not edit manually.
 export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-05T03:20:57.725Z",
+  "generatedAt": "2026-09-04T04:51:01.134Z",
   "entries": [
     {
       "id": "bundled-theme-ayu",
@@ -149,6 +149,34 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "noticePath": "packages/components/src/lib/vscode-theme/bundled/themes/vesper/LICENSE.md"
     },
     {
+      "id": "vendored-virtua",
+      "kind": "vendored",
+      "scope": "vendored-source",
+      "name": "Virtua",
+      "license": "MIT",
+      "homepage": "https://github.com/inokawa/virtua/tree/0.52.7",
+      "author": "inokawa",
+      "description": "Keyed list layout from Virtua, adapted for the conversation scroll engine (packages/components/src/lib/conversation-scroll/keyed-layout).",
+      "assets": [
+        "Virtua list layout and size cache"
+      ],
+      "noticePath": "packages/components/src/lib/conversation-scroll/keyed-layout/LICENSE"
+    },
+    {
+      "id": "vendored-vscode-fuzzy-scorer",
+      "kind": "vendored",
+      "scope": "vendored-source",
+      "name": "Visual Studio Code fuzzy scorer",
+      "license": "MIT",
+      "homepage": "https://github.com/microsoft/vscode/blob/a92c2f9316d5454e35bb4c2958fdc0f23bc87d5d/src/vs/base/common/fuzzyScorer.ts",
+      "author": "Microsoft Corporation",
+      "description": "Vendored fuzzy scoring algorithm used for mention candidate matching.",
+      "assets": [
+        "Fuzzy scorer"
+      ],
+      "noticePath": "packages/components/src/components/mentions/vscode-fuzzy-score.LICENSE.txt"
+    },
+    {
       "id": "bundled-theme-vitesse",
       "kind": "vendored",
       "scope": "bundled-theme",
@@ -188,6 +216,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "noticePath": "packages/components/src/lib/vscode-theme/bundled/themes/vscode-defaults/LICENSE.txt"
     },
     {
+      "id": "vendored-icons-vscode-symbols",
+      "kind": "vendored",
+      "scope": "vendored-icon-set",
+      "name": "vscode-symbols",
+      "license": "MIT",
+      "homepage": "https://github.com/miguelsolorio/vscode-symbols",
+      "author": "Miguel Solorio",
+      "description": "Vendored file and folder icons used across Lody file views.",
+      "assets": [
+        "File icons",
+        "Folder icons"
+      ],
+      "noticePath": "packages/components/src/components/icons/file-icons/LICENSE"
+    },
+    {
       "id": "pkg-emojibase-data-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -211,21 +254,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "versions": [
         "0.3.0"
       ]
-    },
-    {
-      "id": "vendored-icons-vscode-symbols",
-      "kind": "vendored",
-      "scope": "vendored-icon-set",
-      "name": "vscode-symbols",
-      "license": "MIT",
-      "homepage": "https://github.com/miguelsolorio/vscode-symbols",
-      "author": "Miguel Solorio",
-      "description": "Vendored file and folder icons used across Lody file views.",
-      "assets": [
-        "File icons",
-        "Folder icons"
-      ],
-      "noticePath": "packages/components/src/components/icons/file-icons/LICENSE"
     },
     {
       "id": "pkg-agentclientprotocol-sdk-apache-2-0",
@@ -2260,17 +2288,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-checkbox-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-checkbox",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.3.3"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-collapsible-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -2409,17 +2426,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-label-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-label",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "2.1.8"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-menu-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -2428,17 +2434,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://radix-ui.com/primitives",
       "versions": [
         "2.1.16"
-      ]
-    },
-    {
-      "id": "pkg-radix-ui-react-menubar-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-menubar",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.1.16"
       ]
     },
     {
@@ -2499,17 +2494,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-radio-group-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-radio-group",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.3.8"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-roving-focus-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -2565,17 +2549,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
         "1.2.3",
         "1.2.4",
         "1.3.0"
-      ]
-    },
-    {
-      "id": "pkg-radix-ui-react-switch-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-switch",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.2.6"
       ]
     },
     {
@@ -6719,19 +6692,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Implementation of Function.prototype.bind",
       "versions": [
         "1.1.2"
-      ]
-    },
-    {
-      "id": "pkg-fuse-js-apache-2-0",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "fuse.js",
-      "license": "Apache-2.0",
-      "homepage": "http://fusejs.io",
-      "author": "Kiro Risk",
-      "description": "Lightweight fuzzy-search",
-      "versions": [
-        "7.1.0"
       ]
     },
     {

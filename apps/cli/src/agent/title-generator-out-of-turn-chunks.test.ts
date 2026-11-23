@@ -1,0 +1,529 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AcpSessionNotification } from '@lody/shared';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
+import os from 'node:os';
+
+import type { Logger } from '@/utils/logger';
+
+const mocks = vi.hoisted(() => ({
+  startLocalAcpAgent: vi.fn(),
+  shutdownLocalAcpAgent: vi.fn(
+    async (_options: import('./acp-runner').ShutdownLocalAcpAgentOptions) => {}
+  ),
+}));
+
+vi.mock('./acp-runner', () => ({
+  startLocalAcpAgent: mocks.startLocalAcpAgent,
+  shutdownLocalAcpAgent: mocks.shutdownLocalAcpAgent,
+}));
+
+import { generateTitleIsolated } from './title-generator';
+
+const SESSION_ID = 'acp-session-1';
+/** Shape of pi-acp 0.0.33's prelude: version banner plus the skills listing. */
+const BANNER =
+  'pi v0.84.3\n---\n## Skills\n- /home/example/.pi/agent/skills/demo/SKILL.md\n- /home/example/.agents/skills/other/SKILL.md\n';
+const TITLE = 'Refactor the session title generator';
+
+/**
+ * pi-acp always advertises a `thought_level` select, so the title agent always has a
+ * config option to apply and therefore always makes a `session/set_config_option`
+ * round trip before prompting. That round trip is what puts the adapter's prelude in
+ * the buffer ahead of the prompt, so the fixture carries enough of that option for the
+ * title agent to pick the same value it picks in production ('minimal'). pi-acp offers
+ * six thought levels; three are enough to fix the choice.
+ */
+const PI_CONFIG_OPTIONS = [
+  {
+    id: 'thought_level',
+    name: 'Thought level',
+    type: 'select' as const,
+    category: 'thought_level' as const,
+    currentValue: 'medium',
+    options: [
+      { value: 'off', name: 'Off' },
+      { value: 'minimal', name: 'Minimal' },
+      { value: 'medium', name: 'Medium' },
+    ],
+  },
+];
+
+const createSilentLogger = (): Logger =>
+  ({
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    success: () => {},
+    debug: () => {},
+    trace: () => {},
+    setLevel: () => {},
+    child: () => createSilentLogger(),
+    close: async () => {},
+  }) as unknown as Logger;
+
+/** An untyped agent_message_chunk: what an adapter without Lody phase metadata sends. */
+const agentChunk = (text: string): AcpSessionNotification =>
+  ({
+    sessionId: SESSION_ID,
+    update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+  }) as AcpSessionNotification;
+
+type PreludeDelivery = 'during-config-round-trip' | 'before-startup-resolves' | 'never';
+
+const runTitleGeneration = async (
+  delivery: PreludeDelivery
+): Promise<{ title: string | null; preludeArrivedBeforePrompt: boolean }> => {
+  let preludeArrived = false;
+  let preludeArrivedBeforePrompt = false;
+
+  mocks.startLocalAcpAgent.mockImplementation(async (options: Record<string, never>) => {
+    const onUpdateMessage = options.onUpdateMessage as (msg: AcpSessionNotification) => void;
+    const deliverPrelude = () => {
+      preludeArrived = true;
+      onUpdateMessage(agentChunk(BANNER));
+    };
+
+    if (delivery === 'before-startup-resolves') deliverPrelude();
+
+    return {
+      agentProcess: {} as never,
+      acpSessionId: SESSION_ID,
+      client: {
+        setSessionConfigOption: vi.fn(async () => {
+          // pi-acp schedules the prelude with setTimeout(0) during session/new, so it is
+          // on the wire long before this round trip -- itself several pipe RPCs to the pi
+          // child -- can answer.
+          if (delivery === 'during-config-round-trip') deliverPrelude();
+          return undefined;
+        }),
+        prompt: vi.fn(async () => {
+          preludeArrivedBeforePrompt = preludeArrived;
+          onUpdateMessage(agentChunk(TITLE));
+          return { stopReason: 'end_turn' };
+        }),
+      } as never,
+      sessionResponse: { sessionId: SESSION_ID, configOptions: PI_CONFIG_OPTIONS },
+    };
+  });
+
+  const title = await generateTitleIsolated({
+    cliType: 'registry',
+    agentType: 'pi-acp',
+    taskPrompt: 'clean up how session titles are generated',
+    logger: createSilentLogger(),
+  });
+
+  return { title, preludeArrivedBeforePrompt };
+};
+
+describe('title generation ignores adapter output emitted outside the title turn', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('discards a prelude delivered while the title config round trip is in flight', async () => {
+    const result = await runTitleGeneration('during-config-round-trip');
+
+    // Pins the delivery window the reset depends on: the prelude is in the buffer
+    // before the prompt is sent, because applying pi-acp's thought_level option is a
+    // real round trip. Remove that round trip and this flag goes false; move the reset
+    // above it and the title assertion fails instead. Either mutation turns this test
+    // red, and either one is a production regression.
+    expect(result.preludeArrivedBeforePrompt).toBe(true);
+    expect(result.title).toBe(TITLE);
+  });
+
+  it('discards a prelude already buffered when the agent finishes starting up', async () => {
+    const result = await runTitleGeneration('before-startup-resolves');
+
+    expect(result.preludeArrivedBeforePrompt).toBe(true);
+    expect(result.title).toBe(TITLE);
+  });
+});
+
+describe('builtin Codex isolated title configuration', () => {
+  it.each([
+    { configured: undefined, expected: 'gpt-5.6-luna low agent-full-access' },
+    {
+      configured: { model: 'gpt-5.6-sol', reasoning_effort: 'high', mode: 'read-only' },
+      expected: 'gpt-5.6-sol high read-only',
+    },
+  ])('generates with $expected', async ({ configured, expected }) => {
+    const active: Record<string, string | boolean> = {};
+    const configOptions = [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select' as const,
+        category: 'model' as const,
+        currentValue: 'gpt-5.6-sol',
+        options: ['gpt-5.6-luna', 'gpt-5.6-sol'].map((value) => ({ value, name: value })),
+      },
+      {
+        id: 'mode',
+        name: 'Mode',
+        type: 'select' as const,
+        category: 'mode' as const,
+        currentValue: 'read-only',
+        options: ['read-only', 'agent-full-access'].map((value) => ({ value, name: value })),
+      },
+      {
+        id: 'reasoning_effort',
+        name: 'Reasoning',
+        type: 'select' as const,
+        category: 'thought_level' as const,
+        currentValue: 'high',
+        options: ['low', 'high'].map((value) => ({ value, name: value })),
+      },
+    ];
+    mocks.startLocalAcpAgent.mockImplementation(
+      async (options: { onUpdateMessage: (msg: AcpSessionNotification) => void }) => ({
+        agentProcess: {} as never,
+        acpSessionId: SESSION_ID,
+        sessionResponse: { sessionId: SESSION_ID, configOptions },
+        client: {
+          setSessionConfigOption: async (
+            _sessionId: string,
+            key: string,
+            value: string | boolean
+          ) => {
+            active[key] = value;
+            return configOptions;
+          },
+          prompt: async () => {
+            const notification = agentChunk(
+              `${active.model} ${active.reasoning_effort} ${active.mode}`
+            );
+            notification.update._meta = { lody: { messagePhase: 'final_answer' } };
+            options.onUpdateMessage(notification);
+            return { stopReason: 'end_turn' };
+          },
+        },
+      })
+    );
+    const title = await generateTitleIsolated({
+      cliType: 'builtin',
+      agentType: 'codex',
+      taskPrompt: 'Fix session titles',
+      logger: createSilentLogger(),
+      titleConfig: configured ? { configOptionValues: configured } : undefined,
+    });
+    expect(title).toBe(expected);
+  });
+});
+
+describe('builtin Codex title deadline', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    { platform: 'linux', blocked: 'prompt' },
+    { platform: 'win32', blocked: 'prompt' },
+    { platform: 'win32', blocked: 'config' },
+  ] as const)(
+    'falls back and releases the $platform process tree when $blocked does not return',
+    async ({ platform, blocked }) => {
+      const { shutdownLocalAcpAgent } =
+        await vi.importActual<typeof import('./acp-runner')>('./acp-runner');
+      const table = new FakeProcessTable(platform);
+      const child = table.api.spawn('codex-acp', [], { detached: true });
+      const pid = child.pid ?? -1;
+      const descendant = table.addDescendant(pid);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let promptStarted = false;
+      let promptSignal: AbortSignal | undefined;
+      const configOptions = [
+        {
+          id: 'model',
+          name: 'Model',
+          type: 'select' as const,
+          category: 'model' as const,
+          currentValue: 'title-model',
+          options: [{ value: 'title-model', name: 'Title model' }],
+        },
+      ];
+      mocks.startLocalAcpAgent.mockImplementationOnce(async () => {
+        // Start the fake clock after the real git setup and before the title deadline.
+        vi.useFakeTimers();
+        return {
+          agentProcess: child,
+          acpSessionId: SESSION_ID,
+          sessionResponse: { sessionId: SESSION_ID, configOptions },
+          client: {
+            setSessionConfigOption: async () => {
+              if (blocked === 'config') {
+                entered.resolve();
+                await release.promise;
+              }
+              return configOptions;
+            },
+            prompt: async (_id: string, _prompt: unknown, options: { signal: AbortSignal }) => {
+              promptStarted = true;
+              promptSignal = options.signal;
+              entered.resolve();
+              await release.promise;
+              return { stopReason: 'end_turn' };
+            },
+            closeSession: async () => true,
+          },
+        };
+      });
+      mocks.shutdownLocalAcpAgent.mockImplementationOnce(async (options) => {
+        await shutdownLocalAcpAgent({ ...options, nodeProcess: table.api });
+      });
+
+      const result = generateTitleIsolated({
+        cliType: 'builtin',
+        agentType: 'codex',
+        taskPrompt: 'Original task',
+        titleConfig: { configOptionValues: { model: 'title-model' } },
+        logger: createSilentLogger(),
+      });
+      await entered.promise;
+      expect(table.isAlive(pid)).toBe(true);
+      expect(table.isAlive(descendant)).toBe(true);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(await result).toBe('Original task');
+      expect(table.isAlive(pid)).toBe(false);
+      expect(table.isAlive(descendant)).toBe(false);
+      if (blocked === 'prompt') expect(promptSignal?.aborted).toBe(true);
+
+      // A late configuration response cannot dispatch a prompt on a retired process.
+      release.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      if (blocked === 'config') expect(promptStarted).toBe(false);
+    }
+  );
+
+  it('ends a real isolated process when its title prompt never returns', async () => {
+    const { spawnAcpProcess, shutdownLocalAcpAgent } =
+      await vi.importActual<typeof import('./acp-runner')>('./acp-runner');
+    const child = spawnAcpProcess({
+      cliType: 'custom',
+      agentType: 'synthetic',
+      workdir: os.tmpdir(),
+      env: process.env,
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write("ready"); process.stdin.resume()'],
+    });
+    const ready = new Promise<void>((resolve, reject) => {
+      child.stdout?.once('data', () => resolve());
+      child.once('error', reject);
+    });
+    const entered = Promise.withResolvers<void>();
+    const deadline = Promise.withResolvers<() => void>();
+    const realSetTimeout = globalThis.setTimeout;
+    const timerSpy = vi
+      .spyOn(globalThis, 'setTimeout')
+      .mockImplementation((handler, delay, ...args) => {
+        if (delay === 5 * 60_000 && typeof handler === 'function') {
+          deadline.resolve(() => handler(...args));
+          return realSetTimeout(() => {}, delay).unref();
+        }
+        return realSetTimeout(handler, delay, ...args);
+      });
+    const configOptions = [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select' as const,
+        category: 'model' as const,
+        currentValue: 'title-model',
+        options: [{ value: 'title-model', name: 'Title model' }],
+      },
+    ];
+    mocks.startLocalAcpAgent.mockImplementationOnce(async () => {
+      await ready;
+      return {
+        agentProcess: child,
+        acpSessionId: SESSION_ID,
+        sessionResponse: { sessionId: SESSION_ID, configOptions },
+        client: {
+          setSessionConfigOption: async () => configOptions,
+          prompt: async () => {
+            entered.resolve();
+            return await new Promise(() => {});
+          },
+          closeSession: async () => true,
+        },
+      };
+    });
+    mocks.shutdownLocalAcpAgent.mockImplementationOnce(shutdownLocalAcpAgent);
+
+    try {
+      const result = generateTitleIsolated({
+        cliType: 'builtin',
+        agentType: 'codex',
+        taskPrompt: 'Original task',
+        titleConfig: { configOptionValues: { model: 'title-model' } },
+        logger: createSilentLogger(),
+      });
+      await entered.promise;
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+      (await deadline.promise)();
+      expect(await result).toBe('Original task');
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    } finally {
+      timerSpy.mockRestore();
+      if (child.exitCode === null && child.signalCode === null) {
+        await shutdownLocalAcpAgent({
+          agentProcess: child,
+          logger: createSilentLogger(),
+          sessionLabel: 'title-deadline-test',
+          exitTimeoutMs: 3000,
+        });
+      }
+    }
+  }, 15_000);
+
+  it('does not apply the Codex deadline to another Provider', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let finished = false;
+    mocks.startLocalAcpAgent.mockImplementationOnce(
+      async (options: { onUpdateMessage: (message: AcpSessionNotification) => void }) => {
+        vi.useFakeTimers();
+        return {
+          agentProcess: {} as never,
+          acpSessionId: SESSION_ID,
+          sessionResponse: { sessionId: SESSION_ID, configOptions: [] },
+          client: {
+            prompt: async () => {
+              entered.resolve();
+              await release.promise;
+              options.onUpdateMessage(agentChunk('Provider title'));
+              return { stopReason: 'end_turn' };
+            },
+          },
+        };
+      }
+    );
+    const result = generateTitleIsolated({
+      cliType: 'registry',
+      agentType: 'pi-acp',
+      taskPrompt: 'Original task',
+      logger: createSilentLogger(),
+    }).finally(() => {
+      finished = true;
+    });
+    await entered.promise;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(finished).toBe(false);
+    release.resolve();
+    expect(await result).toBe('Provider title');
+  });
+});
+
+describe('configured Codex title models without message phases', () => {
+  it.each([
+    {
+      name: 'unphased answer',
+      chunks: [
+        ['Custom ', undefined],
+        ['endpoint title', undefined],
+      ],
+      expected: 'Custom endpoint title',
+    },
+    {
+      name: 'explicit commentary before unphased answer',
+      chunks: [
+        ['Working...', 'commentary'],
+        ['Custom endpoint title', undefined],
+      ],
+      expected: 'Custom endpoint title',
+    },
+    {
+      name: 'explicit final answer wins over unphased text',
+      chunks: [
+        ['Interim text', undefined],
+        ['Final ', 'final_answer'],
+        ['title', 'final_answer'],
+        ['Trailing text', undefined],
+      ],
+      expected: 'Final title',
+    },
+    {
+      name: 'fragmented error envelope',
+      chunks: [
+        ['{"type":"error",', undefined],
+        ['"error":"unavailable"}', undefined],
+      ],
+      expected: 'Original task',
+    },
+    {
+      name: 'HTTP error',
+      chunks: [['HTTP 400 Bad Request', undefined]],
+      expected: 'Original task',
+    },
+    {
+      name: 'prompt failure after partial output',
+      chunks: [['Partial title', undefined]],
+      expected: 'Original task',
+      fail: true,
+    },
+  ])('$name', async ({ chunks, expected, fail }) => {
+    const configOptions = [
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select' as const,
+        category: 'model' as const,
+        currentValue: 'default-model',
+        options: ['default-model', 'custom-title-model'].map((value) => ({ value, name: value })),
+      },
+    ];
+    let activeModel = 'default-model';
+    mocks.startLocalAcpAgent.mockImplementation(
+      async (options: {
+        env: Record<string, string>;
+        onUpdateMessage: (msg: AcpSessionNotification) => void;
+      }) => {
+        const send = (text: string, phase?: string) => {
+          const notification = agentChunk(text);
+          if (phase) notification.update._meta = { lody: { messagePhase: phase } };
+          options.onUpdateMessage(notification);
+        };
+        send('Startup banner');
+        return {
+          agentProcess: {} as never,
+          acpSessionId: SESSION_ID,
+          sessionResponse: { sessionId: SESSION_ID, configOptions },
+          client: {
+            setSessionConfigOption: async (_session: string, _key: string, value: string) => {
+              activeModel = value;
+              send('Configuration banner');
+              return configOptions;
+            },
+            prompt: async () => {
+              // Fail at the boundary if the saved model or provider environment was lost.
+              if (
+                activeModel !== 'custom-title-model' ||
+                options.env.TEST_PROVIDER_KEY !== 'synthetic-key'
+              ) {
+                throw new Error('Provider configuration was not preserved');
+              }
+              for (const [text, phase] of chunks) send(text ?? '', phase);
+              if (fail) throw new Error('Synthetic provider failure');
+              return { stopReason: 'end_turn' };
+            },
+          },
+        };
+      }
+    );
+    expect(
+      await generateTitleIsolated({
+        cliType: 'builtin',
+        agentType: 'codex',
+        taskPrompt: 'Original task',
+        logger: createSilentLogger(),
+        env: { TEST_PROVIDER_KEY: 'synthetic-key' },
+        titleConfig: { configOptionValues: { model: 'custom-title-model' } },
+      })
+    ).toBe(expected);
+  });
+});

@@ -8,7 +8,7 @@ import {
   type PreviewVisualComment,
 } from '@lody/shared/preview-comment-types';
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const overlayDevices = [
   { id: 'desktop', label: 'Desktop', width: 960, height: 620 },
@@ -254,15 +254,15 @@ function VisualAnnotationCommentsOverlayStory() {
             </div>
             <Button
               type="button"
-              size="sm"
-              variant="outline"
+              variant="secondary"
+              size="small"
               disabled={stagedCommentIds.length === 0}
               onClick={submitStagedComments}
             >
               <SendHorizontal className="h-3.5 w-3.5" />
               Submit staged
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={reset}>
+            <Button type="button" variant="secondary" size="small" onClick={reset}>
               <RefreshCw className="h-3.5 w-3.5" />
               Reset
             </Button>

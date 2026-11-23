@@ -6,7 +6,9 @@ import {
 import { ChevronDown, Plus, TerminalSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import { useSetAtom } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { cn } from '@/lib/utils';
@@ -36,15 +38,31 @@ type RememberedTerminalSessionState = {
   activeTerminalId: string | null;
 };
 
-// Chrome above the resizable body: the drag zone (h-1.5 = 6px) + the top tab
-// strip (h-8 = 32px). Added to `bodyHeight` for the floating card's height.
-const RESIZE_HANDLE_HEIGHT = 6;
+// The terminal tab strip's own canvas is already `bg-sidebar`, unlike
+// `SessionTabBar`/`TAB_PILL_*`, whose pill sits on the app's plain
+// `--background` canvas. Flat fill only, no border/shadow.
+const TERMINAL_TAB_ACTIVE_CLASS =
+  'bg-background text-tab-active-foreground dark:bg-muted-foreground/[0.16]';
+const TERMINAL_TAB_INACTIVE_CLASS =
+  'text-tab-inactive-foreground hover:bg-muted-foreground/[0.08] hover:text-tab-hover-foreground';
+
 const HEADER_HEIGHT = 32;
-const DOCK_CHROME_HEIGHT = RESIZE_HANDLE_HEIGHT + HEADER_HEIGHT;
-// The card floats with mt-1 (4px) + mb-2 (8px) around it, so the animated outer
-// wrapper is taller than the card by that much.
-const CARD_VERTICAL_MARGIN = 12;
-const DOCK_TOTAL_CHROME_HEIGHT = DOCK_CHROME_HEIGHT + CARD_VERTICAL_MARGIN;
+const DOCK_CHROME_HEIGHT = HEADER_HEIGHT + 1;
+
+const styles = stylex.create({
+  frame: {
+    position: 'relative',
+  },
+  resizeHandle: {
+    position: 'absolute',
+    top: 0,
+    insetInline: 0,
+    height: space[1.5],
+    zIndex: 1,
+    cursor: 'ns-resize',
+    touchAction: 'none',
+  },
+});
 
 const MIN_BODY_HEIGHT = 140;
 const MAX_BODY_HEIGHT = 680;
@@ -168,7 +186,7 @@ export function TerminalDock({
 
   // Publish whether a terminal can be created right now so the header icon can
   // disable itself while the local daemon is still starting (canCreateTerminal
-  // is false until it reaches running/degraded).
+  // is false until this workspace's local runtime and session are ready).
   const setDockCanCreate = useSetAtom(terminalDockCanCreateAtom);
   useEffect(() => {
     setDockCanCreate(canCreateTerminal);
@@ -470,13 +488,15 @@ export function TerminalDock({
         !isResizing && 'transition-[height] duration-200 ease-out',
         className
       )}
-      style={{ height: isOpen ? bodyHeight + DOCK_TOTAL_CHROME_HEIGHT : 0 }}
+      style={{ height: isOpen ? bodyHeight + DOCK_CHROME_HEIGHT : 0 }}
       aria-hidden={!isOpen}
     >
       {isOpen ? (
-        // Floating rounded card, mirroring the desktop side panel (sidebar) look.
         <div
-          className="mx-2 mb-2 mt-1 flex min-w-0 flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]"
+          className={cn(
+            'flex min-w-0 flex-col overflow-hidden border-t border-sidebar-border/80 bg-sidebar',
+            stylex.props(styles.frame).className
+          )}
           style={{ height: bodyHeight + DOCK_CHROME_HEIGHT }}
         >
           {/* Drag-to-resize zone at the very top edge (no visible handle bar). */}
@@ -484,7 +504,7 @@ export function TerminalDock({
             onPointerDown={onResizeDown}
             onPointerMove={onResizeMove}
             onPointerUp={onResizeUp}
-            className="h-1.5 flex-none cursor-ns-resize"
+            {...stylex.props(styles.resizeHandle)}
           />
 
           {/* Top tab strip: terminal tabs (+ new) fill the width left of the
@@ -497,15 +517,17 @@ export function TerminalDock({
                     return (
                       <div
                         key={term.terminalId}
-                        className="group flex h-full max-w-44 min-w-0 shrink-0 items-center gap-1"
+                        role="tab"
+                        aria-selected={isActive}
+                        className={cn(
+                          'group flex h-6 max-w-44 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 transition-colors',
+                          isActive ? TERMINAL_TAB_ACTIVE_CLASS : TERMINAL_TAB_INACTIVE_CLASS
+                        )}
                       >
                         <button
                           type="button"
                           onClick={() => selectTerminal(term.terminalId)}
-                          className={cn(
-                            'flex min-w-0 items-center gap-1 hover:text-foreground',
-                            isActive ? 'text-foreground' : ''
-                          )}
+                          className="flex min-w-0 items-center gap-1"
                         >
                           <TerminalSquare className="h-3 w-3 shrink-0 opacity-70" />
                           <span className="min-w-0 truncate">{term.title || 'shell'}</span>
@@ -514,7 +536,12 @@ export function TerminalDock({
                           type="button"
                           aria-label="Close terminal"
                           onClick={() => handleCloseTerminal(term.terminalId)}
-                          className="shrink-0 rounded-sm opacity-0 hover:text-foreground group-hover:opacity-100"
+                          className={cn(
+                            'shrink-0 rounded-sm p-0.5 transition-opacity',
+                            isActive
+                              ? 'opacity-70 hover:opacity-100'
+                              : 'opacity-0 group-hover:opacity-100'
+                          )}
                         >
                           <X className="h-2.5 w-2.5" />
                         </button>
@@ -571,7 +598,6 @@ export function TerminalDock({
                   });
                 }}
                 onTitleChange={updateActiveTitle}
-                className="px-2 py-1"
               />
             ) : (
               <div

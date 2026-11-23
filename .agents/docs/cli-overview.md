@@ -1,0 +1,209 @@
+# CLI build, runtime, and adapter provenance
+
+Background for `apps/cli`. Binding rules stay in [apps/cli/AGENTS.md](../../apps/cli/AGENTS.md)
+and the scoped files under it; this page explains why those rules exist and how the pieces fit
+together.
+
+Session/Task MCP tool contracts are owned by
+[src/mcp/AGENTS.md](../../apps/cli/src/mcp/AGENTS.md), including callers outside that
+directory. Cross-entry model validation, Session provenance, and feedback privacy
+remain in the CLI parent rules.
+
+MCP Session creation reuses CLI dispatch validation for explicit ACP modes and
+config options alongside semantic controls. `acp-run-config.ts` supplies shared
+discovery metadata; `commands/session.ts` resolves and validates the effective
+config before acceptance. Operation storage freezes that config for recovery.
+The [creation contract](../../specs/session-orchestration.md#session-creation-configuration)
+owns precedence and authorization; [the decision note](../notes/implemented/feature/2026-10-02-mcp-create-run-config.md)
+records the necessary conflict handling and deletion experiments.
+
+## Development build
+
+`pnpm dev` bundles with esbuild (`scripts/dev-build.mjs`, ~3s) into `dist-dev/`, then runs
+`node --enable-source-maps dist-dev/index.js`. `pnpm dev:build` builds only. There is no
+on-demand TypeScript-loader fallback, so development startup must run built JavaScript.
+
+The dev output layout must match production's — `index.js` plus flat sibling `claude-acp.js` /
+`codex-acp.js` / `*-worker.js` — because `agent/setting.ts`, the Tinypool pools
+(`file-index-scan-pool.ts`, `diff-line-count-pool.ts`), the direct `turn-diff-store-worker.ts`
+client, and `workspace-watch-coordinator.ts` all locate their child by FILENAME next to
+`import.meta.url`. Running directly from `src/` would leave only `.ts` siblings, so pools would
+fall back to the main thread (`reason=worker_missing`) and mandatory workers would be unavailable.
+`dev-build.mjs` asserts after each build that no worker-resolving module was hoisted into
+`chunks/`, because that reintroduces the same invisible fallback.
+
+Two dev-build choices are load-bearing:
+
+- npm packages stay external — that is what makes it fast and avoids inlining wasm — but they are
+  externalized by ABSOLUTE path. Bundling a workspace package's `.ts` source moves its imports
+  into this bundle, and pnpm's strict layout has no entry for that package's transitive deps under
+  `apps/cli/node_modules`.
+- `splitting: true` keeps `await import(...)` a real lazy boundary. `review-viewer.ts` statically
+  imports the generated `lody-code-review-viewer/manifest`, which does not exist until that
+  package is built; inlining it would make `lody --version` fail.
+
+The CLI entry loads the normal command registry for public invocations, retaining
+the existing command order, help and options. An exact first argument of
+`__internal` registers only the MCP helper commands, so each MCP process avoids
+loading the daemon and interactive command implementations. Both paths share the
+existing application runtime, environment setup and cleanup. Shared application
+chunks stay at the output root in development and production so worker and adapter
+lookups still resolve flat sibling files; dependency chunks may remain in `chunks/`.
+The [internal MCP loading decision](../notes/implemented/architecture/2026-10-30-internal-mcp-command-loading.md)
+records the measured scope and why process isolation is retained.
+
+The CLI's own `version` comes from `@/pkg` because each build composition aliases it to the
+manifest that actually gets published (`apps/cli/package.json` for both explicit cloud and
+default local builds). A
+relative `../package.json` import bakes the stale OSS version into the published bundle — that is
+what made `lody@0.82.1 --version` print `0.76.0`. The package `name` stays `lody` in every
+composition.
+
+## PR status reconciler
+
+`src/lib/pr-poller/` reconciles PR discovery/association, lifecycle, CI rollup, and merge/conflict
+state for this machine's sessions. It is the compensation path for a broken hosted GitHub webhook
+→ Streams fan-out. [PR observation](../../specs/local-github-pr-observation.md) defines
+summary publication independently of hosted webhook linkage: failed linkage remains
+retryable without hiding an authenticated exact-branch observation from the UI.
+
+`PrStatusPoller` is constructed in `LodyFleet.start()`; per-workspace handles
+(`pr-poller-workspace.ts`) are fact sources and write-back destinations only. All policy lives in
+pure modules (targets, priority, quota, selection, provider projection, write-back planning) and
+the scheduler is a thin orchestrator. Priority comes from `session-viewing` presence and
+`lastMessageAt` activity (high lane 20s, low status 5min, no-PR discovery 20min); there is no
+turn-end hook. Requests batch GraphQL per `(workspace, repo)` under a per-credential-scope point
+bucket, with a provider safety-floor freeze and 15min→2h repo cooldowns.
+
+Write-back plans against freshly read owner meta: `pullRequests` upserts by URL with the current
+PR as the LAST item (legacy fields stripped once), while CI and merge state live in
+`SessionMeta.pullRequestState` (`{s,m,t}`, ≤50B per entry; legacy `r` readiness is no longer
+written and is deleted on touch). Scheduling state — never PR status — is in
+`pr-poller-state.sqlite3` under the Lody data directory. `LODY_PR_POLL_DISABLED=1` is the kill switch and `LODY_PR_POLL_*`
+overrides live in `pr-poller-config.ts`. Module invariants: `src/lib/pr-poller/AGENTS.md`.
+
+## Builtin agents and adapter provenance
+
+Builtin Claude, Codex, and Grok use bundled adapters plus managed native runtimes; builtin Kimi
+launches its managed Node package directly. `src/agent/setting.ts` resolves those four through
+`src/agent/managed-agent-runtime.ts`.
+
+Builtin DeepSeek Harness is deliberately not a managed runtime: `src/agent/deepseek-harness-runtime.ts`
+consumes the pinned profile from the `packages/acp-extension-dsh` submodule, launches it through
+Lody's isolated npx cache, and loads the bundled `deepseek-acp.js` adapter. The extension owns the
+ACP model, reasoning-effort, and permission selectors while Harness continues to own model
+execution, sandbox enforcement, and one-shot approvals.
+
+Built-in provider auto-registration runs from `src/lib/lody.ts`. Provider configs live in the
+current machine Flock doc, so registration starts only after the Fleet's workspace subscription
+confirms remote identity/access and the remote bridge attaches.
+
+The adapter packages in `apps/cli/package.json` are public submodule dependencies, and adapter
+bugs or behaviors should be fixed in their package sources first:
+
+- `claude` → `packages/acp-extension-claude`, https://github.com/LodyAI/acp-extension-claude
+- `codex` → `packages/acp-extension-codex`, https://github.com/LodyAI/acp-extension-codex
+- shared contracts → `packages/acp-extension-core`, https://github.com/LodyAI/acp-extension-core
+- `deepseek` → `packages/acp-extension-dsh`, https://github.com/LodyAI/acp-extension-dsh
+
+When debugging Codex-side ACP behavior (tool_call update shapes, collaboration events, goal
+metadata, image generation, history recovery), check the workspace adapter source first. Managed
+runtime artifact pins and checksums live in `src/agent/managed-agent-runtime.ts`; artifact
+production and publication are external distribution responsibilities. Observed per-agent
+edit-evidence behavior and the ACP protocol reference are documented in context/acp-protocol.md
+and context/acp-agent-edit-evidence.md.
+
+Clean checkouts have no adapter `dist/` outputs, and existing checkouts may have stale outputs
+after a submodule update, which is why `prepare:acp-adapters` runs before both
+`scripts/dev-build.mjs` in the CLI `dev` script and Vite in the CLI `build` chain. The
+`src/claude-acp-entry.ts` and `src/codex-acp-entry.ts` entries import the adapters' package roots,
+whose runtime exports point at adapter `dist/`.
+
+`packages/acp-extension-core` is the exception: it builds its own `dist/` through its `prepare`
+script on every install, because `packages/shared` (and every other workspace consumer) imports
+its runtime export directly. `prepare:acp-adapters` therefore only compiles the four adapters.
+
+## Machine catalog freshness during session creation
+
+Machine Flock freshness reads are best-effort: a parsed local project, provider, or ACP
+capability can still satisfy a request after freshness fails. Missing cached capabilities
+alone do not block default-only create/chat. Only current explicit selections require
+catalog-dependent validation. Inherited modes, models, and options retain main's compatible
+filtering: keep usable values, drop unsupported values, and warn after an unconfirmed read.
+Never convert an inherited cache miss into a batch-wide error or a stuck accepted chat.
+
+Effort and Fast filtering/validation use the effective target model, not merely the probe's
+current model. Explicit scalar/raw/semantic model selections win; otherwise a compatible
+inherited model supplies context. This applies both before acceptance and on frozen replay.
+Explicit option maps replace inherited maps. Explicit scalar selectors also remove shadowed
+inherited category options, including adapter-specific option ids.
+Model-dependent skips never waive raw value types; custom Fast select values still use
+the advertised option validator.
+
+A missing explicit selection after an unconfirmed read becomes `SYNC_UNAVAILABLE`.
+Typed transport retryability is preserved, including explicit permanent failures;
+unknown causes are not promoted to retryable. Public diagnostics contain only the bounded
+requested selection id and, for batch items, the index/label, never option values, cached
+records, or raw transport errors. Cache versions remain refresh hints; runtime source
+applicability is checked separately.
+
+```text
+freshness attempt → local catalog read → existing validation
+  inherited incompatibility → filter/drop + warning → accept → materialize
+  default only / usable explicit values → resolve config → accept → materialize
+  explicit miss + retryable freshness failure → abort before any batch acceptance
+  explicit miss + permanent/unknown failure → fail that item; process valid siblings
+  invalid input / permission failure → existing permanent rejection
+```
+
+Accepted target configs preserve `inheritedDispatchConfig` provenance for only the effective
+mode/model/options actually supplied by inheritance. Replay filters that frozen snapshot,
+never mutable requester history, and never promotes it to current explicit input. Values
+changed by an explicit override do not inherit the snapshot's exemption. The older
+`inheritedBuiltinDefaultModeId` remains readable but is no longer emitted.
+
+The internal `builtinDefaultModeId` separately identifies a synthesized builtin fallback.
+Before a fixed UserTurn is authored it may be re-derived or omitted when new capabilities
+exclude it. Once authored, interrupted replay preserves only inherited values reachable
+from the frozen snapshot (or a synthesized builtin mode), including already-omitted fields.
+A matching already-authored inherited model also supplies the context for explicit effort
+validation before filtering can replace it with the probe model. Explicit choices still
+require validation; an unavailable or incompatible explicit control remains an error.
+The complete prepared-input identity check still rejects all unrelated changes. These
+provenance fields are not public MCP inputs and are not written into Session history.
+
+Transient catalog errors instruct callers to wait at least five seconds, reuse the exact
+request and Operation id, and stop after three total calls. This is bounded agent guidance,
+not an enforced counter or a change to the daemon recovery budget. An active Operation
+handle means recovery is already owned by the daemon; callers must not resubmit it.
+
+`syncMachineFlockDocsForRead` opts into strict freshness confirmation for Session create
+and chat validation, then continues from the local replica. For cloud-enabled managers
+this requires an attached, unchanged Streams generation and a successful Streams report.
+A resolved no-route or partial report is not confirmation; a genuinely local-only manager
+retains its authoritative local path. Daemon-hosted MCP reads, including create options,
+session list, and session status, do not start that request-scoped sync. They read the
+daemon replica. Create options return local rows when they can answer, and retryable
+`SYNC_UNAVAILABLE` when the baseline is not ready and the agent-config catalog is empty
+or the current or queried selection is absent. A ready baseline may return an empty
+catalog. Role creation and explicit fresh discovery keep their sync requirements. Ordinary
+Flock sync callers keep their existing best-effort report semantics. Route absence is
+application-level sync unavailability, not a fabricated Repo conflict.
+The [decision note](../notes/implemented/bug-fix/2026-10-10-machine-flock-cache-insufficient.md)
+records the fallback and regression coverage.
+
+PR association membership/order has one publisher: the reconciler. Turn completion
+may detect a PR and establish hosted linkage but does not write its own array.
+Lifecycle records are independent per URL/source; shared resolution applies GitHub
+revision ordering to UI, MCP, notifications and polling targets. The legacy array
+status is a compatibility projection. See the
+[observation contract](../../specs/local-github-pr-observation.md).
+
+## Compatibility window
+
+The daemon and desktop keep no compatibility code for clients or local state from
+before 2026-10-16: draft-preparation and Code Collab v1 requests are unsupported, and
+one-time readers for the send journal, PR poller JSON, pre-v1 managed-runtime metadata
+and unassociated quota reservations are gone. Shared Session document fields, shipped
+mobile writes and backend-dependent fallbacks remain. See the
+[compatibility cut decision](../notes/implemented/simplification/2026-11-16-drop-pre-october-compatibility.md).

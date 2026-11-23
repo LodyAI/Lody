@@ -32,11 +32,11 @@ const buildInfo: Record<string, string> = {
 
 renderBootFailure(rootElement, reconstructed, {
   buildInfo,
-  hint: 'Lody could not load the main window. Click Reload to try again, or Copy error and share it with the team.',
-  onReload: () => {
+  surface: 'recovery',
+  onReload: async () => {
     if (getIpcServices()) {
       try {
-        void getIpcServices()!.app.requestRendererReload()
+        await getIpcServices()!.app.requestRendererReload()
         return
       } catch (error) {
         console.warn('[Lody] requestRendererReload bridge threw', error)
@@ -44,9 +44,9 @@ renderBootFailure(rootElement, reconstructed, {
     }
     window.location.reload()
   },
-  onCopy: () => {
+  onCopy: async () => {
     try {
-      void getIpcServices()?.app.reportRendererFatalError({
+      await getIpcServices()?.app.reportRendererFatalError({
         scope: `recovery:${source}`,
         message,
         details,

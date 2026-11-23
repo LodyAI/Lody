@@ -1,30 +1,239 @@
 import {
+  getAcpConfigOptionsModelId,
+  type ACPSessionId,
+  type AcpConfigOptionSummary,
+  type AcpConfigOptionValue,
+  type AgentSessionDefaults,
   type AgentConfigCliType,
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
+import type { AuthMethod } from '@agentclientprotocol/sdk';
 import { shutdownLocalAcpAgent, startLocalAcpAgent } from '@/agent/acp-runner';
 import { scrubInheritedClaudeAuthEnv, shouldScrubClaudeAuthEnv } from '@/agent/claude-env-conflict';
+import { normalizeAgentProcessEnv } from '@/agent/setting';
 import type { ManagedRuntimeProgressCallback } from '@/agent/managed-agent-runtime';
 import { AcpAuthenticationRequiredError } from '@/agent/agent-client';
+import type { CodexProfileExecution } from './codex-profile-runtime';
+import { startCodexCredentialBroker } from './codex-credential-broker';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { probeBuiltinAuthentication } from '@/agent/acp-authentication';
 import {
   normalizeAcpSessionCapabilities,
+  normalizeConfigOptions,
   type AcpCapabilitiesResult,
 } from '@/agent/acp-capability-normalization';
+import type { AgentClient } from '@/agent/agent-client';
 
 export { normalizeConfigOptions } from '@/agent/acp-capability-normalization';
 export type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization';
 
 export type FetchAcpCapabilitiesOptions = {
+  agentConfigId?: string;
+  magpieGatewayUrl?: string;
+  codexProfile?: CodexProfileExecution;
+  verifyCodexCredential?: boolean;
   onManagedRuntimeProgress?: ManagedRuntimeProgressCallback;
   signal?: AbortSignal;
+  /**
+   * Switch the probe session to every advertised model and record the option
+   * list the agent reports for each. Only a refresh a person asked for sets
+   * this: it costs one `session/set_config_option` round trip per model.
+   */
+  readModelOptions?: {
+    onProgress?: (progress: AcpModelOptionsReadProgress) => void;
+  };
+  /**
+   * The Provider's session defaults. They are set on the probe session before
+   * its options are read, so the advertised `currentValue`s are the defaults a
+   * new conversation starts from.
+   */
+  sessionDefaults?: AgentSessionDefaults;
 };
+
+/** The model whose options are being read, `index` of `total` (1-based). */
+export type AcpModelOptionsReadProgress = {
+  modelId: string;
+  modelName: string;
+  index: number;
+  total: number;
+};
+
+/**
+ * Upper bound for one model switch. The read has no overall deadline, because
+ * a person is watching its progress; this only stops an agent that never
+ * answers from holding the refresh forever.
+ */
+export const ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS = 60_000;
+/**
+ * Standard ACP agents advertise slash commands in a notification after `session/new`.
+ * The probe waits this long for it; an agent that never advertises keeps an empty preview.
+ */
+export const ACP_PROBE_COMMANDS_WAIT_MS = 2_000;
 
 export type FetchedAcpCapabilities = AcpCapabilitiesResult & {
   capabilitySourceVersion?: string;
+  /**
+   * Sign-in methods the agent advertised during `initialize`.
+   *
+   * Reading them here is what lets the account panel offer the agent's own
+   * methods before anyone starts an authentication attempt. Empty means the
+   * agent was asked and advertised none; absent means the caller did not ask
+   * (older test doubles and adapters that cannot report them).
+   */
+  authMethods?: readonly AuthMethod[];
+  /** Each model's own option list, when `readModelOptions` was requested. */
+  modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
 };
+
+class ModelSwitchTimeoutError extends Error {}
+
+const withSwitchTimeout = async <T>(promise: Promise<T>): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new ModelSwitchTimeoutError('Model switch timed out')),
+          ACP_MODEL_OPTIONS_SWITCH_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+/**
+ * Switches the probe session to each advertised model in turn and keeps the
+ * list the agent answers with. The `session/new` snapshot is the current
+ * model's answer. A model whose switch fails or answers without a list for
+ * that model is skipped; an unanswered switch ends the read, since every later
+ * switch would wait on the same agent. What was read so far is kept.
+ */
+export async function readEveryModelConfigOptions(args: {
+  client: Pick<AgentClient, 'setSessionConfigOption'>;
+  acpSessionId: ACPSessionId;
+  snapshot: AcpConfigOptionSummary[] | undefined;
+  onProgress?: (progress: AcpModelOptionsReadProgress) => void;
+  logger: Logger;
+  signal?: AbortSignal;
+}): Promise<Record<string, AcpConfigOptionSummary[]> | undefined> {
+  const modelOption = args.snapshot?.find(
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  const currentModelId = getAcpConfigOptionsModelId(args.snapshot);
+  if (!args.snapshot || !modelOption || !currentModelId) return undefined;
+  const read: Record<string, AcpConfigOptionSummary[]> = { [currentModelId]: args.snapshot };
+  const total = modelOption.options.length;
+  const ordered = [
+    ...modelOption.options.filter((choice) => choice.value === currentModelId),
+    ...modelOption.options.filter((choice) => choice.value !== currentModelId),
+  ];
+  for (const [position, choice] of ordered.entries()) {
+    args.signal?.throwIfAborted();
+    args.onProgress?.({
+      modelId: choice.value,
+      modelName: choice.name,
+      index: position + 1,
+      total,
+    });
+    if (choice.value === currentModelId) continue;
+    try {
+      const reported = normalizeConfigOptions(
+        await withSwitchTimeout(
+          args.client.setSessionConfigOption(args.acpSessionId, modelOption.id, choice.value)
+        )
+      );
+      if (reported && getAcpConfigOptionsModelId(reported) === choice.value) {
+        read[choice.value] = reported;
+      }
+    } catch (error) {
+      args.signal?.throwIfAborted();
+      args.logger.debug(
+        `[acp-capabilities] Could not read options for model ${choice.value}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      if (error instanceof ModelSwitchTimeoutError) break;
+    }
+  }
+  return read;
+}
+
+type RawConfigOption = {
+  id: string;
+  category?: string | null;
+  type?: string;
+  options?: ReadonlyArray<{ value?: string; options?: ReadonlyArray<{ value?: string }> }>;
+};
+
+const acceptsValue = (option: RawConfigOption, value: AcpConfigOptionValue): boolean => {
+  if (option.type === 'boolean') return typeof value === 'boolean';
+  if (typeof value !== 'string') return false;
+  return (option.options ?? []).some(
+    (choice) =>
+      choice.value === value || (choice.options ?? []).some((child) => child.value === value)
+  );
+};
+
+/**
+ * Applies a Provider's session defaults to the probe session: the model first,
+ * because model-dependent options (thinking level) are validated against it,
+ * then every other option. A default the agent does not offer, or rejects, is
+ * skipped — the probe still reports what the agent actually runs with.
+ */
+export async function applyProbeSessionDefaults<T extends { configOptions?: unknown }>(args: {
+  client: Pick<AgentClient, 'setSessionConfigOption'>;
+  acpSessionId: ACPSessionId;
+  sessionResponse: T;
+  defaults: AgentSessionDefaults | undefined;
+  logger: Logger;
+  signal?: AbortSignal;
+}): Promise<T> {
+  const { defaults } = args;
+  if (!defaults) return args.sessionResponse;
+  let current = (
+    Array.isArray(args.sessionResponse.configOptions) ? args.sessionResponse.configOptions : []
+  ) as RawConfigOption[];
+  const modelOption = current.find((option) => option.category === 'model');
+  const requests: Array<[string, AcpConfigOptionValue]> = [];
+  if (defaults.modelId && modelOption && !(modelOption.id in defaults.configOptionValues))
+    requests.push([modelOption.id, defaults.modelId]);
+  const entries = Object.entries(defaults.configOptionValues);
+  requests.push(
+    ...entries.filter(([id]) => id === modelOption?.id),
+    ...entries.filter(([id]) => id !== modelOption?.id)
+  );
+  let changed = false;
+  for (const [configId, value] of requests) {
+    args.signal?.throwIfAborted();
+    const option = current.find((candidate) => candidate.id === configId);
+    if (!option || !acceptsValue(option, value)) continue;
+    try {
+      const reported = await withSwitchTimeout(
+        args.client.setSessionConfigOption(args.acpSessionId, configId, value)
+      );
+      if (reported) {
+        current = reported as RawConfigOption[];
+        changed = true;
+      }
+    } catch (error) {
+      args.signal?.throwIfAborted();
+      args.logger.debug(
+        `[acp-capabilities] Session default ${configId} was not applied: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      if (error instanceof ModelSwitchTimeoutError) break;
+    }
+  }
+  return changed ? { ...args.sessionResponse, configOptions: current } : args.sessionResponse;
+}
 
 /**
  * Spawns a temporary ACP agent to discover the capabilities returned by session/new.
@@ -40,17 +249,18 @@ export async function fetchAcpCapabilities(
   options: FetchAcpCapabilitiesOptions = {}
 ): Promise<FetchedAcpCapabilities> {
   options.signal?.throwIfAborted();
-  const workdir = process.cwd();
   const mergedProbeEnv: NodeJS.ProcessEnv = env ? { ...process.env, ...env } : process.env;
-  const probeEnv: NodeJS.ProcessEnv =
+  const probeEnv = normalizeAgentProcessEnv(
     shouldScrubClaudeAuthEnv(cliType, agentType) && env
       ? scrubInheritedClaudeAuthEnv(mergedProbeEnv, env)
-      : mergedProbeEnv;
+      : mergedProbeEnv
+  );
   const authentication = await probeBuiltinAuthentication({
     cliType,
     agentType,
     runtimeOverrides,
     env: probeEnv,
+    userExplicitEnv: env,
     onManagedRuntimeProgress: options.onManagedRuntimeProgress,
     signal: options.signal,
     logger,
@@ -70,38 +280,173 @@ export async function fetchAcpCapabilities(
     waitForTerminalExit: async () => ({ exitCode: null, signal: null }),
     killTerminal: async () => {},
   };
-  const { agentProcess, client, acpSessionId, sessionResponse, capabilitySourceVersion } =
-    await startLocalAcpAgent({
+  // Providers may create workspace-local files during session/new. Never use
+  // the daemon's inherited cwd (which can be /) or a user's project for probes.
+  const workdir = await mkdtemp(path.join(os.tmpdir(), 'lody-acp-capabilities-'));
+  try {
+    options.signal?.throwIfAborted();
+    const {
+      agentProcess,
+      client,
+      acpSessionId,
+      sessionResponse: startedSessionResponse,
+      capabilitySourceVersion,
+    } = await startLocalAcpAgent({
+      codexProfile: options.codexProfile,
       cliType,
       agentType,
       customAcp,
       runtimeOverrides,
+      agentConfigId: options.agentConfigId,
+      magpieGatewayUrl: options.magpieGatewayUrl,
       workdir,
       env: probeEnv,
+      userExplicitEnv: env,
       onManagedRuntimeProgress: options.onManagedRuntimeProgress,
       signal: options.signal,
       logger,
       terminalManager: noopTerminalManager,
       terminalEnabled: false,
+      discoverAuthenticationMethods: cliType === 'builtin' && agentType === 'sorbet',
       onUpdateMessage: () => {},
       onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
     });
 
-  try {
-    return {
-      ...normalizeAcpSessionCapabilities(sessionResponse, {
+    try {
+      const sessionResponse = await applyProbeSessionDefaults({
+        client,
+        acpSessionId,
+        sessionResponse: startedSessionResponse,
+        defaults: options.sessionDefaults,
+        logger,
+        signal: options.signal,
+      });
+      // Started before verification and model reads so the wait overlaps them.
+      const advertisedCommands = client.waitForAvailableCommands(
+        ACP_PROBE_COMMANDS_WAIT_MS,
+        options.signal
+      );
+      if (
+        options.verifyCodexCredential &&
+        options.codexProfile?.profile.profile.mode === 'api-key'
+      ) {
+        const key = options.codexProfile.candidateKey;
+        if (!key) throw new Error('Codex credential verification requires a candidate key');
+        const broker = await startCodexCredentialBroker({
+          baseUrl: options.codexProfile.profile.profile.baseUrl,
+          apiKey: key,
+          signal: options.signal,
+        });
+        try {
+          const models = normalizeAcpSessionCapabilities(sessionResponse, {
+            agent: { cliType, agentType },
+          }).models;
+          const model = models[0]?.modelId.replace(/\[[^\]]+\]$/, '');
+          if (!model) throw new Error('Codex endpoint did not advertise a model');
+          const response = await fetch(`${broker.baseUrl}/responses`, {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${broker.capability}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model,
+              input: 'Reply with OK only.',
+              max_output_tokens: 16,
+              tools: [],
+              store: false,
+            }),
+            redirect: 'error',
+            signal: options.signal,
+          });
+          if (!response.ok) {
+            await response.body?.cancel();
+            throw new Error('Codex endpoint could not verify this API Key');
+          }
+          const reader = response.body?.getReader();
+          let text = '';
+          const decoder = new TextDecoder();
+          if (reader) {
+            try {
+              for (;;) {
+                const part = await reader.read();
+                if (part.done) break;
+                text += decoder.decode(part.value, { stream: true });
+                if (text.length > 65_536)
+                  throw new Error('Codex verification response is too large');
+              }
+            } finally {
+              await reader.cancel();
+            }
+          }
+          let value: unknown;
+          try {
+            value = JSON.parse(text);
+          } catch {
+            throw new Error('Codex endpoint did not return a Responses result');
+          }
+          if (
+            !value ||
+            typeof value !== 'object' ||
+            !('object' in value) ||
+            value.object !== 'response' ||
+            !('output' in value) ||
+            !Array.isArray(value.output)
+          ) {
+            throw new Error('Codex endpoint did not return a Responses result');
+          }
+        } finally {
+          await broker.close();
+        }
+      }
+      const capabilities = normalizeAcpSessionCapabilities(sessionResponse, {
         sessionFork: client.supportsSessionFork?.() === true,
+        sessionTitle: client.supportsSessionTitleGeneration(),
+        rateLimits: client.getRateLimitsCapability(),
         acknowledgedSteer: client.supportsAcknowledgedSteer(),
-      }),
-      capabilitySourceVersion,
-    };
+        goalActions: client.getGoalCapability()?.actions.slice(),
+        agent: { cliType, agentType },
+      });
+      const modelConfigOptions = options.readModelOptions
+        ? await readEveryModelConfigOptions({
+            client,
+            acpSessionId,
+            snapshot: capabilities.configOptions,
+            onProgress: options.readModelOptions.onProgress,
+            logger,
+            signal: options.signal,
+          })
+        : undefined;
+      // AgentClient already holds response commands, so this resolves at once for them.
+      const availableCommands = (await advertisedCommands) ?? capabilities.availableCommands;
+      options.signal?.throwIfAborted();
+      return {
+        ...capabilities,
+        availableCommands,
+        capabilitySourceVersion,
+        authMethods: client.getAuthMethods(),
+        ...(modelConfigOptions ? { modelConfigOptions } : {}),
+      };
+    } finally {
+      await shutdownLocalAcpAgent({
+        agentProcess,
+        client,
+        acpSessionId,
+        logger,
+        sessionLabel: `acp-capabilities:${cliType}/${agentType}`,
+      });
+    }
   } finally {
-    await shutdownLocalAcpAgent({
-      agentProcess,
-      client,
-      acpSessionId,
-      logger,
-      sessionLabel: `acp-capabilities:${cliType}/${agentType}`,
-    });
+    try {
+      await rm(workdir, { recursive: true, force: true });
+    } catch {
+      // Workspace cleanup must not replace a startup/auth error or discard
+      // discovered capabilities. A later probe always allocates a fresh path.
+      try {
+        logger.warn('[acp-capabilities] Failed to remove temporary probe workspace');
+      } catch {
+        // A failing diagnostic sink must not change the probe result either.
+      }
+    }
   }
 }

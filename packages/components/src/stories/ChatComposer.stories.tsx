@@ -1,5 +1,10 @@
+import { SessionInfoBar } from '../components/sessions/session-info-bar';
+import { ConversationColumn } from '../components/shared/conversation-column';
+import { ScheduledMessageTimeDialog } from '../components/schedules/scheduled-message-time';
+import { formatUpcoming } from '../components/schedules/schedule-format';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowUp, Bot, Github } from 'lucide-react';
 
 import {
@@ -9,11 +14,14 @@ import {
 } from '@/components/chat/chat-composer';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
-import { Card, CardContent } from '@/ui/card';
-import { Button } from '@/ui/button';
+import { Card } from '@/ui/card';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import { SettingsStoryProviders } from './settings-story-shell';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 
 // So session.focusInput has a binding — the desktop ⌘L focus hint reads it.
 registerBuiltInCommands();
@@ -24,6 +32,14 @@ const meta = {
   parameters: {
     layout: 'fullscreen',
   },
+  // The composer's add menu reads cloud queries, which need a platform.
+  decorators: [
+    (Story) => (
+      <SettingsStoryProviders>
+        <Story />
+      </SettingsStoryProviders>
+    ),
+  ],
   tags: ['autodocs'],
   args: {
     title: undefined,
@@ -36,7 +52,6 @@ const meta = {
     promptPlaceholder: undefined,
     promptRows: 3,
     promptRef: undefined,
-    selector: null,
     primaryAction: null,
     secondaryAction: undefined,
     className: undefined,
@@ -78,10 +93,8 @@ const repoOptions: OptionSelectorOption<string>[] = [
 
 const samplePastedText = [
   'Design brief:',
-  '',
   'Users often paste full logs or PR descriptions into the composer before asking a focused question.',
   'We should keep that context available without letting the textarea grow so tall that the actual prompt disappears.',
-  '',
   'Requirements:',
   '- Show a compact summary block with the pasted character count.',
   '- Let users inspect the full content on hover or tap.',
@@ -89,6 +102,15 @@ const samplePastedText = [
 ].join('\n');
 
 const samplePromptPlaceholder = "Press '/' for commands, '@' for mentions.";
+const mentionStressCommands = Array.from({ length: 24 }, (_, index) => ({
+  name: `command-${String(index + 1).padStart(2, '0')}`,
+  description:
+    index % 3 === 0
+      ? 'Review the current changes, include relevant context, and explain the next action. '.repeat(
+          12
+        )
+      : `Synthetic command ${index + 1}`,
+}));
 
 // Inline SVG data-URI thumbnails so image attachment cards render without any
 // network/fetch mock (the composer just needs a non-empty previewUrl).
@@ -157,6 +179,7 @@ function DemoComposer({
   imageItems,
   fileItems,
   initialPrompt,
+  showMentionCommands = false,
 }: {
   tone: 'light' | 'dark';
   variant: 'landing' | 'session' | 'dialog';
@@ -168,10 +191,11 @@ function DemoComposer({
   imageItems?: ChatComposerImageItem[];
   fileItems?: ChatComposerFileItem[];
   initialPrompt?: string;
+  showMentionCommands?: boolean;
 }) {
   const inlinePastedTextLabel = `[Pasted ${getPastedTextCharacterCount(samplePastedText)} chars]`;
   const inlinePastedTextPrompt = `Investigate this context ${inlinePastedTextLabel} and help me extract the root cause.`;
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<ComposerInputElement>(null);
   const [prompt, setPrompt] = useState(
     initialPrompt ??
       (showPastedText
@@ -194,17 +218,11 @@ function DemoComposer({
       : []
   );
 
-  const primaryActionClassName = cn(
-    variant === 'dialog'
-      ? 'border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2 h-10 rounded-lg px-5 text-sm'
-      : 'h-8 w-8 rounded-md border shadow-xs transition-all',
+  const dialogPrimaryActionClassName = cn(
+    'border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2 h-10 rounded-lg px-5 text-sm',
     tone === 'dark'
-      ? variant !== 'dialog'
-        ? 'border-sky-200/20 bg-sky-300/15 text-white hover:bg-sky-300/25 active:translate-y-[1px] focus-visible:ring-white/40 focus-visible:ring-offset-[#050b1d]'
-        : 'border-white/25 bg-white/10 text-white hover:bg-white/15 active:translate-y-[1px] focus-visible:ring-white/30 focus-visible:ring-offset-[#050b1d]'
-      : variant !== 'dialog'
-        ? 'border-input-border/70 bg-input/70 text-input-foreground hover:bg-muted/60 active:translate-y-[1px] focus-visible:ring-ring'
-        : 'border-input-border/70 bg-input/60 text-input-foreground hover:bg-muted/60 active:translate-y-[1px] focus-visible:ring-ring'
+      ? 'border-white/25 bg-white/10 text-white hover:bg-white/15 active:translate-y-[1px] focus-visible:ring-white/30 focus-visible:ring-offset-[#050b1d]'
+      : 'border-input-border/70 bg-input/60 text-input-foreground hover:bg-muted/60 active:translate-y-[1px] focus-visible:ring-ring'
   );
 
   const selectorNode =
@@ -217,7 +235,6 @@ function DemoComposer({
             onSelect={(option) => setSelectedRepo(option.value)}
             placeholder="Select repo"
             placeholderIcon={Github}
-            tone={tone}
             className="w-full"
             contentClassName="w-72"
           />
@@ -229,7 +246,6 @@ function DemoComposer({
             onSelect={(option) => setSelectedAgent(option.value)}
             placeholder="Select agent"
             placeholderIcon={Bot}
-            tone={tone}
             className="w-full"
             contentClassName="w-64"
           />
@@ -243,7 +259,6 @@ function DemoComposer({
           onSelect={(option) => setSelectedRepo(option.value)}
           placeholder="Select repo"
           placeholderIcon={Github}
-          tone={tone}
           className="w-full"
           contentClassName="w-72"
         />
@@ -253,7 +268,6 @@ function DemoComposer({
           onSelect={(option) => setSelectedAgent(option.value)}
           placeholder="Select agent"
           placeholderIcon={Bot}
-          tone={tone}
           className="w-full"
           contentClassName="w-64"
         />
@@ -262,17 +276,11 @@ function DemoComposer({
 
   const primaryActionNode =
     variant !== 'dialog' ? (
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        aria-label="Send"
-        className={cn(primaryActionClassName, 'h-6 w-6')}
-      >
+      <Button type="button" variant="primary" aria-label="Send" size="medium" shape="pill" icon>
         <ArrowUp className="h-4 w-4" />
       </Button>
     ) : (
-      <Button type="button" className={primaryActionClassName}>
+      <Button type="button" className={dialogPrimaryActionClassName}>
         Send
       </Button>
     );
@@ -308,11 +316,12 @@ function DemoComposer({
       promptRef={promptRef}
       promptValue={prompt}
       onPromptChange={setPrompt}
+      availableCommands={showMentionCommands ? mentionStressCommands : undefined}
       promptPlaceholder={samplePromptPlaceholder}
       promptRows={promptRows ?? 3}
       pastedTextDrafts={pastedTextDrafts}
       onPastedTextDraftsChange={setPastedTextDrafts}
-      selector={selectorNode}
+      footerSelector={selectorNode}
       primaryAction={primaryActionNode}
       onAttachmentAddClick={attachmentsEnabled ? () => undefined : undefined}
       imageItems={resolvedImageItems}
@@ -335,17 +344,94 @@ function DemoComposer({
   );
 }
 
+const LONG_PROMPT_SUGGESTION =
+  'Add a regression test for the reconnect path that drops the socket mid-turn, ' +
+  'verify the queued prompt is replayed exactly once after the session resumes, ' +
+  'then run the focused suite and summarize any flaky timing assumptions you find ' +
+  'in the transport fixtures.';
+
+function PromptSuggestionPreview({
+  mobile = false,
+  suggestion = 'Add a regression test for the reconnect path, then run the focused suite.',
+}: {
+  mobile?: boolean;
+  suggestion?: string;
+}) {
+  const [prompt, setPrompt] = useState('');
+  const promptRef = useRef<ComposerInputElement>(null);
+  const composer = (
+    <ChatComposer
+      tone="light"
+      variant="session"
+      promptRef={promptRef}
+      promptValue={prompt}
+      onPromptChange={setPrompt}
+      promptSuggestion={suggestion}
+      primaryAction={
+        <Button icon aria-label="Send">
+          <ArrowUp size={16} />
+        </Button>
+      }
+      autoResize
+      maxRows={11}
+    />
+  );
+  return (
+    <div className="flex min-h-screen flex-col justify-end bg-background px-4 pb-6">
+      <div className={cn('mx-auto w-full', mobile ? 'max-w-[390px]' : 'max-w-3xl')}>
+        {mobile ? (
+          <ForceMobileLayoutProvider force>{composer}</ForceMobileLayoutProvider>
+        ) : (
+          composer
+        )}
+      </div>
+    </div>
+  );
+}
+
+export const SessionPromptSuggestion: Story = {
+  render: () => <PromptSuggestionPreview />,
+};
+
+export const SessionPromptSuggestionMobile: Story = {
+  render: () => <PromptSuggestionPreview mobile />,
+};
+
+export const SessionPromptSuggestionLong: Story = {
+  render: () => <PromptSuggestionPreview suggestion={LONG_PROMPT_SUGGESTION} />,
+};
+
+export const SessionPromptSuggestionLongMobile: Story = {
+  render: () => <PromptSuggestionPreview mobile suggestion={LONG_PROMPT_SUGGESTION} />,
+};
+
 export const LandingDark: Story = {
   render: () => (
     <div className="relative min-h-screen bg-[#050b1d] text-white">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(88,166,255,0.2),transparent_55%),radial-gradient(circle_at_80%_10%,rgba(35,82,150,0.3),transparent_60%),radial-gradient(circle_at_50%_100%,rgba(8,30,58,0.9),transparent_60%)]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
-        <Card className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
-          <CardContent className="p-8">
+        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
+          <Card.Content>
             <DemoComposer tone="dark" variant="landing" title="Let's ship something" />
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
+      </div>
+    </div>
+  ),
+};
+
+export const LandingMentionStress: Story = {
+  render: () => (
+    <div className="relative flex min-h-screen items-center bg-[#050b1d] px-4 text-white">
+      <div className="mx-auto w-full max-w-3xl">
+        <DemoComposer
+          tone="dark"
+          variant="landing"
+          title="Let's ship something"
+          initialPrompt=""
+          showMentionCommands
+        />
       </div>
     </div>
   ),
@@ -362,11 +448,57 @@ export const DialogLight: Story = {
   ),
 };
 
+export const DialogMentionStress: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
+      <div className="w-full max-w-xl rounded-2xl border bg-white p-6 shadow-lg">
+        <h2 className="mb-4 text-lg font-semibold text-slate-900">Start a new chat</h2>
+        <DemoComposer
+          tone="light"
+          variant="dialog"
+          showSecondary
+          promptRows={4}
+          initialPrompt=""
+          showMentionCommands
+        />
+      </div>
+    </div>
+  ),
+};
+
 export const SessionDark: Story = {
   render: () => (
     <div className="min-h-screen bg-[#050b1d] px-4 py-12 text-white">
       <div className="mx-auto w-full max-w-3xl">
         <DemoComposer tone="dark" variant="session" />
+      </div>
+    </div>
+  ),
+};
+
+/** Long command lists against the bottom-docked business composer. */
+export const SessionMentionStress: Story = {
+  render: () => (
+    <div className="flex min-h-screen flex-col justify-end bg-background px-4 pb-6">
+      <div className="mx-auto w-full max-w-3xl">
+        <DemoComposer tone="light" variant="session" initialPrompt="" showMentionCommands />
+      </div>
+    </div>
+  ),
+};
+
+/** The wide bottom-docked composer seen in a full-size desktop window. */
+export const SessionMentionWideDark: Story = {
+  render: () => (
+    <div className="flex min-h-screen flex-col justify-end bg-[#111315] px-[9vw] pb-6 text-white">
+      <div className="w-full max-w-[90rem]">
+        <DemoComposer
+          tone="dark"
+          variant="session"
+          initialPrompt=""
+          promptRows={4}
+          showMentionCommands
+        />
       </div>
     </div>
   ),
@@ -423,8 +555,8 @@ export const AttachmentUploadStatesDark: Story = {
     <div className="relative min-h-screen bg-[#050b1d] text-white">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
-        <Card className="w-full rounded-[32px] border-white/10 bg-white/5 ring-1 ring-white/10 backdrop-blur-2xl">
-          <CardContent className="p-8">
+        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 ring-1 ring-white/10 backdrop-blur-2xl">
+          <Card.Content>
             <DemoComposer
               tone="dark"
               variant="landing"
@@ -432,8 +564,8 @@ export const AttachmentUploadStatesDark: Story = {
               imageItems={sampleImageItems}
               fileItems={sampleFileItems}
             />
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   ),
@@ -445,17 +577,102 @@ export const LandingWithPastedText: Story = {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(88,166,255,0.2),transparent_55%),radial-gradient(circle_at_80%_10%,rgba(35,82,150,0.3),transparent_60%),radial-gradient(circle_at_50%_100%,rgba(8,30,58,0.9),transparent_60%)]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
-        <Card className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
-          <CardContent className="p-8">
+        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
+          <Card.Content>
             <DemoComposer
               tone="dark"
               variant="landing"
               title="Let's ship something"
               showPastedText
             />
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   ),
+};
+
+function ScheduledSendPreview({ pickerInitiallyOpen = false }: { pickerInitiallyOpen?: boolean }) {
+  const { t, i18n } = useTranslation();
+  const promptRef = useRef<ComposerInputElement>(null);
+  const [text, setText] = useState(
+    'Review these files tomorrow morning and summarize the remaining issues.'
+  );
+  const [at, setAt] = useState<string | null>('2026-10-28T01:00:00.000Z');
+  const [picker, setPicker] = useState(pickerInitiallyOpen);
+  return (
+    <div className="min-h-screen bg-background p-4 flex items-center justify-center">
+      <div className="w-full max-w-2xl">
+        <SessionInfoBar
+          status={null}
+          machine={{
+            machineId: 'story-machine' as never,
+            name: 'MacBook Pro',
+            onlineStatus: 'online',
+          }}
+        />
+        <ConversationColumn>
+          <ChatComposer
+            variant="session"
+            promptRef={promptRef}
+            tone="light"
+            promptValue={text}
+            onPromptChange={setText}
+            onAttachmentAddClick={() => {}}
+            onScheduleSend={() => setPicker(true)}
+            secondaryAction={
+              at
+                ? {
+                    label: t('scheduledMessage.composerAction', {
+                      time: formatUpcoming(
+                        Date.parse(at),
+                        'Asia/Shanghai',
+                        Date.parse('2026-10-27T08:00:00Z'),
+                        i18n.language
+                      ),
+                    }),
+                    onClick: () => setPicker(true),
+                  }
+                : undefined
+            }
+            primaryAction={
+              <Button icon aria-label="Send">
+                <ArrowUp size={16} />
+              </Button>
+            }
+            autoResize
+          />
+        </ConversationColumn>
+      </div>
+      {picker ? (
+        <ScheduledMessageTimeDialog
+          finalFocus={promptRef}
+          onRemoveTime={
+            at
+              ? () => {
+                  setAt(null);
+                  setPicker(false);
+                }
+              : undefined
+          }
+          at={at}
+          timeZone="Asia/Shanghai"
+          now={Date.parse('2026-10-27T08:00:00Z')}
+          onClose={() => setPicker(false)}
+          onApply={(value) => {
+            setAt(value);
+            setPicker(false);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+export const ScheduledSend: Story = { render: () => <ScheduledSendPreview /> };
+export const ScheduledSendTimePicker: Story = {
+  render: () => <ScheduledSendPreview pickerInitiallyOpen />,
+};
+export const ScheduledSendDark: Story = {
+  globals: { theme: 'dark' },
+  render: () => <ScheduledSendPreview />,
 };

@@ -10,7 +10,6 @@ declare const __GIT_COMMIT__: string;
 declare const __APP_VERSION__: string;
 
 interface ImportMetaEnv {
-  readonly VITE_PREVIEW_PUBLIC_BASE_DOMAIN: string;
   readonly VITE_SERVER_URL: string;
   readonly VITE_LORO_STREAMS_BASE_URL?: string;
   readonly VITE_SITE_URL?: string;
@@ -18,6 +17,7 @@ interface ImportMetaEnv {
   readonly VITE_CONVEX_SITE_URL: string;
   readonly VITE_ONESIGNAL_APP_ID: string;
   readonly VITE_ONESIGNAL_SAFARI_WEB_ID: string;
+  readonly VITE_PUSH_VAPID_PUBLIC_KEY: string;
   /**
    * Escape hatch that pins the Machine RPC response live transport. Unset (the
    * normal build) uses the SSE-first policy with its long-poll fallback.
@@ -37,7 +37,4 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
-interface Window {
-  OneSignal?: unknown;
-  OneSignalDeferred?: Array<(OneSignal: unknown) => void>;
-}
+interface Window {}

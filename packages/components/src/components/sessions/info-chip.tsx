@@ -1,7 +1,9 @@
 import { useRef, useState, type ComponentType, type ReactNode, type SVGProps } from 'react';
 import { ArrowUpRight } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { cn } from '@/lib/utils';
-import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
+import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
 
 export type InfoChipIcon = ComponentType<SVGProps<SVGSVGElement> & { className?: string }>;
 
@@ -26,8 +28,10 @@ export type InfoChipIcon = ComponentType<SVGProps<SVGSVGElement> & { className?:
  * hover treatment; width varies only by the glanceable short `value`
  * ("12m", "#2857", "2/5") that some items keep while collapsed.
  */
-const CHIP_BUTTON_CLASS =
-  'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs transition-colors hover:bg-muted-foreground/10';
+const CHIP_BUTTON_CLASS = cn(
+  'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 transition-colors hover:bg-muted-foreground/10',
+  INFO_BAR_TEXT_CLASS
+);
 
 function ChipFace({ icon: Icon, value }: { icon: InfoChipIcon; value?: string }) {
   return (
@@ -65,6 +69,77 @@ export function ActionChip({
     </button>
   );
 }
+
+/**
+ * Action chip whose one click toggles a popover above the bar (e.g. related
+ * Sessions). Like {@link ActionChip} it never takes the stage.
+ */
+export function PopoverActionChip({
+  icon,
+  label,
+  value,
+  content,
+  defaultOpen = false,
+  sizing = 'bar',
+}: {
+  icon: InfoChipIcon;
+  label: string;
+  value?: string;
+  /** A render prop receives `close`, so a selection inside the panel can
+   *  dismiss it and reveal the surface it just changed. */
+  content: ReactNode | ((close: () => void) => ReactNode);
+  /** Storybook/testing aid. */
+  defaultOpen?: boolean;
+  /** Compact action menus size to their content and anchor to the chip. */
+  sizing?: 'bar' | 'content';
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            ref={buttonRef}
+            type="button"
+            aria-label={label}
+            title={label}
+            className={cn(
+              CHIP_BUTTON_CLASS,
+              'text-muted-foreground',
+              open && 'bg-muted-foreground/10 text-foreground'
+            )}
+          >
+            <ChipFace icon={icon} value={value} />
+          </button>
+        }
+      />
+      <Popover.Content
+        side="top"
+        align="start"
+        // Detail panels share the bar's edges; compact menus follow their chip.
+        anchor={() => {
+          const button = buttonRef.current;
+          if (sizing === 'content') return button;
+          return button?.closest('[data-info-bar-surface]') ?? button;
+        }}
+        aria-label={label}
+        className={cn(
+          sizing === 'content'
+            ? stylex.props(styles.contentWidth).className
+            : 'w-[var(--anchor-width)]',
+          'border-border/60 p-0 shadow-xl'
+        )}
+      >
+        {typeof content === 'function' ? content(() => setOpen(false)) : content}
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+
+const styles = stylex.create({
+  contentWidth: { width: 'max-content' },
+});
 
 /** Collapsed item in the cluster. Click promotes it onto the stage. */
 export function ClusterChip({
@@ -131,12 +206,12 @@ export function StageChip({
   trailing?: ReactNode;
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
 
   const iconBadge = iconOverride ?? (
     <span
       className={cn(
-        'flex h-6 shrink-0 select-none items-center gap-1 px-1 text-xs',
+        'flex h-6 shrink-0 select-none items-center gap-1 px-1',
+        INFO_BAR_TEXT_CLASS,
         textClassName ?? 'text-muted-foreground'
       )}
     >
@@ -157,7 +232,8 @@ export function StageChip({
   );
 
   const summaryClassName = cn(
-    'flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md px-1 text-xs',
+    'flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md px-1',
+    INFO_BAR_TEXT_CLASS,
     textClassName ?? 'text-muted-foreground'
   );
 
@@ -181,41 +257,33 @@ export function StageChip({
     );
   } else {
     summaryNode = (
-      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <PopoverAnchor asChild>
-          <button
-            ref={anchorRef}
-            type="button"
-            aria-label={detail.ariaLabel}
-            aria-haspopup="dialog"
-            aria-expanded={popoverOpen}
-            title={detail.ariaLabel}
-            onClick={() => setPopoverOpen((value_) => !value_)}
-            className={cn(
-              summaryClassName,
-              'select-none transition-colors hover:bg-muted-foreground/10',
-              popoverOpen && 'bg-muted-foreground/10'
-            )}
-          >
-            {summaryInner}
-          </button>
-        </PopoverAnchor>
-        <PopoverContent
+      <Popover.Root open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <Popover.Trigger
+          render={
+            <button
+              type="button"
+              aria-label={detail.ariaLabel}
+              title={detail.ariaLabel}
+              className={cn(
+                summaryClassName,
+                'select-none transition-colors hover:bg-muted-foreground/10',
+                popoverOpen && 'bg-muted-foreground/10'
+              )}
+            >
+              {summaryInner}
+            </button>
+          }
+        />
+        <Popover.Content
           side="top"
           align="start"
           sideOffset={8}
           aria-label={detail.ariaLabel}
-          onPointerDownOutside={(event) => {
-            const target = event.target as Node | null;
-            if (target && anchorRef.current?.contains(target)) {
-              event.preventDefault();
-            }
-          }}
           className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
         >
           {detail.content}
-        </PopoverContent>
-      </Popover>
+        </Popover.Content>
+      </Popover.Root>
     );
   }
 

@@ -1,0 +1,172 @@
+# Session Browser engines, Managed Preview, HTML viewer, annotations
+
+The two browser engines, the loopback-only Managed Preview boundary, static HTML rendering, and visual annotation.
+
+Scope: `packages/components/src/components/sessions`. Binding rules and the
+pointer to this page live in
+[that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
+this page is the full text of the rules summarised there.
+
+- [Preview annotation availability](../../specs/preview-annotation-availability.md) separates
+  page loading from optional annotation. Runtime loading reports are optional toolbar
+  hints for in-frame navigation; native iframe load clears them independently. They
+  never gate frame readiness or content visibility;
+  missing runtime messages leave annotation unavailable without a timeout error or content
+  cover. Reload can navigate the frame directly. Runtime control binds the first valid
+  message from `window.parent`, never `document.referrer` (which changes after navigation).
+  A data-free ready signal starts this handshake before page resources finish loading;
+  one pending navigation is retained until the parent binds, keeping its policy in control.
+  Tunnel readiness uses a proxy response marker independent of HTML injection; injection
+  overhead that exceeds the response limit leaves the original document intact.
+
+- Encrypted remote previews reuse the signed feature RPC for create, status/renewal
+  and revoke. Missing host support and a verified non-writer are refused before
+  signing; the receiving machine still checks current authority. No ordinary
+  preview-control proof is minted for this path. The Browser shows the tunnel
+  disclosure before creation and while viewing: page bytes pass through the tunnel
+  service as plaintext, even though preview controls and comments remain protected.
+  This entry does not depend on a local Agent. Public-browser navigation retains
+  its declared host capability and cannot fall back to a preview iframe.
+
+- Complete `.html` / `.htm` viewer text may switch between Monaco source and Managed Preview without
+  a Machine RPC endpoint. Build a policy-owned `srcdoc` from the current complete viewer text,
+  inject the shared annotation runtime, and run it in uncached static-document mode
+  (`allow-scripts` only, opaque origin). Static frames must be destroyed as soon as the file
+  tab or rendered mode becomes inactive; never park their JavaScript in the Browser frame cache.
+  Keep CSP/referrer/base policy and the annotation runtime ahead of source scripts, map runtime
+  messages to a file-path logical URL whose namespace distinguishes relative, POSIX-absolute,
+  Windows-drive, and UNC paths. Same-document `#fragment` links stay inside the `srcdoc`; leave
+  rendered mode on every other navigation request because local subresources/pages are not part of
+  the single-document contract. Desktop HTML starts in code mode; mobile session opens
+  default to preview. Truncated documents never enter either HTML preview. The iframe is a
+  permission boundary, not a promised
+  renderer-process/thread boundary; do not claim arbitrary user JS cannot consume the app renderer.
+  Likewise, CSP governs the initial `srcdoc`, not an arbitrary later self-navigation, and do
+  not describe the executable self-contained/no-network rule as a hard browser guarantee.
+  `getExecutableHtmlPreviewSupport()` decides whether scripts may run: `automatic` with
+  credentialless iframes (Chromium); `opt-in` on WebKit (every iOS browser), where a
+  self-navigation is an ordinary request and frame JS shares the app's main thread, so the
+  rendered view starts read-only and runs scripts only after the user presses "Run scripts"
+  for that exact document text (revoked when rendered mode ends or the text changes; the frame
+  cache refuses an executable static frame there without `scriptsOptedIn`); `unsupported`
+  (Gecko and any other engine) never runs them. The read-only fallback is `ReadOnlyHtmlPreview`: an empty sandbox,
+  script-blocking CSP, and a document stripped of navigation, scripts, nested documents, and
+  SVG mutation. It preserves inline CSS and embedded media but offers no script interaction
+  or annotation. Any executable static document goes through `useManagedPreviewFrame`
+  (frame policy from the frame cache, runtime handshake, navigation policy); never build a
+  second executable iframe. When page script replaces the document, the runtime's `pagehide`
+  unload signal (with a parent-initiated load as fallback) removes the frame at once and is
+  treated as a navigation request that leaves rendered mode. This narrows, but does not close,
+  the window in which a replacement page can run; the outgoing request has already been sent.
+
+- Desktop direct HTML preview is the one exception to the `srcdoc` path. It applies when the
+  file is on this desktop's machine and `useSessionFileActions().resolveHostPath` yields its
+  absolute path. Large HTML files keep a paged, read-only source view and open the complete
+  file from disk through the same preview protocol. Each entry into rendered mode first shows a consent dialog. Its "Allow
+  JavaScript" checkbox starts unchecked. Electron main (`machineRpc.openHtmlPreview`) then serves
+  the file's folder by default. For a nested page the user can authorize the displayed workspace
+  folder for that preview, preserving the page’s workspace-relative URL and asset paths. Both
+  choices serve content from a fresh `lody-html-preview://<random token>/` origin. Relative CSS,
+  scripts and images load, and reload re-reads disk. Without consent the iframe sandbox is
+  empty and the response carries `script-src 'none'`. With consent the sandbox adds scripts,
+  same-origin and forms, never modals, popups or top navigation. The unique origin keeps that
+  cross-origin to the renderer. Main's `will-frame-navigate` guard keeps a preview frame on
+  `lody-html-preview:` URLs, and the default session refuses every permission a preview requests. The renderer CSP admits the scheme only in `frame-src`. Main
+  refuses dot-files and paths outside the folder, judged after resolving symlinks, and other machines; a
+  null answer falls back to `srcdoc` for complete text or to the paged source for large files. This mode has no annotation or script toggle,
+  shows the saved file rather than unsaved editor text, and with scripts allowed the page can
+  reach the network. Remote and Web sessions keep the `srcdoc` path.
+  The standalone mobile project browser treats repository HTML as untrusted: it opens the
+  read-only preview with the eye toggle and runs scripts only behind an explicit "Run
+  scripts" opt-in (`StaticHtmlScriptPreview`, no annotation), on any engine that supports it.
+  The session rendered frame exists only while
+  its viewer tab and containing sidebar are visible. Key the file viewer by session + tab so switching
+  session targets resets the HTML mode to that surface’s default.
+- Session Browser has strict dual engines, split on exactly one question: is the address the
+  agent machine's own LOOPBACK? Only that uses Managed Preview, where the machine opens one
+  approved port on itself; those are the only pages eligible for Visual Annotation. Everything
+  else — public sites AND private LAN / `.local` / `host.docker.internal` — uses the declared
+  public-browser capability (Electron `WebContentsView` today), which is the user's own browser
+  on the user's own machine reaching the user's own network. Never fall back from a missing
+  public engine to iframe, system browser, CLI, Preview Gateway, or a different Machine RPC plane.
+  INVARIANT — a managed preview is never a pivot: routing a LAN address through the machine
+  would let whoever holds the tunnel reach hosts behind that machine that they could never reach
+  themselves, and the approver sits on the OTHER side of the tunnel, so approval cannot make it
+  safe. `parseBrowserAddress` never routes LAN there and `PreviewTargetApproval.targetClass` is
+  the literal `'loopback'`, but the CLI's `normalizeTarget` is the authoritative rejection.
+  The public engine has NO network guard — no resolver check, no per-request hostname policy.
+  It is a sandboxed view with no preload, script injection, page capture, or agent tool, so
+  the only reader of what it renders is the person looking at it, and it is strictly less
+  capable than the user's own Chrome. The DNS guard it once had broke every fake-IP proxy user
+  (Clash, Surge, sing-box, Shadowrocket — all their answers land in `198.18.0.0/15`) while
+  protecting nothing. The engine split is therefore by hostname TEXT: a public name that
+  RESOLVES to loopback still opens in the public engine. Do not document it as
+  resolution-accurate.
+  A guard must return if the view gains a non-human READER, attached to that path rather than
+  to human navigation. A non-human NAVIGATOR already exists and is handled here, not in
+  Electron: a Managed Preview page is served by the agent machine, so the navigation requests
+  its injected script posts up (`handleManagedNavigationRequest`) are agent-authored. Those
+  carry `fromPageContent`, and `openAddress` refuses a private-LAN destination for them —
+  public is an ordinary external link and loopback still needs its own approval in the managed
+  branch, but a LAN address would open silently on the USER's network at a page's request.
+  Only the address bar may reach one.
+  The composer info-bar Browser action is an explicit candidate-navigation request, not merely a
+  panel-open action. It opens the reported candidate even when another page is already visible.
+  An eligible local Agent report already starts background remote preparation using
+  the active Session owner's execution identity. The click joins that work or reuses
+  the resulting endpoint. It remains exact-target authorization when a new endpoint
+  is needed, without a confirmation dialog; the CLI accepts only LOOPBACK targets.
+  Enter on a typed loopback address and Share likewise authorize the exact target,
+  without a second confirmation. No candidate is required for a user-started server.
+  The approver is the session initiator, the same person the CLI already requires.
+  Consume the request after handling it so a later panel remount cannot replay stale user intent —
+  but NOT while the candidate is still in flight. Session meta carries only the candidate status;
+  its target lives in the session doc `preview` state, and the two planes sync independently, so a
+  click landing between those writes must wait for the doc (bounded by the doc reaching `synced`)
+  instead of consuming the request and leaving an empty panel.
+  `SessionPreviewPreload` consumes the visible conversation's existing preview document.
+  An available candidate plus active endpoint triggers one non-renewing status request;
+  only a matching live endpoint may load the candidate's exact path/query. Remote-preview
+  capability and atomic iframe moves are required; local Electron routes are skipped.
+  `managed-preview-frame-cache.ts` owns one speculative frame outside its opened-page LRU,
+  in an inert offscreen host with a nonzero viewport. Browser acquisition moves that same
+  frame into its surface, then releases the preparation host and its two-minute timer.
+  Subsequent preparation cleanup cannot destroy the claimed page. Target/endpoint changes,
+  unmount, and backgrounding dispose unclaimed work. Expiry does not retry, and no poller
+  or control keepalive is added. Application scripts and traffic do run before the click;
+  their ordinary authenticated requests can extend tunnel idle time within this bounded
+  preparation lifetime. Unsupported engines retain on-demand loading. Browser still
+  performs its normal live status check when opened. Candidate navigation waits for
+  that initial observation, avoiding a redundant create and empty viewer state that
+  would otherwise discard a prepared frame before it could be adopted.
+  Remote connections are queried through Machine RPC rather than restored from persisted `active`
+  flags. A visible remote Browser renews only its current endpoint every minute; hidden panels,
+  background documents, local viewers, and observational queries do not renew remote access.
+  Creation/revoke fences stale status responses. Navigation progress keeps existing
+  content mounted, and a failed status RPC retains the current viewer URL; only
+  an authoritative endpoint state invalidates it. The toolbar and expiry placeholder share
+  `PreviewConnectionStatus`; restore retains the logical address/path/query and explicitly
+  requests a new endpoint, then offers the replacement share link. Local content stays mounted
+  when remote sharing expires. The endpoint owner, not the panel, enforces the one-hour deadline.
+  An empty Browser must always say WHY it is empty — a bare globe reads as a broken panel. With no
+  reported candidate the empty state names that (the agent never called `lody_report_preview_candidate`,
+  which is the common case, not a bug); with one, an idle desktop panel points at the address bar. Mobile Browser clicks
+  request candidate navigation automatically. While that request waits for the initial
+  status read or candidate document, and while its endpoint is being opened, the mobile
+  panel shows “Establishing network connection” instead of address-entry instructions.
+  Explicitly reopening an existing Browser retains its current page.
+  Annotation mode installs a full-viewport transparent interaction layer inside the managed page;
+  it must remain the pointer target while hit-testing temporarily ignores it to inspect the page
+  below. Do not revert to listener-only interception, which lets page pointer handlers activate.
+  Draft and persisted comment UI render outside the iframe, so both must be registered with the
+  injected runtime as tracked anchors. Their overlay position must come from refreshed resolved
+  rects on page scroll; an initial click rect is only a pre-resolution placeholder.
+  Injected annotation target payloads use path-relative `page.url` values; resolve them against the
+  logical preview URL before stripping capability parameters. Treat parse failures as visible runtime
+  errors instead of silently dropping the selection message.
+  Creating a new preview comment immediately stages its visual-annotation reference in the matching
+  session composer through the idempotent `addVisualAnnotationReference` path. Existing-comment
+  controls use the separate toggle path so users can remove or re-add a staged reference.
+  Preview comment create/resolve/unresolve/submitted writes MUST go through
+  `runtime.writer.mutatePreviewVisualComments`; never call the preview comment store's `setState`
+  from UI code. Preview comments are renderer-authored user data on every platform.

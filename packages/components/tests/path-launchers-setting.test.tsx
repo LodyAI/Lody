@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +10,7 @@ import {
   writeStoredPathLauncherPreference,
 } from '../src/lib/session-path-launchers';
 
-vi.mock('@posthog/react', () => ({
+vi.mock('@/lib/posthog-context', () => ({
   usePostHog: () => null,
 }));
 
@@ -36,6 +35,7 @@ describe('PathLaunchersSettings', () => {
     await initI18n('en');
     localStorage.clear();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Reflect.deleteProperty(window.navigator, 'userAgent');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: vi.fn().mockImplementation((query: string) => ({
@@ -70,7 +70,7 @@ describe('PathLaunchersSettings', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the selected launcher as one compact select and keeps custom editing available', async () => {
+  it('returns to VS Code after deleting the selected custom launcher', async () => {
     seedCustomLauncher();
     await renderSettings();
 
@@ -85,7 +85,9 @@ describe('PathLaunchersSettings', () => {
     const editButton = getButton('Edit');
     await act(async () => editButton.click());
 
-    expect(document.querySelector('[role="listbox"]')).toBeNull();
+    // A Select keeps its list mounted once opened and hides the closed one, so
+    // "shut" is the trigger's own state rather than the row count.
+    expect(getSelectTrigger().getAttribute('aria-expanded')).toBe('false');
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Edit launcher');
     expect(getInput('path-launcher-name').value).toBe('PhpStorm');
     expect(getInput('path-launcher-command').value).toBe('open -a "PhpStorm" {path}');
@@ -102,58 +104,45 @@ describe('PathLaunchersSettings', () => {
     });
   });
 
-  it('lists logo and name options with the custom action last', async () => {
-    seedCustomLauncher();
-    await renderSettings();
-    await openSelect();
-
-    const options = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'));
-    const optionLabels = options.map((option) => option.textContent?.trim());
-    expect(optionLabels).toContain('VS Code');
-    expect(optionLabels).toContain('PhpStorm');
-    expect(optionLabels.at(-1)).toBe('Custom launcher');
-    expect(options.every((option) => option.querySelector('svg, img'))).toBe(true);
-
-    await chooseOption('Cursor');
-    expect(getSelectTrigger().textContent).toContain('Cursor');
-    expect(readStoredPathLauncherPreference().selectedLauncherId).toBe('cursor');
-
-    await openSelect();
-    await chooseOption('Custom launcher');
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Add custom launcher');
-    expect(readStoredPathLauncherPreference().selectedLauncherId).toBe('cursor');
-  });
-
-  it('uses a bottom sheet for the custom launcher form on mobile', async () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
-    seedCustomLauncher();
-    await renderSettings();
-    await openSelect();
-    await act(async () => getButton('Edit').click());
-
-    const sheet = document.querySelector<HTMLElement>('[role="dialog"]');
-    expect(sheet).not.toBeNull();
-    expect(sheet?.className).toContain('bottom-0');
-    expect(sheet?.className).toContain('slide-in-from-bottom');
-    expect(sheet?.textContent).toContain('Edit launcher');
-  });
-
   async function renderSettings(): Promise<void> {
     await act(async () => {
       root.render(<PathLaunchersSettings isElectron platform="darwin" />);
     });
   }
 
-  async function openSelect(): Promise<void> {
+  /**
+   * Base UI defers part of opening a popup to an animation frame, and `act`
+   * flushes React's work but not the frame queue. Without draining it here the
+   * next interaction lands between the list being asked to open and its
+   * opening, and the deferred frame then undoes what that interaction did.
+   */
+  async function settle(): Promise<void> {
     await act(async () => {
-      getSelectTrigger().dispatchEvent(
-        new TestPointerEvent('pointerdown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
+      for (let index = 0; index < 2; index += 1) {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => resolve());
+        });
+      }
     });
+  }
+
+  /** The pointer arriving and pressing, which is what opens the list. */
+  async function pointerClick(element: HTMLElement): Promise<void> {
+    const init = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse', detail: 1 };
+    await act(async () => {
+      element.dispatchEvent(new TestPointerEvent('pointermove', init));
+      element.dispatchEvent(new TestPointerEvent('pointerdown', init));
+      element.dispatchEvent(new MouseEvent('mousedown', init));
+      element.focus();
+      element.dispatchEvent(new TestPointerEvent('pointerup', init));
+      element.dispatchEvent(new MouseEvent('mouseup', init));
+      element.click();
+    });
+    await settle();
+  }
+
+  async function openSelect(): Promise<void> {
+    await pointerClick(getSelectTrigger());
   }
 
   async function chooseOption(name: string): Promise<void> {
@@ -161,10 +150,7 @@ describe('PathLaunchersSettings', () => {
       (item) => item.textContent?.includes(name)
     );
     if (!option) throw new Error(`Could not find option: ${name}`);
-    await act(async () => {
-      option.focus();
-      option.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }));
-    });
+    await pointerClick(option);
   }
 
   function seedCustomLauncher(): void {

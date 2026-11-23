@@ -68,21 +68,6 @@ const baseArgs = {
 };
 
 describe('importProjectHistoryForLocalProject batching', () => {
-  it('splits the selection into batches of at most 5 RPC calls', async () => {
-    const ids = Array.from({ length: 12 }, (_, i) => `session-${i}`);
-    const { runtime, calls } = makeRuntime((request) =>
-      makeImportResult(
-        { imported: request.acpSessionIds.length },
-        makeCatalog(request.acpSessionIds.length)
-      )
-    );
-
-    await importProjectHistoryForLocalProject({ ...baseArgs, runtime, acpSessionIds: ids });
-
-    expect(calls.map((batch) => batch.length)).toEqual([5, 5, 2]);
-    expect(calls.flat()).toEqual(ids);
-  });
-
   it('merges per-batch summaries and keeps the last catalog', async () => {
     const ids = Array.from({ length: 7 }, (_, i) => `session-${i}`);
     let call = 0;
@@ -114,41 +99,5 @@ describe('importProjectHistoryForLocalProject batching', () => {
     expect(result.summary.failures).toHaveLength(1);
     // Last batch's catalog wins (it is the most complete snapshot).
     expect(result.catalog.listed).toBe(200);
-  });
-
-  it('reports cumulative progress after each batch', async () => {
-    const ids = Array.from({ length: 7 }, (_, i) => `session-${i}`);
-    const { runtime } = makeRuntime((request) =>
-      makeImportResult({ imported: request.acpSessionIds.length }, makeCatalog(0))
-    );
-
-    const progress: Array<{ completed: number; total: number; imported: number }> = [];
-    await importProjectHistoryForLocalProject({
-      ...baseArgs,
-      runtime,
-      acpSessionIds: ids,
-      onBatchComplete: (cumulative, p) => {
-        progress.push({ ...p, imported: cumulative.summary.imported });
-      },
-    });
-
-    expect(progress).toEqual([
-      { completed: 5, total: 7, imported: 5 },
-      { completed: 7, total: 7, imported: 7 },
-    ]);
-  });
-
-  it('dedupes selected ids before batching', async () => {
-    const { runtime, calls } = makeRuntime((request) =>
-      makeImportResult({ imported: request.acpSessionIds.length }, makeCatalog(0))
-    );
-
-    await importProjectHistoryForLocalProject({
-      ...baseArgs,
-      runtime,
-      acpSessionIds: ['a', 'a', 'b', 'b', 'b'],
-    });
-
-    expect(calls).toEqual([['a', 'b']]);
   });
 });

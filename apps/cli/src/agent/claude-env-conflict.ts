@@ -9,6 +9,8 @@
  * https://code.claude.com/docs/en/third-party-integrations.
  */
 const CLAUDE_AUTH_ROUTING_KEYS = [
+  // Profile / configuration directory override
+  'CLAUDE_CONFIG_DIR',
   // Direct Anthropic API auth
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
@@ -53,6 +55,7 @@ const CLAUDE_AUTH_ROUTING_KEYS = [
  * inherited credentials.
  */
 const EXPLICIT_INTENT_TRIGGERS = new Set<string>([
+  'CLAUDE_CONFIG_DIR',
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',

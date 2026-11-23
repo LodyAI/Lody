@@ -3,14 +3,66 @@
 File attachments use `file` blocks; the product contract is in
 `specs/session-files.md`.
 
-- `session-file-card.tsx` — pure card (icon by extension, name, size; pending/expired/
-  previewable/downloadable derived from transport + `getServerNow()` expiry) and
-  `SessionFileCardList` (adjacent-block aggregation). Story: `SessionFileCard.stories.tsx`.
+- `session-file-card.tsx` — `SessionFileCardLayout` is shared by pending and delivered
+  cards. The delivered card is evidence, so it rests quietly under the answer, but it is the thing
+  the agent made and reads as a small sheet of paper laid on a tray. Two surfaces only: the tray is
+  `secondaryBackground` with no outline or shadow; the sheet is `raisedBackground` with
+  `shadow.card`, the only shadow, so no edge is drawn twice. The sheet's top-right corner is not
+  painted (the tray shows through, whatever tint it has) and the fold lies in the remaining half.
+  The sheet (`session-file-sheet.tsx`) is narrow and portrait and prints no glyph (one was tried and
+  made it read as a badge) and no extension, which the line beneath the name spells. It carries
+  faint tonal marks of ink instead, drawn per file kind so a column of files reads as different
+  pages: ruled lines (text, document, binary), indented lines (code), brace-like lines (data), a
+  header-and-cells grid (spreadsheet), a zipper (archive), a waveform (audio), a picture over two
+  captions (image) and the same with a play mark (video). The marks are a step of `label` over the
+  paper, never a hue, and the first line of every page stops short of the fold.
+  Beside it, the name is the only line at full ink; under it, `secondaryLabel` spells the type and
+  size ("PDF · 2.4 MB", via `formatSessionFileMeta`, which the pending row shares so the handoff
+  to history does not change the text; no short extension means the size alone) or the status. The
+  action chip trails at `secondaryLabel` (a dimmer rest read as disabled) with no fill of its own.
+  Preview and download actions appear only while the card is hovered or holds focus; devices
+  without hover (`@media (hover: hover)` fails) keep them visible. Only the control under the
+  pointer changes: it brightens and sinks into a well. Hovering the card never paints the chip,
+  and status glyphs (upload spinner, expiry clock, a download in flight) stay visible. The sheet scales with Appearance (`captionSize` units). On a card that opens something
+  the sheet lifts and tilts a hair and takes `shadow.raised`; pending and expired dim it, and a
+  failed card tints the tray toward `destructive` and its reason takes label ink. Under
+  `prefers-reduced-motion` the lift is instant, not animated. There is no colour per file kind,
+  because colour is reserved for outcomes. Transport and `getServerNow()` expiry determine pending/expired/previewable/
+  downloadable state. `SessionFileCardList` aggregates adjacent blocks. Story:
+  `SessionFileCard.stories.tsx`, test: `tests/session-file-card.test.tsx`.
+- Static shares pass `retention='publication'`: the copied object has no dependency
+  on the source upload's expiry. Its manifest-gated reader decides availability.
+- One card, one primary action — EXCEPT an HTML attachment, which also gets a separate
+  download button for the source bytes. Its click opens the RENDERED page (browser
+  surface or live file preview), a surface with no control of its own for the file that
+  was uploaded; every other previewable file opens the attachment preview, which already
+  downloads from inside, so it must not grow a duplicate control. That button carries the
+  in-flight spinner, and the primary affordance keeps reading as preview.
 - `session-file-preview-dialog.tsx` — `SessionFilePreviewPanel` (status-driven;
-  markdown reuses `MarkdownRenderer`, raw toggle, copy=raw, truncation) and dialog wrapper.
-  Story: `SessionFilePreviewPanel.stories.tsx`.
-- `view.tsx` `SessionFileGroup` owns atoms/download/preview-fetch and resolves the pending
-  machine name. Both render switches and `UserChatBubble` route `file` blocks through it.
+  markdown reuses `MarkdownRenderer`, raw toggle, copy=raw, truncation; video
+  attachments render the shared custom `VideoPlayer` with play/pause, scrubbing,
+  time, volume, playback speed, and download fallback on codec/load errors) and dialog wrapper.
+  `session-file-attachment.tsx` owns the preview fetch and download for every host
+  (fetching video bytes through the existing authenticated download / E2EE
+  decryption path into a tab-scoped `blob:` URL revoked on unmount).
+  A desktop Session opens the preview as a closeable side-panel viewer tab
+  (`openFileAttachment` on `SessionChatActionContext`, tab id
+  `attachment:<storage session>:<fileId>`), deduped and focused like file tabs and
+  not restored after reload. The `pane` variant puts the name, size and actions in
+  one toolbar under the tab strip and lets the body fill the panel, with no card,
+  border, radius or close button. Hosts without a side panel keep the modal:
+  mobile uses the Drawer below, and the desktop history reader the Dialog.
+  Complete HTML fallback attachments open in the shared `ReadOnlyHtmlPreview`, with
+  an eye toggle beside Copy in the existing header. Source mode and Copy retain
+  the original text; loading, errors and truncated HTML never mount the iframe.
+  On mobile, all these file types use a bottom Drawer/Sheet taking approximately
+  94dvh (respecting top and bottom safe areas), with a fixed header and scrolling
+  body; HTML fills the available body. The desktop Dialog fallback keeps its
+  55vh content cap. Preview uses the script-free sandbox, with no
+  live-file provenance or Browser connection required.
+  Story: `SessionFilePreviewPanel.stories.tsx` (`SidePanel*` for the pane).
+- `view.tsx` `SessionFileGroup` routes previews (HTML surface, side-panel tab, modal
+  fallback) and resolves the pending machine name. Both render switches and `UserChatBubble` route `file` blocks through it.
   Upload/download/preview helpers: `@/lib/session-file-{upload,download,presentation}.ts`.
 - Agent-uploaded blocks may carry a workspace-relative `sourcePath` proven by the CLI's
   containment check. It is provenance for reopening the live file, never a download path.
@@ -24,13 +76,115 @@ File attachments use `file` blocks; the product contract is in
   cache dir → Share sheet → best-effort cleanup; never buffers the whole file). Base64
   streaming math is in `@/lib/base64-chunk.ts` (tested by `tests/base64-chunk.test.ts`).
   Capacitor plugins stay dynamically imported so web/electron bundles remain clean.
+- A group of image attachments is ONE wrapping row (`IMAGE_ATTACHMENT_ROW_CLASS` in
+  `view.tsx`), used by `ImageGroupBubble` and the user row's grouped `image` items.
+  Never give it a fixed column count or a max width: the thumbnail is a fixed square,
+  so a `grid-cols-2` turned a thirteen-image turn into a two-wide tower that scrolled
+  for screens. Tiles keep `shrink-0` (flex shrinks before it wraps) and hug the
+  speaker's side. Decision:
+  [image attachment row](../../../../../.agents/notes/implemented/bug-fix/2026-09-15-image-attachment-row-wraps.md).
+- In an editable session, the image viewer offers markup for its current loaded image.
+  Markup uses a full-window lightbox; cancel returns to the same image preview.
+  The session composer accepts the annotated PNG and its notes through the same
+  validation and draft path as document selections; a failed handoff leaves the editor
+  open. Static and read-only image viewers do not offer this action.
+
+## Codex file citations
+
+Markdown prose recognizes `:codex-file-citation{path="..."}` as a local file card,
+including paths wrapped in whitespace/newlines and optional `purpose` / `artifact_kind`
+attributes. It reuses `SessionFileCardLayout` and the Markdown file-link action/menu
+boundary; it does not fabricate an uploaded attachment, size, expiry, or download URL.
+Filename punctuation is URL-encoded for transport through the existing href resolver.
+Windows drive prefixes stay unescaped and backslash separators normalize to slashes,
+so absolute artifact targets retain their drive. The citation walk leaves non-container
+Markdown nodes untouched, including inline/display math.
+In conversations, relative citations stay path text until the owning index confirms
+the file; absolute citations render immediately. Clicking a legal target opens it
+directly; without an opener or with an invalid target it copies the original path
+and reports success. Copy menus never resolve a path before copying. Invalid/incomplete citations and
+code examples do not become cards. The inline card uses a span frame to keep paragraph
+markup valid. Coverage lives in the Markdown file-link and streaming renderer suites;
+`MarkdownCodexFileCitations` provides the visual states.
+
+## Upload-to-history continuity
+
+Pending file attachments reuse `SessionFileCardLayout` and `SessionFileCardList`,
+including the delivered row's insets. Progress overlays the bottom edge; it adds
+no height. Ready files show their size in the same subtitle slot. Failure reasons
+still belong to their affected card.
+
+`session-attachment-preparation.ts` owns attachment progress and ready receipts for
+both pending sends and schedules; callers only publish its snapshots. Admission
+and preparation use the same locality rule. Each preparation attempt selects its
+route once before processing unready attachments; ready-only sends skip selection.
+Successful items survive retries,
+while canceled work cannot publish progress or prepared references. The memory
+queue owns unfinished sources and ordering; the durable input owner takes over
+ready Roost inputs and their acceptance receipts.
+
+`session-attachment-preparation.ts` seeds `session-image-cache.ts` with each
+successful image preparation before releasing its source. Plaintext same-desktop images
+remain image payloads with local transport; ordinary files carry their absolute path and owning machine. Generated files
+use the durable path returned by preparation; originals retain their selected path
+and file metadata directly, without preparation IPC or a registration RPC. Resend,
+fork, and queued inputs carry that payload unchanged, without inheritance mappings.
+The path identifies the file; it does not grant read access. Local preview uses the
+host's disk-machine authorization. Remote attachment downloads use the existing
+workspace-contained file reader, so generated files outside its allowed roots cannot
+be downloaded remotely. Local RPC downloads require machine-owner authorization;
+ACP path reads require the frozen requester to be the machine owner and reject the
+encrypted route.
+
+Local images need no cloud token or upload completion for sending or execution.
+Images are automatically published by the background upload owner when authorized
+cloud access is available, with retries after connectivity returns; publication
+never gates local execution. Sends, replay, and schedules preserve `transport`,
+`machineId`, and `localImageId` without checking daemon capability metadata.
+Plaintext desktop preparation uses the local host when its known machine ID matches the
+selected target; otherwise it transfers through the workspace's authorized path.
+Protected sends and schedules always prepare new attachments through encrypted
+transfer, including same-machine Electron targets, using the runtime attachment grant.
+Protected local preparation remains unavailable and cannot fall back to plaintext.
+Published `r2` images may target another machine while retaining their local identity.
+History, fullscreen, and queued previews resolve local images through scoped host
+IPC and its file-resource URL after a reload. They never build a cloud download
+URL for a pending local image. Local cache keys additionally include the owning
+machine and immutable `localImageId`. Preview callers retain the full image
+payload, including MIME, size and storage session. Published `r2` images with
+retained local identity prefer the scoped host file, preserving offline previews
+after backfill. If that file cannot be loaded, including on another device or
+without IPC, they use the normal workspace-authenticated cloud image path. A
+missing cloud token leaves a local miss unavailable. Pending local images remain
+host-only on any resolution or preview failure. Legacy local-attachment image
+rendering remains supported.
+
+The pending image and
+`view.tsx`'s delivered image read that workspace/session/image-scoped cache
+synchronously, so history publication needs no fresh thumbnail request or
+loading frame. Native iOS seeds a data URL before readiness to preserve its
+long-press sharing behavior. Browsers supporting `decode()` warm that URL before
+it becomes ready, avoiding a local decode flash. The existing 200 MiB memory bound and object URL
+cleanup remain; eviction/restart uses the image's local or uploaded transport. Cancelled or cache-cleared
+native conversions cannot publish late previews. Preview caching failures do
+not fail otherwise successful preparation.
+
+Behavioral coverage: `tests/session-image-cache.test.ts`,
+`tests/session-attachment-preparation.test.ts`, and
+`tests/session-pending-message-row.test.tsx`. `SessionPendingMessages.UploadToHistory`
+and its narrow counterpart exercise the real pending and delivered rows with
+synthetic bytes. This replaces the earlier reserved file-progress row and closes
+the extra thumbnail-load gap documented in the
+[deferred-attachment note](../../../../../.agents/notes/implemented/architecture/2026-09-14-deferred-attachment-send.md#sending-in-place-2026-09-29).
 
 ## Image-preview overlay (zoom / pan)
 
 - **There is exactly ONE zoomable image surface in the app:**
   `../shared/zoomable-image-viewer.tsx` (`ZoomableImageViewer`, wrapping
   `react-photo-view` `PhotoSlider`). It owns pinch-to-zoom, double-tap/wheel zoom,
-  drag-to-pan, and the top-right close button. Both callers mount it:
+  drag-to-pan, and the top-right close button. Tapping the photo stays inside the
+  pan/zoom surface, and vertical pulls do not dismiss it; close through the
+  toolbar or backdrop. Both callers mount it:
   `view.tsx` `ImagePreviewDialog` (chat image blocks, gallery of the turn's images)
   and `../sessions/session-file-image-preview.tsx` (Code Collab file preview, one
   image). A new image surface must reuse it rather than hand-roll gestures —
@@ -44,8 +198,12 @@ File attachments use `file` blocks; the product contract is in
   blocked or fall through. Pass an in-drawer element as `portalAnchorRef`;
   `resolveImagePreviewPortalContainer` walks up to the real `[data-vaul-drawer]`
   (not the `data-vaul-no-drag` body wrapper, which is `display: contents`) and
-  `useImagePreviewPortalNoDrag` marks the mounted portal root `data-vaul-no-drag`
+  the shared viewer marks its modal and photo portal roots `data-vaul-no-drag`
   so Vaul does not take over pan/pinch gestures.
+- The shared viewer owns modal focus isolation and named UI buttons: initial
+  focus is Close, Tab stays inside, background content is inert, and closing
+  returns focus to the connected opener. The photo portal lives inside this
+  boundary, including while its source is loading.
 - `react-photo-view@1.2.7` is patched in root `patches/` to hard-clamp the MINIMUM
   pinch scale at `1` (no shrink-below-fit rubber band; max stays 6×). Do not replace
   this with an outer `overlayRender`/React state clamp; that fights PhotoView's touch
@@ -54,7 +212,8 @@ File attachments use `file` blocks; the product contract is in
   full-bleed overlay; desktop (`useIsMobile() === false`) gets a lightbox — the
   photo inset by a `transform: scale()`, a translucent + blurred mask
   (`maskOpacity`), a gradient top bar padded clear of the macOS traffic lights /
-  Windows caption buttons, and no `1 / 1` counter for a single image. Never inset
+  Windows caption buttons with its controls centered on their line (y=23 / the
+  36px caption strip), and no `1 / 1` counter for a single image. Never inset
   the photo by capping `width`/`height` (PhotoView centers the box IT sized, so a
   capped box lands off center) or by padding (it erases an image smaller than the
   inset).
@@ -67,3 +226,12 @@ File attachments use `file` blocks; the product contract is in
   bridge the handler must not `preventDefault()`: web keeps the browser's menu.
 - Still plain non-zoomable `<img>`, by scope not by accident: tool-call `image`
   content blocks in `view.tsx` and markdown images in `markdown-renderer.tsx`.
+
+Path-based local image attachments on the original desktop use their payload path
+and display an inline image through Electron’s file-resource URL, with the existing zoomable
+viewer on click. Failed preview or image loading shows an inline retry action. Ordinary
+local attachment cards open the payload path on the original desktop. On another
+device, clicking downloads current bytes through the existing authenticated file
+RPC; it never starts from rendering alone. Show a spinner during the request and
+an inline error on failure. Web/desktop uses a browser download, native mobile uses
+the existing share sheet. Anonymous shares retain no download action.

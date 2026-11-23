@@ -1,4 +1,6 @@
 import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shared';
+import { CACHE_REJECTION_COOLDOWN_MS, FAILED_PREFETCH_COOLDOWN_MS } from './eager-sync-admission';
+import type { EagerSyncPolicy } from './eager-sync-policy';
 
 /**
  * Background progressive eager-sync of session docs.
@@ -13,12 +15,12 @@ import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shar
  *   React, and never touches real timers — every external effect is an injected
  *   port. This makes it fully unit-testable with in-memory fakes and a fake
  *   clock/scheduler, and sidesteps the loro-repo fake-timer hang.
- * - Sync is always ONE-SHOT catch-up: the prefetcher opens the store, holds a
- *   sync lease until caught up, then releases. We never hold a long-lived live
- *   join for a session the user is not viewing.
- * - Candidate scope depends on the surface: native/electron can eventually
- *   warm all candidates, while web stays bounded to the highest-priority set.
- *   All surfaces use bounded concurrency plus batch cooldowns.
+ * - Sync is always ONE-SHOT catch-up: the runtime prefetcher uses a disposable
+ *   worker and a raw-document snapshot cache, never a UI store or Mirror.
+ *   It releases the document and room after catch-up.
+ * - Every surface bounds automatic prefetch to the highest-priority recent
+ *   candidates. Less-active sessions sync on demand when opened.
+ * - All surfaces use bounded concurrency plus batch cooldowns.
  */
 
 /** Minimal view of a session's metadata the coordinator reasons about. */
@@ -32,7 +34,12 @@ export interface SessionActivitySnapshot {
   parentSessionId?: SessionId;
 }
 
-export type PrefetchOutcome = 'synced' | 'skipped' | 'failed';
+export type PrefetchOutcome =
+  | 'synced'
+  | 'skipped'
+  | 'failed'
+  | 'cache_rejected'
+  | 'apply_incomplete';
 
 /** The subset of the room-sync registry the coordinator depends on. */
 export interface CoordinatorRegistryView {
@@ -55,17 +62,17 @@ export interface BackgroundSyncCoordinatorDeps {
   };
   registry: CoordinatorRegistryView;
   prefetcher: {
+    getRetryAt?(sessionId: SessionId): number | undefined;
     /**
-     * One-shot catch-up: open the store, hold a sync lease until caught up (or
-     * the signal aborts / a timeout fires), then release. Resolves with the
+     * One-shot catch-up: hold a replica until caught up (or the signal aborts /
+     * a timeout fires), persist and release. Resolves with the
      * outcome; never rejects.
      */
-    prefetch(sessionId: SessionId, signal: AbortSignal): Promise<PrefetchOutcome>;
-    /**
-     * Hard-evict a coordinator-warmed doc to bound memory. The coordinator only
-     * calls this for non-joined rooms it warmed itself.
-     */
-    evict(sessionId: SessionId): void;
+    prefetch(
+      sessionId: SessionId,
+      lastMessageAt: number,
+      signal: AbortSignal
+    ): Promise<PrefetchOutcome>;
   };
   env: {
     isOnline(): boolean;
@@ -88,57 +95,21 @@ export interface BackgroundSyncCoordinatorDeps {
   logger?: { debug(...args: unknown[]): void };
 }
 
-export interface EagerSyncPolicy {
-  /** Max concurrent prefetches. */
-  concurrency: number;
-  /** Max prefetches to start before yielding to a cooldown. */
-  batchSize: number;
-  /** Delay before starting the next prefetch batch. */
-  batchCooldownMs: number;
-  /** Burst-coalesce window: skip re-syncing a room synced within this window. */
-  freshnessTtlMs: number;
-  /** Max coordinator-warmed docs kept before LRU eviction. */
-  maxWarmDocs: number;
-  /** Only eager-sync the top-N candidates; Infinity means all candidates. */
-  candidateWindow: number;
-  /** Abort a prefetch that has not settled within this window. */
-  prefetchTimeoutMs: number;
-}
-
-export type EagerSyncSurface = 'web' | 'desktop' | 'mobile';
-
-export const WEB_EAGER_SYNC_CANDIDATE_WINDOW = 20;
-export const FULL_EAGER_SYNC_CANDIDATE_WINDOW = Number.POSITIVE_INFINITY;
-
-export const WEB_EAGER_SYNC_POLICY: EagerSyncPolicy = {
-  concurrency: 2,
-  batchSize: 4,
-  batchCooldownMs: 1_500,
-  freshnessTtlMs: 15_000,
-  maxWarmDocs: 20,
-  candidateWindow: WEB_EAGER_SYNC_CANDIDATE_WINDOW,
-  prefetchTimeoutMs: 20_000,
-};
-
-export const FULL_EAGER_SYNC_POLICY: EagerSyncPolicy = {
-  concurrency: 3,
-  batchSize: 8,
-  batchCooldownMs: 750,
-  freshnessTtlMs: 15_000,
-  maxWarmDocs: 96,
-  candidateWindow: FULL_EAGER_SYNC_CANDIDATE_WINDOW,
-  prefetchTimeoutMs: 20_000,
-};
-
-export const DEFAULT_EAGER_SYNC_POLICY = WEB_EAGER_SYNC_POLICY;
-
-export const resolveEagerSyncPolicy = (surface: EagerSyncSurface): EagerSyncPolicy =>
-  surface === 'web' ? WEB_EAGER_SYNC_POLICY : FULL_EAGER_SYNC_POLICY;
+export type { EagerSyncPolicy, EagerSyncSurface } from './eager-sync-policy';
+export {
+  DEFAULT_EAGER_SYNC_POLICY,
+  DESKTOP_EAGER_SYNC_POLICY,
+  EAGER_SYNC_CANDIDATE_WINDOW,
+  MOBILE_EAGER_SYNC_POLICY,
+  WEB_EAGER_SYNC_CANDIDATE_WINDOW,
+  WEB_EAGER_SYNC_POLICY,
+  resolveEagerSyncPolicy,
+} from './eager-sync-policy';
 
 export interface BackgroundSyncCoordinator {
   start(): void;
   stop(): void;
-  getState(): { queued: SessionId[]; inFlight: SessionId[]; warmed: SessionId[] };
+  getState(): { queued: SessionId[]; inFlight: SessionId[] };
   /** Manual nudge (e.g. sidebar hover): prefetch now, bypassing the burst window. */
   requestPrefetch(sessionId: SessionId): void;
 }
@@ -173,12 +144,11 @@ export function createBackgroundSyncCoordinator(
   const latest = new Map<SessionId, SessionActivitySnapshot>();
   // lastMessageAt value we have already caught up through (Linear's lastSyncId analog).
   const syncedThrough = new Map<SessionId, number>();
+  const cacheRejected = new Map<SessionId, { activity: number; until: number }>();
   // Sessions waiting to be prefetched, with the snapshot that qualified them.
   const queued = new Map<SessionId, SessionActivitySnapshot>();
   const inFlight = new Set<SessionId>();
   const controllers = new Map<SessionId, AbortController>();
-  // Coordinator-warmed docs, oldest first (LRU).
-  const warmed: SessionId[] = [];
   // Trailing re-eval timers (burst coalescing tail).
   const trailingTimers = new Map<SessionId, unknown>();
 
@@ -341,6 +311,10 @@ export function createBackgroundSyncCoordinator(
     if (snap.lastMessageAt == null) {
       return false;
     }
+    const rejected = cacheRejected.get(snap.sessionId);
+    if (rejected && clock.now() < rejected.until) {
+      return false;
+    }
     const synced = getSyncedThrough(snap.sessionId);
     if (synced != null && snap.lastMessageAt <= synced) {
       return false;
@@ -393,32 +367,11 @@ export function createBackgroundSyncCoordinator(
     return best;
   };
 
-  const recordWarm = (sessionId: SessionId) => {
-    const idx = warmed.indexOf(sessionId);
-    if (idx >= 0) {
-      warmed.splice(idx, 1);
-    }
-    warmed.push(sessionId);
-    // Evict oldest non-joined warmed docs beyond the cap.
-    while (warmed.length > policy.maxWarmDocs) {
-      let evictedIndex = -1;
-      for (let i = 0; i < warmed.length; i++) {
-        const candidate = warmed[i];
-        if (!registry.isJoined(roomOf(candidate))) {
-          evictedIndex = i;
-          break;
-        }
-      }
-      if (evictedIndex < 0) {
-        // All warmed docs are currently joined (user viewing) — never evict those.
-        break;
-      }
-      const [evicted] = warmed.splice(evictedIndex, 1);
-      prefetcher.evict(evicted);
-    }
-  };
-
   const runPrefetch = (snap: SessionActivitySnapshot) => {
+    const lastMessageAt = snap.lastMessageAt;
+    if (lastMessageAt == null) {
+      return;
+    }
     const sessionId = snap.sessionId;
     inFlight.add(sessionId);
     startedInCurrentBatch += 1;
@@ -426,16 +379,34 @@ export function createBackgroundSyncCoordinator(
     controllers.set(sessionId, controller);
 
     const timeoutHandle = scheduler.setTimeout(() => {
-      controller.abort();
+      controller.abort(new DOMException('Eager-sync task timed out', 'TimeoutError'));
     }, policy.prefetchTimeoutMs);
 
     void prefetcher
-      .prefetch(sessionId, controller.signal)
+      .prefetch(sessionId, lastMessageAt, controller.signal)
       .then((outcome) => {
         if (outcome === 'synced') {
-          // Record the activity high-water mark we caught up through.
-          recordSyncedThrough(sessionId, snap.lastMessageAt);
-          recordWarm(sessionId);
+          // Avoid duplicate work during this lifetime and persist the small
+          // pre-queue index. The parent also checks the snapshot checkpoint
+          // before it creates a worker.
+          recordSyncedThrough(sessionId, lastMessageAt);
+        }
+        if (
+          outcome === 'cache_rejected' ||
+          outcome === 'failed' ||
+          outcome === 'apply_incomplete'
+        ) {
+          cacheRejected.delete(sessionId);
+          cacheRejected.set(sessionId, {
+            activity: lastMessageAt,
+            until:
+              prefetcher.getRetryAt?.(sessionId) ??
+              clock.now() +
+                (outcome === 'cache_rejected'
+                  ? CACHE_REJECTION_COOLDOWN_MS
+                  : FAILED_PREFETCH_COOLDOWN_MS),
+          });
+          if (cacheRejected.size > 1000) cacheRejected.delete(cacheRejected.keys().next().value!);
         }
         logger?.debug('[eager-sync] prefetch', sessionId, outcome);
       })
@@ -592,7 +563,6 @@ export function createBackgroundSyncCoordinator(
       return {
         queued: Array.from(queued.keys()),
         inFlight: Array.from(inFlight),
-        warmed: Array.from(warmed),
       };
     },
     requestPrefetch(sessionId: SessionId) {
@@ -602,7 +572,10 @@ export function createBackgroundSyncCoordinator(
       if (inFlight.has(sessionId) || registry.isJoined(roomOf(sessionId))) {
         return;
       }
-      const snap = latest.get(sessionId) ?? { sessionId };
+      const snap = latest.get(sessionId);
+      if (!snap || snap.isArchived || snap.lastMessageAt == null) {
+        return;
+      }
       clearTrailing(sessionId);
       queued.set(sessionId, snap);
       scheduleDrain();

@@ -6,6 +6,10 @@ import type {
   RecordTurnDiffInput,
   RecordTurnDiffResult,
   SnapshotPathInput,
+  SnapshotDescriptorInput,
+  SnapshotDescriptor,
+  SnapshotBytesInput,
+  SnapshotBytes,
   TurnDiffFileSummary,
   TurnDiffGcResult,
   TurnDiffSnapshot,
@@ -39,6 +43,14 @@ export class InlineTurnDiffStore implements TurnDiffStoreApi {
       capturedAtMs: input.capturedAtMs ?? recordedAtMs,
       recordedAtMs,
     });
+  }
+
+  async getSnapshotDescriptor(input: SnapshotDescriptorInput): Promise<SnapshotDescriptor> {
+    return this.store.getSnapshotDescriptor({ ...input, nowMs: input.nowMs ?? this.now() });
+  }
+
+  async getSnapshotBytes(input: SnapshotBytesInput): Promise<SnapshotBytes> {
+    return this.store.getSnapshotBytes({ ...input, nowMs: input.nowMs ?? this.now() });
   }
 
   async allocateHeadProof(): Promise<number> {

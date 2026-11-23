@@ -6,11 +6,20 @@ const LODY_INTERNAL_PROMPT_MARKERS = [
   'The "lody" MCP server provides tools for this conversation:',
 ] as const;
 
+/** Prefix context sufficient to detect an instruction marker across an append. */
+export const LODY_INTERNAL_PROMPT_SCAN_TAIL =
+  Math.max(...LODY_INTERNAL_PROMPT_MARKERS.map((marker) => marker.length)) - 1;
+
 export type SessionGoalMessage = Extract<MessageContent, { type: 'goal' }>;
 
 export const SESSION_GOAL_COMMANDS = ['pause', 'resume', 'clear'] as const;
 
 export type SessionGoalCommand = (typeof SESSION_GOAL_COMMANDS)[number];
+
+/** Every goal action Lody can ask an agent to perform, including `set`. */
+export const SESSION_GOAL_ACTIONS = ['set', 'pause', 'resume', 'clear'] as const;
+
+export type SessionGoalAction = (typeof SESSION_GOAL_ACTIONS)[number];
 
 export const sanitizeLodyInternalInstructions = (text: string): string => {
   const markerIndex = LODY_INTERNAL_PROMPT_MARKERS.reduce<number | null>((earliest, marker) => {
@@ -45,7 +54,7 @@ const isSessionGoalMessage = (value: unknown): value is SessionGoalMessage => {
 };
 
 export const resolveLatestSessionGoalFromHistory = (
-  history: ReadonlyArray<Pick<SessionHistoryInput, 'items'> | undefined> | null | undefined
+  history: ReadonlyArray<{ readonly items?: unknown } | undefined> | null | undefined
 ): SessionGoalMessage | null => {
   if (!history?.length) {
     return null;
@@ -96,14 +105,12 @@ export const resolveVisibleSessionGoal = (
 export const isSessionGoalActive = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'active';
 
-/**
- * @deprecated Use `isSessionGoalActive`. This reports persistent goal state,
- * not whether an ACP prompt is currently running.
- */
-export const isSessionGoalWorking = isSessionGoalActive;
-
 export const isSessionGoalPaused = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'paused';
+
+/** A paused or blocked goal can continue when the user explicitly resumes it. */
+export const isSessionGoalResumable = (goal: SessionGoalMessage | null | undefined): boolean =>
+  goal?.status === 'paused' || goal?.status === 'blocked';
 
 export const isSessionGoalComplete = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'complete';

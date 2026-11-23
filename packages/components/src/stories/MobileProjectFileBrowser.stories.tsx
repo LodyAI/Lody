@@ -67,9 +67,18 @@ const repoFiles: FileWorkspaceProviderEntry[] = [
   'package.json',
   'pnpm-workspace.yaml',
   'README.md',
+  'preview.html',
 ].map(file);
 
 const snapshots: Record<string, FileWorkspaceSnapshot> = {
+  'preview.html': {
+    kind: 'text',
+    text: `<style>body { font: 18px system-ui; padding: 20px; background: #fff; color: #222; } h1 { color: #246; }</style>
+      <h1>Mobile HTML report</h1><p>Preview opens immediately.</p>
+      <a href="https://example.invalid/escape">External link</a>
+      <button onclick="this.textContent='Script ran'">Run script</button>
+      <script>document.body.dataset.executed = 'yes';</script>`,
+  },
   'README.md': {
     kind: 'text',
     text: '# lody\n\nA collaborative coding workspace.\n\n- apps/cli\n- apps/web\n- packages/components\n',

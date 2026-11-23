@@ -1,0 +1,1371 @@
+import { readSessionHistoryMetadata } from '@lody/shared/session-data';
+import type { MessageContent, SessionHistory, SessionId } from '@lody/shared';
+import type {
+  SessionDataChange,
+  SessionDirectoryRow,
+  SessionHistoryDirectoryPage,
+  SessionHistoryReader,
+  SessionTurnRead,
+} from '@lody/shared/session-data';
+import { pickIndexInputConfig, pickIndexScalars } from './index-row';
+import { summarizeTurn } from './turn-summary';
+import {
+  conversationTailStart,
+  DEFAULT_MAX_HYDRATED,
+  DEFAULT_TAIL_KEEP,
+  type ConversationView,
+  type ConversationViewChange,
+  type ConversationViewListener,
+  type SubagentRunHistorySource,
+  type TurnIndexRow,
+  UNLOADED_TURN_PREFIX,
+  isUnloadedTurnId,
+} from './types';
+
+// # Reader-backed ConversationView
+//
+// Windowed display cache over `SessionHistoryReader`: this module never imports
+// loro-crdt, never names a CID or container id, and never touches a raw doc.
+// Every synchronous accessor reads an in-memory snapshot that asynchronous
+// port reads populate; `readDirectory` supplies the index rows (scalars, send
+// config, counts) and `readTurn` supplies bodies on demand.
+//
+// - Identity is `turnId` everywhere (index map, pins, hydration); positions are
+//   only the directory's address.
+// - Every async read/lease carries a membership epoch plus the turn's own
+//   content epoch. A response resolving after a relevant change is discarded
+//   (and re-read while a lease still needs it); an unrelated turn's token is
+//   untouched, so one turn's token never cancels every read.
+// - `observe` is the only subscription: `initial` builds the index, then each
+//   `changed(ids)` invalidates those bodies and refreshes their directory rows.
+//   A structural range
+//   (membership/order change, including same-length replacement) emits
+//   `structure` and re-keys the lookups.
+
+export type IdleDeadline = { timeRemaining(): number };
+/** Schedules one background chunk; returns a cancel function. */
+export type IdleScheduler = (task: (deadline: IdleDeadline) => void) => () => void;
+
+export type CreateConversationViewFromReaderOptions = {
+  sessionId: SessionId;
+  /** Hydrated turns kept beyond the pinned ranges and the tail. */
+  maxHydrated?: number;
+  /** Trailing turns that are always hydrated (streaming lands here). */
+  tailKeep?: number;
+  /** Background pass scheduler; defaults to `requestIdleCallback` (or a timer). */
+  scheduleIdle?: IdleScheduler;
+  /** Yield between chunks of a large `acquireRange`; defaults to a macrotask. */
+  yieldToEventLoop?: () => Promise<void>;
+  /** Turns hydrated per `acquireRange` chunk before the call is chunked further. */
+  hydrateChunkSize?: number;
+  /**
+   * Message items hydrated per synchronous chunk. Turn count alone is a poor
+   * budget: chunks are cut by items as well, and the eager tail stops at this
+   * many items with the rest of the tail following in the first idle chunk.
+   */
+  hydrateItemBudget?: number;
+  /** Maximum elapsed work before yielding between individual body reads. */
+  workBudgetMs?: number;
+  /** Monotonic clock for the body-read budget, independently of activity time. */
+  workNow?: () => number;
+  /** Clock for `lastUpdateAt`; defaults to `Date.now`. */
+  now?: () => number;
+};
+
+/** Item budget for deferred tail hydration. */
+const IDLE_CHUNK_ITEMS = 1_200;
+const DIRECTORY_PAGE_SIZE = 40;
+const unloadedTurnId = (position: number): string => `${UNLOADED_TURN_PREFIX}${position}`;
+
+/** Sentinel: the change carried no `to`, so the whole directory is re-read. */
+
+const defaultScheduleIdle: IdleScheduler = (task) => {
+  if (typeof requestIdleCallback === 'function') {
+    const id = requestIdleCallback((deadline) => task(deadline), { timeout: 500 });
+    return () => cancelIdleCallback(id);
+  }
+  const id = setTimeout(() => task({ timeRemaining: () => 4 }), 16);
+  return () => clearTimeout(id);
+};
+
+const defaultYield = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** A slot the directory cannot resolve to a turn (never written by a healthy client). */
+const phantomRow = (position: number): TurnIndexRow => ({
+  id: `invalid-turn:${position}`,
+  role: 'system',
+  timestamp: '',
+  itemCount: 0,
+  planCount: 0,
+});
+
+const unloadedRow = (position: number): TurnIndexRow => ({
+  ...phantomRow(position),
+  id: unloadedTurnId(position),
+});
+
+const validatePage = (page: SessionHistoryDirectoryPage, latest = false): void => {
+  if (
+    !Number.isSafeInteger(page.startPosition) ||
+    !Number.isSafeInteger(page.totalCount) ||
+    page.startPosition < 0 ||
+    page.totalCount < page.startPosition + page.rows.length ||
+    page.rows.some((row, index) => row.position !== page.startPosition + index) ||
+    page.hasMoreOlder !== page.startPosition > 0 ||
+    page.hasMoreOlder !== (typeof page.cursor === 'string' && page.cursor.length > 0) ||
+    (page.rows.length === 0 && page.totalCount !== 0) ||
+    (latest && page.startPosition + page.rows.length !== page.totalCount)
+  ) {
+    throw new Error('History directory page is incomplete or inconsistent');
+  }
+};
+
+type DisplayHistoryReader = {
+  active: boolean;
+  readTurn: NonNullable<SessionHistoryReader['readTurnForDisplay']>;
+  readRun: NonNullable<SessionHistoryReader['readSubagentRun']>;
+};
+
+// Render-item caches can outlive their conversation. A task capability must
+// not retain the reader, its view closure, or the underlying CRDT document.
+const runHistorySource = (
+  reader: WeakRef<DisplayHistoryReader>,
+  turnId: string,
+  rootSessionId: string,
+  runId: string
+): SubagentRunHistorySource => ({
+  read: async () => {
+    const target = reader.deref();
+    return target?.active ? await target.readRun(turnId, rootSessionId, runId) : undefined;
+  },
+});
+
+export function createConversationViewFromReader(
+  reader: SessionHistoryReader,
+  options: CreateConversationViewFromReaderOptions
+): ConversationView {
+  const maxHydrated = options.maxHydrated ?? DEFAULT_MAX_HYDRATED;
+  const tailKeep = options.tailKeep ?? DEFAULT_TAIL_KEEP;
+  const scheduleIdle = options.scheduleIdle ?? defaultScheduleIdle;
+  const yieldToEventLoop = options.yieldToEventLoop ?? defaultYield;
+  const hydrateChunkSize = options.hydrateChunkSize ?? 64;
+  const hydrateItemBudget = options.hydrateItemBudget ?? 320;
+  const workBudgetMs = options.workBudgetMs ?? 4;
+  const workNow = options.workNow ?? (() => performance.now());
+  const now = options.now ?? Date.now;
+  let lastUpdateAt: number | null = null;
+
+  /** Position-aligned with the raw directory; every row owns an id. */
+  let rows: TurnIndexRow[] = [];
+  let ids: string[] = [];
+  const pagedReader =
+    reader.readLatestDirectoryPage && reader.readOlderDirectoryPage
+      ? {
+          readLatest: reader.readLatestDirectoryPage.bind(reader),
+          readOlder: reader.readOlderDirectoryPage.bind(reader),
+        }
+      : undefined;
+  let absoluteStart = 0;
+  let pageTotalCount = 0;
+  let olderCursor: string | null = null;
+  let hasMoreOlder = false;
+  let olderPageRequest: Promise<boolean> | undefined;
+  let directoryInitialized = false;
+  const directoryLeases = new Set<() => void>();
+  const indexById = new Map<string, number>();
+  /** Insertion order is LRU order: `touch` moves a turn to the end. */
+  const hydrated = new Map<string, SessionHistory>();
+  const pins = new Map<string, number>();
+  const listeners = new Set<ConversationViewListener>();
+  let version = 0;
+  let disposed = false;
+  const displayReader: DisplayHistoryReader | undefined =
+    reader.readTurnForDisplay && reader.readSubagentRun
+      ? {
+          active: true,
+          readTurn: reader.readTurnForDisplay.bind(reader),
+          readRun: reader.readSubagentRun.bind(reader),
+        }
+      : undefined;
+  const readBody = (id: string) =>
+    displayReader ? displayReader.readTurn(id) : reader.readTurn(id);
+  const displayBody = (read: Extract<SessionTurnRead, { state: 'ready' }>): SessionHistory => {
+    const turn = read.turn as unknown as SessionHistory;
+    if (!displayReader) return turn;
+    if (!(turn.items ?? []).some((item) => item?.type === 'subagent_task' && item.run)) return turn;
+    const items = (turn.items ?? []).map((item) => {
+      if (!item || typeof item !== 'object' || !('type' in item) || item.type !== 'subagent_task')
+        return item;
+      const task = item as Extract<MessageContent, { type: 'subagent_task' }>;
+      if (!task.run) return item;
+      const rootSessionId = task.run.sessionId;
+      return Object.defineProperty({ ...task }, 'history', {
+        value: runHistorySource(new WeakRef(displayReader), turn.id, rootSessionId, task.taskId),
+      });
+    });
+    return { ...turn, items };
+  };
+  /**
+   * Membership/order epoch. Bumped as soon as a structural change is observed
+   * (and again when it is applied), so a read that started before it can never
+   * write a position/row that has moved or been replaced.
+   */
+  let structureEpoch = 0;
+  /**
+   * Per-turn content epoch. Bumped when that turn's row or body changed, so a
+   * pending body read for one turn is discarded without cancelling reads for
+   * unrelated turns (every content token must not invalidate the whole view).
+   */
+  const turnEpoch = new Map<string, number>();
+  const turnToken = (id: string) => ({
+    structure: structureEpoch,
+    turn: turnEpoch.get(id) ?? 0,
+  });
+  const bumpTurn = (id: string) => turnEpoch.set(id, (turnEpoch.get(id) ?? 0) + 1);
+  /**
+   * The ONE async-result acceptance rule: a result is accepted only while the
+   * membership epoch and the turn's own content epoch are the ones it captured.
+   * It fences initial directory reads, leased/eager hydration, hydrated
+   * replacement, idle summaries, full reads alike.
+   */
+  const acceptsToken = (id: string, token: { structure: number; turn: number }) =>
+    !disposed && structureEpoch === token.structure && (turnEpoch.get(id) ?? 0) === token.turn;
+  let idleCancel: (() => void) | null = null;
+  let resolveReady: () => void = () => {};
+  let readyResolved = false;
+  const ready = new Promise<void>((resolve) => {
+    resolveReady = () => {
+      if (readyResolved) return;
+      readyResolved = true;
+      resolve();
+    };
+  });
+  // Changes observed before the initial directory applies are replayed after
+  // it, so the gap-free initial + the queued events stay ordered.
+  let initialApplied = false;
+  const pendingChanges: SessionDataChange[] = [];
+  /** Structural refresh range: every position after an insert/delete shifted. */
+  let dirtyFrom = Infinity;
+  let dirtyTo = -1;
+  /**
+   * Content refresh targets, as the ids the reader named. A content
+   * notification carries exact ids, so the refresh reads exactly those rows.
+   * Merging them into one `[min, max)` span meant one early status write landing
+   * in the same batch as a streaming delta re-read the whole directory and
+   * re-materialized every hydrated body between the two.
+   */
+  const dirtyIds = new Set<string>();
+  let flushRunning = false;
+  let flushRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let flushRetryPending = false;
+  let flushRetryDelayMs = 50;
+
+  const tailStart = () => conversationTailStart(ids.length, tailKeep);
+
+  const bump = () => {
+    version += 1;
+  };
+
+  const emit = (change: ConversationViewChange) => {
+    for (const listener of listeners) listener(change);
+  };
+
+  const touch = (id: string, turn: SessionHistory) => {
+    hydrated.delete(id);
+    hydrated.set(id, turn);
+  };
+
+  const evict = () => {
+    if (hydrated.size <= maxHydrated) return;
+    const tailFrom = tailStart();
+    for (const id of hydrated.keys()) {
+      if (hydrated.size <= maxHydrated) break;
+      if ((pins.get(id) ?? 0) > 0) continue;
+      const index = indexById.get(id);
+      if (index !== undefined && index >= tailFrom) continue;
+      hydrated.delete(id);
+    }
+  };
+
+  const rowFromDirectory = (entry: SessionDirectoryRow): TurnIndexRow => {
+    if (entry.state !== 'ready' || !entry.scalars) return phantomRow(entry.position);
+    const row = pickIndexScalars(entry.scalars as unknown as Record<string, unknown>);
+    // Send-critical metadata comes from the directory row itself, before any
+    // body hydration; the shared projection already kept explicit empty
+    // selections intact.
+    //
+    // Projecting it costs a schema parse per user turn, and the only consumer
+    // resolves sticky configuration from the newest turn or two — so the parse
+    // is deferred to first read and memoized on the row. `'inputConfig' in
+    // entry` is used instead of a value test because the directory row defers
+    // its own projection the same way. Opening a 4,000-turn conversation read
+    // the whole directory eagerly, and those two parses were most of it.
+    if (row.role === 'user' && 'inputConfig' in entry) {
+      let projected: TurnIndexRow['inputConfig'];
+      let done = false;
+      Object.defineProperty(row, 'inputConfig', {
+        enumerable: true,
+        configurable: true,
+        get: () => {
+          if (!done) {
+            done = true;
+            const source = entry.inputConfig;
+            projected = source === undefined ? undefined : pickIndexInputConfig(source);
+          }
+          return projected;
+        },
+        set: (value: TurnIndexRow['inputConfig']) => {
+          done = true;
+          projected = value;
+        },
+      });
+    }
+    if (entry.itemCount !== undefined) row.itemCount = entry.itemCount;
+    if (entry.planCount !== undefined) row.planCount = entry.planCount;
+    return row;
+  };
+
+  /** A full body read subsumes the turn's scalar/count/summary facts. */
+  const withBodyFacts = (row: TurnIndexRow, turn: SessionHistory): TurnIndexRow => {
+    const next: TurnIndexRow = {
+      ...pickIndexScalars(turn as unknown as Record<string, unknown>),
+      itemCount: Array.isArray(turn.items) ? turn.items.length : 0,
+      planCount: Array.isArray(turn.plan) ? turn.plan.length : 0,
+      summary: summarizeTurn(turn),
+    };
+    // A user turn's body carries the authoritative configuration, so the
+    // directory row's deferred projection is never forced here.
+    if (next.role === 'user') next.inputConfig = pickIndexInputConfig(turn.inputConfig);
+    else if (row.inputConfig !== undefined) next.inputConfig = row.inputConfig;
+    return next;
+  };
+
+  /** Ids map to their FIRST position, matching the renderer's de-duplication. */
+  const rebuildLookups = (from: number) => {
+    for (const [id, index] of indexById) {
+      if (index >= from) indexById.delete(id);
+    }
+    for (let i = from; i < ids.length; i += 1) {
+      const id = ids[i]!;
+      if (!indexById.has(id)) indexById.set(id, i);
+    }
+  };
+
+  /**
+   * Carry the body-derived facts a directory refresh cannot supply.
+   *
+   * A container-backed directory row omits `itemCount`/`planCount` (the adapter
+   * reads them only when they are free), so a refresh of an already-hydrated
+   * row would otherwise drop the real counts. Placeholder heights and the
+   * empty-assistant test read them long after the body is evicted, and
+   * `rowChanged` compares them.
+   */
+  const carryBodyFacts = (old: TurnIndexRow | undefined, next: TurnIndexRow): TurnIndexRow => {
+    if (!old) return next;
+    if (next.itemCount === undefined && old.itemCount !== undefined) next.itemCount = old.itemCount;
+    if (next.planCount === undefined && old.planCount !== undefined) next.planCount = old.planCount;
+    return next;
+  };
+
+  /**
+   * Whether a directory refresh actually changed the turn's index facts.
+   *
+   * Counts are compared only once `carryBodyFacts` has filled the ones the
+   * refresh did not carry: comparing a hydrated row's real count against the
+   * directory's `undefined` reported a change on every refresh, which bumped
+   * every hydrated turn's content epoch and re-read its body.
+   */
+  const rowChanged = (old: TurnIndexRow | undefined, next: TurnIndexRow): boolean => {
+    if (!old) return true;
+    return (
+      old.id !== next.id ||
+      old.role !== next.role ||
+      old.timestamp !== next.timestamp ||
+      old.status !== next.status ||
+      old.finished !== next.finished ||
+      old.endedAt !== next.endedAt ||
+      old.sendStatus !== next.sendStatus ||
+      old.userTurnId !== next.userTurnId ||
+      old.acpTurnId !== next.acpTurnId ||
+      old.startedAt !== next.startedAt ||
+      old.permissionWaitMs !== next.permissionWaitMs ||
+      old.itemCount !== next.itemCount ||
+      old.planCount !== next.planCount
+    );
+  };
+
+  /**
+   * Hydrate a group of ids (already pinned by the caller if leased).
+   *
+   * A body read is accepted only under the token it captured. A result that a
+   * newer content/structural change invalidated is dropped and re-read, so an
+   * active lease never ends with a hole and a stale body never overwrites the
+   * newer row. Unrelated turns' tokens are untouched.
+   *
+   * There is no fixed retry cap: an active request stays owned until every
+   * requested identity is filled or reaches a terminal state (missing, read
+   * error, release, dispose). Each pass yields first, so event handling and
+   * other work interleave instead of the loop starving them.
+   */
+  const hydrateIds = async (
+    targets: readonly string[],
+    emitEvents: boolean,
+    cancelled?: () => boolean
+  ): Promise<void> => {
+    let pending = [...new Set(targets)].filter((id) => !isUnloadedTurnId(id));
+    let pass = 0;
+    while (pending.length > 0) {
+      if (disposed || cancelled?.()) return;
+      if (pass > 0) await yieldToEventLoop();
+      pass += 1;
+      const stale: string[] = [];
+      const nextPending: string[] = [];
+      for (let start = 0; start < pending.length; start += hydrateChunkSize) {
+        if (start > 0) await yieldToEventLoop();
+        if (disposed || cancelled?.()) return;
+        const chunk = pending.slice(start, start + hydrateChunkSize);
+        const tokens = chunk.map((id) => turnToken(id));
+        const pendingReads: Promise<SessionTurnRead>[] = [];
+        let sliceStarted = workNow();
+        for (const id of chunk) {
+          if (pendingReads.length > 0 && workNow() - sliceStarted >= workBudgetMs) {
+            await yieldToEventLoop();
+            if (disposed || cancelled?.()) return;
+            sliceStarted = workNow();
+          }
+          const read = Promise.resolve(readBody(id));
+          // Observe rejections during yields; Promise.all still propagates them.
+          void read.catch(() => {});
+          pendingReads.push(read);
+        }
+        const reads = await Promise.all(pendingReads);
+        if (disposed || cancelled?.()) return;
+        let lo = Infinity;
+        let hi = -1;
+        const positions: number[] = [];
+        reads.forEach((read, index) => {
+          const id = chunk[index]!;
+          if (!acceptsToken(id, tokens[index]!)) {
+            // Invalidated while pending: drop it, but keep it for the retry pass
+            // when the turn is still present.
+            stale.push(id);
+            return;
+          }
+          if (read.state !== 'ready') {
+            // The turn vanished under us: drop the stale body; the directory row
+            // already reflects the current state.
+            hydrated.delete(id);
+            return;
+          }
+          const turn = displayBody(read);
+          const pos = indexById.get(id);
+          hydrated.set(id, turn);
+          if (pos === undefined) return;
+          rows[pos] = withBodyFacts(rows[pos]!, turn);
+          lo = Math.min(lo, pos);
+          hi = Math.max(hi, pos);
+          positions.push(pos);
+        });
+        evict();
+        if (!emitEvents || hi < 0) continue;
+        bump();
+        emit({ kind: 'changed', ids: positions.map((pos) => ids[pos]!) });
+      }
+      if (disposed || cancelled?.()) return;
+      for (const id of stale) {
+        if (indexById.has(id)) nextPending.push(id);
+      }
+      pending = nextPending;
+    }
+  };
+
+  /**
+   * Hydrate the tail from the end backwards within `budget` items. Anything
+   * left over is picked up by the idle pass, which runs tail-first.
+   */
+  const ensureTailHydrated = async (budget: number, emitEvents: boolean): Promise<boolean> => {
+    let spent = 0;
+    let deferred = false;
+    const targets: string[] = [];
+    for (let i = ids.length - 1; i >= tailStart(); i -= 1) {
+      const id = ids[i]!;
+      if (isUnloadedTurnId(id)) continue;
+      if (hydrated.has(id)) continue;
+      const weight = Math.max(1, rows[i]?.itemCount ?? 0);
+      // The newest turn is always admitted; a turn that alone exceeds what is
+      // left waits for the next pass.
+      if (spent > 0 && spent + weight > budget) {
+        deferred = true;
+        continue;
+      }
+      spent += weight;
+      targets.push(id);
+    }
+    if (targets.length > 0) await hydrateIds(targets.reverse(), emitEvents);
+    return deferred;
+  };
+
+  // Idle work only fills the retained tail. Offscreen summaries are produced
+  // by explicit window/outline leases, never by scanning the entire history.
+  const runIdleChunk = async () => {
+    if (disposed) return;
+    const deferred = await ensureTailHydrated(IDLE_CHUNK_ITEMS, true);
+    if (disposed) return;
+    if (deferred) scheduleIdlePass();
+    else resolveReady();
+  };
+
+  const scheduleIdlePass = () => {
+    if (disposed || idleCancel) return;
+    idleCancel = scheduleIdle(() => {
+      idleCancel = null;
+      void runIdleChunk();
+    });
+  };
+
+  // ---- change application ------------------------------------------------------
+
+  const applyHydratedReplacement = async (idsToReRead: readonly string[]): Promise<void> => {
+    let pending = [...new Set(idsToReRead)];
+    let pass = 0;
+    // Keep ownership until every identity is current or terminal; yield between retries.
+    while (pending.length > 0) {
+      if (disposed) return;
+      if (pass > 0) await yieldToEventLoop();
+      pass += 1;
+      const stale: string[] = [];
+      const nextPending: string[] = [];
+      const loPositions: number[] = [];
+      let sliceStarted = workNow();
+      let sliceRead = false;
+      for (const id of pending) {
+        if (sliceRead && workNow() - sliceStarted >= workBudgetMs) {
+          await yieldToEventLoop();
+          if (disposed) return;
+          sliceStarted = workNow();
+          sliceRead = false;
+        }
+        sliceRead = true;
+        const token = turnToken(id);
+        let read: SessionTurnRead;
+        try {
+          read = await readBody(id);
+        } catch {
+          if (indexById.has(id)) dirtyIds.add(id);
+          scheduleFlushRetry();
+          continue;
+        }
+        if (!acceptsToken(id, token)) {
+          // A newer change to this same turn (or a structural move) landed while
+          // the replacement read was pending: drop it and re-read below.
+          stale.push(id);
+          continue;
+        }
+        if (read.state !== 'ready') {
+          // The turn vanished under us: drop the stale body; the directory row
+          // already reflects the current state.
+          hydrated.delete(id);
+          continue;
+        }
+        const turn = displayBody(read);
+        const pos = indexById.get(id);
+        hydrated.set(id, turn);
+        if (pos !== undefined) {
+          rows[pos] = withBodyFacts(rows[pos]!, turn);
+          loPositions.push(pos);
+        }
+      }
+      if (disposed) return;
+      if (loPositions.length > 0) {
+        evict();
+        bump();
+        emit({ kind: 'changed', ids: loPositions.map((pos) => ids[pos]!) });
+      }
+      if (stale.length === 0) return;
+      for (const id of stale) if (indexById.has(id)) nextPending.push(id);
+      pending = nextPending;
+    }
+  };
+
+  /**
+   * Apply one `changed` range. The directory rows decide whether the range is
+   * structural: any position whose id changed (or the length changed) means
+   * membership/order moved, so everything at and after the first mismatch is
+   * re-keyed and a `structure` event fires — including same-length
+   * replacements.
+   */
+  const applyChange = async (
+    from: number,
+    entries: readonly SessionDirectoryRow[],
+    authoritativeCount: number,
+    /**
+     * The turn ids the reader reported as changed, when the flush came from a
+     * content notification. A directory row cannot tell whether a body changed
+     * — a grown text item moves no scalar — so this is the only authority for
+     * invalidating a body. `undefined` means "assume every entry changed",
+     * which is what a structural refresh needs.
+     */
+    reportedIds?: ReadonlySet<string>
+  ): Promise<void> => {
+    let structuralFrom = Infinity;
+    for (const entry of entries) {
+      const id = rowFromDirectory(entry).id;
+      if (entry.position >= ids.length || ids[entry.position] !== id) {
+        structuralFrom = Math.min(structuralFrom, entry.position);
+      }
+    }
+    // `to` is the range endpoint the adapter reported, never the authoritative
+    // length: a content change to an early turn ends its range well before the
+    // list end. Membership changes come from the reader's own count (append or
+    // delete) plus id mismatches inside the re-read range, so a narrow content
+    // event never truncates the visible directory. The count is read coherently
+    // with the directory by `flushDirty`, so a later append cannot pair a new
+    // length with an old row set.
+    if (authoritativeCount !== ids.length) {
+      structuralFrom = Math.min(structuralFrom, Math.min(from, ids.length));
+    }
+    const structural = Number.isFinite(structuralFrom);
+    if (structural && pagedReader) {
+      structureEpoch += 1;
+      mergeDirty(structuralFrom, Math.max(authoritativeCount, ids.length));
+      return;
+    }
+
+    if (!structural) {
+      const toReRead: string[] = [];
+      const evictedChanges: number[] = [];
+      const indexIds: string[] = [];
+      let touched = false;
+      for (const entry of entries) {
+        const pos = entry.position;
+        if (pagedReader && pos >= 0 && pos < pageTotalCount) {
+          pagedDirectoryRows.set(pos, entry);
+        }
+        const row = carryBodyFacts(rows[pos], rowFromDirectory(entry));
+        const old = rows[pos];
+        // A turn the notification did not name kept its body: re-reading it
+        // would cost a full materialization and hand the renderer a new object
+        // for a turn nothing changed.
+        const bodyChanged = reportedIds === undefined || reportedIds.has(row.id);
+        const indexChanged = rowChanged(old, row);
+        if (!bodyChanged && !indexChanged) continue;
+        if (bodyChanged && old && !hydrated.has(old.id) && old.summary !== undefined) {
+          // Drop stale previews; the next explicit read will recompute them.
+          row.summary = undefined;
+        }
+        if (bodyChanged || indexChanged) {
+          // A reported turn always takes the fresh row: `rowChanged` compares
+          // only the facts it can compare, and a user turn's send configuration
+          // is a deferred projection that cannot be diffed without forcing it.
+          // A turn nothing reported keeps its object — placeholder items and
+          // Virtua rows are keyed by that identity.
+          rows[pos] = row;
+          if (row.id !== old?.id) rebuildLookups(pos);
+        }
+        if (bodyChanged) {
+          // Invalidate only the turn(s) the reader named, so an unrelated
+          // turn's in-flight body read is not cancelled.
+          bumpTurn(row.id);
+          if (hydrated.has(row.id)) toReRead.push(row.id);
+          else evictedChanges.push(pos);
+        }
+        touched = true;
+        indexIds.push(row.id);
+      }
+      if (!touched) return;
+      bump();
+      emit({ kind: 'changed', ids: [], indexIds });
+      // Index notifications also occur for summary maintenance. A storage
+      // content edit must separately invalidate body-derived facts even when
+      // this view no longer holds the body. Otherwise an old goal/file diff
+      // stays cached forever in derivations outside the hydrated tail.
+      if (evictedChanges.length > 0)
+        emit({ kind: 'changed', ids: evictedChanges.map((pos) => ids[pos]!) });
+      if (toReRead.length > 0) await applyHydratedReplacement(toReRead);
+      return;
+    }
+
+    // Structural: everything at/after the first mismatch is replaced wholesale,
+    // but ids that survive (they only moved) keep their bodies and pins — a
+    // lease on another viewport's turns is never released by someone else's
+    // insert/delete.
+    const fromIndex = structuralFrom;
+    structureEpoch += 1;
+    const surviving = new Set<string>();
+    for (const entry of entries) surviving.add(rowFromDirectory(entry).id);
+    const oldById = new Map<string, TurnIndexRow>();
+    for (let i = fromIndex; i < ids.length; i += 1) {
+      const existing = rows[i]!;
+      oldById.set(existing.id, existing);
+      if (surviving.has(existing.id)) continue;
+      hydrated.delete(existing.id);
+      pins.delete(existing.id);
+    }
+    rows.length = fromIndex;
+    ids.length = fromIndex;
+    const touchedSurvivors = new Set<string>();
+    for (const entry of entries) {
+      const row = rowFromDirectory(entry);
+      // A mixed batch (content edit + structural edit) carries content changes
+      // to turns that survive the structural edit; their bodies must refresh.
+      if (rowChanged(oldById.get(row.id), row)) bumpTurn(row.id);
+      rows[entry.position] = row;
+      ids[entry.position] = row.id;
+      if (hydrated.has(row.id)) touchedSurvivors.add(row.id);
+    }
+    rebuildLookups(fromIndex);
+    evict();
+    // Re-read the hydrated/pinned turns whose membership is still present but
+    // whose position may have changed, plus the fresh tail.
+    await ensureTailHydrated(hydrateItemBudget, false);
+    if (disposed) return;
+    if (touchedSurvivors.size > 0) {
+      await applyHydratedReplacement([...touchedSurvivors]);
+      if (disposed) return;
+    }
+    bump();
+    emit({ kind: 'structure', from: fromIndex, to: ids.length });
+    scheduleIdlePass();
+  };
+
+  const mergeDirty = (from: number, to: number) => {
+    dirtyFrom = Math.min(dirtyFrom, from);
+    dirtyTo = Math.max(dirtyTo, to);
+  };
+
+  /**
+   * A backend read failure must leave the notification dirty without spinning
+   * the flush loop.  The observer remains live, so a later change can also
+   * wake the flush; the bounded retry covers a quiet backend that recovers
+   * without another notification.
+   */
+  const scheduleFlushRetry = () => {
+    if (disposed || flushRetryTimer) return;
+    flushRetryPending = true;
+    const delay = flushRetryDelayMs;
+    flushRetryDelayMs = Math.min(1_000, flushRetryDelayMs * 2);
+    flushRetryTimer = setTimeout(() => {
+      flushRetryTimer = undefined;
+      flushRetryPending = false;
+      void flushDirty();
+    }, delay);
+  };
+
+  const noteFlushSuccess = () => {
+    if (!flushRetryPending) flushRetryDelayMs = 50;
+  };
+
+  /**
+   * Contiguous `[lo, hi)` runs covering `positions`, so scattered targets still
+   * read in as few directory calls as they have runs — and never read the rows
+   * between two distant runs.
+   */
+  const runsOf = (positions: readonly number[]): [number, number][] => {
+    const sorted = [...new Set(positions)].sort((a, b) => a - b);
+    const runs: [number, number][] = [];
+    for (const position of sorted) {
+      const last = runs[runs.length - 1];
+      if (last && position === last[1]) last[1] = position + 1;
+      else runs.push([position, position + 1]);
+    }
+    return runs;
+  };
+
+  let pagedDirectoryRows = new Map<number, SessionDirectoryRow>();
+
+  const readPagedWindow = async (
+    targetCount: number,
+    throughPosition?: number
+  ): Promise<SessionHistoryDirectoryPage> => {
+    if (!pagedReader) throw new Error('History reader does not support older pages');
+    const first = await pagedReader.readLatest(Math.min(500, Math.max(1, targetCount)));
+    validatePage(first, true);
+    const pages: SessionHistoryDirectoryPage[] = [first];
+    const desiredStart = Math.max(
+      0,
+      throughPosition === undefined
+        ? first.totalCount - Math.max(1, targetCount)
+        : Math.min(throughPosition, first.totalCount)
+    );
+    let cursor = first.cursor;
+    while (pages[0]!.startPosition > desiredStart && cursor) {
+      const older = await pagedReader.readOlder(
+        cursor,
+        Math.min(500, pages[0]!.startPosition - desiredStart)
+      );
+      validatePage(older);
+      const newer = pages[0]!;
+      if (
+        older.totalCount !== first.totalCount ||
+        older.startPosition + older.rows.length !== newer.startPosition
+      ) {
+        throw new Error('History directory pages are not contiguous');
+      }
+      pages.unshift(older);
+      cursor = older.cursor;
+    }
+    const oldest = pages[0]!;
+    return {
+      ...first,
+      startPosition: oldest.startPosition,
+      rows: pages.flatMap((page) => page.rows),
+      hasMoreOlder: oldest.hasMoreOlder,
+      cursor: oldest.cursor,
+    };
+  };
+
+  const applyPagedWindow = async (
+    page: SessionHistoryDirectoryPage,
+    pageOptions: {
+      readonly refreshSurvivors?: boolean;
+      readonly clearFrom?: number;
+      /** Membership epoch captured when the page read started. */
+      readonly expectedStructureEpoch?: number;
+    } = {}
+  ): Promise<boolean> => {
+    if (
+      pageOptions.expectedStructureEpoch !== undefined &&
+      structureEpoch !== pageOptions.expectedStructureEpoch
+    ) {
+      return false;
+    }
+    // Revealing an adjacent older page replaces sentinel slots only. Existing
+    // positions, bodies and row identities remain valid; rebuilding the whole
+    // directory here made reverse paging quadratic in conversation length.
+    if (
+      directoryInitialized &&
+      page.totalCount === pageTotalCount &&
+      page.startPosition + page.rows.length === absoluteStart &&
+      pageOptions.clearFrom === undefined &&
+      pageOptions.refreshSurvivors !== true
+    ) {
+      const previousStart = absoluteStart;
+      for (const entry of page.rows) {
+        const position = entry.position;
+        const oldId = ids[position];
+        if (oldId && indexById.get(oldId) === position) indexById.delete(oldId);
+        const row = rowFromDirectory(entry);
+        pagedDirectoryRows.set(position, entry);
+        rows[position] = row;
+        ids[position] = row.id;
+        const existing = indexById.get(row.id);
+        if (existing === undefined || position < existing) indexById.set(row.id, position);
+      }
+      absoluteStart = page.startPosition;
+      olderCursor = page.cursor;
+      hasMoreOlder = absoluteStart > 0 && olderCursor !== null;
+      structureEpoch += 1;
+      bump();
+      emit({ kind: 'structure', from: absoluteStart, to: previousStart });
+      return true;
+    }
+    const previousOlderCursor = olderCursor;
+    const previousById = new Map(ids.map((id, index) => [id, rows[index]! as TurnIndexRow]));
+    const previousIds = new Set(ids);
+    if (pageOptions.clearFrom !== undefined) {
+      for (const position of [...pagedDirectoryRows.keys()]) {
+        if (position >= pageOptions.clearFrom) pagedDirectoryRows.delete(position);
+      }
+    }
+    for (const position of [...pagedDirectoryRows.keys()]) {
+      if (position >= page.totalCount) pagedDirectoryRows.delete(position);
+    }
+    for (const entry of page.rows) pagedDirectoryRows.set(entry.position, entry);
+    let nextAbsoluteStart = page.startPosition;
+    for (const position of pagedDirectoryRows.keys()) {
+      nextAbsoluteStart = Math.min(nextAbsoluteStart, position);
+    }
+    // A latest-page refresh can overlap a window whose older prefix was already
+    // retained.  Its cursor points immediately before `page.startPosition`,
+    // which is inside that retained prefix, so replacing the old cursor would
+    // make the next reverse read overlap the prefix and fail its continuity
+    // check.  Keep the cursor that belongs to the actual retained boundary;
+    // if that boundary was loaded from position zero, the old null cursor wins.
+    const retainedOlderPrefix = nextAbsoluteStart < page.startPosition;
+    const nextOlderCursor = retainedOlderPrefix ? previousOlderCursor : page.cursor;
+    const nextRows = Array.from({ length: page.totalCount }, (_, position) => {
+      const entry = pagedDirectoryRows.get(position);
+      if (!entry) return unloadedRow(position);
+      const row = rowFromDirectory(entry);
+      return carryBodyFacts(previousById.get(row.id), row);
+    });
+    const nextIds = nextRows.map((row) => row.id);
+    const nextIdSet = new Set(nextIds);
+    const structureChanged =
+      absoluteStart !== nextAbsoluteStart ||
+      ids.length !== nextIds.length ||
+      ids.some((id, index) => id !== nextIds[index]);
+    const structuralSignal = structureChanged || pageOptions.refreshSurvivors === true;
+    const touchedSurvivors: string[] = [];
+    for (let index = 0; index < nextRows.length; index += 1) {
+      const row = nextRows[index]!;
+      const old = previousById.get(row.id);
+      if (rowChanged(old, row) || (pageOptions.refreshSurvivors === true && old !== undefined)) {
+        bumpTurn(row.id);
+        if (hydrated.has(row.id)) touchedSurvivors.push(row.id);
+        else row.summary = undefined;
+      }
+    }
+    for (const id of previousIds) {
+      if (nextIdSet.has(id)) continue;
+      hydrated.delete(id);
+      pins.delete(id);
+      bumpTurn(id);
+    }
+
+    rows = nextRows;
+    ids = nextIds;
+    directoryInitialized = true;
+    absoluteStart = nextAbsoluteStart;
+    pageTotalCount = page.totalCount;
+    olderCursor = nextOlderCursor;
+    hasMoreOlder = nextAbsoluteStart > 0 && nextOlderCursor !== null;
+    rebuildLookups(0);
+    evict();
+    if (structuralSignal) structureEpoch += 1;
+    const appliedStructureEpoch = structureEpoch;
+    if (structuralSignal) await ensureTailHydrated(hydrateItemBudget, false);
+    if (disposed || structureEpoch !== appliedStructureEpoch) return false;
+    if (touchedSurvivors.length > 0) await applyHydratedReplacement(touchedSurvivors);
+    if (disposed || structureEpoch !== appliedStructureEpoch) return false;
+    bump();
+    emit(
+      structuralSignal
+        ? { kind: 'structure', from: 0, to: ids.length }
+        : {
+            kind: 'changed',
+            ids: touchedSurvivors,
+            indexIds: page.rows.map((row) => rowFromDirectory(row).id),
+          }
+    );
+    scheduleIdlePass();
+    return true;
+  };
+
+  const flushStructural = async (from: number, to: number): Promise<void> => {
+    if (pagedReader) {
+      const structureBefore = structureEpoch;
+      try {
+        // A missed notification or branch rewrite invalidates loaded rows, not
+        // the unloaded prefix. Rebuild only as far back as the retained window.
+        const page = await readPagedWindow(
+          DIRECTORY_PAGE_SIZE,
+          pagedDirectoryRows.size > 0 ? Math.max(absoluteStart, from) : undefined
+        );
+        if (disposed) return;
+        if (structureEpoch !== structureBefore) {
+          mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
+          return;
+        }
+        const applied = await applyPagedWindow(page, {
+          refreshSurvivors: true,
+          clearFrom: Math.max(0, from),
+          expectedStructureEpoch: structureBefore,
+        });
+        if (applied) noteFlushSuccess();
+      } catch {
+        mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
+        scheduleFlushRetry();
+      }
+      return;
+    }
+    // A structural refresh re-reads and re-keys the whole range, which subsumes
+    // any content target inside it.
+    for (const id of [...dirtyIds]) {
+      const position = indexById.get(id);
+      if (position !== undefined && position >= from && position < to) dirtyIds.delete(id);
+    }
+    // Read the directory and the count as ONE observation: capture the
+    // membership epoch first, and if a structural change lands before the
+    // pair is ready, re-dirty the window so the next iteration re-reads a
+    // coherent pair instead of pairing old rows with a newer length.
+    const structureBefore = structureEpoch;
+    let entries: readonly SessionDirectoryRow[];
+    let count: number;
+    try {
+      entries = await reader.readDirectory(from, to);
+      count = await reader.count();
+    } catch {
+      mergeDirty(from, to);
+      scheduleFlushRetry();
+      return;
+    }
+    if (disposed) return;
+    if (structureEpoch !== structureBefore) {
+      mergeDirty(from, to);
+      return;
+    }
+    await applyChange(from, entries, count);
+    noteFlushSuccess();
+  };
+
+  const flushContent = async (): Promise<void> => {
+    const reported = new Set(dirtyIds);
+    dirtyIds.clear();
+    const positions: number[] = [];
+    let lowest = ids.length;
+    for (const id of reported) {
+      const position = indexById.get(id);
+      if (position === undefined) continue;
+      positions.push(position);
+      if (position < lowest) lowest = position;
+    }
+    if (positions.length === 0) return;
+    const structureBefore = structureEpoch;
+    let count: number;
+    try {
+      count = await reader.count();
+    } catch {
+      for (const id of reported) dirtyIds.add(id);
+      scheduleFlushRetry();
+      return;
+    }
+    if (disposed) return;
+    // A content notification must not move membership. If the length changed
+    // anyway, re-key structurally rather than splicing rows from a sparse read.
+    if (count !== (pagedReader ? pageTotalCount : ids.length)) {
+      mergeDirty(pagedReader ? 0 : lowest, pagedReader ? ids.length : Math.max(count, ids.length));
+      return;
+    }
+    for (const [lo, hi] of runsOf(positions)) {
+      if (disposed) return;
+      let entries: readonly SessionDirectoryRow[];
+      try {
+        entries = await reader.readDirectory(lo, hi);
+      } catch {
+        for (const id of reported) dirtyIds.add(id);
+        scheduleFlushRetry();
+        return;
+      }
+      if (disposed) return;
+      if (structureEpoch !== structureBefore) {
+        mergeDirty(lo, ids.length);
+        return;
+      }
+      await applyChange(lo, entries, pagedReader ? ids.length : count, reported);
+    }
+    noteFlushSuccess();
+  };
+
+  const flushDirty = async () => {
+    if (flushRunning) return;
+    flushRunning = true;
+    try {
+      while (dirtyFrom <= dirtyTo || dirtyIds.size > 0) {
+        if (disposed) break;
+        if (flushRetryPending) return;
+        if (dirtyFrom <= dirtyTo) {
+          const from = dirtyFrom;
+          const to = dirtyTo;
+          dirtyFrom = Infinity;
+          dirtyTo = -1;
+          await flushStructural(from, to);
+          continue;
+        }
+        await flushContent();
+      }
+    } finally {
+      flushRunning = false;
+    }
+  };
+
+  const onDataChange = (change: SessionDataChange) => {
+    if (disposed) return;
+    lastUpdateAt = now();
+    if (!initialApplied) {
+      pendingChanges.push(change);
+      return;
+    }
+    if (change.kind === 'structure') {
+      // Fence pending membership/body reads before the directory refresh starts.
+      structureEpoch++;
+      mergeDirty(change.from, change.to);
+    } else {
+      // Positions are resolved at flush time, not here: an id's position can
+      // move between the notification and the refresh.
+      for (const id of change.ids) {
+        bumpTurn(id);
+        dirtyIds.add(id);
+      }
+    }
+    void flushDirty();
+  };
+
+  const buildInitial = (entries: readonly SessionDirectoryRow[]) => {
+    if (pagedReader) {
+      pagedDirectoryRows.clear();
+      for (const entry of entries) pagedDirectoryRows.set(entry.position, entry);
+      rows = Array.from({ length: pageTotalCount }, (_, position) => unloadedRow(position));
+      ids = rows.map((row) => row.id);
+      absoluteStart = entries[0]?.position ?? pageTotalCount;
+    }
+    for (const entry of entries) {
+      const row = rowFromDirectory(entry);
+      rows[entry.position] = row;
+      ids[entry.position] = row.id;
+    }
+    rebuildLookups(0);
+    bump();
+    // Everything appeared in one go: positional consumers must (re)acquire,
+    // and index consumers see the whole window.
+    emit({ kind: 'structure', from: 0, to: ids.length });
+  };
+
+  // ---- observation (the only subscription) -------------------------------------
+
+  const observation = reader.observe((change) => onDataChange(change));
+  // Both promises share the backend read. The paged path consumes initialPage;
+  // observe the companion rejection too so it cannot become unhandled.
+  if (pagedReader && observation.initialPage) void observation.initial.catch(() => {});
+  void (async () => {
+    try {
+      const initialPage =
+        pagedReader && observation.initialPage
+          ? await observation.initialPage
+          : pagedReader
+            ? await reader.readLatestDirectoryPage!(DIRECTORY_PAGE_SIZE)
+            : undefined;
+      const entries = initialPage?.rows ?? (await observation.initial);
+      if (disposed) return;
+      if (initialPage) {
+        validatePage(initialPage, true);
+        absoluteStart = initialPage.startPosition;
+        pageTotalCount = initialPage.totalCount;
+        hasMoreOlder = initialPage.hasMoreOlder;
+        olderCursor = initialPage.cursor;
+      }
+      buildInitial(entries);
+      directoryInitialized = true;
+      initialApplied = true;
+      // Queue the background pass before the eager tail hydration, so a
+      // scheduled-idle consumer can drain everything from one queue.
+      scheduleIdlePass();
+      await ensureTailHydrated(hydrateItemBudget, false);
+      if (disposed) return;
+      const queued = pendingChanges.splice(0);
+      for (const change of queued) onDataChange(change);
+    } catch {
+      if (!disposed) {
+        initialApplied = true;
+        mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
+        scheduleFlushRetry();
+        for (const change of pendingChanges.splice(0)) onDataChange(change);
+      }
+      resolveReady();
+    }
+  })();
+
+  // ---- leases -------------------------------------------------------------------
+
+  const pinIds = (targets: readonly string[], delta: 1 | -1) => {
+    for (const id of targets) {
+      const next = (pins.get(id) ?? 0) + delta;
+      if (next <= 0) pins.delete(id);
+      else pins.set(id, next);
+    }
+  };
+
+  const loadOlder = (): Promise<boolean> => {
+    if (!pagedReader || !hasMoreOlder || !olderCursor || disposed) return Promise.resolve(false);
+    if (olderPageRequest) return olderPageRequest;
+    const cursor = olderCursor;
+    const structureBefore = structureEpoch;
+    const request = (async () => {
+      let page: SessionHistoryDirectoryPage;
+      try {
+        page = await pagedReader.readOlder(cursor, DIRECTORY_PAGE_SIZE);
+        validatePage(page);
+      } catch (error) {
+        if (disposed || structureEpoch !== structureBefore) return false;
+        // Rebase the loaded window and its cursor after a fork, expired cursor,
+        // or recoverable read failure. Never recover by fetching the full prefix.
+        mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
+        scheduleFlushRetry();
+        throw error;
+      }
+      if (disposed || structureEpoch !== structureBefore) return false;
+      if (
+        page.totalCount !== pageTotalCount ||
+        page.startPosition + page.rows.length !== absoluteStart
+      ) {
+        mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
+        void flushDirty();
+        return false;
+      }
+      return await applyPagedWindow(page, { expectedStructureEpoch: structureBefore });
+    })();
+    let wrapped: Promise<boolean>;
+    wrapped = request.finally(() => {
+      if (olderPageRequest === wrapped) olderPageRequest = undefined;
+    });
+    olderPageRequest = wrapped;
+    return wrapped;
+  };
+
+  const acquireDirectory = (throughTurnId?: string) => {
+    let released = false;
+    let wake: (() => void) | undefined;
+    const release = () => {
+      released = true;
+      wake?.();
+      directoryLeases.delete(release);
+    };
+    directoryLeases.add(release);
+    const pause = (delay: number) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(done, delay);
+        function done() {
+          clearTimeout(timer);
+          wake = undefined;
+          resolve();
+        }
+        wake = done;
+      });
+    const loading = (async () => {
+      await ready;
+      let retryDelay = 50;
+      for (;;) {
+        if (released || disposed) return;
+        if (
+          directoryInitialized &&
+          (!hasMoreOlder || (throughTurnId !== undefined && indexById.has(throughTurnId)))
+        )
+          return;
+        try {
+          const progressed = directoryInitialized && (await loadOlder());
+          if (released || disposed) return;
+          if (progressed) {
+            retryDelay = 50;
+            await yieldToEventLoop();
+            continue;
+          }
+        } catch {
+          // The page loader rebases a stale cursor. Keep an active directory
+          // request alive through reconnects, without treating partial coverage
+          // as a completed search or a missing saved anchor.
+        }
+        if (released || disposed) return;
+        await pause(retryDelay);
+        retryDelay = Math.min(2_000, retryDelay * 2);
+      }
+    })().finally(() => directoryLeases.delete(release));
+    return { ready: loading, release };
+  };
+
+  const view: ConversationView = {
+    sessionId: options.sessionId,
+    get turnCount() {
+      return ids.length;
+    },
+    get version() {
+      return version;
+    },
+    get structureVersion() {
+      return structureEpoch;
+    },
+    get lastUpdateAt() {
+      return lastUpdateAt;
+    },
+    get hasMoreOlder() {
+      return hasMoreOlder;
+    },
+    ready,
+    index: (i) => rows[i],
+    indexOf: (turnId) => indexById.get(turnId) ?? -1,
+    // One consistent port read for export/replay/hash, instead of stitching the
+    // windowed cache across a changing source.
+    readAll: async () => (await reader.readAll()) as unknown as SessionHistory[],
+    readMetadata: () => readSessionHistoryMetadata(reader),
+    turn: (i) => {
+      const id = ids[i];
+      if (!id) return undefined;
+      const turn = hydrated.get(id);
+      if (turn) touch(id, turn);
+      return turn;
+    },
+    isHydrated: (i) => {
+      const id = ids[i];
+      return id !== undefined && hydrated.has(id);
+    },
+    acquireRange: (from, to) => {
+      if (disposed) return { ready: Promise.resolve(), release: () => {} };
+      const a = Math.max(0, Math.min(from, ids.length));
+      const b = Math.max(a, Math.min(to, ids.length));
+      const capturedIds = ids.slice(a, b).filter((id) => !isUnloadedTurnId(id));
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        pinIds(capturedIds, -1);
+        evict();
+      };
+      // Chunks are cut by turn count AND item count; the first chunk starts
+      // without a yield so small ranges resolve quickly.
+      const chunks: string[][] = [];
+      let chunk: string[] = [];
+      let weight = 0;
+      for (let i = a; i < b; i += 1) {
+        const id = ids[i]!;
+        if (isUnloadedTurnId(id)) continue;
+        if (hydrated.has(id)) continue;
+        const turnWeight = Math.max(1, rows[i]?.itemCount ?? 0);
+        if (
+          chunk.length > 0 &&
+          (chunk.length >= hydrateChunkSize || weight + turnWeight > hydrateItemBudget)
+        ) {
+          chunks.push(chunk);
+          chunk = [];
+          weight = 0;
+        }
+        chunk.push(id);
+        weight += turnWeight;
+      }
+      if (chunk.length > 0) chunks.push(chunk);
+      pinIds(capturedIds, 1);
+      const hydrationReady = (async () => {
+        try {
+          for (let index = 0; index < chunks.length; index += 1) {
+            if (index > 0) await yieldToEventLoop();
+            if (disposed || released) return;
+            await hydrateIds(chunks[index]!, true, () => released);
+          }
+        } catch (error) {
+          release();
+          throw error;
+        }
+      })();
+      return { ready: hydrationReady, release };
+    },
+    loadOlder,
+    acquireDirectory,
+    subscribe: (listener: ConversationViewListener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      if (displayReader) displayReader.active = false;
+      for (const release of directoryLeases) release();
+      structureEpoch += 1;
+      observation.unsubscribe();
+      idleCancel?.();
+      idleCancel = null;
+      if (flushRetryTimer) clearTimeout(flushRetryTimer);
+      flushRetryTimer = undefined;
+      flushRetryPending = false;
+      rows.length = 0;
+      ids.length = 0;
+      indexById.clear();
+      pagedDirectoryRows.clear();
+      turnEpoch.clear();
+      hydrated.clear();
+      pins.clear();
+      listeners.clear();
+      resolveReady();
+    },
+  };
+  return view;
+}

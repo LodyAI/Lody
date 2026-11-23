@@ -1,6 +1,32 @@
-import posthog from 'posthog-js';
+import { isHandledShortcutTokenError } from './shortcut-token-attempt';
+import type posthogJsType from 'posthog-js';
+import { isElectronRenderer } from './electron';
+import { isNativeAppShell } from './native-platform';
+import { postHogPrivacy } from './posthog-privacy';
 
-type PostHogClient = typeof posthog;
+export type PostHogClient = typeof posthogJsType;
+
+/* The SDK lives behind a dynamic import so `posthog-js` (~200KB) stays out of
+   the boot chunk. `loadPostHogClient()` is kicked when initialization is first
+   scheduled — the ~15s startup delay then hides the fetch, and `initializeNow`
+   awaits the same promise so init never runs against an unloaded module. */
+type PostHogModule = typeof import('posthog-js');
+
+let postHogModulePromise: Promise<PostHogClient> | null = null;
+
+function loadPostHogClient(): Promise<PostHogClient> {
+  if (!postHogModulePromise) {
+    postHogModulePromise = import('posthog-js')
+      .then((module: PostHogModule) => module.default)
+      // A transient fetch failure must not poison the cache: the next
+      // scheduled init retries the import instead of failing forever.
+      .catch((error: unknown) => {
+        postHogModulePromise = null;
+        throw error;
+      });
+  }
+  return postHogModulePromise;
+}
 type PostHogOptions = NonNullable<Parameters<PostHogClient['init']>[1]>;
 type TimerHandle = ReturnType<typeof setTimeout>;
 type IdleHandle = number;
@@ -17,7 +43,9 @@ type DeferredPostHogOptions = {
   idleTimeoutMs?: number;
   maxQueuedCalls?: number;
   flushBatchSize?: number;
-  onBeforeInitialize?: () => void;
+  /** Runs right before `init` with the client that will be initialized —
+      the privacy hook attaches to that exact module instance. */
+  onBeforeInitialize?: (client: PostHogClient) => void;
   onDisabled?: (reason: 'initialization-failed' | 'missing-api-key') => void;
 };
 
@@ -96,8 +124,16 @@ function addCaptureTimestamp(args: unknown[]): unknown[] {
 export function createDeferredPostHogController(
   realClient: PostHogClient,
   scheduler: DeferredPostHogScheduler = defaultScheduler,
-  options: DeferredPostHogOptions = {}
+  options: DeferredPostHogOptions = {},
+  /** When set, `initializeNow` awaits this before calling `init` — used by the
+      singleton to keep the SDK behind `import('posthog-js')`. Tests pass a
+      ready client and omit it. */
+  resolveClient?: () => Promise<PostHogClient>
 ) {
+  // Mutable holder: when the SDK is lazily imported, `real` is swapped for the
+  // resolved module once `resolveClient()` completes. Until then `real` is the
+  // caller-supplied client (for the singleton, a never-loaded placeholder).
+  const $holder: { current: PostHogClient } = { current: realClient };
   const startupDelayMs = options.startupDelayMs ?? POSTHOG_STARTUP_DELAY_MS;
   const idleTimeoutMs = options.idleTimeoutMs ?? POSTHOG_IDLE_TIMEOUT_MS;
   const maxQueuedCalls = Math.max(1, options.maxQueuedCalls ?? POSTHOG_MAX_DEFERRED_CALLS);
@@ -114,7 +150,10 @@ export function createDeferredPostHogController(
   let disabled = false;
   let initializationFailed = false;
   let automaticRetryAvailable = true;
-  let initialized = realClient.__loaded;
+  let initialized = $holder.current.__loaded;
+  // The lazily loaded SDK arrives in `$holder.current`; every client read below
+  // goes through `real()` so pre-load calls still see the deferred queue.
+  const real = (): PostHogClient => $holder.current;
   let timeoutHandle: TimerHandle | null = null;
   let idleHandle: IdleHandle | null = null;
   let queueDrainHandle: TimerHandle | null = null;
@@ -141,11 +180,11 @@ export function createDeferredPostHogController(
   };
 
   const invoke = (method: DeferredMethod, args: unknown[]): unknown => {
-    const target = Reflect.get(realClient, method, realClient) as unknown;
+    const target = Reflect.get(real(), method, real()) as unknown;
     if (typeof target !== 'function') {
       return undefined;
     }
-    return Reflect.apply(target, realClient, args);
+    return Reflect.apply(target, real(), args);
   };
 
   const invokeSafely = (call: DeferredCall) => {
@@ -203,6 +242,34 @@ export function createDeferredPostHogController(
     queuedCalls.splice(0, queuedCalls.length, ...retainedCalls);
   };
 
+  const handleInitFailure = (afterFailure: boolean) => {
+    // A later configure can retry initialization without React re-running its
+    // identity and initial-page effects. Preserve that bounded state, but
+    // discard ordinary telemetry from the failed startup window.
+    initializationFailed = true;
+    retainReplayableState();
+    cancelQueueDrain();
+    queueDraining = false;
+    options.onDisabled?.('initialization-failed');
+    if (automaticRetryAvailable) {
+      automaticRetryAvailable = false;
+      scheduleInitialization({ afterFailure });
+    }
+  };
+
+  const runInit = (): boolean => {
+    try {
+      options.onBeforeInitialize?.(real());
+      real().init(apiKey!, initOptions!);
+      postHogPrivacy.sync(true);
+      initialized = true;
+      initializationFailed = false;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const initializeNow = ({ afterFailure = false, flushSynchronously = false } = {}) => {
     if (initializationFailed && !afterFailure) {
       return;
@@ -212,25 +279,36 @@ export function createDeferredPostHogController(
       return;
     }
 
-    if (!initialized && !realClient.__loaded) {
-      try {
-        options.onBeforeInitialize?.();
-        realClient.init(apiKey, initOptions);
-        initialized = true;
-        initializationFailed = false;
-      } catch {
-        // A later configure can retry initialization without React re-running
-        // its identity and initial-page effects. Preserve that bounded state,
-        // but discard ordinary telemetry from the failed startup window.
-        initializationFailed = true;
-        retainReplayableState();
-        cancelQueueDrain();
-        queueDraining = false;
-        options.onDisabled?.('initialization-failed');
-        if (automaticRetryAvailable) {
-          automaticRetryAvailable = false;
-          scheduleInitialization({ afterFailure: true });
-        }
+    if (resolveClient && !real().__loaded && !initialized) {
+      /* The SDK is behind `import('posthog-js')`: `scheduleInitialization`'s
+         15s timer already kicked the fetch, so by the time the idle callback
+         fires the module is normally resolved. If a forced flush or pagehide
+         lands first we still finish init asynchronously — queued calls drain
+         when the module resolves rather than being dropped. */
+      void resolveClient()
+        .then((loaded) => {
+          $holder.current = loaded;
+          if (disabled || !apiKey || !initOptions) {
+            return;
+          }
+          if (real().__loaded) {
+            initialized = true;
+            startQueueDrain();
+            return;
+          }
+          if (runInit()) {
+            startQueueDrain();
+          } else {
+            handleInitFailure(afterFailure);
+          }
+        })
+        .catch(() => handleInitFailure(afterFailure));
+      return;
+    }
+
+    if (!initialized && !real().__loaded) {
+      if (!runInit()) {
+        handleInitFailure(afterFailure);
         return;
       }
     } else {
@@ -257,6 +335,11 @@ export function createDeferredPostHogController(
 
     timeoutHandle = scheduler.setTimeout(() => {
       timeoutHandle = null;
+      // Startup delay elapsed: kick the SDK fetch now so it overlaps the idle
+      // wait — `initializeNow` awaits the same promise instead of fetching cold.
+      if (resolveClient !== undefined && !initialized) {
+        void resolveClient().catch(() => undefined);
+      }
       if (scheduler.requestIdleCallback) {
         idleHandle = scheduler.requestIdleCallback(
           () => {
@@ -272,7 +355,13 @@ export function createDeferredPostHogController(
   };
 
   const enqueueOrInvoke = (method: DeferredMethod, args: unknown[]): unknown => {
-    if ((initialized || realClient.__loaded) && !queueDraining) {
+    if (method === 'captureException' && isHandledShortcutTokenError(args[0])) return undefined;
+    // The privacy scrub applies only to the shared posthog-js SDK — the
+    // controller that owns it is the one constructed with `resolveClient`.
+    if (method === 'captureException' && resolveClient !== undefined) {
+      args = postHogPrivacy.prepareException(args);
+    }
+    if ((initialized || real().__loaded) && !queueDraining) {
       initialized = true;
       return invoke(method, args);
     }
@@ -292,8 +381,12 @@ export function createDeferredPostHogController(
     return undefined;
   };
 
-  const client = new Proxy(realClient, {
-    get(target, property) {
+  /* The public client forwards every read to the CURRENT real client, so the
+     lazily imported SDK takes over transparently once `resolveClient` fills
+     the holder. `get`/`has`/`set` all forward — `__loaded`, `sessionRecording`,
+     `config`, … read live state off the resolved module. */
+  const client = new Proxy({} as PostHogClient, {
+    get(_target, property) {
       if (DEFERRED_METHODS.has(property as DeferredMethod)) {
         const method = property as DeferredMethod;
         let deferred = deferredMethods.get(method);
@@ -304,6 +397,7 @@ export function createDeferredPostHogController(
         return deferred;
       }
 
+      const target = real();
       const value = Reflect.get(target, property, target) as unknown;
       if (typeof value !== 'function') {
         return value;
@@ -318,7 +412,13 @@ export function createDeferredPostHogController(
       boundMethods.set(property, { source, value: bound });
       return bound;
     },
-  }) as PostHogClient;
+    set(_target, property, value) {
+      return Reflect.set(real(), property, value);
+    },
+    has(_target, property) {
+      return Reflect.has(real(), property);
+    },
+  });
 
   return {
     client,
@@ -341,7 +441,7 @@ export function createDeferredPostHogController(
       const configurationChanged =
         disabled || apiKey !== normalizedKey || initOptions !== nextOptions;
       if (!configurationChanged) {
-        if (realClient.__loaded) {
+        if (real().__loaded) {
           initialized = true;
           startQueueDrain();
           return false;
@@ -359,8 +459,8 @@ export function createDeferredPostHogController(
       automaticRetryAvailable = true;
       apiKey = normalizedKey;
       initOptions = nextOptions;
-      if (realClient.__loaded) {
-        options.onBeforeInitialize?.();
+      if (real().__loaded) {
+        options.onBeforeInitialize?.(real());
         initialized = true;
         startQueueDrain();
         return false;
@@ -374,6 +474,9 @@ export function createDeferredPostHogController(
       timestamp = new Date(),
       { force = false }: { force?: boolean } = {}
     ) {
+      // Native navigation already has product events; pageviews add recurring
+      // traffic for every session switch without useful page-level analysis.
+      if (isElectronRenderer() || isNativeAppShell()) return;
       const normalizedKey = normalizePageViewKey(navigationKey);
       if (disabled || (!force && pageViewActive && activePageViewKey === normalizedKey)) return;
       activePageViewKey = normalizedKey;
@@ -391,11 +494,11 @@ export function createDeferredPostHogController(
         ]);
       }
       initializeNow({ flushSynchronously: true });
-      if (!initialized && !realClient.__loaded) return;
+      if (!initialized && !real().__loaded) return;
       flushQueueSynchronously();
-      const shutdown = Reflect.get(realClient, 'shutdown', realClient) as unknown;
+      const shutdown = Reflect.get(real(), 'shutdown', real()) as unknown;
       if (typeof shutdown === 'function') {
-        void Promise.resolve(Reflect.apply(shutdown, realClient, [])).catch(() => undefined);
+        void Promise.resolve(Reflect.apply(shutdown, real(), [])).catch(() => undefined);
       }
     },
   };
@@ -414,15 +517,28 @@ function stopDeferredPageLifecycleListeners(): void {
   removeDeferredPageLifecycleListeners = null;
 }
 
-const deferredPostHogController = createDeferredPostHogController(posthog, defaultScheduler, {
-  onBeforeInitialize: stopDeferredStartupErrorListeners,
-  onDisabled: (reason) => {
-    stopDeferredStartupErrorListeners();
-    if (reason === 'missing-api-key') {
-      stopDeferredPageLifecycleListeners();
-    }
+/* The shared controller is built around a placeholder client and fills it with
+   the real `posthog-js` module once `import()` resolves — that is what keeps
+   the ~200KB SDK out of the boot chunk. `postHogPrivacy.attach` must receive
+   the resolved module (it monkey-patches `_send_request`), so `runInit` passes
+   `real()` to `onBeforeInitialize`. */
+const deferredPostHogController = createDeferredPostHogController(
+  { __loaded: false } as PostHogClient,
+  defaultScheduler,
+  {
+    onBeforeInitialize: (client) => {
+      stopDeferredStartupErrorListeners();
+      postHogPrivacy.attach(client);
+    },
+    onDisabled: (reason) => {
+      stopDeferredStartupErrorListeners();
+      if (reason === 'missing-api-key') {
+        stopDeferredPageLifecycleListeners();
+      }
+    },
   },
-});
+  loadPostHogClient
+);
 
 export const deferredPostHog = deferredPostHogController.client;
 

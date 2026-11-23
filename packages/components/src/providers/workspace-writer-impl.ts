@@ -4,12 +4,20 @@ import {
   getSessionRoomId,
   type MessageQueueItem,
   type PreviewVisualCommentDocInput,
-  type SessionDocMeta,
 } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
 import type { LoroRepo } from 'loro-repo';
-import type { PreviewVisualCommentDocStore, SessionDocStore } from '../atoms/runtime';
+import type { LoroDoc } from 'loro-crdt';
+import type {
+  PreviewVisualCommentDocStore,
+  SessionDocDraft,
+  SessionDocStore,
+} from '../atoms/runtime';
+import { QueueSignalError } from '../lib/session-accepted-inputs';
 import type { WorkspaceWriter } from './workspace-writer';
+
+const QUEUE_SIGNAL_RETRY_DELAYS_MS = [250, 1_000];
+const QUEUE_SIGNAL_FAILURE = 'Queued input was written but its signal failed';
 
 // # WorkspaceWriter implementation
 //
@@ -47,10 +55,36 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
   // Renderer-side, every message-queue mutation also bumps `messageQueueUpdatedAt`
   // so the CLI dispatch watcher re-evaluates.
-  const bumpMessageQueueWatermark = async (sessionId: string): Promise<void> => {
+  const bumpMessageQueueWatermark = async (
+    sessionId: string,
+    frontiers: ReturnType<LoroDoc['frontiers']>
+  ): Promise<void> => {
+    const updatedAt = getServerNow();
     await deps.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
-      messageQueueUpdatedAt: getServerNow(),
+      messageQueueUpdatedAt: updatedAt,
+      messageQueueUpdateVersion: { updatedAt, frontiers },
     });
+  };
+
+  // The row is already committed, so a transient metadata failure must not strand it:
+  // an idle Session is not watched, and this signal is what brings its machine back.
+  const signalQueuedRow = async (
+    sessionId: string,
+    frontiers: ReturnType<LoroDoc['frontiers']>
+  ): Promise<void> => {
+    for (const delayMs of QUEUE_SIGNAL_RETRY_DELAYS_MS) {
+      try {
+        await bumpMessageQueueWatermark(sessionId, frontiers);
+        return;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    try {
+      await bumpMessageQueueWatermark(sessionId, frontiers);
+    } catch (cause) {
+      throw new QueueSignalError(QUEUE_SIGNAL_FAILURE, { cause });
+    }
   };
 
   const withPreviewVisualCommentStore = async <T>(
@@ -71,17 +105,16 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async startSession(sessionId, meta, entry, dispatch) {
-      await Promise.all([
-        deps.repo.upsertDocMeta(
-          getSessionRoomId(sessionId as SessionId),
-          meta as Parameters<LoroRepo['upsertDocMeta']>[1]
-        ),
-        withSessionStore(sessionId, (store) => {
-          store.setState((draft: SessionDocMeta) => {
-            draft.history.push(entry as SessionDocMeta['history'][number]);
-          });
-        }),
-      ]);
+      // Backend selection is part of the session identity. Publish metadata
+      // before the first history write so a crash cannot leave an orphaned
+      // document that a later opener interprets as legacy Loro.
+      await deps.repo.upsertDocMeta(
+        getSessionRoomId(sessionId as SessionId),
+        meta as Parameters<LoroRepo['upsertDocMeta']>[1]
+      );
+      await withSessionStore(sessionId, async (store) => {
+        await store.sessionData.commands.appendTurn(entry);
+      });
       void dispatch;
     },
 
@@ -93,6 +126,16 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       const handle = await deps.repo.openFlockDoc(flockDocId);
       handle.flock.set([...key], value as Parameters<typeof handle.flock.set>[1]);
       handle.flock.commit();
+    },
+
+    async flockRowUpdate(flockDocId, key, update) {
+      const handle = await deps.repo.openFlockDoc(flockDocId);
+      return handle.flock.txn(() => {
+        const next = update(handle.flock.get([...key]));
+        if (next === undefined) return false;
+        handle.flock.set([...key], next as Parameters<typeof handle.flock.set>[1]);
+        return true;
+      });
     },
 
     async flockRowPutIfAbsent(
@@ -119,10 +162,8 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async appendSessionTurn(sessionId, entry, dispatch) {
-      await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          draft.history.push(entry as SessionDocMeta['history'][number]);
-        });
+      await withSessionStore(sessionId, async (store) => {
+        await store.sessionData.commands.appendTurn(entry);
       });
       // Dispatch stays the caller's sibling side effect (Machine RPC / durable
       // pointer), matching the send hot path.
@@ -130,66 +171,72 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async appendSessionHistory(sessionId, entry) {
-      await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          draft.history.push(entry as SessionDocMeta['history'][number]);
-        });
+      await withSessionStore(sessionId, async (store) => {
+        await store.sessionData.commands.appendTurn(entry);
       });
     },
 
     async updateSessionHistory(sessionId, entryId, entry) {
-      await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          const history = draft.history as SessionDocMeta['history'];
-          const idx = history.findIndex((h) => (h as { id?: string }).id === entryId);
-          if (idx < 0) return;
-          history[idx] = entry as SessionDocMeta['history'][number];
-        });
+      await withSessionStore(sessionId, async (store) => {
+        await store.sessionData.commands.replaceTurn(entryId, entry);
       });
     },
 
-    async respondSessionPermission(sessionId, requestId, outcome) {
-      await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
-          for (const entry of draft.history as SessionDocMeta['history']) {
-            const items = (entry as { items?: unknown[] }).items;
-            if (!Array.isArray(items)) continue;
-            for (const item of items) {
-              const pr = (item as { permissionRequest?: { requestId?: string; outcome?: unknown } })
-                .permissionRequest;
-              if (pr && pr.requestId === requestId) {
-                pr.outcome = outcome;
-                return;
-              }
-            }
-          }
-        });
+    async respondSessionPermission(sessionId, requestId, outcome, options) {
+      await withSessionStore(sessionId, async (store) => {
+        if (!(await store.sessionData.commands.respondPermission(requestId, outcome, options)))
+          throw new Error('Permission request not found');
       });
     },
 
     async enqueueSessionMessage(sessionId, item) {
-      await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+      let written = false;
+      const row = withSessionStore(sessionId, (store) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
-          draft.mq = [...mq, item as MessageQueueItem];
+          const userTurnId = item.userTurnId;
+          const operationId =
+            item.operationId ??
+            (typeof userTurnId === 'string' && userTurnId.length > 0
+              ? `queue:${userTurnId}`
+              : undefined);
+          draft.mq = [
+            ...mq,
+            {
+              ...item,
+              ...(operationId ? { operationId } : {}),
+            } as MessageQueueItem,
+          ];
         });
+        written = true;
+        // Capture before releasing the store or yielding to another queue edit.
+        return store.doc.frontiers();
       });
-      await bumpMessageQueueWatermark(sessionId);
+      let frontiers: ReturnType<LoroDoc['frontiers']>;
+      try {
+        frontiers = await row;
+      } catch (cause) {
+        if (written) throw new QueueSignalError(QUEUE_SIGNAL_FAILURE, { cause });
+        throw cause;
+      }
+      await signalQueuedRow(sessionId, frontiers);
     },
 
     async removeSessionMessage(sessionId, itemId) {
-      await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+      const frontiers = await withSessionStore(sessionId, (store) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.filter((item) => item.$cid !== itemId);
         });
+        // Capture before releasing the store or yielding to another queue edit.
+        return store.doc.frontiers();
       });
-      await bumpMessageQueueWatermark(sessionId);
+      await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async updateSessionMessage(sessionId, itemId, patch) {
-      await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+      const frontiers = await withSessionStore(sessionId, (store) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.map((item) =>
             item.$cid === itemId
@@ -197,13 +244,15 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
               : item
           );
         });
+        // Capture before releasing the store or yielding to another queue edit.
+        return store.doc.frontiers();
       });
-      await bumpMessageQueueWatermark(sessionId);
+      await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async reorderSessionMessages(sessionId, orderedItemIds) {
-      await withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocMeta) => {
+      const frontiers = await withSessionStore(sessionId, (store) => {
+        store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const byCid = new Map(mq.map((item) => [item.$cid, item] as const));
           const ordered: MessageQueueItem[] = [];
@@ -221,8 +270,10 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           }
           draft.mq = ordered;
         });
+        // Capture before releasing the store or yielding to another queue edit.
+        return store.doc.frontiers();
       });
-      await bumpMessageQueueWatermark(sessionId);
+      await bumpMessageQueueWatermark(sessionId, frontiers);
     },
 
     async mutatePreviewVisualComments(sessionId, mutation) {

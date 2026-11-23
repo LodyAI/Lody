@@ -1,3 +1,4 @@
+import { SiteAnchor } from '@site/components/site-anchor';
 import { getMDXComponents } from '@site/components/mdx';
 import { SiteFooter } from '@site/components/site-footer';
 import { SiteNav } from '@site/components/site-nav';
@@ -154,9 +155,9 @@ export function ChangelogIndexPage({
                   <time className="cl-date" dateTime={entry.date}>
                     {dateLabel}
                   </time>
-                  <a className="cl-version" href={entry.url}>
+                  <SiteAnchor className="cl-version" href={entry.url}>
                     v{entry.version}
-                  </a>
+                  </SiteAnchor>
                   {index === 0 ? <span className="cl-latest">{t.latestTag}</span> : null}
                 </div>
                 <div className="cl-rail" aria-hidden="true">
@@ -167,10 +168,10 @@ export function ChangelogIndexPage({
                   <div className="cl-prose">
                     {changelogContentLoaders[locale].useContent(entry.docPath)}
                   </div>
-                  <a className="cl-permalink" href={entry.url}>
+                  <SiteAnchor className="cl-permalink" href={entry.url}>
                     {t.permalink}
                     <ArrowRightIcon />
-                  </a>
+                  </SiteAnchor>
                 </div>
               </li>
             );
@@ -200,10 +201,10 @@ export function ChangelogDetailPage({
     <main className="lody-changelog-shell cl-shell marketing-shell">
       <SiteNav locale={locale} languageHref={`${t.languageHref}/${entry.slug}`} />
       <article className="cl-detail">
-        <a className="cl-back" href={t.changelogHref}>
+        <SiteAnchor className="cl-back" href={t.changelogHref}>
           <ArrowLeftIcon />
           {t.back}
-        </a>
+        </SiteAnchor>
 
         <header className="cl-detail-header">
           <div className="cl-detail-tags">
@@ -218,24 +219,24 @@ export function ChangelogDetailPage({
         {newer || older ? (
           <nav className="cl-pager">
             {older ? (
-              <a className="cl-pager-link" href={older.url}>
+              <SiteAnchor className="cl-pager-link" href={older.url}>
                 <span className="cl-pager-dir">{t.older}</span>
                 <span className="cl-pager-label">
                   {formatChangelogDate(older.date, locale) ?? older.title}
                 </span>
                 <span className="cl-pager-version">v{older.version}</span>
-              </a>
+              </SiteAnchor>
             ) : (
               <span />
             )}
             {newer ? (
-              <a className="cl-pager-link cl-pager-link--next" href={newer.url}>
+              <SiteAnchor className="cl-pager-link cl-pager-link--next" href={newer.url}>
                 <span className="cl-pager-dir">{t.newer}</span>
                 <span className="cl-pager-label">
                   {formatChangelogDate(newer.date, locale) ?? newer.title}
                 </span>
                 <span className="cl-pager-version">v{newer.version}</span>
-              </a>
+              </SiteAnchor>
             ) : (
               <span />
             )}

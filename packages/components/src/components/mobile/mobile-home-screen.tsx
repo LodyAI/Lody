@@ -1,8 +1,8 @@
+import { SchedulesWorkspace } from '../schedules/schedules-workspace';
 import {
   forwardRef,
   Fragment,
-  lazy,
-  Suspense,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -10,44 +10,54 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   Archive,
   BellRing,
   CircleHelp,
   CircleCheckBig,
+  Check,
   Clock3,
-  Download,
+  Copy,
   FolderPlus,
   Folders,
   Github,
-  ListTodo,
-  Loader2,
   LockKeyhole,
   MessageCircle,
   Monitor,
+  MonitorDown,
   MonitorSmartphone,
   Plus,
   Search,
   Settings,
+  Share2,
+  SlidersHorizontal,
+  Terminal,
   X,
 } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { control, corner, radius } from '@lody/ui/tokens/scales.stylex';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { MdChat, MdChecklist, MdComputer, MdFolderCopy } from 'react-icons/md';
+import { MdChat, MdComputer, MdFolderCopy } from 'react-icons/md';
 import { FaGithub } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
 import { isIOSRuntimeEnvironment } from '@/lib/native-platform';
+import { writeTextToClipboard } from '@/lib/clipboard';
+import { getDownloadPageUrl } from '@/lib/lody-urls';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
+import { useMobileBackRevealClass } from './mobile-drill-page-layout';
 import { usePullToRefresh } from '@/hooks/use-pull-to-refresh';
-import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { type MobileConversationItem } from './mobile-project-screen';
 import {
   MobileChatList,
+  groupChats,
   type MobileChatGroupBy,
   type MobileChatListSelectionLabels,
 } from './mobile-chat-list';
+import type { MobileStatusCommands } from './use-mobile-status-list';
 import {
   MobileConnectionStatus,
   type MobileConnectionStatusLabels,
@@ -58,13 +68,7 @@ import { MobileInitialLetterAvatar } from './mobile-initial-letter-avatar';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { WorkspaceAvatar } from '@/components/workspace-avatar';
 import { MobileWorkspaceTabBar, type MobileBottomTabBarTabSpec } from './mobile-workspace-tabbar';
-
-/* Lazy so the Tasks surface (board/list + detail graph) stays out of the
-   mobile home chunk for the vast majority of users who never enable the
-   Tasks beta — the tab only renders when `showTasksTab` is on. */
-const TasksListBody = lazy(() =>
-  import('../tasks/tasks-workspace').then((m) => ({ default: m.TasksListBody }))
-);
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
 
 function MobileReactIcon({
   icon: Icon,
@@ -94,14 +98,12 @@ function MobileReactIcon({
    the home screen don't have to chase the type to its new module. */
 export type { MobileChatGroupBy };
 
-/* The mobile home dock surfaces up to four content tabs, ordered
-   left → right: Inbox · Chat · Tasks · 项目. Inbox is available in
+/* The mobile home dock surfaces up to three content tabs, ordered
+   left → right: Inbox · Chat · 项目. Inbox is available in
    multi-member workspaces and occupies the natural "home" position.
-   Tasks only appears when the caller passes `showTasksTab` (the
-   developer-mode Tasks beta gate). The 项目 tab merges Local + GitHub
-   via an inner sub-tab; the 设置 surface lives in the header's gear
-   button. */
-export type MobileHomeTab = 'inbox' | 'chat' | 'projects' | 'tasks';
+   The 项目 tab merges Local + GitHub via an inner sub-tab; the 设置
+   surface lives in the header's gear button. */
+export type MobileHomeTab = 'inbox' | 'chat' | 'projects' | 'schedules';
 
 /* Sub-tab inside the "项目" tab. Drives both the heading + full list
    below the segmented selector. Persisted via `mobileHomeProjectsSubTabAtom`
@@ -136,17 +138,50 @@ export type MobileInboxItem = {
   actionLabel?: string;
 };
 
-/* Copy for the first-run hint shown on the Chat tab when the workspace
+/* Copy for the first-run guide shown on the Chat tab when the workspace
    has no machines AND no conversations yet — i.e. the user installed the
-   mobile app before ever launching the desktop client. The mobile app is
-   a thin client (the agent runs on the user's own computer), so we show a
-   short nudge to download + start the desktop client. Kept deliberately
-   minimal — one line + a button. */
+   mobile app before ever connecting a computer. The mobile app is a thin
+   client (agents run on the user's own machines), so the guide walks the
+   two real ways to connect one: a single CLI command on any machine, or
+   the desktop app on their computer. Every field is optional — defaults
+   keep the guide complete for hosts that only pass the original three
+   strings. */
 export type MobileHomeOnboardingLabels = {
   title?: string;
   description?: string;
-  /** Primary CTA — opens the Lody download page. */
-  downloadButton?: string;
+  /** Heading for the one-command path (CLI / SSH / server). */
+  commandHeading?: string;
+  /** The shell command rendered inside the copyable pill. */
+  command?: string;
+  /** Prerequisite + sign-in explanation shown under the command pill. */
+  commandHint?: string;
+  /** aria-label / tooltip for the command pill's copy action. */
+  copyCommandLabel?: string;
+  /** Feedback shown inside the pill after a successful copy — reused for
+     the download-link copy fallback. */
+
+  /** Native share-sheet action on the command card (sends the command +
+     download link); only rendered when the platform exposes
+     `navigator.share`. */
+  shareCommandLabel?: string;
+  /** Heading for the desktop-app path. */
+  desktopHeading?: string;
+  /** What the desktop app does once installed + signed in. */
+  desktopHint?: string;
+  /** Share-sheet chip on the desktop card, rendered only when the
+     platform exposes `navigator.share`. */
+  shareDownloadLabel?: string;
+  /** aria-label for the desktop card's URL pill — tapping it copies the
+     download link. The phone itself never opens the download page. */
+  copyDownloadLabel?: string;
+  /** Heading for the "what happens next" numbered steps. */
+  nextStepsHeading?: string;
+  /** Step 1 — the machine appears in this workspace. */
+  nextStepMachine?: string;
+  /** Step 2 — add a project folder on that machine. */
+  nextStepProject?: string;
+  /** Step 3 — configure an agent and dispatch the first task. */
+  nextStepAgent?: string;
 };
 
 export type MobileHomeLocalProject = {
@@ -282,9 +317,9 @@ export type MobileHomeScreenLabels = {
   addGitHubRepository?: string;
   addGitHubRepositoryHint?: string;
   chatTab?: string;
-  /** Label for the Tasks tab in the bottom dock. Only rendered when the
-     caller also passes `showTasksTab`. */
-  tasksTab?: string;
+  schedulesTab?: string;
+  /** aria-label for the header plus button on the Schedules tab. */
+  newSchedule?: string;
   settingsTab?: string;
   /** aria-label for the archive-toggle chip in the header. Toggles the
      Chat tab between active and archived conversations. */
@@ -320,9 +355,6 @@ export type MobileHomeScreenLabels = {
      renders an "全部对话" label above the flat list. */
   allLocalProjectsHeading?: string;
   allGitHubReposHeading?: string;
-  /** @deprecated Chat list no longer shows a section heading in the
-     active (non-archived) mode. Kept for call-site compatibility. */
-  allChatsHeading?: string;
   /** Heading rendered above the Chat tab's list when the archive
      toggle is on. Falls back to "归档对话" when not provided. */
   archivedChatsHeading?: string;
@@ -386,10 +418,6 @@ export type MobileHomeScreenProps = {
   selectedTab: MobileHomeTab;
   /** Inbox only appears in workspaces with more than one member. */
   showInboxTab?: boolean;
-  /** Shows the Tasks tab in the bottom dock (developer-mode Tasks beta
-     gate). When false the tab is not rendered at all — as if never
-     built — and a `selectedTab` of `'tasks'` falls back to Chat. */
-  showTasksTab?: boolean;
   /** Active sub-tab inside the Projects tab. Required when `selectedTab`
      is 'projects'; ignored on the Chat tab. */
   selectedProjectsSubTab?: MobileProjectsSubTab;
@@ -452,6 +480,14 @@ export type MobileHomeScreenProps = {
      Receives the next pinned state so the handler doesn't have to
      re-derive the current state. */
   onChatTogglePin?: (chatId: string, nextPinned: boolean) => void;
+  /** Status view writes for the Chat list (drag, row and section menus). */
+  chatStatusCommands?: MobileStatusCommands;
+  /** Whether this member may write Status view state and manage pin sections. */
+  chatStatusWritable?: boolean;
+  /** False when not even a pin can be written (an encrypted workspace's read role). */
+  chatStatusPreferable?: boolean;
+  /** Pinned rows the Chat list's scope hid, by pin section id (`""` = default). */
+  chatScopeHiddenCounts?: Record<string, number>;
   /** Archive a chat from the swipe-to-reveal drawer (or from the
      super-swipe). */
   onChatArchive?: (chatId: string) => void;
@@ -470,11 +506,10 @@ export type MobileHomeScreenProps = {
   /** Fires when the standalone new-conversation chip in the bottom dock
      is tapped. Optional — when omitted the chip is not rendered. */
   onNewChat?: () => void;
-  /** Fires when the user taps "Download Lody" in the first-run onboarding
-     empty state (Chat tab, no machines + no chats). Typically opens the
-     localized download page in the external browser. When omitted the
-     onboarding still renders but the button is inert. */
-  onDownloadClient?: () => void;
+  /** Localized download-page URL carried by the onboarding's share/copy
+     actions — the payload a phone hands to a computer (the phone itself
+     never navigates to it). Defaults to the production download page. */
+  onboardingDownloadUrl?: string;
   /** When true, the Chat tab renders the *archived* conversations
      (instead of the active ones) and the content area is tinted with
      `bg-muted` to give the "everything here is archived" feel. The
@@ -487,21 +522,36 @@ export type MobileHomeScreenProps = {
   onShowArchivedToggle?: () => void;
 };
 
-/* Home header workspace chip — shared `WorkspaceAvatar` so logo /
-   first-letter fallback match the switcher sheet and desktop sidebar. */
-function HomeWorkspaceAvatar({
-  workspace,
-  size = 'sm',
-}: {
-  workspace: MobileHomeWorkspace;
-  size?: 'sm' | 'md';
-}) {
-  const sizeClass = size === 'sm' ? 'h-7 w-7 text-[0.72rem]' : 'h-9 w-9 text-[0.82rem]';
+const workspaceAvatarStyles = stylex.create({
+  crop: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: control.large,
+    height: control.large,
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    overflow: 'hidden',
+  },
+  content: {
+    display: 'flex',
+    // Fill the 36px header control with the primitive's 32px large tile.
+    transform: 'scale(1.125)',
+  },
+});
+
+/* The header owns its circular crop; shared workspace tiles keep their shape. */
+function HomeWorkspaceAvatar({ workspace }: { workspace: MobileHomeWorkspace }) {
   return (
-    <WorkspaceAvatar
-      workspace={{ name: workspace.name, logo: workspace.avatarUrl }}
-      className={sizeClass}
-    />
+    <span {...stylex.props(workspaceAvatarStyles.crop)}>
+      <span {...stylex.props(workspaceAvatarStyles.content)}>
+        <WorkspaceAvatar
+          workspace={{ name: workspace.name, logo: workspace.avatarUrl }}
+          size="large"
+        />
+      </span>
+    </span>
   );
 }
 
@@ -556,7 +606,7 @@ function AddProjectActionSheet({
     options.push({
       key: 'local',
       icon: <FolderPlus className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />,
-      title: labels.addLocalProject ?? '添加本地项目',
+      title: labels.addLocalProject ?? '添加文件夹',
       hint: labels.addLocalProjectHint ?? '浏览机器目录，选择一个文件夹',
       onSelect: onAddLocalProject,
     });
@@ -784,7 +834,7 @@ function ChatListFilterToggle({
         open && 'border-primary/40 bg-primary/15 text-primary'
       )}
     >
-      <CarbonSettingsAdjust className="h-4 w-4 text-current" aria-hidden="true" />
+      <SlidersHorizontal className="h-4 w-4 text-current" strokeWidth={1.8} aria-hidden="true" />
       {hasActiveFilters && !open ? (
         <span
           aria-hidden="true"
@@ -987,7 +1037,6 @@ function RecentItemsRow<TItem extends { id: string }>({
    `<MobileWorkspaceTabBar>` via plain props, not closures. */
 function workspaceTabSpecs(
   labels: MobileHomeScreenLabels,
-  showTasksTab = false,
   showInboxTab = false
 ): ReadonlyArray<MobileBottomTabBarTabSpec<MobileHomeTab>> {
   /* Icons at 24px (h-6) — the dock pill is h-14, so h-5/20px read as
@@ -1010,16 +1059,12 @@ function workspaceTabSpecs(
       material: <MobileReactIcon icon={MdChat} className="h-6 w-6" />,
       label: labels.chatTab ?? 'Chat',
     },
-    ...(showTasksTab
-      ? [
-          {
-            key: 'tasks' as const,
-            ios: <ListTodo className="h-6 w-6" strokeWidth={1.75} />,
-            material: <MobileReactIcon icon={MdChecklist} className="h-6 w-6" />,
-            label: labels.tasksTab ?? 'Tasks',
-          },
-        ]
-      : []),
+    {
+      key: 'schedules',
+      ios: <Clock3 className="h-6 w-6" />,
+      material: <Clock3 className="h-6 w-6" />,
+      label: labels.schedulesTab ?? 'Schedules',
+    },
     {
       key: 'projects',
       ios: <Folders className="h-6 w-6" strokeWidth={1.75} />,
@@ -1042,6 +1087,7 @@ function defaultSearchPlaceholder(
 ): string {
   if (tab === 'inbox') return '搜索';
   if (tab === 'chat') return '搜索对话';
+  if (tab === 'schedules') return '搜索定时任务';
   if (sub === 'github') return '搜索仓库';
   return '搜索项目';
 }
@@ -1249,7 +1295,6 @@ export function MobileHomeScreen({
   onPullToRefresh,
   selectedTab,
   showInboxTab = false,
-  showTasksTab = false,
   selectedProjectsSubTab = 'local',
   onProjectsSubTabSelect,
   onAddLocalProject,
@@ -1272,12 +1317,16 @@ export function MobileHomeScreen({
   onGitHubRepositorySelect,
   onChatSelect,
   onChatTogglePin,
+  chatStatusCommands,
+  chatStatusWritable,
+  chatStatusPreferable,
+  chatScopeHiddenCounts,
   onChatArchive,
   onChatRestore,
   onChatPermanentDelete,
   onSettingsOpen,
   onNewChat,
-  onDownloadClient,
+  onboardingDownloadUrl,
   showArchived = false,
   onShowArchivedToggle,
 }: MobileHomeScreenProps) {
@@ -1298,6 +1347,7 @@ export function MobileHomeScreen({
      thing in both ("react" could match a project name AND a chat
      title). Persisting keeps the filter useful. */
   const [searchQuery, setSearchQuery] = useState('');
+  const createScheduleRef = useRef<(() => void) | null>(null);
   // Controls the add-project action sheet launched from the Projects header.
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [privateHelpOpen, setPrivateHelpOpen] = useState(false);
@@ -1305,6 +1355,18 @@ export function MobileHomeScreen({
      `MobileWorkspaceTabBar` so the dock can collapse while the user
      scrolls. */
   const listScrollRef = useRef<HTMLDivElement>(null);
+  const [archiveUpper, setArchiveUpper] = useState<HTMLDivElement | null>(null);
+  const [archiveLower, setArchiveLower] = useState<HTMLDivElement | null>(null);
+  const setListScroll = useCallback((node: HTMLDivElement | null) => {
+    listScrollRef.current = node;
+    setArchiveLower(node);
+  }, []);
+  const [homeBody, setHomeBody] = useState<HTMLDivElement | null>(null);
+  const homeFold = useHorizontalFoldLayout(
+    homeBody,
+    selectedTab === 'chat' || selectedTab === 'projects'
+  );
+
   /* Pull-to-refresh: when the list is at the top and the user
      pulls down past threshold, fire `onPullToRefresh`. The hook
      reports `isRefreshing` while the promise is in flight (fed into
@@ -1323,6 +1385,14 @@ export function MobileHomeScreen({
   });
   const pullPastThreshold = pullDistance >= pullThreshold;
   const normalizedQuery = normalizeForSearch(searchQuery.trim());
+  // Split whole existing buckets, so openers and opened sessions stay in the
+  // same list and a conversation is never repeated on the two panels.
+  const splitChats = Boolean(
+    selectedTab === 'chat' &&
+    homeFold &&
+    !normalizedQuery &&
+    groupChats(chats, chatGroupBy).length >= 2
+  );
 
   /* First-run onboarding: the user opened the mobile app before ever
      launching the desktop client, so the workspace has no machines and
@@ -1355,13 +1425,7 @@ export function MobileHomeScreen({
     return map;
   }, [machines]);
 
-  /* The Tasks tab only exists while the beta gate is on. If it flips off
-     while the user is sitting on the tab (or a stale `selectedTab`
-     arrives), fall back to Chat rather than rendering a featureless
-     shell — gate-off must behave as if the tab were never built. */
-  const tasksTabActive = showTasksTab && selectedTab === 'tasks';
-  const effectiveSelectedTab: MobileHomeTab =
-    selectedTab === 'tasks' && !showTasksTab ? 'chat' : selectedTab;
+  const scheduleTabActive = selectedTab === 'schedules';
 
   const resolvedTheme: 'ios' | 'material' =
     theme ?? (isIOSRuntimeEnvironment() ? 'ios' : 'material');
@@ -1375,6 +1439,9 @@ export function MobileHomeScreen({
   const recentProjectsMerged = useMemo(
     () => mergeRecentProjects(recentLocalProjects, recentGitHubRepos),
     [recentLocalProjects, recentGitHubRepos]
+  );
+  const splitProjects = Boolean(
+    selectedTab === 'projects' && homeFold && !normalizedQuery && recentProjectsMerged.length > 0
   );
   const searchAriaLabel = labels.searchAriaLabel ?? searchPlaceholder;
   const clearSearchAriaLabel = labels.clearSearchAriaLabel ?? 'Clear search';
@@ -1392,14 +1459,11 @@ export function MobileHomeScreen({
     connectionUiState === 'offline';
   /* Keep search mounted for the exit transition; opacity/transform are
      driven by `searchOpaque`. Pill only mounts once `statusRevealed`. */
-  const [searchOpaque, setSearchOpaque] = useState(() => !tasksTabActive && !wantStatusSlot);
-  const [statusRevealed, setStatusRevealed] = useState(() => tasksTabActive || wantStatusSlot);
+  const [searchOpaque, setSearchOpaque] = useState(() => !wantStatusSlot);
+  const [statusRevealed, setStatusRevealed] = useState(() => wantStatusSlot);
   useEffect(() => {
     let reveal: number | undefined;
-    if (tasksTabActive) {
-      setSearchOpaque(false);
-      setStatusRevealed(true);
-    } else if (wantStatusSlot) {
+    if (wantStatusSlot) {
       /* Exit search first; reveal pill only after the fade finishes so
          the two never share the chrome band. */
       setSearchOpaque(false);
@@ -1417,7 +1481,11 @@ export function MobileHomeScreen({
     return () => {
       if (reveal !== undefined) window.clearTimeout(reveal);
     };
-  }, [tasksTabActive, wantStatusSlot]);
+  }, [wantStatusSlot]);
+
+  /* Home is the destination of a project or Settings Back: settle in under
+     the sliding-off page. */
+  const backRevealClass = useMobileBackRevealClass();
 
   /* Tab swipe was removed — conflicted with the row-level
      left-swipe-to-reveal-actions gesture on conversation rows. The
@@ -1437,7 +1505,12 @@ export function MobileHomeScreen({
          scroll region — keeps the vertical scrollbar contained to
          the list area instead of running through the chrome at the
          top. Mirrors the structure on MobileProjectScreen. */}
-      <div className="mobile-home-shell relative flex h-full w-full flex-col bg-background">
+      <div
+        className={cn(
+          'mobile-home-shell relative flex h-full w-full flex-col bg-background',
+          backRevealClass
+        )}
+      >
         {/* Sticky header: safe-area padding outside the chrome row so the
            status/pull pill can center on the same h-9 band as the
            workspace / search / trailing controls — not the full header
@@ -1461,14 +1534,14 @@ export function MobileHomeScreen({
                   aria-haspopup="dialog"
                   onClick={onWorkspaceMenuOpen}
                 >
-                  <HomeWorkspaceAvatar workspace={workspace} size="sm" />
+                  <HomeWorkspaceAvatar workspace={workspace} />
                 </FloatingPill>
               ) : (
                 <div
                   className="flex h-9 w-9 items-center justify-center rounded-full border border-border/50 bg-muted text-foreground dark:border-white/12 dark:bg-white/10"
                   data-workspace-identity
                 >
-                  <HomeWorkspaceAvatar workspace={workspace} size="sm" />
+                  <HomeWorkspaceAvatar workspace={workspace} />
                 </div>
               )}
             </div>
@@ -1482,21 +1555,19 @@ export function MobileHomeScreen({
                    Duration matches HEADER_SEARCH_EXIT_MS (tailwind
                    duration-150 ≈ 150ms; keep the timeout in sync). */
                 'transition-[opacity,transform] duration-150 ease-out',
-                searchOpaque && !tasksTabActive
+                searchOpaque
                   ? 'opacity-100 translate-y-0'
                   : 'pointer-events-none translate-y-1.5 opacity-0'
               )}
-              aria-hidden={!searchOpaque || tasksTabActive}
+              aria-hidden={!searchOpaque}
             >
-              {!tasksTabActive ? (
-                <HeaderSearchInput
-                  value={searchQuery}
-                  onChange={setSearchQuery}
-                  placeholder={searchPlaceholder}
-                  ariaLabel={searchAriaLabel}
-                  clearAriaLabel={clearSearchAriaLabel}
-                />
-              ) : null}
+              <HeaderSearchInput
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder={searchPlaceholder}
+                ariaLabel={searchAriaLabel}
+                clearAriaLabel={clearSearchAriaLabel}
+              />
             </div>
 
             {/* Trailing header actions — same canvas liquid-glass discs as
@@ -1516,6 +1587,15 @@ export function MobileHomeScreen({
                 <GlassIconButton
                   label={labels.addProjectMenu ?? '添加项目'}
                   onClick={() => setAddMenuOpen(true)}
+                >
+                  <Plus className="h-5 w-5 text-current" aria-hidden="true" strokeWidth={1.75} />
+                </GlassIconButton>
+              ) : null}
+
+              {selectedTab === 'schedules' ? (
+                <GlassIconButton
+                  label={labels.newSchedule ?? '新建定时任务'}
+                  onClick={() => createScheduleRef.current?.()}
                 >
                   <Plus className="h-5 w-5 text-current" aria-hidden="true" strokeWidth={1.75} />
                 </GlassIconButton>
@@ -1577,14 +1657,53 @@ export function MobileHomeScreen({
            `translate3d` so they move as a single compositor layer.
            The header stays put: search does a fast top→bottom exit,
            then the centered status pill mounts. */}
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {/* The chat/projects group stays MOUNTED (but `hidden`) while
-             the Tasks tab is active: unmounting would drop the list
-             scroll element the pull-to-refresh + dock-collapse listeners
-             are bound to, and would reset the chat list's scroll
-             position on every Tasks round-trip. */}
+        <div
+          ref={setHomeBody}
+          data-horizontal-fold-home-body
+          className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
+          {homeFold && splitChats && !showChatOnboarding ? (
+            <>
+              <div
+                ref={setArchiveUpper}
+                {...(showArchived
+                  ? { 'data-horizontal-fold-archive-upper': '' }
+                  : { 'data-horizontal-fold-upper-list': '' })}
+                className="min-h-0 overflow-y-auto"
+                style={{ flex: `0 0 ${homeFold.messageHeight}px` }}
+              />
+              <div aria-hidden="true" style={{ flex: `0 0 ${homeFold.gapHeight}px` }} />
+            </>
+          ) : null}
+          {homeFold && splitProjects ? (
+            <>
+              <div
+                data-horizontal-fold-projects-upper
+                className="min-h-0 overflow-y-auto"
+                style={{ flex: `0 0 ${homeFold.messageHeight}px` }}
+              >
+                <ProjectsTabView
+                  localProjects={localProjects}
+                  githubRepositories={githubRepositories}
+                  recentProjectsMerged={recentProjectsMerged}
+                  selectedSubTab={selectedProjectsSubTab}
+                  onSubTabSelect={(sub) => onProjectsSubTabSelect?.(sub)}
+                  machineLookup={machineLookup}
+                  hasMachines={machines.length > 0}
+                  labels={labels}
+                  query={normalizedQuery}
+                  onLocalProjectSelect={onLocalProjectSelect}
+                  onGitHubRepositorySelect={onGitHubRepositorySelect}
+                  onPrivateHelp={() => setPrivateHelpOpen(true)}
+                  iosTheme={resolvedTheme === 'ios'}
+                  foldPart="upper"
+                />
+              </div>
+              <div aria-hidden="true" style={{ flex: `0 0 ${homeFold.gapHeight}px` }} />
+            </>
+          ) : null}
           <div
-            className={cn('flex min-h-0 flex-1 flex-col', tasksTabActive && 'hidden')}
+            className={cn('flex min-h-0 flex-1 flex-col', scheduleTabActive && 'hidden')}
             style={
               pullDistance > 0
                 ? {
@@ -1616,9 +1735,14 @@ export function MobileHomeScreen({
             </AnimatePresence>
 
             <div
-              ref={listScrollRef}
+              ref={setListScroll}
+              data-mobile-session-list-scroll-region=""
               className={cn(
-                'mobile-home-list-region scrollbar-pro relative min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
+                /* `z-0` makes the scroller a stacking context. WebKit can
+                   otherwise promote the positioned / animated conversation
+                   rows beside its overflow-controls layer, letting row
+                   backgrounds paint over the vertical scrollbar. */
+                'mobile-home-list-region scrollbar-pro relative z-0 min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
                 'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
               )}
             >
@@ -1652,6 +1776,7 @@ export function MobileHomeScreen({
                   onGitHubRepositorySelect={onGitHubRepositorySelect}
                   onPrivateHelp={() => setPrivateHelpOpen(true)}
                   iosTheme={resolvedTheme === 'ios'}
+                  foldPart={splitProjects ? 'lower' : undefined}
                 />
               ) : null}
 
@@ -1659,7 +1784,7 @@ export function MobileHomeScreen({
                 showChatOnboarding ? (
                   <MobileHomeOnboarding
                     labels={labels.onboarding ?? {}}
-                    onDownloadClient={onDownloadClient}
+                    downloadUrl={onboardingDownloadUrl}
                   />
                 ) : (
                   <ChatsFlatView
@@ -1669,9 +1794,18 @@ export function MobileHomeScreen({
                     query={normalizedQuery}
                     onSelect={onChatSelect}
                     onTogglePin={onChatTogglePin}
+                    statusCommands={chatStatusCommands}
+                    statusWritable={chatStatusWritable}
+                    statusPreferable={chatStatusPreferable}
+                    scopeHiddenCounts={chatScopeHiddenCounts}
                     onArchive={onChatArchive}
                     onRestore={onChatRestore}
                     archived={showArchived}
+                    splitTargets={
+                      splitChats && archiveUpper && archiveLower
+                        ? { upper: archiveUpper, lower: archiveLower }
+                        : undefined
+                    }
                     onPermanentDelete={showArchived ? onChatPermanentDelete : undefined}
                     hasActiveFilters={hasActiveChatFilters}
                     onClearFilters={onClearChatFilters}
@@ -1692,29 +1826,28 @@ export function MobileHomeScreen({
             </div>
           </div>
 
-          {/* Tasks tab: the shared All Tasks body (inbox + list) fills the
-             content region under the home header, dock still visible.
-             `embedded` skips BaseHeader's safe-area / drawer menu so we
-             don't double-stack chrome under the home header. The home
-             search row stays hidden (it only filters chats/projects).
-             Tapping a card routes to full-screen `/tasks/$taskId`. */}
-          {tasksTabActive ? (
+          {/* Schedules tab keeps the home header and the bottom dock.
+             Its own title/search row stays hidden so this search field
+             is the one that filters the list. */}
+          {scheduleTabActive ? (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <Suspense fallback={null}>
-                <TasksListBody mobile embedded />
-              </Suspense>
+              <SchedulesWorkspace
+                hideHeader
+                query={searchQuery}
+                createScheduleRef={createScheduleRef}
+              />
             </div>
           ) : null}
         </div>
 
-        {/* Shared workspace tabbar (chat / tasks / projects) + the
-            optional separate new-chat chip. The 设置 surface is reached
-            via the gear button in the top header, so it's no longer one
-            of the bottom tabs. Tabs are built locally so the
-            translations stay co-located with the other screen copy. */}
+        {/* Shared workspace tabbar (chat / projects) + the optional
+            separate new-chat chip. The 设置 surface is reached via the
+            gear button in the top header, so it's no longer one of the
+            bottom tabs. Tabs are built locally so the translations stay
+            co-located with the other screen copy. */}
         <MobileWorkspaceTabBar<MobileHomeTab>
-          tabs={workspaceTabSpecs(labels, showTasksTab, showInboxTab)}
-          selectedTab={effectiveSelectedTab}
+          tabs={workspaceTabSpecs(labels, showInboxTab)}
+          selectedTab={selectedTab}
           onTabSelect={(tab) => onTabSelect?.(tab)}
           onNewChat={onNewChat}
           newChatAriaLabel={labels.newChatAriaLabel}
@@ -1848,6 +1981,7 @@ function ProjectsTabView({
   onGitHubRepositorySelect,
   onPrivateHelp,
   iosTheme,
+  foldPart,
 }: {
   localProjects: MobileHomeLocalProject[];
   githubRepositories: MobileHomeGitHubRepository[];
@@ -1862,6 +1996,7 @@ function ProjectsTabView({
   onGitHubRepositorySelect?: (fullName: string) => void;
   onPrivateHelp: () => void;
   iosTheme: boolean;
+  foldPart?: 'upper' | 'lower';
 }) {
   const localLabel = labels.localTab ?? '本地';
   const githubLabel = labels.githubTab ?? 'GitHub';
@@ -1919,15 +2054,17 @@ function ProjectsTabView({
 
   return (
     <section aria-label={labels.projectsTab ?? '项目'} className="flex flex-col">
-      {recentStrip}
-      <ProjectsSubTabSelector
-        active={selectedSubTab}
-        localLabel={localLabel}
-        githubLabel={githubLabel}
-        onSelect={onSubTabSelect}
-        iosTheme={iosTheme}
-      />
-      {selectedSubTab === 'local' ? (
+      {foldPart !== 'lower' ? recentStrip : null}
+      {foldPart !== 'lower' ? (
+        <ProjectsSubTabSelector
+          active={selectedSubTab}
+          localLabel={localLabel}
+          githubLabel={githubLabel}
+          onSelect={onSubTabSelect}
+          iosTheme={iosTheme}
+        />
+      ) : null}
+      {foldPart === 'upper' ? null : selectedSubTab === 'local' ? (
         <LocalProjectsList
           projects={localProjects}
           machineLookup={machineLookup}
@@ -2083,7 +2220,7 @@ function LocalProjectsList({
                         {project.removalState === 'waiting_for_device' ? (
                           <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
                         ) : (
-                          <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
+                          <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
                         )}
                         <span className="truncate">
                           {project.removalState === 'waiting_for_device'
@@ -2205,8 +2342,17 @@ function ChatsFlatView({
   onClearFilters,
   firstGroupTrailing,
   onPrivateHelp,
+  splitTargets,
+  statusCommands,
+  statusWritable,
+  statusPreferable,
+  scopeHiddenCounts,
 }: {
   chats: MobileConversationItem[];
+  statusCommands?: MobileStatusCommands;
+  statusWritable?: boolean;
+  statusPreferable?: boolean;
+  scopeHiddenCounts?: Record<string, number>;
   groupBy: MobileChatGroupBy;
   labels: MobileHomeScreenLabels;
   query: string;
@@ -2224,6 +2370,7 @@ function ChatsFlatView({
      row when the list is empty / flat with no heading). */
   firstGroupTrailing?: ReactNode;
   onPrivateHelp: () => void;
+  splitTargets?: { upper: HTMLElement; lower: HTMLElement };
 }) {
   const visible = useMemo(() => {
     if (!query) return chats;
@@ -2289,6 +2436,13 @@ function ChatsFlatView({
         chats={visible}
         groupBy={groupBy}
         groupLabels={labels.chatGroupLabels}
+        /* Home aggregates every project and worktree into one scroll, so each
+           bucket previews its latest rows and offers the rest. Without it a
+           single busy project owns the screen — the whole reason the cap
+           exists. The in-project list deliberately does not pass this. */
+        capGroupPreviews
+        /* Home unmounts under Settings; keep folded groups folded on return. */
+        bucketStateKey={archived ? 'home:archived' : 'home'}
         /* Active list is flat — no "全部对话" section label. Only the
            archived surface keeps a heading so the mode is obvious. */
         flatHeading={archived ? (labels.archivedChatsHeading ?? '归档对话') : undefined}
@@ -2301,58 +2455,322 @@ function ChatsFlatView({
         privateLabel={labels.privateLabel}
         privateHelpAriaLabel={labels.privateHelpAriaLabel}
         onPrivateHelp={onPrivateHelp}
+        splitTargets={splitTargets}
+        statusCommands={statusCommands}
+        statusWritable={statusWritable}
+        statusPreferable={statusPreferable}
+        scopeHiddenCounts={scopeHiddenCounts}
       />
     </section>
   );
 }
 
-/* Minimal first-run hint shown on the Chat tab of an empty workspace (no
-   machines + no conversations). The mobile app is a thin client over a
-   desktop/CLI host, so a brand-new user just needs a short nudge to go
-   install + start the desktop client — one icon, one line, one button.
+/* First-run guide shown on the Chat tab of an empty workspace (no machines
+   + no conversations). The mobile app is a thin client over the user's own
+   machines, so the only thing standing between a new user and their first
+   task is getting ONE machine connected. The guide offers the two real
+   paths — the `lody daemon start` one-liner on any machine (including a
+   headless server reached over SSH, whose printed sign-in link can be
+   opened right on this phone) and the desktop app on their computer —
+   then previews what happens once a machine comes online.
+
    Rendered inline (not a blocking modal) so the user can still switch
    workspaces / open settings underneath it. Pure presentational — copy via
-   `labels`, action via `onDownloadClient` — so i18n + Storybook live in the
-   caller. */
-function MobileHomeOnboarding({
+   `labels`, actions via `navigator.share` + the shared clipboard helper —
+   so i18n + Storybook live in the caller. The phone itself never opens
+   the download page: opening it here only re-pitches the mobile app the
+   user already installed, so the desktop card shares or copies the link
+   for the computer instead. */
+export function MobileHomeOnboarding({
   labels,
-  onDownloadClient,
+  downloadUrl,
 }: {
   labels: MobileHomeOnboardingLabels;
-  onDownloadClient?: () => void;
+  /** Localized download-page URL carried by the share/copy actions. */
+  downloadUrl?: string;
 }) {
+  const command = labels.command ?? 'npx lody daemon start';
+  const copyLabel = labels.copyCommandLabel ?? '复制命令';
+  const linkUrl = downloadUrl ?? getDownloadPageUrl(undefined);
+  /* The pill displays the URL without its scheme — `lody.ai/download` is
+     short enough to read and type on the computer; the copy value keeps
+     `https://` so a pasted link stays clickable. */
+  const linkDisplay = linkUrl.replace(/^https?:\/\//u, '');
+  const [copied, setCopied] = useState<'command' | 'link' | null>(null);
+  const copiedTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    return () => window.clearTimeout(copiedTimerRef.current);
+  }, []);
+
+  /* The native share sheet is the phone → computer bridge: AirDrop hands
+     the link straight to a Mac's browser, Messages/Mail carry it to the
+     user's own machine. Capacitor WebViews may not expose it — copy to
+     clipboard remains the universal path. */
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
+  async function copyText(text: string, kind: 'command' | 'link') {
+    if (!(await writeTextToClipboard(text))) return;
+    setCopied(kind);
+    window.clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = window.setTimeout(() => setCopied(null), 2000);
+  }
+
+  function shareSetup() {
+    if (!canShare) return;
+    /* Single `text` field is the most portable payload: the receiver gets
+       both the command and the link regardless of which field the target
+       app reads. AbortError (dismissed sheet) is expected — swallow it. */
+    void navigator.share({ text: `${command}\n${linkUrl}` }).catch(() => {});
+  }
+
+  function shareDownload() {
+    if (!canShare) return;
+    /* A bare `url` renders as a rich link — AirDrop opens it straight in
+       the receiving Mac's browser. Same AbortError contract as above. */
+    void navigator.share({ url: linkUrl }).catch(() => {});
+  }
+
+  const nextSteps = [
+    labels.nextStepMachine ?? '它会自动出现在当前 workspace。',
+    labels.nextStepProject ?? '在「项目」里选择这台机器，添加一个文件夹。',
+    labels.nextStepAgent ?? '在「设置 → Agents」中配置 Agent，即可下发第一个任务。',
+  ];
+
   return (
-    <div className="px-5 pt-10">
-      {/* Wide enough that the one-line sub-copy doesn't wrap on a phone
-         (the title + button are short and stay centered regardless). */}
-      <div className="mx-auto flex max-w-xs flex-col items-center gap-4 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-          <MonitorSmartphone className="h-6 w-6" strokeWidth={1.6} aria-hidden="true" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-[0.95rem] font-medium text-foreground">
-            {labels.title ?? '在电脑上启动 Lody'}
-          </p>
-          {labels.description ? (
-            <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
-              {labels.description}
+    <div className="px-4 pb-6 pt-8">
+      <div className="mx-auto flex max-w-sm flex-col gap-4">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+            <MonitorSmartphone className="h-6 w-6" strokeWidth={1.6} aria-hidden="true" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-[0.95rem] font-medium text-foreground">
+              {labels.title ?? '先连接一台机器'}
             </p>
-          ) : null}
+            {labels.description ? (
+              <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
+                {labels.description}
+              </p>
+            ) : null}
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => onDownloadClient?.()}
-          className={cn(
-            'inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2',
-            'text-[0.85rem] font-medium text-primary-foreground',
-            'transition-transform active:scale-[0.98]'
+
+        {/* Path 1 — one command on any machine. The command is the most
+            transferable artifact a phone can hand to a terminal: type it,
+            paste it into an SSH client, or share it to the computer. */}
+        <section className="rounded-2xl border border-border/40 bg-card p-4">
+          <div className="flex items-center gap-2">
+            <Terminal
+              className="h-4 w-4 shrink-0 text-muted-foreground"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <p className="text-[0.85rem] font-medium text-foreground">
+              {labels.commandHeading ?? '一行命令，接入任意机器'}
+            </p>
+          </div>
+          <div className="mt-3 flex items-stretch gap-2">
+            <OnboardingArtifactPill
+              display={command}
+              ariaLabel={`${copyLabel}: ${command}`}
+              isCopied={copied === 'command'}
+              onCopy={() => void copyText(command, 'command')}
+            />
+            {canShare ? (
+              <OnboardingShareButton
+                label={labels.shareCommandLabel ?? '分享到电脑'}
+                onShare={shareSetup}
+              />
+            ) : null}
+          </div>
+          <p className="mt-2.5 text-[0.75rem] leading-relaxed text-muted-foreground">
+            {labels.commandHint ??
+              '在服务器、虚拟机或你的电脑上运行（需 Node.js 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+（26.x））。命令会发起登录；没有浏览器的机器会打印链接，用这台手机打开即可完成授权。'}
+          </p>
+        </section>
+
+        {/* Path 2 — the desktop app: friendlier on a personal computer and
+            needs no Node.js; signing in starts the bundled runtime. The share
+            sheet is the whole interaction — a URL wants a browser, and
+            AirDrop lands it there; no need to display the link itself. Only
+            when `navigator.share` is missing does the type/copy pill appear
+            as the fallback path. The phone never opens the page itself. */}
+        <section className="rounded-2xl border border-border/40 bg-card p-4">
+          <div className="flex items-center gap-2">
+            <MonitorDown
+              className="h-4 w-4 shrink-0 text-muted-foreground"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <p className="text-[0.85rem] font-medium text-foreground">
+              {labels.desktopHeading ?? '或者在电脑上装桌面端'}
+            </p>
+          </div>
+          {canShare ? (
+            <div className="mt-3 flex items-stretch gap-2">
+              <button
+                type="button"
+                onClick={shareDownload}
+                aria-label={labels.shareDownloadLabel ?? '发送到电脑'}
+                className={cn(
+                  'flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5',
+                  'text-[0.85rem] font-medium text-primary-foreground',
+                  'transition-transform motion-safe:active:scale-[0.98]'
+                )}
+              >
+                <Share2 className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+                {labels.shareDownloadLabel ?? '发送到电脑'}
+              </button>
+              {/* Trailing copy accelerator — same coupled layout as the
+                  command pill's share button: primary action leads, the
+                  quiet icon button is the fallback. */}
+              <button
+                type="button"
+                onClick={() => void copyText(linkUrl, 'link')}
+                aria-label={`${labels.copyDownloadLabel ?? '复制下载链接'}: ${linkUrl}`}
+                title={labels.copyDownloadLabel ?? '复制下载链接'}
+                data-copied={copied === 'link' ? 'true' : 'false'}
+                className={cn(
+                  'relative inline-flex w-10 shrink-0 items-center justify-center rounded-xl bg-muted/70',
+                  'text-muted-foreground transition active:bg-muted motion-safe:active:scale-90'
+                )}
+              >
+                <OnboardingCopiedIcon
+                  isCopied={copied === 'link'}
+                  className="h-4 w-4"
+                  strokeWidth={1.8}
+                />
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 flex items-stretch gap-2">
+              <OnboardingArtifactPill
+                display={linkDisplay}
+                ariaLabel={`${labels.copyDownloadLabel ?? '复制下载链接'}: ${linkUrl}`}
+                isCopied={copied === 'link'}
+                onCopy={() => void copyText(linkUrl, 'link')}
+              />
+            </div>
           )}
-        >
-          <Download className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-          {labels.downloadButton ?? '下载客户端'}
-        </button>
+          <p className="mt-2.5 text-[0.75rem] leading-relaxed text-muted-foreground">
+            {labels.desktopHint ?? '安装桌面端并登录，它会自动启动 Agent 运行环境。'}
+          </p>
+        </section>
+
+        {/* What happens after the machine connects — so the user knows the
+            flow continues on this phone. */}
+        <section className="px-1 pt-1">
+          <p className="text-[0.72rem] font-medium uppercase tracking-wide text-muted-foreground">
+            {labels.nextStepsHeading ?? '机器上线之后'}
+          </p>
+          <ol className="mt-2.5 space-y-2">
+            {nextSteps.map((step, index) => (
+              <li key={index} className="flex items-start gap-2.5">
+                <span className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-muted text-[0.68rem] font-medium text-muted-foreground">
+                  {index + 1}
+                </span>
+                <span className="text-[0.78rem] leading-relaxed text-muted-foreground">{step}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
       </div>
     </div>
+  );
+}
+
+/* The mono artifact pill is the guide's central element: it displays text
+   the user can simply TYPE on the other device (the command, the download
+   URL), so walking to the computer and typing it is the baseline path.
+   Tapping copies as a convenience — copy is the accelerator, not the
+   interaction model. */
+/* Copy feedback icon: Copy ↔ Check crossfades — the outgoing icon blurs and
+   shrinks out while the incoming one blurs in, so the eye reads one smooth
+   morph instead of two objects swapping. `popLayout` pops the exiting icon
+   out of flow so the swap never shifts layout. First mount renders idle
+   instantly; prefers-reduced-motion skips the animation entirely. */
+function OnboardingCopiedIcon({
+  isCopied,
+  className,
+  strokeWidth,
+}: {
+  isCopied: boolean;
+  className: string;
+  strokeWidth: number;
+}) {
+  const reduceMotion = useReducedMotion();
+  const icon = isCopied ? (
+    <Check className={className} strokeWidth={strokeWidth} aria-hidden="true" />
+  ) : (
+    <Copy className={className} strokeWidth={strokeWidth} aria-hidden="true" />
+  );
+  if (reduceMotion) {
+    return <span className="inline-flex">{icon}</span>;
+  }
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      <motion.span
+        key={isCopied ? 'copied' : 'idle'}
+        className="inline-flex"
+        initial={{ opacity: 0, scale: 0.7, filter: 'blur(2px)' }}
+        animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+        exit={{ opacity: 0, scale: 0.7, filter: 'blur(2px)' }}
+        transition={{ duration: 0.18, ease: 'easeOut' }}
+      >
+        {icon}
+      </motion.span>
+    </AnimatePresence>
+  );
+}
+
+function OnboardingArtifactPill({
+  display,
+  ariaLabel,
+  isCopied,
+  onCopy,
+}: {
+  display: string;
+  ariaLabel: string;
+  isCopied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      aria-label={ariaLabel}
+      data-copied={isCopied ? 'true' : 'false'}
+      className={cn(
+        'flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-muted/70 px-3 py-2.5 text-left',
+        'transition active:bg-muted motion-safe:active:scale-[0.98]'
+      )}
+    >
+      <code className="min-w-0 flex-1 font-mono text-[0.78rem] text-foreground">{display}</code>
+      <span className="relative inline-flex shrink-0 items-center text-muted-foreground">
+        <OnboardingCopiedIcon isCopied={isCopied} className="h-3.5 w-3.5" strokeWidth={2} />
+      </span>
+    </button>
+  );
+}
+
+/* Icon-only share affordance pinned to the artifact pill's trailing edge —
+   "this thing → send it". Quiet secondary styling: the typeable pill stays
+   the primary instruction, share is just the accelerator. Label is carried
+   by aria-label/title only, so it adds no visual weight. */
+function OnboardingShareButton({ label, onShare }: { label: string; onShare: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onShare}
+      aria-label={label}
+      title={label}
+      className={cn(
+        'inline-flex w-10 shrink-0 items-center justify-center rounded-xl bg-muted/70',
+        'text-muted-foreground transition active:bg-muted motion-safe:active:scale-90'
+      )}
+    >
+      <Share2 className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+    </button>
   );
 }
 

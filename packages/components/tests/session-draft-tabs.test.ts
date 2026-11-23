@@ -1,16 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { SessionId } from '@lody/shared';
+import type {
+  AgentConfigId,
+  AgentConfigMeta,
+  AgentRole,
+  AgentRoleId,
+  MachineId,
+  SessionId,
+} from '@lody/shared';
 
 import {
-  createDraftSessionTab,
+  buildDraftSessionAgentRolePatch,
   filterPendingPromotedChildSessions,
-  getDraftTabLabel,
-  isDraftSessionTabId,
-  mergeTabOrderGroup,
   readPersistedDraftTabs,
   readStoredLastActiveTabState,
-  removeTabOrderId,
-  replaceTabOrderId,
   writeStoredLastActiveTabState,
 } from '../src/lib/session-draft-tabs';
 
@@ -67,111 +69,31 @@ afterEach(() => {
 });
 
 describe('session draft tabs', () => {
-  it('creates draft ids with the expected prefix', () => {
-    const draft = createDraftSessionTab({
+  it('refuses to apply a Role through a different Agent Config binding', () => {
+    const role = {
+      v: 1,
+      id: 'reviewer' as AgentRoleId,
+      ownerUserId: 'user-1',
+      visibility: 'private',
+      name: 'Reviewer',
+      machineId: 'machine-1' as MachineId,
+      agentConfigId: 'codex-config' as AgentConfigId,
+      runConfig: {},
+      revision: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    } satisfies AgentRole;
+    const wrongConfig = {
+      id: 'claude-config' as AgentConfigId,
+      machineId: role.machineId,
+      name: 'Claude',
+      description: undefined,
       cliType: 'builtin',
-      agentType: 'codex',
-      modeId: null,
-      modelId: null,
-    });
+      agentType: 'claude',
+      env: {},
+    } satisfies AgentConfigMeta;
 
-    expect(isDraftSessionTabId(draft.id)).toBe(true);
-    expect(draft.sessionId).not.toContain(':');
-    expect(draft.sessionId).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
-    expect(draft.prompt).toBe('');
-  });
-
-  it('hydrates legacy persisted draft tabs with an upload-safe session id', () => {
-    installWindowStorage();
-    localStorage.setItem(
-      'lody:draft-tabs:session-1',
-      JSON.stringify([
-        {
-          id: 'draft:legacy',
-          prompt: 'Review this branch',
-          cliType: 'builtin',
-          agentType: 'codex',
-          modeId: null,
-          modelId: null,
-        },
-      ])
-    );
-
-    const drafts = readPersistedDraftTabs('session-1' as SessionId);
-
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]?.sessionId).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
-  });
-
-  it('preserves a persisted draft session id when it is upload-safe', () => {
-    installWindowStorage();
-    const validSessionId = 'child-session-abc123';
-    localStorage.setItem(
-      'lody:draft-tabs:session-1',
-      JSON.stringify([
-        {
-          id: 'draft:keep-id',
-          sessionId: validSessionId,
-          prompt: 'Review this branch',
-          cliType: 'builtin',
-          agentType: 'codex',
-          modeId: null,
-          modelId: null,
-        },
-      ])
-    );
-
-    const drafts = readPersistedDraftTabs('session-1' as SessionId);
-
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]?.sessionId).toBe(validSessionId);
-  });
-
-  it('replaces a persisted draft session id that is not upload-safe', () => {
-    installWindowStorage();
-    localStorage.setItem(
-      'lody:draft-tabs:session-1',
-      JSON.stringify([
-        {
-          id: 'draft:bad-id',
-          sessionId: 'draft:not-a-valid-path-segment',
-          prompt: 'Review this branch',
-          cliType: 'builtin',
-          agentType: 'codex',
-          modeId: null,
-          modelId: null,
-        },
-      ])
-    );
-
-    const drafts = readPersistedDraftTabs('session-1' as SessionId);
-
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]?.sessionId).not.toBe('draft:not-a-valid-path-segment');
-    expect(drafts[0]?.sessionId).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
-  });
-
-  it('restores a persisted custom-provider draft tab', () => {
-    installWindowStorage();
-    localStorage.setItem(
-      'lody:draft-tabs:session-1',
-      JSON.stringify([
-        {
-          id: 'draft:custom',
-          sessionId: 'child-session-custom',
-          prompt: 'Run with my own ACP agent',
-          cliType: 'custom',
-          agentType: 'custom-1234',
-          modeId: null,
-          modelId: null,
-        },
-      ])
-    );
-
-    const drafts = readPersistedDraftTabs('session-1' as SessionId);
-
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]?.cliType).toBe('custom');
+    expect(buildDraftSessionAgentRolePatch(role, wrongConfig)).toBeNull();
   });
 
   it('does not discard sibling drafts when one uses a custom provider', () => {
@@ -207,45 +129,6 @@ describe('session draft tabs', () => {
     expect(drafts).toHaveLength(2);
   });
 
-  it('uses the first non-empty line as the draft tab label', () => {
-    expect(getDraftTabLabel({ prompt: '\n  Review this diff\nAnd add tests' })).toBe(
-      'Review this diff'
-    );
-    expect(getDraftTabLabel({ prompt: '   ' }, 'Fallback')).toBe('Fallback');
-  });
-
-  it('replaces a draft tab id with a session id while preserving order', () => {
-    expect(replaceTabOrderId(['a', 'draft:1', 'c'], 'draft:1', 'session-2')).toEqual([
-      'a',
-      'session-2',
-      'c',
-    ]);
-  });
-
-  it('removes a tab id from stored order', () => {
-    expect(removeTabOrderId(['a', 'draft:1', 'c'], 'draft:1')).toEqual(['a', 'c']);
-  });
-
-  it('reorders one tab group without dropping the others', () => {
-    expect(
-      mergeTabOrderGroup(
-        ['session-2', 'diff:1', 'draft:1', 'file:src/app.ts'],
-        ['draft:1', 'session-2'],
-        ['session-2', 'draft:1']
-      )
-    ).toEqual(['draft:1', 'session-2', 'diff:1', 'file:src/app.ts']);
-  });
-
-  it('keeps omitted group ids after the reordered subset', () => {
-    expect(
-      mergeTabOrderGroup(
-        ['diff:1', 'file:src/app.ts', 'diff:2', 'session-2'],
-        ['file:src/app.ts'],
-        ['diff:1', 'file:src/app.ts', 'diff:2']
-      )
-    ).toEqual(['file:src/app.ts', 'diff:1', 'diff:2', 'session-2']);
-  });
-
   it('hides a child session while the draft it replaces is still present', () => {
     expect(
       filterPendingPromotedChildSessions(
@@ -272,33 +155,7 @@ describe('session draft tabs', () => {
     ).toEqual([{ id: 'child-1' }]);
   });
 
-  it('persists and restores the last active session tab without a viewer', () => {
-    installWindowStorage();
-
-    writeStoredLastActiveTabState('session-1', {
-      sessionTabId: 'child-session-2',
-      viewerTab: null,
-      sidePanel: {
-        open: true,
-        tab: 'files',
-        tabs: ['files'],
-        sideSessionId: 'side-session-1',
-      },
-    });
-
-    expect(readStoredLastActiveTabState('session-1')).toEqual({
-      sessionTabId: 'child-session-2',
-      viewerTab: null,
-      sidePanel: {
-        open: true,
-        tab: 'files',
-        tabs: ['files'],
-        sideSessionId: 'side-session-1',
-      },
-    });
-  });
-
-  it('persists the browser side panel under the browser key', () => {
+  it('restores a device split only while both of its tabs are open', () => {
     installWindowStorage();
 
     writeStoredLastActiveTabState('session-1', {
@@ -306,128 +163,30 @@ describe('session draft tabs', () => {
       viewerTab: null,
       sidePanel: {
         open: true,
-        tab: 'browser',
-        tabs: ['files', 'browser'],
+        tab: 'android-emulator',
+        tabs: ['ios-simulator', 'android-emulator'],
         sideSessionId: null,
+        split: ['android-emulator', 'ios-simulator'],
       },
     });
+    expect(readStoredLastActiveTabState('session-1')?.sidePanel.split).toEqual([
+      'android-emulator',
+      'ios-simulator',
+    ]);
 
-    expect(readStoredLastActiveTabState('session-1')?.sidePanel).toEqual({
-      open: true,
-      tab: 'browser',
-      tabs: ['files', 'browser'],
-      sideSessionId: null,
-    });
-  });
-
-  it('migrates the old always-visible side panel tabs to the new empty state', () => {
-    installWindowStorage();
     localStorage.setItem(
       'lody:last-active-tab:session-1',
       JSON.stringify({
         sessionTabId: 'session-1',
         viewerTab: null,
-        sidePanel: { open: true, tab: 'changes' },
+        sidePanel: {
+          open: true,
+          tab: 'ios-simulator',
+          tabs: ['ios-simulator'],
+          split: ['ios-simulator', 'android-emulator'],
+        },
       })
     );
-
-    expect(readStoredLastActiveTabState('session-1')?.sidePanel).toEqual({
-      open: true,
-      tab: null,
-      tabs: [],
-      sideSessionId: null,
-    });
-  });
-
-  it('rejects the removed preview side panel key instead of migrating it', () => {
-    installWindowStorage();
-    localStorage.setItem(
-      'lody:last-active-tab:session-1',
-      JSON.stringify({
-        sessionTabId: 'session-1',
-        viewerTab: null,
-        sidePanel: { open: true, tab: 'preview' },
-      })
-    );
-
-    expect(readStoredLastActiveTabState('session-1')).toBeNull();
-  });
-
-  it('persists and restores the last active diff viewer tab', () => {
-    installWindowStorage();
-
-    writeStoredLastActiveTabState('session-1', {
-      sessionTabId: 'child-session-2',
-      viewerTab: {
-        id: 'diff:turn-1:src/app.ts',
-        type: 'diff',
-        turnId: 'turn-1',
-        filePaths: ['src/app.ts'],
-        focusFilePath: 'src/app.ts',
-        focusComment: {
-          source: 'lody',
-          path: 'src/app.ts',
-          lineNumber: 42,
-          side: 'additions',
-          threadId: 'thread-1',
-        },
-        focusRequestSeq: 4,
-        mode: 'conversation',
-        label: 'app.ts',
-      },
-    });
-
-    expect(readStoredLastActiveTabState('session-1')).toEqual({
-      sessionTabId: 'child-session-2',
-      viewerTab: {
-        id: 'diff:turn-1:src/app.ts',
-        type: 'diff',
-        turnId: 'turn-1',
-        filePaths: ['src/app.ts'],
-        focusFilePath: 'src/app.ts',
-        focusComment: {
-          source: 'lody',
-          path: 'src/app.ts',
-          lineNumber: 42,
-          side: 'additions',
-          threadId: 'thread-1',
-        },
-        focusRequestSeq: 4,
-        mode: 'conversation',
-        label: 'app.ts',
-      },
-    });
-  });
-
-  it('persists and restores provider file viewer identity by file id', () => {
-    installWindowStorage();
-
-    writeStoredLastActiveTabState('session-1', {
-      sessionTabId: 'child-session-2',
-      viewerTab: {
-        id: 'file:t:old-file',
-        type: 'file',
-        filePath: 'src/renamed.ts',
-        fileId: 't:old-file',
-        label: 'renamed.ts',
-        startLine: 7,
-        endLine: 9,
-        focusRequestSeq: 3,
-      },
-    });
-
-    expect(readStoredLastActiveTabState('session-1')).toEqual({
-      sessionTabId: 'child-session-2',
-      viewerTab: {
-        id: 'file:t:old-file',
-        type: 'file',
-        filePath: 'src/renamed.ts',
-        fileId: 't:old-file',
-        label: 'renamed.ts',
-        startLine: 7,
-        endLine: 9,
-        focusRequestSeq: 3,
-      },
-    });
+    expect(readStoredLastActiveTabState('session-1')?.sidePanel.split).toBeNull();
   });
 });

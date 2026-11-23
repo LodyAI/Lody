@@ -1,114 +1,142 @@
-import type { AcpCommandSummary } from '@lody/shared';
+export type SlashMatchFields = {
+  /** The canonical text committed to the composer, without the slash. */
+  token: string;
+  name?: string;
+  description?: string;
+};
 
-type TextMatchRank = {
-  score: number;
+export type SlashMatchRank = {
+  /** Exact, prefix, word prefix, substring, subsequence, description. */
+  tier: number;
+  /** Canonical token wins a tie against a display name. */
+  field: number;
+  position: number;
+  gaps: number;
+  extraLength: number;
 };
 
 const WORD_BOUNDARY_CHARS = new Set([' ', '\t', '\n', '\r', '-', '_', '/', ':', '.']);
 
-function normalizeSearchTerm(value: string): string {
-  return value.trim().replace(/^\/+/, '').toLowerCase();
+export function normalizeSlashSearchTerm(value: string): string {
+  return value
+    .trim()
+    .replace(/^[/、]+/, '')
+    .toLowerCase();
 }
 
-function normalizeCommandName(value: string): string {
-  return value.trim().replace(/^\/+/, '').toLowerCase();
+export function compareSlashMatchRanks(a: SlashMatchRank, b: SlashMatchRank): number {
+  return (
+    a.tier - b.tier ||
+    a.field - b.field ||
+    a.position - b.position ||
+    a.gaps - b.gaps ||
+    a.extraLength - b.extraLength
+  );
 }
 
 function findWordPrefixIndex(text: string, term: string): number {
-  for (let index = 0; index < text.length; index += 1) {
-    if (index > 0 && !WORD_BOUNDARY_CHARS.has(text[index - 1] ?? '')) continue;
-    if (text.startsWith(term, index)) return index;
+  for (let index = 1; index < text.length; index += 1) {
+    if (WORD_BOUNDARY_CHARS.has(text[index - 1] ?? '') && text.startsWith(term, index)) {
+      return index;
+    }
   }
-
   return -1;
 }
 
-function getSubsequenceMatchScore(text: string, term: string): number | null {
+function subsequenceMatch(text: string, term: string): { position: number; gaps: number } | null {
   let searchFrom = 0;
   let firstIndex = -1;
   let previousIndex = -1;
-  let lastIndex = -1;
-  let gapCount = 0;
-
+  let gaps = 0;
   for (const char of term) {
     const index = text.indexOf(char, searchFrom);
     if (index === -1) return null;
-
     if (firstIndex === -1) firstIndex = index;
-    if (previousIndex !== -1) gapCount += index - previousIndex - 1;
+    if (previousIndex !== -1) gaps += index - previousIndex - 1;
     previousIndex = index;
-    lastIndex = index;
     searchFrom = index + 1;
   }
-
-  const span = lastIndex - firstIndex + 1;
-  return 60 + firstIndex * 4 + gapCount * 3 + (span - term.length);
+  return { position: firstIndex, gaps };
 }
 
-function rankTextMatch(
-  text: string | undefined,
-  term: string,
-  baseScore: number
-): TextMatchRank | null {
-  if (!text) return null;
-
-  const normalized = text.trim().toLowerCase();
+function rankName(text: string | undefined, term: string, field: number): SlashMatchRank | null {
+  const normalized = text?.trim().replace(/^\/+/, '').toLowerCase();
   if (!normalized) return null;
-
-  if (normalized === term) return { score: baseScore };
-
+  const extraLength = normalized.length - term.length;
+  if (normalized === term) return { tier: 0, field, position: 0, gaps: 0, extraLength };
   if (normalized.startsWith(term)) {
-    return { score: baseScore + 10 + normalized.length - term.length };
+    return { tier: 1, field, position: 0, gaps: 0, extraLength };
   }
-
-  const wordPrefixIndex = findWordPrefixIndex(normalized, term);
-  if (wordPrefixIndex !== -1) {
-    return { score: baseScore + 30 + wordPrefixIndex + normalized.length - term.length };
+  const wordIndex = findWordPrefixIndex(normalized, term);
+  if (wordIndex !== -1) {
+    return { tier: 2, field, position: wordIndex, gaps: 0, extraLength };
   }
-
   const substringIndex = normalized.indexOf(term);
   if (substringIndex !== -1) {
-    return { score: baseScore + 45 + substringIndex * 2 + normalized.length - term.length };
+    return { tier: 3, field, position: substringIndex, gaps: 0, extraLength };
   }
-
-  const fuzzyScore = getSubsequenceMatchScore(normalized, term);
-  if (fuzzyScore !== null) {
-    return { score: baseScore + fuzzyScore + normalized.length - term.length };
-  }
-
-  return null;
+  const fuzzy = subsequenceMatch(normalized, term);
+  return fuzzy ? { tier: 4, field, ...fuzzy, extraLength } : null;
 }
 
-export function rankSlashCommand(command: AcpCommandSummary, searchTerm: string): number | null {
-  const term = normalizeSearchTerm(searchTerm);
-  if (!term) return 0;
-
-  const nameRank = rankTextMatch(normalizeCommandName(command.name), term, 0);
-  const rawNameRank = rankTextMatch(command.name, term, 5);
-  const descriptionRank = rankTextMatch(command.description, term, 120);
-  const bestRank = [nameRank, rawNameRank, descriptionRank]
-    .filter((rank): rank is TextMatchRank => rank !== null)
-    .toSorted((a, b) => a.score - b.score)[0];
-
-  return bestRank?.score ?? null;
-}
-
-export function filterAndRankSlashCommands(
-  commands: AcpCommandSummary[],
+/** One ranking contract for Agent Commands and Prompt Shortcuts. */
+export function rankSlashMatch(
+  fields: SlashMatchFields,
   searchTerm: string
-): AcpCommandSummary[] {
-  const term = normalizeSearchTerm(searchTerm);
-  if (!term) return commands;
+): SlashMatchRank | null {
+  const term = normalizeSlashSearchTerm(searchTerm);
+  if (!term) return { tier: 0, field: 0, position: 0, gaps: 0, extraLength: 0 };
+  const matches = [rankName(fields.token, term, 0), rankName(fields.name, term, 1)];
+  const description = fields.description?.trim().toLowerCase();
+  const descriptionIndex = description?.indexOf(term) ?? -1;
+  if (description && descriptionIndex !== -1) {
+    matches.push({
+      tier: 5,
+      field: 2,
+      position: descriptionIndex,
+      gaps: 0,
+      extraLength: description.length - term.length,
+    });
+  }
+  return (
+    matches
+      .filter((match): match is SlashMatchRank => match !== null)
+      .sort(compareSlashMatchRanks)[0] ?? null
+  );
+}
 
-  return commands
-    .map((command, index) => ({
-      command,
-      index,
-      rank: rankSlashCommand(command, term),
-    }))
-    .filter((entry): entry is { command: AcpCommandSummary; index: number; rank: number } => {
-      return entry.rank !== null;
-    })
-    .toSorted((a, b) => a.rank - b.rank || a.index - b.index)
-    .map((entry) => entry.command);
+export function rankSlashItems<T>(
+  items: readonly T[],
+  searchTerm: string,
+  fields: (item: T) => SlashMatchFields,
+  limit = 50
+): Array<{ item: T; rank: SlashMatchRank }> {
+  const term = normalizeSlashSearchTerm(searchTerm);
+  return items
+    .map((item, index) => ({ item, index, rank: rankSlashMatch(fields(item), term) }))
+    .filter(
+      (entry): entry is { item: T; index: number; rank: SlashMatchRank } => entry.rank !== null
+    )
+    .sort((a, b) => (term ? compareSlashMatchRanks(a.rank, b.rank) : 0) || a.index - b.index)
+    .slice(0, limit)
+    .map(({ item, rank }) => ({ item, rank }));
+}
+
+export function sortRankedSlashItems<
+  T extends {
+    rank: SlashMatchRank;
+    disabled?: boolean;
+    token: string;
+    id: string;
+  },
+>(items: readonly T[], limit = 50): T[] {
+  return [...items]
+    .sort(
+      (a, b) =>
+        Number(Boolean(a.disabled)) - Number(Boolean(b.disabled)) ||
+        compareSlashMatchRanks(a.rank, b.rank) ||
+        a.token.localeCompare(b.token) ||
+        a.id.localeCompare(b.id)
+    )
+    .slice(0, limit);
 }

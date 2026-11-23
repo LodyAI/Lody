@@ -1,24 +1,18 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createElement } from 'react';
+import { describe, expect, it } from 'vitest';
+import { resolveTheme } from '@pierre/diffs';
+import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { ThemeProvider, useActiveVSCodeDiffThemeName } from '../src/theme-provider';
 import {
   createLodyVSCodeShikiThemeName,
+  getBundledVSCodeThemeById,
   getRegisteredLodyVSCodeThemeForDiffs,
   registerLodyVSCodeThemeForDiffs,
   type LodyResolvedVSCodeTheme,
 } from '../src/lib/vscode-theme';
-
-type RegisterCustomTheme = (name: string, loader: () => Promise<unknown>) => void;
-
-const mocks = vi.hoisted(() => ({
-  registerCustomTheme: vi.fn<RegisterCustomTheme>(),
-}));
-
-vi.mock('@pierre/diffs', () => mocks);
 
 const createTheme = (id: string): LodyResolvedVSCodeTheme => ({
   schemaVersion: 1,
@@ -46,13 +40,7 @@ function DiffThemeProbe() {
   });
 }
 
-const waitForMacrotask = () => new Promise((resolve) => setTimeout(resolve, 0));
-
 describe('VSCode diff theme registration', () => {
-  beforeEach(() => {
-    mocks.registerCustomTheme.mockClear();
-  });
-
   it('does not report a lazy custom theme as registered until @pierre/diffs has the loader', async () => {
     const theme = createTheme('registration-race');
     const themeName = createLodyVSCodeShikiThemeName(theme);
@@ -62,21 +50,15 @@ describe('VSCode diff theme registration', () => {
 
     expect(firstRegistration).toBe(secondRegistration);
     expect(getRegisteredLodyVSCodeThemeForDiffs(theme)).toBeUndefined();
-    expect(mocks.registerCustomTheme).not.toHaveBeenCalled();
 
     await expect(firstRegistration).resolves.toBe(themeName);
     await expect(secondRegistration).resolves.toBe(themeName);
 
     expect(getRegisteredLodyVSCodeThemeForDiffs(theme)).toBe(themeName);
-    expect(mocks.registerCustomTheme).toHaveBeenCalledTimes(1);
-
-    const registrationCall = mocks.registerCustomTheme.mock.calls[0];
-    expect(registrationCall?.[0]).toBe(themeName);
-    const loader = registrationCall?.[1];
-    if (!loader) {
-      throw new Error('Expected custom theme loader to be registered.');
-    }
-    await expect(loader()).resolves.toMatchObject({ name: themeName });
+    expect((await resolveTheme(themeName, 'highlights')).zed?.style['editor.background']).toBe(
+      '#101010'
+    );
+    expect((await resolveTheme(themeName, 'shiki-js')).textmate?.bg).toBe('#101010');
   });
 
   it('keeps the React hook on fallback until the lazy custom theme registration finishes', async () => {
@@ -101,12 +83,11 @@ describe('VSCode diff theme registration', () => {
       const probe = container.querySelector<HTMLElement>('#diff-theme-probe');
       expect(probe?.dataset.diffThemeName).toBe('');
 
-      for (let attempts = 0; attempts < 10; attempts += 1) {
-        await waitForMacrotask();
-        if (probe?.dataset.diffThemeName === 'lody-vscode-vesper') {
-          break;
-        }
-      }
+      await act(async () => {
+        const theme = await getBundledVSCodeThemeById('vesper');
+        if (!theme) throw new Error('Vesper fixture is missing');
+        await registerLodyVSCodeThemeForDiffs(theme);
+      });
 
       expect(probe?.dataset.diffThemeName).toBe('lody-vscode-vesper');
     } finally {

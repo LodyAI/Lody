@@ -8,10 +8,12 @@ import {
   type PrStatus,
   type SessionId,
   type SessionMeta,
+  type SessionPullRequestLinkCheck,
   type SessionPullRequestMeta,
   type SessionPullRequestStateMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import type { PrMetaWritePlan } from './pr-poll-writeback';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { listAliveSessionMetas } from '@/lib/command-runtime';
 import type { Logger } from '@/utils/logger';
@@ -22,6 +24,7 @@ import {
 } from './github-credential-resolver';
 import type { AliveSessionMeta } from './pr-poll-targets';
 import type { CloudGithubTokenPort, CloudPrAssociationPort } from '@lody/platform';
+import type { PrObservation } from './github-graphql-client';
 
 /**
  * Per-workspace adapter between the poller scheduler and a live workspace
@@ -40,11 +43,29 @@ export type AssociatePullRequestArgs = {
 };
 
 export type PrPollMetaPatch = {
+  lifecycle?: PrMetaWritePlan['lifecycle'];
+  /** Per-URL `prLinkCheck:*` results (unreadable explicit links); own keys, never link records. */
+  linkChecks?: Array<{ field: `prLinkCheck:${string}`; value: SessionPullRequestLinkCheck }>;
   pullRequests?: SessionPullRequestMeta[];
   pullRequestState?: Record<string, SessionPullRequestStateMeta>;
 };
 
 export interface PrPollerWorkspaceHandle {
+  workflowObservationOwners?(): ReadonlySet<SessionId>;
+  recordWorkflowObservations?(
+    meta: SessionMeta,
+    repository: string,
+    headSha: string,
+    runs: readonly import('./workflow-runs').WorkflowRunObservation[],
+    gap: boolean,
+    observedAt: number
+  ): Promise<void>;
+  recordObservations?(
+    meta: SessionMeta,
+    repoFullName: string,
+    observations: readonly PrObservation[],
+    observedAt: number
+  ): Promise<void>;
   readonly workspaceId: string;
   /** Local machine identity — the pre-write ownership revalidation predicate. */
   readonly machineId: MachineId;
@@ -57,10 +78,13 @@ export interface PrPollerWorkspaceHandle {
   subscribePresence(listener: (states: LodyPresenceStateMap) => void): (() => void) | null;
   getPresenceStates(): LodyPresenceStateMap | null;
   waitForInitialSync(timeoutMs?: number): Promise<boolean>;
-  resolveCredential(repoFullName: string): Promise<ResolvedGitHubCredential | null>;
+  resolveCredential(
+    repoFullName: string,
+    nativeCredentials?: boolean
+  ): Promise<ResolvedGitHubCredential | null>;
   invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void;
-  /** `github:associatePullRequestForCli` — the poller's only backend write (plan §4). */
-  associatePullRequest(args: AssociatePullRequestArgs): Promise<boolean>;
+  /** Optional hosted webhook linkage; failure does not block summary publication. */
+  associatePullRequest: ((args: AssociatePullRequestArgs) => Promise<boolean>) | null;
   /** Release owned resources (token manager). Idempotent. */
   dispose(): Promise<void>;
 }
@@ -68,12 +92,15 @@ export interface PrPollerWorkspaceHandle {
 const ASSOCIATE_TIMEOUT_MS = 15_000;
 
 export function createLodyPrPollerWorkspace(options: {
+  recordObservations?: PrPollerWorkspaceHandle['recordObservations'];
+  workflowObservationOwners?: PrPollerWorkspaceHandle['workflowObservationOwners'];
+  recordWorkflowObservations?: PrPollerWorkspaceHandle['recordWorkflowObservations'];
   documentManager: LoroDocumentManager;
   workspaceId: string;
   userId: string;
   machineId: MachineId;
   githubTokens: CloudGithubTokenPort | null;
-  prAssociation: CloudPrAssociationPort;
+  prAssociation: CloudPrAssociationPort | null;
   logger: Logger;
 }): PrPollerWorkspaceHandle {
   const { documentManager, workspaceId, userId, machineId, githubTokens, prAssociation, logger } =
@@ -92,6 +119,9 @@ export function createLodyPrPollerWorkspace(options: {
   return {
     workspaceId,
     machineId,
+    recordObservations: options.recordObservations,
+    workflowObservationOwners: options.workflowObservationOwners,
+    recordWorkflowObservations: options.recordWorkflowObservations,
 
     async listAliveSessionMetas(): Promise<AliveSessionMeta[]> {
       const rows = await listAliveSessionMetas(documentManager);
@@ -112,7 +142,12 @@ export function createLodyPrPollerWorkspace(options: {
     },
 
     async writeOwnerMeta(ownerSessionId: SessionId, patch: PrPollMetaPatch): Promise<void> {
-      await documentManager.repo.upsertDocMeta(getSessionRoomId(ownerSessionId), patch);
+      const { lifecycle = [], linkChecks = [], ...legacyPatch } = patch;
+      await documentManager.repo.upsertDocMeta(getSessionRoomId(ownerSessionId), {
+        ...legacyPatch,
+        ...Object.fromEntries(lifecycle.map((write) => [write.field, write.value])),
+        ...Object.fromEntries(linkChecks.map((write) => [write.field, write.value])),
+      });
     },
 
     watchSessionMetadata(listener: (sessionId: SessionId) => void): (() => void) | null {
@@ -147,47 +182,47 @@ export function createLodyPrPollerWorkspace(options: {
       );
     },
 
-    resolveCredential(repoFullName: string) {
-      return credentialResolver.resolve(repoFullName);
+    resolveCredential(repoFullName: string, nativeCredentials?: boolean) {
+      return credentialResolver.resolve(repoFullName, nativeCredentials);
     },
 
     invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void {
       credentialResolver.invalidate(repoFullName, credential);
     },
 
-    async associatePullRequest(args: AssociatePullRequestArgs): Promise<boolean> {
-      // Reference caller: turn-post-processing-service.ts detectAndAssociatePR.
-      // Idempotent — an existing link row keeps its status.
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), ASSOCIATE_TIMEOUT_MS);
-      try {
-        const associated = await Promise.race([
-          prAssociation.associatePullRequest({
-            ...args,
-            workspaceId: workspaceId as WorkspaceId,
-          }),
-          new Promise<never>((_, reject) => {
-            controller.signal.addEventListener('abort', () => reject(new Error('timed out')), {
-              once: true,
-            });
-          }),
-        ]);
-        if (!associated) {
-          logger.debug(
-            `[pr-poller] PR association was rejected for ${args.prUrl}`
-          );
-          return false;
+    associatePullRequest: prAssociation
+      ? async (args: AssociatePullRequestArgs): Promise<boolean> => {
+          // Reference caller: turn-post-processing-service.ts detectAndAssociatePR.
+          // Idempotent — an existing link row keeps its status.
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), ASSOCIATE_TIMEOUT_MS);
+          try {
+            const associated = await Promise.race([
+              prAssociation.associatePullRequest({
+                ...args,
+                workspaceId: workspaceId as WorkspaceId,
+              }),
+              new Promise<never>((_, reject) => {
+                controller.signal.addEventListener('abort', () => reject(new Error('timed out')), {
+                  once: true,
+                });
+              }),
+            ]);
+            if (!associated) {
+              logger.trace(`[pr-poller] PR association was rejected or paused for ${args.prUrl}`);
+              return false;
+            }
+            return true;
+          } catch (error) {
+            logger.debug(
+              `[pr-poller] PR association failed for ${args.prUrl}: ${formatErrorMessage(error)}`
+            );
+            return false;
+          } finally {
+            clearTimeout(timeout);
+          }
         }
-        return true;
-      } catch (error) {
-        logger.debug(
-          `[pr-poller] PR association failed for ${args.prUrl}: ${formatErrorMessage(error)}`
-        );
-        return false;
-      } finally {
-        clearTimeout(timeout);
-      }
-    },
+      : null,
 
     async dispose(): Promise<void> {
       if (disposed) {

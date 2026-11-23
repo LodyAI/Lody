@@ -1,0 +1,117 @@
+# Session initialization deadline
+
+Status: draft
+Translation: current
+
+[中文](session-initialization-deadline.zh.md)
+
+A Session turn begins in `initializing` and stays there while Lody does the work
+that must happen before the agent can be prompted: resolving the requester's
+identity, verifying machine access, preparing a worktree, downloading a managed
+runtime, and starting or resuming the ACP agent. Only once that work completes
+does the turn become `running`.
+
+Every one of those steps depends on something Lody does not control — a cloud
+query, a remote repository, a download, a child process. Lody therefore
+guarantees that **initialization always reaches a terminal state**. A turn whose
+initialization stops making progress is failed with a visible error; it never
+waits indefinitely.
+
+## What counts as progress
+
+The deadline measures silence, not duration. It runs from the last time the
+session's published status changed, so a step that reports progress keeps
+resetting it. A managed-runtime download that publishes a rising percentage may
+legitimately take as long as the transfer needs; the same download stuck at one
+percentage is a stall.
+
+Steps that publish no intermediate progress — preparing a clone, spawning the
+agent process — are measured from when they began, because for those the absence
+of any published change is the only signal available.
+
+Each initialization step carries its own budget, because their honest worst
+cases differ by orders of magnitude. Pre-agent bookkeeping is the tightest: its
+only intentionally slow dependency, the requester profile query, already carries
+its own 60-second deadline, so anything meaningfully longer is a wedge rather
+than a slow answer. Cloning a repository is the most generous, because its input
+size and the user's link speed are both unbounded and neither is Lody's to
+assume.
+
+## Git identity preflight
+
+Before applying commit identity, publish `initializing` with detail `Resolving Git identity`.
+The complete identity-policy lookup has a 3-second deadline per attempt, with one
+immediate retry on timeout or rejection. Two failures use the existing conservative
+`personalIdentityEnabled: false` result and permit agent startup. This is a read-only
+policy retry, not a retry of GitHub writes or an agent/daemon restart. The lower-level
+2.5-second fetch abort remains in place but does not replace this operation deadline.
+Cancellation ends the waiter without retry or fallback; cancelled startup cannot apply
+late identity results or launch an agent after that preflight. Log elapsed time and
+resolved, fallback, timeout/rejection, or cancellation outcomes. Once the lookup finishes,
+restore the appropriate agent-start stage and its watchdog budget.
+
+## What the user sees
+
+A stalled turn fails the way any other known pre-prompt failure does: the chat
+records `session_init_failed` with a message naming the step that went silent
+and how long it was given, and the session returns to `idle`. It is not silently
+returned to `idle` with no explanation, and it is not reported as cancelled — the
+user did not cancel it. Retrying is sending the message again.
+
+Failing the turn also releases what initialization was holding: the session's
+active presence, its turn registration, and the pending agent process. Until it
+is released, active presence keeps the session counted as busy, which both
+suppresses idle collection and makes the machine publish a Session that looks
+like it is working when nothing is.
+
+Release includes abandoning the initialization work itself, and that is what
+makes retrying meaningful. Lody coalesces concurrent starts for one Session onto
+a single in-flight attempt, so an attempt nobody is waiting for any more must be
+detached rather than left to be reused — otherwise the retry rejoins the same
+wedged attempt and stalls identically, and the failure is not recoverable at all.
+A retry therefore always begins genuinely new initialization work.
+
+Detaching cancels the Git identity waiter and fences subsequent startup steps.
+Other underlying work may still run when it cannot be interrupted. It is watched instead, and any Session it eventually
+produces is terminated rather than left behind as an orphan agent process.
+That termination is silent: it never counts as the end of the Session's work, so
+it cannot unregister or end a retry that has since started the same Session.
+Teardown never blocks indefinitely on an attempt that may never finish.
+
+The deadline is a backstop for a dependency that never answers. It is not a
+performance budget, and a step that trips it is a defect somewhere else.
+
+## Temporary system failures
+
+A start can also fail outright because the machine is briefly out of a system
+resource: it cannot fork another process, open another file, or allocate memory.
+Sending the same message moments later usually succeeds, so Lody makes that
+attempt itself. Lody starts again at most twice, with a short randomized wait before
+each attempt and fewer retries when many Sessions fail at once, and keeps the Session visibly initializing meanwhile. This happens only
+before the agent has produced anything for the turn. Every attempt begins
+genuinely new initialization work. A worktree setup script never runs twice for
+one start: a start that failed while its script ran is not repeated, and a later
+attempt does not repeat a script that already finished. A start whose failed attempt could not release its agent or credentials is not
+repeated either. Stop ends the waiting
+and makes no further attempt. Any other failure, including authentication and
+agent resume errors, still fails the turn on its first occurrence. A start that
+fails on its last attempt reports that failure the same way as any other.
+
+## Evidence
+
+The watchdog and its per-stage budgets live in
+`apps/cli/src/lib/loro/session-active-presence.ts`; the turn-side enforcement is
+`awaitInitializationStall` and `finalizeStalledInitializationEffect` in
+`apps/cli/src/session/session-execution-service.ts`. Detaching and reaping the
+abandoned attempt is `SessionManager.abandonPendingSessionCreate`, which
+`requestSessionTerminate` also uses once its own wait expires.
+The requester-profile deadline it is calibrated against is
+`USER_PROFILE_TIMEOUT_MS` in `apps/cli/src/session/session-user-resolver.ts`.
+Temporary-failure retry is `startWithTransientRetry` in the execution service, with
+its classification in `apps/cli/src/session/session-start-stage.ts`.
+
+This draft records the requested guarantee. The budgets are calibrated from one
+machine's daemon logs (923 initializations over one week) and from the single
+production stall that motivated it; they have not been validated against a
+managed-runtime download or a large clone on a slow link. Covering tests are in
+`apps/cli/tests/session-execution-service.test.ts`.

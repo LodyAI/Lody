@@ -46,12 +46,12 @@ describe('ChatComposer auto resize', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
   it('grows through 11 rows and becomes internally scrollable after that', async () => {
-    const promptRef = createRef<HTMLTextAreaElement>();
-    const skipNextViewportResizeAutoScrollRef = { current: false };
+    const promptRef = createRef<HTMLElement>();
     const renderComposer = (promptValue: string) => (
       <ChatComposer
         variant="session"
@@ -62,27 +62,26 @@ describe('ChatComposer auto resize', () => {
         primaryAction={null}
         autoResize
         maxRows={11}
-        skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
       />
     );
 
     await act(async () => root.render(renderComposer('one line')));
 
     const textarea = promptRef.current;
-    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-    expect(skipNextViewportResizeAutoScrollRef.current).toBe(false);
+    expect(textarea?.hasAttribute('data-composer-editor')).toBe(true);
     textarea!.style.lineHeight = '24px';
+    // The editor's paragraph lays out at its full content height.
     let scrollHeight = 240;
-    Object.defineProperty(textarea, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeight,
-    });
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.parentElement?.hasAttribute('data-composer-editor') ? scrollHeight : 0;
+      }
+    );
 
     await act(async () => root.render(renderComposer('ten\n'.repeat(10))));
 
     expect(textarea?.style.height).toBe('240px');
     expect(textarea?.style.overflowY).toBe('hidden');
-    expect(skipNextViewportResizeAutoScrollRef.current).toBe(true);
 
     scrollHeight = 288;
     await act(async () => root.render(renderComposer('twelve\n'.repeat(12))));
@@ -94,5 +93,69 @@ describe('ChatComposer auto resize', () => {
       Number.parseFloat(computed.paddingBottom || '0');
     expect(textarea?.style.height).toBe(`${elevenRowsHeight}px`);
     expect(textarea?.style.overflowY).toBe('auto');
+
+    scrollHeight = 72;
+    await act(async () => root.render(renderComposer('three\nlines\nhere')));
+    expect(textarea?.style.height).toBe('72px');
+    expect(textarea?.style.overflowY).toBe('hidden');
+    // Measuring leaves no clone behind.
+    expect(document.querySelectorAll('textarea')).toHaveLength(0);
+
+    // Cleared (e.g. after sending): back to the two-row minimum, whatever the
+    // wrapped placeholder would report as scrollHeight.
+    scrollHeight = 480;
+    await act(async () => root.render(renderComposer('')));
+    const twoRowsHeight =
+      24 * 2 +
+      Number.parseFloat(computed.paddingTop || '0') +
+      Number.parseFloat(computed.paddingBottom || '0');
+    expect(textarea?.style.height).toBe(`${twoRowsHeight}px`);
+    expect(textarea?.style.overflowY).toBe('hidden');
+  });
+
+  it('grows an empty composer to hold a wrapped prompt suggestion, within maxRows', async () => {
+    const promptRef = createRef<HTMLElement>();
+    let suggestionHeight = 72;
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.hasAttribute('data-prompt-suggestion') ? suggestionHeight : 0;
+      }
+    );
+    const renderComposer = (promptSuggestion: string | null, maxRows = 11) => (
+      <ChatComposer
+        variant="session"
+        promptRef={promptRef}
+        promptValue=""
+        onPromptChange={() => undefined}
+        promptSuggestion={promptSuggestion}
+        promptRows={2}
+        primaryAction={null}
+        autoResize
+        maxRows={maxRows}
+      />
+    );
+
+    await act(async () => root.render(renderComposer(null)));
+    const textarea = promptRef.current!;
+    textarea.style.lineHeight = '24px';
+    await act(async () => root.render(renderComposer(null, 10)));
+    const computed = getComputedStyle(textarea);
+    const padding =
+      Number.parseFloat(computed.paddingTop || '0') +
+      Number.parseFloat(computed.paddingBottom || '0');
+    expect(textarea.style.height).toBe(`${24 * 2 + padding}px`);
+
+    await act(async () => root.render(renderComposer('a suggestion wrapped to three lines', 10)));
+    expect(textarea.style.height).toBe(`${72 + padding}px`);
+    expect(textarea.style.overflowY).toBe('hidden');
+
+    // Never past the composer's own maximum.
+    suggestionHeight = 480;
+    await act(async () => root.render(renderComposer('a much longer suggestion', 10)));
+    expect(textarea.style.height).toBe(`${24 * 10 + padding}px`);
+
+    // Hiding the suggestion returns the empty box to its row minimum.
+    await act(async () => root.render(renderComposer(null, 10)));
+    expect(textarea.style.height).toBe(`${24 * 2 + padding}px`);
   });
 });

@@ -22,11 +22,16 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime: runtimeA,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(runtimeA),
         organizationsReady: false,
         expectedWorkspaceId: null,
       })
-    ).toEqual({ status: 'switching', targetSlug: 'workspace-b' });
+    ).toEqual({
+      status: 'switching',
+      targetSlug: 'workspace-b',
+      blocker: 'runtime_other_workspace',
+    });
   });
 
   it('rejects metadata owned by an earlier runtime with the same target slug', () => {
@@ -37,11 +42,12 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime: currentRuntime,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(oldRuntime),
         organizationsReady: true,
         expectedWorkspaceId: 'workspace-b-id',
       })
-    ).toEqual({ status: 'switching', targetSlug: 'workspace-b' });
+    ).toEqual({ status: 'switching', targetSlug: 'workspace-b', blocker: 'doc_meta_scan_pending' });
   });
 
   it('rejects a matching snapshot until its bootstrap is ready', () => {
@@ -51,11 +57,12 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(runtime, false),
         organizationsReady: true,
         expectedWorkspaceId: 'workspace-b-id',
       })
-    ).toEqual({ status: 'switching', targetSlug: 'workspace-b' });
+    ).toEqual({ status: 'switching', targetSlug: 'workspace-b', blocker: 'doc_meta_scan_pending' });
   });
 
   it('allows an offline cached runtime without waiting for organizations', () => {
@@ -65,6 +72,7 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(runtime),
         organizationsReady: false,
         expectedWorkspaceId: null,
@@ -84,10 +92,11 @@ describe('resolveWorkspaceDataScope', () => {
       resolveWorkspaceDataScope({
         targetSlug: 'workspace-b',
         runtime,
+        runtimeInitFailure: null,
         docMetaScope: createDocMetaScope(runtime),
         organizationsReady: true,
         expectedWorkspaceId: 'server-workspace-b-id',
       })
-    ).toEqual({ status: 'switching', targetSlug: 'workspace-b' });
+    ).toEqual({ status: 'switching', targetSlug: 'workspace-b', blocker: 'workspace_id_mismatch' });
   });
 });

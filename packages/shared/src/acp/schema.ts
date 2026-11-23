@@ -10,6 +10,16 @@ import type {
   ToolCallUpdate,
 } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
+import { isLodySubagentEvent, type LodySubagentEvent } from 'acp-extension-core';
+
+export const MessagePhaseSchema = z.enum(['commentary', 'final_answer']);
+
+export function parseLodyMessagePhase(meta: Record<string, unknown> | null | undefined) {
+  const canonical = z.object({ messagePhase: MessagePhaseSchema }).safeParse(meta?.lody);
+  if (canonical.success) return canonical.data.messagePhase;
+  const legacy = z.object({ phase: MessagePhaseSchema }).safeParse(meta?.codex);
+  return legacy.success ? legacy.data.phase : undefined;
+}
 
 const zMeta = z.record(z.string(), z.unknown()).nullish();
 
@@ -94,13 +104,15 @@ const zToolCallContent = z.union([
   withMeta({ type: z.literal('terminal'), terminalId: z.string() }),
 ]);
 
+// Omitted lists are not clears, including replayed initial calls. Preserve their
+// presence just as zToolCallUpdate and normalized child events do.
 export const zToolCall = withMeta({
   toolCallId: z.string(),
   title: z.string(),
   kind: zToolKind.optional(),
   status: zToolCallStatus.optional(),
-  content: z.array(zToolCallContent).optional().default([]),
-  locations: z.array(zToolCallLocation).optional().default([]),
+  content: z.array(zToolCallContent).optional(),
+  locations: z.array(zToolCallLocation).optional(),
   rawInput: z.unknown().optional(),
   rawOutput: z.unknown().optional(),
 });
@@ -154,6 +166,10 @@ const zContentChunk = withMeta({
 });
 
 export const zSessionUpdate = z.discriminatedUnion('sessionUpdate', [
+  withMeta({
+    sessionUpdate: z.literal('subagent_event'),
+    event: z.custom<LodySubagentEvent>(isLodySubagentEvent),
+  }),
   zContentChunk.extend({ sessionUpdate: z.literal('user_message_chunk') }),
   zContentChunk.extend({ sessionUpdate: z.literal('agent_message_chunk') }),
   zContentChunk.extend({ sessionUpdate: z.literal('agent_thought_chunk') }),
@@ -183,8 +199,16 @@ export const zSessionNotification = withMeta({
   update: zSessionUpdate,
 });
 
-export type AcpSessionNotification = SessionNotification;
-export type AcpSessionUpdate = SessionUpdate;
+export type AcpSessionUpdate =
+  | SessionUpdate
+  | {
+      sessionUpdate: 'subagent_event';
+      event: LodySubagentEvent;
+      _meta?: Record<string, unknown> | null;
+    };
+export type AcpSessionNotification = Omit<SessionNotification, 'update'> & {
+  update: AcpSessionUpdate;
+};
 export type AcpToolCall = ToolCall;
 export type AcpToolCallUpdate = ToolCallUpdate;
 export type AcpContentBlock = ContentBlock;

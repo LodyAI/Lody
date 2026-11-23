@@ -4,6 +4,7 @@ import { getLocalWorkspaceCatalogPath } from '@lody/shared/node/local-workspace-
 import { getInstallationProfile } from '@lody/shared/node/installation-profile'
 import type { ElectronLocalPlatformSnapshot } from '@lody/shared/electron-ipc'
 import { parseLocalPlatformSnapshot } from './local-platform-snapshot'
+import { resolveDesktopProfile } from './desktop-channel'
 
 /**
  * Build-time platform selection for the desktop shell
@@ -13,7 +14,10 @@ import { parseLocalPlatformSnapshot } from './local-platform-snapshot'
 export const mainPlatformKind: PlatformKind = resolvePlatformKind(
   import.meta.env.VITE_LODY_PLATFORM
 )
-export const desktopInstallationProfile = getInstallationProfile(mainPlatformKind)
+export const desktopInstallationProfile = resolveDesktopProfile(
+  getInstallationProfile(mainPlatformKind),
+  import.meta.env.VITE_LODY_RELEASE_CHANNEL
+)
 
 export function isLocalPlatform(): boolean {
   return mainPlatformKind === 'local'

@@ -1,0 +1,258 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { mkdtemp, writeFile, rm, open, rename } from 'node:fs/promises'
+import { tmpdir, homedir } from 'node:os'
+import { join, relative } from 'node:path'
+import { LocalFileResources } from './local-file-resource.ts'
+import {
+  LocalFilePreviewRequestSchema,
+  previewLocalFile,
+  readFileMachineId
+} from './local-file-preview.ts'
+
+void test('desktop preview reads disk identity and files with no daemon dependency', async (t) => {
+  const file = await fixture(t, 'notes.md', 'offline content')
+  const credentials = `${file.absolutePath}.credentials.json`
+  await writeFile(credentials, JSON.stringify({ machine: { machineId: 'this-desktop' } }))
+  const machineId = await readFileMachineId(credentials)
+  const resources = new LocalFileResources()
+  const request = LocalFilePreviewRequestSchema.parse({ machineId, path: file.absolutePath })
+  const opened = await previewLocalFile(resources, 1, request, machineId)
+  assert.equal(opened.status, 'ok')
+  assert.equal(opened.content.text, 'offline content')
+  assert.equal(opened.external, true)
+  const homePath = '~/' + relative(homedir(), file.absolutePath)
+  assert.equal(
+    (await previewLocalFile(resources, 1, { ...request, path: homePath }, machineId)).content.text,
+    'offline content'
+  )
+  assert.equal(
+    await previewLocalFile(resources, 1, { ...request, machineId: 'remote' }, machineId),
+    null
+  )
+  assert.equal(await previewLocalFile(resources, 1, request, null), null)
+  assert.equal(await readFileMachineId(`${credentials}.missing`), null)
+})
+
+void test('desktop relative paths require their supplied root and report filesystem failures', async (t) => {
+  const file = await fixture(t, 'notes.md', 'original workspace')
+  const resources = new LocalFileResources()
+  const request = { machineId: 'local', path: 'notes.md' }
+  assert.equal(
+    (await previewLocalFile(resources, 1, request, 'local')).code,
+    'workspace_root_unavailable'
+  )
+  const workspaceRoot = join(file.absolutePath, '..')
+  const opened = await previewLocalFile(resources, 1, { ...request, workspaceRoot }, 'local')
+  assert.equal(opened.content.text, 'original workspace')
+  assert.equal(opened.path, 'notes.md')
+  assert.equal(opened.external, false)
+  assert.equal(
+    (await previewLocalFile(resources, 1, { ...request, path: workspaceRoot }, 'local')).code,
+    'not_a_file'
+  )
+  assert.equal(
+    (
+      await previewLocalFile(
+        resources,
+        1,
+        { ...request, path: `${file.absolutePath}.missing` },
+        'local'
+      )
+    ).code,
+    'file_not_found'
+  )
+  assert.equal(
+    (await previewLocalFile(resources, 1, { ...request, path: 'bad\0path' }, 'local')).code,
+    'invalid_path'
+  )
+  assert.equal(
+    (await previewLocalFile(resources, 1, { ...request, workspaceRoot: 'relative' }, 'local')).code,
+    'invalid_path'
+  )
+  assert.equal(
+    await previewLocalFile(
+      resources,
+      1,
+      { ...request, machineId: 'remote', workspaceRoot: 'C:\\remote' },
+      'local'
+    ),
+    null
+  )
+})
+
+async function fixture(t, name, content) {
+  const dir = await mkdtemp(join(tmpdir(), 'lody-resource-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const path = join(dir, name)
+  await writeFile(path, content)
+  return { status: 'local-file', path: name, absolutePath: path, external: false }
+}
+
+void test('small UTF-8 documents retain full content and a save-compatible digest', async (t) => {
+  const file = await fixture(t, 'small.txt', '\ufeff中文\r\n')
+  const result = await new LocalFileResources().preview(1, file)
+  assert.equal(result.status, 'ok')
+  assert.equal(result.content.text, '\ufeff中文\r\n')
+  assert.deepEqual(result.format, { bom: true, eol: 'crlf' })
+  assert.match(result.digest, /^sha256:[0-9a-f]{64}$/)
+})
+
+void test('a multi-gigabyte sparse file opens as a resource and only requested bytes are returned', async (t) => {
+  const file = await fixture(t, 'large.txt', 'header\n'.repeat(1200))
+  const handle = await open(file.absolutePath, 'r+')
+  await handle.truncate(3 * 1024 ** 3)
+  await handle.write(Buffer.from('tail'), 0, 4, 3 * 1024 ** 3 - 4)
+  await handle.close()
+  const resources = new LocalFileResources()
+  const result = await resources.preview(1, file)
+  assert.equal(result.status, 'resource')
+  assert.equal(result.kind, 'text')
+  assert.equal(result.sizeBytes, 3 * 1024 ** 3)
+  assert.equal((await resources.respond(new Request(result.url))).status, 416)
+  const response = await resources.respond(
+    new Request(result.url, { headers: { Range: `bytes=${result.sizeBytes - 4}-` } })
+  )
+  assert.equal(response.status, 206)
+  assert.equal(await response.text(), 'tail')
+  const excessive = await resources.respond(
+    new Request(result.url, { headers: { Range: 'bytes=0-1000000' } })
+  )
+  assert.equal(excessive.status, 416)
+})
+
+void test('binary resources stream raw bytes, support ranges, and expire with their owner', async (t) => {
+  const bytes = syntheticPng(1024 * 1024)
+  const file = await fixture(t, 'image.png', bytes)
+  const resources = new LocalFileResources()
+  const result = await resources.preview(8, file)
+  assert.equal(result.status, 'resource')
+  assert.equal(result.kind, 'binary')
+  const response = await resources.respond(
+    new Request(result.url, { headers: { Range: 'bytes=10-19' } })
+  )
+  assert.equal(response.status, 206)
+  assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*')
+  assert.equal(
+    response.headers.get('Access-Control-Expose-Headers'),
+    'Accept-Ranges, Content-Range'
+  )
+  assert.equal(response.headers.get('Accept-Ranges'), 'bytes')
+  assert.equal(response.headers.get('Content-Range'), `bytes 10-19/${bytes.length}`)
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes.subarray(10, 20))
+  assert.equal(response.headers.get('Content-Security-Policy'), "default-src 'none'; sandbox")
+  resources.releaseOwner(9)
+  assert.equal((await resources.respond(new Request(result.url, { method: 'HEAD' }))).status, 200)
+  resources.releaseOwner(8)
+  assert.equal((await resources.respond(new Request(result.url))).status, 404)
+})
+
+void test('large PDFs are binary resources with bounded range responses', async (t) => {
+  const bytes = Buffer.alloc(320 * 1024)
+  Buffer.from('%PDF-1.7\n').copy(bytes)
+  const file = await fixture(t, 'report.pdf', bytes)
+  const resources = new LocalFileResources()
+  const result = await resources.preview(3, file)
+  assert.equal(result.status, 'resource')
+  assert.equal(result.kind, 'binary')
+  assert.equal(result.sizeBytes, bytes.length)
+
+  const response = await resources.respond(
+    new Request(result.url, { headers: { Range: 'bytes=0-65535' } })
+  )
+  assert.equal(response.status, 206)
+  assert.equal(response.headers.get('Content-Type'), 'application/pdf')
+  assert.equal(response.headers.get('Content-Range'), `bytes 0-65535/${bytes.length}`)
+  assert.equal((await response.arrayBuffer()).byteLength, 64 * 1024)
+})
+
+void test('local video files serve video Content-Type and support HTTP Range seeking', async (t) => {
+  const bytes = Buffer.alloc(128 * 1024)
+  Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]).copy(bytes)
+  const file = await fixture(t, 'recording.mp4', bytes)
+  const resources = new LocalFileResources()
+  const result = await resources.preview(4, file)
+  assert.equal(result.status, 'resource')
+  assert.equal(result.kind, 'binary')
+  assert.equal(result.sizeBytes, bytes.length)
+
+  const response = await resources.respond(
+    new Request(result.url, { headers: { Range: 'bytes=1024-2047' } })
+  )
+  assert.equal(response.status, 206)
+  assert.equal(response.headers.get('Content-Type'), 'video/mp4')
+  assert.equal(response.headers.get('Accept-Ranges'), 'bytes')
+  assert.equal(response.headers.get('Content-Range'), `bytes 1024-2047/${bytes.length}`)
+  assert.equal((await response.arrayBuffer()).byteLength, 1024)
+})
+
+void test('replacing a file invalidates every existing resource URL', async (t) => {
+  const file = await fixture(t, 'large.txt', 'a'.repeat(600_000))
+  const resources = new LocalFileResources()
+  const result = await resources.preview(1, file)
+  await writeFile(file.absolutePath + '.new', 'b'.repeat(600_000))
+  await rename(file.absolutePath + '.new', file.absolutePath)
+  assert.equal(
+    (await resources.respond(new Request(result.url, { headers: { Range: 'bytes=0-10' } }))).status,
+    409
+  )
+})
+
+function syntheticPng(length, width = 16, height = 16) {
+  const bytes = Buffer.alloc(length)
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(bytes)
+  bytes.writeUInt32BE(width, 16)
+  bytes.writeUInt32BE(height, 20)
+  return bytes
+}
+
+void test('image decode budget is based on dimensions, not encoded file length', async (t) => {
+  const file = await fixture(t, 'huge.png', syntheticPng(32, 32768, 32768))
+  const result = await new LocalFileResources().preview(1, file)
+  assert.equal(result.status, 'error')
+  assert.equal(result.code, 'too_large')
+  assert.match(result.message, /dimensions/)
+})
+
+void test('a change during a stream read is rejected before its bytes are exposed', async (t) => {
+  const file = await fixture(t, 'large.txt', 'a'.repeat(600_000))
+  const resources = new LocalFileResources()
+  const result = await resources.preview(1, file)
+  const writer = await open(file.absolutePath, 'r+')
+  t.after(() => writer.close())
+  const prototype = Object.getPrototypeOf(writer)
+  const read = prototype.read
+  t.mock.method(prototype, 'read', async function (...args) {
+    const chunk = await read.apply(this, args)
+    // Explicitly change the revision between the read and delivery; no timer race.
+    await writer.truncate(600_001)
+    return chunk
+  })
+  const response = await resources.respond(
+    new Request(result.url, { headers: { Range: 'bytes=0-10' } })
+  )
+  await assert.rejects(response.arrayBuffer(), /File changed/)
+})
+
+for (const extension of ['bmp', 'ico']) {
+  void test(`${extension} headers remain previewable without library dimension support`, async (t) => {
+    const bytes = Buffer.alloc(64)
+    if (extension === 'bmp') {
+      bytes.write('BM')
+      bytes.writeUInt32LE(40, 14)
+      bytes.writeInt32LE(16, 18)
+      bytes.writeInt32LE(16, 22)
+    } else {
+      bytes.writeUInt16LE(1, 2)
+      bytes.writeUInt16LE(1, 4)
+      bytes[6] = 16
+      bytes[7] = 16
+    }
+    const file = await fixture(t, `image.${extension}`, bytes)
+    const resources = new LocalFileResources()
+    const result = await resources.preview(1, file)
+    assert.equal(result.status, 'resource')
+    const response = await resources.respond(new Request(result.url))
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes)
+  })
+}

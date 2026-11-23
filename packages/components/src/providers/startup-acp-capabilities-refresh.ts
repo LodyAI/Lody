@@ -19,12 +19,24 @@ export type StartupAcpCapabilitiesRefreshPorts = {
  * Connection invariant: callers must reuse the workspace runtime's existing Machine
  * Flock and RPC transports. This pass may add bounded RPC work, but it must never
  * create or retain one Streams subscription per agent config or refresh request.
+ *
+ * "Once" is owned by `refreshedConfigKeys`, not by the caller's decision to start
+ * a pass. A pass that is aborted mid-way — presence leaving `synced` does exactly
+ * that — is restarted by the caller, and without a record of which configs already
+ * answered, each restart re-probed every config and turned one startup scan into a
+ * standing per-reconnect probe cycle. Configs recorded here are skipped; failures
+ * are deliberately not recorded, so they stay retryable on the next pass.
  */
 export async function runStartupAcpCapabilitiesRefresh(
   ports: StartupAcpCapabilitiesRefreshPorts,
-  options: { machineConcurrency?: number; signal?: AbortSignal } = {}
+  options: {
+    /** Caller-owned set, shared across every pass of one workspace runtime. */
+    refreshedConfigKeys: Set<string>;
+    machineConcurrency?: number;
+    signal?: AbortSignal;
+  }
 ): Promise<void> {
-  const { signal } = options;
+  const { refreshedConfigKeys, signal } = options;
   if (signal?.aborted) return;
   const listedMachineIds = await ports.listMachineIds();
   if (signal?.aborted) return;
@@ -54,8 +66,13 @@ export async function runStartupAcpCapabilitiesRefresh(
             });
             continue;
           }
+          const refreshedConfigKey = `${machineId}\u0000${config.id}`;
+          if (refreshedConfigKeys.has(refreshedConfigKey)) {
+            continue;
+          }
           try {
             await ports.refreshAgentConfig(machineId, config, signal);
+            refreshedConfigKeys.add(refreshedConfigKey);
           } catch (error) {
             if (signal?.aborted) return;
             ports.onError?.(error, { machineId, configId: config.id });

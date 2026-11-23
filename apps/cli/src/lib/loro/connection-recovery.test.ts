@@ -13,6 +13,7 @@ import { LoroConnectionRecoveryController } from './connection-recovery';
 const createLogger = (): Logger =>
   ({
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
@@ -94,186 +95,70 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     return controller;
   };
 
-  it('sweeps rooms via repo.reconnect() even while transport and meta are healthy', async () => {
-    // Regression guard for the "stuck until daemon restart" bug class: a
-    // doc/flock room can sit in 'error' after a non-retriable stream failure
-    // while transport + meta stay healthy. The watchdog previously early-
-    // returned on isStreamsHealthy() and never rejoined such rooms.
-    let resolveReconnectCalled: () => void = () => {};
-    const reconnectCalled = new Promise<void>((resolve) => {
-      resolveReconnectCalled = resolve;
-    });
-    const reconnect = vi.fn(async () => {
-      resolveReconnectCalled();
-    });
-    const metaSub = createMetaSub('joined');
-    createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
-
-    expect(reconnect).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(30_000);
-    await reconnectCalled;
-    expect(reconnect).toHaveBeenCalledTimes(1);
-    expect(reconnect).toHaveBeenCalledWith({ resetBackoff: false, timeout: 10_000 });
-
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(reconnect).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not re-fire meta-synced listeners or rejoin meta on a healthy sweep', async () => {
+  it('keeps one failed doc room from starting a transport-wide recovery', async () => {
+    // #2194: a cross-machine read joined a room whose initial sync never
+    // finished. Each failure made the aggregate 'disconnected', and treating
+    // that as an outage reconnected the workspace and rescanned every session
+    // about every two minutes. The meta room never left 'joined'.
     const reconnect = vi.fn(async () => {});
     const joinMetaRoom = vi.fn();
     const metaSub = createMetaSub('joined');
     const instance = createController({ reconnect, joinMetaRoom }, metaSub);
-
     const metaSynced = vi.fn();
+    const streamsOnline = vi.fn();
     instance.onMetaRoomSynced(metaSynced);
+    instance.onStreamsOnline(streamsOnline);
 
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(reconnect).toHaveBeenCalledTimes(1);
-    // The healthy sweep must stay side-effect free: no meta room rejoin and no
-    // meta-synced fan-out (those listeners trigger metadata recovery work).
-    expect(joinMetaRoom).not.toHaveBeenCalled();
-    expect(metaSynced).not.toHaveBeenCalled();
-  });
-
-  it('keeps the full recovery path when the meta room degrades', async () => {
-    const reconnect = vi.fn(async () => {});
-    const metaSub = createMetaSub('joined');
-    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
-
-    metaSub.emitStatus('error');
-    // scheduleReconnect uses jittered exponential backoff starting at ~1s;
-    // 5s comfortably covers attempt 0 including jitter.
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(reconnect).toHaveBeenCalled();
-    expect(instance.isRecovering()).toBe(true);
-
-    metaSub.emitStatus('joined');
-    await vi.advanceTimersByTimeAsync(0);
+    instance.setTransportStatus('disconnected');
+    expect(instance.getStreamsHealth()).toBe('rooms-degraded');
     expect(instance.isRecovering()).toBe(false);
-  });
+    expect(instance.isTransportConnected()).toBe(true);
 
-  it('treats an aggregate "connecting" caused by joining rooms as healthy', async () => {
-    // `TransportConnectionStatus` aggregates every joined room, so lazily
-    // joining a session room flips it to 'connecting' and back. In a workspace
-    // with thousands of rooms that happens continuously. Each flip used to
-    // count as a recovery episode: it re-emitted meta-synced, whose listeners
-    // run O(rooms) recovery scans, which join more rooms, which flip the
-    // aggregate again — a self-sustaining loop, ~one full scan every 2-4s.
-    const reconnect = vi.fn(async () => {});
-    const metaSub = createMetaSub('joined');
-    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
-    const metaSynced = vi.fn();
-    instance.onMetaRoomSynced(metaSynced);
-
-    expect(instance.getStreamsHealth()).toBe('connected');
-
-    for (let round = 0; round < 10; round++) {
-      instance.setTransportStatus('connecting');
-      expect(instance.getStreamsHealth()).toBe('joining-rooms');
-      expect(instance.isRecovering()).toBe(false);
-      instance.setTransportStatus('connected');
-      await vi.advanceTimersByTimeAsync(0);
-    }
-
-    expect(metaSynced).not.toHaveBeenCalled();
-    expect(metaSub.waitUntilSynced).not.toHaveBeenCalled();
-
-    // No reconnect was scheduled either: the backoff timer would have fired
-    // well before the 30s watchdog sweep.
-    await vi.advanceTimersByTimeAsync(29_000);
-    expect(reconnect).not.toHaveBeenCalled();
-  });
-
-  it('reports one meta sync once rooms finish rejoining after a real disconnect', async () => {
-    const reconnect = vi.fn(async () => {});
-    const metaSub = createMetaSub('joined');
-    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
-    const metaSynced = vi.fn();
-    instance.onMetaRoomSynced(metaSynced);
-
-    instance.setTransportStatus('disconnected');
-    expect(instance.getStreamsHealth()).toBe('recovering');
-    expect(instance.isRecovering()).toBe(true);
-
+    // The failed room is swept about as soon as a reconnect would have run, so
+    // this Machine's own room recovers quickly, but only as a per-room sweep.
     await vi.advanceTimersByTimeAsync(1_000);
     expect(reconnect).toHaveBeenCalledTimes(1);
-    expect(metaSynced).not.toHaveBeenCalled();
+    expect(reconnect).toHaveBeenCalledWith({ resetBackoff: false, timeout: 10_000 });
+    expect(joinMetaRoom).not.toHaveBeenCalled();
 
-    // Rooms are back to merely joining: nothing is disconnected or errored
-    // anymore, so this is the end of the recovery episode.
-    instance.setTransportStatus('connecting');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
-
-    instance.setTransportStatus('connected');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
-  });
-
-  it('waits for aggregate transport recovery before reporting one meta sync', async () => {
-    const reconnect = vi.fn(async () => {});
-    const metaSub = createMetaSub('joined');
-    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
-    const metaSynced = vi.fn();
-    instance.onMetaRoomSynced(metaSynced);
-
+    // While it keeps failing, sweeps back off instead of repeating every second.
     instance.setTransportStatus('disconnected');
-
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(reconnect).toHaveBeenCalledTimes(1);
-    expect(metaSub.waitUntilSynced).not.toHaveBeenCalled();
-    expect(metaSynced).not.toHaveBeenCalled();
-
-    // Recovery remains unhealthy, so the next attempt uses exponential
-    // backoff instead of being reset by the still-joined meta room.
     await vi.advanceTimersByTimeAsync(1_999);
     expect(reconnect).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(reconnect).toHaveBeenCalledTimes(2);
+    expect(reconnect).toHaveBeenLastCalledWith({ resetBackoff: false, timeout: 10_000 });
     expect(metaSynced).not.toHaveBeenCalled();
-
-    instance.setTransportStatus('connected');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSub.waitUntilSynced).toHaveBeenCalledTimes(1);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
-
-    instance.setTransportStatus('connected');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
+    expect(streamsOnline).not.toHaveBeenCalled();
   });
 
-  it('reports each real meta-room recovery generation exactly once', async () => {
+  it('confirms meta writes while an unrelated room is disconnected', async () => {
+    const metaSub = createMetaSub('joined');
+    const instance = createController({ reconnect: vi.fn(async () => {}) }, metaSub);
+
+    instance.setTransportStatus('disconnected');
+    await expect(instance.waitUntilMetaSynced({ reason: 'test' })).resolves.toBe(true);
+    expect(metaSub.waitUntilSynced).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a disconnected transport without a joined meta room as offline', async () => {
     const reconnect = vi.fn(async () => {});
     const metaSub = createMetaSub('joined');
     const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
-    const metaSynced = vi.fn();
-    instance.onMetaRoomSynced(metaSynced);
 
-    metaSub.emitStatus('error');
-    metaSub.emitStatus('joined');
-    await vi.advanceTimersByTimeAsync(0);
+    metaSub.emitStatus('reconnecting');
+    instance.setTransportStatus('disconnected');
+    expect(instance.getStreamsHealth()).toBe('recovering');
+    expect(instance.isTransportConnected()).toBe(false);
+    await expect(instance.waitUntilMetaSynced({ reason: 'test' })).resolves.toBe(false);
 
-    expect(metaSub.waitUntilSynced).toHaveBeenCalledTimes(1);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
-
-    metaSub.emitStatus('joined');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
-
-    metaSub.emitStatus('disconnected');
-    metaSub.emitStatus('joined');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSub.waitUntilSynced).toHaveBeenCalledTimes(2);
-    expect(metaSynced).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(reconnect).toHaveBeenCalledWith({ resetBackoff: false, timeout: 10_000 });
   });
 
-  it('throttles the expensive fan-out on a transport-only flap but never the online signal', async () => {
-    // The two signals carry different meanings and must not be collapsed again.
-    // `meta-room-synced` drives O(rooms) rescans, so a flap that never took the
-    // meta room down is rate-limited. `streams-online` releases work parked
-    // while offline (a dirty Machine Flock doc arms no timer of its own), so it
-    // must fire on every edge.
+  it('ignores transport-only flaps while the meta room stays joined', async () => {
+    // `meta-room-synced` drives O(rooms) rescans. A flap that never took the
+    // meta room down cannot have missed metadata, so it is not a recovery edge.
     const reconnect = vi.fn(async () => {});
     const metaSub = createMetaSub('joined');
     const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
@@ -288,70 +173,130 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
       await vi.advanceTimersByTimeAsync(0);
     }
 
-    // First recovery is not delayed (cold start); the rest wait out the floor.
-    expect(metaSynced).toHaveBeenCalledTimes(1);
-    expect(streamsOnline).toHaveBeenCalledTimes(5);
-
-    // Deferred, never dropped: the throttled emit lands once the floor elapses.
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(metaSynced).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not throttle a fan-out after the meta room actually degraded', async () => {
-    // A real meta-room outage may have missed remote metadata, so its rescan
-    // must not be held behind the transport-flap floor.
-    const reconnect = vi.fn(async () => {});
-    const metaSub = createMetaSub('joined');
-    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
-    const metaSynced = vi.fn();
-    instance.onMetaRoomSynced(metaSynced);
-
-    metaSub.emitStatus('error');
-    metaSub.emitStatus('joined');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
-
-    // Immediately again, well inside the 30s floor.
-    metaSub.emitStatus('error');
-    metaSub.emitStatus('joined');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(2);
-  });
-
-  it('reports a newly joined replacement meta room', async () => {
-    const replacementMetaSub = createMetaSub('joined');
-    const reconnect = vi.fn(async () => {});
-    const joinMetaRoom = vi.fn(async () => replacementMetaSub);
-    const instance = createController({ reconnect, joinMetaRoom }, null, {
-      initialTransportStatus: 'connected',
-    });
-    const metaSynced = vi.fn();
-    instance.onMetaRoomSynced(metaSynced);
-
-    await vi.advanceTimersByTimeAsync(1_000);
-
-    expect(joinMetaRoom).toHaveBeenCalledTimes(1);
-    expect(replacementMetaSub.waitUntilSynced).toHaveBeenCalledTimes(1);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
-  });
-
-  it('drops a stale joined event when the meta room degrades before sync handling', async () => {
-    const reconnect = vi.fn(async () => {});
-    const metaSub = createMetaSub('joined');
-    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
-    const metaSynced = vi.fn();
-    instance.onMetaRoomSynced(metaSynced);
-
-    metaSub.emitStatus('error');
-    metaSub.emitStatus('joined');
-    metaSub.emitStatus('error');
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(metaSub.waitUntilSynced).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(29_000);
     expect(metaSynced).not.toHaveBeenCalled();
+    expect(streamsOnline).not.toHaveBeenCalled();
+    // At most one per-room sweep, never a transport reconnect.
+    expect(reconnect.mock.calls).toEqual([[{ resetBackoff: false, timeout: 10_000 }]]);
+  });
 
-    metaSub.emitStatus('joined');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(metaSynced).toHaveBeenCalledTimes(1);
+  it('keeps the room sweep when an unrelated room reports connected', async () => {
+    // loro-repo sets the aggregate to 'connected' on any join start or
+    // successful sync without re-aggregating, while the failed room stays failed.
+    const reconnect = vi.fn(async () => {});
+    const metaSub = createMetaSub('joined');
+    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
+
+    instance.setTransportStatus('disconnected');
+    instance.setTransportStatus('connected');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(reconnect).toHaveBeenCalledWith({ resetBackoff: false, timeout: 10_000 });
+  });
+
+  it('backs off room sweeps while failures repeat and resets after they stop', async () => {
+    const reconnect = vi.fn(async () => {});
+    const metaSub = createMetaSub('joined');
+    const instance = createController({ reconnect, joinMetaRoom: vi.fn() }, metaSub);
+    const sweepAfter = async (failure: () => void) => {
+      const before = reconnect.mock.calls.length;
+      failure();
+      let waited = 0;
+      while (reconnect.mock.calls.length === before) {
+        await vi.advanceTimersByTimeAsync(100);
+        waited += 100;
+      }
+      return waited;
+    };
+    const fail = () => {
+      instance.setTransportStatus('disconnected');
+      instance.setTransportStatus('connected');
+    };
+
+    const delays = [];
+    for (let round = 0; round < 4; round++) delays.push(await sweepAfter(fail));
+    expect(delays).toEqual([1_000, 2_000, 4_000, 8_000]);
+
+    // A failure after a quiet minute is a new episode and is swept quickly again.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await sweepAfter(fail)).toBe(1_000);
+  });
+
+  it('does not re-download a room that stays errored on every 30s watchdog tick', async () => {
+    // Production: a cursor-less session room stuck in 'error' was rejoined by
+    // every watchdog tick, and each rejoin re-read its full 24 MiB stream.
+    const reconnect = vi.fn(async () => {});
+    const rejoin = vi.fn(async () => {});
+    const room = { status: 'error' as TransportRoomStatus };
+    const transportRooms = vi.fn(() => [
+      {
+        room: { kind: 'doc', id: 'stuck-session' },
+        subscription: {
+          get status() {
+            return room.status;
+          },
+          rejoin,
+        },
+      },
+    ]);
+    createController(
+      { reconnect, joinMetaRoom: vi.fn(), transportRooms } as unknown as Partial<LoroRepo>,
+      createMetaSub('joined')
+    );
+    const sweepTimes: number[] = [];
+    const startedAt = Date.now();
+    rejoin.mockImplementation(async () => {
+      sweepTimes.push((Date.now() - startedAt) / 1_000);
+    });
+
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(sweepTimes).toEqual([30, 60, 120, 240, 480]);
+
+    // Once the room recovers, a later failure is retried on the next tick again.
+    room.status = 'joined';
+    await vi.advanceTimersByTimeAsync(30_000);
+    room.status = 'error';
+    sweepTimes.length = 0;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(sweepTimes).toEqual([660]);
+  });
+
+  it('retries a newly errored room on the next tick while another room is backed off', async () => {
+    // One stuck room must not gate recovery of an unrelated room.
+    const reconnect = vi.fn(async () => {});
+    const status: Record<string, TransportRoomStatus> = { a: 'error', b: 'joined' };
+    const rejoined: string[] = [];
+    const entry = (id: string) => ({
+      room: { kind: 'doc', id },
+      subscription: {
+        get status() {
+          return status[id];
+        },
+        rejoin: vi.fn(async () => {
+          rejoined.push(`${id}@${(Date.now() - startedAt) / 1_000}`);
+        }),
+      },
+    });
+    const rooms = [entry('a'), entry('b')];
+    const startedAt = Date.now();
+    createController(
+      {
+        reconnect,
+        joinMetaRoom: vi.fn(),
+        transportRooms: vi.fn(() => rooms),
+      } as unknown as Partial<LoroRepo>,
+      createMetaSub('joined')
+    );
+
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(rejoined).toEqual(['a@30', 'a@60', 'a@120', 'a@240', 'a@480']);
+
+    // Room A is backed off until t=780; Room B fails now.
+    status.b = 'error';
+    rejoined.length = 0;
+    reconnect.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(rejoined).toEqual(['b@630']);
+    // repo.reconnect() would rejoin (and re-download) the backed-off room A too.
+    expect(reconnect).not.toHaveBeenCalled();
   });
 });

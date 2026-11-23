@@ -9,7 +9,15 @@ export type ElectronOAuthQuery = {
   state: string;
   code_challenge: string;
   code_challenge_method?: string;
+  desktop_channel?: 'stable' | 'nightly';
 };
+
+function desktopProtocol(channel: string | undefined): string {
+  if (channel === 'nightly') return 'ai.lody.nightly';
+  if (channel === 'stable') return 'ai.lody.stable';
+  if (channel === undefined) return ELECTRON_PROTOCOL_SCHEME;
+  throw new Error('Unsupported desktop callback channel');
+}
 
 function encodeBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value);
@@ -25,6 +33,10 @@ function buildElectronOAuthSearch(query: ElectronOAuthQuery): URLSearchParams {
   search.set('client_id', query.client_id);
   search.set('state', query.state);
   search.set('code_challenge', query.code_challenge);
+  if (query.desktop_channel) {
+    desktopProtocol(query.desktop_channel);
+    search.set('desktop_channel', query.desktop_channel);
+  }
   if (query.code_challenge_method) {
     search.set('code_challenge_method', query.code_challenge_method);
   }
@@ -65,8 +77,11 @@ export function clearElectronAuthorizationCode(): void {
   document.cookie = `${ELECTRON_AUTHORIZATION_CODE_COOKIE_KEY}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
 }
 
-export function buildElectronAuthorizationCallbackUrl(token: string): string {
-  return `${ELECTRON_PROTOCOL_SCHEME}:/${ELECTRON_CALLBACK_PATH}#token=${encodeURIComponent(token)}`;
+export function buildElectronAuthorizationCallbackUrl(
+  token: string,
+  channel?: 'stable' | 'nightly'
+): string {
+  return `${desktopProtocol(channel)}:/${ELECTRON_CALLBACK_PATH}#token=${encodeURIComponent(token)}`;
 }
 
 // True when a `lody://` deep link is the auth callback that carries the
@@ -82,7 +97,11 @@ export function readElectronAuthCallbackToken(deepLinkUrl: string): string | nul
     return null;
   }
 
-  if (parsed.protocol !== `${ELECTRON_PROTOCOL_SCHEME}:`) {
+  if (
+    ![`${ELECTRON_PROTOCOL_SCHEME}:`, 'ai.lody.stable:', 'ai.lody.nightly:'].includes(
+      parsed.protocol
+    )
+  ) {
     return null;
   }
 
@@ -110,9 +129,14 @@ export function buildElectronRedirectToken(authorizationCode: string, state: str
   );
 }
 
-export function buildElectronRedirectUrl(authorizationCode: string, state: string): string {
+export function buildElectronRedirectUrl(
+  authorizationCode: string,
+  state: string,
+  channel?: 'stable' | 'nightly'
+): string {
   return buildElectronAuthorizationCallbackUrl(
-    buildElectronRedirectToken(authorizationCode, state)
+    buildElectronRedirectToken(authorizationCode, state),
+    channel
   );
 }
 
@@ -148,13 +172,21 @@ export function buildElectronWebLoginCallbackUrl(
   return isAbsolute ? url.toString() : `${url.pathname}${url.search}`;
 }
 
-export function redirectToElectronWithAuthorizationCode(
-  authorizationCode: string,
-  state: string
-): void {
+// Navigates to an already-built `lody://auth/callback#token=…` URL. Callers that
+// show the same URL as a clickable fallback link build it once with
+// `buildElectronRedirectUrl` and pass it here, so the automatic attempt and the
+// link the user can click carry the identical authorization payload.
+export function redirectToElectronDeepLink(deepLinkUrl: string): void {
   if (typeof window === 'undefined') {
     return;
   }
 
-  window.location.replace(buildElectronRedirectUrl(authorizationCode, state));
+  window.location.replace(deepLinkUrl);
+}
+
+export function redirectToElectronWithAuthorizationCode(
+  authorizationCode: string,
+  state: string
+): void {
+  redirectToElectronDeepLink(buildElectronRedirectUrl(authorizationCode, state));
 }

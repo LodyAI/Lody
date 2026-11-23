@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'n
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
+import { LLMS_ANSWERS } from './llms-answers.mjs';
 import { absoluteSiteUrl, slugFromMdxFile } from './site-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -85,9 +86,16 @@ function validateDocsMetadata() {
   }
 }
 
+function docsFilesForLlms(localeRoot) {
+  const ordered = orderedDocsFiles(localeRoot);
+  const seen = new Set(ordered.map((file) => path.resolve(file)));
+  const extras = listMdxFiles(localeRoot).filter((file) => !seen.has(path.resolve(file)));
+  return [...ordered, ...extras];
+}
+
 function docsEntries() {
   const localeRoot = path.join(docsRoot, 'en');
-  return orderedDocsFiles(localeRoot).map((file) => {
+  return docsFilesForLlms(localeRoot).map((file) => {
     const { frontmatter, body } = parseMdxFile(file);
     const title = requireString(frontmatter.title, 'title', file);
     const description = requireString(frontmatter.description, 'description', file);
@@ -132,9 +140,34 @@ function renderLink(entry) {
   return `- [${entry.title}](${absoluteSiteUrl(entry.sitePath)}) - ${entry.description}`;
 }
 
+function renderAnswer(block) {
+  const links = block.links
+    .map((link) => `- [${link.title}](${absoluteSiteUrl(link.sitePath)})`)
+    .join('\n');
+  return `### ${block.question}
+
+${block.answer}
+
+${links}`;
+}
+
+function assertAnswerLinksExist(docs) {
+  const known = new Set(docs.map((entry) => entry.sitePath));
+  for (const block of LLMS_ANSWERS) {
+    for (const link of block.links) {
+      if (!known.has(link.sitePath)) {
+        throw new Error(
+          `llms answer link is not a current English docs path: ${link.sitePath} (from “${block.question}”)`
+        );
+      }
+    }
+  }
+}
+
 validateDocsMetadata();
 const docs = docsEntries();
 const blog = blogEntries();
+assertAnswerLinksExist(docs);
 
 const llms = `# Lody
 
@@ -156,6 +189,10 @@ For the complete English documentation in one file, read [llms-full.txt](${absol
 ## Documentation
 
 ${docs.map(renderLink).join('\n')}
+
+## Answers
+
+${LLMS_ANSWERS.map(renderAnswer).join('\n\n')}
 
 ## Blog Posts
 

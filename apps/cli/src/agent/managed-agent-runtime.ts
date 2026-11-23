@@ -12,7 +12,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { finished as waitForStreamFinished, pipeline } from 'node:stream/promises';
@@ -25,22 +25,41 @@ import claudePackageJson from '../../../../packages/acp-extension-claude/package
 import codexPackageJson from '../../../../packages/acp-extension-codex/package.json';
 import grokPackageJson from '../../../../packages/acp-extension-grok/package.json';
 import grokRuntimeManifestJson from '../../../../packages/acp-extension-grok/runtime-manifest.json';
-import claudeSdkManifestJson from '../../node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
-import claudeSdkPackageJson from '../../node_modules/@anthropic-ai/claude-agent-sdk/package.json';
+import claudeSdkManifestJson from '../../../../packages/acp-extension-claude/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
+import claudeSdkPackageJson from '../../../../packages/acp-extension-claude/node_modules/@anthropic-ai/claude-agent-sdk/package.json';
+import devinPackageJson from '../../../../packages/acp-extension-devin/package.json';
+import devinAdapterManifest from '../../../../packages/acp-extension-devin/runtime-manifest.json';
+import devinPinsJson from './devin-runtime-manifest.json';
+import grokPinsJson from './grok-runtime-manifest.json';
 import claudeRuntimeManifestJson from './claude-runtime-manifest.json';
 import codexRuntimeManifestJson from './codex-runtime-manifest.json';
+import antigravityRuntimeManifestJson from './antigravity-runtime-manifest.json';
 import kimiRuntimeManifestJson from './kimi-runtime-manifest.json';
+import piRuntimeManifestJson from './pi-runtime-manifest.json';
 
 import {
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  MACHINE_PROTOCOL_CAPABILITIES,
   getManagedBuiltinRuntimeByRuntimeName,
   type ManagedBuiltinRuntimeName,
+  PI_EXTENSIONS_PROTOCOL_VERSION,
 } from '@lody/shared';
 import { formatErrorWithCauses } from '@/utils/format-error';
+import { getLogger } from '@/utils/logger';
 import { getCliHttpFetch, resolveCliHttpTransportConfig } from '@/utils/http-transport';
 import { resolveProxyUrl } from '@/utils/proxy';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 const COMPLETE_MARKER = '.lody-complete';
+const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
+
+/**
+ * Floor between managed-runtime progress emissions. A listener republishes these as
+ * session presence, and the presence channel is a shared serial queue that the machine
+ * heartbeat also uses, so the emit rate must be bounded by the publisher rather than by
+ * the download's chunk rate. See specs/loro-ephemeral-presence-channel.md.
+ */
+const MANAGED_RUNTIME_PROGRESS_MIN_INTERVAL_MS = 500;
 
 function managedRuntimeAbortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
@@ -77,7 +96,7 @@ export type ManagedRuntimeStatus =
       current: string;
       required: string;
     }
-  | { kind: 'not-installed'; platformArch: string; version: string }
+  | { kind: 'not-installed'; platformArch: string; version: string; warning?: string }
   | {
       kind: 'installed';
       platformArch: string;
@@ -131,10 +150,13 @@ type ManagedRuntimeInstallEntry = {
 };
 
 const MANAGED_RUNTIME_NAME_VALUES = [
+  'antigravity',
+  'pi',
   'codex',
   'claude-code',
   'kimi-code',
   'grok-build',
+  'devin',
 ] as const satisfies readonly ManagedRuntimeName[];
 
 const ManagedRuntimeNameSchema = z.enum(MANAGED_RUNTIME_NAME_VALUES);
@@ -154,22 +176,6 @@ const ManagedRuntimeInstallMetadataSchema = z
   .strict();
 
 type ManagedRuntimeInstallMetadata = z.infer<typeof ManagedRuntimeInstallMetadataSchema>;
-
-const LegacyManagedRuntimeInstallMetadataSchema = z
-  .object({
-    name: ManagedRuntimeNameSchema,
-    version: z.string().min(1),
-    platform: z.string().min(1),
-    archiveSha256: z.string().regex(/^[a-f0-9]{64}$/u),
-    archiveSize: z.number().int().positive(),
-    executableSha256: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/u)
-      .optional(),
-    executableSize: z.number().int().positive().optional(),
-    installedAt: z.string().min(1),
-  })
-  .strict();
 
 export type ManagedRuntimeDiagnostics = {
   runtimeName: ManagedRuntimeName;
@@ -205,6 +211,8 @@ export class ManagedRuntimeError extends Error {
     this.name = 'ManagedRuntimeError';
   }
 }
+
+class CorruptRuntimeCacheError extends ManagedRuntimeError {}
 
 export class ManagedRuntimeUnsupportedPlatformError extends ManagedRuntimeError {
   readonly platformArch: string;
@@ -310,6 +318,7 @@ const CODEX_DEPENDENCY_VERSION = resolveSingleDependencyVersion(
   '@openai/codex',
   codexPackageJson.dependencies['@openai/codex']
 );
+export const ANTIGRAVITY_RUNTIME_VERSION = antigravityRuntimeManifestJson.version;
 export const CODEX_RUNTIME_VERSION = codexRuntimeManifestJson.version;
 if (CODEX_RUNTIME_VERSION !== CODEX_DEPENDENCY_VERSION) {
   throw new Error(
@@ -334,8 +343,24 @@ if (
 export const CODEX_ACP_ADAPTER_VERSION = codexPackageJson.version;
 export const CLAUDE_ACP_ADAPTER_VERSION = claudePackageJson.version;
 export const KIMI_CODE_VERSION = kimiRuntimeManifestJson.version;
+export const PI_RUNTIME_VERSION = piRuntimeManifestJson.version;
+export const PI_EXTENSIONS_SUPPORTED =
+  'piExtensionsProtocolVersion' in piRuntimeManifestJson &&
+  piRuntimeManifestJson.piExtensionsProtocolVersion === PI_EXTENSIONS_PROTOCOL_VERSION;
+export const DEVIN_ACP_ADAPTER_VERSION = devinPackageJson.version;
+export const DEVIN_RUNTIME_VERSION = devinPinsJson.version;
+if (DEVIN_RUNTIME_VERSION !== devinAdapterManifest.officialRuntime.version) {
+  throw new Error(
+    'Devin runtime manifest does not match its adapter. Refresh the managed Devin runtime.'
+  );
+}
 export const GROK_ACP_ADAPTER_VERSION = grokPackageJson.version;
-export const GROK_BUILD_RUNTIME_VERSION = grokRuntimeManifestJson.officialRuntime.version;
+export const GROK_BUILD_RUNTIME_VERSION = grokPinsJson.version;
+if (GROK_BUILD_RUNTIME_VERSION !== grokRuntimeManifestJson.officialRuntime.version) {
+  throw new Error(
+    `Grok runtime manifest ${GROK_BUILD_RUNTIME_VERSION} does not match official runtime ${grokRuntimeManifestJson.officialRuntime.version}. Run pnpm mirror:agent-runtimes -- --runtime grok-build to refresh it.`
+  );
+}
 export const KIMI_CODE_MIN_NODE_VERSION = resolveMinimumNodeVersion(
   'Kimi managed runtime manifest',
   `>=${kimiRuntimeManifestJson.minNodeVersion}`
@@ -376,7 +401,53 @@ function createClaudeRuntimeArchive(platform: ClaudeRuntimePlatform): RuntimeArc
   };
 }
 
+function createGrokRuntimeArchive(platform: keyof typeof grokPinsJson.artifacts): RuntimeArchive {
+  const { sourceIntegrity: _sourceIntegrity, ...artifact } = grokPinsJson.artifacts[platform];
+  return {
+    ...artifact,
+    compression: 'zstd',
+    cmd: platform.startsWith('win32-') ? 'grok.exe' : 'grok',
+  };
+}
+
+function createDevinRuntimeArchive(platform: keyof typeof devinPinsJson.artifacts): RuntimeArchive {
+  const { sourceSha256: _sourceSha256, ...artifact } = devinPinsJson.artifacts[platform];
+  return {
+    ...artifact,
+    compression: 'zstd',
+    cmd: platform.startsWith('win32-') ? 'bin/devin.exe' : 'bin/devin',
+  };
+}
+
 const RUNTIMES: Record<ManagedRuntimeName, RuntimeDefinition> = {
+  antigravity: {
+    name: 'antigravity',
+    version: ANTIGRAVITY_RUNTIME_VERSION,
+    platforms: Object.fromEntries(
+      Object.entries(antigravityRuntimeManifestJson.artifacts).map(([platform, artifact]) => [
+        platform,
+        {
+          fileName: artifact.fileName,
+          sha256: artifact.sha256,
+          size: artifact.size,
+          compression: 'zstd' as const,
+          cmd: platform.startsWith('win32-') ? 'agy.exe' : 'agy',
+        },
+      ])
+    ),
+  },
+  devin: {
+    name: 'devin',
+    version: DEVIN_RUNTIME_VERSION,
+    platforms: {
+      'darwin-arm64': createDevinRuntimeArchive('darwin-arm64'),
+      'darwin-x64': createDevinRuntimeArchive('darwin-x64'),
+      'linux-arm64': createDevinRuntimeArchive('linux-arm64'),
+      'linux-x64': createDevinRuntimeArchive('linux-x64'),
+      'win32-arm64': createDevinRuntimeArchive('win32-arm64'),
+      'win32-x64': createDevinRuntimeArchive('win32-x64'),
+    },
+  },
   codex: {
     name: 'codex',
     version: CODEX_RUNTIME_VERSION,
@@ -403,6 +474,15 @@ const RUNTIMES: Record<ManagedRuntimeName, RuntimeDefinition> = {
       'win32-x64': createClaudeRuntimeArchive('win32-x64'),
     },
   },
+  pi: {
+    name: 'pi',
+    version: PI_RUNTIME_VERSION,
+    kind: 'node-package',
+    minNodeVersion: piRuntimeManifestJson.minNodeVersion,
+    platforms: {
+      node: { ...piRuntimeManifestJson.artifact, compression: 'zstd' },
+    },
+  },
   'kimi-code': {
     name: 'kimi-code',
     version: KIMI_CODE_VERSION,
@@ -422,60 +502,12 @@ const RUNTIMES: Record<ManagedRuntimeName, RuntimeDefinition> = {
     name: 'grok-build',
     version: GROK_BUILD_RUNTIME_VERSION,
     platforms: {
-      'darwin-arm64': {
-        fileName: `xai-official-grok-darwin-arm64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: '63aa0a0a95e7a555a372f1a501dcf59151376d7e4d900e24e1c591ff6cc8f818',
-        size: 46222120,
-        compression: 'zstd',
-        cmd: 'grok',
-        executableSha256: '13c7f4f0b9abb00bf38216302ea4bab31f03e13555e3576620eca1de572a8d21',
-        executableSize: 131817232,
-      },
-      'darwin-x64': {
-        fileName: `xai-official-grok-darwin-x64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: '7bf0af43ba1f3dc8e860e7f887b75966ece7bb6102cc7a3b2fb5af275f757c8a',
-        size: 50590131,
-        compression: 'zstd',
-        cmd: 'grok',
-        executableSha256: 'a82210a961deac9f0cb72ec6c334196abf76a587be4593bc59db2deab85ee6dc',
-        executableSize: 147358000,
-      },
-      'linux-arm64': {
-        fileName: `xai-official-grok-linux-arm64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: 'c888d404ad218caa251cbdbbd0da5836c807957be5a83fd8ab21b69de93469d9',
-        size: 49704069,
-        compression: 'zstd',
-        cmd: 'grok',
-        executableSha256: 'bb7c51116564a2219f6a49850815060f416918ac407f1f2ba82c53c0b0d4383f',
-        executableSize: 133745832,
-      },
-      'linux-x64': {
-        fileName: `xai-official-grok-linux-x64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: '7d0bb4309e634e0ecb63403f35fa468120f5ecf2173feb6518371be1633ecd99',
-        size: 53264623,
-        compression: 'zstd',
-        cmd: 'grok',
-        executableSha256: '28dbc967a5843dae2374b6834dadbab95354e685c7e5c8dc750b92a4e5fc7c3e',
-        executableSize: 163676672,
-      },
-      'win32-arm64': {
-        fileName: `xai-official-grok-win32-arm64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: 'c821de276cb1fa835567bd6c5589709e6ba29182d6b0c9ad7c160cc3df91145c',
-        size: 45241480,
-        compression: 'zstd',
-        cmd: 'grok.exe',
-        executableSha256: '9d41447b6eee77cfb7359b7f50935ae64b4e7b7e7ef56c40e6d203f5660317e1',
-        executableSize: 121471488,
-      },
-      'win32-x64': {
-        fileName: `xai-official-grok-win32-x64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: '5d66d3e0c1e54b050c76b77dfc1dadefbf3e909459a31b4361d8307a671c179c',
-        size: 48124303,
-        compression: 'zstd',
-        cmd: 'grok.exe',
-        executableSha256: 'd546dbc995c2ce9ba97c044d6af6b53f8c11c414a6355bf006802d07c572f406',
-        executableSize: 139903488,
-      },
+      'darwin-arm64': createGrokRuntimeArchive('darwin-arm64'),
+      'darwin-x64': createGrokRuntimeArchive('darwin-x64'),
+      'linux-arm64': createGrokRuntimeArchive('linux-arm64'),
+      'linux-x64': createGrokRuntimeArchive('linux-x64'),
+      'win32-arm64': createGrokRuntimeArchive('win32-arm64'),
+      'win32-x64': createGrokRuntimeArchive('win32-x64'),
     },
   },
 };
@@ -508,14 +540,34 @@ function getDownloadPercent(downloadedBytes: number, totalBytes: number): number
   return Math.min(100, Math.max(0, Math.floor((downloadedBytes / totalBytes) * 100)));
 }
 
-function isMuslLibc(): boolean {
+/**
+ * Host libc does not change for the life of this process. `process.report.getReport()`
+ * builds a synchronous process snapshot; capability refresh reaches it on every Claude
+ * archive lookup, including a capability-cache hit, and that snapshot stalled the daemon.
+ * Memoize the classification. A thrown report is not cached.
+ * .agents/notes/implemented/bug-fix/2026-10-11-musl-report-cache.md
+ */
+let muslLibc: boolean | undefined;
+
+function readMuslLibc(): boolean {
   if (process.platform !== 'linux') return false;
   const report =
     typeof process.report?.getReport === 'function'
       ? (process.report.getReport() as { header?: { glibcVersionRuntime?: string } })
       : null;
-  const header = report?.header;
-  return !header?.glibcVersionRuntime;
+  return !report?.header?.glibcVersionRuntime;
+}
+
+function isMuslLibc(): boolean {
+  if (muslLibc === undefined) {
+    muslLibc = readMuslLibc();
+  }
+  return muslLibc;
+}
+
+/** Test-only. Omit the argument to forget the classification; pass a boolean to preset it. */
+export function resetMuslLibcCacheForTests(preset?: boolean): void {
+  muslLibc = preset;
 }
 
 export function mapManagedRuntimePlatform(
@@ -523,16 +575,41 @@ export function mapManagedRuntimePlatform(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch
 ): string | undefined {
+  if (
+    name === 'pi' &&
+    (!['darwin', 'linux', 'win32'].includes(platform) || !['arm64', 'x64'].includes(arch))
+  )
+    return undefined;
   if (RUNTIMES[name].kind === 'node-package') return 'node';
   const archPart = arch === 'arm64' ? 'arm64' : arch === 'x64' ? 'x64' : undefined;
   if (!archPart) return undefined;
   if (platform === 'darwin') return `darwin-${archPart}`;
   if (platform === 'win32') return `win32-${archPart}`;
   if (platform === 'linux') {
-    const muslSuffix = name === 'claude-code' && isMuslLibc() ? '-musl' : '';
+    const muslSuffix =
+      (name === 'claude-code' || name === 'antigravity') && isMuslLibc() ? '-musl' : '';
     return `linux-${archPart}${muslSuffix}`;
   }
   return undefined;
+}
+
+/** Host-dependent runtime capabilities must not be advertised by shared static metadata. */
+export function getHostMachineProtocolCapabilities(
+  nodeVersion = process.versions.node,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch
+) {
+  const capabilities = { ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES };
+  if (
+    mapManagedRuntimePlatform('pi', platform, arch) &&
+    isNodeVersionAtLeast(nodeVersion, piRuntimeManifestJson.minNodeVersion)
+  ) {
+    capabilities[MACHINE_PROTOCOL_CAPABILITIES.builtinPi] = 1;
+    if (PI_EXTENSIONS_SUPPORTED) {
+      capabilities[MACHINE_PROTOCOL_CAPABILITIES.piExtensions] = PI_EXTENSIONS_PROTOCOL_VERSION;
+    }
+  }
+  return capabilities;
 }
 
 async function sha256File(
@@ -662,9 +739,57 @@ export class ManagedAgentRuntimeManager {
   private async readInstallation(
     name: ManagedRuntimeName,
     version: string,
-    platformArch: string
+    platformArch: string,
+    acceptsMetadata?: (metadata: ManagedRuntimeInstallMetadata) => boolean
   ): Promise<(ManagedRuntimeInstallation & { metadata: ManagedRuntimeInstallMetadata }) | null> {
     const dir = this.targetDir(name, version, platformArch);
+    const entries = await readdir(dirname(dir), { withFileTypes: true }).catch(() => []);
+    const directories = [
+      dir,
+      ...entries
+        .filter(
+          (entry) =>
+            entry.isDirectory() && entry.name.startsWith(`${sanitizeSegment(platformArch)}.gen-`)
+        )
+        .map((entry) => join(dirname(dir), entry.name)),
+    ];
+    const installations = [];
+    let corruption: CorruptRuntimeCacheError | undefined;
+    for (const candidateDir of directories) {
+      try {
+        const installation = await this.readInstallationDirectory(
+          name,
+          version,
+          platformArch,
+          candidateDir
+        );
+        if (installation) installations.push(installation);
+      } catch (error) {
+        if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+        corruption ??= error;
+        if (candidateDir !== dir) this.warnCacheMaintenanceFailure(name, 'cache generation', error);
+      }
+    }
+    if (installations.length === 0 && corruption) throw corruption;
+    const eligible = installations.filter(
+      (installation) =>
+        this.isHostCompatible(installation) &&
+        (!acceptsMetadata || acceptsMetadata(installation.metadata))
+    );
+    eligible.sort(
+      (a, b) =>
+        b.metadata.installedAt.localeCompare(a.metadata.installedAt) ||
+        b.command.localeCompare(a.command)
+    );
+    return eligible[0] ?? null;
+  }
+
+  private async readInstallationDirectory(
+    name: ManagedRuntimeName,
+    version: string,
+    platformArch: string,
+    dir: string
+  ): Promise<(ManagedRuntimeInstallation & { metadata: ManagedRuntimeInstallMetadata }) | null> {
     if (!existsSync(join(dir, COMPLETE_MARKER))) {
       return null;
     }
@@ -672,32 +797,9 @@ export class ManagedAgentRuntimeManager {
     let metadata: ManagedRuntimeInstallMetadata;
     try {
       const rawMetadata: unknown = JSON.parse(await readFile(join(dir, 'metadata.json'), 'utf8'));
-      const currentMetadata = ManagedRuntimeInstallMetadataSchema.safeParse(rawMetadata);
-      if (currentMetadata.success) {
-        metadata = currentMetadata.data;
-      } else {
-        const legacyMetadata = LegacyManagedRuntimeInstallMetadataSchema.parse(rawMetadata);
-        const legacyDefinition = RUNTIMES[legacyMetadata.name];
-        const legacyArchive = legacyDefinition.platforms[legacyMetadata.platform];
-        if (!legacyArchive) {
-          throw new ManagedRuntimeError(
-            `Managed runtime legacy cache platform is unsupported for ${legacyMetadata.name}/${legacyMetadata.version}/${legacyMetadata.platform}`
-          );
-        }
-        metadata = {
-          schemaVersion: 1,
-          runtimeName: legacyMetadata.name,
-          runtimeVersion: legacyMetadata.version,
-          platformArch: legacyMetadata.platform,
-          command: legacyArchive.cmd,
-          minNodeVersion: legacyDefinition.minNodeVersion,
-          archiveSha256: legacyMetadata.archiveSha256,
-          archiveSize: legacyMetadata.archiveSize,
-          installedAt: legacyMetadata.installedAt,
-        };
-      }
+      metadata = ManagedRuntimeInstallMetadataSchema.parse(rawMetadata);
     } catch (error) {
-      throw new ManagedRuntimeError(
+      throw new CorruptRuntimeCacheError(
         `Managed runtime cache metadata is invalid for ${name}/${version}/${platformArch}`,
         { cause: error }
       );
@@ -707,7 +809,7 @@ export class ManagedAgentRuntimeManager {
       metadata.runtimeVersion !== version ||
       metadata.platformArch !== platformArch
     ) {
-      throw new ManagedRuntimeError(
+      throw new CorruptRuntimeCacheError(
         `Managed runtime cache metadata does not match its directory for ${name}/${version}/${platformArch}`
       );
     }
@@ -719,7 +821,7 @@ export class ManagedAgentRuntimeManager {
       relativeCommand.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) ||
       !existsSync(command)
     ) {
-      throw new ManagedRuntimeError(
+      throw new CorruptRuntimeCacheError(
         `Managed runtime command is invalid for ${name}/${version}/${platformArch}: ${metadata.command}`
       );
     }
@@ -750,19 +852,17 @@ export class ManagedAgentRuntimeManager {
     platformArch: string,
     archive: RuntimeArchive
   ): Promise<(ManagedRuntimeInstallation & { metadata: ManagedRuntimeInstallMetadata }) | null> {
-    const installation = await this.readInstallation(name, definition.version, platformArch);
-    if (!installation) return null;
-    if (
-      installation.metadata.command !== archive.cmd ||
-      installation.metadata.archiveSha256 !== archive.sha256 ||
-      installation.metadata.archiveSize !== archive.size ||
-      installation.metadata.minNodeVersion !== definition.minNodeVersion
-    ) {
-      throw new ManagedRuntimeError(
-        `Managed runtime cache metadata does not match the current definition for ${name}/${definition.version}/${platformArch}`
-      );
-    }
-    return installation;
+    // Same-version repacks can coexist: filter every candidate before ranking.
+    return this.readInstallation(
+      name,
+      definition.version,
+      platformArch,
+      (metadata) =>
+        metadata.command === archive.cmd &&
+        metadata.archiveSha256 === archive.sha256 &&
+        metadata.archiveSize === archive.size &&
+        metadata.minNodeVersion === definition.minNodeVersion
+    );
   }
 
   private async findReusableInstallation(
@@ -777,7 +877,13 @@ export class ManagedAgentRuntimeManager {
     > = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name === sanitizeSegment(definition.version)) continue;
-      const installation = await this.readInstallation(name, entry.name, platformArch);
+      const installation = await this.readInstallation(name, entry.name, platformArch).catch(
+        (error: unknown) => {
+          if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+          this.warnCacheMaintenanceFailure(name, 'cache reuse', error);
+          return null;
+        }
+      );
       if (installation && this.isHostCompatible(installation)) {
         installations.push(installation);
       }
@@ -806,7 +912,19 @@ export class ManagedAgentRuntimeManager {
       return { kind: 'unsupported-platform', platformArch: resolvedArchive.platformArch };
     }
     const { definition, platformArch, archive } = resolvedArchive;
-    const current = await this.readCurrentInstallation(name, definition, platformArch, archive);
+    let current;
+    try {
+      current = await this.readCurrentInstallation(name, definition, platformArch, archive);
+    } catch (error) {
+      if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+      this.warnCacheMaintenanceFailure(name, 'cache status', error);
+      return {
+        kind: 'not-installed',
+        platformArch,
+        version: definition.version,
+        warning: error.message,
+      };
+    }
     if (current && this.isHostCompatible(current)) {
       return {
         kind: 'installed',
@@ -866,9 +984,13 @@ export class ManagedAgentRuntimeManager {
   async listAvailableUpdates(): Promise<ManagedRuntimeName[]> {
     const updates: ManagedRuntimeName[] = [];
     for (const name of MANAGED_RUNTIME_NAMES) {
-      const status = await this.getRuntimeStatus(name);
-      if (status.kind === 'installed' && status.updateAvailable) {
-        updates.push(name);
+      try {
+        const status = await this.getRuntimeStatus(name);
+        if (status.kind === 'installed' && status.updateAvailable) {
+          updates.push(name);
+        }
+      } catch (error) {
+        this.warnCacheMaintenanceFailure(name, 'update scan', error);
       }
     }
     return updates;
@@ -881,20 +1003,54 @@ export class ManagedAgentRuntimeManager {
     const current = await this.readCurrentInstallation(name, definition, platformArch, archive);
     const fallback = await this.findReusableInstallation(name, definition, platformArch);
     const retainedVersions = new Set(
-      [current?.version, fallback?.version].filter((version): version is string => Boolean(version))
+      [definition.version, current?.version, fallback?.version].filter(
+        (version): version is string => Boolean(version)
+      )
     );
     const runtimeRoot = join(this.rootDir, sanitizeSegment(name));
     const entries = await readdir(runtimeRoot, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (entry.isDirectory() && !retainedVersions.has(entry.name)) {
-        await rm(join(runtimeRoot, entry.name), { recursive: true, force: true });
+        const versionDir = join(runtimeRoot, entry.name);
+        const children = await readdir(versionDir, { withFileTypes: true });
+        // The manager has no reader leases: never collect a repair tree or an
+        // unreadable original merely because another version became current.
+        if (children.some((child) => child.isDirectory() && child.name.includes('.gen-'))) continue;
+        try {
+          await this.readInstallation(name, entry.name, platformArch);
+        } catch (error) {
+          if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+          this.warnCacheMaintenanceFailure(name, 'cache cleanup', error);
+          continue;
+        }
+        await rm(versionDir, { recursive: true, force: true });
       }
     }
   }
 
   async prepareCache(): Promise<void> {
     for (const name of MANAGED_RUNTIME_NAMES) {
-      await this.pruneSupersededVersions(name);
+      try {
+        await this.pruneSupersededVersions(name);
+      } catch (error) {
+        // Cache maintenance must never prevent the daemon from starting or
+        // stop cleanup of unrelated runtimes. Launch/install still validate.
+        this.warnCacheMaintenanceFailure(name, 'startup cache cleanup', error);
+      }
+    }
+  }
+
+  private warnCacheMaintenanceFailure(
+    name: ManagedRuntimeName,
+    operation: string,
+    error: unknown
+  ): void {
+    try {
+      getLogger('managed-runtime').warn(
+        `Skipping failed ${operation} for ${name}: ${formatErrorWithCauses(error)}`
+      );
+    } catch {
+      // Even an unavailable log sink must not make maintenance fatal.
     }
   }
 
@@ -919,7 +1075,15 @@ export class ManagedAgentRuntimeManager {
         definition.minNodeVersion
       );
     }
-    const current = await this.readCurrentInstallation(name, definition, platformArch, archive);
+    const current = await this.readCurrentInstallation(
+      name,
+      definition,
+      platformArch,
+      archive
+    ).catch((error: unknown) => {
+      if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+      return null;
+    });
     if (current) {
       options.onProgress?.({
         runtimeName: name,
@@ -1096,6 +1260,20 @@ export class ManagedAgentRuntimeManager {
     signal: AbortSignal
   ): Promise<ManagedRuntimeInstallation> {
     signal.throwIfAborted();
+    // Existing readers may still need this path even when its metadata is bad.
+    // Publish a verified successor independently; never move their directory.
+    try {
+      await this.readCurrentInstallation(name, definition, platformArch, archive);
+    } catch (error) {
+      if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+      signal.throwIfAborted();
+      this.warnCacheMaintenanceFailure(
+        name,
+        'corrupt cache retained; installing a new generation',
+        error
+      );
+    }
+    if (existsSync(dir)) dir = `${dir}.gen-${randomUUID()}`;
     await mkdir(this.rootDir, { recursive: true });
     const scratch = await mkdtemp(join(this.rootDir, 'tmp-'));
     const artifactPath = join(scratch, basename(archive.fileName));
@@ -1165,8 +1343,30 @@ export class ManagedAgentRuntimeManager {
         totalBytes: archive.size,
         percent: 100,
       });
-      await this.publish(unpackDir, dir);
+      const published = await this.publish(unpackDir, dir);
       signal.throwIfAborted();
+      if (!published) {
+        const existing = await this.readCurrentInstallation(
+          name,
+          definition,
+          platformArch,
+          archive
+        );
+        if (!existing)
+          throw new ManagedRuntimeError(
+            'Concurrent runtime installation does not match the current definition'
+          );
+        this.emitProgress(progressKey, {
+          runtimeName: name,
+          version: definition.version,
+          platformArch,
+          phase: 'complete',
+          downloadedBytes: archive.size,
+          totalBytes: archive.size,
+          percent: 100,
+        });
+        return existing;
+      }
       await writeFile(
         join(dir, 'metadata.json'),
         JSON.stringify(
@@ -1383,6 +1583,45 @@ export class ManagedAgentRuntimeManager {
     offset: number,
     signal: AbortSignal
   ): Promise<'downloaded' | 'retry-from-start'> {
+    const controller = new AbortController();
+    const downloadSignal = AbortSignal.any([signal, controller.signal]);
+    const abort = () =>
+      controller.abort(new ManagedRuntimeError('Managed runtime download timed out'));
+    let idle = setTimeout(abort, DOWNLOAD_IDLE_TIMEOUT_MS);
+    const onData = () => {
+      clearTimeout(idle);
+      idle = setTimeout(abort, DOWNLOAD_IDLE_TIMEOUT_MS);
+    };
+    try {
+      return await this.streamDownload(
+        progressKey,
+        name,
+        version,
+        platformArch,
+        url,
+        partialPath,
+        archive,
+        offset,
+        downloadSignal,
+        onData
+      );
+    } finally {
+      clearTimeout(idle);
+    }
+  }
+
+  private async streamDownload(
+    progressKey: string,
+    name: ManagedRuntimeName,
+    version: string,
+    platformArch: string,
+    url: string,
+    partialPath: string,
+    archive: RuntimeArchive,
+    offset: number,
+    signal: AbortSignal,
+    onData: () => void
+  ): Promise<'downloaded' | 'retry-from-start'> {
     const headers = new Headers();
     if (offset > 0) {
       headers.set('Range', `bytes=${offset}-`);
@@ -1418,15 +1657,20 @@ export class ManagedAgentRuntimeManager {
     }
 
     let downloadedBytes = offset;
-    let lastPercent = -1;
     let lastEmitAtMs = 0;
     const emitDownloadProgress = (force = false) => {
       const percent = getDownloadPercent(downloadedBytes, archive.size);
       const nowMs = Date.now();
-      if (!force && percent === lastPercent && nowMs - lastEmitAtMs < 500) {
+      // This runs per stream chunk, and a listener publishes it as session presence.
+      // The ceiling must therefore be TIME-based, not "changed percent": a changing
+      // value is exactly what defeats the `(phase, detail)` dedupe downstream, and a
+      // presence write per changed percent puts ~100 serial POSTs ahead of the
+      // machine heartbeat on the workspace's shared queue. Terminal state is never
+      // lost, because the caller forces an emit after the pipeline settles.
+      // Bounds: specs/loro-ephemeral-presence-channel.md.
+      if (!force && nowMs - lastEmitAtMs < MANAGED_RUNTIME_PROGRESS_MIN_INTERVAL_MS) {
         return;
       }
-      lastPercent = percent ?? -1;
       lastEmitAtMs = nowMs;
       this.emitProgress(progressKey, {
         runtimeName: name,
@@ -1440,6 +1684,7 @@ export class ManagedAgentRuntimeManager {
     };
     const progressStream = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
+        onData();
         downloadedBytes += chunk.byteLength;
         emitDownloadProgress();
         callback(null, chunk);
@@ -1496,16 +1741,17 @@ export class ManagedAgentRuntimeManager {
     }
   }
 
-  private async publish(unpackDir: string, dir: string): Promise<void> {
+  private async publish(unpackDir: string, dir: string): Promise<boolean> {
     await mkdir(dirname(dir), { recursive: true });
-    if (existsSync(dir)) {
-      await rm(dir, { recursive: true, force: true });
-    }
     try {
       await rename(unpackDir, dir);
+      return true;
     } catch (error) {
-      if (existsSync(join(dir, COMPLETE_MARKER))) return;
-      throw error;
+      if (!existsSync(join(dir, COMPLETE_MARKER))) throw error;
+      // Another process won publication. Release only our own unpacked tree;
+      // the caller must return before writing metadata or markers into theirs.
+      await rm(unpackDir, { recursive: true, force: true });
+      return false;
     }
   }
 }

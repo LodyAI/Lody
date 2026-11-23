@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionHistory, SessionId } from '@lody/shared';
 
 import { useAppStoreReviewPrompt } from '../src/hooks/use-app-store-review-prompt';
+
+const capture = vi.hoisted(() => vi.fn());
+vi.mock('../src/lib/deferred-posthog', () => ({
+  deferredPostHog: { capture },
+}));
 
 type PromptInput = Parameters<typeof useAppStoreReviewPrompt>[0];
 
@@ -25,7 +29,7 @@ function assistantTurn(id: string, occurredAtMs: number, userTurnId?: string): S
   } as SessionHistory;
 }
 
-function userTurn(id: string, status: 'handled' | 'processing'): SessionHistory {
+function userTurn(id: string, status: 'handled' | 'processing' | 'failed'): SessionHistory {
   return {
     id,
     role: 'user',
@@ -36,9 +40,11 @@ function userTurn(id: string, status: 'handled' | 'processing'): SessionHistory 
   } as SessionHistory;
 }
 
+// Fifty completed turns inside the sixty-day window, one per minute, in
+// chronological order: the stored watermark only counts turns above it.
 function eligibleHistoricalTurns(): SessionHistory[] {
-  return Array.from({ length: 51 }, (_, index) =>
-    assistantTurn(`historical-${index}`, index % 2 === 0 ? nowMs : nowMs - 24 * 60 * 60 * 1000)
+  return Array.from({ length: 50 }, (_, index) =>
+    assistantTurn(`historical-${index}`, nowMs - (50 - index) * 60_000)
   );
 }
 
@@ -51,7 +57,6 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
   let container: HTMLDivElement;
   let root: Root;
   let requestReview: ReturnType<typeof vi.fn>;
-  let setItemSpy: ReturnType<typeof vi.spyOn>;
 
   const render = async (input: PromptInput) => {
     await act(async () => {
@@ -64,6 +69,7 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
     vi.useFakeTimers();
     vi.setSystemTime(nowMs);
     localStorage.clear();
+    capture.mockClear();
     requestReview = vi.fn(async () => undefined);
     window.__LODY_NATIVE__ = true;
     window.__LODY_APP_INFO__ = { app_version: '1.5.0' };
@@ -79,7 +85,6 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
       configurable: true,
       value: 'visible',
     });
-    setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -116,7 +121,7 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
       ...baseInput,
       history: historical,
       historyHydrated: true,
-      lastCompletedAssistantMessageId: 'historical-50',
+      lastCompletedAssistantMessageId: 'historical-49',
     });
 
     await act(async () => {
@@ -146,12 +151,12 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
     expect(requestReview).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the idle timer across a semantically unchanged history identity update', async () => {
+  it('keeps the idle timer when a later history update adds a recent hard failure', async () => {
     const historical = eligibleHistoricalTurns();
     const baseInput = {
       sessionId,
-      sessionOwnerId: 'identity-user',
-      currentUserId: 'identity-user',
+      sessionOwnerId: 'hard-failure-user',
+      currentUserId: 'hard-failure-user',
       historyHydrated: true,
       sessionCompleted: true,
     } as const;
@@ -159,18 +164,18 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
     await render({
       ...baseInput,
       history: historical,
-      lastCompletedAssistantMessageId: 'historical-50',
+      lastCompletedAssistantMessageId: 'historical-49',
     });
 
     const completedHistory = [
       ...historical,
-      userTurn('identity-user-turn', 'handled'),
-      assistantTurn('identity-assistant-turn', nowMs, 'identity-user-turn'),
+      userTurn('eligible-user-turn', 'handled'),
+      assistantTurn('eligible-assistant-turn', nowMs, 'eligible-user-turn'),
     ];
     await render({
       ...baseInput,
       history: completedHistory,
-      lastCompletedAssistantMessageId: 'identity-assistant-turn',
+      lastCompletedAssistantMessageId: 'eligible-assistant-turn',
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
@@ -178,14 +183,18 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
 
     await render({
       ...baseInput,
-      history: [...completedHistory],
-      lastCompletedAssistantMessageId: 'identity-assistant-turn',
+      history: [...completedHistory, userTurn('late-failure-user-turn', 'failed')],
+      lastCompletedAssistantMessageId: 'eligible-assistant-turn',
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(1_499);
+    });
+    expect(requestReview).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
     });
 
-    expect(requestReview).toHaveBeenCalledTimes(1);
+    expect(requestReview).not.toHaveBeenCalled();
   });
 
   it('does not retry the same completed turn after real user interaction cancels its timer', async () => {
@@ -202,7 +211,7 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
       historyHydrated: true,
       history: historical,
       sessionCompleted: true,
-      lastCompletedAssistantMessageId: 'historical-50',
+      lastCompletedAssistantMessageId: 'historical-49',
     } as const;
 
     await render(input);
@@ -227,49 +236,32 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
     expect(requestReview).not.toHaveBeenCalled();
   });
 
-  it('does not rewrite local storage for streaming updates without a new finalized outcome', async () => {
-    const completed = [assistantTurn('completed', nowMs)];
+  it('does not ask for a rating when the session just failed a turn', async () => {
+    const historical = eligibleHistoricalTurns();
     const baseInput = {
       sessionId,
-      sessionOwnerId: 'stream-user',
-      currentUserId: 'stream-user',
+      sessionOwnerId: 'failure-user',
+      currentUserId: 'failure-user',
       historyHydrated: true,
-      sessionCompleted: false,
-      lastCompletedAssistantMessageId: 'completed',
+      sessionCompleted: true,
     } as const;
 
-    await render({ ...baseInput, history: completed });
-    expect(setItemSpy).toHaveBeenCalledTimes(1);
-    setItemSpy.mockClear();
-
+    await render({ ...baseInput, history: historical, lastCompletedAssistantMessageId: null });
     await render({
       ...baseInput,
       history: [
-        ...completed,
-        userTurn('stream-user-turn', 'processing'),
-        {
-          ...assistantTurn('stream-assistant-turn', nowMs, 'stream-user-turn'),
-          finished: false,
-          endedAt: undefined,
-          items: [{ type: 'text', text: 'Partial' }],
-        } as SessionHistory,
+        ...historical,
+        // A failed send sits among the session's most recent finalized turns.
+        userTurn('failure-user-turn', 'failed'),
+        userTurn('recovered-user-turn', 'handled'),
+        assistantTurn('recovered-assistant-turn', nowMs, 'recovered-user-turn'),
       ],
+      lastCompletedAssistantMessageId: 'recovered-assistant-turn',
     });
-    await render({
-      ...baseInput,
-      history: [
-        ...completed,
-        userTurn('stream-user-turn', 'processing'),
-        {
-          ...assistantTurn('stream-assistant-turn', nowMs, 'stream-user-turn'),
-          finished: false,
-          endedAt: undefined,
-          items: [{ type: 'text', text: 'Partial output grew' }],
-        } as SessionHistory,
-      ],
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
     });
 
-    expect(setItemSpy).not.toHaveBeenCalled();
     expect(requestReview).not.toHaveBeenCalled();
   });
 });

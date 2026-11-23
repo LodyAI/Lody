@@ -1,14 +1,33 @@
+import { WorkspaceOwnershipTransfer } from '@/components/settings/workspace-ownership-transfer';
+import { E2eeSecurityPanel } from '@/components/settings/e2ee/security-panel';
 import type { Meta, StoryObj } from '@storybook/react';
+import { Button } from '@lody/ui/button';
+import { CompactRow } from '@/components/settings/compact-layout';
+import * as stylex from '@stylexjs/stylex';
+import type { ComponentProps } from 'react';
+import type { AgentConfigMeta, MachineId } from '@lody/shared';
+import { settingsFlat } from '@/components/settings/material.stylex';
+import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
+import { useResolvedTheme } from '@/theme-provider';
+import { settingsSurface } from '@/components/settings/surface';
+import {
+  AccountMachinesOverviewView,
+  type AccountMachineOverviewItem,
+} from '@/components/settings/account-machines-overview';
 import { AccountSettingsPure } from '@/components/settings';
 import type { AccountSettingsPureProps } from '@/components/settings';
 import type { Invitation } from 'better-auth/plugins';
 import { userEvent, within } from 'storybook/test';
 
+const mockMemberAvatar = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect width="80" height="80" fill="#b5caf4"/><path d="M12 80a28 28 0 0 1 56 0" fill="#7268ba"/><circle cx="40" cy="34" r="20" fill="#ffe0bf"/><path d="M20 31a20 20 0 0 1 40 0q-12-3-19-13-8 10-21 13" fill="#473c55"/><circle cx="33" cy="34" r="2"/><circle cx="47" cy="34" r="2"/><path d="M34 43q6 5 12 0" fill="none" stroke="#a85863" stroke-width="2"/></svg>'
+)}`;
+
 const mockCurrentUser = {
   id: 'user-1',
   name: 'Alice Chen',
   email: 'alice@example.com',
-  image: null,
+  image: mockMemberAvatar,
 };
 
 const mockOrganization = {
@@ -176,10 +195,11 @@ export const WithCliAuthKey: Story = {
         keyPreview: 'lody_cli_abc******123456',
         note: 'CI runner',
         source: 'manual',
-        createdAt: Date.now() - 60_000,
-        lastRequest: Date.now() - 120_000,
+        createdAt: Date.UTC(2026, 9, 1, 9, 0),
+        lastRequest: Date.UTC(2026, 10, 12, 8, 0),
         expiresAt: null,
         enabled: true,
+        machineIds: [],
       },
       {
         id: 'key-2',
@@ -188,12 +208,44 @@ export const WithCliAuthKey: Story = {
         keyPreview: 'lody_cli_xyz******654321',
         note: null,
         source: 'auto',
-        createdAt: Date.now() - 600_000,
-        lastRequest: null,
+        createdAt: Date.UTC(2026, 9, 20, 10, 0),
+        lastRequest: Date.UTC(2026, 10, 12, 7, 30),
+        expiresAt: Date.UTC(2027, 1, 10, 7, 30),
+        enabled: true,
+        machineIds: ['machine-office-mac'],
+      },
+      {
+        id: 'key-3',
+        name: 'Lody CLI Token',
+        keyStart: 'lody_cli_',
+        keyPreview: 'lody_cli_pqr******987654',
+        note: null,
+        source: 'pairing',
+        createdAt: Date.UTC(2026, 7, 2, 21, 0),
+        lastRequest: Date.UTC(2026, 10, 10, 23, 0),
         expiresAt: null,
         enabled: true,
+        machineIds: ['machine-home-server'],
+      },
+      {
+        id: 'key-4',
+        name: 'Lody CLI Token',
+        keyStart: 'lody_cli_',
+        keyPreview: 'lody_cli_def******246810',
+        note: null,
+        source: 'auto',
+        createdAt: Date.UTC(2026, 5, 3, 12, 0),
+        lastRequest: null,
+        expiresAt: Date.UTC(2027, 1, 10, 0, 0),
+        enabled: true,
+        machineIds: ['machine-in-another-workspace'],
       },
     ],
+    cliApiKeyMachineNames: new Map([
+      ['machine-office-mac', 'Office MacBook'],
+      ['machine-home-server', 'Home server'],
+    ]),
+    currentMachineId: 'machine-office-mac',
     isCreatingCliApiKey: false,
     onGenerateCliApiKey: noop,
     onCopyGeneratedCliApiKey: noop,
@@ -220,4 +272,194 @@ export const DarkModeWithInvitations: Story = {
   args: {
     pendingInvitations: mockPendingInvitations,
   },
+};
+
+export const OwnershipTransfer: Story = {
+  args: {
+    surface: 'workspace',
+    workspaceOwnershipSlot: (
+      <WorkspaceOwnershipTransfer
+        workspaceName={mockOrganization.name}
+        currentUserId={mockCurrentUser.id}
+        members={mockMembers}
+        onTransfer={noop}
+      />
+    ),
+  },
+};
+
+/** An encrypted workspace owner: transfer opens the encryption console; delete states
+ * that encrypted content cannot be recovered. Open "删除工作区" for the confirmation. */
+export const EncryptedWorkspaceDangerZone: Story = {
+  args: {
+    surface: 'workspace',
+    encryptedWorkspace: true,
+    workspaceOwnershipSlot: (
+      <CompactRow
+        label="转移所有权"
+        helper="在加密控制台的成员页选择新所有者。转出后你会变成管理员，这次变更会记入变更记录。"
+      >
+        <Button variant="secondary" size="small" tone="destructive">
+          转移…
+        </Button>
+      </CompactRow>
+    ),
+  },
+};
+
+/** An encrypted workspace member: leaving says what it means for this device's access. */
+export const EncryptedWorkspaceMemberLeave: Story = {
+  args: {
+    surface: 'workspace',
+    encryptedWorkspace: true,
+    role: 'member',
+    hasAdminPermission: false,
+  },
+};
+
+export const AfterOwnershipTransfer: Story = {
+  args: {
+    surface: 'workspace',
+    role: 'member',
+    hasAdminPermission: false,
+    members: mockMembers.map((member) => ({
+      ...member,
+      role: member.userId === 'user-2' ? 'owner' : 'member',
+    })),
+  },
+};
+
+const studioId = 'machine-studio' as MachineId;
+const airId = 'machine-air' as MachineId;
+
+const paneAgents = (machineId: MachineId, count: number): AgentConfigMeta[] =>
+  Array.from(
+    { length: count },
+    (_, index) =>
+      ({
+        id: `${machineId}-agent-${index}`,
+        machineId,
+        name: index % 2 ? 'Codex' : 'Claude Code',
+        cliType: 'builtin',
+        agentType: index % 2 ? 'codex' : 'claude',
+        env: {},
+      }) as AgentConfigMeta
+  );
+
+const paneMachines: AccountMachineOverviewItem[] = [
+  {
+    id: studioId,
+    name: 'alice-mac-studio.local',
+    os: 'darwin',
+    isOnline: true,
+    sharedWithTeam: false,
+    agents: paneAgents(studioId, 6),
+    directories: Array.from({ length: 10 }, (_, index) => ({
+      key: `${studioId}:dir-${index}`,
+      name: `project-${index}`,
+      rootPath: `/Users/alice/Code/project-${index}`,
+      sharedWithTeam: false,
+    })),
+  },
+  {
+    id: airId,
+    name: 'alice-macbook-air.local',
+    os: 'darwin',
+    isOnline: false,
+    sharedWithTeam: false,
+    agents: paneAgents(airId, 3),
+    directories: [],
+  },
+];
+
+/** A settings page as the desktop pane draws it: its scope, material and canvas. */
+function DesktopPane(args: ComponentProps<typeof AccountSettingsPure>) {
+  const palette = useResolvedTheme() === 'dark' ? productDarkPalette : productLightPalette;
+  return (
+    <div
+      data-settings-surface=""
+      data-testid="settings-pane"
+      {...stylex.props(palette, settingsFlat, settingsSurface.canvas)}
+      style={{ width: 860, minHeight: '100vh', paddingInline: 32, paddingBlock: 24 }}
+    >
+      <AccountSettingsPure {...args} />
+    </div>
+  );
+}
+
+/** Settings > Account in the desktop pane: profile, connected accounts, machines, tokens. */
+export const DesktopPaneAccount: Story = {
+  args: {
+    onConnectAccount: noop,
+    canGenerateCliApiKey: true,
+    cliApiKeys: [
+      {
+        id: 'key-1',
+        name: 'Lody CLI Token',
+        keyStart: 'lody_cli_',
+        keyPreview: 'lody_cli_abc******123456',
+        note: 'CI runner',
+        source: 'manual',
+        createdAt: Date.UTC(2026, 8, 20, 9, 30),
+        lastRequest: Date.UTC(2026, 8, 25, 18, 5),
+        expiresAt: null,
+        enabled: true,
+      },
+    ],
+    onGenerateCliApiKey: noop,
+    onRevokeCliApiKey: noop,
+    accountMachinesSlot: (
+      <AccountMachinesOverviewView
+        items={paneMachines}
+        currentMachineId={studioId}
+        onManageMachine={() => {}}
+      />
+    ),
+  },
+  render: (args) => <DesktopPane {...args} />,
+};
+
+/** Settings > General (the workspace) in the desktop pane, with a pending invitation. */
+export const DesktopPaneWorkspace: Story = {
+  args: {
+    surface: 'workspace',
+    pendingInvitations: mockPendingInvitations,
+  },
+  render: (args) => <DesktopPane {...args} />,
+};
+
+/** Settings > General for a solo encrypted workspace in the desktop pane: the security
+ * entry is the page's first section, on the same column as Workspace and Members. */
+export const DesktopPaneEncryptedWorkspace: Story = {
+  args: {
+    surface: 'workspace',
+    encryptedWorkspace: true,
+    hasAdminPermission: false,
+    members: mockMembers.slice(0, 1),
+    workspaceSecuritySlot: (
+      <E2eeSecurityPanel
+        state={{
+          epoch: 1,
+          rotationRequired: false,
+          updatePending: false,
+          mayRotate: true,
+          devices: [],
+        }}
+        onUpdate={() => {}}
+        onRetry={() => {}}
+        onOpenConsole={() => {}}
+      />
+    ),
+    workspaceOwnershipSlot: (
+      <CompactRow
+        label="转移所有权"
+        helper="在加密控制台的成员页选择新所有者。转出后你会变成管理员，这次变更会记入变更记录。"
+      >
+        <Button variant="secondary" size="small" tone="destructive">
+          转移…
+        </Button>
+      </CompactRow>
+    ),
+  },
+  render: (args) => <DesktopPane {...args} />,
 };

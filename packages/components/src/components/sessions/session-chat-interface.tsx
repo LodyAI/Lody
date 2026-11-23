@@ -1,3 +1,47 @@
+import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
+import { MessageQuoteAction } from '../ai-gui/message-quote-action';
+import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
+import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import {
+  useLegacyWorkspaceQueryStatus,
+  useWorkspaceFeature,
+  useWorkspaceFeatureReason,
+  useMachineRpcFeatureReason,
+} from '@/hooks/use-workspace-feature';
+import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
+import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
+import { useLocalSessionContinuation } from './use-local-session-continuation';
+import { SessionContinuationNote } from './session-continuation-note';
+import { SessionContinuationTweaks } from './session-continuation-tweaks';
+import { AutoDeliveryDialog, SessionAutoDeliveryNote } from './session-auto-delivery';
+import { useStableNow } from '@/hooks/use-stable-now';
+import type { DocumentSelection } from '@/lib/document-selection';
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
+import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
+import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
+import {
+  buildDraftUserHistoryEntry,
+  type SessionAttachmentDraft,
+} from '@/lib/session-attachment-draft';
+import { useSchedules } from '@/hooks/use-schedules';
+import { ScheduledMessageEditDialog } from '../schedules/scheduled-message-edit-dialog';
+import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
+import { useScheduledMessageContents } from '../schedules/use-scheduled-message-content';
+import { saveScheduledMessage } from '../schedules/scheduled-message-write';
+import { windowPreparationAtom } from '@/lib/window-preparation';
+import { conversationCopyRange } from '@/lib/conversation-copy-range';
+import { readConversationCopySource } from '@/lib/conversation-copy-source';
+import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
+import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
+import {
+  MessageSelectionContext,
+  MessageSelectionToolbar,
+  useMessageSelection,
+} from '@/components/ai-gui/message-selection';
 import {
   startTransition,
   forwardRef,
@@ -6,58 +50,87 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { useOpenSettings } from '../../hooks/use-open-settings';
 import { v4 as uuidv4 } from 'uuid';
 import {
+  AlarmClock,
   ArrowDown,
   ArrowUp,
+  ArrowUpCircle,
   Archive,
   ArchiveRestore,
-  Check,
+  CheckCircle2,
   ChevronDown,
   Copy,
+  CircleDot,
   CornerLeftUp,
   Ellipsis,
+  FileText,
   Folder,
+  FolderOpen,
   GitBranch,
   GitBranchPlus,
   GitFork,
   Github,
   History,
-  Loader2,
+  Image,
+  Info,
+  Link,
   LockKeyhole,
   MessageCircle,
   Monitor,
+  MoveHorizontal,
   Pencil,
   Play,
   Plus,
   Search,
+  Share2,
+  SquareArrowOutUpRight,
+  Timer,
   Trash2,
-  UserRoundCog,
   Users,
   X,
 } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { buildSnoozePresets, expiredSnoozeTimestamp, statusViewTier } from '@lody/shared';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
+import { useOrganization } from '@/hooks/useOrganization';
+import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
+import { useRouter } from '@tanstack/react-router';
+import { Spinner } from '@lody/ui/spinner';
+import { Switch } from '@lody/ui/switch';
+import { Button } from '@lody/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import { isMac } from '@/lib/commands/platform';
-import { matchesKeyboardEvent, parseBinding } from '@/lib/commands/key-matcher';
-import { isSessionContextCompacting } from '@/lib/session-context-compaction';
-import { hasFileTransfer, getFilesFromDataTransfer } from '@/lib/file-drop';
+import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
+import { isSessionContextCompacting, canStopAgentEnabled } from '@/lib/session-context-compaction';
+import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
+import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
 import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
-import { SessionChatInputArea, type SessionChatInputAreaHandle } from './session-chat-input-area';
+import {
+  SessionChatInputArea,
+  type SessionChatInputAreaHandle,
+  type SessionTurnAgentRoleSelection,
+} from './session-chat-input-area';
+import { queueTask } from './message-queue/queue-task';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
-import { MessageQueueDisplay, shouldRequestNativeQueueSteer } from './message-queue';
+import {
+  MessageQueueDisplay,
+  type ScheduledQueueItem,
+  shouldRequestNativeQueueSteer,
+  useHasPendingQueueRecords,
+} from './message-queue';
 import { useTranslation } from 'react-i18next';
-import { useRouter } from '@tanstack/react-router';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type {
   LocalProjectId,
+  LineChange,
   MessageContent,
   MessageQueueItemInput,
   MessageQueueItem,
@@ -69,25 +142,24 @@ import type {
   SessionInputBlock,
   SessionLegacyMetaFields,
   SessionMeta,
+  SessionPreviewDocState,
   SessionStatus,
   SessionTurnInputConfig,
   CommentReferencePayload,
-  ConversationMarkdownStats,
-  GitHubCheckRun,
   GitHubMergeMethod,
   VisualAnnotationReferencePayload,
 } from '@lody/shared';
 import {
   buildConversationMarkdown,
-  buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
-  countBillableSessionTurns,
-  deriveSessionPullRequestReadiness,
+  countPendingQueuedUserTurns,
+  collectConversationMessages,
+  type ConversationMessage,
   evaluateBillingQuota,
   FREE_SESSION_TURN_LIMIT,
   FREE_SESSION_TURN_WARNING_REMAINING,
-  getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheKey,
+  getDeviceTimeZone,
   getMachineFlockLocalProjects,
   getProjectRefBranch,
   getSessionPullRequestLegacyFields,
@@ -98,27 +170,41 @@ import {
   hasReportedPreviewTarget,
   isSessionGoalCleared,
   isSessionGoalActive,
+  machineSupportsScheduledMessagesProtocol,
+  machineSupportsMessageQuotes,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
+  resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
+  resolveSessionConversationSourceFence,
   resolveVisibleSessionGoal,
   resolveActiveAssistantTurnId,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
+  decodeProjectPreparationProgress,
+  type McpServerId,
+  type ScheduleDocument,
+  type SessionPullRequestView,
+  type SessionPullRequestLinkListItem,
+  resolveSessionPullRequestLinkList,
 } from '@lody/shared';
+import { encryptedRemoteEditAndResendAvailable } from '../../lib/encrypted-machine-controls';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
+import { useAppCapability } from '@/lib/app-platform';
+import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
+import { SessionShareEditorPanel } from '@/components/sharing/session-share-panel';
+import { useSessionShareStatus } from '@/hooks/use-session-share-management';
 import {
   conversationFontSizeAtom,
+  conversationWideModeAtom,
   currentWorkspaceIdAtom,
+  currentWorkspaceSlugAtom,
   getAllAgentConfigAtom,
   queuedMessageBehaviorAtom,
   userAtom,
 } from '@/atoms';
-import { currentWorkspaceSlugAtom } from '@/atoms';
-import { taskIndexRowsAtom } from '@/atoms/tasks';
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
-import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { browserOnlineAtom } from '@/atoms/control-connection';
 import {
   docMetaCacheReadyAtom,
@@ -133,26 +219,43 @@ import {
   resolveSessionConversationPreparationState,
   type SessionConversationPreparationState,
 } from '@/lib/session-conversation-preparation';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import {
+  clearSessionPrMergeStatus,
+  sessionPrMergeStatusAtomFamily,
+} from '@/atoms/session-pr-merge-status';
+import { isGitHubOperationTokenConnectionLostError } from '@/lib/github-token';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
+import { openExternalUrl } from '@/lib/native-browser';
 import { ReadyForReviewStillDraftError, useGitHubPrDetails } from '@/hooks/use-github-pr-details';
-import { derivePrStatusFromDetails } from '@/lib/github-pr-details-state';
+import { useAwaitedPrStatus } from '@/hooks/use-awaited-pr-status';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import SessionChatStream, {
   type AssistantMessageAction,
   type GoalCommand,
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
+  type UserMessageEditMentionContext,
+  type UserMessageEditSubmission,
 } from '../ai-gui';
 import { MessageSendStatusContext } from '../ai-gui/message-send-status-context';
 import { format, formatDistanceToNow } from 'date-fns';
 import type { Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
-import { getAppShareUrl } from '@/lib/app-location';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
+import { buildSessionLink } from '@lody/shared/session-link';
+import { buildAppSessionUrl } from '@/lib/session-app-url';
+import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
+  normalizeSessionFileActionPlatform,
+  resolveOpenFolderInFileManagerLabel,
+} from '@/lib/session-file-actions';
+import {
   buildPathLauncherLaunchInput,
+  executePathLauncher,
+  buildPathLauncherProbes,
   getAvailablePathLauncherOptions,
   getPathLauncherId,
   PATH_LAUNCHER_PREFERENCE_CHANGED_EVENT,
@@ -162,74 +265,108 @@ import {
   writeStoredPathLauncherPreference,
   type PathLauncherOption,
 } from '@/lib/session-path-launchers';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import * as stylex from '@stylexjs/stylex';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import {
   SessionAccessControl,
   SessionArchivedBadge,
+  type SessionAccessAction,
+  type SessionShareEditorContext,
   getSessionSharingDescription,
-  getSessionSharingLabel,
   type SessionSharingTranslator,
 } from '@/components/session-sharing';
 
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/ui/sheet';
-import { Badge } from '@/ui/badge';
-import { Input } from '@/ui/input';
-import { Separator } from '@/ui/separator';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Drawer } from '@lody/ui/drawer';
+import { Badge } from '@lody/ui/badge';
+import { Input } from '@lody/ui/input';
+import { Separator } from '@lody/ui/separator';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
+import { useSessionPendingConfig } from '@/hooks/use-session-pending-config';
+import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-drafts';
+import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { useSessionActions } from '@/hooks/use-session-actions';
-import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
-import { UserAvatar } from '@/components/user-avatar';
-import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
+import { useWorkspaceSenderProfile } from '@/hooks/use-workspace-sender-profile';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
+import {
+  unlinkSessionPullRequestFromUi,
+  type SessionPullRequestLinksProps,
+} from './session-pr-links';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
-import { SessionInfoBar } from './session-info-bar';
-import type { ContextChipAction, PrCiRun } from './session-info-chips';
-import { resolveSessionInfoBarGitHubActionIds } from './session-info-action-state';
 import {
-  canPauseGoalThroughPromptBridge,
-  getPromptBridgeGoalCommands,
+  SessionInfoDialog,
+  type SessionInfoPullRequest,
+  type SessionOwnerMenuState,
+} from './session-info-dialog';
+import { SessionInfoBar } from './session-info-bar';
+import { SessionPreviewPreload } from './session-preview-preload';
+import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
+import { SessionProjectMembersChip } from './session-project-members-chip';
+import {
+  useMoveToFocusWithConfirmation,
+  useSettleSessionWithConfirmation,
+  useSnoozeSessionWithConfirmation,
+} from './session-sub-conversation-confirmation';
+import {
+  buildSessionProjectMemberRows,
+  resolveSessionProjectMemberRow,
+} from '@/lib/session-project-members';
+import {
+  mapGitHubCheckRunToPrCiRun,
+  type ContextChipAction,
+  type PrCiRun,
+  type WorkspaceLocationKind,
+} from './session-info-chips';
+import {
+  resolveSessionInfoBarGitHubActionIds,
+  shouldDisableSessionInfoBarGitHubActionForHydration,
+} from './session-info-action-state';
+import {
+  getSessionGoalCommands,
+  GOAL_COMMAND_PENDING_TIMEOUT_MS,
   isSessionPromptBusy,
 } from './session-goal-control';
 import { resolveSessionMessageSubmitRoute } from './session-message-submit-route';
+import {
+  CAPACITY_RETRY_CONTINUATION_PROMPT,
+  useCapacityAutoRetry,
+} from './use-capacity-auto-retry';
+import { useSessionDocStaleReport } from './use-session-doc-stale-report';
 import { buildFixCiErrorsPrompt, buildResolvePrConflictsPrompt } from './session-pr-prompts';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
 import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge-method';
 import { PrLinkProvider } from '@/components/ai-gui/pr-link-context';
+import { SessionLinkProvider } from '@/components/ai-gui/session-link-context';
 import {
   COMMIT_AND_PUSH_PROMPT,
-  CREATE_DRAFT_PR_PROMPT,
-  CREATE_PR_PROMPT,
+  CREATE_DRAFT_PR_BASE_PROMPT,
+  CREATE_DRAFT_PR_ORIGIN_PROMPT,
+  CREATE_PR_BASE_PROMPT,
+  CREATE_PR_ORIGIN_PROMPT,
+  PR_BRANCH_UPKEEP_PROMPT,
+  withPrBranchUpkeep,
+  withProjectGroupPrScope,
+  withQuickActionOrigin,
 } from './create-pr-prompt';
-import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import {
   getSessionForkDestinationOptions,
+  SessionForkOptionTooltip,
   type SessionForkDestination,
   type SessionForkWorktreeAvailability,
 } from './session-fork-destination-menu';
-import { ReviewAgentSetupDialog } from './auto-review-info';
-import { AutoReviewStatus } from './auto-review-status';
-import { useAutoReview } from '@/hooks/use-auto-review';
+import { SessionAgentFileLinkMenuProvider } from './session-agent-file-link-menu';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
 import {
   resolveOpenedByNavigationTarget,
   type SessionNavigationTarget,
 } from '@/lib/session-navigation';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import {
   isThoughtLevelSelector,
   type AcpConfigOptionValue,
@@ -239,19 +376,30 @@ import { useComposerCycleCommands } from '@/hooks/use-composer-cycle-commands';
 import { useSessionAcpSelectorContext } from '@/hooks/use-session-acp-selector-context';
 import {
   useAcpSessionConfigSelectionState,
-  useReconcileAcpSessionConfigSelection,
+  useResolvedAcpSessionConfigSelection,
 } from '@/hooks/use-acp-session-config-selection';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { MessageListErrorFallback } from './message-list-error-fallback';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
 import { NotificationPermissionPrompt } from './notification-permission-prompt';
 import { useAppStoreReviewPrompt } from '@/hooks/use-app-store-review-prompt';
 import {
   FloatingPermissionRequest,
   hasPendingPermissionRequest,
+  hasPendingAskUserQuestion,
 } from './floating-permission-request';
 import { SessionPin } from './session-pin';
 import { SessionPinContext, type SessionPinContextValue } from './session-pin-context';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
+import { ConversationSkeleton } from '@/components/ai-gui/conversation-sync-placeholders';
+import {
+  resolveHistoryLiveSync,
+  type LiveTurnActivity,
+} from '@/components/ai-gui/assistant-turn-timing';
+import { useHistoryLiveWindow } from '@/hooks/use-history-live-window';
+import { sessionUnsentNewConversationAtomFamily } from '@/atoms/session-send-status';
+import { useDisplayedContentSyncState } from '@/hooks/use-displayed-content-sync-state';
+import { resolveSessionContentSyncState } from '@/lib/session-content-sync-state';
 import { ChildTabEmptyState } from './child-tab-empty-state';
 import {
   SessionConversationPage,
@@ -263,7 +411,14 @@ import {
   resolveUnstartedTrailingDispatchAtMs,
   UNSTARTED_TRAILING_USER_TURN_TIMEOUT_MS,
 } from '@/lib/session-dispatch-state';
-import { shouldMarkSessionRead } from '@/lib/session-read-receipt';
+import {
+  getEffectiveSessionLastMessageAt,
+  resolveManualUnreadLatch,
+  shouldMarkSessionRead,
+  type ReadReceiptSnapshot,
+} from '@/lib/session-read-receipt';
+import { useWindowReadEngagement } from '@/lib/window-read-engagement';
+import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import {
   extractIssuePRMentionsFromText,
@@ -278,105 +433,390 @@ import {
 } from '@/lib/session-chat-search';
 import { useIncrementalSearchBlocks } from '@/hooks/use-incremental-search-blocks';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+  useConversationIndexRows,
+  useConversationTail,
+  useConversationVersion,
+  useTurn,
+} from '@/hooks/use-conversation-view';
+import {
+  collectConversationConfigSources,
+  countUserTurns,
+  resolveLastAssistantTurnIds,
+} from '@/lib/conversation-view';
+import {
+  latestGoalFromFacts,
+  latestProposedPlanFromFacts,
+  permissionRequestsFromFacts,
+  schedulingEntriesFromFacts,
+  useSessionTurnFacts,
+} from './session-turn-facts';
+import { AlertDialog } from '@/ui/dialog';
 import { resolveSessionHtmlAttachmentAction } from './session-html-attachment-action';
 
+// loro-repo stays out of the session route chunk: its error classes resolve in
+// the background and start formatting once loaded. Errors that arrive before
+// the chunk resolves fall through to the generic Error formatting, matching
+// what non-repo failures already produced.
+let loroSyncErrorTools: ReturnType<typeof createLoroSyncErrorTools> | null = null;
+void import('loro-repo')
+  .then(({ RepoSyncError, RepoTransportError }) => {
+    loroSyncErrorTools = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
+  })
+  .catch(() => {});
+
+const styles = stylex.create({
+  historyTriggerIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+  historyTriggerIconSpaced: { marginRight: 'calc(var(--spacing) * 2)' },
+  historySubtitle: {
+    color: colors.secondaryLabel,
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+  },
+  historyList: { marginTop: 'calc(var(--spacing) * 6)' },
+  historyEmpty: {
+    color: colors.secondaryLabel,
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+  },
+  historyRow: {
+    width: '100%',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--hover))',
+      },
+    },
+    color: 'inherit',
+    textAlign: 'left',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+    marginBlockStart: {
+      default: null,
+      ':not(:last-child)': 0,
+    },
+    marginBlockEnd: {
+      default: null,
+      ':not(:last-child)': 'calc(var(--spacing) * 2)',
+    },
+  },
+  historyRowSelected: {
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--selection))',
+    color: 'hsl(var(--selection-foreground))',
+  },
+  historyRowBody: { display: 'flex', alignItems: 'flex-start', gap: 'calc(var(--spacing) * 3)' },
+  historyStatusDot: {
+    width: 'calc(var(--spacing) * 2.5)',
+    height: 'calc(var(--spacing) * 2.5)',
+    marginTop: 'calc(var(--spacing) * 1)',
+    borderRadius: '9999px',
+  },
+  statusDotInfo: { backgroundColor: colors.accent },
+  statusDotWarning: { backgroundColor: colors.warning },
+  statusDotSuccess: { backgroundColor: colors.success },
+  statusDotError: { backgroundColor: colors.destructive },
+  statusDotNeutral: { backgroundColor: colors.secondaryLabel },
+  historyTextColumn: { minWidth: 0, flex: '1 1 0%' },
+  historyTitle: {
+    overflow: 'hidden',
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+    fontWeight: 500,
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  historyMeta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    marginTop: 'calc(var(--spacing) * 1)',
+    color: colors.secondaryLabel,
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+  },
+  historyMetaText: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  historySeparator: {
+    width: 'var(--spacing)',
+    height: 'var(--spacing)',
+    borderRadius: '9999px',
+    backgroundColor: colors.separator,
+  },
+  projectRoot: { minWidth: 0 },
+  projectLine: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    fontSize: '0.875rem',
+    lineHeight: 1.25,
+  },
+  projectIcon: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    color: colors.secondaryLabel,
+  },
+  projectIconGlyph: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+  projectTitle: {
+    overflow: 'hidden',
+    fontWeight: 500,
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  projectStatus: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    color: colors.secondaryLabel,
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+  },
+  openedByColumn: {
+    paddingBlock: {
+      default: 'calc(var(--spacing) * 2)',
+      '@media (min-width: 640px)': 'calc(var(--spacing) * 3)',
+    },
+  },
+  continuationNotesColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  pageOutlineOverlay: {
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+    containerType: 'inline-size',
+  },
+  toolbarHeader: {
+    display: 'flex',
+    height: '100%',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    paddingLeft: 'calc(var(--spacing) * 1)',
+    paddingRight: 'calc(var(--spacing) * 2)',
+  },
+  desktopHeaderActions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  hiddenHeaderActions: { display: 'none' },
+  messageArea: { position: 'relative', minHeight: 0, flex: '1 1 0%' },
+  stream: { height: '100%' },
+  shareRequestsScroller: { maxHeight: '35vh', flexShrink: 0, overflowY: 'auto' },
+  shareRequestsColumn: { paddingInline: 'calc(var(--spacing) * 3)' },
+  menuIcon: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+  menuIconFixed: { flexShrink: 0 },
+  menuTrailingIcon: { marginLeft: 'auto' },
+  menuCopyIcon: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
+  menuBranchIcon: { marginTop: 'calc(var(--spacing) * 0.5)' },
+  menuForkStatus: {
+    flexShrink: 0,
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: colors.secondaryLabel,
+  },
+  searchShortcut: {
+    borderRadius: 'var(--radius-sm)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--muted))',
+    paddingInline: 'var(--spacing)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '10px',
+    lineHeight: 1,
+    color: colors.secondaryLabel,
+  },
+  searchOverlay: {
+    pointerEvents: 'auto',
+    position: 'absolute',
+    right: {
+      default: 'calc(var(--spacing) * 3)',
+      '@media (min-width: 640px)': 'calc(var(--spacing) * 4)',
+    },
+    top: {
+      default: 'calc(var(--spacing) * 3)',
+      '@media (min-width: 640px)': 'calc(var(--spacing) * 4)',
+    },
+    zIndex: 20,
+    width: {
+      default: 'min(360px, calc(100% - 1.5rem))',
+      '@media (min-width: 640px)': 'min(360px, calc(100% - 2rem))',
+    },
+  },
+  searchSurface: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 9)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 0.5)',
+    borderRadius: 'var(--radius-lg)',
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    backgroundColor: {
+      default: 'hsl(var(--background) / 0.95)',
+      '@supports (backdrop-filter: var(--tw))': 'hsl(var(--background) / 0.85)',
+    },
+    paddingLeft: 'calc(var(--spacing) * 2.5)',
+    paddingRight: 'var(--spacing)',
+    boxShadow: '0 4px 12px -4px rgba(15,23,42,0.16), 0 1px 2px rgba(15,23,42,0.06)',
+    backdropFilter: 'blur(var(--blur-md))',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+    ':focus-within': { borderColor: 'hsl(var(--ring) / 0.6)' },
+  },
+  searchSurfaceNoResults: {
+    borderColor: {
+      default: 'hsl(var(--destructive) / 0.3)',
+      ':focus-within': 'hsl(var(--destructive) / 0.6)',
+    },
+  },
+  searchIcon: {
+    color: 'hsl(var(--muted-foreground) / 0.8)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+  },
+  searchIconQuery: { color: colors.label },
+  searchIconNoResults: { color: 'hsl(var(--destructive) / 0.8)' },
+  searchCount: {
+    flexShrink: 0,
+    userSelect: 'none',
+    paddingInline: 'var(--spacing)',
+    fontSize: '11.5px',
+    fontWeight: 500,
+    fontVariantNumeric: 'tabular-nums',
+    letterSpacing: 'var(--tracking-tight)',
+    color: colors.secondaryLabel,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+  },
+  searchCountNoResults: { color: 'hsl(var(--destructive) / 0.9)' },
+  searchActions: { display: 'flex', alignItems: 'center', gap: '1px' },
+  headerPills: {
+    display: {
+      default: 'none',
+      '@container session-page (min-width: 800px)': 'flex',
+    },
+    alignItems: 'center',
+  },
+  headerLauncher: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 0.16)',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground) / 0.28)',
+      },
+    },
+    backgroundColor: 'transparent',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    fontSize: '0.7rem',
+    fontWeight: 500,
+    lineHeight: 'normal',
+    color: {
+      default: 'hsl(var(--foreground) / 0.8)',
+      '@media (hover: hover)': {
+        ':hover': colors.label,
+      },
+    },
+    outlineStyle: 'none',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+    outline: {
+      default: null,
+      '@media (forced-colors: active)': '2px solid transparent',
+    },
+    outlineOffset: {
+      default: null,
+      '@media (forced-colors: active)': '2px',
+    },
+    '--tw-ring-shadow': {
+      default: null,
+      ':focus-visible':
+        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)',
+    },
+    '--tw-ring-color': {
+      default: null,
+      ':focus-visible': 'hsl(var(--ring) / 0.5)',
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible':
+        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+    },
+  },
+  headerLauncherPrimary: {
+    gap: 'var(--spacing)',
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+    borderRightWidth: 0,
+  },
+  headerLauncherSelect: {
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    paddingInline: 'var(--spacing)',
+  },
+  headerLauncherLabel: { fontSize: '0.75rem', lineHeight: '1rem' },
+  composerContents: { display: 'contents' },
+  composerHidden: { display: 'none' },
+});
+
+function reportStatusActionError(error: unknown): void {
+  toast.error(error instanceof Error ? error.message : String(error));
+}
+
 function getErrorMessage(err: unknown): string {
+  const syncError = loroSyncErrorTools?.formatLoroSyncError(err);
+  if (syncError) return syncError;
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   return String(err);
 }
 
-/**
- * Copy-as-Markdown never trims message text, so it can trim tool output, thinking,
- * or nothing at all — and it can still land over budget. Silent truncation reads as
- * "I copied everything", so the toast always names what happened.
- */
-function describeCopiedConversation(
-  stats: ConversationMarkdownStats,
-  t: (key: string, fallback: string, options?: Record<string, unknown>) => string
-): string {
-  if (stats.overBudget) {
-    return t(
-      'sessions.copyConversationHistoryCopiedOverBudget',
-      'Conversation copied as Markdown (~{{tokens}}k tokens — message text alone exceeds the target)',
-      { tokens: Math.round(stats.estimatedTokens / 1000) }
-    );
-  }
-
-  const trimmed: string[] = [];
-  if (stats.toolCallsCollapsed) {
-    trimmed.push(t('sessions.copyConversationHistoryTrimToolCalls', 'tool call details'));
-  }
-  if (stats.thinkingOmitted) {
-    trimmed.push(t('sessions.copyConversationHistoryTrimThinking', 'thinking'));
-  }
-  if (stats.terminalOutputOmitted || stats.terminalOutputTruncated) {
-    trimmed.push(t('sessions.copyConversationHistoryTrimTerminal', 'terminal output'));
-  }
-  if (stats.toolResultsTruncated > 0) {
-    trimmed.push(
-      // `value`, not `count`: `count` would send i18next down its plural-key
-      // lookup (`..._one` / `..._other`), which these strings do not define.
-      t('sessions.copyConversationHistoryTrimToolResults', '{{value}} tool results', {
-        value: stats.toolResultsTruncated,
-      })
-    );
-  }
-
-  if (trimmed.length === 0) {
-    return t('sessions.copyConversationHistoryCopied', 'Conversation copied as Markdown');
-  }
-  return t(
-    'sessions.copyConversationHistoryCopiedTrimmed',
-    'Conversation copied as Markdown (trimmed: {{omitted}})',
-    { omitted: trimmed.join(', ') }
-  );
-}
-
-function mapGitHubCheckRunToInfoBar(run: GitHubCheckRun): PrCiRun {
-  const status: PrCiRun['status'] =
-    run.status === 'queued'
-      ? 'queued'
-      : run.status === 'in_progress'
-        ? 'running'
-        : run.conclusion === 'success'
-          ? 'success'
-          : run.conclusion === 'neutral' || run.conclusion === 'skipped'
-            ? 'skipped'
-            : 'failure';
-  const startedAtMs = run.startedAt ? Date.parse(run.startedAt) : Number.NaN;
-  const completedAtMs = run.completedAt ? Date.parse(run.completedAt) : Number.NaN;
-  const durationMs =
-    Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
-      ? Math.max(0, completedAtMs - startedAtMs)
-      : undefined;
-  return {
-    name: run.name,
-    status,
-    ...(durationMs === undefined ? {} : { durationMs }),
-    ...(run.htmlUrl ? { url: run.htmlUrl } : {}),
-  };
-}
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import {
   capturePostHogEvent,
   capturePostHogOutcome,
   getDurationSinceMs,
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
-import { isAskUserQuestionPermissionMeta, type AnalyticsOutcome } from '@lody/shared';
+import type { AnalyticsOutcome } from '@lody/shared';
 import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
-import { buildAuthorFixPrompt } from '@lody/shared';
-import { ACP_PLAN_PERMISSION_MODE_ID } from '@lody/shared';
 import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
@@ -387,17 +827,11 @@ import {
   resolveSessionWorkspacePath,
 } from '@/lib/session-workspace-path';
 import { isNativeAppShell } from '@/lib/native-platform';
-import {
-  disableCodexPlanMode,
-  findLatestCompletedCodexProposedPlan,
-  shouldShowCodexProposedPlanDecision,
-} from '@/lib/codex-plan-decision';
-import { resolveModeIdAfterPlanExit } from '@/lib/plan-mode-exit';
-import { planModeExitApprovalCountAtomFamily } from '@/atoms/plan-mode-exit';
+import { shouldShowCodexProposedPlanDecision } from '@/lib/codex-plan-decision';
+import { buildExecutionTurnConfigOverrides } from '@/lib/execution-turn-config';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
-
-// ── Path launcher options for "Open in" split button ──
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 type ActionId = 'copy-path';
 
@@ -415,7 +849,7 @@ const DISPATCHING_TIMEOUT_MS = 15_000;
 const TITLE_SYNCING_INDICATOR_DELAY_MS = 400;
 
 /** Exact ⌘F / Ctrl+F — no Alt/Shift/secondary primary mod. See find keydown handler. */
-const FIND_IN_CHAT_BINDING = parseBinding('$mod+f');
+const FIND_IN_CHAT_BINDING = 'Mod+F';
 
 const summarizeInputBlocksForAnalytics = (inputBlocks: readonly SessionInputBlock[]) => {
   let textBlockCount = 0;
@@ -490,7 +924,12 @@ const getSessionAnalyticsProject = (project: {
 // counts assistant turns; `duration_ms` spans the first turn start to the last
 // turn end; `permission_wait_ms` sums the per-turn waits.
 const summarizeSessionEndTiming = (
-  history: readonly SessionHistory[] | undefined
+  history:
+    | readonly Pick<
+        SessionHistory,
+        'role' | 'startedAt' | 'timestamp' | 'endedAt' | 'permissionWaitMs'
+      >[]
+    | undefined
 ): {
   turn_count: number;
   duration_ms: number | null;
@@ -551,62 +990,6 @@ const summarizeSessionEndTiming = (
   };
 };
 
-type PermissionScanEntry = {
-  requestId: string;
-  requestKind: 'ask_user_question' | 'tool_permission';
-  toolKind: ToolKind | null;
-  hasOutcome: boolean;
-  decision: 'allow' | 'deny' | 'cancelled' | 'other';
-};
-
-// Flatten every tool-call permission request currently in history so the
-// permission funnel (shown -> responded) can be derived from CRDT state. Done
-// by diffing snapshots (see the effect) rather than instrumenting the response
-// handler in floating-permission-request.tsx: that component is owned elsewhere,
-// and CRDT-derived state also covers permissions resolved on another client.
-const scanPermissionRequests = (
-  history: readonly SessionHistory[] | undefined
-): PermissionScanEntry[] => {
-  if (!history?.length) return [];
-  const entries: PermissionScanEntry[] = [];
-  for (const historyEntry of history) {
-    if (historyEntry.role !== 'assistant') continue;
-    const rawItems: unknown = historyEntry.items;
-    if (!Array.isArray(rawItems)) continue;
-    for (const rawItem of rawItems) {
-      const item = rawItem as MessageContent;
-      if (!item || item.type !== 'tool_call') continue;
-      const permission = (item as ToolCallMessage).permissionRequest;
-      if (!permission?.requestId) continue;
-      const outcome = permission.outcome;
-      let decision: PermissionScanEntry['decision'] = 'other';
-      if (outcome) {
-        if (outcome.outcome === 'cancelled') {
-          decision = 'cancelled';
-        } else if (outcome.outcome === 'selected') {
-          const selected = permission.options.find((opt) => opt.optionId === outcome.optionId);
-          const kind = selected?.kind ?? '';
-          decision = kind.startsWith('allow')
-            ? 'allow'
-            : kind.startsWith('deny') || kind.startsWith('reject')
-              ? 'deny'
-              : 'other';
-        }
-      }
-      entries.push({
-        requestId: permission.requestId,
-        requestKind: isAskUserQuestionPermissionMeta(permission._meta)
-          ? 'ask_user_question'
-          : 'tool_permission',
-        toolKind: (item as ToolCallMessage).kind ?? null,
-        hasOutcome: Boolean(outcome),
-        decision,
-      });
-    }
-  }
-  return entries;
-};
-
 const countSearchBlockTypes = (blocks: readonly SessionSearchBlock[]): Record<string, number> => {
   const counts: Record<string, number> = {};
   for (const block of blocks) {
@@ -640,26 +1023,11 @@ const isTrackableRunningStatusType = (statusType: SessionStatus['type'] | undefi
 };
 
 const STATUS_TONE_STYLES = {
-  info: {
-    text: 'text-primary',
-    dot: 'bg-primary',
-  },
-  warn: {
-    text: 'text-status-warning',
-    dot: 'bg-status-warning',
-  },
-  success: {
-    text: 'text-status-success',
-    dot: 'bg-status-success',
-  },
-  error: {
-    text: 'text-destructive',
-    dot: 'bg-destructive',
-  },
-  neutral: {
-    text: 'text-muted-foreground',
-    dot: 'bg-muted-foreground',
-  },
+  info: styles.statusDotInfo,
+  warn: styles.statusDotWarning,
+  success: styles.statusDotSuccess,
+  error: styles.statusDotError,
+  neutral: styles.statusDotNeutral,
 } as const;
 
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
@@ -710,7 +1078,7 @@ const resolveActivityFromItems = (items: MessageContent[]): AgentActivity => {
   return resolveActivityFromToolKind(lastToolKind);
 };
 
-const resolveActivityFromHistory = (history?: SessionHistory[]): AgentActivity => {
+const resolveActivityFromHistory = (history?: readonly SessionHistory[]): AgentActivity => {
   if (!history?.length) {
     return 'thinking';
   }
@@ -733,6 +1101,14 @@ const resolveActivityFromSessionStatus = (
   }
   return null;
 };
+
+/**
+ * History and presence arrive independently. A finished assistant row cannot
+ * distinguish finalization from a new running goal prompt. Only the execution
+ * owner's finalizing phase selects the finalization label; the session stays busy.
+ */
+export const isSessionFinalizing = (liveStatus: SessionStatus | null | undefined): boolean =>
+  liveStatus?.type === 'running' && liveStatus.phase === 'finalizing';
 
 const resolveToneByStatus = (status: SessionStatus['type']) => {
   switch (status) {
@@ -791,27 +1167,30 @@ export function SessionHistoryButton({
 
   const trigger = (
     <Button
-      variant={compact ? 'ghost' : 'outline'}
-      size={compact ? 'icon' : 'sm'}
-      className={cn('shrink-0', compact ? 'h-8 w-8' : '')}
+      variant={compact ? 'ghost' : 'secondary'}
+      size="small"
+      icon={compact}
+      className="shrink-0"
       disabled={historySessions.length === 0}
     >
-      <History className={cn('h-4 w-4', compact ? '' : 'mr-2')} />
+      <History
+        {...stylex.props(styles.historyTriggerIcon, !compact && styles.historyTriggerIconSpaced)}
+      />
       {!compact && <span>{t('sessions.history', 'History')}</span>}
     </Button>
   );
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>{trigger}</SheetTrigger>
-      <SheetContent side={isMobile ? 'bottom' : 'right'} className="sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>{t('sessions.history', 'History')}</SheetTitle>
-          <p className="text-sm text-muted-foreground">{t('sessions.newSession.title')}</p>
-        </SheetHeader>
-        <div className="mt-6 space-y-2">
+    <Drawer.Root side={isMobile ? 'bottom' : 'end'} open={open} onOpenChange={setOpen}>
+      <Drawer.Trigger render={trigger} />
+      <Drawer.Content side={isMobile ? 'bottom' : 'end'} className="sm:max-w-md">
+        <Drawer.Header>
+          <Drawer.Title>{t('sessions.history', 'History')}</Drawer.Title>
+          <p {...stylex.props(styles.historySubtitle)}>{t('sessions.newSession.title')}</p>
+        </Drawer.Header>
+        <div {...stylex.props(styles.historyList)}>
           {historySessions.length === 0 ? (
-            <div className="text-sm text-muted-foreground">{t('sessions.noSessions')}</div>
+            <div {...stylex.props(styles.historyEmpty)}>{t('sessions.noSessions')}</div>
           ) : (
             historySessions.map((session) => {
               const sessionTitle = (session.title ?? '').trim() || defaultSessionTitle;
@@ -832,38 +1211,30 @@ export function SessionHistoryButton({
               return (
                 <button
                   key={session.id}
-                  className={cn(
-                    'w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted',
-                    isActive && 'border-border/70 bg-selection text-selection-foreground'
-                  )}
+                  {...stylex.props(styles.historyRow, isActive && styles.historyRowSelected)}
                   onClick={() => handleSelect(session.id as SessionId)}
                 >
-                  <div className="flex items-start gap-3">
+                  <div {...stylex.props(styles.historyRowBody)}>
                     <div
-                      className={cn(
-                        'mt-1 h-2.5 w-2.5 rounded-full',
-                        STATUS_TONE_STYLES[tone ?? 'info'].dot
-                      )}
+                      {...stylex.props(styles.historyStatusDot, STATUS_TONE_STYLES[tone ?? 'info'])}
                     />
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-sm font-medium">{sessionTitle}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <span className="truncate">{createdAtLabel}</span>
-                        <span className="h-1 w-1 rounded-full bg-border" />
-                        <span className="truncate">{statusLabel}</span>
+                    <div {...stylex.props(styles.historyTextColumn)}>
+                      <p {...stylex.props(styles.historyTitle)}>{sessionTitle}</p>
+                      <div {...stylex.props(styles.historyMeta)}>
+                        <span {...stylex.props(styles.historyMetaText)}>{createdAtLabel}</span>
+                        <span {...stylex.props(styles.historySeparator)} />
+                        <span {...stylex.props(styles.historyMetaText)}>{statusLabel}</span>
                       </div>
                     </div>
-                    {isActive && (
-                      <Badge variant="secondary">{t('common.current', 'Current')}</Badge>
-                    )}
+                    {isActive && <Badge>{t('common.current', 'Current')}</Badge>}
                   </div>
                 </button>
               );
             })
           )}
         </div>
-      </SheetContent>
-    </Sheet>
+      </Drawer.Content>
+    </Drawer.Root>
   );
 }
 
@@ -899,24 +1270,22 @@ export function SessionProjectInfo({
 
   if (!hasProjectInfo) {
     return (
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-1.5 text-sm leading-tight">
-          <span className="inline-flex shrink-0 items-center text-muted-foreground">
-            <MessageCircle className="h-3.5 w-3.5" />
+      <div {...stylex.props(styles.projectRoot)}>
+        <div {...stylex.props(styles.projectLine)}>
+          <span {...stylex.props(styles.projectIcon)}>
+            <MessageCircle {...stylex.props(styles.projectIconGlyph)} />
           </span>
-          <span className="truncate font-medium">{t('sessions.chat', 'Chat')}</span>
+          <span {...stylex.props(styles.projectTitle)}>{t('sessions.chat', 'Chat')}</span>
           {isLoading && (
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-              {t('common.loading', 'Loading')}
-            </span>
+            <span {...stylex.props(styles.projectStatus)}>{t('common.loading', 'Loading')}</span>
           )}
           {isSyncing && <SessionSyncingIndicator />}
           {isMachineOffline && (
             <span
-              className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+              {...stylex.props(styles.projectStatus)}
               title={t('sessions.machineOffline', 'Machine is offline')}
             >
-              <FamiconsCloudOfflineOutline className="h-3.5 w-3.5" />
+              <FamiconsCloudOfflineOutline {...stylex.props(styles.projectIconGlyph)} />
             </span>
           )}
         </div>
@@ -925,46 +1294,34 @@ export function SessionProjectInfo({
   }
 
   return (
-    <div className="min-w-0">
-      <div className="flex min-w-0 items-center gap-1.5 text-sm leading-tight">
+    <div {...stylex.props(styles.projectRoot)}>
+      <div {...stylex.props(styles.projectLine)}>
         {(projectLabel || localProjectName) && (
-          <span className="inline-flex shrink-0 items-center text-muted-foreground">
-            {isGitHub ? <Github className="h-3.5 w-3.5" /> : <Folder className="h-3.5 w-3.5" />}
+          <span {...stylex.props(styles.projectIcon)}>
+            {isGitHub ? (
+              <Github {...stylex.props(styles.projectIconGlyph)} />
+            ) : (
+              <Folder {...stylex.props(styles.projectIconGlyph)} />
+            )}
           </span>
         )}
-        <span className="truncate font-medium">{projectLabel || localProjectName || ''}</span>
+        <span {...stylex.props(styles.projectTitle)}>{projectLabel || localProjectName || ''}</span>
         {isLoading && (
-          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-            {t('common.loading', 'Loading')}
-          </span>
+          <span {...stylex.props(styles.projectStatus)}>{t('common.loading', 'Loading')}</span>
         )}
         {isSyncing && <SessionSyncingIndicator />}
         {isMachineOffline && (
           <span
-            className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+            {...stylex.props(styles.projectStatus)}
             title={t('sessions.machineOffline', 'Machine is offline')}
           >
-            <FamiconsCloudOfflineOutline className="h-3.5 w-3.5" />
+            <FamiconsCloudOfflineOutline {...stylex.props(styles.projectIconGlyph)} />
           </span>
         )}
       </div>
     </div>
   );
 }
-
-/**
- * Owner-transfer state for the "···" menu. Only resolved on multi-member
- * workspaces — a solo workspace has nobody to hand the session to, so the
- * caller passes `undefined` and the submenu never renders.
- */
-export type SessionOwnerMenuState = {
-  members: WorkspaceMember[];
-  /** Current `SessionMeta.userId`; may name someone who already left. */
-  ownerUserId: string;
-  onChangeOwner: (userId: string) => void | Promise<void>;
-  /** Member whose write is still in flight — keeps the row from looking inert. */
-  pendingUserId?: string | null;
-};
 
 /**
  * Navigation across the presentation-only "opened by" relationship (see
@@ -974,13 +1331,19 @@ export type SessionOwnerMenuState = {
  * conversation — not only from the sidebar tree.
  */
 export type SessionOpenedByMenuState = {
-  /** The Session that created this one, when it is still resolvable. */
-  openedBy?: { sessionId: SessionId; title: string; target: SessionNavigationTarget } | null;
+  /** The Session that created this one; navigation exists only while it resolves. */
+  openedBy?: {
+    sessionId: SessionId;
+    title: string;
+    target: SessionNavigationTarget | null;
+  } | null;
   /** Independent Sessions this Session opened, oldest first. */
   opened?: Array<{ sessionId: SessionId; title: string; target: SessionNavigationTarget }>;
   onOpenSession: (target: SessionNavigationTarget) => void;
 };
 
+const SESSION_HEADER_MENU_CONTENT_CLASS =
+  'min-w-[200px] max-w-[290px] [&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
 /** Session header "···" menu — context, visibility, sharing, and session actions. */
 export function SessionHeaderMenu({
   session,
@@ -989,21 +1352,31 @@ export function SessionHeaderMenu({
   machineName,
   onCopyConversationHistory,
   onCopyUrl,
+  onCopyDeepLink,
+  onOpenPublicShare,
   sharing,
   onShareWithTeam,
+  onShareAsImage,
   onOpenSearch,
-  onFork,
+  onFork: requestedFork,
   isForking = false,
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
   onRename,
-  onOpenReviewSettings,
+  onSnooze,
+  onSettle,
+  onMoveToFocus,
   owner,
   openedByRelations,
   onArchive,
   onRestore,
   onDelete,
   compact = false,
+  openInIde,
+  openInFileManager,
+  isLauncherPillVisible,
+  pullRequest,
+  continuationTweaks,
   t,
 }: {
   session: SessionMeta;
@@ -1014,15 +1387,22 @@ export function SessionHeaderMenu({
   machineName?: string | null;
   onCopyConversationHistory?: () => void | Promise<void>;
   onCopyUrl: () => void | Promise<void>;
+  onCopyDeepLink?: () => void | Promise<void>;
+  /** Opens the page-owned static-share editor. Omitted when publishing is unavailable. */
+  onOpenPublicShare?: () => void;
   sharing?: SessionSharingState;
   onShareWithTeam?: () => void | Promise<void>;
+  /** Opens the share-as-image preview dialog. Pure local feature; no gating. */
+  onShareAsImage?: () => void;
   onOpenSearch?: () => void | Promise<void>;
   onFork?: (destination?: SessionForkDestination) => void | Promise<void>;
   isForking?: boolean;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkMenuOpen?: () => void;
   onRename?: () => void | Promise<void>;
-  onOpenReviewSettings?: () => void;
+  onSnooze?: (snoozedUntil: number) => void | Promise<void>;
+  onSettle?: () => void | Promise<void>;
+  onMoveToFocus?: () => void | Promise<void>;
   /** Multi-member workspaces only; omitted elsewhere. */
   owner?: SessionOwnerMenuState;
   /** Omitted when this Session neither opened nor was opened by another. */
@@ -1031,9 +1411,50 @@ export function SessionHeaderMenu({
   onRestore?: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   compact?: boolean;
+  continuationTweaks?: React.ReactNode;
+  /** Electron path launchers; always listed in `⋯` so CSS-hidden pills stay reachable. */
+  openInIde?: {
+    options: PathLauncherOption[];
+    selected: PathLauncherOption;
+    onOpen: () => void;
+    onSelect: (launcher: PathLauncherOption) => void;
+  };
+  /**
+   * Opens this session's directory in Finder, File Explorer, or the host file
+   * manager. Stays in `⋯` even when the editor pill is on screen — it is not
+   * one of the editor choices.
+   */
+  openInFileManager?: {
+    label: string;
+    onOpen: () => void;
+  };
+  /** Whether the header's launcher pill is on screen; read when the menu opens. */
+  isLauncherPillVisible?: () => boolean;
+  /** The session's current pull request, listed in the info dialog. */
+  pullRequest?: SessionInfoPullRequest;
   t: SessionSharingTranslator;
 }) {
+  const rpcReason = useMachineRpcFeatureReason(session.machineId);
+  const onFork = rpcReason ? undefined : requestedFork;
+  const exportReason = useWorkspaceFeatureReason('export');
+  const sharingReason = useWorkspaceFeatureReason('sharing');
+  const previewReason = useWorkspaceFeatureReason('remote-preview');
   const isArchived = !!session.isArchived;
+  const [customSnoozeTarget, setCustomSnoozeTarget] = useState<CustomSnoozeDialogTarget | null>(
+    null
+  );
+  const statusNow = new Date(getServerNow());
+  const statusGroup = statusViewTier(
+    {
+      activityAt: session.lastMessageAt ?? (Date.parse(session.createdAt ?? '') || 0),
+      isWorking: session.status?.type === 'running' || session.status?.type === 'initializing',
+      isWaitingPermission: session.status?.type === 'requestPermission',
+      snoozedUntil: session.snoozedUntil,
+      settledAt: session.settledAt,
+      focusRestoredAt: session.focusRestoredAt,
+    },
+    statusNow.getTime()
+  );
   const project = session.project as
     | { kind: 'github'; repoFullName?: string; branch?: string }
     | { kind: 'local'; localProjectId?: string; branch?: string; githubRepoFullName?: string }
@@ -1042,25 +1463,45 @@ export function SessionHeaderMenu({
   const isGitHub = project?.kind === 'github' || !!repoFullName;
   const baseBranch = session.baseBranch?.trim() || getProjectRefBranch(project) || '';
   const currentBranch = session.branchName?.trim() || '';
-  const showBranchInfo = Boolean(
-    (isGitHub || project?.kind === 'local') && (baseBranch || currentBranch)
-  );
   const localPath = localProjectMeta?.rootPath ?? '';
   const trimmedWorkspacePath = workspacePath?.trim() || '';
-  const branchDisplayValue = currentBranch || baseBranch;
   const showBaseBranchContext = Boolean(
     currentBranch && baseBranch && currentBranch !== baseBranch
-  );
-  const showProjectPath = !showBranchInfo && Boolean(localPath);
-  const showSessionContext = Boolean(
-    (isGitHub && repoFullName) || showBranchInfo || showProjectPath || machineName || sharing
   );
   const shareActionDisabled =
     !onShareWithTeam ||
     sharing?.visibility === 'unknown' ||
     (sharing?.visibility === 'private' &&
       (sharing.privateReason === 'machine-not-registered' || !sharing.canManage));
-  const [reviewSetupOpen, setReviewSetupOpen] = useState(false);
+  const conversationWide = useAtomValue(conversationWideModeAtom);
+  const setConversationWide = useSetAtom(conversationWideModeAtom);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [launcherPillVisible, setLauncherPillVisible] = useState(false);
+  const infoOwner = isArchived ? undefined : owner;
+  const sessionPlacement =
+    machineName && project?.kind === 'local'
+      ? session.isWorktree
+        ? ('worktree' as const)
+        : ('local' as const)
+      : undefined;
+  const hasSessionInfo = Boolean(
+    (isGitHub && repoFullName) ||
+    currentBranch ||
+    baseBranch ||
+    pullRequest ||
+    machineName ||
+    trimmedWorkspacePath ||
+    localPath ||
+    sharing ||
+    infoOwner
+  );
+  const showStatusMenu =
+    !isArchived &&
+    Boolean(
+      onSnooze ||
+      (statusGroup !== 'settled' && onSettle) ||
+      (statusGroup !== 'focus' && onMoveToFocus)
+    );
 
   const openedBySession = openedByRelations?.openedBy ?? null;
   const openedSessions = openedByRelations?.opened ?? [];
@@ -1068,52 +1509,95 @@ export function SessionHeaderMenu({
     openedByRelations && (openedBySession || openedSessions.length > 0) ? (
       <>
         {openedBySession ? (
-          <DropdownMenuItem
+          <Menu.Item
+            disabled={!openedBySession.target}
             onClick={() => {
-              openedByRelations.onOpenSession(openedBySession.target);
+              if (openedBySession.target) {
+                openedByRelations.onOpenSession(openedBySession.target);
+              }
             }}
             title={openedBySession.title}
+            icon={CornerLeftUp}
           >
-            <CornerLeftUp className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">
-              {t('sessions.openedBy.openOpener', 'Opened by')}: {openedBySession.title}
-            </span>
-          </DropdownMenuItem>
+            {t('sessions.openedBy.openOpener', 'Opened by')}: {openedBySession.title}
+          </Menu.Item>
         ) : null}
         {openedSessions.length > 0 ? (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <GitBranchPlus className="h-3.5 w-3.5 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">
-                {t('sessions.openedBy.openedSessions', 'Opened sessions')} ({openedSessions.length})
-              </span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
+          <Menu.Submenu>
+            <Menu.SubmenuTrigger icon={GitBranchPlus}>
+              {t('sessions.openedBy.openedSessions', 'Opened sessions')} ({openedSessions.length})
+            </Menu.SubmenuTrigger>
+            <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
               {openedSessions.map((opened) => (
-                <DropdownMenuItem
+                <Menu.Item
                   key={opened.sessionId}
                   onClick={() => {
                     openedByRelations.onOpenSession(opened.target);
                   }}
                   title={opened.title}
                 >
-                  <span className="min-w-0 flex-1 truncate">{opened.title}</span>
-                </DropdownMenuItem>
+                  {opened.title}
+                </Menu.Item>
               ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+            </Menu.Content>
+          </Menu.Submenu>
         ) : null}
-        <DropdownMenuSeparator />
       </>
     ) : null;
+
+  const openInIdeMenu = (() => {
+    if (!openInIde || openInIde.options.length === 0) return null;
+    const SelectedIcon = getPathLauncherIcon(openInIde.selected);
+    const openLabel = t('sessions.openInIde', 'Open in {{name}}', {
+      name: openInIde.selected.label,
+    });
+    if (openInIde.options.length === 1) {
+      return (
+        <Menu.Item icon={SelectedIcon} onClick={openInIde.onOpen}>
+          {openLabel}
+        </Menu.Item>
+      );
+    }
+    return (
+      <Menu.Submenu>
+        <Menu.SubmenuTrigger icon={SelectedIcon}>{openLabel}</Menu.SubmenuTrigger>
+        <Menu.Content>
+          <Menu.RadioGroup
+            value={getPathLauncherId(openInIde.selected)}
+            onValueChange={(launcherId) => {
+              const target = openInIde.options.find(
+                (option) => getPathLauncherId(option) === launcherId
+              );
+              if (target) openInIde.onSelect(target);
+            }}
+          >
+            {openInIde.options.map((launcher) => {
+              const launcherId = getPathLauncherId(launcher);
+              const LauncherIcon = getPathLauncherIcon(launcher);
+              return (
+                <Menu.RadioItem
+                  key={launcherId}
+                  value={launcherId}
+                  icon={LauncherIcon}
+                  indicator="check"
+                  indicatorSide="end"
+                >
+                  {launcher.label}
+                </Menu.RadioItem>
+              );
+            })}
+          </Menu.RadioGroup>
+        </Menu.Content>
+      </Menu.Submenu>
+    );
+  })();
 
   const copyToClipboard = useCallback(
     // successMessage names what was copied in a full sentence (e.g. "Base
     // branch name copied to clipboard") — no raw value echo, which reads
     // noisy for long paths/URLs.
     (text: string, successMessage: string) => {
-      void navigator.clipboard
-        .writeText(text)
+      void copyTextToClipboard(text)
         .then(() => toast.success(successMessage))
         .catch(() => toast.error(t('sessions.copyFailed', 'Unable to copy')));
     },
@@ -1122,308 +1606,321 @@ export function SessionHeaderMenu({
 
   return (
     <>
-      <DropdownMenu
+      <Menu.Root
         onOpenChange={(open) => {
-          if (open) onForkMenuOpen?.();
+          if (!open) return;
+          onForkMenuOpen?.();
+          setLauncherPillVisible(isLauncherPillVisible?.() ?? false);
         }}
       >
-        <DropdownMenuTrigger asChild>
+        <Menu.Trigger
+          render={
+            <Button
+              variant="ghost"
+              icon
+              className="h-7 w-7 shrink-0 text-muted-foreground"
+              aria-label={t('sessions.moreActions', 'More actions')}
+            >
+              <Ellipsis {...stylex.props(styles.historyTriggerIcon)} />
+            </Button>
+          }
+        >
           <Button
             variant="ghost"
-            size="icon"
+            icon
             className="h-7 w-7 shrink-0 text-muted-foreground"
             aria-label={t('sessions.moreActions', 'More actions')}
           >
-            <Ellipsis className="h-4 w-4" />
+            <Ellipsis {...stylex.props(styles.historyTriggerIcon)} />
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[200px] max-w-[320px]">
-          {/* One compact context group keeps useful identity visible. Separate labels make
-              every value pay for two rows, while a submenu hides context behind another step. */}
-          {!compact && showSessionContext ? (
-            <>
-              <DropdownMenuLabel className="pb-0.5 pt-1.5 text-[0.7rem] font-medium text-muted-foreground">
-                {t('sessions.sessionContextLabel', 'Session')}
-              </DropdownMenuLabel>
-
-              {isGitHub && repoFullName ? (
-                <DropdownMenuItem
-                  className="py-1.5"
-                  onClick={() =>
-                    copyToClipboard(
-                      repoFullName,
-                      t('sessions.repoCopied', 'Repository name copied to clipboard')
-                    )
-                  }
-                  title={repoFullName}
-                  aria-label={`${t('sessions.copyRepository', 'Copy repository')}: ${repoFullName}`}
-                >
-                  <Github className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{repoFullName}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 opacity-50" />
-                </DropdownMenuItem>
-              ) : null}
-
-              {showBranchInfo ? (
-                <DropdownMenuItem
-                  className="items-start py-1.5"
-                  onClick={() =>
-                    copyToClipboard(
-                      branchDisplayValue,
-                      currentBranch
-                        ? t(
-                            'sessions.currentBranchCopied',
-                            'Current branch name copied to clipboard'
-                          )
-                        : t('sessions.baseBranchCopied', 'Base branch name copied to clipboard')
-                    )
-                  }
-                  title={
-                    showBaseBranchContext
-                      ? `${branchDisplayValue}\n${t(
-                          'sessions.baseBranch',
-                          'Base branch'
-                        )}: ${baseBranch}`
-                      : branchDisplayValue
-                  }
-                  aria-label={`${
-                    currentBranch
-                      ? t('sessions.copyCurrentBranch', 'Copy current branch')
-                      : t('sessions.copyBaseBranch', 'Copy base branch')
-                  }: ${branchDisplayValue}`}
-                >
-                  <GitBranch className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{branchDisplayValue}</span>
-                    {showBaseBranchContext ? (
-                      <span className="block truncate text-[0.68rem] leading-4 text-muted-foreground">
-                        {t('sessions.baseBranch', 'Base branch')}: {baseBranch}
-                      </span>
-                    ) : null}
-                  </span>
-                  <Copy className="ml-auto mt-0.5 h-3 w-3 shrink-0 opacity-50" />
-                </DropdownMenuItem>
-              ) : showProjectPath ? (
-                <DropdownMenuItem
-                  className="py-1.5"
-                  onClick={() =>
-                    copyToClipboard(
-                      localPath,
-                      t('sessions.projectPathCopied', 'Project path copied to clipboard')
-                    )
-                  }
-                  title={localPath}
-                  aria-label={`${t('sessions.copyProjectPath', 'Copy project path')}: ${localPath}`}
-                >
-                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{localPath}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 opacity-50" />
-                </DropdownMenuItem>
-              ) : null}
-
-              {machineName ? (
-                <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[0.8rem]">
-                  <Monitor className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="sr-only">{t('sessions.machineLabel', 'Machine')}: </span>
-                  <span className="min-w-0 flex-1 truncate">{machineName}</span>
-                  {project?.kind === 'local' ? (
-                    <span className="ml-auto shrink-0 rounded border border-border/70 px-1 py-px text-[0.62rem] font-medium leading-none text-muted-foreground">
-                      {session.isWorktree
-                        ? t('chat.workdir.worktree', 'Worktree')
-                        : t('chat.workdir.local', 'Local')}
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {sharing ? (
-                <Tooltip delayDuration={300}>
-                  <TooltipTrigger asChild>
-                    <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[0.8rem]">
-                      {sharing.visibility === 'team' ? (
-                        <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      ) : sharing.visibility === 'private' ? (
-                        <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                      )}
-                      <span className="min-w-0 flex-1 truncate font-medium">
-                        {getSessionSharingLabel(t, sharing)}
-                      </span>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent side="left" className="max-w-64 px-2.5 py-2 text-xs">
-                    {getSessionSharingDescription(t, sharing)}
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
-
-              <DropdownMenuSeparator />
-            </>
+        </Menu.Trigger>
+        <Menu.Content align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
+          {/* Where the session lives (repository, branch, PR, machine, path,
+              access, owner) opens in one dialog instead of stacking rows here. */}
+          {!compact && hasSessionInfo ? (
+            <Menu.Item icon={Info} onClick={() => setInfoOpen(true)}>
+              {t('sessions.info.menu', 'Session info…')}
+            </Menu.Item>
           ) : null}
 
-          {openedByRelationRows}
+          {/* View preference, not a session action: device-local toggle mirrored
+              from Settings > Appearance. It sits with "Session info…" above the
+              actions — the page's own display option, like Notion's page
+              controls. A trailing Switch, not a checkmark; the row stays open
+              so the flip is visible. */}
+          <Menu.Item
+            closeOnClick={false}
+            onClick={() => setConversationWide(!conversationWide)}
+            icon={MoveHorizontal}
+            endContent={
+              <Switch
+                // The menu row owns keyboard focus. A tabbable nested switch
+                // otherwise receives initial focus even when opened by mouse.
+                tabIndex={-1}
+                checked={conversationWide}
+                onCheckedChange={(checked) => setConversationWide(checked === true)}
+                onClick={(event) => event.stopPropagation()}
+                aria-label={t('sessions.fullWidth', 'Full width')}
+                className="shrink-0"
+              />
+            }
+          >
+            {t('sessions.fullWidth', 'Full width')}
+          </Menu.Item>
 
-          {onOpenSearch && (
-            <DropdownMenuItem
-              onClick={() => {
-                void onOpenSearch();
-              }}
-            >
-              <Search className="h-3.5 w-3.5 shrink-0" />
-              {t('sessions.findInConversation', 'Find in session')}
-            </DropdownMenuItem>
-          )}
-
-          {onFork && !isArchived && forkWorktreeAvailability !== 'hidden' ? (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger disabled={isForking}>
-                {isForking ? (
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                ) : (
-                  <GitFork className="h-3.5 w-3.5 shrink-0" />
-                )}
-                <span className="min-w-0 flex-1 truncate">
-                  {t('sessions.forkSession', 'Fork session')}
-                </span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="min-w-[16rem]">
-                {getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => (
-                  <DropdownMenuItem
-                    key={option.id}
-                    disabled={option.disabled || isForking}
-                    className="items-start py-1.5"
-                    onSelect={() => {
-                      void onFork(option.id);
-                    }}
-                  >
-                    {option.id === 'new-worktree' ? (
-                      <WorktreeIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    ) : (
-                      <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    )}
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="leading-tight">{option.label}</span>
-                      <span className="text-xs font-normal leading-snug text-muted-foreground">
-                        {option.hint}
-                      </span>
-                    </span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          ) : onFork && !isArchived ? (
-            <DropdownMenuItem
-              disabled={isForking}
-              onClick={() => {
-                if (!isForking) {
-                  void onFork('shared');
-                }
-              }}
-            >
-              {isForking ? (
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-              ) : (
-                <GitFork className="h-3.5 w-3.5 shrink-0" />
-              )}
-              {t('sessions.forkSession', 'Fork session')}
-            </DropdownMenuItem>
-          ) : null}
+          <Menu.Separator />
 
           {onRename && !isArchived && (
-            <DropdownMenuItem
+            <Menu.Item
+              icon={Pencil}
               onClick={() => {
                 void onRename();
               }}
             >
-              <Pencil className="h-3.5 w-3.5 shrink-0" />
               {t('sidebar.renameChat.title', 'Rename Chat')}
-            </DropdownMenuItem>
+            </Menu.Item>
           )}
 
-          {owner && !isArchived ? (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <UserRoundCog className="h-3.5 w-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">
-                  {t('sessions.owner.change', 'Change owner')}
-                </span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
-                {owner.members.map((member) => {
-                  const isOwner = member.userId === owner.ownerUserId;
-                  const isPending = owner.pendingUserId === member.userId;
-                  return (
-                    <DropdownMenuItem
-                      key={member.userId}
-                      disabled={owner.pendingUserId != null}
-                      onClick={() => {
-                        // Guard in the handler, not just via `disabled`: the
-                        // menu stays mounted while the write is in flight.
-                        if (isOwner || owner.pendingUserId != null) return;
-                        void owner.onChangeOwner(member.userId);
-                      }}
-                      title={member.email ?? member.name}
-                    >
-                      <UserAvatar
-                        user={{ id: member.userId, name: member.name, image: member.image }}
-                        className="h-4 w-4 shrink-0"
-                        fallbackClassName="text-[0.55rem]"
-                      />
-                      <span className="min-w-0 flex-1 truncate">{member.name}</span>
-                      {isPending ? (
-                        <Loader2 className="ml-auto h-3.5 w-3.5 shrink-0 animate-spin" />
-                      ) : isOwner ? (
-                        <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
-                      ) : null}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          ) : null}
-
-          {/* Copy URL stays in the Copy submenu even for private sessions (the
-              link still works for the owner); sharing is a separate action that
-              only appears while the conversation isn't team-visible. */}
-          {sharing && sharing.visibility !== 'team' ? (
-            <DropdownMenuItem
-              disabled={shareActionDisabled}
+          {onOpenSearch && (
+            <Menu.Item
+              icon={Search}
               onClick={() => {
-                void onShareWithTeam?.();
+                void onOpenSearch();
               }}
             >
-              {sharing.visibility === 'unknown' ? (
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-              ) : sharing.privateReason === 'machine-not-registered' ? (
-                <Monitor className="h-3.5 w-3.5 shrink-0" />
-              ) : sharing.canManage ? (
-                <Users className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
-              )}
-              {sharing.visibility === 'unknown'
-                ? t('sessions.sharing.loadingAction', 'Checking sharing…')
-                : sharing.privateReason === 'machine-not-registered'
-                  ? t(
-                      'sessions.sharing.registerDeviceToShare',
-                      'Register this device before sharing'
-                    )
-                  : sharing.canManage
-                    ? t('sessions.sharing.shareWithTeam', 'Share with team…')
-                    : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
-            </DropdownMenuItem>
+              {t('sessions.findInConversation', 'Find in session')}
+            </Menu.Item>
+          )}
+
+          {onFork || (onCopyConversationHistory && !exportReason) ? (
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger
+                icon={isForking ? <Spinner size="small" label={null} /> : GitFork}
+              >
+                {t('sessions.forkSession', 'Fork session')}
+              </Menu.SubmenuTrigger>
+              <Menu.Content className="min-w-[13rem]">
+                {onFork &&
+                  !isArchived &&
+                  getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => {
+                    const disabled = option.disabled || isForking;
+                    const item = (
+                      <Menu.Item
+                        key={option.id}
+                        disabled={disabled}
+                        onClick={() => {
+                          void onFork(option.id);
+                        }}
+                        icon={
+                          option.id === 'new-worktree' ? (
+                            <WorktreeIcon className="h-full w-full" />
+                          ) : (
+                            <Folder size="100%" />
+                          )
+                        }
+                        endContent={
+                          option.status ? (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {option.status}
+                            </span>
+                          ) : undefined
+                        }
+                      >
+                        {option.label}
+                      </Menu.Item>
+                    );
+                    // The submenu usually opens toward the conversation, so the
+                    // explanation sits on that side instead of over the parent menu.
+                    return disabled ? (
+                      item
+                    ) : (
+                      <SessionForkOptionTooltip
+                        key={option.id}
+                        description={option.description}
+                        side="left"
+                      >
+                        {item}
+                      </SessionForkOptionTooltip>
+                    );
+                  })}
+                {onCopyConversationHistory && !exportReason && (
+                  <Menu.Item
+                    icon={Copy}
+                    onClick={() => {
+                      void onCopyConversationHistory();
+                    }}
+                  >
+                    {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
+                  </Menu.Item>
+                )}
+              </Menu.Content>
+            </Menu.Submenu>
           ) : null}
 
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <Copy className="h-3.5 w-3.5 shrink-0" />
-              {t('sessions.copy', 'Copy')}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="min-w-[200px]">
+          {continuationTweaks && (
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>
+                {t('sessions.continuation.tweaks.title', '自动化设置')}
+              </Menu.SubmenuTrigger>
+              <Menu.Content className="w-[290px] p-3">{continuationTweaks}</Menu.Content>
+            </Menu.Submenu>
+          )}
+
+          {openedByRelationRows}
+
+          {/* The header pill is the primary launcher; the menu lists it only
+              while the narrow-page container query hides that pill. Opening the
+              folder in Finder / Explorer stays here either way. */}
+          {launcherPillVisible ? null : openInIdeMenu}
+          {openInFileManager ? (
+            <Menu.Item icon={FolderOpen} onClick={() => void openInFileManager.onOpen()}>
+              {openInFileManager.label}
+            </Menu.Item>
+          ) : null}
+
+          <Menu.Separator />
+
+          {showStatusMenu ? (
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger icon={CircleDot}>
+                {t('sessions.status.change', 'Change status')}
+              </Menu.SubmenuTrigger>
+              <Menu.Content className="min-w-[200px]">
+                {onSnooze ? (
+                  <Menu.Submenu>
+                    <Menu.SubmenuTrigger icon={AlarmClock}>
+                      {t('sessions.contextMenu.snooze', 'Later')}
+                    </Menu.SubmenuTrigger>
+                    <Menu.Content className="min-w-[200px]">
+                      {buildSnoozePresets(statusNow).map((preset) => {
+                        const label =
+                          preset.id === 'oneHour'
+                            ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
+                            : preset.id === 'laterToday'
+                              ? t('sessions.contextMenu.snoozeLaterToday', 'In 3 hours')
+                              : preset.id === 'tomorrowMorning'
+                                ? t(
+                                    'sessions.contextMenu.snoozeTomorrowMorning',
+                                    'Tomorrow morning'
+                                  )
+                                : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
+                        return (
+                          <Menu.Item
+                            key={preset.id}
+                            onClick={() => void onSnooze(preset.timestamp)}
+                          >
+                            <span className="flex w-full items-center justify-between gap-4">
+                              <span>{label}</span>
+                              <span className="text-[11px] tabular-nums text-muted-foreground">
+                                {preset.countdown}
+                              </span>
+                            </span>
+                          </Menu.Item>
+                        );
+                      })}
+                      <Menu.Separator />
+                      <Menu.Item
+                        icon={Timer}
+                        onClick={() =>
+                          setCustomSnoozeTarget({
+                            sessionId: session.id,
+                            title: session.title ?? '',
+                          })
+                        }
+                      >
+                        {t('sessions.contextMenu.snoozeCustom', 'Custom time…')}
+                      </Menu.Item>
+                    </Menu.Content>
+                  </Menu.Submenu>
+                ) : null}
+                {statusGroup !== 'settled' && onSettle ? (
+                  <Menu.Item icon={CheckCircle2} onClick={() => void onSettle()}>
+                    {t('sessions.contextMenu.settle', 'Settle')}
+                  </Menu.Item>
+                ) : null}
+                {statusGroup !== 'focus' && onMoveToFocus ? (
+                  <Menu.Item icon={ArrowUpCircle} onClick={() => void onMoveToFocus()}>
+                    {t('sessions.contextMenu.moveToFocus', 'Move to Focus')}
+                  </Menu.Item>
+                ) : null}
+              </Menu.Content>
+            </Menu.Submenu>
+          ) : null}
+
+          <Menu.Submenu>
+            <Menu.SubmenuTrigger icon={Share2}>
+              {t('sharing.manager.title', 'Share')}
+            </Menu.SubmenuTrigger>
+            <Menu.Content className="min-w-[200px]">
+              {onOpenPublicShare && !sharingReason && (
+                <Menu.Item icon={Link} onClick={onOpenPublicShare}>
+                  {t('sessions.share.publicLink', 'Public link…')}
+                </Menu.Item>
+              )}
+              {/* Copy URL stays in the Copy submenu even for private sessions (the
+              link still works for the owner); sharing is a separate action that
+              only appears while the conversation isn't team-visible. */}
+              {sharing && !sharingReason && sharing.visibility !== 'team' ? (
+                <Menu.Item
+                  disabled={shareActionDisabled}
+                  onClick={() => {
+                    void onShareWithTeam?.();
+                  }}
+                  icon={
+                    sharing.visibility === 'unknown' ? (
+                      <Spinner size="small" label={null} />
+                    ) : sharing.privateReason === 'machine-not-registered' ? (
+                      <Monitor size="100%" />
+                    ) : sharing.canManage ? (
+                      Users
+                    ) : (
+                      LockKeyhole
+                    )
+                  }
+                >
+                  {sharing.visibility === 'unknown'
+                    ? t('sessions.sharing.loadingAction', 'Checking sharing…')
+                    : sharing.privateReason === 'machine-not-registered'
+                      ? t(
+                          'sessions.sharing.registerDeviceToShare',
+                          'Register this device before sharing'
+                        )
+                      : sharing.canManage
+                        ? t('sessions.sharing.shareWithTeam', 'Share with team…')
+                        : t(
+                            'sessions.sharing.onlyOwnerCanShare',
+                            'Only the device owner can share'
+                          )}
+                </Menu.Item>
+              ) : null}
+              {sharingReason ? (
+                <Menu.Item disabled icon={Share2}>
+                  <WorkspaceFeatureReasonText reason={sharingReason} />
+                </Menu.Item>
+              ) : null}
+              <Menu.Item
+                disabled={!!exportReason || !onShareAsImage}
+                title={exportReason}
+                onClick={() => {
+                  onShareAsImage?.();
+                }}
+                icon={Image}
+              >
+                {exportReason ? (
+                  <WorkspaceFeatureReasonText reason={exportReason} />
+                ) : (
+                  t('sessions.shareAsImage', 'Share as image…')
+                )}
+              </Menu.Item>
+            </Menu.Content>
+          </Menu.Submenu>
+
+          <Menu.Submenu>
+            <Menu.SubmenuTrigger icon={Copy}>{t('sessions.copy', 'Copy')}</Menu.SubmenuTrigger>
+            <Menu.Content className="min-w-[200px]">
               {showBaseBranchContext ? (
                 <>
-                  <DropdownMenuItem
+                  <Menu.Item
                     onClick={() =>
                       copyToClipboard(
                         baseBranch,
@@ -1431,14 +1928,14 @@ export function SessionHeaderMenu({
                       )
                     }
                     title={baseBranch}
+                    icon={GitBranch}
                   >
-                    <GitBranch className="h-3.5 w-3.5 shrink-0" />
                     {t('sessions.copyBaseBranch', 'Copy base branch')}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
+                  </Menu.Item>
+                  <Menu.Separator />
                 </>
               ) : null}
-              <DropdownMenuItem
+              <Menu.Item
                 onClick={() =>
                   copyToClipboard(
                     trimmedWorkspacePath,
@@ -1450,92 +1947,119 @@ export function SessionHeaderMenu({
                   trimmedWorkspacePath ||
                   t('sessions.copyPathUnavailable', 'Workspace path unavailable')
                 }
+                icon={Folder}
               >
-                <Copy className="h-3.5 w-3.5 shrink-0" />
                 {t('sessions.copyPath', 'Copy path')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
+              </Menu.Item>
+              <Menu.Item
                 onClick={() => {
                   void onCopyConversationHistory?.();
                 }}
-                disabled={!onCopyConversationHistory}
+                disabled={!!exportReason || !onCopyConversationHistory}
                 title={
-                  onCopyConversationHistory
+                  exportReason ??
+                  (onCopyConversationHistory
                     ? undefined
                     : t(
                         'sessions.copyConversationHistoryUnavailable',
                         'Conversation history is unavailable for this tab'
-                      )
+                      ))
                 }
+                icon={FileText}
               >
-                <Copy className="h-3.5 w-3.5 shrink-0" />
                 {t('sessions.copyAsMarkdown', 'Copy as Markdown')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
+              </Menu.Item>
+              <Menu.Item
                 onClick={() => {
                   void onCopyUrl();
                 }}
+                icon={Link}
               >
-                <Copy className="h-3.5 w-3.5 shrink-0" />
                 {t('sessions.copyUrl', 'Copy URL')}
-              </DropdownMenuItem>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+              </Menu.Item>
+              {onCopyDeepLink ? (
+                <Menu.Item onClick={() => void onCopyDeepLink()} icon={SquareArrowOutUpRight}>
+                  {t('sessions.copyDeepLink', 'Copy deeplink')}
+                </Menu.Item>
+              ) : null}
+            </Menu.Content>
+          </Menu.Submenu>
 
-          <AutoReviewMenuItem
-            sessionId={session.id}
-            meta={session}
-            onConfigurationRequired={() => setReviewSetupOpen(true)}
-          />
+          {rpcReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={rpcReason} />
+            </Menu.Item>
+          ) : null}
+          {previewReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={previewReason} />
+            </Menu.Item>
+          ) : null}
 
           {/* Archive / Restore + Delete */}
           {isArchived
             ? (onRestore || onDelete) && (
                 <>
-                  <DropdownMenuSeparator />
+                  <Menu.Separator />
                   {onRestore && (
-                    <DropdownMenuItem
+                    <Menu.Item
                       onClick={() => {
                         void onRestore();
                       }}
+                      icon={ArchiveRestore}
                     >
-                      <ArchiveRestore className="h-3.5 w-3.5 shrink-0" />
                       {t('archive.restore', 'Restore session')}
-                    </DropdownMenuItem>
+                    </Menu.Item>
                   )}
                   {onDelete && (
-                    <DropdownMenuItem
+                    <Menu.Item
+                      tone="destructive"
                       onClick={() => {
                         void onDelete();
                       }}
-                      className="text-destructive focus:text-destructive"
+                      icon={Trash2}
                     >
-                      <Trash2 className="h-3.5 w-3.5 shrink-0" />
                       {t('archive.delete', 'Delete permanently')}
-                    </DropdownMenuItem>
+                    </Menu.Item>
                   )}
                 </>
               )
             : onArchive && (
                 <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
+                  <Menu.Separator />
+                  <Menu.Item
                     onClick={() => {
                       void onArchive();
                     }}
+                    icon={Archive}
                   >
-                    <Archive className="h-3.5 w-3.5 shrink-0" />
                     {t('sessions.archive', 'Archive session')}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 </>
               )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ReviewAgentSetupDialog
-        open={reviewSetupOpen}
-        onOpenChange={setReviewSetupOpen}
-        machineName={machineName ?? undefined}
-        onOpenSettings={() => onOpenReviewSettings?.()}
+        </Menu.Content>
+      </Menu.Root>
+      {onSnooze ? (
+        <CustomSnoozeDialog
+          target={customSnoozeTarget}
+          now={statusNow}
+          onClose={() => setCustomSnoozeTarget(null)}
+          onConfirm={(_sessionId, snoozedUntil) => void onSnooze(snoozedUntil)}
+        />
+      ) : null}
+      <SessionInfoDialog
+        open={infoOpen}
+        onOpenChange={setInfoOpen}
+        repoFullName={isGitHub ? repoFullName || undefined : undefined}
+        currentBranch={currentBranch || undefined}
+        baseBranch={baseBranch || undefined}
+        pullRequest={pullRequest}
+        machineName={machineName}
+        placement={sessionPlacement}
+        workspacePath={trimmedWorkspacePath || localPath || undefined}
+        sharing={sharing}
+        owner={infoOwner}
+        t={t}
       />
     </>
   );
@@ -1585,47 +2109,45 @@ export function SessionSearchBar({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
+        icon
+        className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
         disabled={!hasResults}
         onClick={onClick}
         aria-label={label}
       >
-        <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
+        <Icon {...stylex.props(styles.menuIcon)} strokeWidth={2} />
       </Button>
     );
     if (!hasResults) return button;
     return (
-      <Tooltip delayDuration={400}>
-        <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent side="bottom" className="flex items-center gap-1.5 px-2 py-1 text-[11px]">
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={400} render={button} />
+        <Tooltip.Content side="bottom" className="flex items-center gap-1.5 px-2 py-1 text-[11px]">
           <span>{label}</span>
-          <span className="rounded-sm border border-border/70 bg-muted px-1 font-mono text-[10px] leading-none text-muted-foreground">
-            {shortcut}
-          </span>
-        </TooltipContent>
-      </Tooltip>
+          <span {...stylex.props(styles.searchShortcut)}>{shortcut}</span>
+        </Tooltip.Content>
+      </Tooltip.Root>
     );
   };
 
   return (
-    <div className="pointer-events-auto absolute right-3 top-3 z-20 w-[min(440px,calc(100%-1.5rem))] sm:right-4 sm:top-4 sm:w-[min(440px,calc(100%-2rem))]">
+    <div {...stylex.props(styles.searchOverlay)}>
       <div
         role="search"
-        className={cn(
-          'group/search flex h-11 items-center gap-1 rounded-full border bg-background/95 pl-3.5 pr-1.5 shadow-[0_14px_40px_-18px_rgba(15,23,42,0.45),0_2px_10px_-4px_rgba(15,23,42,0.16)] backdrop-blur-md transition-colors supports-[backdrop-filter]:bg-background/85',
-          'border-border focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20',
-          noResults &&
-            'border-destructive/30 focus-within:border-destructive/60 focus-within:ring-destructive/15'
+        {...withClassName(
+          stylex.props(styles.searchSurface, noResults && styles.searchSurfaceNoResults),
+          'group/search'
         )}
       >
         <Search
-          className={cn(
-            'h-4 w-4 shrink-0 transition-colors',
-            hasQuery ? 'text-foreground' : 'text-muted-foreground/80',
-            noResults && 'text-destructive/80'
+          {...stylex.props(
+            styles.menuIcon,
+            styles.menuIconFixed,
+            styles.searchIcon,
+            hasQuery && styles.searchIconQuery,
+            noResults && styles.searchIconNoResults
           )}
-          strokeWidth={2.25}
+          strokeWidth={2}
         />
         <Input
           ref={inputRef}
@@ -1634,7 +2156,7 @@ export function SessionSearchBar({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t('sessions.findInConversation', 'Find in session')}
           aria-label={t('sessions.findInConversation', 'Find in session')}
-          className="h-9 min-w-0 flex-1 border-0 bg-transparent px-2 py-0 text-[13.5px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
+          className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
@@ -1658,19 +2180,16 @@ export function SessionSearchBar({
 
         {hasQuery && (
           <span
-            className={cn(
-              'shrink-0 select-none px-1 text-[11.5px] font-medium tabular-nums tracking-tight transition-colors',
-              hasResults ? 'text-muted-foreground' : 'text-destructive/90'
-            )}
+            {...stylex.props(styles.searchCount, !hasResults && styles.searchCountNoResults)}
             aria-live="polite"
           >
             {countLabel}
           </span>
         )}
 
-        <Separator orientation="vertical" className="mx-0.5 h-5 bg-border/60" />
+        <Separator orientation="vertical" className="mx-0.5 h-4 bg-border/60" />
 
-        <div className="flex items-center gap-px">
+        <div {...stylex.props(styles.searchActions)}>
           {renderNavButton(
             ArrowUp,
             t('sessions.previousResult', 'Previous result'),
@@ -1678,44 +2197,50 @@ export function SessionSearchBar({
             onPrevious
           )}
           {renderNavButton(ArrowDown, t('sessions.nextResult', 'Next result'), '↵', onNext)}
-          <Tooltip delayDuration={400}>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-                onClick={onClose}
-                aria-label={t('common.close', 'Close')}
-              >
-                <X className="h-3.5 w-3.5" strokeWidth={2.25} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              delay={400}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon
+                  className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                  onClick={onClose}
+                  aria-label={t('common.close', 'Close')}
+                >
+                  <X {...stylex.props(styles.menuIcon)} strokeWidth={2} />
+                </Button>
+              }
+            />
+            <Tooltip.Content
               side="bottom"
               className="flex items-center gap-1.5 px-2 py-1 text-[11px]"
             >
               <span>{t('common.close', 'Close')}</span>
-              <span className="rounded-sm border border-border/70 bg-muted px-1 font-mono text-[10px] leading-none text-muted-foreground">
-                Esc
-              </span>
-            </TooltipContent>
-          </Tooltip>
+              <span {...stylex.props(styles.searchShortcut)}>Esc</span>
+            </Tooltip.Content>
+          </Tooltip.Root>
         </div>
       </div>
     </div>
   );
 }
 
-interface SessionChatInterfaceProps {
+export interface SessionChatInterfaceProps {
+  claimNavigationFocus?: () => boolean;
   session: SessionMeta;
   workspaceSession?: SessionMeta | null;
   className?: string;
   hideHeader?: boolean;
+  /** Renders the root conversation's existing header controller in the desktop tab row. */
+  toolbar?: SessionChatToolbar;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
   /** Opens an agent-uploaded HTML source path directly in rendered file preview. */
   onOpenHtmlFile?: (filePath: string) => void;
+  /** Opens an attachment preview as a side-panel tab; false when there is no panel. */
+  onOpenFileAttachment?: (file: SessionFilePayload, sessionId: SessionId) => boolean;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   /** Optional replacement for the GitHub badge area in the header. */
   headerActionsSlot?: React.ReactNode;
@@ -1774,19 +2299,22 @@ interface SessionChatInterfaceProps {
   sharing?: SessionSharingState;
   /** Request the parent-owned confirmation flow for a private session. */
   onShareWithTeam?: () => void | Promise<void>;
+  /** Opens the parent-owned share-as-image preview dialog. */
+  onShareAsImage?: () => void;
   /** Called when the user clicks the PR badge and wants to open the in-app PR tab. */
   onOpenPrTab?: (args: { prNumber: number; repoFullName: string; headCommitSha?: string }) => void;
   /** Session associated with the header Browser button. Defaults to `session`. */
   browserActionSession?: SessionMeta | null;
   /** Called when the user wants to open the Browser panel. */
   onOpenBrowser?: () => void;
+  onOpenIosSimulator?: () => void;
+  onOpenAndroidEmulator?: () => void;
   /** Opens Browser without forcing a newly reported candidate navigation. */
   onOpenExistingBrowser?: () => void;
   /**
-   * 'page' renders the classic full header row. 'toolbar' (desktop
-   * `hideMessageArea` instance) renders ONLY the compact right-side controls
-   * (IDE launcher / browser / "…" menu / end slot) so session-detail can embed
-   * them in the tab row — no title, no PR badge (the context strip owns PR).
+   * 'page' renders the full header; 'toolbar' renders compact controls inline.
+   * Desktop SessionDetail uses `toolbar.container` to portal those controls from
+   * the conversation's existing controller into its tab row.
    */
   headerVariant?: 'page' | 'toolbar';
   /**
@@ -1796,7 +2324,7 @@ interface SessionChatInterfaceProps {
    */
   paintSessionMentionOverlay?: boolean;
   /** All-Changes totals for the context strip; null/undefined hides the diffstat. */
-  changesDiffStat?: { add: number; del: number } | null;
+  changesDiffStat?: LineChange | null;
   /** Called when the context strip's diffstat is clicked. */
   onOpenAllChanges?: () => void;
   /** Native ACP fork action for the latest completed assistant turn. */
@@ -1813,42 +2341,89 @@ interface SessionChatInterfaceProps {
 }
 
 function SpinningLoaderIcon({ className }: { className?: string }) {
-  return <Loader2 className={cn(className, 'animate-spin')} />;
+  return <Spinner className={className} />;
 }
 
 const EMPTY_CHAT_STREAM_EMPTY_STATE = <></>;
 
+export type SessionChatToolbar = {
+  container: HTMLElement | null;
+  className?: string;
+  endSlot?: React.ReactNode;
+  actions: Pick<
+    SessionChatInterfaceProps,
+    | 'onArchiveSession'
+    | 'onRestoreSession'
+    | 'onDeleteSession'
+    | 'onOpenSearch'
+    | 'onCopyConversationHistory'
+    | 'onRequestRename'
+    | 'onForkSession'
+    | 'forkWorktreeAvailability'
+    | 'onForkWorktreeMenuOpen'
+    | 'forkingAssistantMessageId'
+    | 'sharing'
+    | 'onShareWithTeam'
+    | 'onShareAsImage'
+  > & {
+    /** Copies the active tab's session link; the tab row reuses the root header menu. */
+    onCopyUrl: (linkFormat: 'https' | 'deeplink') => void | Promise<void>;
+  };
+};
+
 export type SessionChatInterfaceHandle = {
-  sendQuickMessage: (prompt: string) => void;
-  setInputText: (text: string) => void;
+  addDocumentSelection: (selection: DocumentSelection) => boolean;
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   toggleVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
-  dispatchInputBlocks: (
-    inputBlocks: SessionInputBlock[],
-    options?: DispatchInputBlocksOptions
-  ) => Promise<boolean>;
+  /**
+   * Adds files to the composer as attachments, the way a drop does. It never
+   * sends; false when the composer is not mounted to take them.
+   */
+  addAttachmentFiles: (files: File[]) => boolean;
   copyConversationHistory: () => Promise<void>;
+  /** Plain-text conversation snapshot for the share-as-image card; null while
+   * durable history has not loaded. */
+  getShareImageData: () => Promise<{
+    messages: ConversationMessage[];
+    sourceRuntime: WorkspaceRuntime;
+    agentName?: string;
+  } | null>;
+  startShareImageSelection: (
+    messages: ConversationMessage[],
+    onConfirm: (messages: ConversationMessage[]) => void
+  ) => void;
+  /** Drops the share selection and restores the composer. Confirming does not:
+   *  the preview can be reopened against the same selection, so only finishing
+   *  the share or an explicit Cancel ends it. */
+  cancelShareImageSelection: () => void;
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
-  insertSessionMention: (sessionId: string) => boolean;
+  insertSessionMention: (
+    sessionId: string,
+    options?: { at?: number; replaceEnd?: number }
+  ) => boolean;
 };
 
 export type DispatchInputBlocksOptions = {
+  attachments?: SessionAttachmentDraft[];
   forceQueue?: boolean;
   forceDirect?: boolean;
+  /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
+  invertSubmitBehavior?: boolean;
   modeIdOverride?: string | null;
   modelIdOverride?: string | null;
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
+  /** Role identity frozen beside this Turn's run config; null is explicit None. */
+  agentRole?: SessionTurnAgentRoleSelection;
+  /** The MCP selection captured when the user pressed send. */
+  mcpServerIds?: readonly McpServerId[];
+  skipMcpOnce?: boolean;
 };
 
-function buildEditedMessageQueueItem(
-  item: MessageQueueItem,
-  task: string,
-  imageOnlyLabel: string
-): MessageQueueItem {
+function buildEditedMessageQueueItem(item: MessageQueueItem, task: string): MessageQueueItem {
   const nextTask = task.trim();
   const inputBlocks = normalizeSessionInputBlocks(
     item.acpSessionConfig?.inputBlocks,
@@ -1864,7 +2439,7 @@ function buildEditedMessageQueueItem(
   if (!item.acpSessionConfig) {
     return {
       ...item,
-      task: nextTask || imageOnlyLabel,
+      task: nextTask || queueTask(nonTextInputBlocks),
       isEditing: false,
       editingStartedAt: undefined,
     };
@@ -1872,7 +2447,7 @@ function buildEditedMessageQueueItem(
 
   return {
     ...item,
-    task: nextTask || imageOnlyLabel,
+    task: nextTask || queueTask(nonTextInputBlocks),
     isEditing: false,
     editingStartedAt: undefined,
     acpSessionConfig: {
@@ -1894,9 +2469,11 @@ export const SessionChatInterface = memo(
       workspaceSession,
       className,
       hideHeader = false,
+      toolbar,
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onOpenFileAttachment,
       messageFileDiffEntriesByTurn,
       headerActionsSlot,
       headerEndSlot,
@@ -1906,6 +2483,7 @@ export const SessionChatInterface = memo(
       hideMessageArea = false,
       syncEnabled = !hideMessageArea,
       isVisible = true,
+      claimNavigationFocus,
       isExternalHistoryRefreshing = false,
       externalHistoryProviderLabel,
       onNavigateToComment,
@@ -1922,9 +2500,12 @@ export const SessionChatInterface = memo(
       onForkSession: onForkSessionExternal,
       sharing,
       onShareWithTeam,
+      onShareAsImage,
       onOpenPrTab,
       browserActionSession,
       onOpenBrowser,
+      onOpenIosSimulator,
+      onOpenAndroidEmulator,
       onOpenExistingBrowser,
       headerVariant = 'page',
       paintSessionMentionOverlay = true,
@@ -1940,7 +2521,18 @@ export const SessionChatInterface = memo(
     },
     ref
   ) {
+    /* Mount/unmount into the crash-report render trace. The 0.89.x #185 crash
+       ends in this component's mount layout effects — a LAYOUT effect (passive
+       ones may never flush inside the crashing cascade) is what proves whether
+       the loop is remounting this surface or lives elsewhere. */
+    useLayoutEffect(() => {
+      recordSessionRenderTrace(`surface mount ${shortTraceId(session.id)}`);
+      return () => {
+        recordSessionRenderTrace(`surface unmount ${shortTraceId(session.id)}`);
+      };
+    }, [session.id]);
     const { t, i18n } = useTranslation();
+    const preparingWindow = useAtomValue(windowPreparationAtom);
     const isMobile = useIsMobile();
     const isNativeApp = isNativeAppShell();
     const hidesBillingUi = isMobile || isNativeApp;
@@ -1950,8 +2542,17 @@ export const SessionChatInterface = memo(
     const postHog = usePostHog();
     const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+    const rpcReason = useMachineRpcFeatureReason(session.machineId);
+    const sharingAllowed = useWorkspaceFeature('sharing');
+    const publicSharingAvailable = useAppCapability('teamSharing') && sharingAllowed;
+    // One owner for the static-share editor, because both the header control
+    // and the "…" menu open the same one.
+    const publicShareWorkspaceId = publicSharingAvailable && workspaceId ? workspaceId : undefined;
+    // Keyed by session id, not a boolean: a tab that switches underneath an
+    // open editor must not retarget it at the newly shown conversation.
+    const [publicShareSessionId, setPublicShareSessionId] = useState<string | null>(null);
+    const publicShareStatus = useSessionShareStatus(publicShareWorkspaceId ?? null, session.id);
     const currentUser = useAtomValue(userAtom);
-    const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
     const { openSettings } = useOpenSettings();
     const billingEntitlement = useCloudQuery(
       cloudOperations.billing.getWorkspaceBillingEntitlement,
@@ -2023,42 +2624,202 @@ export const SessionChatInterface = memo(
       [postHog, sessionAnalyticsProperties]
     );
 
+    const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+    const { run: runPlaintextCopy, confirmation: plaintextCopyConfirmation } = usePlaintextCopy(
+      runtime,
+      session.id
+    );
     const localMachineId = useAtomValue(localMachineIdAtom);
     const localHomeDir = useAtomValue(localHomeDirAtom);
     const liveSessionPresence = useAtomValue(sessionLivePresenceAtomFamily(session.id));
     const liveSessionStatus = liveSessionPresence?.status ?? null;
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
-    const [pendingRemoteHtmlFileName, setPendingRemoteHtmlFileName] = useState<string | null>(null);
+    const automationContent = {
+      mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext',
+    } as const;
+    const automationSupported = !!runtime && workspaceSupports(automationContent, 'automations');
+    const continuation = useLocalSessionContinuation(
+      automationSupported &&
+        workspaceId &&
+        session.machineId &&
+        (isLocalSession ||
+          // Remote control rides workspace Machine RPC; encrypted workspaces withhold it.
+          (!!localMachineId &&
+            !!getAutomationProofIssuer() &&
+            workspaceSupports(automationContent, 'rpc') &&
+            !!currentUser?.id))
+        ? {
+            workspaceId,
+            machineId: session.machineId,
+            sessionId: session.id,
+            ...(!isLocalSession && runtime && currentUser?.id
+              ? { remote: { runtime, requesterUserId: currentUser.id } }
+              : {}),
+          }
+        : null,
+      isVisible
+    );
+    const continuationNow = useStableNow(10_000).getTime();
+    // Auto delivery reads the PR poller, which encrypted workspaces do not run.
+    const autoDeliverSupported = runtime?.contentMode !== 'e2ee';
+    const canAutoDeliver =
+      autoDeliverSupported && !!continuation.value && !continuation.value.autoDeliver;
+    const [autoDeliveryDialogOpen, setAutoDeliveryDialogOpen] = useState(false);
+    const autoDeliveryStatus = session.autoDelivery ?? null;
+    // Session-scoped UI state below stores the session it belongs to and is read
+    // only for that session: this instance can outlive a switch (the desktop
+    // toolbar is not keyed), and a late async write must not reach the next one.
+    const [pendingRemoteHtmlFile, setPendingRemoteHtmlFile] = useState<{
+      sessionId: SessionId;
+      fileName: string;
+    } | null>(null);
+    const pendingRemoteHtmlFileName =
+      pendingRemoteHtmlFile?.sessionId === session.id ? pendingRemoteHtmlFile.fileName : null;
+    // Set by the confirm action so the dialog's close does not also count as a deny.
+    const remotePortAllowedRef = useRef(false);
     const {
-      selectedModeId,
-      selectedModelId,
-      configOptionValues,
+      doc: sessionDoc,
+      history: conversationView,
+      addHistory: addSessionHistory,
+      pushMessageQueue,
+      removeMessageQueueItem,
+      updateMessageQueueItem,
+      reorderMessageQueueItem,
+      updateHistoryEntry,
+      waitUntilSynced,
+      ready: sessionDocReady,
+      synced: sessionDocSynced,
+      syncState: sessionDocSyncState,
+    } = useSessionDoc(session.id, {
+      enabled: !hideMessageArea,
+      syncEnabled: !hideMessageArea && syncEnabled,
+    });
+    // History is read through the conversation view: the hydrated tail (which
+    // always reaches the latest user turn) for every "latest turn" reader, the
+    // index for counts and timing, and the per-turn fact table for the few
+    // readers that need something from anywhere in the conversation.
+    const conversationVersion = useConversationVersion(conversationView);
+    const {
+      turns: sessionTailHistory,
+      availableTurns: availableSessionTailHistory,
+      from: sessionTailFrom,
+    } = useConversationTail(conversationView, { extendToLastUserTurn: true });
+    const conversationConfigSources = useMemo(
+      () =>
+        conversationView ? collectConversationConfigSources(conversationView, sessionTailFrom) : [],
+      // `conversationVersion` is the change signal for the view's contents.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [conversationVersion, conversationView, sessionTailFrom]
+    );
+    const durableConversationConfig = useMemo(
+      () => resolveSessionConversationConfig(conversationConfigSources, sessionDoc?.mq ?? []),
+      [conversationConfigSources, sessionDoc?.mq]
+    );
+    const durableConversationSourceFence = useMemo(
+      () => resolveSessionConversationSourceFence(conversationConfigSources, sessionDoc?.mq ?? []),
+      [conversationConfigSources, sessionDoc?.mq]
+    );
+    const {
+      config: sessionConversationConfig,
+      sourceFence: sessionConversationSourceFence,
+      hasPendingConfig,
+    } = useSessionPendingConfig({
+      sessionId: session.id,
+      pendingSends: runtime?.pendingSends,
+      history: conversationView,
+      config: durableConversationConfig,
+      sourceFence: durableConversationSourceFence,
+      documentReady: sessionDocReady,
+    });
+    // Runtime attribution needs turn identity, which the index already has;
+    // waiting for bodies would temporarily revive the turn's old Plan request.
+    const sessionRuntimeConfig = useMemo(
+      () =>
+        resolveSessionAcpRuntimeConfig(
+          conversationConfigSources,
+          sessionDoc?.mq ?? [],
+          sessionDoc?.acpRuntimeConfig
+        ),
+      [sessionDoc?.acpRuntimeConfig, conversationConfigSources, sessionDoc?.mq]
+    );
+    // A local send and its history/queue row share one fence, so landing the
+    // send cannot consume edits made for the next draft during its upload.
+    const sessionConversationConfigRevision = `${session.id}:${
+      sessionConversationSourceFence.currentTurnKey ?? ''
+    }`;
+    const sessionRunConfigTargetKey = getSessionRunConfigDraftTargetKey(session);
+    const sessionConfigPreferences = useMemo(
+      () => ({
+        modeId: sessionConversationConfig.modeId,
+        modelId: sessionConversationConfig.modelId,
+        configOptionValues: sessionConversationConfig.configOptionValues,
+      }),
+      [
+        sessionConversationConfig.configOptionValues,
+        sessionConversationConfig.modeId,
+        sessionConversationConfig.modelId,
+      ]
+    );
+    /* User edits are the only stored selection state, scoped to this session;
+       effective values derive per render. The UNVALIDATED candidates feed the
+       capability lookup so the catalog can depend on the selection (Codex
+       reasoning tiers, provisional menu enrichment) without feeding back into
+       the values it validates — the #185 reconcile loop is unrepresentable. */
+    const {
+      selection: sessionConfigSelection,
+      candidates: sessionConfigCandidates,
+      hasUserEdits: sessionRunConfigHasUserEdits,
       selectMode: handleModeChange,
       selectModel: handleModelChange,
       selectConfigOption: handleConfigOptionChange,
-      replaceConfigOptions: setConfigOptionValues,
-      dispatch: dispatchSessionConfigSelection,
-    } = useAcpSessionConfigSelectionState();
+      captureForSend: captureRunConfigForSend,
+    } = useAcpSessionConfigSelectionState({
+      enabled: !hideMessageArea && (sessionDocReady || hasPendingConfig),
+      targetKey: sessionRunConfigTargetKey,
+      preferenceRevision: sessionConversationConfigRevision,
+      preferences: sessionConfigPreferences,
+      runtimePreferences: hasPendingConfig ? null : sessionRuntimeConfig,
+      preserveUnsentUserEdits: true,
+      draftScope:
+        runtime?.accountId && runtime.workspaceId
+          ? {
+              accountId: runtime.accountId,
+              workspaceId: runtime.workspaceId,
+              sessionId: session.id,
+              targetKey: sessionRunConfigTargetKey,
+            }
+          : undefined,
+    });
     const {
       availableCommands,
       capabilityAuthority,
       configOptionSelectors,
       defaultModeId,
-      defaultModelId,
       machineFlockRows,
       modeOptions,
       modelOptions,
+      selectorOptions,
       sessionMachine,
     } = useSessionAcpSelectorContext({
       machineId: session.machineId,
       configId: session.agentConfigId,
       cliType: session.cliType,
       agentType: session.agentType,
-      selectedModeId,
-      selectedModelId,
-      configOptionValues,
+      selectedModeId: sessionConfigCandidates.modeId,
+      selectedModelId: sessionConfigCandidates.modelId,
+      configOptionValues: sessionConfigCandidates.configOptionValues,
+      sessionCommands: sessionDoc?.acpRuntimeConfig?.availableCommands,
     });
-    useMachineFlockAgentConfigsForMachineIds([session.machineId]);
+    const steerCapability = session.agentConfigId
+      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
+      : undefined;
+    const nativeSteerAvailable =
+      !rpcReason && shouldRequestNativeQueueSteer(capabilityAuthority, steerCapability);
+    const { selectedModeId, selectedModelId, configOptionValues } =
+      useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
+        cliType: session.cliType,
+        agentType: session.agentType,
+      });
     const machineDotlodyPath = useMemo(
       () => resolveMachineDotlodyPath(machineFlockRows, isLocalSession ? localHomeDir : null),
       [isLocalSession, localHomeDir, machineFlockRows]
@@ -2133,6 +2894,9 @@ export const SessionChatInterface = memo(
         cliType: session.cliType,
         agentType: session.agentType,
         config: sessionAgentConfig,
+        capability: session.agentConfigId
+          ? sessionMachine?.acpCapabilities?.[session.agentConfigId]?.rateLimits
+          : undefined,
       })
         ? sessionMachine?.raceLimits
         : undefined;
@@ -2141,53 +2905,138 @@ export const SessionChatInterface = memo(
       return formatSessionDate(session.createdAt, localeObj) || session.id;
     }, [session, localeObj]);
 
+    // A Project group freezes its Member forest on the workspace-owner
+    // Session; a child tab reads the same snapshot. The selection is keyed by
+    // that owner so the tab and its root describe the same repository.
+    const projectMemberOwnerSession = workspaceSession ?? session;
+    const sessionProjectRun = projectMemberOwnerSession.projectRun;
+    const projectMemberRows = useMemo(
+      () =>
+        buildSessionProjectMemberRows(projectMemberOwnerSession, {
+          machineId: session.machineId,
+          localProjects: sessionMachineLocalProjects,
+        }),
+      [projectMemberOwnerSession, session.machineId, sessionMachineLocalProjects]
+    );
+    const selectedProjectMemberId = useAtomValue(
+      sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession.id)
+    );
+    const setSelectedProjectMemberId = useSetAtom(
+      sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession.id)
+    );
+    const legacyRepoFullName =
+      resolveProjectGitHubRepo(projectMemberOwnerSession.project) ??
+      projectMemberOwnerSession.repoFullName;
+    const selectedProjectMemberRow = useMemo(
+      () =>
+        resolveSessionProjectMemberRow(
+          projectMemberRows,
+          selectedProjectMemberId,
+          legacyRepoFullName
+        ),
+      [legacyRepoFullName, projectMemberRows, selectedProjectMemberId]
+    );
+    // `undefined` keeps the single-repository projection; `null` says the
+    // selected Member has no GitHub remote, so it must not borrow the first
+    // Member's PR. An explicit repository describes that Member.
+    const activeProjectRepository = sessionProjectRun
+      ? (selectedProjectMemberRow?.repoFullName ?? null)
+      : undefined;
+
     const {
+      sourceSessionId: prSessionId,
       repoFullName,
       latestPr,
       latestPrState,
+      pullRequestHistory,
       canShowGitHubActions,
       hasExistingPr,
       workspaceDirty,
+      workspaceUnpushed,
       hasChanges,
     } = useMemo(
-      () => getSessionGitHubState(session, workspaceSession),
-      [session, workspaceSession]
+      () => getSessionGitHubState(session, workspaceSession, activeProjectRepository),
+      [activeProjectRepository, session, workspaceSession]
     );
+    const hasHostedGitHub = usePlatformCapability('githubIntegration');
     const latestPrNumber = getPullRequestNumber(latestPr);
     const latestPrRepoFullName = getPullRequestRepoFullName(latestPr) ?? repoFullName;
+    // Stable identity: it is the PrLinkProvider value over the whole
+    // conversation, and a new function per render re-propagated that context
+    // through every row. It reads the latest PR when called.
+    const openLatestPr = useStableCallback(() => {
+      if (!latestPr) return;
+      if (hasHostedGitHub && onOpenPrTab && latestPrRepoFullName && latestPrNumber) {
+        onOpenPrTab({
+          prNumber: latestPrNumber,
+          repoFullName: latestPrRepoFullName,
+          headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
+        });
+        return;
+      }
+      void openExternalUrl(latestPr.url);
+    });
+    const prLinkHandler = latestPr ? openLatestPr : undefined;
+    const launcherPillRef = useRef<HTMLDivElement>(null);
+    // The PR tab follows the current PR, so an earlier PR opens on GitHub.
+    const openHistoryPr = useStableCallback((view: SessionPullRequestView) => {
+      void openExternalUrl(view.url);
+    });
     const preferredMergeMethod = usePreferredPrMergeMethod();
     const activePrDetails = useGitHubPrDetails({
+      sessionId: prSessionId,
       workspaceId,
       repoFullName: latestPrRepoFullName,
       prNumber: latestPrNumber,
       headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-      enabled: canShowGitHubActions && hasExistingPr,
+      enabled: hasHostedGitHub && canShowGitHubActions && hasExistingPr,
     });
     const {
       data: activePrData,
       state: activePrState,
-      refreshCheckRuns: refreshActivePrCheckRuns,
       mergePullRequest: mergeActivePullRequest,
       isMerging: isActivePrMerging,
       markReadyForReview: markActivePrReadyForReview,
       isMarkingReady: isActivePrMarkingReady,
     } = activePrDetails;
-    const [isPrActionPending, setIsPrActionPending] = useState(false);
+    const [prActionPendingSessionId, setPrActionPendingSessionId] = useState<SessionId | null>(
+      null
+    );
+    const isPrActionPending = prActionPendingSessionId === session.id;
     // Shared with the PR-tab "Resolve conflicts" button through
     // `resolveConflictsActionAtomFamily`; both surfaces block re-clicks + show
     // loading off this one flag while the prompt dispatch is in flight.
-    const [isResolvingConflicts, setIsResolvingConflicts] = useState(false);
-    const repositories = useCloudQuery(
+    const [resolvingConflictsSessionId, setResolvingConflictsSessionId] =
+      useState<SessionId | null>(null);
+    const isResolvingConflicts = resolvingConflictsSessionId === session.id;
+    const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+    const repositories = useLegacyWorkspaceQuery(
       cloudOperations.github.getWorkspaceRepositories,
       workspaceId ? { workspaceId } : 'skip'
     );
-    const isRepoPublic = useMemo(() => {
-      if (!repoFullName || !repositories) return undefined;
-      const repo = repositories.find((r) => r.fullName === repoFullName);
-      return repo ? !repo.private : undefined;
-    }, [repoFullName, repositories]);
+    const linkedRepo = useMemo(
+      () => resolveLinkedWorkspaceGitHubRepo(repoFullName, repositories),
+      [repoFullName, repositories]
+    );
+    const isRepoPublic = linkedRepo?.isPublic;
+    const isRepoLinked = useMemo(() => {
+      if (!repoFullName || !hasHostedGitHub || legacyQueryStatus === 'blocked') return false;
+      if (session.project?.kind === 'local') return Boolean(linkedRepo);
+      if (repositories !== undefined) return Boolean(linkedRepo);
+      return undefined;
+    }, [
+      hasHostedGitHub,
+      legacyQueryStatus,
+      linkedRepo,
+      repoFullName,
+      repositories,
+      session.project?.kind,
+    ]);
 
-    const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(repoFullName, isRepoPublic);
+    const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(
+      isRepoLinked === false ? undefined : (linkedRepo?.fullName ?? repoFullName),
+      isRepoPublic
+    );
 
     type InputActionState = 'ready' | 'dispatching';
     const [inputActionState, setInputActionState] = useState<InputActionState>('ready');
@@ -2210,16 +3059,61 @@ export const SessionChatInterface = memo(
       >
     >(new Map());
     const isArchivedSession = session.isArchived === true;
+    const editSkillAgent = useMemo(
+      () =>
+        !isArchivedSession && session.cliType && session.agentType
+          ? {
+              cliType: session.cliType,
+              agentType: session.agentType,
+              machineId: session.machineId,
+            }
+          : undefined,
+      [isArchivedSession, session.agentType, session.cliType, session.machineId]
+    );
+    const editMentionContext = useMemo<UserMessageEditMentionContext>(
+      () => ({
+        sessionSource: isArchivedSession
+          ? undefined
+          : {
+              session,
+              sessionLocalProjectRootPath: resolvedLocalProjectMeta?.rootPath ?? null,
+              isRepoPublic,
+              isRepoLinked,
+            },
+        availableCommands,
+        skillAgent: editSkillAgent,
+      }),
+      [
+        availableCommands,
+        editSkillAgent,
+        isArchivedSession,
+        isRepoLinked,
+        isRepoPublic,
+        resolvedLocalProjectMeta?.rootPath,
+        session,
+      ]
+    );
     const [pendingGoalCommand, setPendingGoalCommand] = useState<{
       threadId: string;
       command: GoalCommand;
     } | null>(null);
     const chatStreamRef = useRef<SessionChatStreamHandle>(null);
+    const shareSelection = useMessageSelection(session.id);
     const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
+    const handleAnnotateImage = useCallback(
+      (selection: DocumentSelection) =>
+        inputAreaRef.current?.addDocumentSelection(selection) ?? false,
+      []
+    );
     const searchInputRef = useRef<HTMLInputElement>(null);
     const messageAreaRef = useRef<HTMLDivElement>(null);
+    const [foldMessageArea, setFoldMessageArea] = useState<HTMLDivElement | null>(null);
+    const setMessageArea = useCallback((node: HTMLDivElement | null) => {
+      messageAreaRef.current = node;
+      setFoldMessageArea(node);
+    }, []);
+    const horizontalFold = useHorizontalFoldLayout(foldMessageArea, isMobile);
     const [outlineOverlayRoot, setOutlineOverlayRoot] = useState<HTMLDivElement | null>(null);
-    const skipNextViewportResizeAutoScrollRef = useRef(false);
     const suppressStickyAutoScrollRef = useRef(false);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -2227,24 +3121,66 @@ export const SessionChatInterface = memo(
     const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
     const lastSearchAnalyticsKeyRef = useRef<string | null>(null);
 
-    const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
     const queuedMessageBehavior = useAtomValue(queuedMessageBehaviorAtom);
     const {
       markSessionRead,
       requestSessionCancel,
       requestSessionDispatch,
+      requestSessionGoal,
       requestSessionSteer,
       touchSessionActivity,
       transferSessionOwner,
+      setTreeCollaborationStopped,
+      updateSessionMetadata,
+      snoozeSession,
+      settleSession,
+      moveSessionToFocus,
     } = useSessionActions();
+    const statusViewWritable = useStatusViewWritable(useOrganization().role);
+    // Linked pull requests: the user unlinks through their own records (the reconciler
+    // alone publishes `pullRequests`). Rows open the primary PR's tab, others on GitHub.
+    const prOwnerMeta = workspaceSession ?? session;
+    const prLinkItems = useMemo(
+      () => resolveSessionPullRequestLinkList(prOwnerMeta, activeProjectRepository),
+      [prOwnerMeta, activeProjectRepository]
+    );
+    const writePrLink = useStableCallback(async (patch: Record<string, unknown>) => {
+      if (!prSessionId) throw new Error('Session is not ready');
+      await updateSessionMetadata(prSessionId, patch);
+    });
+    const unlinkPrFromUi = useStableCallback(async (url: string) => {
+      await unlinkSessionPullRequestFromUi(prOwnerMeta, url, writePrLink).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
+    });
+    const openLinkedPr = useStableCallback((item: SessionPullRequestLinkListItem) => {
+      if (item.kind === 'associated' && item.primary && prLinkHandler) prLinkHandler();
+      else void openExternalUrl(item.url);
+    });
+    const prLinks = useMemo<SessionPullRequestLinksProps>(
+      () => ({
+        items: prLinkItems,
+        onOpen: openLinkedPr,
+        onUnlink: unlinkPrFromUi,
+      }),
+      [prLinkItems, openLinkedPr, unlinkPrFromUi]
+    );
+    const settleSessionWithConfirmation = useSettleSessionWithConfirmation(settleSession);
+    const snoozeSessionWithConfirmation = useSnoozeSessionWithConfirmation(snoozeSession);
+    const moveToFocusWithConfirmation = useMoveToFocusWithConfirmation(moveSessionToFocus);
     const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
       null
     );
     const { members: workspaceMembers, isMultiMember } = useWorkspaceMembers();
-    const [pendingOwnerUserId, setPendingOwnerUserId] = useState<string | null>(null);
+    const [pendingOwner, setPendingOwner] = useState<{
+      sessionId: SessionId;
+      userId: string;
+    } | null>(null);
+    const pendingOwnerUserId = pendingOwner?.sessionId === session.id ? pendingOwner.userId : null;
     const handleChangeOwner = useCallback(
       async (nextUserId: string) => {
-        setPendingOwnerUserId(nextUserId);
+        const target = { sessionId: session.id, userId: nextUserId };
+        setPendingOwner(target);
         try {
           await transferSessionOwner(session.id, nextUserId);
           const name =
@@ -2254,40 +3190,32 @@ export const SessionChatInterface = memo(
           console.error('Failed to transfer session owner', error);
           toast.error(t('sessions.owner.changeFailed', 'Could not change the session owner'));
         } finally {
-          setPendingOwnerUserId(null);
+          setPendingOwner((current) => (current === target ? null : current));
         }
       },
       [session.id, t, transferSessionOwner, workspaceMembers]
     );
+    const getOwnerAccessReason = useSessionOwnerAccess();
     const ownerMenuState = useMemo<SessionOwnerMenuState | undefined>(
       () =>
         isMultiMember
           ? {
               members: workspaceMembers,
+              getDisabledReason: (userId) => getOwnerAccessReason(session, userId),
               ownerUserId: session.userId,
               onChangeOwner: handleChangeOwner,
               pendingUserId: pendingOwnerUserId,
             }
           : undefined,
-      [handleChangeOwner, isMultiMember, pendingOwnerUserId, session.userId, workspaceMembers]
+      [
+        handleChangeOwner,
+        isMultiMember,
+        pendingOwnerUserId,
+        session,
+        workspaceMembers,
+        getOwnerAccessReason,
+      ]
     );
-    const {
-      doc: sessionDoc,
-      addHistory: addSessionHistory,
-      pushMessageQueue,
-      removeMessageQueueItem,
-      updateMessageQueueItem,
-      reorderMessageQueueItem,
-      updateHistoryEntry,
-      waitUntilSynced,
-      ready: sessionDocReady,
-      synced: sessionDocSynced,
-      syncState: sessionDocSyncState,
-    } = useSessionDoc(session.id, {
-      enabled: !hideMessageArea,
-      syncEnabled: !hideMessageArea && syncEnabled,
-    });
-
     const [sendingMessageIds, setSendingMessageIds] = useState<ReadonlySet<string>>(new Set());
     const [dismissedProposedPlanDecisionKeys, setDismissedProposedPlanDecisionKeys] = useState<
       ReadonlySet<string>
@@ -2327,7 +3255,7 @@ export const SessionChatInterface = memo(
       [waitUntilSynced]
     );
 
-    const sessionHistoryLength = sessionDoc?.history?.length ?? 0;
+    const sessionHistoryLength = conversationView?.turnCount ?? 0;
     const conversationPreparationSignalRef = useRef<SessionConversationPreparationState | null>(
       null
     );
@@ -2376,69 +3304,66 @@ export const SessionChatInterface = memo(
       TITLE_SYNCING_INDICATOR_DELAY_MS
     );
 
-    const sessionConversationConfig = useMemo(
-      () => resolveSessionConversationConfig(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
-      [sessionDoc?.history, sessionDoc?.mq]
+    // How current the shown conversation is: a skeleton while nothing is cached,
+    // "Syncing" in the info bar while a cached copy catches up. "Caught up"
+    // is sticky per open, so later sync blips (live output) stay quiet.
+    const contentCaughtUpRef = useRef({ sessionId: session.id, caughtUp: false });
+    if (contentCaughtUpRef.current.sessionId !== session.id) {
+      contentCaughtUpRef.current = { sessionId: session.id, caughtUp: false };
+    }
+    if (sessionDocSyncState === 'synced') contentCaughtUpRef.current.caughtUp = true;
+    const contentSyncState = useDisplayedContentSyncState(
+      resolveSessionContentSyncState({
+        docReady: sessionDocReady,
+        historyLength: sessionHistoryLength,
+        syncState: sessionDocSyncState,
+        hasCaughtUp: contentCaughtUpRef.current.caughtUp,
+        knownToHaveMessages: session.lastMessageAt != null,
+      })
     );
+
     const mcpSelection = useSessionMcpSelection(sessionConversationConfig.mcpServerIds, {
       existingSession: true,
       disabled: isArchivedSession,
+      scopeKey: session.id,
+      defaultsTarget: { project: session.project, machineId: session.machineId },
     });
-    // `sourceConfigKey` identifies the durable turn selected by the resolver,
-    // so there is no need to hash its mode/model/option values separately.
-    const sessionConversationConfigRevision = `${session.id}:${
-      sessionConversationConfig.sourceConfigKey ?? ''
-    }`;
-    const sessionConfigPreferences = useMemo(
-      () => ({
-        modeId: sessionConversationConfig.modeId,
-        modelId: sessionConversationConfig.modelId,
-        configOptionValues: sessionConversationConfig.configOptionValues,
-      }),
-      [
-        sessionConversationConfig.configOptionValues,
-        sessionConversationConfig.modeId,
-        sessionConversationConfig.modelId,
-      ]
+    const {
+      send: sendWithMcpSelection,
+      retryDefaults: retryMcpDefaults,
+      recoveryGeneration,
+    } = mcpSelection;
+    const executionTurnConfigOverrides = useMemo(
+      () =>
+        buildExecutionTurnConfigOverrides({
+          selectedModeId,
+          defaultModeId,
+          modeOptions,
+          configOptionSelectors,
+          configOptionValues,
+        }),
+      [configOptionSelectors, configOptionValues, defaultModeId, modeOptions, selectedModeId]
     );
-    const sessionSelectorOptions = useMemo(
-      () => ({
-        capabilityAuthority,
-        configOptionSelectors,
-        defaultModeId,
-        defaultModelId,
-        modeOptions,
-        modelOptions,
-      }),
-      [
-        capabilityAuthority,
-        configOptionSelectors,
-        defaultModeId,
-        defaultModelId,
-        modeOptions,
-        modelOptions,
-      ]
-    );
-    useReconcileAcpSessionConfigSelection({
-      enabled: !hideMessageArea && sessionDocReady,
-      targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
-      preferenceRevision: sessionConversationConfigRevision,
-      preferences: sessionConfigPreferences,
-      selectorOptions: sessionSelectorOptions,
-      dispatch: dispatchSessionConfigSelection,
-    });
 
     // Session status strip above the composer: one priority-ordered slot for
     // "will my message run?" (self offline > machine removed > machine offline).
+    const presenceAvailable = useWorkspaceFeature('presence');
     const statusStripState = useMemo(
       () =>
         resolveSessionStatusStripState({
           browserOnline,
+          presenceAvailable,
           machineRemoved: isMachineRemoved,
           machineOnlineStatus: sessionMachineOnlineStatus,
           machineName: sessionMachine?.name ?? null,
         }),
-      [browserOnline, isMachineRemoved, sessionMachineOnlineStatus, sessionMachine?.name]
+      [
+        browserOnline,
+        presenceAvailable,
+        isMachineRemoved,
+        sessionMachineOnlineStatus,
+        sessionMachine?.name,
+      ]
     );
 
     // Keyboard cyclers (⇧Tab mode + rebindable model / thinking). The agent provider is
@@ -2519,10 +3444,39 @@ export const SessionChatInterface = memo(
         case 'initializing': {
           const stage = liveSessionStatus.stage;
           switch (stage) {
-            case 'git-clone':
-              return tHeartbeat('sessions.statusIndicator.gitClone', {
-                repo: '',
-              });
+            case 'git-clone': {
+              // A Project group says which step it is on; anything else keeps
+              // the plain clone heartbeat.
+              const progress = decodeProjectPreparationProgress(liveSessionStatus.detail);
+              switch (progress?.step) {
+                case 'resolve':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.resolve',
+                    'Finding the group’s repositories on this machine'
+                  );
+                case 'member':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.member',
+                    'Preparing repositories {{done}}/{{total}} · {{path}}',
+                    progress
+                  );
+                case 'submodules':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.submodules',
+                    'Checking out submodules'
+                  );
+                case 'setup':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.setup',
+                    'Running setup for {{path}}',
+                    progress
+                  );
+                default:
+                  return tHeartbeat('sessions.statusIndicator.gitClone', {
+                    repo: '',
+                  });
+              }
+            }
             case 'managed-runtime':
               return (
                 liveSessionStatus.detail ??
@@ -2545,28 +3499,21 @@ export const SessionChatInterface = memo(
       return null;
     }, [liveSessionStatus, session.createdAt, t]);
 
-    const sessionHistory = useMemo(
-      () => (sessionDoc?.history as SessionHistory[] | undefined) ?? [],
-      [sessionDoc?.history]
-    );
-    const [lastCompletedAssistantTarget, setLastCompletedAssistantTarget] = useState<{
-      sessionId: SessionId;
-      messageId: string | null;
-    } | null>(null);
-    const lastCompletedAssistantMessageId =
-      lastCompletedAssistantTarget?.sessionId === session.id
-        ? lastCompletedAssistantTarget.messageId
-        : null;
-    const handleLastCompletedAssistantMessageIdChange = useCallback(
-      (messageId: string | null) => {
-        setLastCompletedAssistantTarget((current) => {
-          if (current?.sessionId === session.id && current.messageId === messageId) {
-            return current;
-          }
-          return { sessionId: session.id, messageId };
-        });
-      },
-      [session.id]
+    /** The hydrated tail; every reader below that scans backwards for the latest turn uses it. */
+    const sessionHistory = sessionTailHistory;
+    const turnFacts = useSessionTurnFacts(conversationView, isVisible && !hideMessageArea);
+    const conversationIndexRows = useConversationIndexRows(conversationView, {
+      includeSummary: false,
+    });
+    // Read the same index-only result as the stream; no child effect/state mirror.
+    const lastCompletedAssistantMessageId = useMemo(
+      () =>
+        conversationView
+          ? resolveLastAssistantTurnIds(conversationView).lastCompletedAssistantMessageId
+          : null,
+      // `conversationVersion` is the change signal for index facts, including completion.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [conversationView, conversationVersion]
     );
     const handleForkFromMenu = useCallback(
       (destination?: SessionForkDestination) => {
@@ -2592,29 +3539,37 @@ export const SessionChatInterface = memo(
     // persisted. Serialize to a key so the input area only re-renders when the
     // derived set actually changes (not on every streaming token).
     const scheduledTasksKey = useMemo(
-      () => JSON.stringify(collectPendingScheduledTasksFromHistory(sessionHistory)),
-      [sessionHistory]
+      () =>
+        JSON.stringify(
+          collectPendingScheduledTasksFromHistory(schedulingEntriesFromFacts(turnFacts.ordered))
+        ),
+      [turnFacts.ordered]
     );
     const pendingScheduledTasks = useMemo(
       () => JSON.parse(scheduledTasksKey) as PendingScheduledTask[],
       [scheduledTasksKey]
     );
     const legacySession = session as SessionLegacyMetaFields;
-    const latestGoal = useMemo(
-      () =>
-        resolveVisibleSessionGoal(
-          sessionHistory,
-          legacySession.latestGoal,
-          session.dismissedGoalThreadId
-        ),
-      [legacySession.latestGoal, session.dismissedGoalThreadId, sessionHistory]
-    );
+    const latestGoal = useMemo(() => {
+      const goalItem = latestGoalFromFacts(turnFacts.ordered);
+      return resolveVisibleSessionGoal(
+        goalItem ? [{ items: [goalItem] as never }] : [],
+        legacySession.latestGoal,
+        session.dismissedGoalThreadId
+      );
+    }, [legacySession.latestGoal, session.dismissedGoalThreadId, turnFacts.ordered]);
     const isGoalActive = isSessionGoalActive(latestGoal);
-    // The existing prompt bridge is Codex-specific. Other providers may publish
-    // neutral goal snapshots, but their advertised `_session/goal` extension is
-    // not yet routed through Lody's session control plane, so keep them read-only.
-    const goalCommands = getPromptBridgeGoalCommands(session.agentType);
-    const canPauseGoal = canPauseGoalThroughPromptBridge(session.agentType);
+    // Goal control is an ACP extension, so the runtime's advertised actions
+    // decide which buttons exist. A runtime with no goal extension stays
+    // read-only rather than being guessed at from the agent's name.
+    const goalCapability = session.agentConfigId
+      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
+      : undefined;
+    const goalCommands = useMemo(
+      () => (rpcReason ? [] : getSessionGoalCommands(goalCapability)),
+      [rpcReason, goalCapability]
+    );
+    const canPauseGoal = goalCommands.includes('pause');
 
     useEffect(() => {
       if (!pendingGoalCommand) {
@@ -2645,6 +3600,19 @@ export const SessionChatInterface = memo(
         setPendingGoalCommand(null);
       }
     }, [latestGoal, pendingGoalCommand]);
+
+    useEffect(() => {
+      if (!pendingGoalCommand) {
+        return undefined;
+      }
+      // The agent's own goal snapshot is the completion signal, and a queued
+      // action waits for a running turn to drain. Stop waiting eventually so a
+      // command that never lands cannot leave every goal button disabled.
+      const timer = setTimeout(() => {
+        setPendingGoalCommand((current) => (current === pendingGoalCommand ? null : current));
+      }, GOAL_COMMAND_PENDING_TIMEOUT_MS);
+      return () => clearTimeout(timer);
+    }, [pendingGoalCommand]);
 
     const isSessionActive = liveSessionStatus != null;
     // CLI-reported presence is the fact source for "working now". The only
@@ -2709,9 +3677,13 @@ export const SessionChatInterface = memo(
       () => (sessionDoc?.mq ?? []) as MessageQueueItem[],
       [sessionDoc?.mq]
     );
+    const hasPendingQueueRecords = useHasPendingQueueRecords(session.id, messageQueue);
     const billableSessionTurnCount = useMemo(
-      () => countBillableSessionTurns({ history: sessionHistory, queue: messageQueue }),
-      [messageQueue, sessionHistory]
+      () =>
+        (conversationView ? countUserTurns(conversationView) : 0) +
+        countPendingQueuedUserTurns(messageQueue),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [conversationVersion, conversationView, messageQueue]
     );
     const handleOpenBillingSettings = useCallback(() => {
       captureSessionEvent('session/free_turn_limit_upgrade_clicked');
@@ -2812,10 +3784,18 @@ export const SessionChatInterface = memo(
       t,
       workspaceId,
     ]);
+    // Encrypted remote machines cannot take ordinary RPC, but their owner reaches edit and
+    // resend through the signed feature channel once the machine supports it.
+    const encryptedRemoteEditAvailable = encryptedRemoteEditAndResendAvailable({
+      contentMode: runtime?.contentMode,
+      accountId: runtime?.accountId,
+      machine: sessionMachine,
+    });
+    const editRpcReason = encryptedRemoteEditAvailable ? undefined : rpcReason;
     const editableLastUserMessageId = useMemo(() => {
       if (
+        editRpcReason ||
         session.isArchived ||
-        session.autoReview ||
         isGoalActive ||
         session.cliType !== 'builtin' ||
         (session.agentType !== 'codex' && session.agentType !== 'claude')
@@ -2833,6 +3813,7 @@ export const SessionChatInterface = memo(
       if (
         !userMessage ||
         userMessage.status === 'pending_apply' ||
+        userMessage.status === 'delivery_unknown' ||
         (userMessage.inputConfig as Record<string, unknown> | undefined)?._lodyDeliveryKind ===
           'steer'
       ) {
@@ -2847,8 +3828,7 @@ export const SessionChatInterface = memo(
         if (entry.finished !== true || !entry.acpTurnId || !session.agentConfigId) return null;
         const capability =
           sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)];
-        return getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-          capability?.sessionFork === true
+        return capabilityAuthority === 'authoritative' && capability?.sessionFork === true
           ? userMessage.id
           : null;
       }
@@ -2856,19 +3836,43 @@ export const SessionChatInterface = memo(
       // The first user message uses session/new and therefore has no fork boundary.
       return userMessage.id;
     }, [
+      capabilityAuthority,
+      editRpcReason,
       isGoalActive,
       session.agentConfigId,
       session.agentType,
-      session.autoReview,
       session.cliType,
       session.isArchived,
       sessionHistory,
       sessionMachine?.acpCapabilities,
     ]);
+    const messageQuotesSupported = machineSupportsMessageQuotes(sessionMachine);
     const handleEditLastUser = useCallback(
-      async (message: SessionHistoryParsed, text: string): Promise<boolean> => {
-        const nextText = text.trim();
-        const requesterUserId = currentUser?.id ?? session.userId;
+      async (
+        message: SessionHistoryParsed,
+        submission: UserMessageEditSubmission
+      ): Promise<boolean> => {
+        // `submission.text` is already expanded (session/skill/agent-role tokens
+        // rewritten to their agent-facing forms) and trimmed; `submission.spans`
+        // records where each mention landed so the transcript paints the user's
+        // own wording back over it — identical to a fresh send.
+        const nextText = submission.text;
+        if (
+          submission.spans?.some((span) => span.kind === 'message_quote') &&
+          !messageQuotesSupported
+        ) {
+          toast.error(
+            t(
+              'composer.messageQuotesUpgrade',
+              'Update the target machine to use message quotes. Your draft is preserved.'
+            )
+          );
+          return false;
+        }
+        const requesterUserId =
+          (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+          currentUser?.id ??
+          session.userId;
         if (
           !runtime ||
           !requesterUserId ||
@@ -2885,7 +3889,11 @@ export const SessionChatInterface = memo(
         for (const block of originalBlocks) {
           if (block.type === 'text') {
             if (!replacedText) {
-              inputBlocks.push({ type: 'text', text: nextText });
+              inputBlocks.push({
+                type: 'text',
+                text: nextText,
+                ...(submission.spans ? { spans: submission.spans } : {}),
+              });
               replacedText = true;
             }
             continue;
@@ -2893,7 +3901,11 @@ export const SessionChatInterface = memo(
           inputBlocks.push(block);
         }
         if (!replacedText) {
-          inputBlocks.push({ type: 'text', text: nextText });
+          inputBlocks.push({
+            type: 'text',
+            text: nextText,
+            ...(submission.spans ? { spans: submission.spans } : {}),
+          });
         }
 
         const originalConfig = normalizeSessionTurnInputConfig(message.inputConfig) ?? {};
@@ -2947,10 +3959,11 @@ export const SessionChatInterface = memo(
         session.id,
         session.machineId,
         session.userId,
+        messageQuotesSupported,
         t,
       ]
     );
-    const searchBlocks = useIncrementalSearchBlocks(sessionHistory, isSearchOpen);
+    const searchBlocks = useIncrementalSearchBlocks(conversationView, isSearchOpen);
     const normalizedSearchQuery = useMemo(
       () => normalizeSessionSearchQuery(deferredSearchQuery),
       [deferredSearchQuery]
@@ -3027,7 +4040,7 @@ export const SessionChatInterface = memo(
     const openSearch = useCallback(() => {
       if (!isSearchOpen) {
         captureSessionEvent('session/search_opened', {
-          history_count: sessionHistory.length,
+          history_count: sessionHistoryLength,
           searchable_block_count: searchBlocks.length,
           source: 'conversation',
         });
@@ -3039,7 +4052,7 @@ export const SessionChatInterface = memo(
       focusSearchInput,
       isSearchOpen,
       searchBlocks.length,
-      sessionHistory.length,
+      sessionHistoryLength,
     ]);
 
     const closeSearch = useCallback(() => {
@@ -3116,7 +4129,6 @@ export const SessionChatInterface = memo(
       setActiveSearchResultIndex(0);
     }, []);
 
-    // ── Page-level drag-and-drop ────────────────────────────────────────
     // Two kinds land on the whole conversation, not just on the composer: image
     // and file attachments, and a session dragged out of the sidebar, which
     // becomes a mention of that conversation. Each zone ignores the other's
@@ -3126,9 +4138,12 @@ export const SessionChatInterface = memo(
       enabled: canHandlePageDrop,
       accepts: hasFileTransfer,
       onDrop: useCallback((dataTransfer: DataTransfer) => {
-        const files = getFilesFromDataTransfer(dataTransfer);
+        const { files, directories } = readDroppedTransfer(dataTransfer);
         if (files.length > 0) {
           inputAreaRef.current?.handleImageDrop(files);
+        }
+        if (directories.length > 0) {
+          inputAreaRef.current?.handleDirectoryDrop(directories);
         }
       }, []),
     });
@@ -3167,8 +4182,8 @@ export const SessionChatInterface = memo(
         // Exact chord only: ⌘F (macOS) / Ctrl+F (Windows/Linux). Refuse any extra
         // modifier (Shift/Alt/the other primary mod) so chords like ⌘⌥F, ⌘⇧F, or
         // ⌘⌃F keep their other meanings and are not stolen via preventDefault.
-        // Matches the command registry's `$mod+f` matcher (primary-mod exclusive).
-        if (!matchesKeyboardEvent(FIND_IN_CHAT_BINDING, event, isMac())) {
+        // Matches the command registry's Mod+F matcher (primary-mod exclusive).
+        if (!matchesKeyboardEvent(event, FIND_IN_CHAT_BINDING)) {
           return;
         }
         event.preventDefault();
@@ -3241,68 +4256,191 @@ export const SessionChatInterface = memo(
       };
     }, [activeSearchResult, isSearchOpen]);
 
-    const handleCopyConversationHistory = useCallback(async () => {
-      if (!sessionDoc?.history?.length) {
-        captureSessionEvent('session/history_copy_failed', {
-          reason: 'empty_history',
-          history_count: 0,
-        });
-        toast.error(t('sessions.copyConversationHistoryEmpty', 'No conversation history to copy'));
+    // Pasting a transcript elsewhere loses the session it came from, so the export
+    // header carries the repo and branch. Names only reach turn headings when the
+    // conversation has more than one human in it; the builder makes that call.
+    const conversationCopySource = useMemo(() => {
+      const repo = (resolveProjectGitHubRepo(session.project) ?? session.repoFullName)?.trim();
+      const branch = session.branchName?.trim();
+      return [repo, branch].filter(Boolean).join(' \u00b7 ') || undefined;
+    }, [session.branchName, session.project, session.repoFullName]);
+
+    const conversationCopyParticipants = useMemo(() => {
+      const names: Record<string, string> = {};
+      for (const member of workspaceMembers) {
+        names[member.userId] = member.name;
+      }
+      return names;
+    }, [workspaceMembers]);
+
+    const handleCopyConversationHistory = useCallback(
+      async (throughMessageId?: string) => {
+        if (!conversationView?.turnCount) {
+          captureSessionEvent('session/history_copy_failed', {
+            reason: 'empty_history',
+            history_count: 0,
+          });
+          toast.error(
+            t('sessions.copyConversationHistoryEmpty', 'No conversation history to copy')
+          );
+          return;
+        }
+
+        const turnCount = conversationView.turnCount;
+        try {
+          await runPlaintextCopy(async (assertCurrent, admitOutput) => {
+            if (!runtime) throw new Error('Workspace runtime unavailable');
+            const history = conversationCopyRange(
+              await readConversationCopySource(runtime, session.id, conversationView),
+              throughMessageId
+            );
+            assertCurrent();
+            const last = history.at(-1);
+            const { markdown, stats } = buildConversationMarkdown({
+              workspaceId: workspaceId ?? undefined,
+              history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
+              title: session.title ?? undefined,
+              source: conversationCopySource,
+              participants: conversationCopyParticipants,
+              // Header, not a trailing line: whoever reads this next has to know the
+              // last turn is cut short before reading it. See the builder's option.
+              incompleteFinalResponse:
+                last?.role === 'assistant' && !last.finished
+                  ? t(
+                      'sessions.copyContextIncomplete',
+                      'The last response was still generating when copied.'
+                    )
+                  : undefined,
+            });
+            await admitOutput();
+            assertCurrent();
+            await copyTextToClipboard(markdown);
+            assertCurrent();
+            captureSessionEvent('session/history_copy_succeeded', {
+              history_count: turnCount,
+              prompt_length: stats.chars,
+              estimated_tokens: stats.estimatedTokens,
+              over_budget: stats.overBudget,
+              thinking_truncated: stats.thinkingTruncated,
+              terminal_omitted: stats.terminalOutputOmitted,
+              tool_calls_collapsed: stats.toolCallsCollapsed,
+              tool_results_truncated: stats.toolResultsTruncated,
+            });
+            capturePostHogEvent(postHog, 'export/context_markdown_copied', {
+              scope: throughMessageId ? 'through_message' : 'full',
+              history_count: turnCount,
+            });
+            toast.success(describeCopiedConversation(stats, t));
+          });
+        } catch (error) {
+          console.error('Failed to copy conversation history', error);
+          captureSessionEvent('session/history_copy_failed', {
+            reason: 'clipboard_error',
+            history_count: turnCount,
+            error_name: error instanceof Error ? error.name : typeof error,
+            error_message: error instanceof Error ? error.message : String(error),
+          });
+          toast.error(
+            t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
+          );
+        }
+      },
+      [
+        captureSessionEvent,
+        conversationCopyParticipants,
+        conversationCopySource,
+        workspaceId,
+        session.title,
+        conversationView,
+        runtime,
+        session.id,
+        runPlaintextCopy,
+        postHog,
+        t,
+      ]
+    );
+
+    // Inactive tabs and collapsed side chats stay mounted for fast switching, so
+    // being mounted is not evidence the user saw this conversation: only a
+    // visible surface inside an active foreground window that has received page
+    // interaction may clear unread state.
+    const {
+      isWindowActive: isWindowReadActive,
+      hasPageInteraction: hasWindowReadInteraction,
+      engagementRevision: windowReadEngagementRevision,
+      getLatestState: getLatestWindowReadEngagement,
+    } = useWindowReadEngagement();
+    const prevReadReceiptSnapshotRef = useRef<ReadReceiptSnapshot | null>(null);
+    const manualUnreadAtMessageRef = useRef<number | null>(null);
+
+    useEffect(() => {
+      const surfaceVisible = isVisible && !preparingWindow;
+      const lastMessageAt = getEffectiveSessionLastMessageAt({
+        lastMessageAt: parseTimestamp(session.lastMessageAt),
+        snoozedUntil: parseTimestamp(session.snoozedUntil),
+      });
+      const lastReadAt = parseTimestamp(session.lastReadAt);
+      const snapshot: ReadReceiptSnapshot = {
+        sessionId: session.id,
+        isVisible: surfaceVisible,
+        lastMessageAt,
+        lastReadAt,
+      };
+      const manualUnreadAt = resolveManualUnreadLatch(
+        prevReadReceiptSnapshotRef.current,
+        snapshot,
+        manualUnreadAtMessageRef.current
+      );
+      prevReadReceiptSnapshotRef.current = snapshot;
+      manualUnreadAtMessageRef.current = manualUnreadAt;
+
+      if (manualUnreadAt !== null && lastMessageAt !== null && lastMessageAt <= manualUnreadAt) {
         return;
       }
 
-      try {
-        const { markdown, stats } = buildConversationMarkdown({
-          history: sessionDoc.history as Parameters<typeof buildConversationMarkdown>[0]['history'],
-          title: session.title ?? undefined,
-        });
-        await navigator.clipboard.writeText(markdown);
-        captureSessionEvent('session/history_copy_succeeded', {
-          history_count: sessionDoc.history.length,
-          prompt_length: stats.chars,
-          estimated_tokens: stats.estimatedTokens,
-          over_budget: stats.overBudget,
-          thinking_omitted: stats.thinkingOmitted,
-          terminal_omitted: stats.terminalOutputOmitted,
-          tool_calls_collapsed: stats.toolCallsCollapsed,
-          tool_results_truncated: stats.toolResultsTruncated,
-        });
-        toast.success(describeCopiedConversation(stats, t));
-      } catch (error) {
-        console.error('Failed to copy conversation history', error);
-        captureSessionEvent('session/history_copy_failed', {
-          reason: 'clipboard_error',
-          history_count: sessionDoc.history.length,
-          error_name: error instanceof Error ? error.name : typeof error,
-          error_message: error instanceof Error ? error.message : String(error),
-        });
-        toast.error(
-          t('sessions.copyConversationHistoryFailed', 'Failed to copy conversation history')
-        );
+      const liveEngagement = getLatestWindowReadEngagement();
+      const readGate = {
+        rendersConversation: !hideMessageArea,
+        isVisible: surfaceVisible,
+        isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
+        hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
+      };
+      const rootWokeAt =
+        session.parentSessionId && workspaceSession
+          ? expiredSnoozeTimestamp(parseTimestamp(workspaceSession.snoozedUntil), getServerNow())
+          : null;
+      if (
+        !shouldMarkSessionRead({ ...readGate, lastMessageAt, lastReadAt }) &&
+        !(
+          rootWokeAt !== null &&
+          shouldMarkSessionRead({
+            ...readGate,
+            lastMessageAt: rootWokeAt,
+            lastReadAt: parseTimestamp(workspaceSession?.lastReadAt),
+          })
+        )
+      ) {
+        return;
       }
-    }, [captureSessionEvent, session.title, sessionDoc?.history, t]);
-
-    // Inactive tabs and collapsed side chats stay mounted for fast switching, so
-    // being mounted is not evidence the user saw this conversation: only the
-    // visible surface may clear unread state. Otherwise opening a parent session
-    // marks every one of its sub-sessions read at once.
-    const shouldMarkRead = useMemo(
-      () =>
-        shouldMarkSessionRead({
-          rendersConversation: !hideMessageArea,
-          isVisible,
-          lastMessageAt: parseTimestamp(session.lastMessageAt),
-          lastReadAt: parseTimestamp(session.lastReadAt),
-        }),
-      [hideMessageArea, isVisible, session.lastMessageAt, session.lastReadAt]
-    );
-
-    useEffect(() => {
-      if (!shouldMarkRead) return;
-      void markSessionRead(session.id, session.lastMessageAt ?? null).catch((error: unknown) => {
+      void markSessionRead(session.id, lastMessageAt).catch((error: unknown) => {
         console.warn('Failed to mark session as read', error);
       });
-    }, [markSessionRead, session.id, session.lastMessageAt, shouldMarkRead]);
+    }, [
+      getLatestWindowReadEngagement,
+      hasWindowReadInteraction,
+      hideMessageArea,
+      isVisible,
+      isWindowReadActive,
+      markSessionRead,
+      preparingWindow,
+      session.id,
+      session.lastMessageAt,
+      session.lastReadAt,
+      session.parentSessionId,
+      session.snoozedUntil,
+      windowReadEngagementRevision,
+      workspaceSession,
+    ]);
 
     const isDispatching = inputActionState === 'dispatching';
     const isAgentBusy = isSessionPromptBusy({
@@ -3310,11 +4448,28 @@ export const SessionChatInterface = memo(
       isSessionWorking,
       isGoalActive,
     });
-    const canStopAgent =
-      (isSessionActive && activeAssistantTurnId != null) || (isGoalActive && canPauseGoal);
+    const peekSessionStore = useCallback(
+      () => runtime?.peekSessionStore?.(session.id),
+      [runtime, session.id]
+    );
+    useSessionDocStaleReport({
+      sessionId: session.id,
+      docReady: sessionDocReady && !hideMessageArea,
+      syncEnabled: !hideMessageArea && syncEnabled,
+      machineOnlineStatus: sessionMachineOnlineStatus,
+      agentBusy: isAgentBusy,
+      activeAssistantTurnId: activeAssistantTurnId ?? null,
+      lastMessageAt: session.lastMessageAt,
+      peekStore: peekSessionStore,
+    });
+    const canStopAgent = canStopAgentEnabled({
+      activeAssistantTurnId: activeAssistantTurnId ?? null,
+      isGoalActive,
+      canPauseGoal,
+    });
     const latestCompletedProposedPlan = useMemo(
-      () => findLatestCompletedCodexProposedPlan(sessionDoc?.history),
-      [sessionDoc?.history]
+      () => latestProposedPlanFromFacts(turnFacts.ordered),
+      [turnFacts.ordered]
     );
     const isCodexPlanSession = session.agentType === 'codex';
     const isProposedPlanDecisionPending =
@@ -3334,20 +4489,6 @@ export const SessionChatInterface = memo(
     const isProposedPlanDecisionReady =
       !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing;
 
-    // Approving "Yes, implement this plan" switches the mode of the RUNNING
-    // turn only — the composer would still say Plan and quietly plan again on
-    // the next send. The permission cards bump this counter when THIS user
-    // approves, so the selector follows.
-    const planModeExitApprovalCount = useAtomValue(planModeExitApprovalCountAtomFamily(session.id));
-    useEffect(() => {
-      if (planModeExitApprovalCount === 0 || selectedModeId !== ACP_PLAN_PERMISSION_MODE_ID) {
-        return;
-      }
-      const nextModeId = resolveModeIdAfterPlanExit(modeOptions, defaultModeId);
-      if (nextModeId) {
-        handleModeChange(nextModeId);
-      }
-    }, [defaultModeId, handleModeChange, modeOptions, planModeExitApprovalCount, selectedModeId]);
     const sessionBranch = useMemo(
       () =>
         resolveBaseBranchPreference({
@@ -3414,7 +4555,7 @@ export const SessionChatInterface = memo(
       return { kind: 'github', repoFullName: fallbackRepo, branch: sessionBranch };
     }, [session.isWorktree, session.project, session.repoFullName, sessionBranch]);
     const trackUserInterruptEnd = useCallback(() => {
-      const timing = summarizeSessionEndTiming(sessionDoc?.history as SessionHistory[] | undefined);
+      const timing = summarizeSessionEndTiming(conversationIndexRows);
       capturePostHogEvent(postHog, 'session/end_user_interrupt', {
         session_id: session.id,
         workspace_id: workspaceId ?? null,
@@ -3437,60 +4578,99 @@ export const SessionChatInterface = memo(
       session.id,
       session.machineId,
       session.repoFullName,
-      sessionDoc?.history,
+      conversationIndexRows,
       sessionProject,
       workspaceId,
     ]);
+    const isFinalizing = isSessionFinalizing(liveSessionStatus);
+    const pendingSenderUserId =
+      (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ?? currentUser?.id ?? null;
+    const pendingSender = useWorkspaceSenderProfile({
+      userId: pendingSenderUserId,
+      workspaceId,
+    });
+    const pendingMessages = useSessionPendingMessages({
+      sessionId: session.id,
+      history: conversationView,
+      user: pendingSender,
+      showSenderIdentity: isMultiMember,
+      conversationFontSize,
+      onNavigateSession,
+    });
+    // Presence owns liveness; the same pending queue as the composer supplies
+    // the kind of human input. Core metadata works for every ACP provider.
+    const permissionSessionHistory = availableSessionTailHistory as unknown as Parameters<
+      typeof FloatingPermissionRequest
+    >[0]['sessionHistory'];
+    const isAwaitingQuestion = hasPendingAskUserQuestion(
+      liveSessionStatus ?? undefined,
+      permissionSessionHistory
+    );
     const agentActivityLabel =
       initStatusLabel && !isEmptyConversation
         ? initStatusLabel
         : isSessionActive
-          ? liveSessionStatus?.type === 'requestPermission'
-            ? t('sessions.statusIndicator.requestPermission')
-            : t(`sessions.statusIndicator.${runningActivity ?? 'thinking'}`)
+          ? isAwaitingQuestion
+            ? t('sessions.statusIndicator.waitingForAnswer')
+            : liveSessionStatus?.type === 'requestPermission'
+              ? t('sessions.statusIndicator.requestPermission')
+              : isFinalizing
+                ? t('sessions.statusIndicator.finalizing')
+                : runningActivity === 'imageGenerating'
+                  ? t('sessions.statusIndicator.imageGenerating')
+                  : // Reading, running and editing all read as "Working"; the
+                    // collapsed tool groups above already say which.
+                    runningActivity === 'exploring' || runningActivity === 'writing'
+                    ? t('sessions.working', 'Working')
+                    : t('sessions.statusIndicator.thinking')
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or
               // offline) hands the story to the status chip instead.
               t('sessions.statusIndicator.pendingDispatch')
-            : null;
+            : pendingMessages.isSending && statusStripState == null
+              ? t('sessions.sendStatus.sendingWithoutSize')
+              : null;
     const agentActivityTone =
-      isSessionActive && liveSessionStatus?.type === 'requestPermission' ? 'warning' : 'primary';
+      isSessionActive && (isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission')
+        ? 'warning'
+        : 'primary';
+    // Waiting on the user is not work in progress: that status does not shimmer.
+    const agentActivityShimmer = agentActivityTone !== 'warning';
+    // Presence, not the history's `finished` flag: a turn whose daemon died
+    // before finalizing stays unfinished forever but is not running.
+    const liveTurnActivity: LiveTurnActivity | null = isSessionActive
+      ? isAwaitingQuestion || liveSessionStatus?.type === 'requestPermission'
+        ? 'awaitingUser'
+        : 'working'
+      : null;
+    const historyLive = useHistoryLiveWindow(
+      resolveHistoryLiveSync(sessionDocSyncState, browserOnline)
+    );
 
-    const scrollChatToBottom = useCallback(() => {
-      requestAnimationFrame(() => chatStreamRef.current?.scrollToBottom());
+    /**
+     * A direct send holds its message at the top of the viewport while the
+     * reply streams into the room below it. A guide (sent while the agent is
+     * working) leaves the reader's position alone, as a queued message does.
+     */
+    const anchorChatToMessage = useCallback((messageId: string) => {
+      chatStreamRef.current?.anchorMessage(messageId);
     }, []);
 
     const guideHistoryEntry = useCallback(
       async (userTurnId: string, expectedTurnId: string): Promise<boolean> => {
-        const applied = await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
+        return await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
           machineId: session.machineId,
         });
-        if (!applied) {
-          return false;
-        }
-        try {
-          await updateHistoryEntry(userTurnId, (entry) => ({
-            ...entry,
-            status: 'processing',
-            read: true,
-            inputConfig: {
-              ...entry.inputConfig,
-              _lodyDeliveryKind: 'steer',
-            },
-          }));
-        } catch (error) {
-          console.warn('Guide was applied before local history status updated', error);
-        }
-        return true;
       },
-      [requestSessionSteer, session.id, session.machineId, updateHistoryEntry]
+      [requestSessionSteer, session.id, session.machineId]
     );
 
     const enqueueInputBlocks = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
         options?: {
+          attachments?: SessionAttachmentDraft[];
           createHistory?: boolean;
           existingUserTurnId?: string;
           requestDispatch?: boolean;
@@ -3498,6 +4678,8 @@ export const SessionChatInterface = memo(
           modeIdOverride?: string | null;
           modelIdOverride?: string | null;
           configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
+          agentRole?: SessionTurnAgentRoleSelection;
+          mcpServerIds?: readonly McpServerId[];
         }
       ): Promise<boolean> => {
         try {
@@ -3506,7 +4688,10 @@ export const SessionChatInterface = memo(
           const turnModelId =
             options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
           const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
-          const derivedUserId = currentUser?.id ?? session.userId;
+          const derivedUserId =
+            (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+            currentUser?.id ??
+            session.userId;
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
@@ -3519,20 +4704,31 @@ export const SessionChatInterface = memo(
             modelId: turnModelId,
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
-            mcpServerIds: mcpSelection.selectedIds,
-            taskToolsEnabled: tasksEnabled,
+            mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
+            agentRoleId:
+              options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
+            agentRoleRevision: options?.agentRole?.agentRoleRevision,
+            memory:
+              options?.agentRole === undefined
+                ? sessionConversationConfig.memory
+                : options.agentRole?.memory,
+            agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
           });
 
+          const onAccepted = captureRunConfigForSend(inputConfig);
           let userTurnId = options?.existingUserTurnId?.trim() || null;
           if (!userTurnId && options?.createHistory) {
-            const pendingHistoryEntry = buildPendingUserHistoryEntry({
-              userId: derivedUserId,
-              inputBlocks,
-              timestamp: new Date().toISOString(),
-              inputConfig,
-              status: options?.guideExpectedTurnId ? 'pending_apply' : 'pending',
-            });
+            const pendingHistoryEntry = buildDraftUserHistoryEntry(
+              {
+                userId: derivedUserId,
+                inputBlocks,
+                timestamp: new Date().toISOString(),
+                inputConfig,
+                status: options?.guideExpectedTurnId ? 'pending_apply' : 'pending',
+              },
+              options?.attachments
+            );
             if (!pendingHistoryEntry) {
               return false;
             }
@@ -3541,6 +4737,9 @@ export const SessionChatInterface = memo(
             }
             const { entry: historyEntry } = await addSessionHistory(pendingHistoryEntry, {
               dispatch: options?.requestDispatch === true,
+              guideExpectedTurnId: options?.guideExpectedTurnId,
+              attachments: options?.attachments,
+              onAccepted,
             });
             userTurnId = historyEntry.id;
             touchSessionActivity(session.id).catch((err: unknown) => {
@@ -3586,10 +4785,11 @@ export const SessionChatInterface = memo(
               })
               .catch((error: unknown) => {
                 console.error('Failed to apply guide message', error);
+                toast.error(t('sessions.sendError'), { description: getErrorMessage(error) });
               });
           }
 
-          scrollChatToBottom();
+          if (userTurnId && !options?.guideExpectedTurnId) anchorChatToMessage(userTurnId);
           return true;
         } catch (err) {
           console.error('Failed to queue session message', err);
@@ -3603,17 +4803,21 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         addSessionHistory,
+        captureRunConfigForSend,
         captureSessionEvent,
         configOptionValues,
         currentUser?.id,
         guardNewBillableTurn,
         guideHistoryEntry,
         knownIssuePrItems,
+        sessionConversationConfig.memory,
         mcpSelection.selectedIds,
         repoFullName,
         requestSessionDispatch,
-        scrollChatToBottom,
+        anchorChatToMessage,
         selectedModeId,
         selectedModelId,
         session.acpSessionId,
@@ -3626,7 +4830,6 @@ export const SessionChatInterface = memo(
         touchSessionActivity,
         updateHistoryEntry,
         t,
-        tasksEnabled,
       ]
     );
 
@@ -3635,7 +4838,12 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'attachments'
+          | 'mcpServerIds'
         >
       ): Promise<boolean> => {
         try {
@@ -3644,7 +4852,10 @@ export const SessionChatInterface = memo(
           const turnModelId =
             options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
           const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
-          const derivedUserId = currentUser?.id ?? session.userId;
+          const derivedUserId =
+            (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+            currentUser?.id ??
+            session.userId;
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
@@ -3657,8 +4868,15 @@ export const SessionChatInterface = memo(
             modelId: turnModelId,
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
-            mcpServerIds: mcpSelection.selectedIds,
-            taskToolsEnabled: tasksEnabled,
+            mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
+            agentRoleId:
+              options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
+            agentRoleRevision: options?.agentRole?.agentRoleRevision,
+            memory:
+              options?.agentRole === undefined
+                ? sessionConversationConfig.memory
+                : options.agentRole?.memory,
+            agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
           });
           const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
@@ -3670,8 +4888,11 @@ export const SessionChatInterface = memo(
             modelId: inputConfig.modelId ?? undefined,
             configOptionValues: inputConfig.configOptionValues ?? undefined,
             issuePRMentions: inputConfig.issuePRMentions ?? undefined,
-            mcpServerIds: [...mcpSelection.selectedIds],
-            taskToolsEnabled: inputConfig.taskToolsEnabled,
+            mcpServerIds: [...(options?.mcpServerIds ?? mcpSelection.selectedIds)],
+            agentRoleId: inputConfig.agentRoleId,
+            agentRoleRevision: inputConfig.agentRoleRevision,
+            memory: inputConfig.memory,
+            agentRoleSnapshot: inputConfig.agentRoleSnapshot,
             resume: inputConfig.resume ?? undefined,
             chainDepth: 0,
           };
@@ -3680,13 +4901,18 @@ export const SessionChatInterface = memo(
             return false;
           }
           const userTurnId = uuidv4();
-          await pushMessageQueue({
-            task: prompt || t('sessions.messageQueue.imageOnly', '[Image message]'),
-            project: sessionProject,
-            userId: derivedUserId,
-            userTurnId,
-            acpSessionConfig: queuedInputConfig,
-          });
+          const onAccepted = captureRunConfigForSend(inputConfig);
+          await pushMessageQueue(
+            {
+              task: queueTask(inputBlocks, options?.attachments),
+              project: sessionProject,
+              userId: derivedUserId,
+              userTurnId,
+              acpSessionConfig: queuedInputConfig,
+              attachments: options?.attachments,
+            },
+            { onAccepted }
+          );
           return true;
         } catch (err) {
           console.error('Failed to queue session message', err);
@@ -3702,11 +4928,15 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
+        captureRunConfigForSend,
         captureSessionEvent,
         configOptionValues,
         currentUser?.id,
         guardNewBillableTurn,
         knownIssuePrItems,
+        sessionConversationConfig.memory,
         mcpSelection.selectedIds,
         pushMessageQueue,
         repoFullName,
@@ -3718,7 +4948,6 @@ export const SessionChatInterface = memo(
         session.userId,
         sessionProject,
         t,
-        tasksEnabled,
       ]
     );
 
@@ -3727,7 +4956,12 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'attachments'
+          | 'mcpServerIds'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -3737,18 +4971,24 @@ export const SessionChatInterface = memo(
           modeIdOverride: options?.modeIdOverride,
           modelIdOverride: options?.modelIdOverride,
           configOptionValuesOverride: turnConfigOptionValues,
+          agentRole: options?.agentRole,
+          attachments: options?.attachments,
+          mcpServerIds: options?.mcpServerIds,
         });
       },
       [configOptionValues, enqueueInputBlocks]
     );
 
-    const dispatchInputBlocks = useCallback(
+    const dispatchInputBlocksUnchecked = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
         options?: DispatchInputBlocksOptions
       ): Promise<boolean> => {
         const normalized = normalizeSessionInputBlocks(inputBlocks, '');
-        if (normalized.length === 0) {
+        if (normalized.length === 0 && !options?.attachments?.length) {
+          return false;
+        }
+        if (!sessionDocReady) {
           return false;
         }
 
@@ -3761,9 +5001,11 @@ export const SessionChatInterface = memo(
         const submitRoute = resolveSessionMessageSubmitRoute({
           forceDirect,
           forceQueue: options?.forceQueue === true,
+          invertBehavior: options?.invertSubmitBehavior === true,
           isPromptBusy: isAgentBusy,
           hasUnfinishedAssistantTurn: activeAssistantTurnId != null,
           queuedMessageBehavior,
+          nativeSteerAvailable,
         });
         const startedAtMs = getPerformanceNowMs();
         const inputSummary = summarizeInputBlocksForAnalytics(normalized);
@@ -3787,6 +5029,7 @@ export const SessionChatInterface = memo(
           ...inputSummary,
           force_queue: Boolean(options?.forceQueue),
           force_direct: forceDirect,
+          invert_behavior: Boolean(options?.invertSubmitBehavior),
           submit_route: submitRoute.type,
           is_agent_busy: isAgentBusy,
           mode_id: turnModeId ?? null,
@@ -3798,6 +5041,9 @@ export const SessionChatInterface = memo(
             modeIdOverride: turnModeId,
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
+            agentRole: options?.agentRole,
+            attachments: options?.attachments,
+            mcpServerIds: options?.mcpServerIds,
           });
           captureSessionEvent(
             accepted ? 'session/message_queued' : 'session/message_submit_failed',
@@ -3818,6 +5064,9 @@ export const SessionChatInterface = memo(
             modeIdOverride: turnModeId,
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
+            agentRole: options?.agentRole,
+            attachments: options?.attachments,
+            mcpServerIds: options?.mcpServerIds,
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -3846,7 +5095,16 @@ export const SessionChatInterface = memo(
           modeIdOverride: turnModeId,
           modelIdOverride: turnModelId,
           configOptionValuesOverride: turnConfigOptionValues,
+          agentRole: options?.agentRole,
+          attachments: options?.attachments,
+          mcpServerIds: options?.mcpServerIds,
         });
+        // A held send (attachments still preparing) dispatches itself later;
+        // the composer is free again now.
+        if (accepted && runtime?.pendingSends?.hasSession(session.id)) {
+          directDispatchInFlightRef.current = false;
+          setInputActionState('ready');
+        }
         if (!accepted) {
           captureSessionEvent('session/message_submit_failed', {
             ...inputSummary,
@@ -3859,6 +5117,8 @@ export const SessionChatInterface = memo(
         return accepted;
       },
       [
+        runtime?.pendingSends,
+        session.id,
         captureSessionEvent,
         configOptionValues,
         directDispatchInputBlocks,
@@ -3869,24 +5129,118 @@ export const SessionChatInterface = memo(
         isAgentBusy,
         queueInputBlocks,
         queuedMessageBehavior,
+        nativeSteerAvailable,
+        sessionDocReady,
         selectedModeId,
         selectedModelId,
       ]
     );
 
+    const dispatchInputBlocks = useCallback(
+      async function dispatchWithMcpGuard(
+        inputBlocks: SessionInputBlock[],
+        options?: DispatchInputBlocksOptions
+      ): Promise<boolean> {
+        const accepted = await sendWithMcpSelection(
+          session.id,
+          options,
+          (ids) => dispatchInputBlocksUnchecked(inputBlocks, { ...options, mcpServerIds: ids }),
+          (failed) =>
+            reportMcpDefaultsBlocked(
+              t,
+              failed,
+              retryMcpDefaults,
+              () => {
+                void dispatchWithMcpGuard(inputBlocks, {
+                  ...options,
+                  mcpServerIds: [],
+                  skipMcpOnce: true,
+                });
+              },
+              session.id,
+              recoveryGeneration
+            )
+        );
+        if (accepted) toast.dismiss(`mcp-defaults:${session.id}`);
+        return accepted;
+      },
+      [
+        dispatchInputBlocksUnchecked,
+        recoveryGeneration,
+        retryMcpDefaults,
+        sendWithMcpSelection,
+        session.id,
+        t,
+      ]
+    );
+
+    useEffect(() => () => toast.dismiss(`mcp-defaults:${session.id}`), [session.id]);
+
     const dispatchPrompt = useCallback(
       async (prompt: string, options?: DispatchInputBlocksOptions): Promise<boolean> => {
-        return await dispatchInputBlocks([{ type: 'text', text: prompt }], options);
+        const inputArea = inputAreaRef.current;
+        const hasRunConfigOverride =
+          options?.modeIdOverride !== undefined ||
+          options?.modelIdOverride !== undefined ||
+          options?.configOptionValuesOverride !== undefined;
+        const agentRole = resolveProgrammaticTurnAgentRole({
+          requested: options?.agentRole,
+          composer: inputArea
+            ? inputArea.getAgentRoleSelection(options)
+            : hasRunConfigOverride
+              ? null
+              : undefined,
+          durableRoleId: sessionConversationConfig.agentRoleId,
+          durableRoleRevision: sessionConversationConfig.agentRoleRevision,
+          durableMemory: sessionConversationConfig.memory,
+        });
+        return await dispatchInputBlocks(
+          [{ type: 'text', text: prompt }],
+          agentRole === undefined ? options : { ...options, agentRole }
+        );
+      },
+      [
+        dispatchInputBlocks,
+        sessionConversationConfig.agentRoleId,
+        sessionConversationConfig.agentRoleRevision,
+        sessionConversationConfig.memory,
+      ]
+    );
+
+    const handleSendMessage = useCallback(
+      async (
+        inputBlocks: SessionInputBlock[],
+        agentRole?: SessionTurnAgentRoleSelection,
+        options?: Omit<DispatchInputBlocksOptions, 'agentRole'>
+      ): Promise<boolean> => {
+        return await dispatchInputBlocks(inputBlocks, { ...options, agentRole });
       },
       [dispatchInputBlocks]
     );
 
-    const handleSendMessage = useCallback(
-      async (inputBlocks: SessionInputBlock[]): Promise<boolean> => {
-        return await dispatchInputBlocks(inputBlocks);
-      },
-      [dispatchInputBlocks]
-    );
+    const capacityRetry = useCapacityAutoRetry({
+      sessionId: session.id,
+      history: sessionHistory,
+      hostRecoveryEnabled:
+        isLocalSession && continuation.supported && continuation.recoveryEnabled !== false,
+      canRetry:
+        !continuation.recoveryEnabled &&
+        sessionDocReady &&
+        !isAgentBusy &&
+        !isMachineRemoved &&
+        !isArchivedSession &&
+        !isExternalHistoryRefreshing,
+      onRetry: async () =>
+        await dispatchPrompt(
+          t('sessions.capacityRetry.continuationPrompt', CAPACITY_RETRY_CONTINUATION_PROMPT)
+        ),
+      onRetryAttempt: ({ trigger, attempt }) =>
+        captureSessionEvent('session/agent_busy_retry', { trigger, attempt }),
+      onAutoRetryCancelled: ({ pendingAttempt }) =>
+        captureSessionEvent('session/agent_busy_retry_cancelled', {
+          pending_attempt: pendingAttempt,
+        }),
+    });
 
     // Resend a user turn the missing-history recovery negatively acknowledged:
     // the row's "Not delivered" label opens a confirmation dialog that calls
@@ -3894,19 +5248,29 @@ export const SessionChatInterface = memo(
     // NEW message — the old turn is never revived.
     const handleResendUndelivered = useCallback(
       async (userTurnId: string, inputBlocks: SessionInputBlock[]): Promise<boolean> => {
-        const accepted = await handleSendMessage(inputBlocks);
+        // This is a new Turn with the old content, not a replay of the old run:
+        // freeze the currently committed composer Role beside the current run
+        // config. Copying only the original Role would pair it with unrelated
+        // current mode/model values.
+        const currentAgentRole = resolveProgrammaticTurnAgentRole({
+          composer: inputAreaRef.current?.getAgentRoleSelection(),
+          durableRoleId: sessionConversationConfig.agentRoleId,
+          durableRoleRevision: sessionConversationConfig.agentRoleRevision,
+          durableMemory: sessionConversationConfig.memory,
+        });
+        const accepted = await handleSendMessage(inputBlocks, currentAgentRole);
         if (accepted) {
-          // Supersede the abandoned delivery attempt. The ordinary send clears
-          // the missing-history marker, and without a terminal status the stale
-          // pending entry would become dispatchable again (duplicating the just
-          // resent content). 'canceled' is the truthful terminal state and also
-          // hides the row's not-delivered label independent of the marker.
+          // The marker stays as a tombstone; terminalize the abandoned entry.
           try {
-            await updateHistoryEntry(userTurnId, (entry) => ({
-              ...entry,
-              status: 'canceled',
-              read: true,
-            }));
+            await updateHistoryEntry(userTurnId, (entry) =>
+              entry.status === 'delivery_unknown'
+                ? entry
+                : {
+                    ...entry,
+                    status: 'canceled',
+                    read: true,
+                  }
+            );
           } catch (error) {
             console.warn('Failed to supersede the undelivered user turn', {
               userTurnId,
@@ -3916,10 +5280,14 @@ export const SessionChatInterface = memo(
         }
         return accepted;
       },
-      [handleSendMessage, updateHistoryEntry]
+      [
+        handleSendMessage,
+        sessionConversationConfig.agentRoleId,
+        sessionConversationConfig.agentRoleRevision,
+        sessionConversationConfig.memory,
+        updateHistoryEntry,
+      ]
     );
-
-    const autoReview = useAutoReview(session?.id, session);
 
     const handleContinueDiscussingProposedPlan = useCallback(() => {
       if (!latestCompletedProposedPlan) {
@@ -3938,16 +5306,14 @@ export const SessionChatInterface = memo(
       }
 
       const decisionKey = latestCompletedProposedPlan.key;
-      const nextConfigOptionValues = disableCodexPlanMode(configOptionValues);
       pendingProposedPlanDecisionKeyRef.current = decisionKey;
       setPendingProposedPlanDecisionKey(decisionKey);
-      setConfigOptionValues(nextConfigOptionValues);
 
       const accepted = await dispatchPrompt(
         t('sessions.proposedPlanDecision.executePrompt', 'Implement the plan'),
         {
+          ...executionTurnConfigOverrides,
           forceDirect: true,
-          configOptionValuesOverride: nextConfigOptionValues,
         }
       );
 
@@ -3958,13 +5324,12 @@ export const SessionChatInterface = memo(
           return next;
         });
       } else {
-        setConfigOptionValues(configOptionValues);
         toast.error(t('sessions.proposedPlanDecision.executeError', 'Failed to execute plan'));
       }
 
       pendingProposedPlanDecisionKeyRef.current = null;
       setPendingProposedPlanDecisionKey(null);
-    }, [configOptionValues, dispatchPrompt, latestCompletedProposedPlan, setConfigOptionValues, t]);
+    }, [dispatchPrompt, executionTurnConfigOverrides, latestCompletedProposedPlan, t]);
 
     const handleGoalCommand = useCallback(
       async (
@@ -3988,20 +5353,27 @@ export const SessionChatInterface = memo(
           return false;
         }
 
-        directDispatchInFlightRef.current = false;
-        setInputActionState('ready');
         if (options?.showPending !== false) {
           setPendingGoalCommand({ threadId: goal.threadId, command });
         }
 
         try {
-          const accepted = await dispatchPrompt(`/goal ${command}`);
-          if (!accepted) {
-            throw new Error('Goal command was not accepted for dispatch');
+          const response = await requestSessionGoal(session.id, command, {
+            userId:
+              (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+              currentUser?.id ??
+              session.userId,
+            machineId: session.machineId,
+          });
+          if (!response?.accepted) {
+            throw new Error(
+              response?.error ?? `Goal command was ${response?.disposition ?? 'not delivered'}`
+            );
           }
           captureSessionEvent('session/goal_command_dispatched', {
             command,
             goal_thread_id: goal.threadId,
+            disposition: response.disposition,
           });
           return true;
         } catch (error) {
@@ -4022,30 +5394,55 @@ export const SessionChatInterface = memo(
           return false;
         }
       },
-      [captureSessionEvent, dispatchPrompt, goalCommands, latestGoal, t]
+      [
+        runtime?.accountId,
+        runtime?.contentMode,
+        captureSessionEvent,
+        currentUser?.id,
+        goalCommands,
+        latestGoal,
+        requestSessionGoal,
+        session.id,
+        session.machineId,
+        session.userId,
+        t,
+      ]
     );
 
     const handleGoalCardCommand = useCallback(
       (command: GoalCommand, goal: Extract<MessageContent, { type: 'goal' }>) => {
+        if (command === 'resume' || command === 'clear') {
+          captureSessionEvent(
+            command === 'resume' ? 'session/goal_resume_requested' : 'session/goal_clear_requested',
+            { goal_thread_id: goal.threadId, cancel_turn_id: null }
+          );
+        }
         void handleGoalCommand(command, goal);
       },
-      [handleGoalCommand]
+      [captureSessionEvent, handleGoalCommand]
     );
 
     const handleDismissGoalBanner = useCallback(
       (goal: Extract<MessageContent, { type: 'goal' }>) => {
         if (!runtime) return;
         if (session.dismissedGoalThreadId === goal.threadId) return;
-        const roomId = getSessionRoomId(session.id);
-        void runtime.writer.upsertDocMeta(roomId, {
+        void updateSessionMetadata(session.id, {
           dismissedGoalThreadId: goal.threadId,
-        } as Partial<SessionMeta>);
+        } as Partial<SessionMeta>).catch((error: unknown) =>
+          toast.error(error instanceof Error ? error.message : String(error))
+        );
         captureSessionEvent('session/goal_banner_dismissed', {
           goal_thread_id: goal.threadId,
           goal_status: goal.status,
         });
       },
-      [captureSessionEvent, runtime, session.id, session.dismissedGoalThreadId]
+      [
+        captureSessionEvent,
+        runtime,
+        session.id,
+        session.dismissedGoalThreadId,
+        updateSessionMetadata,
+      ]
     );
 
     // Allow child sessions to change agent config before first message
@@ -4053,31 +5450,51 @@ export const SessionChatInterface = memo(
     const handleChildEmptyStateSuggest = useCallback((text: string) => {
       inputAreaRef.current?.setInputText(text);
     }, []);
+    // A first message still uploading is the conversation's only content: it
+    // takes the top of the empty stream (where its committed turn will land)
+    // instead of a loading skeleton with the pending row pinned under it.
+    const hasUnsentNewConversation = useAtomValue(
+      sessionUnsentNewConversationAtomFamily(session.id)
+    );
+    const unsentFirstMessage =
+      hasUnsentNewConversation &&
+      sessionHistoryLength === 0 &&
+      pendingMessages.localUserMessages.length === 0;
     const chatStreamEmptyState = useMemo(
       () =>
-        isChildSession ? (
+        unsentFirstMessage ? (
+          pendingMessages.trailingContent
+        ) : contentSyncState === 'cold' ? (
+          <ConversationSkeleton />
+        ) : isChildSession ? (
           <ChildTabEmptyState onSuggest={handleChildEmptyStateSuggest} />
         ) : (
           EMPTY_CHAT_STREAM_EMPTY_STATE
         ),
-      [handleChildEmptyStateSuggest, isChildSession]
+      [
+        contentSyncState,
+        handleChildEmptyStateSuggest,
+        isChildSession,
+        pendingMessages.trailingContent,
+        unsentFirstMessage,
+      ]
     );
     const handleAgentConfigChange = useCallback(
       (selection: AgentSelection) => {
         if (!runtime) return;
         const config = agentConfigs.find((c) => c.id === selection.agentId);
         if (!config) return;
-        const roomId = getSessionRoomId(session.id);
-        void runtime.writer.upsertDocMeta(roomId, {
+        void updateSessionMetadata(session.id, {
           agentConfigId: config.id,
           cliType: config.cliType,
           agentType: config.agentType,
-        } as Partial<SessionMeta>);
+        } as Partial<SessionMeta>).catch((error: unknown) =>
+          toast.error(error instanceof Error ? error.message : String(error))
+        );
       },
-      [runtime, agentConfigs, session.id]
+      [runtime, agentConfigs, session.id, updateSessionMetadata]
     );
 
-    // ── Pin management ──────────────────────────────────────────────────
     const handlePinMessage = useCallback(
       (historyId: string | null) => {
         if (!runtime) {
@@ -4087,20 +5504,28 @@ export const SessionChatInterface = memo(
           });
           return;
         }
-        const roomId = getSessionRoomId(session.id);
-        const history = (sessionDoc?.history as SessionHistory[] | undefined) ?? [];
-        const historyIndex = historyId ? history.findIndex((entry) => entry.id === historyId) : -1;
+        const historyIndex =
+          historyId && conversationView ? conversationView.indexOf(historyId) : -1;
         // Use empty string as "cleared" — undefined is skipped by upsertDocMeta merge
-        void runtime.writer.upsertDocMeta(roomId, {
+        void updateSessionMetadata(session.id, {
           pinnedHistoryId: historyId ?? '',
-        } as Partial<SessionMeta>);
+        } as Partial<SessionMeta>).catch((error: unknown) =>
+          toast.error(error instanceof Error ? error.message : String(error))
+        );
         captureSessionEvent(historyId ? 'session/message_pinned' : 'session/message_unpinned', {
           history_id: historyId ?? null,
           history_index: historyIndex >= 0 ? historyIndex : null,
           previous_pinned_history_id: session.pinnedHistoryId || null,
         });
       },
-      [captureSessionEvent, runtime, session.id, session.pinnedHistoryId, sessionDoc?.history]
+      [
+        captureSessionEvent,
+        conversationView,
+        runtime,
+        session.id,
+        session.pinnedHistoryId,
+        updateSessionMetadata,
+      ]
     );
 
     const pinnedHistoryId = session.pinnedHistoryId || null;
@@ -4109,50 +5534,64 @@ export const SessionChatInterface = memo(
       handlePinMessage(null);
     }, [handlePinMessage]);
 
+    // The pin context wraps the whole conversation; keep its handler stable.
+    const pinMessage = useStableCallback(handlePinMessage);
     const pinContextValue = useMemo<SessionPinContextValue>(
       () => ({
         pinnedHistoryId,
-        onPin: handlePinMessage,
+        onPin: pinMessage,
       }),
-      [pinnedHistoryId, handlePinMessage]
+      [pinnedHistoryId, pinMessage]
     );
 
-    const sessionHistoryForPin = useMemo(() => {
-      const history = (sessionDoc?.history as SessionHistory[] | undefined) ?? [];
-      return history.map((h) => {
-        const rawItems: unknown = h.items;
-        const items = Array.isArray(rawItems) ? rawItems : [];
-        return {
-          id: h.id,
-          role: h.role,
-          items,
-          status: h.status,
-          read: h.read ?? false,
-          timestamp: h.timestamp,
-          endedAt: h.endedAt,
-          userId: h.userId,
-          modelInfo: h.modelInfo,
-          fileDiff: h.fileDiff,
-          finished: h.finished,
-          plan: h.plan,
-        };
-      });
-    }, [sessionDoc?.history]);
+    // The pinned turn is hydrated on demand through the view; nothing else
+    // needs the whole history for the pin banner.
+    const pinnedTurn = useTurn(conversationView, pinnedHistoryId);
+    const pinnedMessage = useMemo<SessionHistoryParsed | null>(() => {
+      if (!pinnedTurn) return null;
+      const rawItems: unknown = pinnedTurn.items;
+      return {
+        ...pinnedTurn,
+        items: Array.isArray(rawItems) ? rawItems : [],
+        read: pinnedTurn.read ?? false,
+      } as SessionHistoryParsed;
+    }, [pinnedTurn]);
 
     const handleScrollToMessage = useCallback(
       (historyId: string) => {
-        const history = (sessionDoc?.history as SessionHistory[] | undefined) ?? [];
-        const index = history.findIndex((h) => h.id === historyId);
+        const index = conversationView?.indexOf(historyId) ?? -1;
         if (index >= 0) {
           chatStreamRef.current?.scrollToIndex(index);
         }
       },
-      [sessionDoc?.history]
+      [conversationView]
     );
 
-    const createPrPrompt = t('sessions.prompts.createPr', CREATE_PR_PROMPT);
-    const createDraftPrPrompt = t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_PROMPT);
-    const commitAndPushPrompt = t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT);
+    // The origin line tells the user, reading back, that this message came from
+    // the button rather than from something they typed.
+    // A Project group conversation publishes every repository it changed, so the
+    // same actions carry the group facts.
+    const scopeToProjectGroup = (prompt: string) =>
+      session.projectRun ? withProjectGroupPrScope(prompt) : prompt;
+    const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
+    const createPrPrompt = withQuickActionOrigin(
+      t('sessions.prompts.createPrOrigin', CREATE_PR_ORIGIN_PROMPT),
+      scopeToProjectGroup(
+        withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
+      )
+    );
+    const createDraftPrPrompt = withQuickActionOrigin(
+      t('sessions.prompts.createDraftPrOrigin', CREATE_DRAFT_PR_ORIGIN_PROMPT),
+      scopeToProjectGroup(
+        withPrBranchUpkeep(
+          t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
+          prBranchUpkeep
+        )
+      )
+    );
+    const commitAndPushPrompt = scopeToProjectGroup(
+      t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT)
+    );
 
     const handleCreatePr = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -4160,8 +5599,15 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(createPrPrompt);
-    }, [captureSessionEvent, createPrPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchPrompt(createPrPrompt, executionTurnConfigOverrides);
+    }, [
+      captureSessionEvent,
+      createPrPrompt,
+      dispatchPrompt,
+      executionTurnConfigOverrides,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleCreateDraftPr = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -4169,8 +5615,15 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(createDraftPrPrompt);
-    }, [captureSessionEvent, createDraftPrPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchPrompt(createDraftPrPrompt, executionTurnConfigOverrides);
+    }, [
+      captureSessionEvent,
+      createDraftPrPrompt,
+      dispatchPrompt,
+      executionTurnConfigOverrides,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleCommitAndPush = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -4178,12 +5631,20 @@ export const SessionChatInterface = memo(
         has_existing_pr: hasExistingPr,
         workspace_dirty: workspaceDirty,
       });
-      void dispatchPrompt(commitAndPushPrompt);
-    }, [captureSessionEvent, commitAndPushPrompt, dispatchPrompt, hasExistingPr, workspaceDirty]);
+      void dispatchPrompt(commitAndPushPrompt, executionTurnConfigOverrides);
+    }, [
+      captureSessionEvent,
+      commitAndPushPrompt,
+      dispatchPrompt,
+      executionTurnConfigOverrides,
+      hasExistingPr,
+      workspaceDirty,
+    ]);
 
     const handleResolveConflicts = useCallback(async () => {
       if (isResolvingConflicts || !latestPr?.url) return;
-      setIsResolvingConflicts(true);
+      const targetSessionId = session.id;
+      setResolvingConflictsSessionId(targetSessionId);
       captureSessionEvent('session/quick_action_selected', {
         action_id: 'resolve-conflicts',
         has_existing_pr: true,
@@ -4191,71 +5652,109 @@ export const SessionChatInterface = memo(
       });
       try {
         await dispatchPrompt(
-          buildResolvePrConflictsPrompt({
-            repoFullName: latestPrRepoFullName,
-            prNumber: latestPrNumber,
-            prUrl: latestPr.url,
-          })
+          buildResolvePrConflictsPrompt(
+            {
+              repoFullName: latestPrRepoFullName,
+              prNumber: latestPrNumber,
+              prUrl: latestPr.url,
+            },
+            t
+          ),
+          executionTurnConfigOverrides
         );
       } finally {
-        setIsResolvingConflicts(false);
+        setResolvingConflictsSessionId((current) => (current === targetSessionId ? null : current));
       }
     }, [
       captureSessionEvent,
       dispatchPrompt,
+      executionTurnConfigOverrides,
       isResolvingConflicts,
       latestPr,
       latestPrNumber,
       latestPrRepoFullName,
+      session.id,
+      t,
       workspaceDirty,
     ]);
 
+    // The CI verdict already comes from Session metadata, so the action sends only
+    // the PR identity; the agent reads the failing checks itself.
     const handleFixCiErrors = useCallback(async () => {
-      if (isPrActionPending) return;
-      setIsPrActionPending(true);
+      if (isPrActionPending || !latestPr?.url) return;
+      const targetSessionId = session.id;
+      setPrActionPendingSessionId(targetSessionId);
       captureSessionEvent('session/quick_action_selected', {
         action_id: 'fix-ci-errors',
         has_existing_pr: true,
         workspace_dirty: workspaceDirty,
       });
       try {
-        const refreshed = await refreshActivePrCheckRuns();
-        if (!refreshed) {
-          toast.error(t('sessions.fixCiErrors.fetchError', 'Failed to load the failed CI checks'));
-          return;
-        }
-        const prompt = buildFixCiErrorsPrompt({
-          repoFullName: latestPrRepoFullName,
-          pullRequest: refreshed.pullRequest,
-          checkRuns: refreshed.checkRuns,
-        });
-        if (!prompt) {
-          toast.info(t('sessions.fixCiErrors.noFailures', 'No failing CI checks were found'));
-          return;
-        }
-        const accepted = await dispatchPrompt(prompt);
+        const accepted = await dispatchPrompt(
+          buildFixCiErrorsPrompt(
+            {
+              repoFullName: latestPrRepoFullName,
+              prNumber: latestPrNumber,
+              prUrl: latestPr.url,
+            },
+            t
+          ),
+          executionTurnConfigOverrides
+        );
         if (!accepted) {
           toast.error(t('sessions.fixCiErrors.sendError', 'Failed to send the CI fix request'));
         }
-      } catch (error) {
-        toast.error(t('sessions.fixCiErrors.fetchError', 'Failed to load the failed CI checks'), {
-          description: getErrorMessage(error),
-        });
       } finally {
-        setIsPrActionPending(false);
+        setPrActionPendingSessionId((current) => (current === targetSessionId ? null : current));
       }
     }, [
       captureSessionEvent,
       dispatchPrompt,
+      executionTurnConfigOverrides,
       isPrActionPending,
+      latestPr,
+      latestPrNumber,
       latestPrRepoFullName,
-      refreshActivePrCheckRuns,
+      session.id,
       t,
       workspaceDirty,
     ]);
 
+    const jotaiStore = useStore();
+    const prMergeStatus = useAtomValue(sessionPrMergeStatusAtomFamily(prSessionId ?? ''));
+    const effectivePrStatus =
+      latestPr?.status === 'merged'
+        ? 'merged'
+        : prMergeStatus?.phase === 'merged' &&
+            (!prMergeStatus.prNumber || prMergeStatus.prNumber === latestPrNumber)
+          ? 'merged'
+          : (latestPr?.status ?? null);
+
+    useEffect(() => {
+      if (prSessionId) {
+        clearSessionPrMergeStatus(jotaiStore, prSessionId, 'failed');
+      }
+    }, [jotaiStore, prSessionId]);
+
+    useEffect(() => {
+      if (prSessionId && latestPr?.status === 'merged') {
+        clearSessionPrMergeStatus(jotaiStore, prSessionId, 'merged');
+      }
+    }, [jotaiStore, latestPr?.status, prSessionId]);
+
+    const { awaiting: awaitedPrStatus, awaitStatus: awaitPrStatus } = useAwaitedPrStatus(
+      latestPr?.url ?? null,
+      effectivePrStatus
+    );
+    const isMergeSettling =
+      isActivePrMerging ||
+      prMergeStatus?.phase === 'merging' ||
+      !!awaitedPrStatus?.includes('merged');
+    const isReadySettling = isActivePrMarkingReady || !!awaitedPrStatus?.includes('open');
+
     const handleMergePullRequest = useCallback(
       async (method: GitHubMergeMethod) => {
+        const targetPrNumber = latestPrNumber;
         captureSessionEvent('session/quick_action_selected', {
           action_id: 'merge',
           merge_method: method,
@@ -4263,14 +5762,29 @@ export const SessionChatInterface = memo(
           workspace_dirty: workspaceDirty,
         });
         try {
-          await mergeActivePullRequest(method);
+          if (await mergeActivePullRequest(method)) awaitPrStatus(['merged']);
         } catch (error) {
-          toast.error(t('sessions.prTab.mergeError', 'Failed to merge'), {
-            description: getErrorMessage(error),
-          });
+          if (isGitHubOperationTokenConnectionLostError(error)) return;
+          toast.error(
+            targetPrNumber
+              ? t('sessions.prMergeStatus.failedNumber', 'Failed to merge PR #{{number}}', {
+                  number: targetPrNumber,
+                })
+              : t('sessions.prTab.mergeError', 'Failed to merge'),
+            {
+              description: getErrorMessage(error),
+            }
+          );
         }
       },
-      [captureSessionEvent, mergeActivePullRequest, t, workspaceDirty]
+      [
+        awaitPrStatus,
+        captureSessionEvent,
+        latestPrNumber,
+        mergeActivePullRequest,
+        t,
+        workspaceDirty,
+      ]
     );
 
     const handleMarkReadyForReview = useCallback(async () => {
@@ -4280,7 +5794,7 @@ export const SessionChatInterface = memo(
         workspace_dirty: workspaceDirty,
       });
       try {
-        await markActivePrReadyForReview();
+        if (await markActivePrReadyForReview()) awaitPrStatus(['open']);
       } catch (error) {
         const description =
           error instanceof ReadyForReviewStillDraftError
@@ -4293,56 +5807,199 @@ export const SessionChatInterface = memo(
           description,
         });
       }
-    }, [captureSessionEvent, markActivePrReadyForReview, t, workspaceDirty]);
-
-    const effectivePrStatus = activePrData
-      ? derivePrStatusFromDetails(activePrData.pullRequest)
-      : (latestPr?.status ?? null);
-
-    // The compact `SessionMeta.pullRequests` status (`latestPr.status`) is only
-    // written by the CLI PR poller / webhook fan-out, so it can lag behind
-    // ready-for-review and merge transitions. Once live PR details load, they
-    // are the action bar's complete status truth so the action and status marker
-    // switch together without waiting for background reconciliation.
-    const effectiveLatestPr = useMemo(
-      () => (latestPr ? { ...latestPr, status: effectivePrStatus ?? latestPr.status } : latestPr),
-      [latestPr, effectivePrStatus]
-    );
+    }, [awaitPrStatus, captureSessionEvent, markActivePrReadyForReview, t, workspaceDirty]);
 
     const infoBarPrCiRuns = useMemo(
-      () => activePrData?.checkRuns.runs.map(mapGitHubCheckRunToInfoBar),
+      () => activePrData?.checkRuns.runs.map(mapGitHubCheckRunToPrCiRun),
       [activePrData?.checkRuns.runs]
     );
     const handleOpenPrCiRun = useCallback((run: PrCiRun) => {
       if (run.url) window.open(run.url, '_blank', 'noopener,noreferrer');
     }, []);
 
-    // The task this session belongs to. Titles come from the workspace task
-    // index, which is already loaded for the sidebar count, so the chip costs no
-    // extra read.
     const router = useRouter();
     const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
-    const sessionTaskId = session.taskId;
-    const taskIndexRows = useAtomValue(taskIndexRowsAtom);
-    // A session keeps its `taskId` even for a user who never enabled the Tasks
-    // beta (an agent or another device can set it), so the chip is gated too —
-    // otherwise it would be a visible door to a feature that is supposed to be
-    // absent, and the index it reads from is not even synced.
-    const sessionTaskChip = useMemo(() => {
-      if (!tasksEnabled || !sessionTaskId) return null;
-      const row = taskIndexRows[sessionTaskId];
-      return { taskId: sessionTaskId as string, title: row?.title ?? '' };
-    }, [tasksEnabled, sessionTaskId, taskIndexRows]);
-    const handleOpenSessionTask = useCallback(
-      (taskId: string) => {
-        if (!workspaceSlug) return;
-        void router.navigate({
-          to: '/$workspaceName/tasks/$taskId',
-          params: { workspaceName: workspaceSlug, taskId },
-        });
-      },
-      [router, workspaceSlug]
+    const scheduleRegistry = useSchedules();
+    const scheduledSessionRows = useMemo(
+      () =>
+        scheduleRegistry.rows.filter(
+          (row) =>
+            row.scheduledMessage &&
+            row.enabled &&
+            row.ownerId === currentUser?.id &&
+            row.destination.kind === 'existing_session' &&
+            row.destination.sessionId === session.id &&
+            row.trigger.kind === 'once'
+        ),
+      [currentUser?.id, scheduleRegistry.rows, session.id]
     );
+    const scheduledMessageContents = useScheduledMessageContents(scheduledSessionRows);
+    const scheduledQueueItems = useMemo<ScheduledQueueItem[]>(() => {
+      const runtimeFor = (row: (typeof scheduleRegistry.rows)[number]) =>
+        scheduleRegistry.runtimes.find(
+          (candidate) =>
+            candidate.scheduleId === row.scheduleId &&
+            candidate.machineId === row.machineId &&
+            candidate.activationId === row.activationId &&
+            candidate.observedDefinitionFingerprint === row.definitionFingerprint
+        );
+      const timeZone = getDeviceTimeZone(sessionMachine?.timeZone);
+      return scheduledSessionRows
+        .map((row) => ({ row, scheduledRuntime: runtimeFor(row) }))
+        .filter(
+          ({ scheduledRuntime }) =>
+            !['sent', 'cancelled'].includes(scheduledRuntime?.messageState ?? '')
+        )
+        .map(({ row, scheduledRuntime }) => ({
+          scheduleId: row.scheduleId,
+          content: scheduledMessageContents.get(row.scheduleId)?.trim() || row.title,
+          at: Date.parse(row.trigger.kind === 'once' ? row.trigger.at : ''),
+          timeZone,
+          state:
+            scheduledRuntime?.messageState === 'failed'
+              ? ('failed' as const)
+              : ('pending' as const),
+        }))
+        .filter((item) => Number.isFinite(item.at))
+        .sort((a, b) => a.at - b.at);
+    }, [
+      scheduleRegistry.runtimes,
+      scheduledMessageContents,
+      scheduledSessionRows,
+      sessionMachine?.timeZone,
+    ]);
+
+    const [scheduledTimeEdit, setScheduledTimeEdit] = useState<{
+      item: ScheduledQueueItem;
+      document: ScheduleDocument;
+    } | null>(null);
+    const [scheduledMessageEdit, setScheduledMessageEdit] = useState<{
+      item: ScheduledQueueItem;
+      document: ScheduleDocument;
+    } | null>(null);
+
+    useEffect(() => {
+      setScheduledTimeEdit(null);
+      setScheduledMessageEdit(null);
+    }, [session.id]);
+
+    const readScheduledMessage = useCallback(
+      async (scheduleId: string) => {
+        if (!runtime) return null;
+        // loro-mirror keeps loro-crdt (WASM) in whichever chunk imports it;
+        // this route file is on the boot path, so construct lazily.
+        const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
+        return new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+          protectedContent: runtime.contentMode === 'e2ee',
+          signDeclaration: runtime.signScheduleDeclaration,
+        }).read(scheduleId);
+      },
+      [runtime]
+    );
+
+    const openScheduledTimeEditor = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return;
+        try {
+          const document = await readScheduledMessage(item.scheduleId);
+          if (!document?.message) throw new Error('Scheduled message unavailable');
+          setScheduledMessageEdit(null);
+          setScheduledTimeEdit({ item, document });
+        } catch {
+          toast.error(t('scheduledMessage.loadError'));
+        }
+      },
+      [currentUser, readScheduledMessage, runtime, t]
+    );
+
+    const openScheduledMessageEditor = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return;
+        try {
+          const document = await readScheduledMessage(item.scheduleId);
+          if (!document?.message) throw new Error('Scheduled message unavailable');
+          setScheduledTimeEdit(null);
+          setScheduledMessageEdit({ item, document });
+        } catch {
+          toast.error(t('scheduledMessage.loadError'));
+        }
+      },
+      [currentUser, readScheduledMessage, runtime, t]
+    );
+
+    const applyScheduledTime = useCallback(
+      async (at: string) => {
+        if (!scheduledTimeEdit || !runtime || !currentUser) return;
+        const { document, item } = scheduledTimeEdit;
+        setScheduledTimeEdit(null);
+        const definition = document.definition;
+        try {
+          await saveScheduledMessage({
+            runtime,
+            actorId: currentUser.id,
+            scheduleId: item.scheduleId,
+            activationId: uuidv4(),
+            activityId: uuidv4(),
+            create: false,
+            draft: {
+              title: definition.title,
+              machineId: definition.machineId,
+              agent: definition.agent,
+              destination: definition.destination,
+              misfirePolicy: definition.misfirePolicy,
+              overlapPolicy: definition.overlapPolicy,
+              retryPolicy: definition.retryPolicy,
+              prompt: document.prompt,
+              ...(document.message ? { message: document.message } : {}),
+              trigger: { kind: 'once', at },
+            },
+          });
+        } catch {
+          toast.error(t('scheduledMessage.saveError'));
+        }
+      },
+      [currentUser, runtime, scheduledTimeEdit, t]
+    );
+
+    const cancelScheduledMessage = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return false;
+        try {
+          const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
+          await runtime.withScheduleStore(item.scheduleId, () =>
+            new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+              protectedContent: runtime.contentMode === 'e2ee',
+              signDeclaration: runtime.signScheduleDeclaration,
+            }).setEnabled({
+              scheduleId: item.scheduleId,
+              actorId: currentUser.id,
+              enabled: false,
+              now: getServerNow(),
+              activationId: uuidv4(),
+              requestId: uuidv4(),
+            })
+          );
+          return true;
+        } catch {
+          toast.error(t('scheduledMessage.saveError'));
+          return false;
+        }
+      },
+      [currentUser, runtime, t]
+    );
+
+    const scheduledMessageDisabledReason =
+      !currentUser || session.userId !== currentUser.id
+        ? t('scheduledMessage.ownMachine')
+        : !sessionMachine
+          ? t('scheduledMessage.waiting')
+          : sessionMachine.ownerUserId !== currentUser.id
+            ? t('scheduledMessage.ownMachine')
+            : !machineSupportsScheduledMessagesProtocol(sessionMachine)
+              ? t('scheduledMessage.upgrade')
+              : session.isArchived
+                ? t('scheduledMessage.archived')
+                : undefined;
 
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
@@ -4352,16 +6009,31 @@ export const SessionChatInterface = memo(
     const openerSessionMeta = useAtomValue(
       sessionMetaAtomFamily(openerSessionId ? getSessionRoomId(openerSessionId) : '')
     );
+    const openerRootSessionId = openerSessionId
+      ? (session.openedByRootSessionId ?? openerSessionMeta?.parentSessionId ?? openerSessionId)
+      : null;
+    const openerRootSessionMeta = useAtomValue(
+      sessionMetaAtomFamily(openerRootSessionId ? getSessionRoomId(openerRootSessionId) : '')
+    );
     const openedSessions = useAtomValue(openedSessionsAtomFamily(session.id));
     const openerNavigationTarget = useMemo(
-      () => resolveOpenedByNavigationTarget(session, openerSessionMeta),
-      [openerSessionMeta, session]
+      () =>
+        resolveOpenedByNavigationTarget(session, {
+          metadataReady: docMetaCacheReady,
+          openerSession: openerSessionMeta,
+          rootSession: openerRootSessionMeta,
+        }),
+      [docMetaCacheReady, openerRootSessionMeta, openerSessionMeta, session]
     );
     const handleOpenRelatedSession = useCallback(
-      (target: SessionNavigationTarget) => {
+      (target: SessionNavigationTarget & { workspaceId?: string }) => {
+        if (target.workspaceId && target.workspaceId !== workspaceId) {
+          openSessionDeepLink(target);
+          return;
+        }
         onNavigateSession?.(target);
       },
-      [onNavigateSession]
+      [onNavigateSession, workspaceId]
     );
     const openedByRelations = useMemo<SessionOpenedByMenuState | undefined>(() => {
       const opened = openedSessions.map((item) => ({
@@ -4369,33 +6041,35 @@ export const SessionChatInterface = memo(
         title: (item.title ?? '').trim() || t('sessions.untitled', 'Untitled session'),
         target: { sessionId: item.id },
       }));
-      // An opener that is archived or not synced to this client still has a
-      // usable id, so navigation stays available; only the label falls back.
-      const openedBy =
-        openerSessionId && openerNavigationTarget
-          ? {
-              sessionId: openerSessionId,
-              title:
-                (openerSessionMeta?.title ?? '').trim() ||
-                t('sessions.untitled', 'Untitled session'),
-              target: openerNavigationTarget,
-            }
-          : null;
+      const openedBy = openerSessionId
+        ? {
+            sessionId: openerSessionId,
+            title:
+              (openerSessionMeta?.title ?? '').trim() ||
+              (docMetaCacheReady
+                ? t('sessions.openedBy.deletedSession', 'Deleted session')
+                : t('sessions.untitled', 'Untitled session')),
+            target: openerNavigationTarget,
+          }
+        : null;
       if (!openedBy && opened.length === 0) return undefined;
       return { openedBy, opened, onOpenSession: handleOpenRelatedSession };
     }, [
       handleOpenRelatedSession,
+      docMetaCacheReady,
       openedSessions,
       openerNavigationTarget,
       openerSessionId,
       openerSessionMeta?.title,
       t,
     ]);
+    const hasSessionRelations = useHasSessionRelations(session.id);
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
+      const target = openedBy.target;
       return (
-        <ConversationColumn className="py-2 sm:py-3">
+        <ConversationColumn {...stylex.props(styles.openedByColumn)}>
           <SessionRelationCard
             relation="opened-by"
             label={t(
@@ -4405,80 +6079,138 @@ export const SessionChatInterface = memo(
             sessionTitle={openedBy.title}
             actionLabel={t('sessions.openedBy.backToOpener', 'Back to session')}
             actionIcon={CornerLeftUp}
-            onAction={() => openedByRelations.onOpenSession(openedBy.target)}
+            onAction={target ? () => openedByRelations.onOpenSession(target) : undefined}
           />
         </ConversationColumn>
       );
     }, [openedByRelations, t]);
 
+    // A Project group's GitHub actions stay conversation-scoped (Create PR
+    // publishes every changed Member). `getSessionGitHubState` already reads
+    // the workspace-owner fields that `projectRunMetaPatch` aggregates across
+    // every Member, including its committed-diff fallback for mixed groups.
+    const selectedMemberInPlace =
+      selectedProjectMemberRow?.access === 'additional' ||
+      selectedProjectMemberRow?.access === 'link';
+    const infoBarProjectName = sessionProjectRun
+      ? repoFullName || selectedProjectMemberRow?.path || null
+      : repoFullName || resolvedLocalProjectMeta?.name || null;
+    const infoBarBranch = sessionProjectRun
+      ? (selectedProjectMemberRow?.branch ?? null)
+      : session.branchName?.trim() || null;
+    const infoBarWorkspaceLocation = useMemo<{
+      kind: WorkspaceLocationKind;
+      path?: string | null;
+    } | null>(() => {
+      if (sessionProjectRun && selectedProjectMemberRow) {
+        const base = sessionWorkspacePath?.replace(/[\\/]+$/, '');
+        return {
+          kind: selectedMemberInPlace ? 'folder' : repoFullName ? 'github-worktree' : 'worktree',
+          // A Member used in place lives outside the conversation's main
+          // directory; the snapshot does not carry its host path, so do not
+          // pretend the mount path is copyable.
+          path: selectedMemberInPlace || !base ? null : `${base}/${selectedProjectMemberRow.path}`,
+        };
+      }
+      if (session.isWorktree) {
+        return {
+          kind: repoFullName ? 'github-worktree' : 'worktree',
+          path: sessionWorkspacePath,
+        };
+      }
+      return resolvedLocalProjectMeta ? { kind: 'folder', path: sessionWorkspacePath } : null;
+    }, [
+      repoFullName,
+      resolvedLocalProjectMeta,
+      selectedMemberInPlace,
+      selectedProjectMemberRow,
+      session.isWorktree,
+      sessionProjectRun,
+      sessionWorkspacePath,
+    ]);
+    const infoBarDiffStat = sessionProjectRun
+      ? (selectedProjectMemberRow?.diff ?? null)
+      : changesDiffStat;
+
     const infoBarContextActions = useMemo<ContextChipAction[]>(() => {
-      // The CI pill renders from live check runs, so the action gating must
-      // honor them too: whenever the pill shows "CI failed", the Fix CI Errors
-      // action has to be available even if the compact meta `s` hasn't caught
-      // up (e.g. the machine-side reconciler isn't running).
-      const liveCiFailed = infoBarPrCiRuns?.some((run) => run.status === 'failure') ?? false;
       return resolveSessionInfoBarGitHubActionIds({
         canShowGitHubActions,
+        canMutatePr: hasHostedGitHub,
         hasExistingPr,
         workspaceDirty,
+        workspaceUnpushed,
         hasChanges,
         isAgentBusy,
-        prCiState: liveCiFailed ? 'f' : latestPrState?.s,
+        prCiState: latestPrState?.s,
         prMergeState: latestPrState?.m,
-        prReadiness: deriveSessionPullRequestReadiness(latestPrState),
         prStatus: effectivePrStatus,
+        canAutoDeliver,
       }).map((actionId) => {
+        const disabledForHydration = shouldDisableSessionInfoBarGitHubActionForHydration(
+          actionId,
+          sessionDocReady
+        );
         switch (actionId) {
           case 'create-pr':
             return {
               id: actionId,
               label: t('sessions.createPr', 'Create PR'),
               onClick: handleCreatePr,
+              disabled: disabledForHydration,
             };
           case 'create-draft-pr':
             return {
               id: actionId,
               label: t('sessions.createDraftPr', 'Create Draft PR'),
               onClick: handleCreateDraftPr,
+              disabled: disabledForHydration,
             };
           case 'commit-and-push':
             return {
               id: actionId,
               label: t('sessions.commitAndPush', 'Commit & Push'),
               onClick: handleCommitAndPush,
+              disabled: disabledForHydration,
             };
           case 'resolve-conflicts':
             return {
               id: actionId,
               label: t('sessions.resolveConflicts', 'Resolve Conflicts'),
               onClick: () => void handleResolveConflicts(),
-              disabled: isResolvingConflicts,
+              disabled: disabledForHydration || isResolvingConflicts,
             };
           case 'fix-ci-errors':
             return {
               id: actionId,
               label: t('sessions.fixCiErrors', 'Fix CI Errors'),
               onClick: () => void handleFixCiErrors(),
-              disabled: isPrActionPending,
+              disabled: disabledForHydration || isPrActionPending,
             };
           case 'ready-for-review':
             return {
               id: actionId,
-              label: isActivePrMarkingReady
+              label: isReadySettling
                 ? t('sessions.prTab.markingReadyForReview', 'Marking ready…')
                 : t('sessions.prTab.readyForReview', 'Ready for review'),
               onClick: () => void handleMarkReadyForReview(),
-              disabled: activePrState !== 'ready' || isActivePrMarkingReady,
+              disabled: activePrState !== 'ready' || isReadySettling,
             };
           case 'merge':
             return {
               kind: 'merge' as const,
               id: 'merge' as const,
               method: preferredMergeMethod,
-              isMerging: isActivePrMerging,
+              isMerging: isMergeSettling,
               disabled: activePrState !== 'ready',
               onMerge: handleMergePullRequest,
               onSelectMethod: setPreferredPrMergeMethod,
+            };
+          case 'auto-deliver':
+            return {
+              id: actionId,
+              label: t('sessions.autoDelivery.title', 'Auto delivery'),
+              onClick: () => setAutoDeliveryDialogOpen(true),
+              disabled: continuation.busy || continuation.settingsUnavailable,
             };
           default: {
             const unsupportedActionId: never = actionId;
@@ -4487,7 +6219,11 @@ export const SessionChatInterface = memo(
         }
       });
     }, [
+      canAutoDeliver,
+      continuation.busy,
+      continuation.settingsUnavailable,
       canShowGitHubActions,
+      hasHostedGitHub,
       handleCommitAndPush,
       handleCreateDraftPr,
       handleCreatePr,
@@ -4497,17 +6233,18 @@ export const SessionChatInterface = memo(
       handleResolveConflicts,
       hasExistingPr,
       effectivePrStatus,
-      infoBarPrCiRuns,
       isAgentBusy,
       isPrActionPending,
       isResolvingConflicts,
       latestPrState,
       activePrState,
-      isActivePrMarkingReady,
+      isReadySettling,
       preferredMergeMethod,
-      isActivePrMerging,
+      isMergeSettling,
+      sessionDocReady,
       t,
       workspaceDirty,
+      workspaceUnpushed,
       hasChanges,
     ]);
 
@@ -4522,7 +6259,7 @@ export const SessionChatInterface = memo(
     useEffect(() => {
       setResolveConflictsAction({
         run: () => void handleResolveConflicts(),
-        pending: isResolvingConflicts,
+        pending: !sessionDocReady || isResolvingConflicts,
         available: resolveConflictsAvailable,
       });
       return () => setResolveConflictsAction(null);
@@ -4531,7 +6268,15 @@ export const SessionChatInterface = memo(
       handleResolveConflicts,
       isResolvingConflicts,
       resolveConflictsAvailable,
+      sessionDocReady,
     ]);
+
+    useIosSimulatorPreviewRequest(
+      session.id,
+      session.iosSimulatorPreviewRequestId,
+      isVisible && !hideMessageArea && !isMobile && Boolean(onOpenIosSimulator),
+      onOpenIosSimulator
+    );
 
     const headerBrowserSession =
       browserActionSession === undefined ? session : browserActionSession;
@@ -4604,12 +6349,8 @@ export const SessionChatInterface = memo(
     useImperativeHandle(
       ref,
       () => ({
-        sendQuickMessage: (prompt: string) => {
-          void dispatchPrompt(prompt);
-        },
-        setInputText: (text: string) => {
-          inputAreaRef.current?.setInputText(text);
-        },
+        addDocumentSelection: (selection) =>
+          inputAreaRef.current?.addDocumentSelection(selection) ?? false,
         focusInput: () => {
           inputAreaRef.current?.focusInput();
         },
@@ -4625,20 +6366,44 @@ export const SessionChatInterface = memo(
         toggleVisualAnnotationReference: (reference) => {
           return inputAreaRef.current?.toggleVisualAnnotationReference(reference) ?? false;
         },
-        dispatchInputBlocks,
+        addAttachmentFiles: (files) => {
+          const inputArea = inputAreaRef.current;
+          if (!inputArea) return false;
+          inputArea.handleImageDrop(files);
+          return true;
+        },
         copyConversationHistory: handleCopyConversationHistory,
+        getShareImageData: async () => {
+          if (!conversationView?.turnCount) return null;
+          if (!runtime) throw new Error('Workspace runtime unavailable');
+          await runtime.waitForContentAdmission?.();
+          return {
+            messages: collectConversationMessages(
+              await readConversationCopySource(runtime, session.id, conversationView)
+            ),
+            sourceRuntime: runtime,
+            agentName: session.cliType === 'custom' ? sessionAgentConfig?.name : undefined,
+          };
+        },
+        startShareImageSelection: shareSelection.start,
+        cancelShareImageSelection: shareSelection.cancel,
         openSearch,
         getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
-        insertSessionMention: (sessionId: string) => {
-          return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
+        insertSessionMention: (sessionId, options) => {
+          return inputAreaRef.current?.insertSessionMention(sessionId, options) ?? false;
         },
       }),
       [
-        dispatchInputBlocks,
-        dispatchPrompt,
         handleCopyConversationHistory,
+        shareSelection.start,
+        shareSelection.cancel,
         lastCompletedAssistantMessageId,
         openSearch,
+        session.cliType,
+        session.id,
+        sessionAgentConfig?.name,
+        conversationView,
+        runtime,
       ]
     );
 
@@ -4703,8 +6468,7 @@ export const SessionChatInterface = memo(
     // a card to this client.
     useEffect(() => {
       if (hideMessageArea) return undefined;
-      const history = sessionDoc?.history as SessionHistory[] | undefined;
-      const scanned = scanPermissionRequests(history);
+      const scanned = permissionRequestsFromFacts(turnFacts.ordered);
       if (scanned.length === 0) return undefined;
       const state = permissionRequestStateRef.current;
 
@@ -4747,7 +6511,7 @@ export const SessionChatInterface = memo(
         }
       }
       return undefined;
-    }, [hideMessageArea, postHog, sessionAnalyticsProperties, sessionDoc?.history]);
+    }, [hideMessageArea, postHog, sessionAnalyticsProperties, turnFacts.ordered]);
 
     const handleStop = useCallback(async () => {
       if (!workspaceId) {
@@ -4789,15 +6553,20 @@ export const SessionChatInterface = memo(
         cancel_turn_id: turnIdToCancel,
         goal_thread_id: goalToPause?.threadId ?? null,
       };
-      captureSessionEvent('session/stop_requested', stopAnalyticsProperties);
+      const stopStartedAtMs = getPerformanceNowMs();
       try {
         await requestSessionCancel(session.id, turnIdToCancel);
-        captureSessionEvent('session/stop_request_succeeded', stopAnalyticsProperties);
+        // The request helper resolved; this does not acknowledge a stopped turn.
+        captureSessionEvent('session/stop_request_succeeded', {
+          ...stopAnalyticsProperties,
+          duration_ms: getDurationSinceMs(stopStartedAtMs),
+        });
       } catch (error) {
         console.error('Failed to request session cancel', error);
         pendingUserInterruptRef.current = false;
         captureSessionEvent('session/stop_request_failed', {
           ...stopAnalyticsProperties,
+          duration_ms: getDurationSinceMs(stopStartedAtMs),
           error_name: error instanceof Error ? error.name : typeof error,
           error_message: getErrorMessage(error),
         });
@@ -4805,8 +6574,10 @@ export const SessionChatInterface = memo(
         return;
       }
 
+      // Cancel first so Stop stays immediate; the pause that follows is an
+      // out-of-band control request and no longer waits for a free prompt slot.
       if (goalToPause) {
-        void handleGoalCommand('pause', goalToPause, { showPending: false });
+        await handleGoalCommand('pause', goalToPause, { showPending: false });
       }
     }, [
       activeAssistantTurnId,
@@ -4821,107 +6592,69 @@ export const SessionChatInterface = memo(
       workspaceId,
     ]);
 
-    const handleInterruptAndSend = useCallback(
+    const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: 'external_history_syncing',
-            queue_item_id: item.$cid,
-          });
-          return;
-        }
-        if (!workspaceId || !activeAssistantTurnId) {
-          captureSessionEvent('session/queue_interrupt_blocked', {
-            reason: !workspaceId ? 'missing_workspace' : 'missing_active_turn',
-            queue_item_id: item.$cid,
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'));
-          return;
-        }
-        setInputActionState('ready');
-        pendingUserInterruptRef.current = true;
-        try {
-          await requestSessionCancel(session.id, activeAssistantTurnId);
-          captureSessionEvent('session/queue_interrupt_succeeded', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-          });
-        } catch (error) {
-          console.error('Failed to interrupt for queued message', error);
-          pendingUserInterruptRef.current = false;
-          captureSessionEvent('session/queue_interrupt_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.interruptFailed', 'Failed to interrupt current task'), {
-            description: getErrorMessage(error),
-          });
-        }
-      },
-      [
-        activeAssistantTurnId,
-        captureSessionEvent,
-        isExternalHistoryRefreshing,
-        requestSessionCancel,
-        session.id,
-        t,
-        workspaceId,
-      ]
-    );
-
-    const handleNativeSteerQueuedMessage = useCallback(
-      async (item: MessageQueueItem) => {
-        if (isExternalHistoryRefreshing || !activeAssistantTurnId) {
-          return;
-        }
-        if (steeringQueueItemIdsRef.current.has(item.$cid)) {
-          return;
-        }
+        if (isExternalHistoryRefreshing || steeringQueueItemIdsRef.current.has(item.$cid)) return;
+        const targetTurnId = activeAssistantTurnId;
+        const guide = Boolean(isSessionActive && targetTurnId && nativeSteerAvailable);
+        if (targetTurnId && !guide && !item.paused && messageQueue[0]?.$cid !== item.$cid) return;
         steeringQueueItemIdsRef.current.add(item.$cid);
         try {
-          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
-          if (!inputConfig) {
-            throw new Error('Queued message input config is invalid');
+          if (runtime) {
+            const current = await runtime.sendResources.withSessionStore(session.id, (store) =>
+              store.getState().mq?.find((row) => row.$cid === item.$cid)
+            );
+            if (!current) return;
+            item = current as MessageQueueItem;
           }
+          const inputConfig = normalizeSessionTurnInputConfig(item.acpSessionConfig);
+          if (!inputConfig) throw new Error('Queued message input config is invalid');
           const inputBlocks = normalizeSessionInputBlocks(
             inputConfig.inputBlocks,
             inputConfig.prompt ?? item.task
           );
-          const pendingHistoryEntry = buildPendingUserHistoryEntry({
-            userId: item.userId,
+          const pendingHistoryEntry = buildDraftUserHistoryEntry({
+            userId: item.paused
+              ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+                currentUser?.id ??
+                session.userId)
+              : item.userId,
             inputBlocks,
-            timestamp: item.timestamp,
+            timestamp: item.paused ? new Date().toISOString() : item.timestamp,
             inputConfig,
-            status: 'pending_apply',
+            status: guide ? 'pending_apply' : 'pending',
           });
-          if (!pendingHistoryEntry) {
-            throw new Error('Queued message is empty');
-          }
-          const { entry: historyEntry } = await addSessionHistory(pendingHistoryEntry);
+          if (!pendingHistoryEntry) throw new Error('Queued message is empty');
+          const originalTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
+          // Stop's cancellation receipt stays final. An explicit resend owns a
+          // distinct, stable id so retries cannot revive or duplicate the old input.
+          const userTurnId = item.paused ? `queue-resend:${originalTurnId}` : originalTurnId;
+          const { entry } = await addSessionHistory(
+            { ...pendingHistoryEntry, id: userTurnId },
+            guide && targetTurnId ? { guideExpectedTurnId: targetTurnId } : { dispatch: true }
+          );
           await removeMessageQueueItem(item.$cid);
-          trackMessageSend(historyEntry.id);
-          touchSessionActivity(session.id).catch((error: unknown) => {
-            console.warn('Failed to update session activity for steer', error);
+          trackMessageSend(entry.id);
+          void touchSessionActivity(session.id).catch((error: unknown) => {
+            console.warn('Failed to update session activity for queued send', error);
           });
-          const applied = await guideHistoryEntry(historyEntry.id, activeAssistantTurnId);
-          captureSessionEvent('session/queue_guide_result', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            applied,
-          });
+          if (guide && targetTurnId) {
+            await guideHistoryEntry(entry.id, targetTurnId);
+          } else {
+            if (targetTurnId) {
+              pendingUserInterruptRef.current = true;
+              await requestSessionCancel(session.id, targetTurnId, { interrupt: true });
+            }
+            await requestSessionDispatch(session.id, entry.id, {
+              inputConfig,
+              machineId: session.machineId,
+            });
+            anchorChatToMessage(entry.id);
+          }
         } catch (error) {
-          console.error('Failed to guide with queued message', error);
-          captureSessionEvent('session/queue_guide_failed', {
-            queue_item_id: item.$cid,
-            active_assistant_turn_id: activeAssistantTurnId,
-            error_name: error instanceof Error ? error.name : typeof error,
-            error_message: getErrorMessage(error),
-          });
-          toast.error(t('sessions.sendError'), {
-            description: getErrorMessage(error),
-          });
+          pendingUserInterruptRef.current = false;
+          console.error('Failed to send queued message', error);
+          toast.error(t('sessions.sendError'), { description: getErrorMessage(error) });
         } finally {
           steeringQueueItemIdsRef.current.delete(item.$cid);
         }
@@ -4929,50 +6662,40 @@ export const SessionChatInterface = memo(
       [
         activeAssistantTurnId,
         addSessionHistory,
-        captureSessionEvent,
+        anchorChatToMessage,
+        currentUser?.id,
         guideHistoryEntry,
         isExternalHistoryRefreshing,
+        isSessionActive,
+        messageQueue,
+        nativeSteerAvailable,
         removeMessageQueueItem,
+        requestSessionCancel,
+        requestSessionDispatch,
+        runtime,
         session.id,
+        session.machineId,
+        session.userId,
         t,
-        touchSessionActivity,
         trackMessageSend,
+        touchSessionActivity,
       ]
-    );
-
-    const queueSteerCapability = session.agentConfigId
-      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
-      : undefined;
-    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(
-      capabilityAuthority,
-      queueSteerCapability
-    );
-    const handleSteerQueuedMessage = useCallback(
-      async (item: MessageQueueItem) => {
-        if (shouldUseNativeQueueSteer) {
-          await handleNativeSteerQueuedMessage(item);
-          return;
-        }
-        await handleInterruptAndSend(item);
-      },
-      [handleInterruptAndSend, handleNativeSteerQueuedMessage, shouldUseNativeQueueSteer]
     );
 
     const handleReorderQueueItem = useCallback(
       async (activeCid: string, overCid: string) => {
+        const startedAtMs = getPerformanceNowMs();
         try {
-          captureSessionEvent('session/queue_item_reorder_requested', {
-            queue_item_id: activeCid,
-            over_queue_item_id: overCid,
-          });
           await reorderMessageQueueItem(activeCid, overCid);
           captureSessionEvent('session/queue_item_reordered', {
+            duration_ms: getDurationSinceMs(startedAtMs),
             queue_item_id: activeCid,
             over_queue_item_id: overCid,
           });
         } catch (error) {
           console.error('Failed to reorder queued message', error);
           captureSessionEvent('session/queue_item_reorder_failed', {
+            duration_ms: getDurationSinceMs(startedAtMs),
             queue_item_id: activeCid,
             over_queue_item_id: overCid,
             error_name: error instanceof Error ? error.name : typeof error,
@@ -5000,9 +6723,6 @@ export const SessionChatInterface = memo(
               ? current
               : { ...current, isEditing: true, editingStartedAt: getServerNow() }
           );
-          if (isFirstItem) {
-            await waitUntilSynced();
-          }
         } catch (error) {
           console.error('Failed to start editing queued message', error);
           captureSessionEvent('session/queue_item_edit_start_failed', {
@@ -5017,7 +6737,7 @@ export const SessionChatInterface = memo(
           throw error;
         }
       },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem, waitUntilSynced]
+      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleCancelQueueItemEdit = useCallback(
@@ -5029,9 +6749,6 @@ export const SessionChatInterface = memo(
               ? { ...current, isEditing: false, editingStartedAt: undefined }
               : current
           );
-          if (isFirstItem) {
-            await waitUntilSynced();
-          }
           captureSessionEvent('session/queue_item_edit_cancelled', {
             queue_item_id: item.$cid,
             is_first_queue_item: isFirstItem,
@@ -5050,7 +6767,7 @@ export const SessionChatInterface = memo(
           throw error;
         }
       },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem, waitUntilSynced]
+      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleSaveQueueItemEdit = useCallback(
@@ -5058,15 +6775,8 @@ export const SessionChatInterface = memo(
         const isFirstItem = messageQueue[0]?.$cid === item.$cid;
         try {
           await updateMessageQueueItem(item.$cid, (current) =>
-            buildEditedMessageQueueItem(
-              current,
-              task,
-              t('sessions.messageQueue.imageOnly', '[Image message]')
-            )
+            buildEditedMessageQueueItem(current, task)
           );
-          if (isFirstItem) {
-            await waitUntilSynced();
-          }
           captureSessionEvent('session/queue_item_edit_saved', {
             queue_item_id: item.$cid,
             is_first_queue_item: isFirstItem,
@@ -5085,7 +6795,7 @@ export const SessionChatInterface = memo(
           throw error;
         }
       },
-      [captureSessionEvent, messageQueue, t, updateMessageQueueItem, waitUntilSynced]
+      [captureSessionEvent, messageQueue, t, updateMessageQueueItem]
     );
 
     const handleRemoveQueueItem = useCallback(
@@ -5114,20 +6824,7 @@ export const SessionChatInterface = memo(
 
     const prBadge =
       canShowGitHubActions && latestPr ? (
-        <PullRequestBadge
-          pr={latestPr}
-          size="md"
-          onOpenTab={
-            onOpenPrTab && latestPrNumber && latestPrRepoFullName
-              ? () =>
-                  onOpenPrTab({
-                    prNumber: latestPrNumber,
-                    repoFullName: latestPrRepoFullName,
-                    headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-                  })
-              : undefined
-          }
-        />
+        <PullRequestBadge pr={latestPr} size="md" onOpenTab={prLinkHandler} />
       ) : null;
 
     const localProjectId = useMemo(() => {
@@ -5194,7 +6891,8 @@ export const SessionChatInterface = memo(
           return true;
         case 'confirm-reported-port':
           if (!onOpenBrowser) return false;
-          setPendingRemoteHtmlFileName(file.fileName);
+          remotePortAllowedRef.current = false;
+          setPendingRemoteHtmlFile({ sessionId: session.id, fileName: file.fileName });
           return true;
         case 'fallback':
           return false;
@@ -5211,8 +6909,6 @@ export const SessionChatInterface = memo(
     );
     const openInIdePath = openInIdeTarget?.path ?? null;
     const openInIdePathSource = openInIdeTarget?.source ?? null;
-    const shouldShowOpenInIdeButton = Boolean(openInIdePath);
-
     const resolveOpenInIdePath = useCallback(async (): Promise<string | null> => {
       return openInIdePath;
     }, [openInIdePath]);
@@ -5244,7 +6940,7 @@ export const SessionChatInterface = memo(
       typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
     const electronPathLauncherPlatform =
       typeof window !== 'undefined' ? window.__LODY_PLATFORM__?.os : undefined;
-    const pathLauncherOptions = useMemo(
+    const launcherCandidates = useMemo(
       () =>
         getAvailablePathLauncherOptions({
           customLaunchers: pathLauncherPreference.customLaunchers,
@@ -5257,6 +6953,55 @@ export const SessionChatInterface = memo(
         pathLauncherPreference.customLaunchers,
       ]
     );
+    const [availableLauncherIds, setAvailableLauncherIds] = useState(new Set<string>());
+    useEffect(() => {
+      if (!isElectronRendererForPathLaunch || !openInIdePath) {
+        setAvailableLauncherIds(new Set());
+        return undefined;
+      }
+      const services = getIpcServices();
+      if (!services) return undefined;
+
+      let cancelled = false;
+      const launchers = buildPathLauncherProbes(
+        launcherCandidates,
+        openInIdePath,
+        electronPathLauncherPlatform
+      );
+      void services.app
+        .probePathLaunchers({
+          launchers,
+        })
+        .then(
+          (result) => {
+            if (!cancelled) {
+              setAvailableLauncherIds(new Set(result.availableIds));
+            }
+          },
+          () => {
+            // A failed probe must not advertise launchers whose presence could
+            // not be established.
+            if (!cancelled) setAvailableLauncherIds(new Set());
+          }
+        );
+      return () => {
+        cancelled = true;
+      };
+    }, [
+      launcherCandidates,
+      electronPathLauncherPlatform,
+      isElectronRendererForPathLaunch,
+      openInIdePath,
+    ]);
+    const pathLauncherOptions = useMemo(
+      () =>
+        launcherCandidates.filter(
+          (launcher) =>
+            launcher.kind === 'custom' || availableLauncherIds.has(getPathLauncherId(launcher))
+        ),
+      [availableLauncherIds, launcherCandidates]
+    );
+    const shouldShowOpenInIdeButton = Boolean(openInIdePath) && pathLauncherOptions.length > 0;
     const selectedPathLauncher = useMemo(
       () =>
         resolveSelectedPathLauncher(pathLauncherPreference.selectedLauncherId, pathLauncherOptions),
@@ -5312,7 +7057,8 @@ export const SessionChatInterface = memo(
             return;
           }
 
-          const result = await getIpcServices()!.app.launchLocalPath(request);
+          const result = await executePathLauncher(launcher, path);
+          if (!result.launched && result.error === 'launcher_not_approved') return;
           if (!result.launched) {
             captureSessionEvent('session/open_in_ide_failed', {
               ...analyticsProperties,
@@ -5351,6 +7097,48 @@ export const SessionChatInterface = memo(
       void launchPathWithLauncher(selectedPathLauncher, 'session/open_in_ide_clicked');
     }, [launchPathWithLauncher, selectedPathLauncher]);
 
+    const openInFileManagerLabel = resolveOpenFolderInFileManagerLabel(
+      normalizeSessionFileActionPlatform(electronPathLauncherPlatform),
+      t
+    );
+    const canOpenInFileManager = Boolean(openInIdePath) && isElectronRendererForPathLaunch;
+    const handleOpenInFileManager = useCallback(async () => {
+      const path = await resolveOpenInIdePath();
+      if (!path) {
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        return;
+      }
+      const analyticsProperties = { path_source: openInIdePathSource };
+      captureSessionEvent('session/open_in_file_manager_clicked', analyticsProperties);
+      const services = getIpcServices();
+      if (!services) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: 'native_bridge_unavailable',
+        });
+        toast.error(
+          t('sessions.pathLaunchUnsupported', 'This launcher is only available in the desktop app')
+        );
+        return;
+      }
+      try {
+        const result = await services.app.openLocalPath(path);
+        if (!result.opened) {
+          captureSessionEvent('session/open_in_file_manager_failed', {
+            ...analyticsProperties,
+            reason: result.error,
+          });
+          toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+        }
+      } catch (error) {
+        captureSessionEvent('session/open_in_file_manager_failed', {
+          ...analyticsProperties,
+          reason: getErrorMessage(error),
+        });
+        toast.error(t('sessions.openFolder.failed', 'Could not open that folder'));
+      }
+    }, [captureSessionEvent, openInIdePathSource, resolveOpenInIdePath, t]);
+
     const handleCopyPath = useCallback(async () => {
       const path = await resolveOpenInIdePath();
       if (!path) {
@@ -5361,7 +7149,7 @@ export const SessionChatInterface = memo(
         return;
       }
       try {
-        await navigator.clipboard.writeText(path);
+        await copyTextToClipboard(path);
         captureSessionEvent('session/path_copied', {
           path_source: openInIdePathSource,
         });
@@ -5378,84 +7166,94 @@ export const SessionChatInterface = memo(
       openSettings('preferences');
     }, [captureSessionEvent, openSettings]);
 
-    const handleCopySessionLink = useCallback(async () => {
-      try {
-        await navigator.clipboard.writeText(getAppShareUrl());
-        captureSessionEvent('session/share_link_copied');
-        toast.success(t('sessions.urlCopied', 'Session URL copied to clipboard'));
-      } catch {
-        captureSessionEvent('session/share_link_copy_failed');
-        toast.error(t('sessions.shareFailed', 'Unable to share link'));
-      }
-    }, [captureSessionEvent, t]);
+    const handleCopySessionLink = useCallback(
+      async (linkFormat: 'https' | 'deeplink' = 'https') => {
+        try {
+          if (!workspaceId || !workspaceSlug) throw new Error('Workspace is not ready');
+          await copyTextToClipboard(
+            linkFormat === 'deeplink'
+              ? buildSessionLink({ sessionId: session.id, workspaceId })
+              : buildAppSessionUrl(workspaceSlug, session.id)
+          );
+          captureSessionEvent('session/share_link_copied');
+          toast.success(t('sessions.urlCopied', 'Session URL copied to clipboard'));
+        } catch {
+          captureSessionEvent('session/share_link_copy_failed');
+          toast.error(t('sessions.shareFailed', 'Unable to share link'));
+        }
+      },
+      [captureSessionEvent, t, session.id, workspaceId, workspaceSlug]
+    );
 
     const headerGitHubActions = headerActionsSlot !== undefined ? headerActionsSlot : prBadge;
 
-    const prLinkHandler =
-      onOpenPrTab && latestPr && latestPrRepoFullName && latestPrNumber
-        ? () =>
-            onOpenPrTab({
-              prNumber: latestPrNumber,
-              repoFullName: latestPrRepoFullName,
-              headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-            })
-        : undefined;
-    const permissionSessionHistory = sessionDoc?.history as Parameters<
-      typeof FloatingPermissionRequest
-    >[0]['sessionHistory'];
     const shouldReplaceComposerWithPermission = hasPendingPermissionRequest(
       liveSessionStatus ?? undefined,
       permissionSessionHistory
     );
 
     /* Shared header pieces used by both header variants. */
+    const isLauncherPillVisible = () => (launcherPillRef.current?.getClientRects().length ?? 0) > 0;
     const headerLauncherActions = (
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
-          <div className="flex items-center">
-            <Button
-              className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1"
-              variant="outline"
-              size="sm"
+          <div ref={launcherPillRef} {...stylex.props(styles.headerPills)}>
+            <button
+              type="button"
+              {...stylex.props(styles.headerLauncher, styles.headerLauncherPrimary)}
               onClick={handleOpenInIde}
             >
-              <SelectedPathLauncherIcon className="h-3.5 w-3.5" />
-              <span className="text-xs">{selectedPathLauncher.label}</span>
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  className="h-6 px-1 py-1 rounded-l-none"
-                  variant="outline"
-                  size="sm"
-                  aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
+              <SelectedPathLauncherIcon {...stylex.props(styles.menuIcon)} />
+              <span {...stylex.props(styles.headerLauncherLabel)}>
+                {selectedPathLauncher.label}
+              </span>
+            </button>
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <button
+                    type="button"
+                    {...stylex.props(styles.headerLauncher, styles.headerLauncherSelect)}
+                    aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
+                  >
+                    <ChevronDown {...stylex.props(styles.menuCopyIcon)} />
+                  </button>
+                }
+              />
+              <Menu.Content align="end">
+                <Menu.RadioGroup
+                  value={getPathLauncherId(selectedPathLauncher)}
+                  onValueChange={(launcherId) => {
+                    const target = pathLauncherOptions.find(
+                      (option) => getPathLauncherId(option) === launcherId
+                    );
+                    if (target) void handleSelectPathLauncher(target);
+                  }}
                 >
-                  <ChevronDown className="h-3 w-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {pathLauncherOptions.map((launcher) => {
-                  const launcherId = getPathLauncherId(launcher);
-                  const LauncherIcon = getPathLauncherIcon(launcher);
-                  return (
-                    <DropdownMenuItem
-                      key={launcherId}
-                      onClick={() => {
-                        void handleSelectPathLauncher(launcher);
-                      }}
-                    >
-                      <LauncherIcon className="h-3.5 w-3.5" />
-                      {launcher.label}
-                      {launcherId === getPathLauncherId(selectedPathLauncher) && (
-                        <Check className="ml-auto h-3.5 w-3.5" />
-                      )}
-                    </DropdownMenuItem>
-                  );
-                })}
-                <DropdownMenuSeparator />
+                  {pathLauncherOptions.map((launcher) => {
+                    const launcherId = getPathLauncherId(launcher);
+                    const LauncherIcon = getPathLauncherIcon(launcher);
+                    return (
+                      <Menu.RadioItem
+                        key={launcherId}
+                        value={launcherId}
+                        icon={LauncherIcon}
+                        indicator="check"
+                        indicatorSide="end"
+                      >
+                        {launcher.label}
+                      </Menu.RadioItem>
+                    );
+                  })}
+                </Menu.RadioGroup>
+                <Menu.Separator />
+                <Menu.Item icon={FolderOpen} onClick={() => void handleOpenInFileManager()}>
+                  {openInFileManagerLabel}
+                </Menu.Item>
                 {ACTION_OPTIONS.map((action) => (
-                  <DropdownMenuItem
+                  <Menu.Item
                     key={action.id}
+                    icon={action.Icon}
                     onClick={
                       action.id === 'copy-path'
                         ? () => {
@@ -5464,444 +7262,901 @@ export const SessionChatInterface = memo(
                         : undefined
                     }
                   >
-                    <action.Icon className="h-3.5 w-3.5" />
                     {t('sessions.copyPath', action.label)}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 ))}
                 {isElectronRendererForPathLaunch && (
-                  <DropdownMenuItem onClick={handleOpenPathLauncherSettings}>
-                    <Plus className="h-3.5 w-3.5" />
+                  <Menu.Item icon={Plus} onClick={handleOpenPathLauncherSettings}>
                     {t('sessions.managePathLaunchers', 'Add more…')}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </Menu.Content>
+            </Menu.Root>
           </div>
         )}
       </>
     );
+    const toolbarActions = toolbar?.actions;
+    const headerSharing = toolbarActions ? toolbarActions.sharing : sharing;
+    const headerShareWithTeam = toolbarActions ? toolbarActions.onShareWithTeam : onShareWithTeam;
+    const headerShareAsImage = toolbarActions ? toolbarActions.onShareAsImage : onShareAsImage;
+    const headerCopyConversation = toolbarActions
+      ? toolbarActions.onCopyConversationHistory
+      : hideMessageArea && onCopyConversationHistoryExternal
+        ? onCopyConversationHistoryExternal
+        : handleCopyConversationHistory;
     const headerMenuNode = (
       <SessionHeaderMenu
+        key={`${workspaceId}:${session.id}`}
+        onOpenPublicShare={
+          publicShareWorkspaceId ? () => setPublicShareSessionId(session.id) : undefined
+        }
         session={session}
+        continuationTweaks={
+          continuation.value ? (
+            <SessionContinuationTweaks
+              value={continuation.value}
+              onChange={continuation.setTweak}
+              disabled={continuation.busy || continuation.settingsUnavailable}
+              unavailable={continuation.settingsUnavailable}
+              capabilities={{
+                recoverCapacity: {
+                  supported:
+                    continuation.value.recoverCapacity ||
+                    session.agentType === 'codex' ||
+                    Boolean(
+                      session.agentConfigId &&
+                      sessionAgentConfig &&
+                      sessionMachine?.acpCapabilities?.[session.agentConfigId]?.rateLimits
+                        ?.query === true &&
+                      canShowSubscriptionRateLimits({
+                        cliType: session.cliType,
+                        agentType: session.agentType,
+                        config: sessionAgentConfig,
+                        capability:
+                          sessionMachine?.acpCapabilities?.[session.agentConfigId]?.rateLimits,
+                      })
+                    ),
+                  reason: t(
+                    'sessions.continuation.quotaUnavailable',
+                    'Quota recovery support could not be confirmed for this provider.'
+                  ),
+                },
+                autoDeliver: {
+                  supported: autoDeliverSupported || continuation.value.autoDeliver,
+                  reason: t(
+                    'sessions.autoDelivery.encryptedUnavailable',
+                    'Encrypted workspaces do not observe pull requests yet.'
+                  ),
+                },
+              }}
+              autoDeliverOptions={continuation.autoDeliverOptions}
+              onAutoDeliverOptionsChange={continuation.setAutoDeliver}
+            />
+          ) : undefined
+        }
         localProjectMeta={resolvedLocalProjectMeta}
         workspacePath={sessionWorkspacePath}
         machineName={sessionMachine?.name}
-        onCopyConversationHistory={
-          hideMessageArea && onCopyConversationHistoryExternal
-            ? onCopyConversationHistoryExternal
-            : () => {
-                void handleCopyConversationHistory();
-              }
-        }
+        onCopyConversationHistory={headerCopyConversation}
         onCopyUrl={() => {
-          void handleCopySessionLink();
+          void (toolbarActions
+            ? toolbarActions.onCopyUrl('https')
+            : handleCopySessionLink('https'));
         }}
-        sharing={sharing}
-        onShareWithTeam={onShareWithTeam}
-        onOpenSearch={hideMessageArea ? onOpenSearchExternal : openSearch}
-        onFork={canForkFromMenu ? handleForkFromMenu : undefined}
-        isForking={forkingAssistantMessageId !== null && forkingAssistantMessageId !== undefined}
-        forkWorktreeAvailability={forkWorktreeAvailability}
-        onForkMenuOpen={onForkWorktreeMenuOpen}
-        onRename={
-          headerVariant === 'toolbar'
-            ? onRequestRename
-            : () => {
-                setRenameDialogTarget({
-                  sessionId: session.id,
-                  initialTitle: session.title ?? '',
-                });
-              }
+        onCopyDeepLink={() =>
+          toolbarActions ? toolbarActions.onCopyUrl('deeplink') : handleCopySessionLink('deeplink')
         }
-        onOpenReviewSettings={() => openSettings('preferences')}
+        sharing={headerSharing}
+        onShareWithTeam={headerShareWithTeam}
+        onShareAsImage={headerShareAsImage}
+        onOpenSearch={
+          toolbarActions
+            ? toolbarActions.onOpenSearch
+            : hideMessageArea
+              ? onOpenSearchExternal
+              : openSearch
+        }
+        onFork={
+          toolbarActions
+            ? toolbarActions.onForkSession
+            : canForkFromMenu
+              ? handleForkFromMenu
+              : undefined
+        }
+        isForking={
+          toolbarActions
+            ? toolbarActions.forkingAssistantMessageId != null
+            : forkingAssistantMessageId != null
+        }
+        forkWorktreeAvailability={
+          toolbarActions ? toolbarActions.forkWorktreeAvailability : forkWorktreeAvailability
+        }
+        onForkMenuOpen={
+          toolbarActions ? toolbarActions.onForkWorktreeMenuOpen : onForkWorktreeMenuOpen
+        }
+        onRename={
+          toolbarActions
+            ? toolbarActions.onRequestRename
+            : headerVariant === 'toolbar'
+              ? onRequestRename
+              : () => {
+                  setRenameDialogTarget({
+                    sessionId: session.id,
+                    initialTitle: session.title ?? '',
+                  });
+                }
+        }
+        onSnooze={
+          statusViewWritable && headerSharing?.access !== 'read'
+            ? (snoozedUntil) =>
+                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
+            : undefined
+        }
+        onSettle={
+          statusViewWritable && headerSharing?.access !== 'read'
+            ? () =>
+                settleSessionWithConfirmation(session.id).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
+            : undefined
+        }
+        onMoveToFocus={
+          statusViewWritable && headerSharing?.access !== 'read'
+            ? () =>
+                moveToFocusWithConfirmation(session.id).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
+            : undefined
+        }
         owner={ownerMenuState}
         openedByRelations={openedByRelations}
-        onArchive={onArchiveSession}
-        onRestore={onRestoreSession}
-        onDelete={onDeleteSession}
+        onArchive={toolbarActions ? toolbarActions.onArchiveSession : onArchiveSession}
+        onRestore={toolbarActions ? toolbarActions.onRestoreSession : onRestoreSession}
+        onDelete={toolbarActions ? toolbarActions.onDeleteSession : onDeleteSession}
+        isLauncherPillVisible={isLauncherPillVisible}
+        pullRequest={
+          latestPr
+            ? { number: latestPrNumber ?? null, status: latestPr.status, onOpen: openLatestPr }
+            : undefined
+        }
+        openInIde={
+          shouldShowOpenInIdeButton && isElectronRendererForPathLaunch
+            ? {
+                options: pathLauncherOptions,
+                selected: selectedPathLauncher,
+                onOpen: handleOpenInIde,
+                onSelect: (launcher) => {
+                  void handleSelectPathLauncher(launcher);
+                },
+              }
+            : undefined
+        }
+        openInFileManager={
+          canOpenInFileManager
+            ? {
+                label: openInFileManagerLabel,
+                onOpen: () => {
+                  void handleOpenInFileManager();
+                },
+              }
+            : undefined
+        }
         t={t}
       />
     );
+    // One header control carries both access axes. It survives an absent
+    // `sharing` — a solo workspace resolves no team visibility but can still
+    // publish — and an absent editor, which is the local build.
+    const headerPublicShare = publicShareWorkspaceId
+      ? {
+          status: publicShareStatus,
+          // The panel hosts the editor itself; the `⋯` menu's "Share" still opens the dialog.
+          renderEditor: ({ onClose, onBusyChange }: SessionShareEditorContext) => (
+            <SessionShareEditorPanel
+              workspaceId={publicShareWorkspaceId}
+              session={session}
+              onClose={onClose}
+              onBusyChange={onBusyChange}
+            />
+          ),
+        }
+      : undefined;
+    // What leaves the conversation: the same handlers as the `⋯` menu's Copy
+    // submenu and "Share as image…". Path and base branch describe the working
+    // directory, not the conversation, so they stay in `⋯` only.
+    const headerExportActions: SessionAccessAction[] = [
+      {
+        id: 'copy-markdown',
+        label: t('sessions.copyAsMarkdown', 'Copy as Markdown'),
+        icon: Copy,
+        onSelect: () => headerCopyConversation?.(),
+      },
+      ...(headerShareAsImage
+        ? [
+            {
+              id: 'share-image',
+              label: t('sessions.shareAsImage', 'Share as image…'),
+              icon: Image,
+              onSelect: headerShareAsImage,
+            },
+          ]
+        : []),
+    ];
     const headerAccessNode =
-      sharing && !isMobile ? (
-        <SessionAccessControl state={sharing} onShareWithTeam={onShareWithTeam} />
+      !isMobile && (headerSharing || headerPublicShare) ? (
+        <div {...stylex.props(styles.headerPills)}>
+          <SessionAccessControl
+            state={headerSharing}
+            onShareWithTeam={headerShareWithTeam}
+            publicShare={headerPublicShare}
+            onCopyLink={() => handleCopySessionLink()}
+            exportActions={headerExportActions}
+          />
+        </div>
       ) : null;
     const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
 
+    const toolbarNode = (
+      <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
+        <div {...stylex.props(styles.toolbarHeader)}>
+          {headerLauncherActions}
+          {headerArchivedNode}
+          {headerAccessNode}
+          {headerMenuNode}
+          {toolbar ? toolbar.endSlot : headerEndSlot}
+        </div>
+      </ErrorBoundary>
+    );
+
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-        <SessionConversationPage
-          className={className}
-          dropActive={imageDropZone.isActive || sessionMentionOverlay}
-          dropKind={sessionMentionOverlay ? 'session-mention' : 'files'}
-          hideMessageArea={hideMessageArea}
-          {...pageDropHandlers}
-        >
-          {/* The outline must centre in the whole conversation page, not only
+        <SessionLinkProvider enabled={!!onNavigateSession}>
+          {plaintextCopyConfirmation}
+          {autoDeliveryDialogOpen ? (
+            <AutoDeliveryDialog
+              open
+              busy={continuation.busy}
+              onOpenChange={setAutoDeliveryDialogOpen}
+              onStart={(options) => {
+                continuation.setAutoDeliver(options);
+                setAutoDeliveryDialogOpen(false);
+              }}
+            />
+          ) : null}
+          {toolbar?.container &&
+            createPortal(
+              <SessionConversationPage className={toolbar.className} hideMessageArea>
+                {toolbarNode}
+              </SessionConversationPage>,
+              toolbar.container
+            )}
+          {isVisible &&
+            !preparingWindow &&
+            onOpenBrowser &&
+            (!browserActionSession || browserActionSession.id === session.id) && (
+              <SessionPreviewPreload
+                session={session}
+                preview={sessionDoc.preview as SessionPreviewDocState | undefined}
+              />
+            )}
+          {isVisible &&
+            sessionDocReady &&
+            (sessionHistory.length > 0 || (sessionHistoryLength === 0 && sessionDocSynced)) && (
+              <span
+                hidden
+                data-window-session-ready={session.id}
+                data-window-requires-stream={sessionHistoryLength > 0 ? 'true' : undefined}
+              />
+            )}
+          <SessionConversationPage
+            className={className}
+            dropActive={imageDropZone.isActive || sessionMentionOverlay}
+            dropKind={sessionMentionOverlay ? 'session-mention' : 'files'}
+            hideMessageArea={hideMessageArea}
+            {...pageDropHandlers}
+          >
+            {/* The outline must centre in the whole conversation page, not only
               the flex area left after the composer takes its height. */}
-          <div
-            ref={setOutlineOverlayRoot}
-            className="pointer-events-none absolute inset-0 @container"
-          />
-          {!shouldHideHeader &&
-            (headerVariant === 'toolbar' ? (
-              /* Compact toolbar for the merged desktop tab row: right-side
+            <div ref={setOutlineOverlayRoot} {...stylex.props(styles.pageOutlineOverlay)} />
+            {!shouldHideHeader &&
+              (headerVariant === 'toolbar' ? (
+                /* Compact toolbar for the merged desktop tab row: right-side
                  controls only — no title (the context strip owns identity) and
                  no PR badge (the strip owns PR). */
-              <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
-                <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
-                  {headerLauncherActions}
-                  {headerArchivedNode}
-                  {headerAccessNode}
-                  {headerMenuNode}
-                  {headerEndSlot}
-                </div>
-              </ErrorBoundary>
-            ) : (
-              <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
-                <SessionConversationPageHeader
-                  startSlot={headerStartSlot}
-                  titleSlot={
-                    <SessionProjectInfo
-                      session={session}
-                      isLoading={shouldShowTitleLoading}
-                      isSyncing={effectiveTitleSyncing}
-                      isMachineOffline={sessionMachineOnlineStatus === 'offline'}
-                      t={t}
-                      localProjectMeta={resolvedLocalProjectMeta}
-                    />
-                  }
-                  desktopActionsSlot={
-                    <div className={cn('flex shrink-0 items-center gap-2', isMobile && 'hidden')}>
-                      {headerLauncherActions}
-                      {headerGitHubActions}
-                      {headerArchivedNode}
-                      {headerAccessNode}
-                    </div>
-                  }
-                  menuSlot={headerMenuNode}
-                  endSlot={headerEndSlot}
-                  nativeApp={isNativeApp}
-                  reserveMacTrafficLightInset={
-                    !isNativeApp &&
-                    Boolean(headerStartSlot) &&
-                    isMacOSElectronRenderer() &&
-                    !isElectronFullscreen
-                  }
-                />
-              </ErrorBoundary>
-            ))}
-          {subHeader}
-          {hideMessageArea ? null : (
-            <>
-              <SessionPin
-                pinnedHistoryId={pinnedHistoryId}
-                history={sessionHistoryForPin}
-                onUnpin={handleUnpin}
-                onScrollToMessage={handleScrollToMessage}
-              />
-              <SessionSearchProvider value={searchContextValue}>
-                <SessionPinContext.Provider value={pinContextValue}>
-                  {/* Message area */}
-                  <div ref={messageAreaRef} className="relative flex-1 min-h-0">
-                    {isSearchOpen ? (
-                      <SessionSearchBar
-                        query={searchQuery}
-                        currentIndex={activeSearchResultIndex}
-                        totalCount={searchResults.length}
-                        inputRef={searchInputRef}
-                        onQueryChange={handleSearchQueryChange}
-                        onPrevious={() => moveToSearchResult('previous')}
-                        onNext={() => moveToSearchResult('next')}
-                        onClose={closeSearch}
+                toolbarNode
+              ) : (
+                <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
+                  <SessionConversationPageHeader
+                    startSlot={headerStartSlot}
+                    titleSlot={
+                      <SessionProjectInfo
+                        session={session}
+                        isLoading={shouldShowTitleLoading}
+                        isSyncing={effectiveTitleSyncing}
+                        isMachineOffline={sessionMachineOnlineStatus === 'offline'}
                         t={t}
+                        localProjectMeta={resolvedLocalProjectMeta}
                       />
-                    ) : null}
-                    <ErrorBoundary
-                      name="SessionChatStream"
-                      variant="section"
-                      resetKeys={[session.id]}
-                      fallbackRender={({ resetErrorBoundary }) => (
-                        <div className="flex h-full w-full items-center justify-center p-4 text-center">
-                          <div className="max-w-md">
-                            <div className="text-sm font-semibold text-foreground">
-                              {t('common.somethingWentWrong', 'Something went wrong')}
-                            </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {t(
-                                'sessions.messageListCrashed',
-                                'The message list failed to render. Your draft message below is safe.'
-                              )}
-                            </div>
-                            <div className="mt-3 flex justify-center gap-2">
-                              <button
-                                type="button"
-                                className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-                                onClick={resetErrorBoundary}
-                              >
-                                {t('common.tryAgain', 'Try again')}
-                              </button>
-                            </div>
-                          </div>
+                    }
+                    desktopActionsSlot={
+                      <div
+                        {...stylex.props(
+                          styles.desktopHeaderActions,
+                          isMobile && styles.hiddenHeaderActions
+                        )}
+                      >
+                        {headerLauncherActions}
+                        {headerGitHubActions}
+                        {headerArchivedNode}
+                        {headerAccessNode}
+                      </div>
+                    }
+                    menuSlot={headerMenuNode}
+                    endSlot={headerEndSlot}
+                    nativeApp={isNativeApp}
+                    reserveMacTrafficLightInset={
+                      !isNativeApp &&
+                      Boolean(headerStartSlot) &&
+                      isMacOSElectronRenderer() &&
+                      !isElectronFullscreen
+                    }
+                  />
+                </ErrorBoundary>
+              ))}
+            {subHeader}
+            {hideMessageArea ? null : (
+              <>
+                <SessionPin
+                  pinnedHistoryId={pinnedHistoryId}
+                  pinnedMessage={pinnedMessage}
+                  onUnpin={handleUnpin}
+                  onScrollToMessage={handleScrollToMessage}
+                />
+                <SessionSearchProvider value={searchContextValue}>
+                  <SessionPinContext.Provider value={pinContextValue}>
+                    {/* Message area */}
+                    <MessageQuoteAction
+                      root={foldMessageArea}
+                      enabled={
+                        isVisible &&
+                        !session.isArchived &&
+                        !shareSelection.active &&
+                        !shouldReplaceComposerWithPermission
+                      }
+                      onQuote={(text) => inputAreaRef.current?.addMessageQuote(text) ?? false}
+                    />
+                    <div
+                      ref={setMessageArea}
+                      {...stylex.props(styles.messageArea)}
+                      style={
+                        horizontalFold ? { maxHeight: horizontalFold.messageHeight } : undefined
+                      }
+                    >
+                      {isSearchOpen ? (
+                        <SessionSearchBar
+                          query={searchQuery}
+                          currentIndex={activeSearchResultIndex}
+                          totalCount={searchResults.length}
+                          inputRef={searchInputRef}
+                          onQueryChange={handleSearchQueryChange}
+                          onPrevious={() => moveToSearchResult('previous')}
+                          onNext={() => moveToSearchResult('next')}
+                          onClose={closeSearch}
+                          t={t}
+                        />
+                      ) : null}
+                      <ErrorBoundary
+                        name="SessionChatStream"
+                        variant="section"
+                        resetKeys={[session.id]}
+                        fallbackRender={(props) => <MessageListErrorFallback {...props} />}
+                      >
+                        {/* Key forces remount on session change, preventing scroll state bleed between sessions */}
+                        <MessageSendStatusContext.Provider value={sendingMessageIds}>
+                          <MessageSelectionContext.Provider value={shareSelection.context}>
+                            <SessionAgentFileLinkMenuProvider
+                              session={session}
+                              workspaceId={workspaceId}
+                              isVisible={isVisible}
+                            >
+                              <SessionChatStream
+                                key={session.id}
+                                ref={chatStreamRef}
+                                sessionId={session?.id}
+                                workspaceId={workspaceId}
+                                showSenderIdentity={isMultiMember}
+                                view={conversationView}
+                                isVisible={isVisible}
+                                sessionCreatedAt={session?.createdAt}
+                                dividerLabel={sessionDividerLabel}
+                                {...stylex.props(styles.stream)}
+                                leadingContent={openedByConversationStart}
+                                emptyState={chatStreamEmptyState}
+                                trailingContent={
+                                  unsentFirstMessage ? undefined : (
+                                    <>
+                                      {pendingMessages.trailingContent}
+                                      {autoDeliveryStatus ? (
+                                        <ConversationColumn
+                                          {...stylex.props(styles.continuationNotesColumn)}
+                                        >
+                                          <SessionAutoDeliveryNote
+                                            status={autoDeliveryStatus}
+                                            busy={continuation.busy}
+                                            onTurnOff={
+                                              continuation.value?.autoDeliver
+                                                ? () => continuation.setAutoDeliver(false)
+                                                : undefined
+                                            }
+                                            onDismiss={() => continuation.setAutoDeliver(false)}
+                                          />
+                                        </ConversationColumn>
+                                      ) : null}
+                                      {continuation.views.length > 0 ? (
+                                        // The stream's trailing row is full-bleed, so the
+                                        // note mounts its own conversation column like every
+                                        // other region; otherwise it paints the whole pane.
+                                        <ConversationColumn
+                                          {...stylex.props(styles.continuationNotesColumn)}
+                                        >
+                                          {continuation.views.map((view) => (
+                                            <SessionContinuationNote
+                                              key={view.id}
+                                              view={
+                                                continuation.error
+                                                  ? { ...view, block: 'unavailable' }
+                                                  : view
+                                              }
+                                              now={continuationNow}
+                                              compact={isMobile}
+                                              statusUnavailable={continuation.error}
+                                              onCancel={continuation.cancel}
+                                              onResume={() => {
+                                                void setTreeCollaborationStopped(session.id, false)
+                                                  .then(continuation.refresh)
+                                                  .catch(() =>
+                                                    toast.error(
+                                                      t('sessions.relations.controlFailed')
+                                                    )
+                                                  );
+                                              }}
+                                            />
+                                          ))}
+                                        </ConversationColumn>
+                                      ) : null}
+                                    </>
+                                  )
+                                }
+                                localUserMessages={pendingMessages.localUserMessages}
+                                agentActivityLabel={agentActivityLabel}
+                                agentActivityTone={agentActivityTone}
+                                agentActivityShimmer={agentActivityShimmer}
+                                liveTurnActivity={liveTurnActivity}
+                                historyLive={historyLive}
+                                onFileDiffClick={onFileDiffClick}
+                                onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
+                                onOpenHtmlFile={handleOpenHtmlAttachment}
+                                onOpenFileAttachment={onOpenFileAttachment}
+                                onAnnotateImage={
+                                  isArchivedSession ? undefined : handleAnnotateImage
+                                }
+                                messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
+                                assistantActions={assistantQuickActions}
+                                assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
+                                onCopyContext={(messageId) => {
+                                  void handleCopyConversationHistory(messageId);
+                                }}
+                                onForkLastAssistant={onForkLastAssistant}
+                                forkWorktreeAvailability={forkWorktreeAvailability}
+                                onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                                onEditLastUser={
+                                  editableLastUserMessageId ? handleEditLastUser : undefined
+                                }
+                                editMentionContext={editMentionContext}
+                                onResendUndelivered={handleResendUndelivered}
+                                capacityRetry={capacityRetry ?? undefined}
+                                forkingAssistantMessageId={forkingAssistantMessageId}
+                                onNavigateSession={onNavigateSession}
+                                conversationFontSize={conversationFontSize}
+                                suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
+                                outlineOverlayRoot={outlineOverlayRoot}
+                              />
+                            </SessionAgentFileLinkMenuProvider>
+                          </MessageSelectionContext.Provider>
+                        </MessageSendStatusContext.Provider>
+                      </ErrorBoundary>
+                    </div>
+
+                    <div
+                      data-horizontal-fold-lower
+                      style={
+                        horizontalFold
+                          ? {
+                              position: 'absolute',
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              top: horizontalFold.lowerTop,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'flex-end',
+                              minHeight: 0,
+                            }
+                          : { display: 'contents' }
+                      }
+                    >
+                      {/* Requests and their editor must survive virtual row eviction. */}
+                      {workspaceId && (
+                        <div {...stylex.props(styles.shareRequestsScroller)}>
+                          <ConversationColumn {...stylex.props(styles.shareRequestsColumn)}>
+                            <SessionShareRequestCards
+                              workspaceId={workspaceId}
+                              session={session}
+                              isVisible={isVisible}
+                            />
+                          </ConversationColumn>
                         </div>
                       )}
-                    >
-                      {/* Key forces remount on session change, preventing scroll state bleed between sessions */}
-                      <MessageSendStatusContext.Provider value={sendingMessageIds}>
-                        <SessionChatStream
-                          key={session.id}
-                          ref={chatStreamRef}
-                          sessionId={session?.id}
-                          workspaceId={workspaceId}
-                          sessionDoc={sessionDoc}
-                          sessionCreatedAt={session?.createdAt}
-                          dividerLabel={sessionDividerLabel}
-                          className="h-full"
-                          leadingContent={openedByConversationStart}
-                          emptyState={chatStreamEmptyState}
-                          agentActivityLabel={agentActivityLabel}
-                          agentActivityTone={agentActivityTone}
-                          onFileDiffClick={onFileDiffClick}
-                          onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
-                          onOpenHtmlFile={handleOpenHtmlAttachment}
-                          messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
-                          assistantActions={assistantQuickActions}
-                          assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
-                          onForkLastAssistant={onForkLastAssistant}
-                          forkWorktreeAvailability={forkWorktreeAvailability}
-                          onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                          onEditLastUser={
-                            editableLastUserMessageId ? handleEditLastUser : undefined
-                          }
-                          onResendUndelivered={handleResendUndelivered}
-                          forkingAssistantMessageId={forkingAssistantMessageId}
-                          onNavigateSession={onNavigateSession}
-                          onLastCompletedAssistantMessageIdChange={
-                            handleLastCompletedAssistantMessageIdChange
-                          }
-                          conversationFontSize={conversationFontSize}
-                          skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
-                          suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
-                          outlineOverlayRoot={outlineOverlayRoot}
-                        />
-                      </MessageSendStatusContext.Provider>
-                    </ErrorBoundary>
-                  </div>
 
-                  {/* Floating permission request - shown when session is waiting for permission */}
-                  <FloatingPermissionRequest
-                    sessionId={session.id}
-                    sessionStatus={liveSessionStatus ?? undefined}
-                    sessionHistory={permissionSessionHistory}
-                  />
+                      {/* The one place a pending permission request is answered; it stands in for the composer. */}
+                      <FloatingPermissionRequest
+                        liftAboveKeyboard={isMobile}
+                        sessionId={session.id}
+                        sessionStatus={liveSessionStatus ?? undefined}
+                        sessionHistory={permissionSessionHistory}
+                        onStop={() => {
+                          void handleStop();
+                        }}
+                      />
 
-                  {/* Notification permission prompt - shown when session becomes idle (turn completed) */}
-                  {/* TODO(analytics): session/notification_prompt_shown|_permission_granted|_permission_denied.
+                      {/* Notification permission prompt - shown when session becomes idle (turn completed) */}
+                      {/* TODO(analytics): session/notification_prompt_shown|_permission_granted|_permission_denied.
                       Visibility + enable/dismiss live inside NotificationPermissionPrompt (owned elsewhere)
                       and the actual grant/deny resolves on the settings page, so these must be emitted from
                       that component via onShown/onEnableClicked/onDismissed callbacks (see crossFileNeeds). */}
-                  <NotificationPermissionPrompt
-                    sessionCompleted={session.status?.type === 'idle' && !isSessionWorking}
-                  />
-
-                  {/* An active auto-review run states itself here rather than
-                      only in the "…" menu: the failure mode worth designing
-                      against is a user who ticked the box days ago, forgot, and
-                      then finds a pull request merged itself. */}
-                  {autoReview.run && autoReview.active ? (
-                    <ConversationColumn className="px-3 pb-1.5">
-                      <AutoReviewStatus
-                        run={autoReview.run}
-                        maxRounds={autoReview.run.policy.budget.reviewRounds}
-                        onDisable={() => {
-                          void autoReview.disable();
-                        }}
-                        onConfirmMerge={() => {
-                          void autoReview.confirmMerge();
-                        }}
-                        onResume={() => {
-                          void autoReview.resume();
-                        }}
-                        onFixFinding={(finding) => {
-                          void dispatchPrompt(
-                            buildAuthorFixPrompt([finding], {
-                              // Same reason as the engine's own dispatch: with a
-                              // PR open, a committed-but-unpushed fix is invisible
-                              // to everything that reads the PR head.
-                              hasPullRequest: hasExistingPr,
-                            })
-                          );
-                        }}
+                      <NotificationPermissionPrompt
+                        sessionCompleted={session.status?.type === 'idle' && !isSessionWorking}
                       />
-                    </ConversationColumn>
-                  ) : null}
 
-                  {/* Session info bar (desktop AND mobile): the canonical
+                      {/* Session info bar (desktop AND mobile): the canonical
                       cluster + fixed stage row merging status, goal, schedule,
                       and work context, glued to the composer shell. It
                       replaced the mobile status strip / goal banner /
                       in-composer scheduled panel. */}
-                  <SessionInfoBar
-                    status={statusStripState}
-                    goal={latestGoal}
-                    goalCommands={goalCommands}
-                    goalPendingCommand={
-                      pendingGoalCommand && pendingGoalCommand.threadId === latestGoal?.threadId
-                        ? pendingGoalCommand.command
-                        : null
-                    }
-                    onGoalCommand={handleGoalCardCommand}
-                    onGoalDismiss={handleDismissGoalBanner}
-                    task={sessionTaskChip}
-                    onOpenTask={handleOpenSessionTask}
-                    scheduledTasks={pendingScheduledTasks}
-                    prCiRuns={infoBarPrCiRuns}
-                    onOpenPrCiRun={handleOpenPrCiRun}
-                    projectName={repoFullName || resolvedLocalProjectMeta?.name || null}
-                    branch={isMobile ? null : session.branchName?.trim() || null}
-                    workspaceLocation={
-                      session.isWorktree
-                        ? {
-                            // GitHub sessions are always worktrees, so surface the
-                            // GitHub identity rather than the redundant worktree mark.
-                            kind: repoFullName ? 'github-worktree' : 'worktree',
-                            path: sessionWorkspacePath,
-                          }
-                        : resolvedLocalProjectMeta
-                          ? { kind: 'folder', path: sessionWorkspacePath }
-                          : null
-                    }
-                    pr={canShowGitHubActions ? effectiveLatestPr : null}
-                    onOpenPr={prLinkHandler}
-                    contextActions={infoBarContextActions}
-                    onOpenAllChanges={onOpenAllChanges}
-                    onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
-                    privateAccessStatus={
-                      isMobile && sharing?.visibility === 'private'
-                        ? {
-                            label: t('sharing.privateOnlyYou', 'Private · Only you'),
-                            description: getSessionSharingDescription(t, sharing),
-                            onAction:
-                              sharing.canManage && onShareWithTeam
-                                ? () => {
-                                    void onShareWithTeam();
-                                  }
-                                : undefined,
-                          }
-                        : undefined
-                    }
-                    diffStat={changesDiffStat}
-                    // Desktop only: mobile already shows catch-up in its header.
-                    syncing={!isMobile && effectiveTitleSyncing}
-                    // Mobile keeps the bar above the session drawer's z-30
-                    // edge-back strip so its leading chip stays tappable.
-                    protectFromEdgeBackZone={isMobile}
-                  />
+                      <SessionInfoBar
+                        status={statusStripState}
+                        machine={
+                          sessionMachine
+                            ? {
+                                machineId: session.machineId,
+                                name: sessionMachine.name,
+                                ownerName: workspaceMembers.find(
+                                  (member) => member.userId === sessionMachine.ownerUserId
+                                )?.name,
+                                isOwn:
+                                  !!currentUser?.id &&
+                                  sessionMachine.ownerUserId === currentUser.id,
+                                isCurrent: localMachineId ? isLocalSession : undefined,
+                                onlineStatus: sessionMachineOnlineStatus,
+                              }
+                            : null
+                        }
+                        compactMachineInfo={isMobile}
+                        goal={latestGoal}
+                        goalCommands={goalCommands}
+                        goalPendingCommand={
+                          pendingGoalCommand && pendingGoalCommand.threadId === latestGoal?.threadId
+                            ? pendingGoalCommand.command
+                            : null
+                        }
+                        onGoalCommand={handleGoalCardCommand}
+                        onGoalDismiss={handleDismissGoalBanner}
+                        scheduleSource={
+                          session.scheduleId
+                            ? {
+                                title:
+                                  scheduleRegistry.rows.find(
+                                    (row) => row.scheduleId === session.scheduleId
+                                  )?.title ?? t('schedules.source', 'Scheduled task'),
+                                onOpen: () => {
+                                  if (workspaceSlug && session.scheduleId)
+                                    void router.navigate({
+                                      to: '/$workspaceName/schedules/$scheduleId',
+                                      params: {
+                                        workspaceName: workspaceSlug,
+                                        scheduleId: session.scheduleId,
+                                      },
+                                    });
+                                },
+                              }
+                            : null
+                        }
+                        scheduledTasks={pendingScheduledTasks}
+                        prCiRuns={infoBarPrCiRuns}
+                        onOpenPrCiRun={handleOpenPrCiRun}
+                        prCiState={latestPrState?.s}
+                        projectName={infoBarProjectName}
+                        branch={isMobile ? null : infoBarBranch}
+                        workspaceLocation={infoBarWorkspaceLocation}
+                        pr={canShowGitHubActions ? latestPr : null}
+                        onOpenPr={prLinkHandler}
+                        prHistory={canShowGitHubActions ? pullRequestHistory : undefined}
+                        onOpenHistoryPr={openHistoryPr}
+                        prLinks={canShowGitHubActions ? prLinks : undefined}
+                        contextActions={infoBarContextActions}
+                        onOpenAllChanges={onOpenAllChanges}
+                        // Opener + every Session/Tab created here: the in-stream
+                        // creation cards scroll away with the conversation.
+                        projectMembers={
+                          sessionProjectRun && projectMemberRows.length > 0 ? (
+                            <SessionProjectMembersChip
+                              groupName={sessionProjectRun.name}
+                              rows={projectMemberRows}
+                              selectedMemberId={selectedProjectMemberRow?.id}
+                              onSelectMember={setSelectedProjectMemberId}
+                              onOpenPullRequest={(url) => {
+                                void openExternalUrl(url);
+                              }}
+                            />
+                          ) : undefined
+                        }
+                        relations={
+                          hasSessionRelations ? (
+                            <CurrentSessionRelationsChip
+                              sessionId={session.id}
+                              onOpenSession={handleOpenRelatedSession}
+                            />
+                          ) : undefined
+                        }
+                        onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
+                        onOpenIosSimulator={
+                          session.iosSimulatorPreviewRequestId ? onOpenIosSimulator : undefined
+                        }
+                        onOpenAndroidEmulator={
+                          session.androidEmulatorPreviewRequestId
+                            ? onOpenAndroidEmulator
+                            : undefined
+                        }
+                        privateAccessStatus={
+                          isMobile && sharing?.visibility === 'private'
+                            ? {
+                                label: t('sharing.privateOnlyYou', 'Private · Only you'),
+                                description: getSessionSharingDescription(t, sharing),
+                                onAction:
+                                  sharing.canManage && onShareWithTeam
+                                    ? () => {
+                                        void onShareWithTeam();
+                                      }
+                                    : undefined,
+                              }
+                            : undefined
+                        }
+                        diffStat={infoBarDiffStat}
+                        // Desktop only: mobile already shows catch-up in its header.
+                        syncStatus={
+                          isMobile
+                            ? null
+                            : contentSyncState === 'catching-up'
+                              ? 'updating'
+                              : effectiveTitleSyncing
+                                ? 'syncing'
+                                : null
+                        }
+                        // Mobile keeps the bar above the session drawer's z-30
+                        // edge-back strip so its leading chip stays tappable.
+                        protectFromEdgeBackZone={isMobile}
+                        // Queued turns stack on the bar (or on the composer when the
+                        // bar is empty). Hidden with the composer: a pending
+                        // permission bypasses the queue, as does share selection.
+                        queue={
+                          (messageQueue.length > 0 ||
+                            hasPendingQueueRecords ||
+                            scheduledQueueItems.length > 0) &&
+                          !shouldReplaceComposerWithPermission &&
+                          !shareSelection.active ? (
+                            <MessageQueueDisplay
+                              sessionId={session.id}
+                              items={messageQueue}
+                              scheduledItems={scheduledQueueItems}
+                              onOpenScheduled={(item) => {
+                                void openScheduledMessageEditor(item);
+                              }}
+                              onEditScheduledTime={(item) => {
+                                void openScheduledTimeEditor(item);
+                              }}
+                              onCancelScheduled={(item) => {
+                                void cancelScheduledMessage(item);
+                              }}
+                              onRemove={handleRemoveQueueItem}
+                              onReorder={handleReorderQueueItem}
+                              onEditStart={handleStartQueueItemEdit}
+                              onEditCancel={handleCancelQueueItemEdit}
+                              onEditSave={handleSaveQueueItemEdit}
+                              onSteer={handleSteerQueuedMessage}
+                              showSteerAction={!isExternalHistoryRefreshing}
+                              nativeSteerAvailable={nativeSteerAvailable}
+                              sendWhileIdle={!activeAssistantTurnId}
+                              roomy={isMobile}
+                              footerPosition={isMobile ? 'inline' : 'below'}
+                            />
+                          ) : undefined
+                        }
+                      />
 
-                  {/* Input area - isolated component to prevent full re-renders on typing.
+                      {/* Input area - isolated component to prevent full re-renders on typing.
                       Hidden while a permission is pending so the response buttons claim
                       the bottom surface; chat queue is bypassed for the same reason. */}
-                  {shouldReplaceComposerWithPermission ? null : (
-                    <SessionChatInputArea
-                      ref={inputAreaRef}
-                      session={session}
-                      sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
-                      isMachineRemoved={isMachineRemoved}
-                      isAgentBusy={isAgentBusy}
-                      canStopAgent={canStopAgent}
-                      isExternalHistoryRefreshing={isExternalHistoryRefreshing}
-                      externalHistorySyncLabel={externalHistorySyncLabel}
-                      isDark={isDark}
-                      isEmptyConversation={isEmptyConversation}
-                      selectedModeId={selectedModeId}
-                      selectedModelId={selectedModelId}
-                      modeOptions={modeOptions}
-                      modelOptions={modelOptions}
-                      rateLimits={sessionRateLimits}
-                      showCodexResetForecast={showCodexResetForecast}
-                      isContextCompacting={isContextCompacting}
-                      configOptionSelectors={configOptionSelectors}
-                      configOptionValues={configOptionValues}
-                      isRepoPublic={isRepoPublic}
-                      availableCommands={availableCommands}
-                      freeTurnLimitNotice={freeSessionTurnNotice}
-                      queueDisplay={
-                        messageQueue.length > 0 ? (
-                          <MessageQueueDisplay
-                            sessionId={session.id}
-                            items={messageQueue}
-                            onRemove={handleRemoveQueueItem}
-                            onReorder={handleReorderQueueItem}
-                            onEditStart={handleStartQueueItemEdit}
-                            onEditCancel={handleCancelQueueItemEdit}
-                            onEditSave={handleSaveQueueItemEdit}
-                            onSteer={handleSteerQueuedMessage}
-                            showSteerAction={
-                              isSessionActive &&
-                              !!activeAssistantTurnId &&
-                              !isExternalHistoryRefreshing
+                      {scheduledTimeEdit ? (
+                        <ScheduledMessageTimeDialog
+                          at={
+                            scheduledTimeEdit.document.definition.trigger.kind === 'once'
+                              ? scheduledTimeEdit.document.definition.trigger.at
+                              : null
+                          }
+                          timeZone={getDeviceTimeZone(sessionMachine?.timeZone)}
+                          now={getServerNow()}
+                          onClose={() => setScheduledTimeEdit(null)}
+                          onApply={(at) => {
+                            void applyScheduledTime(at);
+                          }}
+                        />
+                      ) : null}
+                      {scheduledMessageEdit ? (
+                        <ScheduledMessageEditDialog
+                          document={scheduledMessageEdit.document}
+                          state={
+                            scheduledMessageEdit.item.state === 'failed' ? 'failed' : undefined
+                          }
+                          disabledReason={scheduledMessageDisabledReason}
+                          onClose={() => setScheduledMessageEdit(null)}
+                          onCancel={async () => {
+                            if (await cancelScheduledMessage(scheduledMessageEdit.item))
+                              setScheduledMessageEdit(null);
+                          }}
+                          onSaved={() => setScheduledMessageEdit(null)}
+                        />
+                      ) : null}
+                      <MessageSelectionToolbar selection={shareSelection} />
+                      <div
+                        {...stylex.props(
+                          styles.composerContents,
+                          shareSelection.active && styles.composerHidden
+                        )}
+                      >
+                        {shouldReplaceComposerWithPermission ? null : (
+                          <SessionChatInputArea
+                            isVisible={isVisible && !shareSelection.active}
+                            claimNavigationFocus={
+                              isVisible && !preparingWindow ? claimNavigationFocus : undefined
+                            }
+                            ref={inputAreaRef}
+                            session={session}
+                            messageHistory={conversationView}
+                            sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
+                            isMachineRemoved={isMachineRemoved}
+                            isAgentBusy={isAgentBusy}
+                            canStopAgent={canStopAgent}
+                            isExternalHistoryRefreshing={isExternalHistoryRefreshing}
+                            externalHistorySyncLabel={externalHistorySyncLabel}
+                            isDark={isDark}
+                            isEmptyConversation={isEmptyConversation}
+                            selectedModeId={selectedModeId}
+                            selectedModelId={selectedModelId}
+                            durableAgentRoleId={sessionConversationConfig.agentRoleId}
+                            durableAgentRoleRevision={sessionConversationConfig.agentRoleRevision}
+                            durableAgentRoleSourceTurnKey={
+                              sessionConversationSourceFence.currentTurnKey
+                            }
+                            durableAgentRoleKnownTurnKeys={
+                              sessionConversationSourceFence.knownTurnKeys
+                            }
+                            durableAgentRoleReady={sessionDocReady || hasPendingConfig}
+                            runConfigHasUserEdits={sessionRunConfigHasUserEdits}
+                            modeOptions={modeOptions}
+                            modelOptions={modelOptions}
+                            rateLimits={sessionRateLimits}
+                            quotaConfig={sessionAgentConfig}
+                            showCodexResetForecast={showCodexResetForecast}
+                            isContextCompacting={isContextCompacting}
+                            configOptionSelectors={configOptionSelectors}
+                            configOptionValues={configOptionValues}
+                            isRepoPublic={isRepoPublic}
+                            isRepoLinked={isRepoLinked}
+                            availableCommands={availableCommands}
+                            commandsEnabled={isVisible}
+                            freeTurnLimitNotice={freeSessionTurnNotice}
+                            mcp={mcpSelection.menu}
+                            mcpSelectionReady={mcpSelection.ready}
+                            mcpDefaultsFailed={mcpSelection.defaultsFailed}
+                            onRetryMcpDefaults={mcpSelection.retryDefaults}
+                            // The info bar above owns this gap (and seats the queue).
+                            hideTopSpacer
+                            onModeChange={handleModeChange}
+                            onModelChange={handleModelChange}
+                            onConfigOptionChange={handleConfigOptionChange}
+                            onSendMessage={handleSendMessage}
+                            onRestoreSession={onRestoreSession ?? toolbarActions?.onRestoreSession}
+                            onStop={() => {
+                              void handleStop();
+                            }}
+                            onRemoveQueueItem={handleRemoveQueueItem}
+                            onAgentConfigChange={
+                              isChildSession ? handleAgentConfigChange : undefined
+                            }
+                            onNavigateToComment={onNavigateToComment}
+                            onCommentReferencesChange={onCommentReferencesChange}
+                            onVisualAnnotationReferencesChange={onVisualAnnotationReferencesChange}
+                            onVisualAnnotationReferencesSubmitted={
+                              onVisualAnnotationReferencesSubmitted
                             }
                           />
-                        ) : null
-                      }
-                      mcp={mcpSelection.menu}
-                      skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
-                      onModeChange={handleModeChange}
-                      onModelChange={handleModelChange}
-                      onConfigOptionChange={handleConfigOptionChange}
-                      onSendMessage={handleSendMessage}
-                      onStop={() => {
-                        void handleStop();
-                      }}
-                      onRemoveQueueItem={handleRemoveQueueItem}
-                      onAgentConfigChange={isChildSession ? handleAgentConfigChange : undefined}
-                      onNavigateToComment={onNavigateToComment}
-                      onCommentReferencesChange={onCommentReferencesChange}
-                      onVisualAnnotationReferencesChange={onVisualAnnotationReferencesChange}
-                      onVisualAnnotationReferencesSubmitted={onVisualAnnotationReferencesSubmitted}
-                    />
-                  )}
-                </SessionPinContext.Provider>
-              </SessionSearchProvider>
-            </>
-          )}
-          <RenameSessionDialog
-            target={renameDialogTarget}
-            onClose={() => setRenameDialogTarget(null)}
-          />
-          <AlertDialog
-            open={pendingRemoteHtmlFileName !== null}
-            onOpenChange={(open) => {
-              if (!open) setPendingRemoteHtmlFileName(null);
-            }}
-          >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {t('sessions.htmlAttachment.openReportedPortTitle', 'Open the reported port?')}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t(
-                    'sessions.htmlAttachment.openReportedPortDescription',
-                    'To preview {{name}}, Lody will connect to the local port reported by the Agent and open it in Browser.',
-                    { name: pendingRemoteHtmlFileName ?? '' }
-                  )}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => {
-                    setPendingRemoteHtmlFileName(null);
-                    onOpenBrowser?.();
-                  }}
-                >
-                  {t('sessions.htmlAttachment.openReportedPortAction', 'Connect and open')}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </SessionConversationPage>
+                        )}
+                      </div>
+                    </div>
+                  </SessionPinContext.Provider>
+                </SessionSearchProvider>
+              </>
+            )}
+            <RenameSessionDialog
+              target={renameDialogTarget?.sessionId === session.id ? renameDialogTarget : null}
+              onClose={() => setRenameDialogTarget(null)}
+            />
+            {publicShareWorkspaceId && publicShareSessionId === session.id && (
+              <SessionShareDialog
+                workspaceId={publicShareWorkspaceId}
+                session={session}
+                onClose={() => setPublicShareSessionId(null)}
+              />
+            )}
+            <AlertDialog.Root
+              open={pendingRemoteHtmlFileName !== null}
+              onOpenChange={(open) => {
+                if (open) return;
+                if (!remotePortAllowedRef.current && pendingRemoteHtmlFileName !== null) {
+                  captureSessionEvent('file_preview/remote_port_confirmed', { decision: 'deny' });
+                }
+                remotePortAllowedRef.current = false;
+                setPendingRemoteHtmlFile(null);
+              }}
+            >
+              <AlertDialog.Content>
+                <AlertDialog.Header>
+                  <AlertDialog.Title>
+                    {t('sessions.htmlAttachment.openReportedPortTitle', 'Open the reported port?')}
+                  </AlertDialog.Title>
+                  <AlertDialog.Description>
+                    {t(
+                      'sessions.htmlAttachment.openReportedPortDescription',
+                      'To preview {{name}}, Lody will connect to the local port reported by the Agent and open it in Browser.',
+                      { name: pendingRemoteHtmlFileName ?? '' }
+                    )}
+                  </AlertDialog.Description>
+                </AlertDialog.Header>
+                <AlertDialog.Footer>
+                  <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+                  <AlertDialog.Action
+                    onClick={() => {
+                      remotePortAllowedRef.current = true;
+                      captureSessionEvent('file_preview/remote_port_confirmed', {
+                        decision: 'allow',
+                      });
+                      setPendingRemoteHtmlFile(null);
+                      onOpenBrowser?.();
+                    }}
+                  >
+                    {t('sessions.htmlAttachment.openReportedPortAction', 'Connect and open')}
+                  </AlertDialog.Action>
+                </AlertDialog.Footer>
+              </AlertDialog.Content>
+            </AlertDialog.Root>
+          </SessionConversationPage>
+        </SessionLinkProvider>
       </PrLinkProvider>
     );
   })

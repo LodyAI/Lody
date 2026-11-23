@@ -1,22 +1,172 @@
-import { useState } from 'react';
-import { Check, Copy, Link2, Loader2, RotateCw, X } from 'lucide-react';
+import { seatBillingErrorKey } from './billing-errors';
+import {
+  useLegacyWorkspaceMutation,
+  useLegacyWorkspaceQuery,
+} from '@/hooks/use-legacy-workspace-query';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Check, Copy, Link2, RotateCw, X } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { toast } from '@/lib/toast';
+import { useCloudAction, useCloudQuery } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getAppShareUrl } from '@/lib/app-location';
-import { Button } from '@/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import {
+  SeatCostNotice,
+  SeatAdmissionActions,
+  isSeatAdmissionReady,
+  type SeatInvitePreview,
+} from './invite-member-dialog';
+import { Select } from '@lody/ui/select';
+import { CompactSection } from './compact-layout';
+import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
-export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: string }) {
+const WIDE = '@media (min-width: 640px)';
+
+const styles = stylex.create({
+  /** The link line: the link and when it expires, then what sets and clears it. */
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[2],
+    paddingInline: space[4],
+    paddingBlock: '8px',
+  },
+  link: {
+    display: 'flex',
+    flexGrow: 1,
+    flexBasis: '12rem',
+    alignItems: 'baseline',
+    gap: space[2],
+    minWidth: 0,
+  },
+  url: {
+    minWidth: 0,
+    flexGrow: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  expires: {
+    display: { default: 'none', [WIDE]: 'inline' },
+    flexShrink: 0,
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  controls: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
+  expiry: { width: '6.5rem', flexShrink: 0 },
+  actions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1] },
+  note: { display: 'flex', alignItems: 'center', gap: space[2] },
+  request: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: '8px',
+  },
+  requestText: { flexGrow: 1, minWidth: 0 },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  name: {
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    lineHeight: type.leading,
+    color: colors.label,
+  },
+  meta: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  reason: {
+    margin: 0,
+    marginTop: space[2],
+    whiteSpace: 'pre-wrap',
+    fontSize: uiText.footnoteSize,
+    lineHeight: 1.43,
+    color: colors.label,
+  },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+  /** An icon-only button draws the glyph's box; the glyph fills it. */
+  glyph: { width: '100%', height: '100%' },
+});
+
+export function WorkspaceJoinRequestsSettings({
+  workspaceId,
+  onOpenBilling,
+  onMembersChanged,
+}: {
+  workspaceId: string;
+  onOpenBilling?: () => void;
+  onMembersChanged?: () => Promise<unknown>;
+}) {
   const { t } = useTranslation();
-  const state = useCloudQuery(cloudOperations.workspaceJoinRequests.getOwnerState, {
+  const state = useLegacyWorkspaceQuery(cloudOperations.workspaceJoinRequests.getOwnerState, {
     workspaceId,
   });
-  const rotateLink = useCloudMutation(cloudOperations.workspaceJoinRequests.rotateLink);
-  const revokeLink = useCloudMutation(cloudOperations.workspaceJoinRequests.revokeLink);
-  const reviewRequest = useCloudMutation(cloudOperations.workspaceJoinRequests.reviewRequest);
+  const rotateLink = useLegacyWorkspaceMutation(cloudOperations.workspaceJoinRequests.rotateLink);
+  const revokeLink = useLegacyWorkspaceMutation(cloudOperations.workspaceJoinRequests.revokeLink);
+  const refreshSeatTerms = useCloudAction(cloudOperations.billing.purchaseWorkspaceMemberSeat);
+  const reviewRequest = useLegacyWorkspaceMutation(
+    cloudOperations.workspaceJoinRequests.reviewRequest
+  );
+  const [approvalId, setApprovalId] = useState<string | null>(null);
+  const seatPreview = useCloudQuery(cloudOperations.billing.getWorkspaceSeatInvitePreview, {
+    workspaceId,
+  });
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const memberRefresh = useRef<Promise<void> | null>(null);
+  const memberRefreshPending = useRef(false);
+  const refreshMembers = useCallback(() => {
+    if (!live.current || !onMembersChanged) return Promise.resolve();
+    memberRefreshPending.current = true;
+    if (!memberRefresh.current) {
+      memberRefresh.current = Promise.resolve().then(async () => {
+        try {
+          while (memberRefreshPending.current && live.current) {
+            memberRefreshPending.current = false;
+            try {
+              await onMembersChanged();
+            } catch {
+              // A cache failure must not report a committed approval as failed.
+              console.warn('Workspace member list refresh pending');
+            }
+          }
+        } finally {
+          memberRefresh.current = null;
+        }
+      });
+    }
+    return memberRefresh.current;
+  }, [onMembersChanged]);
+  const observedVersion = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const version = state?.membershipVersion;
+    if (version === undefined) return;
+    const previous = observedVersion.current;
+    observedVersion.current = version;
+    if (previous !== version) void refreshMembers();
+  }, [state?.membershipVersion, refreshMembers]);
   const [expiresInDays, setExpiresInDays] = useState('30');
   const activeLink = state?.activeLink ?? null;
   const joinUrl = activeLink ? getAppShareUrl(`/join/${activeLink.token}`) : null;
@@ -31,91 +181,108 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
       await action();
     } catch (error) {
       console.error('Workspace join request action failed:', error);
-      toast.error(t('joinRequest.admin.actionFailed', 'Could not update join requests.'));
+      toast.error(
+        t(
+          seatBillingErrorKey(error) ?? 'joinRequest.admin.actionFailed',
+          'Could not update join requests.'
+        )
+      );
     } finally {
       setBusyAction(null);
     }
   };
 
-  return (
-    <section className="overflow-hidden rounded-xl border border-border/60 bg-card">
-      <div className="flex items-start justify-between gap-3 border-b border-border/50 px-3 py-3">
-        <div>
-          <h3 className="text-sm font-medium">{t('joinRequest.admin.title', 'Open join link')}</h3>
-          <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-            {t(
-              'joinRequest.admin.description',
-              'People can request access; only you can approve them.'
-            )}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Select value={expiresInDays} onValueChange={setExpiresInDays}>
-            <SelectTrigger
-              className="h-8 w-[5.5rem] text-xs"
-              aria-label={t('joinRequest.admin.expiration', 'Link expiration')}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[7, 30, 90].map((days) => (
-                <SelectItem key={days} value={String(days)}>
-                  {t('joinRequest.admin.days', '{{count}} days', { count: days })}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            size="sm"
-            variant={activeLink ? 'ghost' : 'default'}
-            disabled={busyAction !== null}
-            onClick={() =>
-              void run('rotate', () =>
-                rotateLink({ workspaceId, expiresInDays: Number(expiresInDays) })
-              )
-            }
+  const expiryControl = (
+    <div {...stylex.props(styles.controls)}>
+      {/* The trigger's well is as wide as what holds it, so the holder sets the width. */}
+      <div {...stylex.props(styles.expiry)}>
+        <Select.Root
+          items={[7, 30, 90].map((days) => ({
+            value: String(days),
+            label: t('joinRequest.admin.days', '{{count}} days', { count: days }),
+          }))}
+          value={expiresInDays}
+          onValueChange={(value) => {
+            if (value != null) setExpiresInDays(value);
+          }}
+        >
+          <Select.Trigger
+            size="small"
+            aria-label={t('joinRequest.admin.expiration', 'Link expiration')}
           >
-            {busyAction === 'rotate' ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : activeLink ? (
-              <RotateCw className="mr-1.5 h-3.5 w-3.5" />
-            ) : (
-              <Link2 className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            {activeLink
-              ? t('joinRequest.admin.regenerate', 'Regenerate')
-              : t('joinRequest.admin.create', 'Create link')}
-          </Button>
-        </div>
+            <Select.Value />
+          </Select.Trigger>
+          <Select.Content>
+            {[7, 30, 90].map((days) => (
+              <Select.Item key={days} value={String(days)}>
+                {t('joinRequest.admin.days', '{{count}} days', { count: days })}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
       </div>
+      <Button
+        variant="secondary"
+        size="small"
+        disabled={busyAction !== null}
+        onClick={() =>
+          void run('rotate', () =>
+            rotateLink({ workspaceId, expiresInDays: Number(expiresInDays) })
+          )
+        }
+      >
+        {busyAction === 'rotate' ? (
+          <Spinner size="small" />
+        ) : activeLink ? (
+          <RotateCw {...stylex.props(styles.icon)} />
+        ) : (
+          <Link2 {...stylex.props(styles.icon)} />
+        )}
+        {activeLink
+          ? t('joinRequest.admin.regenerate', 'Regenerate')
+          : t('joinRequest.admin.create', 'Create link')}
+      </Button>
+    </div>
+  );
 
+  // The section rules every child as a line of one card, so each line is its
+  // own element here rather than a fragment of several.
+  const lines: ReactNode[] = [
+    <div key="link" {...stylex.props(styles.row)}>
       {activeLink && joinUrl ? (
-        <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2.5">
-          <code className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{joinUrl}</code>
-          <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
+        <div {...stylex.props(styles.link)}>
+          <code {...stylex.props(styles.url)}>{joinUrl}</code>
+          <span {...stylex.props(styles.expires)}>
             {t('joinRequest.admin.expires', 'Expires {{date}}', {
               date: new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(
                 new Date(activeLink.expiresAt)
               ),
             })}
           </span>
+        </div>
+      ) : (
+        <div {...stylex.props(styles.link)} />
+      )}
+      {expiryControl}
+      {activeLink && joinUrl ? (
+        <div {...stylex.props(styles.actions)}>
           <Button
-            size="icon"
             variant="ghost"
-            className="h-7 w-7"
             aria-label={t('joinRequest.admin.copy', 'Copy link')}
+            size="small"
+            icon
             onClick={() => {
-              void navigator.clipboard
-                .writeText(joinUrl)
-                .then(() => toast.success(t('joinRequest.admin.copied', 'Link copied.')));
+              void copyTextToClipboard(joinUrl).then(() =>
+                toast.success(t('joinRequest.admin.copied', 'Link copied.'))
+              );
             }}
           >
-            <Copy className="h-3.5 w-3.5" />
+            <Copy {...stylex.props(styles.glyph)} />
           </Button>
           <Button
-            size="sm"
             variant="ghost"
-            className="h-7 text-xs text-destructive hover:text-destructive"
+            size="small"
+            tone="destructive"
             disabled={busyAction !== null}
             onClick={() =>
               void run('revoke', () => revokeLink({ workspaceId, linkId: activeLink.id }))
@@ -125,83 +292,177 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
           </Button>
         </div>
       ) : null}
+    </div>,
+  ];
 
-      {!state ? (
-        <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          {t('joinRequest.admin.loading', 'Loading requests…')}
-        </div>
-      ) : state.pendingRequests.length === 0 ? (
-        <div className="px-3 py-3 text-xs text-muted-foreground">
-          {t('joinRequest.admin.empty', 'No pending requests.')}
-        </div>
-      ) : (
-        <>
-          {state.pendingRequests.map((request) => (
-            <div key={request.id} className="border-t border-border/50 px-3 py-3 first:border-t-0">
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{request.applicantName}</p>
-                  <p className="truncate text-xs text-muted-foreground">{request.applicantEmail}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {t('joinRequest.admin.requestedAt', 'Requested {{date}}', {
-                      date: dateTimeFormatter.format(new Date(request.createdAt)),
-                    })}
-                  </p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-foreground/85">
-                    {request.reason}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 text-destructive hover:text-destructive"
-                    aria-label={t('joinRequest.admin.reject', 'Reject')}
-                    disabled={busyAction !== null}
-                    onClick={() =>
-                      void run(`reject:${request.id}`, () =>
-                        reviewRequest({ requestId: request.id, decision: 'rejected' })
-                      )
-                    }
-                  >
-                    {busyAction === `reject:${request.id}` ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <X className="h-4 w-4" />
-                    )}
-                  </Button>
-                  <Button
-                    size="icon"
-                    className="h-8 w-8"
-                    aria-label={t('joinRequest.admin.approve', 'Approve')}
-                    disabled={busyAction !== null}
-                    onClick={() =>
-                      void run(`approve:${request.id}`, () =>
-                        reviewRequest({ requestId: request.id, decision: 'approved' })
-                      )
-                    }
-                  >
-                    {busyAction === `approve:${request.id}` ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Check className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ))}
-          {state.hasMorePendingRequests ? (
-            <p className="border-t border-border/50 px-3 py-2.5 text-xs text-muted-foreground">
-              {t(
-                'joinRequest.admin.morePending',
-                'Showing the oldest 100 requests. Review them to reveal more.'
-              )}
+  if (!state) {
+    lines.push(
+      <p key="loading" {...stylex.props(surface.cardNote, styles.note)}>
+        <Spinner size="small" />
+        {t('joinRequest.admin.loading', 'Loading requests…')}
+      </p>
+    );
+  } else if (state.pendingRequests.length === 0) {
+    lines.push(
+      <p key="empty" {...stylex.props(surface.cardNote)}>
+        {t('joinRequest.admin.empty', 'No pending requests.')}
+      </p>
+    );
+  } else {
+    for (const request of state.pendingRequests) {
+      lines.push(
+        <div key={request.id} {...stylex.props(styles.request)}>
+          <div {...stylex.props(styles.requestText)}>
+            <p {...stylex.props(styles.name)}>{request.applicantName}</p>
+            <p {...stylex.props(styles.meta, styles.truncate)}>{request.applicantEmail}</p>
+            <p {...stylex.props(styles.meta)}>
+              {t('joinRequest.admin.requestedAt', 'Requested {{date}}', {
+                date: dateTimeFormatter.format(new Date(request.createdAt)),
+              })}
             </p>
-          ) : null}
-        </>
-      )}
-    </section>
+            <p {...stylex.props(styles.reason)}>{request.reason}</p>
+          </div>
+          <div {...stylex.props(styles.actions)}>
+            <Button
+              variant="ghost"
+              aria-label={t('joinRequest.admin.reject', 'Reject')}
+              size="small"
+              icon
+              tone="destructive"
+              disabled={busyAction !== null}
+              onClick={() =>
+                void run(`reject:${request.id}`, () =>
+                  reviewRequest({ requestId: request.id, decision: 'rejected' })
+                )
+              }
+            >
+              {busyAction === `reject:${request.id}` ? (
+                <Spinner size="small" />
+              ) : (
+                <X {...stylex.props(styles.glyph)} />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              aria-label={t('joinRequest.admin.approve', 'Approve')}
+              size="small"
+              icon
+              disabled={busyAction !== null}
+              onClick={() =>
+                void run(`approve:${request.id}`, async () => {
+                  setApprovalId(request.id);
+                })
+              }
+            >
+              {busyAction === `approve:${request.id}` ? (
+                <Spinner size="small" />
+              ) : (
+                <Check {...stylex.props(styles.glyph)} />
+              )}
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    if (state.hasMorePendingRequests) {
+      lines.push(
+        <p key="more" {...stylex.props(surface.cardNote)}>
+          {t(
+            'joinRequest.admin.morePending',
+            'Showing the oldest 100 requests. Review them to reveal more.'
+          )}
+        </p>
+      );
+    }
+  }
+
+  return (
+    <>
+      <SeatApprovalDialog
+        open={approvalId !== null}
+        onOpenChange={(open) => {
+          if (!open) setApprovalId(null);
+        }}
+        preview={seatPreview}
+        pending={busyAction !== null}
+        onOpenBilling={onOpenBilling}
+        onRefresh={() => void run('refresh-billing', () => refreshSeatTerms({ workspaceId }))}
+        onApprove={() => {
+          if (!approvalId || !isSeatAdmissionReady(seatPreview)) return;
+          void run(`approve:${approvalId}`, async () => {
+            await refreshSeatTerms({ workspaceId });
+            await reviewRequest({ requestId: approvalId, decision: 'approved' });
+            if (!live.current) return;
+            setApprovalId(null);
+            void refreshMembers();
+          });
+        }}
+      />
+      <CompactSection
+        title={t('joinRequest.admin.title', 'Open join link')}
+        description={t(
+          'joinRequest.admin.description',
+          'People can request access; only you can approve them.'
+        )}
+      >
+        {lines}
+      </CompactSection>
+    </>
+  );
+}
+
+/** Shared presentational boundary: cloud work and retry sequencing stay in the controller. */
+export function SeatApprovalDialog({
+  open,
+  onOpenChange,
+  preview,
+  pending,
+  onOpenBilling,
+  onRefresh,
+  onApprove,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  preview?: SeatInvitePreview | null;
+  pending: boolean;
+  onOpenBilling?: () => void;
+  onRefresh: () => void;
+  onApprove: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={(value) => {
+        if (!pending) onOpenChange(value);
+      }}
+    >
+      <Dialog.Content>
+        <Dialog.Header>
+          <Dialog.Title>{t('joinRequest.admin.approve')}</Dialog.Title>
+          <Dialog.Description>{t('billing.seatApprovalConfirm')}</Dialog.Description>
+        </Dialog.Header>
+        <SeatCostNotice preview={preview} />
+        <Dialog.Footer>
+          <Button variant="ghost" disabled={pending} onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            disabled={pending || !isSeatAdmissionReady(preview)}
+            onClick={() => {
+              if (!pending && isSeatAdmissionReady(preview)) onApprove();
+            }}
+          >
+            {t('joinRequest.admin.approve')}
+          </Button>
+          <SeatAdmissionActions
+            preview={preview}
+            pending={pending}
+            onOpenBilling={onOpenBilling}
+            onRefresh={onRefresh}
+          />
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

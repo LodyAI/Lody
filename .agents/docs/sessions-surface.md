@@ -1,0 +1,131 @@
+# Conversation surface: read receipts, Copy as Markdown, launchers, message list
+
+`session-chat-interface.tsx` and the message-list renderer it drives.
+
+Scope: `packages/components/src/components/sessions`. Binding rules and the
+pointer to this page live in
+[that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
+this page is the full text of the rules summarised there.
+
+Owner assignment uses `SessionMeta.userId`; it does not share machines, projects or
+individual sessions. Both owner menus and `transferSessionOwner` require the target
+member's existing machine access and, for local sessions, project access. The machine
+owner can reclaim any session on that machine. My scope includes only sessions
+assigned to the current user, across desktop/mobile lists, archive, home summaries
+and badges. Owning a machine does not include other
+members' sessions in My scope. Machine ownership also preserves history and
+management when a local project is removed, without granting execution availability.
+
+Machine ownership for access and management checks comes from the visible
+machine index's `accessByMachineId`, using the workspace-local account identity. An existing
+authoritative access row overrides the Loro owner claim; only the index's existing
+missing-row compatibility fallback uses Loro ownership. No consumer reconstructs
+ownership directly from raw machine metadata. Home and badge atoms receive only
+the workspace-local account identity from their React host; machine ownership does not expand personal summaries.
+
+Legacy metadata has no immutable creator field. The existing `userId` history fallback
+is retained so a creator can still read their work after machine sharing is revoked;
+old transferred owners cannot be distinguished. E2EE workspace-history admission is
+unchanged. These client checks do not replace hosted metadata/body authorization.
+
+- `session-chat-interface.tsx` — conversation surface (draft variant:
+  `draft-session-chat-interface.tsx`).
+  **Read receipts are gated on VISIBILITY, an active foreground window, and page
+  interaction, not on being mounted or merely open.** A child tab
+  or side chat stays mounted after its first selection, so the mark-as-read
+  effect takes an explicit `isVisible` prop (`../../lib/session-read-receipt.ts`)
+  that `session-detail.tsx` derives per surface — top tabs `isActive`, side chats
+  `isActive && isSidebarOpen` (a collapsed panel is only `invisible`). Dropping
+  that prop silently marks every sub-session read the moment the parent opens.
+  In addition, `useWindowReadEngagement` (`../../lib/window-read-engagement.ts`)
+  requires the host window to be visible, focused, and neither suspended nor
+  locked, and requires a page interaction (`pointerdown`, `keydown`, `wheel`,
+  `touchstart`, or `click`) within the active visit's idle window (mounted at
+  the workspace layout root via `useObserveWindowReadEngagement` so sidebar or
+  tab navigation clicks carry into the opened session). Window blur, hide, OS
+  sleep/lock, or idle expiry clears engagement so background, untouched, or
+  `Cmd+Tab`-only windows never mark sessions read until the user interacts with
+  the page. A manual Mark as unread moves `lastReadAt` behind the latest message
+  while a surface may already be visible; `resolveManualUnreadLatch` suppresses
+  subsequent interactions and focus changes on that visit until a new message
+  arrives or the user switches away and reopens the surface.
+  "Copy as Markdown" renders through `@lody/shared`
+  `buildConversationMarkdown` (`packages/shared/src/conversation-markdown.ts`),
+  NOT `buildReplayPromptFromHistory` — that one is the agent-facing replay
+  prompt and its budget behaviour is load-bearing for CLI resume; keep the two
+  separate. The copy targets ~60k estimated tokens AND 150k characters (both
+  bounds, because CJK is ~1 token/char) and gets there by degrading tool
+  results, terminal output, then collapsing tool calls to per-turn counted
+  summaries, and only then capping thinking — oldest turns first.
+  **Message text is never trimmed and thinking is never dropped** — the export
+  exists to move context to another agent, so prose-shaped content outranks
+  everything the agent produced around it. Thinking degrades by capping (head +
+  tail, middle elided) so the receiving conversation always inherits some of the
+  reasoning; a conversation whose prose alone exceeds the budget returns
+  `overBudget` instead of cutting it. Whatever was trimmed must reach the toast
+  (`describeCopiedConversation`); silent truncation reads as "I copied
+  everything". The one edit allowed on prose is heading level: bodies routinely
+  contain `#`/`##` headings that would outrank the `##` turn headings and
+  destroy the outline, so `demoteMarkdownHeadings` shifts them down two levels
+  outside fenced blocks. Turn headings carry a round number, local time, and —
+  for assistant turns — the recorded model and effective working time; speaker
+  names appear only when the conversation has more than one human in it.
+  The trim notice lives in the header blockquote, not the footer, so a reader
+  learns the transcript is incomplete before reading it rather than after.
+  Message actions copy the inclusive history prefix independently of ACP fork
+  capability. A streaming assistant reply uses a direct Copy action so the Fork
+  affordance and its loading state remain completion-gated; finished replies and
+  user messages keep context copy in the fork menu. Missing boundaries fail. A
+  reply that was still generating is marked through the builder's
+  `incompleteFinalResponse` option, so the warning lands in the header blockquote
+  with the trim notice rather than as a trailing line — callers must not append
+  their own note after the transcript.
+  Attachment bytes are not exported. The session header copies all history.
+  Header "Open in" / "Copy Path" launchers live here; shared launcher/path
+  helpers are `../../lib/session-path-launchers.ts`,
+  `../../lib/session-open-in-ide-path.ts`, and `../../lib/session-workspace-path.ts`.
+  Header "Copy URL" uses `buildAppSessionUrl` for the selected conversation’s
+  HTTPS page; "Copy deeplink" uses the workspace-scoped `lody://session/…` address.
+  The mobile menu offers the same two actions. Neither action publishes history.
+  Header "Copy path" derives paths from the machine Flock doc `['dotlodyPath']`,
+  falling back to local-project `rootPath`; `MachineMeta.workspacePaths[sessionId]` is
+  legacy fallback only and must not get new writes.
+  Launchers are desktop-bridge only (all `requiresElectron`; the split button is
+  gated on `isElectronRendererForPathLaunch`, Copy Path stays in `SessionHeaderMenu`).
+  Editors launch via their CLI first. VS Code alone falls back, after every CLI
+  candidate fails, to `vscode://file/.../?windowId=_blank`; `_blank` is required
+  because a plain scheme URL reuses the focused window and clobbers other
+  worktrees. VS Code family uses `-n` (it de-dupes by folder, so re-opening focuses
+  the existing window). Zed gets NO flag: `zed <path>` focuses an already-open
+  worktree else opens a new window; its `-n`/`--new` forces a duplicate window
+  every time (per editor `newWindowFlag` in `session-path-launchers.ts`). Warp is
+  url-only (`warp://…new_tab`, via `shell.openExternal`).
+  ACP selectors on existing sessions and child-tab drafts must go through
+  `useSessionAcpSelectorContext()`. Session UI that reads ACP capabilities must
+  use `useResolvedMachineMeta()` so machine Flock capability rows override
+  legacy machine meta; never read `acpCapabilities` from the raw machine atom.
+  The composer is controlled and must not recompute ACP selector options itself.
+- **The message-list renderer is `../ai-gui/view.tsx`** (markdown/tool calls/terminal);
+  most rendering changes land there, not here. `chat_failed` system notices render
+  as compact left-aligned Coding Agent errors with no divider or persistent card;
+  raw details live in a whole-row hover/focus tooltip, and the trigger uses a subtle
+  error-tinted hover background. Keep the dedicated `SessionChatStream` story aligned
+  with production. Its outer Virtua `VList` is vertical-only (`overflow-x-hidden`):
+  wide markdown, tool output, and user content own their nested horizontal scrollers
+  and must never make the whole conversation pane pan sideways.
+- Pending share requests sit below the message viewport in a bounded scroll area,
+  above the composer. Their canonical query and editor are not virtual rows:
+  restoring the conversation to its tail must not unsubscribe before a query
+  result arrives or discard an open editor. Workspace, user and surface visibility
+  still gate the requests. Conversation provenance remains `leadingContent`.
+
+Session continuation uses the target machine's advertised protocol capability before
+starting reads: `sessionAutomations` for local IPC, `remoteAutomationControl` for
+remote control. Missing capabilities hide its settings and notes without polling;
+metadata updates enable the reader after a CLI upgrade. When a read fails, existing
+continuation notes are marked unavailable and the reader retries in the background;
+the conversation does not add a standalone warning for a failed poll. Settings reads
+are tracked independently: the last confirmed settings remain visible but disabled
+when they cannot be refreshed. An uncertain cancellation or settings change is reported
+and followed by a fresh read. Workspace content and ownership admission remain unchanged; see the
+[continuation availability decision](../notes/implemented/feature/2026-10-30-session-continuation-general-availability.md).

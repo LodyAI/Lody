@@ -1,0 +1,111 @@
+name: Desktop E2E PR
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Regression suite to run
+        required: true
+        type: choice
+        options: [smoke, full]
+        default: smoke
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  NODE_VERSION: '22.23.4'
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+
+jobs:
+  gate:
+    name: Select desktop E2E suite
+    # Unrelated label edits must neither start nor cancel a desktop run.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'e2e' || github.event.label.name == 'e2e-full'
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+      suite: ${{ steps.select.outputs.suite }}
+    steps:
+      - name: Select suite from trusted event metadata
+        id: select
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName === 'workflow_dispatch') {
+              core.setOutput('run', 'true')
+              core.setOutput('suite', context.payload.inputs?.suite === 'full' ? 'full' : 'smoke')
+              return
+            }
+
+            const labels = new Set((context.payload.pull_request?.labels ?? []).map((label) => label.name))
+            core.setOutput('run', String(labels.has('e2e') || labels.has('e2e-full')))
+            core.setOutput('suite', labels.has('e2e-full') ? 'full' : 'smoke')
+
+  regression:
+    name: Desktop E2E (${{ needs.gate.outputs.suite }})
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    concurrency:
+      group: desktop-e2e-pr-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Use the PR merge ref so local actions match the workflow revision.
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up workspace toolchain
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check suite contract
+        run: pnpm --filter @lody/e2e check
+
+      - name: Build and stage bundled CLI
+        env:
+          # Match the CLI's documented 2 GiB build budget instead of Node's host-derived default.
+          NODE_OPTIONS: --max-old-space-size=2048
+        run: |
+          pnpm --dir apps/electron build:cli
+          pnpm --dir apps/electron sync:cli
+
+      - name: Build OSS desktop
+        # Keep build-app.mjs's renderer heap budget independent of the CLI's.
+        run: pnpm --dir apps/electron build:app
+
+      - name: Run selected desktop journeys
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p e2e/artifacts
+          pnpm --filter @lody/e2e ${{ needs.gate.outputs.suite }} 2>&1 | tee e2e/artifacts/cucumber-output.log
+
+      - name: Render failed journey videos
+        if: failure()
+        run: |
+          pnpm --filter @lody/e2e exec playwright install ffmpeg
+          pnpm --filter @lody/e2e failure:videos
+
+      - name: Upload desktop E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-${{ needs.gate.outputs.suite }}-${{ github.run_id }}
+          path: e2e/artifacts/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,6 +1,19 @@
 // @vitest-environment jsdom
+import React, { act, useState } from 'react';
+import {
+  buildMentionFileIndex,
+  getSuggestions,
+} from '../src/components/mentions/file-search/engine';
+import type {
+  FileSearchRequest,
+  FileSearchResponse,
+} from '../src/components/mentions/file-search/client';
 
-import React, { act } from 'react';
+import type { SkillMentionItem } from '../src/components/mentions/mention-skill-source';
+
+const skillItems: SkillMentionItem[] = [];
+
+let fileEntry: { paths: string[]; fetchedAt: number; truncated: boolean } | null = null;
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,12 +24,13 @@ const sessionItems: Array<{
   title: string;
   slug: string;
   activityAt?: number;
+  projectKey: 'chat' | `github:${string}` | `local:${string}:${string}`;
 }> = [];
 
 vi.mock('../src/components/mentions/mention-project-file-source', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useMentionProjectFiles: () => ({
-    fileData: { entry: null, status: 'ready' as const },
+    fileData: { entry: fileEntry, status: 'ready' as const },
     initializeLazyDirectory: async () => undefined,
     getKnownFileTokens: () => new Set<string>(),
   }),
@@ -28,7 +42,7 @@ vi.mock('../src/components/mentions/mention-skill-source', async (importOriginal
     skillScanEnabled.push(enabled);
     return {
       skillState: { status: enabled ? ('ready' as const) : ('idle' as const) },
-      skillItems: [],
+      skillItems,
       knownSkillTokens: new Set<string>(),
     };
   },
@@ -46,8 +60,16 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (importOri
   useAgentRoleMentionItems: () => [],
 }));
 
+import { Provider, createStore } from 'jotai';
+import { currentWorkspaceIdAtom } from '../src/atoms';
+import { UserMessageEditor } from '../src/components/ai-gui/user-message-editor';
 import { CombinedMentionTextarea } from '../src/components/mentions/combined-mention-textarea';
+import { __resetIssuePrFetchFreshnessForTests } from '../src/components/mentions/issue-pr-hash-mention';
+import { composerIn } from './composer-test-utils';
 import { initI18n } from '../src/i18n';
+import { commands } from '../src/lib/commands';
+import { invalidateGitHubTokensForWorkspace } from '../src/lib/github-token';
+import { installGitHubTokenPort } from '../src/lib/github-token-port';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -62,7 +84,9 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     await initI18n('en');
     originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
+    fileEntry = null;
     skillScanEnabled.length = 0;
+    skillItems.length = 0;
     sessionItems.length = 0;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -71,6 +95,8 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    __resetIssuePrFetchFreshnessForTests();
+    vi.useRealTimers();
     container.remove();
     if (originalScrollIntoView) {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -83,18 +109,30 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
 
   async function render(props: {
     value: string;
+    workspaceId?: string;
     skillAgent?: { machineId?: string; cliType?: string };
+    mentionSource?: unknown;
+    commandsEnabled?: boolean;
+    availableCommands?: Array<{ name: string; description: string }>;
   }) {
+    const store = props.workspaceId ? createStore() : null;
+    if (store && props.workspaceId) {
+      store.set(currentWorkspaceIdAtom, props.workspaceId as never);
+    }
     function ControlledComposer() {
       const [value, setValue] = React.useState(props.value);
-      return (
+      const content = (
         <CombinedMentionTextarea
           value={value}
           onValueChange={setValue}
           skillAgent={props.skillAgent as never}
+          mentionSource={props.mentionSource as never}
+          commandsEnabled={props.commandsEnabled}
+          availableCommands={props.availableCommands}
           resetOnEmpty={false}
         />
       );
+      return store ? <Provider store={store}>{content}</Provider> : content;
     }
 
     await act(async () => {
@@ -103,7 +141,9 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
   }
 
   function textarea() {
-    return container.querySelector('textarea');
+    return container.querySelector('[data-composer-editor], textarea')
+      ? composerIn(container)
+      : null;
   }
 
   /**
@@ -124,90 +164,526 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
   async function typeInto(value: string) {
     const input = textarea();
     if (!input) throw new Error('composer textarea missing');
-    await act(async () => {
-      input.focus();
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        'value'
-      )?.set;
-      setter?.call(input, value);
-      input.selectionStart = value.length;
-      input.selectionEnd = value.length;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    input.focus();
+    input.edit(value, value.length);
+    await act(async () => {});
   }
 
-  it('renders a plain textarea when no mention type is reachable', async () => {
-    await render({ value: '' });
+  it.each(['/', '、'])(
+    'opens and filters commands from %s, then commits the slash form',
+    async (trigger) => {
+      await render({
+        value: '',
+        availableCommands: [
+          { name: 'review', description: 'Review changes' },
+          { name: 'compact', description: 'Compact history' },
+        ],
+      });
+      await typeInto(trigger);
+      expect(document.body.textContent).toContain('Review changes');
+      expect(document.body.textContent).toContain('Compact history');
+      await typeInto(`${trigger}rev`);
+      expect(document.body.textContent).toContain('Review changes');
+      expect(document.body.textContent).not.toContain('Compact history');
+      await act(async () => {
+        textarea()!.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+      expect(textarea()!.value.trimEnd()).toBe('/review');
+    }
+  );
 
-    expect(textarea()).not.toBeNull();
-    expect(mentionTreeMounted()).toBe(false);
-  });
+  it.each(['text 、rev', '、rev argument', 'text /rev', '/rev argument'])(
+    'does not offer commands for mixed prompt %s',
+    async (value) => {
+      await render({
+        value: '',
+        availableCommands: [{ name: 'review', description: 'Review changes' }],
+      });
+      await typeInto(value);
+      expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
+      expect(textarea()!.value).toBe(value);
+    }
+  );
 
-  it('mounts the mention tree when sessions are the only mentionable type', async () => {
-    sessionItems.push({ sessionId: 's1', title: 'Fix the parser', slug: 'fix-the-parser' });
+  it.each(['@file:', '@', '@other:'])(
+    'shows asynchronous file search state and commits %s results through the composer',
+    async (prefix) => {
+      vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
+      let respond: ((data: FileSearchResponse) => void) | undefined;
+      let query: Extract<FileSearchRequest, { type: 'query' }> | undefined;
+      vi.stubGlobal(
+        'Worker',
+        class {
+          onmessage: ((event: { data: FileSearchResponse }) => void) | null = null;
+          onerror = null;
+          onmessageerror = null;
+          constructor() {
+            respond = (data) => this.onmessage?.({ data });
+          }
+          postMessage(message: FileSearchRequest) {
+            if (message.type === 'query') query = message;
+          }
+          terminate() {}
+        }
+      );
+      fileEntry = {
+        paths:
+          prefix === '@other:'
+            ? ['src/other:Composer.tsx', 'src/other:Other.ts']
+            : ['src/Composer.tsx', 'src/Other.ts'],
+        fetchedAt: 1,
+        truncated: false,
+      };
+      const selectedPath = prefix === '@other:' ? 'src/other:Other.ts' : 'src/Other.ts';
+      // A file row reads its name, then the folder it sits in.
+      const selectedRowText = `${selectedPath.slice(4)}src`;
+      try {
+        await render({ value: '', mentionSource: { kind: 'local', localProjectId: 'project-1' } });
+        await typeInto(`${prefix}Composer`);
+        expect(document.body.textContent).toContain('Loading');
+        await act(async () => respond?.({ type: 'ready' }));
+        if (!query) throw new Error('Expected file query');
+        const initial = query;
+        await typeInto(`${prefix}Other`);
+        await act(async () =>
+          respond?.({
+            type: 'result',
+            id: initial.id,
+            term: initial.term,
+            items: getSuggestions(buildMentionFileIndex(fileEntry)!, initial.term),
+          })
+        );
+        expect(
+          document.querySelector('[data-slot="mention-item"]')?.textContent ?? ''
+        ).not.toContain('Composer.tsx');
+        const current = query;
+        await act(async () =>
+          respond?.({
+            type: 'result',
+            id: current.id,
+            term: current.term,
+            items: getSuggestions(buildMentionFileIndex(fileEntry)!, current.term),
+          })
+        );
+        const row = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-slot="mention-item"]')
+        ).find((element) => element.textContent?.includes(selectedRowText));
+        expect(row).toBeDefined();
+        await act(async () => vi.advanceTimersToNextFrame());
+        if (prefix === '@') {
+          expect(highlightedRowText()).toContain('Other.tssrc');
+          await act(async () =>
+            textarea()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+          );
+        } else {
+          await act(async () => row?.click());
+        }
+        expect(textarea()?.value).toContain(`@${selectedPath}`);
+        expect(textarea()?.value).not.toContain('file:');
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
 
-    await render({ value: '' });
-
-    expect(mentionTreeMounted()).toBe(true);
-  });
-
-  it('wraps ArrowUp from the first @ result and continues in reverse order', async () => {
-    sessionItems.push(
-      { sessionId: 's1', title: 'First session', slug: 'first-session', activityAt: 3 },
-      { sessionId: 's2', title: 'Second session', slug: 'second-session', activityAt: 2 },
-      { sessionId: 's3', title: 'Third session', slug: 'third-session', activityAt: 1 }
+  it('expands and reanchors an edited session mention before saving and ignores IME submit', async () => {
+    sessionItems.push({
+      sessionId: 'other-session',
+      title: 'Other session',
+      slug: 'other-session',
+      projectKey: 'chat',
+    });
+    let saved: Parameters<React.ComponentProps<typeof UserMessageEditor>['onSave']>[0] | undefined;
+    function Editor() {
+      const [value, setValue] = useState('  @other-session  ');
+      return (
+        <UserMessageEditor
+          value={value}
+          onChange={setValue}
+          onCancel={() => undefined}
+          onSave={(submission) => {
+            saved = submission;
+          }}
+          isSaving={false}
+          conversationFontSize={13}
+        />
+      );
+    }
+    await act(async () => root.render(<Editor />));
+    await act(async () => {
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          metaKey: true,
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(saved).toBeUndefined();
+    await act(async () => {
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(saved?.text).toContain('lody://session/other-session');
+    expect(saved?.text).toBe(saved?.text.trim());
+    expect(saved?.spans).toEqual([
+      expect.objectContaining({ start: 0, kind: 'session', target: 'other-session' }),
+    ]);
+    expect(saved!.text.slice(saved!.spans![0]!.start, saved!.spans![0]!.end)).toContain(
+      'lody://session/other-session'
     );
-    await render({ value: '' });
-    await typeInto('@session:');
+  });
+
+  it('starts in the current project and toggles without losing query or focus', async () => {
+    sessionItems.push(
+      {
+        sessionId: 'current',
+        title: 'Current parser work',
+        slug: 'current-parser-work',
+        activityAt: 2,
+        projectKey: 'github:lodyai/lody',
+      },
+      {
+        sessionId: 'other',
+        title: 'Other parser work',
+        slug: 'other-parser-work',
+        activityAt: 1,
+        projectKey: 'github:lodyai/other',
+      }
+    );
+    await render({
+      value: '',
+      mentionSource: { kind: 'github', repoFullName: ' LodyAI/Lody ' },
+    });
+    await typeInto('@session:parser');
 
     const input = textarea();
     if (!input) throw new Error('composer textarea missing');
-    expect(highlightedRowText()).toContain('First session');
+    expect(document.body.textContent).toContain('Current parser work');
+    expect(document.body.textContent).not.toContain('Other parser work');
+    expect(document.body.textContent).toContain('Current project');
 
+    const toggle = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '[role="group"][aria-label="Session project scope"] button'
+      )
+    ).find((button) => button.textContent === 'All projects');
+    if (!toggle) throw new Error('scope toggle missing');
+    await act(async () => {
+      toggle.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }));
+      toggle.click();
+    });
+
+    expect(input.value).toBe('@session:parser');
+    expect(document.activeElement).toBe(input.element);
+    expect(document.body.textContent).toContain('Other parser work');
+    expect(document.body.textContent).toContain('All projects');
+
+    // Going back within the same open menu preserves the temporary scope.
+    await typeInto('@');
+    await typeInto('@session:parser');
+    expect(document.body.textContent).toContain('Other parser work');
+
+    // Closing the menu resets the next open to the current project.
     await act(async () => {
       input.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
       );
     });
-    expect(highlightedRowText()).toContain('Third session');
+    await typeInto('');
+    await typeInto('@session:parser');
+    expect(document.body.textContent).not.toContain('Other parser work');
+    expect(document.body.textContent).toContain('Current project');
+  });
 
+  it.each([
+    { name: 'No project', projectKey: 'chat' as const, mentionSource: undefined },
+    {
+      name: 'GitHub project',
+      projectKey: 'github:lodyai/lody' as const,
+      mentionSource: { kind: 'github', repoFullName: 'lodyai/lody' },
+    },
+    {
+      name: 'local project',
+      projectKey: 'local:machine-1:project-1' as const,
+      mentionSource: { kind: 'local', machineId: 'machine-1', localProjectId: 'project-1' },
+    },
+  ])(
+    'distinguishes unmatched searches from an empty $name scope',
+    async ({ projectKey, mentionSource }) => {
+      for (let index = 0; index < 14; index++) {
+        sessionItems.push({
+          sessionId: `scoped-${index}`,
+          title: `Scoped conversation ${index}`,
+          slug: `scoped-conversation-${index}`,
+          activityAt: 14 - index,
+          projectKey,
+        });
+      }
+      sessionItems.push({
+        sessionId: 'other',
+        title: 'Elsewhere parser work',
+        slug: 'elsewhere-parser-work',
+        activityAt: 1,
+        projectKey: 'github:lodyai/other',
+      });
+      await render({ value: '', mentionSource });
+      await typeInto('@');
+      const category = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-slot="mention-item"]')
+      ).find((row) => row.textContent === 'Sessions');
+      if (!category) throw new Error('Sessions category missing');
+      await act(async () => category.click());
+
+      const rows = () =>
+        Array.from(document.querySelectorAll<HTMLElement>('[data-slot="mention-item"]')).map(
+          (row) => row.textContent
+        );
+      const initialRows = rows();
+      expect(initialRows).toHaveLength(14);
+      expect(textarea()!.value).toBe('@session:');
+
+      for (const query of ['zzzzunmatched', 'elsewhere']) {
+        await typeInto(`@session:${query}`);
+        expect(rows()).toEqual([]);
+        expect(document.body.textContent).toContain(`Nothing matches “${query}”`);
+        expect(document.body.textContent).not.toContain('There are no other sessions');
+        expect(textarea()!.value).toBe(`@session:${query}`);
+        expect(document.activeElement).toBe(textarea()?.element);
+        await typeInto('@session:');
+        expect(rows()).toEqual(initialRows);
+      }
+
+      await typeInto('@session:elsewhere');
+      await act(async () => {
+        commands.execute('mention.toggleSessionProjectScope');
+      });
+      expect(textarea()!.value).toBe('@session:elsewhere');
+      expect(document.activeElement).toBe(textarea()?.element);
+      expect(rows()).toHaveLength(1);
+      expect(rows()[0]).toContain('Elsewhere parser work');
+      await typeInto('@session:zzzzunmatched');
+      expect(document.body.textContent).toContain('Nothing matches “zzzzunmatched”');
+      await typeInto('@session:');
+      expect(rows()).toHaveLength(15);
+      await act(async () => {
+        commands.execute('mention.toggleSessionProjectScope');
+      });
+      expect(rows()).toEqual(initialRows);
+    }
+  );
+
+  it.each([
+    { mentionSource: undefined, message: 'There are no other sessions without a project.' },
+    {
+      mentionSource: { kind: 'github', repoFullName: 'lodyai/lody' },
+      message: 'There are no other sessions in the current project.',
+    },
+  ])('offers all projects from an empty scope: $message', async ({ mentionSource, message }) => {
+    sessionItems.push({
+      sessionId: 'other',
+      title: 'Cross project session',
+      slug: 'cross-project-session',
+      activityAt: 1,
+      projectKey: 'github:lodyai/other',
+    });
+    await render({
+      value: '',
+      mentionSource,
+    });
+
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
+    await typeInto('@session:');
+    expect(document.body.textContent).toContain(message);
+    expect(document.body.textContent).toContain('View all projects');
+    await typeInto('@session:cross');
+    expect(document.body.textContent).toContain(message);
+    expect(document.body.textContent).not.toContain('Cross project session');
+
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(true);
+    await act(async () => Promise.resolve());
+    expect(document.body.textContent).toContain('Cross project session');
+
+    await typeInto('@');
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
+  });
+
+  it('does not let a hidden retained composer own the scope command', async () => {
+    sessionItems.push({
+      sessionId: 'other',
+      title: 'Other session',
+      slug: 'other-session',
+      activityAt: 1,
+      projectKey: 'chat',
+    });
+    await render({ value: '', commandsEnabled: false });
+    await typeInto('@session:');
+
+    expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
+  });
+
+  it.each(['$', '￥', '¥'])('opens skills from %s and commits the dollar form', async (trigger) => {
+    for (const token of ['review', 'research']) {
+      skillItems.push({
+        token,
+        dir: '.agents/skills',
+        scope: 'project',
+        skill: {
+          id: token,
+          name: token,
+          relativePath: `.agents/skills/${token}/SKILL.md`,
+          isSymlink: false,
+        },
+      });
+    }
+    await render({ value: '', skillAgent: { machineId: 'machine-1' } });
+    expect(skillScanEnabled).not.toContain(true);
+    await typeInto(`Use ${trigger}`);
+    expect(document.body.textContent).toContain('review');
+    expect(document.body.textContent).toContain('research');
+    await typeInto(`Use ${trigger}rev`);
+    expect(document.body.textContent).toContain('review');
+    expect(document.body.textContent).not.toContain('research');
     await act(async () => {
-      input.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
       );
     });
-    expect(highlightedRowText()).toContain('Second session');
+    expect(textarea()!.value.trimEnd()).toBe('Use $review');
   });
 
-  it('does not scan skills until something asks for them', async () => {
+  it.each(['$', '￥', '¥'])('keeps %s plain when skills are unavailable', async (trigger) => {
+    await render({ value: '', availableCommands: [{ name: 'review', description: 'Review' }] });
+    await typeInto(`${trigger}review`);
+    expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
+    expect(textarea()!.value).toBe(`${trigger}review`);
+  });
+
+  it.each(['￥', '¥'])('preserves an unselected %s query on dismissal', async (trigger) => {
     await render({ value: '', skillAgent: { machineId: 'machine-1' } });
-
-    expect(skillScanEnabled).not.toContain(true);
+    await typeInto(`${trigger}unknown`);
+    await act(async () => {
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      );
+    });
+    expect(textarea()!.value).toBe(`${trigger}unknown`);
+    expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
   });
 
-  it('scans skills when the menu scopes to the Skills category', async () => {
-    await render({ value: '', skillAgent: { machineId: 'machine-1' } });
-    expect(skillScanEnabled).not.toContain(true);
+  it('hides Issues and Pull Requests for unlinked repositories and recovers once linked', async () => {
+    let repoLinked = false;
+    let tokenRequests = 0;
+    const uninstallPort = installGitHubTokenPort({
+      getRepoToken: async () => {
+        tokenRequests += 1;
+        if (!repoLinked) {
+          return {
+            success: false,
+            errorCode: 'repo_not_linked',
+            errorMessage:
+              'Repository acme/unlinked is not linked to your workspace. Add it in Settings → Integrations → GitHub.',
+          };
+        }
+        return {
+          success: true,
+          token: 'ghs_linked',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        };
+      },
+      getOperationToken: async () => ({
+        success: false,
+        errorCode: 'repo_not_linked',
+        errorMessage: 'not linked',
+      }),
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify([
+          {
+            number: 42,
+            title: 'Linked repo issue',
+            state: 'open',
+            updated_at: '2026-01-01T00:00:00Z',
+            html_url: 'https://github.com/acme/unlinked/issues/42',
+          },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
 
-    // Typed/pasted namespace prefixes still activate their lazy source.
-    await typeInto('@skill:');
+    try {
+      await render({
+        value: '',
+        workspaceId: 'ws-1',
+        mentionSource: {
+          kind: 'github',
+          repoFullName: 'acme/unlinked',
+          issuePrEnabled: false,
+        },
+      });
+      await typeInto('@');
+      expect(document.body.textContent).toContain('Files');
+      expect(document.body.textContent).not.toContain('Issues');
+      expect(document.body.textContent).not.toContain('Pull Requests');
+      expect(tokenRequests).toBe(0);
 
-    expect(skillScanEnabled).toContain(true);
-  });
+      await render({
+        value: '',
+        workspaceId: 'ws-1',
+        mentionSource: {
+          kind: 'local',
+          machineId: 'machine-1',
+          workspaceId: 'ws-1',
+          localProjectId: 'project-1',
+          githubRepoFullName: 'acme/unlinked',
+        },
+      });
+      await typeInto('@linked');
+      await act(async () => {
+        await Promise.resolve();
+      });
 
-  it('retains $ as a direct skill-menu trigger', async () => {
-    await render({ value: '', skillAgent: { machineId: 'machine-1' } });
-    expect(skillScanEnabled).not.toContain(true);
+      expect(tokenRequests).toBe(1);
+      expect(document.body.textContent).not.toContain('is not linked to your workspace');
+      expect(document.querySelector('[role="alert"]')).toBeNull();
+      expect(document.body.textContent).not.toContain('Issues');
+      expect(document.body.textContent).not.toContain('Pull Requests');
 
-    await typeInto('$');
+      await typeInto('');
+      await typeInto('@again');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(tokenRequests).toBe(1);
+      expect(document.body.textContent).not.toContain('Issues');
 
-    expect(skillScanEnabled).toContain(true);
-  });
-
-  it('still scans skills for a draft that already carries a $ token', async () => {
-    await render({ value: 'use $review', skillAgent: { machineId: 'machine-1' } });
-
-    expect(skillScanEnabled).toContain(true);
+      repoLinked = true;
+      await act(async () => {
+        invalidateGitHubTokensForWorkspace('ws-1');
+      });
+      await typeInto('');
+      await typeInto('@Linked');
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(document.body.textContent).toContain('Linked repo issue');
+    } finally {
+      fetchSpy.mockRestore();
+      uninstallPort();
+    }
   });
 });

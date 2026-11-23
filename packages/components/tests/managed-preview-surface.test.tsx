@@ -1,20 +1,38 @@
 // @vitest-environment jsdom
-
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 import {
+  MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE,
   MANAGED_BROWSER_STATE_MESSAGE_TYPE,
+  MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
+  MANAGED_BROWSER_READY_MESSAGE_TYPE,
+  SET_ANNOTATION_MODE_MESSAGE_TYPE,
   RESOLVE_VISUAL_ANNOTATION_ANCHORS_MESSAGE_TYPE,
-  VISUAL_ANNOTATION_ANCHORS_RESOLVED_MESSAGE_TYPE,
   VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE,
 } from '@lody/shared/visual-annotation-types';
 
 import { userAtom } from '../src/atoms';
 import { ManagedPreviewSurface } from '../src/components/sessions/managed-preview-surface';
-import { clearManagedPreviewFrame } from '../src/components/sessions/managed-preview-frame-cache';
+import {
+  acquireManagedPreviewFrame,
+  clearManagedPreviewFrame,
+  getExecutableHtmlPreviewSupport,
+  isWebKitUserAgent,
+  releaseManagedPreviewFrame,
+} from '../src/components/sessions/managed-preview-frame-cache';
 
 const mocks = vi.hoisted(() => ({
   comments: [],
@@ -25,7 +43,7 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_key: string, fallback?: string) => fallback ?? _key }),
 }));
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn() } }));
 
 vi.mock('../src/components/preview/visual-annotation-comments-overlay', () => ({
   VisualAnnotationCommentsOverlay: () => null,
@@ -103,6 +121,25 @@ const targetMessage = {
   },
 };
 
+const IOS_SAFARI_USER_AGENT =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+
+/** Runs `run` with credentialless iframes removed and `navigator.userAgent` spied, then restores both. */
+const withoutCredentiallessFrames = (run: (userAgent: MockInstance<() => string>) => void) => {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'credentialless');
+  const userAgent = vi.spyOn(navigator, 'userAgent', 'get');
+  const prototype = HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean };
+  try {
+    delete prototype.credentialless;
+    run(userAgent);
+  } finally {
+    userAgent.mockRestore();
+    if (descriptor)
+      Object.defineProperty(HTMLIFrameElement.prototype, 'credentialless', descriptor);
+    else delete prototype.credentialless;
+  }
+};
+
 type StatePreservingElement = HTMLElement & {
   moveBefore?: (node: Node, child: Node | null) => void;
 };
@@ -161,6 +198,7 @@ describe('ManagedPreviewSurface', () => {
     container = undefined;
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('runs static HTML as an uncached opaque-origin srcdoc', async () => {
@@ -229,6 +267,253 @@ describe('ManagedPreviewSurface', () => {
       root?.render(<Provider store={store}>{null}</Provider>);
     });
     expect(iframe.isConnected).toBe(false);
+  });
+
+  it('leaves rendered mode when a live static document navigates itself', async () => {
+    const store = createStore();
+    store.set(userAtom, { id: 'user-1', name: 'Test User', email: 'test@example.com' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const onNavigationRequest = vi.fn();
+    const logicalUrl = 'https://html-file-preview.invalid/result.html';
+
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <ManagedPreviewSurface
+            session={session}
+            viewerUrl={logicalUrl}
+            logicalUrl={logicalUrl}
+            documentHtml="<!doctype html><p>Preview</p>"
+            annotationEnabled={false}
+            onAnnotationAvailabilityChange={vi.fn()}
+            onRuntimeError={vi.fn()}
+            onLoadingChange={vi.fn()}
+            onBrowserStateChange={vi.fn()}
+            onNavigationRequest={onNavigationRequest}
+          />
+        </Provider>
+      );
+    });
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Expected static preview iframe');
+    vi.spyOn(iframe.contentWindow, 'postMessage').mockImplementation(() => {});
+
+    // An engine's initial load before the runtime announces itself is ordinary.
+    await act(async () => iframe.dispatchEvent(new Event('load')));
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: 'null',
+          source: iframe.contentWindow,
+          data: { type: MANAGED_BROWSER_READY_MESSAGE_TYPE },
+        })
+      );
+    });
+    await act(async () => iframe.dispatchEvent(new Event('load')));
+    expect(onNavigationRequest).not.toHaveBeenCalled();
+    expect(iframe.isConnected).toBe(true);
+
+    // A later load the parent did not start is script self-navigation.
+    await act(async () => iframe.dispatchEvent(new Event('load')));
+    expect(onNavigationRequest).toHaveBeenCalledWith(logicalUrl);
+    expect(iframe.isConnected).toBe(false);
+  });
+
+  it('retires a static frame on the runtime unload signal, ignores parent reloads, and reloads fresh', async () => {
+    const store = createStore();
+    store.set(userAtom, { id: 'user-1', name: 'Test User', email: 'test@example.com' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const onNavigationRequest = vi.fn();
+    const logicalUrl = 'https://html-file-preview.invalid/result.html';
+    const documentHtml = '<!doctype html><p>Preview</p>';
+    const renderSurface = (command?: { id: number; action: 'reload' }) =>
+      root?.render(
+        <Provider store={store}>
+          <ManagedPreviewSurface
+            session={session}
+            viewerUrl={logicalUrl}
+            logicalUrl={logicalUrl}
+            documentHtml={documentHtml}
+            command={command}
+            annotationEnabled={false}
+            onAnnotationAvailabilityChange={vi.fn()}
+            onRuntimeError={vi.fn()}
+            onLoadingChange={vi.fn()}
+            onBrowserStateChange={vi.fn()}
+            onNavigationRequest={onNavigationRequest}
+          />
+        </Provider>
+      );
+    const sendFromFrame = (frame: HTMLIFrameElement, type: string) =>
+      act(async () => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: 'null',
+            source: frame.contentWindow,
+            data: { type },
+          })
+        );
+      });
+
+    await act(async () => renderSurface());
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Expected static preview iframe');
+    vi.spyOn(iframe.contentWindow, 'postMessage').mockImplementation(() => {});
+    await sendFromFrame(iframe, MANAGED_BROWSER_READY_MESSAGE_TYPE);
+
+    // A parent-owned reload replaces the srcdoc; its unload signal is expected.
+    await act(async () => renderSurface({ id: 1, action: 'reload' }));
+    await sendFromFrame(iframe, MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE);
+    expect(onNavigationRequest).not.toHaveBeenCalled();
+    expect(iframe.isConnected).toBe(true);
+    await sendFromFrame(iframe, MANAGED_BROWSER_READY_MESSAGE_TYPE);
+
+    // Page script replacing the document is caught on unload, before the srcdoc
+    // (or the replacement page) ever fires load.
+    await sendFromFrame(iframe, MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE);
+    expect(onNavigationRequest).toHaveBeenCalledOnce();
+    expect(onNavigationRequest).toHaveBeenCalledWith(logicalUrl);
+    expect(iframe.isConnected).toBe(false);
+    // The replacement page's load is not reported a second time.
+    await act(async () => iframe.dispatchEvent(new Event('load')));
+    expect(onNavigationRequest).toHaveBeenCalledOnce();
+
+    // A caller that stays mounted can reload into a fresh frame.
+    await act(async () => renderSurface({ id: 2, action: 'reload' }));
+    const fresh = container.querySelector('iframe');
+    expect(fresh).not.toBeNull();
+    expect(fresh).not.toBe(iframe);
+    expect(fresh?.getAttribute('srcdoc')).toBe(documentHtml);
+  });
+
+  it('refuses an executable static frame on opt-in engines without explicit consent', () => {
+    withoutCredentiallessFrames((userAgent) => {
+      userAgent.mockReturnValue(IOS_SAFARI_USER_AGENT);
+      const host = document.createElement('div');
+      const request = {
+        sessionId: null,
+        viewerUrl: 'https://html-file-preview.invalid/a.html',
+        title: 'Preview',
+        host,
+        documentHtml: '<p>a</p>',
+      };
+      expect(() => acquireManagedPreviewFrame(request)).toThrow(/opt-in/u);
+      expect(host.querySelector('iframe')).toBeNull();
+      const frame = acquireManagedPreviewFrame({ ...request, scriptsOptedIn: true });
+      expect(frame.iframe.getAttribute('srcdoc')).toBe('<p>a</p>');
+      releaseManagedPreviewFrame(null, frame.iframe);
+    });
+  });
+
+  it('classifies executable HTML preview support by engine', () => {
+    const iosChrome =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0 Mobile/15E148 Safari/604.1';
+    const chrome =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+    const firefox = 'Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0';
+    expect(isWebKitUserAgent(IOS_SAFARI_USER_AGENT)).toBe(true);
+    expect(isWebKitUserAgent(iosChrome)).toBe(true);
+    expect(isWebKitUserAgent(chrome)).toBe(false);
+    expect(isWebKitUserAgent(firefox)).toBe(false);
+
+    withoutCredentiallessFrames((userAgent) => {
+      userAgent.mockReturnValue(IOS_SAFARI_USER_AGENT);
+      expect(getExecutableHtmlPreviewSupport()).toBe('opt-in');
+      userAgent.mockReturnValue(firefox);
+      expect(getExecutableHtmlPreviewSupport()).toBe('unsupported');
+      Object.defineProperty(HTMLIFrameElement.prototype, 'credentialless', {
+        configurable: true,
+        value: false,
+        writable: true,
+      });
+      userAgent.mockReturnValue(chrome);
+      expect(getExecutableHtmlPreviewSupport()).toBe('automatic');
+    });
+  });
+
+  it('accepts runtime data only from the current exact Quick origin and frame, including after restore', async () => {
+    const store = createStore();
+    store.set(userAtom, { id: 'user-1', name: 'Test User', email: 'test@example.com' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const firstOrigin = 'https://first-preview.trycloudflare.com';
+    const restoredOrigin = 'https://restored-preview.trycloudflare.com';
+    const ignore = () => {};
+    function Harness({ origin }: { origin: string }) {
+      const [title, setTitle] = useState('untouched');
+      const [navigation, setNavigation] = useState('untouched');
+      return (
+        <Provider store={store}>
+          <output data-testid="state">{title}</output>
+          <output data-testid="navigation">{navigation}</output>
+          <ManagedPreviewSurface
+            session={session}
+            viewerUrl={`${origin}/docs?__lody_preview_token=synthetic`}
+            logicalUrl="http://localhost:5173/docs"
+            annotationEnabled
+            onAnnotationAvailabilityChange={ignore}
+            onRuntimeError={ignore}
+            onLoadingChange={ignore}
+            onBrowserStateChange={(state) => setTitle(state.title)}
+            onNavigationRequest={setNavigation}
+          />
+        </Provider>
+      );
+    }
+    await act(async () => root?.render(<Harness origin={firstOrigin} />));
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Expected managed preview iframe');
+    const messages = [
+      targetMessage,
+      {
+        type: MANAGED_BROWSER_STATE_MESSAGE_TYPE,
+        payload: {
+          url: '/docs',
+          title: 'accepted',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+        },
+      },
+      { type: MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE, payload: { url: '/next' } },
+    ];
+    const dispatch = async (origin: string, source: Window | null) => {
+      await act(async () => {
+        for (const data of messages) {
+          window.dispatchEvent(new MessageEvent('message', { origin, source, data }));
+        }
+      });
+    };
+    for (const origin of [restoredOrigin, 'http://first-preview.trycloudflare.com', 'null']) {
+      await dispatch(origin, iframe.contentWindow);
+    }
+    await dispatch(firstOrigin, window);
+    await dispatch(firstOrigin, null);
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('untouched');
+    expect(container.querySelector('[data-testid="navigation"]')?.textContent).toBe('untouched');
+
+    await dispatch(firstOrigin, iframe.contentWindow);
+    expect(container.querySelector('textarea')).not.toBeNull();
+    expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('accepted');
+    expect(container.querySelector('[data-testid="navigation"]')?.textContent).toBe('/next');
+
+    await act(async () => root?.render(<Harness origin={restoredOrigin} />));
+    const restoredFrame = container.querySelector('iframe');
+    if (!restoredFrame?.contentWindow) throw new Error('Expected restored frame');
+    // Cached iframe/window identity may survive restore; origin must still change.
+    expect(container.querySelector('textarea')).toBeNull();
+    await dispatch(firstOrigin, restoredFrame.contentWindow);
+    await dispatch(restoredOrigin, window);
+    expect(container.querySelector('textarea')).toBeNull();
+    await dispatch(restoredOrigin, restoredFrame.contentWindow);
+    expect(container.querySelector('textarea')).not.toBeNull();
+    expect(container.querySelector('iframe')?.src).toContain(restoredOrigin);
   });
 
   it('stages a newly created annotation reference in the matching chat input', async () => {
@@ -308,112 +593,114 @@ describe('ManagedPreviewSurface', () => {
     );
   });
 
-  it('moves an open comment draft when its target scrolls inside the preview', async () => {
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+  it('keeps the page and reload usable without a runtime and accepts a late handshake', async () => {
+    vi.useFakeTimers();
     const store = createStore();
-    store.set(userAtom, { id: 'user-1', name: 'Test User', email: 'test@example.com' });
+    const viewerUrl = 'http://127.0.0.1:61234/';
+    function Browser() {
+      const [available, setAvailable] = useState(false);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState<string | null>(null);
+      const [command, setCommand] = useState<{ id: number; action: 'reload' }>();
+      return (
+        <>
+          <output>
+            {loading ? 'loading' : 'loaded'};{available ? 'annotatable' : 'unavailable'};
+            {error ?? 'no error'}
+          </output>
+          <button
+            onClick={() =>
+              setCommand((current) => ({ id: (current?.id ?? 0) + 1, action: 'reload' }))
+            }
+          >
+            Reload
+          </button>
+          <ManagedPreviewSurface
+            session={session}
+            viewerUrl={viewerUrl}
+            logicalUrl="http://localhost:5173/"
+            annotationEnabled={false}
+            command={command}
+            onAnnotationAvailabilityChange={setAvailable}
+            onLoadingChange={setLoading}
+            onRuntimeError={setError}
+            onBrowserStateChange={() => {}}
+            onNavigationRequest={() => {}}
+          />
+        </>
+      );
+    }
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-
-    await act(async () => {
-      root?.render(
-        <Provider store={store}>
-          <ManagedPreviewSurface
-            session={session}
-            viewerUrl="http://127.0.0.1:61234/"
-            logicalUrl="http://localhost:5173/"
-            annotationEnabled
-            onAnnotationAvailabilityChange={vi.fn()}
-            onRuntimeError={vi.fn()}
-            onLoadingChange={vi.fn()}
-            onBrowserStateChange={vi.fn()}
-            onNavigationRequest={vi.fn()}
-          />
-        </Provider>
+    try {
+      await act(async () =>
+        root?.render(
+          <Provider store={store}>
+            <Browser />
+          </Provider>
+        )
       );
-    });
-
-    const iframe = container.querySelector('iframe');
-    if (!iframe?.contentWindow) throw new Error('Expected managed preview iframe');
-    const postMessage = vi.spyOn(iframe.contentWindow, 'postMessage').mockImplementation(() => {});
-    await act(async () => {
-      iframe.dispatchEvent(new Event('load'));
-      window.dispatchEvent(
-        new MessageEvent('message', {
-          origin: 'http://127.0.0.1:61234',
-          source: iframe.contentWindow,
-          data: targetMessage,
-        })
+      const iframe = container.querySelector('iframe');
+      if (!iframe?.contentWindow) throw new Error('Expected preview iframe');
+      const postMessage = vi
+        .spyOn(iframe.contentWindow, 'postMessage')
+        .mockImplementation(() => {});
+      await act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source: iframe.contentWindow,
+            origin: 'http://127.0.0.1:61234',
+            data: { type: MANAGED_BROWSER_READY_MESSAGE_TYPE },
+          })
+        )
       );
-    });
-
-    const resolveMessage = postMessage.mock.calls
-      .map(
-        ([message]) =>
-          message as {
-            type?: string;
-            payload?: { anchors?: Array<{ commentId: string }> };
-          }
-      )
-      .find(
-        (message) =>
-          message.type === RESOLVE_VISUAL_ANNOTATION_ANCHORS_MESSAGE_TYPE &&
-          message.payload?.anchors?.some(({ commentId }) => commentId.includes('draft'))
+      expect(postMessage).toHaveBeenCalledWith(
+        { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: false },
+        'http://127.0.0.1:61234'
       );
-    const draftAnchorId = resolveMessage?.payload?.anchors?.find(({ commentId }) =>
-      commentId.includes('draft')
-    )?.commentId;
-    if (!draftAnchorId) throw new Error('Expected the comment draft anchor to be tracked');
-
-    let draft = container.querySelector(
-      '[data-lody-visual-comment-draft="true"]'
-    ) as HTMLDivElement | null;
-    expect(draft?.style.top).toBe('192px');
-
-    await act(async () => {
-      window.dispatchEvent(
-        new MessageEvent('message', {
-          origin: 'http://127.0.0.1:61234',
-          source: iframe.contentWindow,
-          data: {
-            type: VISUAL_ANNOTATION_ANCHORS_RESOLVED_MESSAGE_TYPE,
-            payload: {
-              viewport: {
-                width: 800,
-                height: 600,
-                scrollX: 0,
-                scrollY: 120,
-                devicePixelRatio: 1,
+      expect(container.querySelector('output')?.textContent).toBe('loading;unavailable;no error');
+      await act(async () => iframe.dispatchEvent(new Event('load')));
+      await act(async () => vi.advanceTimersByTime(30_000));
+      expect(container.querySelector('output')?.textContent).toBe('loaded;unavailable;no error');
+      expect(container.querySelector('iframe')).toBe(iframe);
+      // A parent-driven reload still works when there is no injected receiver.
+      iframe.src = 'http://127.0.0.1:61234/error';
+      await act(async () => container?.querySelector('button')?.click());
+      expect(iframe.src).toBe(viewerUrl);
+      await act(async () => iframe.dispatchEvent(new Event('load')));
+      await act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source: iframe.contentWindow,
+            origin: 'http://127.0.0.1:61234',
+            data: {
+              type: MANAGED_BROWSER_STATE_MESSAGE_TYPE,
+              payload: {
+                url: viewerUrl,
+                title: 'Preview',
+                loading: true,
+                canGoBack: false,
+                canGoForward: false,
               },
-              results: [
-                {
-                  commentId: draftAnchorId,
-                  resolved: true,
-                  rect: {
-                    x: 100,
-                    y: 60,
-                    width: 120,
-                    height: 30,
-                    top: 60,
-                    left: 100,
-                    right: 220,
-                    bottom: 90,
-                  },
-                  rectRatio: { x: 0.125, y: 0.1, width: 0.15, height: 0.05 },
-                },
-              ],
             },
-          },
-        })
+          })
+        )
       );
-    });
-
-    draft = container.querySelector(
-      '[data-lody-visual-comment-draft="true"]'
-    ) as HTMLDivElement | null;
-    expect(draft?.style.top).toBe('102px');
+      expect(container.querySelector('output')?.textContent).toBe('loading;annotatable;no error');
+      expect(container.querySelector('iframe')).toBe(iframe);
+      // A page-initiated navigation has no parent src change. Its runtime can
+      // report loading, but native load must finish it without a runtime reply.
+      await act(async () => iframe.dispatchEvent(new Event('load')));
+      expect(container.querySelector('output')?.textContent).toBe('loaded;unavailable;no error');
+      // A previously healthy runtime can disappear too. Reload must still be
+      // performed by the parent rather than sent to the missing receiver.
+      iframe.src = 'http://127.0.0.1:61234/error';
+      await act(async () => container?.querySelector('button')?.click());
+      expect(iframe.src).toBe(viewerUrl);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   const mountRemountCycle = async (onLoadingChange: ReturnType<typeof vi.fn>) => {
@@ -458,36 +745,4 @@ describe('ManagedPreviewSurface', () => {
     });
     return { firstIframe, remountedIframe: container?.querySelector('iframe') ?? null };
   };
-
-  it('reuses the live iframe after the preview surface remounts', async () => {
-    const moveBefore = vi.spyOn(HTMLElement.prototype as StatePreservingElement, 'moveBefore');
-    const onLoadingChange = vi.fn();
-
-    const { firstIframe, remountedIframe } = await mountRemountCycle(onLoadingChange);
-
-    expect(remountedIframe).toBe(firstIframe);
-    expect(onLoadingChange).toHaveBeenLastCalledWith(false);
-    // A plain appendChild would also pass the identity check above while
-    // silently discarding the page, so assert the atomic move actually ran.
-    expect(moveBefore).toHaveBeenCalled();
-  });
-
-  it('mounts a fresh iframe when the engine cannot reparent without a reload', async () => {
-    // Without an atomic move, parking and re-hosting a frame each reload the
-    // page, so caching would cost more loads than a plain remount.
-    const moveBefore = (HTMLElement.prototype as StatePreservingElement).moveBefore;
-    delete (HTMLElement.prototype as StatePreservingElement).moveBefore;
-    const onLoadingChange = vi.fn();
-
-    try {
-      const { firstIframe, remountedIframe } = await mountRemountCycle(onLoadingChange);
-
-      expect(remountedIframe).not.toBeNull();
-      expect(remountedIframe).not.toBe(firstIframe);
-      expect(firstIframe.isConnected).toBe(false);
-      expect(onLoadingChange).toHaveBeenLastCalledWith(true);
-    } finally {
-      (HTMLElement.prototype as StatePreservingElement).moveBefore = moveBefore;
-    }
-  });
 });

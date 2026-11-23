@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
-import { filterSessionsByVisibility, isSessionVisibleToUser } from '../src/lib/session-visibility';
+import {
+  filterSessionsByVisibility,
+  isSessionInMyScope,
+  isSessionVisibleToUser,
+  isSessionEditableToUser,
+  getSessionOwnerAccessReason,
+  isSessionReadShared,
+  resolveSessionVisibilityState,
+} from '../src/lib/session-visibility';
 import { getLocalProjectVisibilityKey } from '../src/lib/visible-local-project-index';
 
 const m1 = 'machine-1' as MachineId;
@@ -8,31 +16,39 @@ const m2 = 'machine-2' as MachineId;
 const p1 = 'project-1' as LocalProjectId;
 
 describe('session visibility', () => {
-  it('keeps only sessions whose machine is visible to the current user', () => {
+  it('filters My Tasks by assignment without removing machine-owner access to teammates tasks', () => {
     const sessions = [
-      { id: 's1', machineId: m1 },
-      { id: 's2', machineId: m2 },
-      { id: 's3', machineId: null },
-      { id: 's4' },
+      { id: 'mine-remote', machineId: m2, userId: 'me' },
+      { id: 'mine-local', machineId: m1, userId: 'me' },
+      { id: 'teammate-on-my-machine', machineId: m1, userId: 'teammate' },
+      { id: 'teammate-remote', machineId: m2, userId: 'teammate' },
     ];
-
-    expect(filterSessionsByVisibility(sessions, new Set([m1]), new Set())).toEqual([
-      { id: 's1', machineId: m1 },
+    const visible = filterSessionsByVisibility(
+      sessions,
+      new Set(),
+      new Set(),
+      false,
+      'me',
+      false,
+      new Set([m1])
+    );
+    expect(visible.map((session) => session.id)).toEqual([
+      'mine-remote',
+      'mine-local',
+      'teammate-on-my-machine',
     ]);
-  });
-
-  it('keeps the current user owner session visible without machine access rows', () => {
     expect(
-      isSessionVisibleToUser(
-        { id: 's1', machineId: m1, userId: 'user-1' },
-        new Set<MachineId>(),
-        new Set<string>(),
-        'user-1'
-      )
-    ).toBe(true);
+      visible.filter((session) => isSessionInMyScope(session, 'me')).map((session) => session.id)
+    ).toEqual(['mine-remote', 'mine-local']);
+    expect(isSessionEditableToUser(sessions[2]!, new Set(), new Set(), 'me', new Set([m1]))).toBe(
+      true
+    );
+    for (const userId of [null, undefined, '']) {
+      expect(visible.filter((session) => isSessionInMyScope(session, userId))).toEqual([]);
+    }
   });
 
-  it('keeps the current user local-project session visible without project access rows', () => {
+  it('keeps the assigned conversation owner visible without granting machine access', () => {
     expect(
       isSessionVisibleToUser(
         {
@@ -93,7 +109,7 @@ describe('session visibility', () => {
     ).toEqual(['s-owner', 's-shared-machine', 's-visible-local']);
   });
 
-  it('keeps local-project sessions when the project is visible but the machine is not', () => {
+  it('hides a local-project session when machine access is revoked before its project index refreshes', () => {
     const sessions = [
       { id: 's1', machineId: m1, project: { kind: 'local' as const, localProjectId: p1 } },
       { id: 's2', machineId: m2, project: { kind: 'local' as const, localProjectId: p1 } },
@@ -105,30 +121,7 @@ describe('session visibility', () => {
         new Set(),
         new Set([getLocalProjectVisibilityKey(m1, p1)])
       )
-    ).toEqual([{ id: 's1', machineId: m1, project: { kind: 'local', localProjectId: p1 } }]);
-  });
-
-  it('returns empty when neither machines nor local projects are visible', () => {
-    const sessions = [
-      { id: 's1', machineId: m1, project: { kind: 'local' as const, localProjectId: p1 } },
-    ];
-    expect(filterSessionsByVisibility(sessions, new Set(), new Set())).toEqual([]);
-  });
-
-  it('keeps owner sessions even when both visibility indices are empty', () => {
-    const sessions = [
-      { id: 's-owner', machineId: m2, userId: 'user-1' },
-      { id: 's-other', machineId: m1, userId: 'user-2' },
-    ];
-    expect(
-      filterSessionsByVisibility(sessions, new Set(), new Set(), false, 'user-1').map(
-        (item) => item.id
-      )
-    ).toEqual(['s-owner']);
-  });
-
-  it('returns empty for empty sessions list', () => {
-    expect(filterSessionsByVisibility([], new Set([m1]), new Set())).toEqual([]);
+    ).toEqual([]);
   });
 
   it('fails closed for unconfirmed sessions during machine visibility loading', () => {
@@ -140,7 +133,7 @@ describe('session visibility', () => {
     expect(filterSessionsByVisibility(sessions, new Set(), new Set(), true)).toEqual([]);
   });
 
-  it('keeps local-project sessions during loading when the project key is already visible', () => {
+  it('keeps local-project sessions during loading when both access indexes already admit it', () => {
     const sessions = [
       { id: 's1', machineId: m1, project: { kind: 'local' as const, localProjectId: p1 } },
       { id: 's2', machineId: m2 },
@@ -149,14 +142,14 @@ describe('session visibility', () => {
     expect(
       filterSessionsByVisibility(
         sessions,
-        new Set(),
+        new Set([m1]),
         new Set([getLocalProjectVisibilityKey(m1, p1)]),
         true
       )
     ).toEqual([{ id: 's1', machineId: m1, project: { kind: 'local', localProjectId: p1 } }]);
   });
 
-  it('keeps the current user session visible during machine visibility loading', () => {
+  it('keeps a metadata owner session visible during machine visibility loading', () => {
     const sessions = [
       { id: 's-owner', machineId: m1, userId: 'user-1' },
       { id: 's-other', machineId: m2, userId: 'user-2' },
@@ -167,5 +160,204 @@ describe('session visibility', () => {
         (item) => item.id
       )
     ).toEqual(['s-owner']);
+  });
+});
+
+describe('owner transfer never grants machine or project access', () => {
+  const session = { machineId: m1, userId: 'a', project: { kind: 'local', localProjectId: p1 } };
+  const machine = { machineId: m1, ownerUserId: 'a', sharedWithTeam: false, updatedAt: 1 };
+  const project = { ...machine, localProjectId: p1 };
+  const key = getLocalProjectVisibilityKey(m1, p1);
+  it('allows the machine owner and refuses a colleague on a private machine', () => {
+    expect(
+      getSessionOwnerAccessReason(session, 'a', new Map([[m1, machine]]), new Map())
+    ).toBeNull();
+    expect(
+      getSessionOwnerAccessReason(session, 'b', new Map([[m1, machine]]), new Map([[key, project]]))
+    ).toBe('machineNotShared');
+  });
+  it('requires both machine and local project sharing, regardless of current session owner', () => {
+    const machines = new Map([[m1, { ...machine, sharedWithTeam: true }]]);
+    expect(
+      getSessionOwnerAccessReason(
+        { ...session, userId: 'b' },
+        'b',
+        machines,
+        new Map([[key, project]])
+      )
+    ).toBe('projectNotShared');
+    expect(
+      getSessionOwnerAccessReason(
+        session,
+        'b',
+        machines,
+        new Map([[key, { ...project, sharedWithTeam: true }]])
+      )
+    ).toBeNull();
+    expect(getSessionOwnerAccessReason(session, 'b', new Map(), new Map())).toBe(
+      'machineUnavailable'
+    );
+  });
+});
+
+it('keeps transferred local-project history visible to the machine owner after the project is removed', () => {
+  expect(
+    isSessionVisibleToUser(
+      { machineId: m1, userId: 'b', project: { kind: 'local', localProjectId: p1 } },
+      new Set([m1]),
+      new Set(),
+      'a',
+      new Set([m1])
+    )
+  ).toBe(true);
+});
+
+describe('machine-bound session read grants', () => {
+  const root = { id: 'root', machineId: m1, userId: 'different-session-owner' };
+  const child = { id: 'child', machineId: m1, parentSessionId: 'root' };
+  const views = new Map([
+    [m1, { machineId: m1, canManage: false, readSharedSessionIds: ['root'] }],
+  ]);
+  it('shows only the granted root and its contained tabs, without machine execution access', () => {
+    const records = new Map([
+      ['root', root],
+      ['child', child],
+    ]);
+    expect(isSessionReadShared(root, views, records)).toBe(true);
+    expect(isSessionReadShared(child, views, records)).toBe(true);
+    expect(
+      filterSessionsByVisibility(
+        [root, child, { id: 'other', machineId: m1 }],
+        new Set(),
+        new Set(),
+        false,
+        'viewer',
+        false,
+        new Set(),
+        views,
+        records
+      ).map((row) => row.id)
+    ).toEqual(['root', 'child']);
+    expect(isSessionVisibleToUser(root, new Set(), new Set(), 'viewer')).toBe(false);
+  });
+  it('withdraws on revocation, machine reassignment or a substituted binding', () => {
+    expect(isSessionReadShared(root, new Map())).toBe(false);
+    expect(isSessionReadShared({ ...root, machineId: m2 }, views)).toBe(false);
+    expect(isSessionReadShared(root, new Map([[m1, { ...views.get(m1)!, machineId: m2 }]]))).toBe(
+      false
+    );
+    expect(isSessionReadShared({ ...child, machineId: m2 }, views, new Map([['root', root]]))).toBe(
+      false
+    );
+  });
+  it('retains only assigned-owner and machine-owner visibility, not all E2EE history', () => {
+    expect(
+      resolveSessionVisibilityState(root, new Set(), new Set(), {
+        workspaceHistoryReadable: true,
+        currentUserId: root.userId,
+      })
+    ).toBe('visible');
+    expect(
+      resolveSessionVisibilityState(root, new Set(), new Set(), {
+        currentUserId: 'machine-owner',
+        ownedMachineIds: new Set([m1]),
+      })
+    ).toBe('visible');
+  });
+});
+
+it('inherits read access only through a direct same-machine contained Tab or side panel', () => {
+  const root = { id: 'root', machineId: m1 };
+  const views = new Map([
+    [m1, { machineId: m1, canManage: false, readSharedSessionIds: ['root'] }],
+  ]);
+  const records = new Map([['root', root]]);
+  const child = { id: 'child', machineId: m1, parentSessionId: 'root' };
+  expect(isSessionReadShared(child, views, records)).toBe(true);
+  expect(
+    isSessionReadShared({ ...child, childSessionPlacement: 'side-panel' }, views, records)
+  ).toBe(true);
+  expect(isSessionReadShared({ ...child, childSessionPlacement: 'sidebar' }, views, records)).toBe(
+    false
+  );
+  expect(isSessionReadShared({ ...child, machineId: m2 }, views, records)).toBe(false);
+  expect(
+    isSessionReadShared({ id: 'opened', machineId: m1, openedBySessionId: 'root' }, views, records)
+  ).toBe(false);
+  expect(
+    isSessionReadShared(child, views, new Map([['root', { ...root, parentSessionId: 'other' }]]))
+  ).toBe(false);
+});
+
+it('assignment admits reading but never editing or machine access', () => {
+  const assigned = { id: 'assigned', machineId: m1, userId: 'me' };
+  expect(isSessionVisibleToUser(assigned, new Set(), new Set(), 'me')).toBe(true);
+  expect(isSessionEditableToUser(assigned, new Set(), new Set(), 'me')).toBe(false);
+  expect(isSessionEditableToUser(assigned, new Set([m1]), new Set(), 'me')).toBe(true);
+});
+
+it('limits personal read grants to that account, bound machine and contained root, then withdraws', () => {
+  const root = { id: 'personal-root', machineId: m1, userId: 'someone' };
+  const child = { id: 'contained', machineId: m1, parentSessionId: root.id };
+  const view = {
+    machineId: m1,
+    canManage: false,
+    readSharedSessionIds: [],
+    memberReadSharedSessions: [{ sessionId: root.id, userId: 'reader' }],
+  };
+  const views = new Map([[m1, view]]),
+    records = new Map([
+      [root.id, root],
+      [child.id, child],
+    ]);
+  const options = { currentUserId: 'reader', readSharedSessions: views, sessionsById: records };
+  expect(resolveSessionVisibilityState(root, new Set(), new Set(), options)).toBe('visible');
+  expect(resolveSessionVisibilityState(child, new Set(), new Set(), options)).toBe('visible');
+  expect(
+    resolveSessionVisibilityState(root, new Set(), new Set(), {
+      ...options,
+      currentUserId: 'other',
+    })
+  ).toBe('hidden');
+  expect(
+    resolveSessionVisibilityState({ ...root, machineId: m2 }, new Set(), new Set(), options)
+  ).toBe('hidden');
+  view.memberReadSharedSessions = [];
+  expect(resolveSessionVisibilityState(root, new Set(), new Set(), options)).toBe('hidden');
+});
+
+describe('imported conversations', () => {
+  it('shows conversations imported into this workspace to every member, read only', () => {
+    const imported = {
+      id: 'imported',
+      machineId: 'machine-from-another-workspace',
+      userId: 'original-author',
+      importFence: { workspaceId: 'ws_b', importedBy: 'me' },
+    };
+    const visibleTo = (userId: string, workspaceId: string) =>
+      filterSessionsByVisibility(
+        [imported],
+        new Set(),
+        new Set(),
+        false,
+        userId,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        workspaceId
+      ).map((session) => session.id);
+    expect(visibleTo('me', 'ws_b')).toEqual(['imported']);
+    expect(visibleTo('teammate', 'ws_b')).toEqual(['imported']);
+    // Only in the workspace the import went into.
+    expect(visibleTo('me', 'ws_a')).toEqual([]);
+    expect(
+      resolveSessionVisibilityState(imported, new Set(), new Set(), {
+        currentUserId: 'me',
+        workspaceId: 'ws_b',
+      })
+    ).toBe('visible');
+    expect(isSessionEditableToUser(imported, new Set(), new Set(), 'me')).toBe(false);
+    expect(isSessionEditableToUser(imported, new Set(), new Set(), 'teammate')).toBe(false);
   });
 });

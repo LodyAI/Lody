@@ -78,7 +78,11 @@ export const POSTHOG_INIT_PROPERTY_DENYLIST: string[] = POSTHOG_PROPERTY_DENYLIS
 export type PostHogAnalyticsProperties = Record<string, unknown>;
 
 export type PostHogAnalyticsClient = {
-  capture: (eventName: string, properties?: PostHogAnalyticsProperties) => void;
+  capture: (
+    eventName: string,
+    properties?: PostHogAnalyticsProperties,
+    options?: { uuid?: string }
+  ) => unknown;
   group?: (
     groupType: string,
     groupKey: string,
@@ -240,13 +244,15 @@ export function sanitizePostHogProperties(
 export function capturePostHogEvent(
   postHog: PostHogAnalyticsClient | null | undefined,
   eventName: string,
-  properties?: PostHogAnalyticsProperties
-): void {
+  properties?: PostHogAnalyticsProperties,
+  options?: { uuid?: string }
+): unknown {
   if (!postHog) {
     return;
   }
 
-  postHog.capture(eventName, sanitizePostHogProperties(properties));
+  const safe = sanitizePostHogProperties(properties);
+  return options ? postHog.capture(eventName, safe, options) : postHog.capture(eventName, safe);
 }
 
 export function capturePostHogSampled(
@@ -370,4 +376,34 @@ export function getAppLaunchPerformanceProperties(): Record<string, unknown> {
     first_paint_ms: roundMs(firstPaint?.startTime),
     first_contentful_paint_ms: roundMs(firstContentfulPaint?.startTime),
   };
+}
+
+export type AnalyticsFileKind = 'html' | 'md' | 'image' | 'pdf' | 'other';
+
+const ANALYTICS_IMAGE_EXTENSIONS = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'svg',
+  'bmp',
+  'ico',
+  'avif',
+  'heic',
+]);
+
+/**
+ * Coarse file-type enum for analytics. File names and paths are never sent;
+ * only the bucket derived from the extension.
+ */
+export function getAnalyticsFileKind(fileNameOrPath: string): AnalyticsFileKind {
+  const base = fileNameOrPath.split(/[\\/]/).pop() ?? '';
+  const dot = base.lastIndexOf('.');
+  const ext = dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
+  if (ext === 'html' || ext === 'htm') return 'html';
+  if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'md';
+  if (ext === 'pdf') return 'pdf';
+  if (ANALYTICS_IMAGE_EXTENSIONS.has(ext)) return 'image';
+  return 'other';
 }

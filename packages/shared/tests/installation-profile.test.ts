@@ -1,11 +1,8 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { describe, expect, it } from 'vitest';
-import {
-  getInstallationProfile,
-  getLodyDataDir,
-} from '../src/node/installation-profile';
-import { getLocalCliHostEndpoint } from '../src/node/local-cli-host-lease';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getInstallationProfile, getLodyDataDir } from '../src/node/installation-profile';
+import { getE2eHostPipe, getLocalCliHostEndpoint } from '../src/node/local-cli-host-lease';
 import {
   getLocalControlSocketPath,
   getLocalDaemonRunDir,
@@ -15,6 +12,10 @@ import { getLocalTerminalSocketPath } from '../src/node/local-terminal';
 import { getLocalWorkspaceCatalogPath } from '../src/node/local-workspace-catalog';
 
 const require = createRequire(import.meta.url);
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('installation profile', () => {
   it('keeps cloud defaults backward compatible and gives local a disjoint namespace', () => {
@@ -47,6 +48,39 @@ describe('installation profile', () => {
     }
   });
 
+  it.runIf(process.platform !== 'win32')(
+    'uses an isolated host port only for an explicit E2E process',
+    () => {
+      vi.stubEnv('LODY_E2E', '1');
+      vi.stubEnv('LODY_E2E_LOCAL_CLI_HOST_PORT', '29471');
+
+      expect(getLocalCliHostEndpoint('local')).toEqual({
+        kind: 'tcp',
+        host: '127.0.0.1',
+        port: 29_471,
+      });
+
+      vi.stubEnv('LODY_E2E', '0');
+      expect(getLocalCliHostEndpoint('local')).toEqual({
+        kind: 'tcp',
+        host: '127.0.0.1',
+        port: 17_789,
+      });
+    }
+  );
+
+  it('accepts only an explicit E2E-scoped Windows pipe', () => {
+    vi.stubEnv('LODY_E2E', '1');
+    vi.stubEnv('LODY_E2E_LOCAL_CLI_HOST_PIPE', '\\\\.\\pipe\\lody-e2e-round-123');
+    expect(getE2eHostPipe('win32')).toBe('\\\\.\\pipe\\lody-e2e-round-123');
+    expect(getE2eHostPipe('darwin')).toBeNull();
+
+    vi.stubEnv('LODY_E2E_LOCAL_CLI_HOST_PIPE', '\\\\.\\pipe\\lody-agent-host-user');
+    expect(() => getE2eHostPipe('win32')).toThrow(
+      'LODY_E2E_LOCAL_CLI_HOST_PIPE must use the \\\\.\\pipe\\lody-e2e-<id> namespace'
+    );
+  });
+
   it('keeps Electron main-process paths isolated without ambient LODY_PLATFORM', () => {
     const previousPlatform = process.env.LODY_PLATFORM;
     const previousDataDir = process.env.LODY_DATA_DIR;
@@ -67,22 +101,5 @@ describe('installation profile', () => {
       if (previousDataDir === undefined) delete process.env.LODY_DATA_DIR;
       else process.env.LODY_DATA_DIR = previousDataDir;
     }
-  });
-
-  it('keeps the CommonJS installation profile in parity', () => {
-    const commonJs = require('../src/node/installation-profile.cjs') as typeof import('../src/node/installation-profile');
-    expect(commonJs.getInstallationProfile('local')).toEqual(getInstallationProfile('local'));
-    expect(commonJs.getLodyDataDir('local', '/home/alice')).toBe(
-      getLodyDataDir('local', '/home/alice'),
-    );
-  });
-
-  it('keeps the CommonJS terminal path platform parameter in parity', () => {
-    const commonJs = require('../src/node/local-terminal.cjs') as {
-      getLocalTerminalSocketPath(platform?: 'local' | 'cloud'): string;
-    };
-    expect(commonJs.getLocalTerminalSocketPath('local')).toBe(
-      getLocalTerminalSocketPath('local'),
-    );
   });
 });

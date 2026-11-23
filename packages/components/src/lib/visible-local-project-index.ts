@@ -1,6 +1,8 @@
 import type { LocalProjectId, LocalProjectMeta, MachineId, MachineViewMeta } from '@lody/shared';
 import type { MachineVisibilityAccess } from './visible-machine-index';
 
+export type { MachineVisibilityAccess };
+
 export type LocalProjectVisibilityAccess = {
   machineId: string;
   localProjectId: string;
@@ -20,6 +22,7 @@ export type VisibleLocalProjectEntry = {
 };
 
 type BuildArgs = {
+  includeMemberOnly?: boolean;
   rawMachines: Map<MachineId, MachineViewMeta>;
   machineAccessByMachineId: ReadonlyMap<MachineId, MachineVisibilityAccess>;
   convexAccessRows: ReadonlyArray<LocalProjectVisibilityAccess>;
@@ -29,7 +32,9 @@ type BuildArgs = {
 
 export type VisibleLocalProjectIndex = {
   projects: Map<string, VisibleLocalProjectEntry>;
+  registeredProjects: Map<string, VisibleLocalProjectEntry>;
   accessByProjectKey: Map<string, LocalProjectVisibilityAccess>;
+  accessByMachineId: ReadonlyMap<MachineId, MachineVisibilityAccess>;
   isLoading: boolean;
 };
 
@@ -54,6 +59,7 @@ export function buildVisibleLocalProjectIndex({
   convexAccessRows,
   currentUserId,
   isLoading,
+  includeMemberOnly = false,
 }: BuildArgs): VisibleLocalProjectIndex {
   const accessByProjectKey = new Map<string, LocalProjectVisibilityAccess>();
 
@@ -94,6 +100,17 @@ export function buildVisibleLocalProjectIndex({
     const machineAccess = machineAccessByMachineId.get(machineId);
     const project = machine?.localProjects?.[localProjectId];
     if (!machine || !project) continue;
+    // Legacy machine metadata bypasses Flock's local-project validation. Keep
+    // incomplete rows out of display/launch indexes without deleting their access
+    // or source data; a later complete snapshot makes the project visible again.
+    if (
+      typeof project.name !== 'string' ||
+      !project.name.trim() ||
+      typeof project.rootPath !== 'string' ||
+      !project.rootPath.trim()
+    ) {
+      continue;
+    }
     projects.set(key, {
       key,
       machineId,
@@ -107,8 +124,12 @@ export function buildVisibleLocalProjectIndex({
   }
 
   return {
-    projects,
+    registeredProjects: projects,
+    projects: includeMemberOnly
+      ? projects
+      : new Map([...projects].filter(([, entry]) => entry.project.standaloneVisible !== false)),
     accessByProjectKey,
+    accessByMachineId: machineAccessByMachineId,
     isLoading,
   };
 }

@@ -1,5 +1,17 @@
-import { getMachineFlockDocId, type MachineId, type WorkspaceId } from '@lody/shared';
-import type { LoroRepo, RepoTransportRoomStatus, TransportSubscription } from 'loro-repo';
+import {
+  getMachineFlockDocId,
+  getMachineFlockLocalProjects,
+  readMachineFlockRowsFromFlock,
+  type LocalProjectId,
+  type MachineId,
+  type WorkspaceId,
+} from '@lody/shared';
+import type {
+  LoroRepo,
+  RepoFlockDocHandle,
+  RepoTransportRoomStatus,
+  TransportSubscription,
+} from 'loro-repo';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
@@ -10,7 +22,7 @@ import {
   streamsRoomBinding,
   type StreamsRoomBinding,
 } from './streams-room-binding';
-import { readTimeoutEnv, withTimeout } from './timeout-utils';
+import { readTimeoutEnv, SYNC_CONFIRMATION_TIMEOUT_MS, withTimeout } from './timeout-utils';
 
 type MachineFlockSyncState = {
   machineId: MachineId;
@@ -22,6 +34,7 @@ type MachineFlockSyncState = {
   activeSync: Promise<boolean> | null;
   joinPromise: Promise<void> | null;
   roomSub: TransportSubscription | null;
+  flock?: RepoFlockDocHandle['flock'];
   // Detached-aware 'streams' binding view of `roomSub`; all status reads and
   // first-sync waits go through it, never the classic surface (which hides
   // 'detached' behind 'disconnected' and would rejoin-spin while offline).
@@ -66,6 +79,18 @@ export class MachineFlockSyncCoordinator {
     this.random = options.random ?? Math.random;
     this.retryBaseDelayMs = options.retryBaseDelayMs;
     this.retryMaxDelayMs = options.retryMaxDelayMs;
+  }
+
+  /** Borrow only an already-open catalog. Never acquire or sync on a query. */
+  peekLocalProjectRootPath(machineId: MachineId, localProjectId: LocalProjectId): string | null {
+    if (this.cleanedUp) return null;
+    const flock = this.states.get(machineId)?.flock;
+    if (!flock) return null;
+    return (
+      getMachineFlockLocalProjects(
+        readMachineFlockRowsFromFlock(flock, { families: ['localProject'] })
+      )[localProjectId]?.rootPath?.trim() || null
+    );
   }
 
   ensureJoined(machineId: MachineId, options: { reason?: string } = {}): Promise<void> {
@@ -177,7 +202,8 @@ export class MachineFlockSyncCoordinator {
 
     const syncVersion = state.dirtyVersion;
     const timeoutMs =
-      options.timeoutMs ?? readTimeoutEnv('LODY_LORO_SYNC_MACHINE_FLOCK_TIMEOUT_MS', 8_000);
+      options.timeoutMs ??
+      readTimeoutEnv('LODY_LORO_SYNC_MACHINE_FLOCK_TIMEOUT_MS', SYNC_CONFIRMATION_TIMEOUT_MS);
     const timeoutMessage = `Timeout waiting for machine Flock doc sync (doc=${state.docId})`;
 
     try {
@@ -252,6 +278,7 @@ export class MachineFlockSyncCoordinator {
         return;
       }
       const binding = streamsRoomBinding(sub);
+      state.flock = handle.flock;
       state.roomSub = sub;
       state.roomBinding = binding;
       state.detachRoomStatusListener = binding.onStatusChange((status) => {

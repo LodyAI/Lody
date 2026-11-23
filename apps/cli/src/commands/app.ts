@@ -7,8 +7,7 @@ import type {
   MachineId,
 } from '@lody/shared';
 import {
-  createLocalProjectId,
-  ensureLocalProjectRootPath,
+  localProjectsLegacy,
   getLocalProjectNameFromRootPath,
 } from '@lody/shared/node/local-project';
 import {
@@ -17,6 +16,7 @@ import {
   runOneShotCommand,
   type CommonCommandOptions,
 } from '@/lib/command-runtime';
+import { appResetCacheCommand } from '@/commands/app-reset-cache';
 import { buildOpenLocalProjectDeepLink } from '@/lib/desktop-deep-link';
 import {
   extractWorkspaceCandidates,
@@ -88,7 +88,7 @@ export async function resolveLocalProjectForApp(args: {
       // that is already registered stays selectable. A brand new one is not, and
       // the caller warns about that.
       return {
-        localProjectId: createLocalProjectId(args.rootPath),
+        localProjectId: localProjectsLegacy.createLocalProjectId(args.rootPath),
         name: getLocalProjectNameFromRootPath(args.rootPath),
         workspaceSlug: null,
         registered: false,
@@ -122,6 +122,16 @@ export const appCommand = new Command('app')
   .description(
     'Open the Lody desktop app on a new chat with a local directory selected (registers it if needed)'
   )
+  // `lody app reset-cache` wins over the optional path argument, so a directory
+  // with that exact name has to be passed as `./reset-cache`.
+  //
+  // Positional options are REQUIRED here, like on the program: `app` declares
+  // `--json`/`--debug` of its own, and without this Commander lets the parent
+  // swallow them before the subcommand is reached — `app reset-cache --json`
+  // would then print human text. Existing `lody app [path]` spellings, including
+  // a trailing `--json`, keep working.
+  .enablePositionalOptions()
+  .addCommand(appResetCacheCommand)
   .argument('[path]', 'Local project directory to select', '.')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--json', 'Print JSON output')
@@ -130,7 +140,9 @@ export const appCommand = new Command('app')
     await runOneShotCommand('app', options, async () => {
       const logger = getLogger('app');
       const auth = getAuthContextOrThrow('app');
-      const rootPath = ensureLocalProjectRootPath(path.resolve(projectPath ?? '.'));
+      const rootPath = localProjectsLegacy.ensureLocalProjectRootPath(
+        path.resolve(projectPath ?? '.')
+      );
 
       const target = await resolveLocalProjectForApp({
         machineId: auth.machineId,

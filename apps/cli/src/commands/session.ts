@@ -1,33 +1,84 @@
-import { Command } from 'commander';
+import { selectTranscriptHistoryPositions } from '@lody/shared/session-data';
+import type { SessionBackend } from '@/session/session-backend';
+import {
+  readProjectDefaultMcpIds,
+  syncMcpCatalog,
+  waitForMcpDefaultCatalog,
+} from '@/lib/workspace-mcp-store';
+import {
+  getDaemonWorkspace,
+  readEncryptedMachineAccess,
+  resolveDaemonTarget,
+  type DaemonTargetResolution,
+} from '@/lib/session-command-environment';
+import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
+import type { SessionSteerResponse } from '@lody/shared';
+import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
+import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
+import {
+  getMachineRoomId,
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  OPERATION_INBOX_PROTOCOL_VERSION,
+} from '@lody/shared';
+import {
+  assertMachineFlockCacheSufficient,
+  validateWithMachineFlockFreshness,
+  type MachineFlockFreshness,
+} from './session-catalog-read';
+export { MachineFlockReadUnavailableError } from './session-catalog-read';
+import {
+  MachineOfflineError,
+  readMachinePresence,
+  type MachinePresence,
+} from './session-machine-presence';
+export { MachineOfflineError } from './session-machine-presence';
+import { normalizeSessionTurnInputConfig } from '@lody/shared';
+import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
+import { buildCommandInputBlocks, type SessionInputAttachment } from '@/lib/session-input-content';
+import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
+import { inputBlocksToHistoryItems, type SessionInputBlock } from '@lody/shared';
+import type { MessageAuthor, AgentMessageAuthor } from '@lody/shared';
+import {
+  ACP_CAPABILITY_ROW_FAMILIES,
+  getDeclaredModelControls,
+  getAcpModelEffortChoices,
+  getAcpModelFastSupport,
+  getAcpModelSpeedTiers,
+  withAcpConfigOptionsForModel,
+  machineSupportsPreparedSessionInputProtocol,
+  machineSupportsMemoryProviders,
+  resolveNewSessionHistoryBackend,
+} from '@lody/shared';
+import {
+  materializePreparedSessionInput,
+  commitPreparedSessionDispatch,
+  isPreparedSessionDispatched,
+  type PreparedSessionInput,
+} from '@/lib/prepared-session-input';
+import { Command, Option } from 'commander';
+import {
+  SessionDiscoveryFilterShape,
+  matchesSessionDiscovery,
+  type SessionDiscoveryFilters,
+} from '@/lib/discovery-query';
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { v4 as uuidV4 } from 'uuid';
 import {
-  createLoroStreamsJsonStreamClient,
-  LORO_STREAMS_RPC_RETENTION_SECONDS,
-  LORO_STREAMS_RPC_VERSION,
-  LoroStreamsMachineRpcClient,
-} from '@lody/loro-streams-rpc';
-import {
-  getLocalProjectGitStateAtRootPath,
-  normalizeLocalProjectRootPath,
-  resolveLocalProjectBranchAtRootPath,
+  localProjectsLegacy,
   selectLocalProjectBranchSelector,
 } from '@lody/shared/node/local-project';
 import {
   type ACPSessionConfig,
-  getLoroStreamsShardUrls,
-  LORO_STREAMS_BUCKET_ID,
   type MessageContent,
   MachineStatusResponseSchema,
   SessionCancelResponseSchema,
   SessionStatusFactory,
-  buildMachineArchiveSessionCommand,
-  buildMachineDeleteSessionCommand,
+  readSessionOperationTargets,
   type BillingQuotaAdmission,
   countBillableSessionTurns,
-  deleteMachineFlockRowFromFlock,
   evaluateBillingQuota,
   evaluateSessionCreateQuota,
   formatSessionQuotaRejection,
@@ -36,19 +87,24 @@ import {
   getAcpCapabilityCacheKey,
   getBuiltinDefaultModeId,
   getMachineFlockAcpCapabilities,
+  getReadableAcpCapabilityCacheEntry,
+  getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   getMachineFlockDocId,
-  getMachineFlockLocalProjects,
-  getMachineRoomId,
-  machineFlockKeys,
-  machineDeleteCommandToQueueItem,
   readMachineFlockRowsFromFlock,
   resolveActiveAssistantTurnId,
   getServerNow,
   getSessionRoomId,
+  getSessionIdFromRoomId,
   isLoroRepoDocDeleted,
   isMachineDocRoomId,
   isSessionDocRoomId,
   hasAgentRunConfigSelection,
+  ACP_CONFIG_OPTION_OFF_VALUE,
+  ACP_CONFIG_OPTION_ON_VALUE,
+  ACP_FAST_MODE_VALUE_FAST,
+  ACP_FAST_MODE_VALUE_ULTRAFAST,
+  isAcpFastModeConfigId,
+  isAcpThoughtLevelConfigOption,
   resolveAgentRunConfigSelection,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
@@ -56,38 +112,41 @@ import {
   type AcpCapabilityCacheEntry,
   type AcpConfigOptionSummary,
   type AgentConfigMeta,
+  type BuiltinRuntimeOverrides,
   type AgentRoleId,
+  type LocalProjectGitState,
   type LocalProjectId,
-  type MachineLegacyMetaFields,
   type MachineId,
   type MachineMeta,
   type ProjectRef,
-  type SessionDocMeta,
   type SessionHistory,
   type SessionHistoryInput,
+  type SessionHistoryBackendKind,
   type SessionQuotaKind,
   type SessionTurnInputConfig,
   type SessionId,
   type SessionMeta,
-  type TaskId,
+  type SessionOperation,
   type WorkspaceId,
-  shouldQueueMachineDeleteSession,
-  writeMachineFlockRowToFlock,
-  type MachineFlockKey,
-  type MachineFlockRow,
+  deriveDraftSessionTitle,
+  NEW_SESSION_HISTORY_BACKEND,
 } from '@lody/shared';
-import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
+import { readSessionHistoryMetadata, type SessionTurn } from '@lody/shared/session-data';
 import { AuthClient } from '@/lib/auth';
 import {
   dispatchLocalControl,
+  withWorkspaceManager as withCommandWorkspaceManager,
+  withMachineRpcClient,
   ensureWorkspaceMetaSynced,
   listAliveDocMetas,
   listAliveSessionMetas,
   listAliveRoomIds,
   LocalDaemonAvailabilityError,
   normalizeCliValue,
+  listWorkspaceCandidates,
   printJson,
   resolveStructuredOutputMode as resolveOutputMode,
+  resolveWorkspaceOrThrow,
   selectWorkspaceSummary,
   syncDocForRead,
   syncCommandTime,
@@ -98,7 +157,9 @@ import {
 import { LoroDocumentManager, type SessionDocument } from '@/lib/loro/doc';
 import { renderTerminalTable } from '@/lib/terminal-table';
 import {
+  canDelegateMachineUseForCliToken,
   canRequestMachineForCliToken,
+  canUseMachineForCliToken,
   type WorkspaceBillingEntitlement,
   listWorkspaceGitHubRepositoriesForCliToken,
   listWorkspacesForToken,
@@ -106,48 +167,117 @@ import {
   type WorkspaceSummary,
 } from '@/lib/workspace';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
-import { linkTaskSessionFromCli } from '@/lib/task-doc';
+import { getSessionCommandEnvironment } from '@/lib/session-command-environment';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
-import { getLogger, rootLogger } from '@/utils/logger';
+import {
+  applyAgentRoleCreateTarget,
+  composeAgentRolePrompt,
+  resolveAgentRoleCreateFromCatalog,
+} from '@/lib/agent-role-create';
+import { getLogger, rootLogger, routeLoggerToStderr } from '@/utils/logger';
 import { parseEnvAssignments } from './agent-config';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   SessionTurnWaitError,
+  sessionHistoryActivityAt,
   type SessionTurnOutputEvent,
   type StructuredSessionOutputMode,
   waitForTurnCompletion,
 } from './session-output';
 import { flushTelemetry } from '@/instrument';
 import { captureSessionCommandEvent } from './analytics-events';
-import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
-import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
-import { getCliHttpFetch } from '@/utils/http-transport';
+import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
+import { createSessionBackend, readHistoryEntry } from '@/session/session-backend';
+import { Effect } from 'effect';
+import { createSessionObserveWriter, resolveObserveSelection } from './session-observe';
+import { acquireSessionObservation } from './session-observe-runtime';
+import { WorkspaceSessionObserver } from './session-observe-workspace';
 
 type CommonOptions = CommonCommandOptions;
+
+export type DelegatedSessionRequester = {
+  userId: string;
+  author?: AgentMessageAuthor;
+};
+
+/** Delegation without provenance must never be recorded as human input. */
+/**
+ * Classify encrypted delegation before writing. Same-machine inputs retain the
+ * signed human root and verified principal. Cross-machine Owner work keeps the
+ * machine-signed path; unverifiable origins refuse.
+ */
+async function classifyDelegatedEncryptedInput(
+  manager: LoroDocumentManager,
+  delegatedRequester: DelegatedSessionRequester | undefined,
+  targetMachineId: string,
+  userTurnId: string
+): Promise<
+  | { principal: 'owner' | 'member'; derivedFrom?: { sessionId: string; userTurnId: string } }
+  | undefined
+> {
+  if (!delegatedRequester || !manager.isEncryptedWorkspace()) return undefined;
+  const author = delegatedRequester.author;
+  const daemon = getDaemonWorkspace();
+  if (!author || !daemon?.classifyEncryptedDerivation || daemon.manager !== manager)
+    throw new Error('e2ee_derivation_unavailable');
+  const origin = { sessionId: author.sessionId, userTurnId: author.turnId };
+  const resolved = await daemon.classifyEncryptedDerivation(origin, {
+    machineId: targetMachineId,
+    userTurnId,
+  });
+  return resolved === 'owner'
+    ? { principal: 'owner' }
+    : { principal: resolved.principal, derivedFrom: resolved.origin };
+}
+
+const resolveSessionInputAuthor = (
+  userId: string,
+  delegatedRequester?: DelegatedSessionRequester
+): MessageAuthor => {
+  if (!delegatedRequester) return { v: 1, kind: 'human', userId };
+  if (!delegatedRequester.author) {
+    throw new Error('Delegated message is missing Agent source identity.');
+  }
+  return delegatedRequester.author;
+};
+
+type ResolvedSessionRequester = {
+  userId: string;
+  isDelegated: boolean;
+};
 
 export const DEFAULT_SESSION_LIST_LIMIT = 50;
 export const MAX_MCP_SESSION_LIST_LIMIT = 200;
 export const DEFAULT_SESSION_HISTORY_LIMIT = 50;
 export const MAX_MCP_SESSION_HISTORY_LIMIT = 200;
 
+const parseSessionHistoryBackend = (value: string): SessionHistoryBackendKind => {
+  if (value !== 'loro' && value !== 'roost') {
+    throw new Error(`Unsupported session history backend: ${value}`);
+  }
+  return value;
+};
+
 type PromptOptions = {
+  attach?: string[];
   prompt?: string;
   promptFile?: string;
 };
 
 export type CreateOptions = CommonOptions &
   PromptOptions & {
+    inputAttachments?: SessionInputAttachment[];
     title?: string;
     machine?: string;
     agent?: string;
     agentConfig?: string;
+    /** CLI `--agent-role` selector (id or name), resolved from the workspace catalog. */
+    agentRole?: string;
     currentSessionId?: SessionId;
     defaultMachineId?: MachineId;
     requesterUserId?: string;
-    /**
-     * Trusted Session attribution supplied by an internal caller. Access checks
-     * must continue to use requesterUserId, which is bound to CLI auth.
-     */
+    /** Trusted human requester supplied by a delegated internal caller. */
+    delegatedRequester?: DelegatedSessionRequester;
     sessionOwnerUserId?: string;
     parent?: string;
     useCurrentSessionAsParent?: boolean;
@@ -158,9 +288,12 @@ export type CreateOptions = CommonOptions &
     mode?: string;
     model?: string;
     configOption?: string[];
+    mcpServerIds?: string;
     env?: string[];
     wait?: boolean;
     timeout?: number;
+    /** Explicit history backend selection for this session. */
+    historyBackend?: SessionHistoryBackendKind;
     /** Stable ids preallocated by durable orchestration recovery. */
     sessionId?: SessionId;
     userTurnId?: string;
@@ -169,14 +302,12 @@ export type CreateOptions = CommonOptions &
     /** Agent Role provenance frozen when the create Operation is accepted. */
     agentRoleId?: string;
     agentRoleRevision?: number;
+    agentRoleSnapshot?: import('@lody/shared').AgentRoleSnapshot;
     /**
-     * Task this session belongs to. Inherited from the invoking session when it
-     * is itself working on a task, so an agent spawning helpers keeps the whole
-     * fan-out attached to the same task.
+     * Role instruction frozen at acceptance. It is prepended to the execution
+     * prompt only; the visible user turn keeps the authored prompt.
      */
-    taskId?: string;
-    /** Provenance for the task link; automation starts are runs, spawns inherit. */
-    taskLinkOrigin?: 'run' | 'agent-spawn';
+    agentRolePromptPrefix?: string;
     /** Durable batch Operations intentionally bypass cooperative session quotas. */
     bypassSessionQuota?: boolean;
     /**
@@ -192,9 +323,25 @@ export type ChatOptions = CommonOptions &
     mode?: string;
     model?: string;
     configOption?: string[];
+    mcpServerIds?: string;
     wait?: boolean;
     timeout?: number;
   };
+
+/** Additive Stop fields are sent only to a peer that implements Inbox pause/resume. */
+export function getSessionCancelProtocolFields(
+  machine: Parameters<typeof machineSupportsProtocolCapability>[0],
+  cancelId: string,
+  pauseInbox: boolean
+): { cancelId?: string; pauseInbox?: boolean } {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.operationInbox,
+    OPERATION_INBOX_PROTOCOL_VERSION
+  )
+    ? { cancelId, pauseInbox }
+    : {};
+}
 
 export async function ensureSessionCreateWorkspaceMetaFresh(args: {
   manager: Pick<LoroDocumentManager, 'syncMetaOrThrow'>;
@@ -205,13 +352,14 @@ export async function ensureSessionCreateWorkspaceMetaFresh(args: {
   await syncWorkspaceMetaForRead(args.manager, `session.create:${args.workspaceId}:prewrite`);
 }
 
-type ListOptions = CommonOptions & {
-  archived?: boolean;
-  all?: boolean;
-  limit?: number;
-  openedBy?: string;
-  openedByCurrent?: boolean;
-};
+type ListOptions = CommonOptions &
+  SessionDiscoveryFilters & {
+    archived?: boolean;
+    all?: boolean;
+    limit?: number;
+    openedBy?: string;
+    openedByCurrent?: boolean;
+  };
 
 type RenameOptions = CommonOptions & {
   title?: string;
@@ -275,6 +423,7 @@ export type SessionTranscriptEntry = {
   index: number;
   id: string;
   role: SessionTranscriptRole;
+  author?: MessageAuthor;
   timestamp: string;
   text: string;
 };
@@ -304,7 +453,6 @@ type ResolvedCreateContext = {
   parentSessionId?: SessionId;
   openedBySessionId?: SessionId;
   openedByRootSessionId?: SessionId;
-  taskId?: TaskId;
 };
 
 type SessionActivityTimestampManager = {
@@ -313,9 +461,6 @@ type SessionActivityTimestampManager = {
     upsertDocMeta(roomId: string, meta: Partial<SessionMeta>): Promise<unknown>;
   };
 };
-
-// Re-export for backward compatibility with tests
-export { normalizeCliValue, selectWorkspaceSummary };
 
 export function resolvePromptCandidate(input: {
   prompt?: string;
@@ -346,7 +491,11 @@ export function sortSessionMetas(sessions: SessionMeta[]): SessionMeta[] {
 
 export function filterSessionMetas(
   sessions: SessionMeta[],
-  options: { archivedOnly?: boolean; includeAll?: boolean; openedBySessionId?: SessionId }
+  options: {
+    archivedOnly?: boolean;
+    includeAll?: boolean;
+    openedBySessionId?: SessionId;
+  } & SessionDiscoveryFilters
 ): SessionMeta[] {
   let result: SessionMeta[];
   if (options.includeAll) {
@@ -359,7 +508,7 @@ export function filterSessionMetas(
   if (options.openedBySessionId) {
     result = result.filter((session) => session.openedBySessionId === options.openedBySessionId);
   }
-  return result;
+  return result.filter((session) => matchesSessionDiscovery(session, options));
 }
 
 function formatAgentConfigCandidates(configs: AgentConfigMeta[]): string {
@@ -434,7 +583,7 @@ export function shouldWaitForSessionCompletion(options: {
   return options.wait === true;
 }
 
-function isTranscriptRole(role: SessionHistoryInput['role']): role is SessionTranscriptRole {
+function isTranscriptRole(role: SessionTurn['role']): role is SessionTranscriptRole {
   return role === 'user' || role === 'assistant' || role === 'system';
 }
 
@@ -463,8 +612,8 @@ function formatVisibleTranscriptItem(item: MessageContent): string | undefined {
       deliveryId: item.deliveryId,
       operationId: item.operationId,
       operationKind: item.operationKind,
+      ...(item.progressMessageId ? { progressMessageId: item.progressMessageId } : {}),
       completion: item.completion,
-      ...(item.continuation ? { continuation: item.continuation } : {}),
     });
   }
 
@@ -498,34 +647,53 @@ function extractTranscriptText(
   return text || undefined;
 }
 
+/**
+ * Whether a raw history row is part of the displayable transcript. Shared by the
+ * whole-history formatter and by bounded paging, so both agree on `limit`
+ * counting displayable entries while positions stay raw.
+ */
+export function isVisibleTranscriptTurn(
+  entry: SessionTurn
+): entry is SessionTurn & { role: SessionTranscriptRole } {
+  if (!isTranscriptRole(entry.role)) return false;
+  if (
+    entry.role === 'system' &&
+    !(entry.items as Array<{ type?: string }> | undefined)?.some(
+      (item) => item.type === 'operation_completion'
+    )
+  ) {
+    return false;
+  }
+  return (
+    extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role) !== undefined
+  );
+}
+
+/** Format one raw row at its raw position, or `undefined` when not displayable. */
+export function toSessionTranscriptEntry(
+  index: number,
+  entry: SessionTurn
+): SessionTranscriptEntry | undefined {
+  if (!isVisibleTranscriptTurn(entry)) return undefined;
+  const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
+  if (!text) return undefined;
+  return {
+    index,
+    id: entry.id,
+    role: entry.role,
+    ...(entry.author ? { author: entry.author } : {}),
+    timestamp: entry.timestamp,
+    text,
+  };
+}
+
 export function toSessionTranscriptEntries(
-  history: SessionHistoryInput[]
+  history: readonly SessionTurn[]
 ): SessionTranscriptEntry[] {
   const entries: SessionTranscriptEntry[] = [];
-
   for (const [index, entry] of history.entries()) {
-    if (!isTranscriptRole(entry.role)) {
-      continue;
-    }
-    if (
-      entry.role === 'system' &&
-      !entry.items?.some((item) => item.type === 'operation_completion')
-    ) {
-      continue;
-    }
-
-    const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
-    if (!text) {
-      continue;
-    }
-
-    entries.push({
-      index,
-      id: entry.id,
-      role: entry.role,
-      timestamp: entry.timestamp,
-      text,
-    });
+    const formatted = toSessionTranscriptEntry(index, entry);
+    if (formatted) entries.push(formatted);
   }
 
   return entries;
@@ -540,6 +708,46 @@ export function selectSessionTranscriptEntries(
     selected.reverse();
   }
   return selected;
+}
+
+/** Count visible rows and hydrate the requested transcript positions. */
+export async function readSessionTranscript(
+  backend: Pick<SessionBackend, 'readHistory' | 'readHistorySelection' | 'readHistoryTranscript'>,
+  options: { all?: boolean; limit?: number; reverse?: boolean }
+): Promise<{ total: number; entries: SessionTranscriptEntry[] }> {
+  if (options.all) {
+    const transcript = toSessionTranscriptEntries(await backend.readHistory());
+    return {
+      total: transcript.length,
+      entries: selectSessionTranscriptEntries(transcript, options),
+    };
+  }
+  let total = 0,
+    positions: number[] = [];
+  let selected: SessionHistoryInput[];
+  if (backend.readHistoryTranscript) {
+    const result = await backend.readHistoryTranscript(options);
+    total = result.total;
+    positions = result.positions;
+    selected = result.entries;
+  } else {
+    selected = await backend.readHistorySelection(
+      (rows) => {
+        const result = selectTranscriptHistoryPositions(rows, options);
+        total = result.total;
+        positions = result.positions;
+        return positions;
+      },
+      { transcriptVisibility: true }
+    );
+  }
+  return {
+    total,
+    entries: selected.flatMap((entry, index) => {
+      const formatted = toSessionTranscriptEntry(positions[index]!, entry);
+      return formatted ? [formatted] : [];
+    }),
+  };
 }
 
 export function renderSessionTranscript(entries: SessionTranscriptEntry[]): string {
@@ -654,6 +862,8 @@ async function readPromptText(
       return resolved;
     }
   }
+
+  if (options.attach?.length) return '';
 
   throw new Error(
     'Missing prompt. Pass a positional prompt, --prompt, --prompt-file, or pipe stdin.'
@@ -802,36 +1012,7 @@ async function withWorkspaceManager<T>(
   workspace: WorkspaceSummary,
   fn: (manager: LoroDocumentManager) => Promise<T>
 ): Promise<T> {
-  // One-shot commands need the remote Streams transport so their writes reach
-  // the cloud (and the daemon) instead of stranding in the local SQLite store.
-  if (!LODY_AUTH_URL) {
-    throw new Error('Cloud session commands require LODY_AUTH_URL');
-  }
-  const logger = getLogger('session');
-  const manager = await LoroDocumentManager.create(
-    workspace.id as WorkspaceId,
-    auth.userId,
-    logger,
-    {
-      attachRemoteOnCreate: true,
-      streamsTokens: createCloudStreamsTokenPort({
-        token: auth.token,
-        authBaseUrl: LODY_AUTH_URL,
-        authSiteUrl: LODY_AUTH_SITE_URL,
-        logger,
-      }),
-      cloudBilling: createCloudBillingPort({ token: auth.token }),
-    }
-  );
-  try {
-    return await fn(manager);
-  } finally {
-    await manager.cleanUp({ fast: true, preserveSessionStatus: true }).catch((error: unknown) => {
-      getLogger('session').warn(
-        `Failed to clean up workspace manager for ${workspace.id}: ${formatErrorMessage(error)}`
-      );
-    });
-  }
+  return withCommandWorkspaceManager(auth, workspace, 'session', fn);
 }
 
 async function listSessionMetasForWorkspace(manager: LoroDocumentManager): Promise<SessionMeta[]> {
@@ -855,7 +1036,19 @@ const billingEntitlementCache = new Map<
   }
 >();
 
-async function getWorkspaceBillingEntitlementBestEffort(
+/**
+ * After a failed or timed-out read, the plan stays unknown (fail open) for this long
+ * without asking again, so a persistently offline machine does not make every
+ * command wait for the read deadline. A failure is never cached as a plan.
+ */
+const BILLING_ENTITLEMENT_RETRY_AFTER_MS = 30_000;
+const billingEntitlementRetryAfter = new Map<
+  string,
+  { port: NonNullable<LoroDocumentManager['cloudBilling']>; until: number }
+>();
+
+/** @internal Exported for the quota fail-open tests. */
+export async function getWorkspaceBillingEntitlementBestEffort(
   manager: LoroDocumentManager,
   workspace: WorkspaceSummary
 ): Promise<WorkspaceBillingEntitlement | null> {
@@ -864,6 +1057,8 @@ async function getWorkspaceBillingEntitlementBestEffort(
     return null;
   }
   const now = getServerNow();
+  const retryAfter = billingEntitlementRetryAfter.get(workspace.id);
+  if (retryAfter?.port === port && retryAfter.until > now) return null;
   let entry = billingEntitlementCache.get(workspace.id);
   if (!entry || entry.port !== port || entry.expiresAt <= now) {
     entry = {
@@ -874,12 +1069,18 @@ async function getWorkspaceBillingEntitlementBestEffort(
     billingEntitlementCache.set(workspace.id, entry);
   }
   try {
-    return await entry.entitlement;
+    const entitlement = await entry.entitlement;
+    billingEntitlementRetryAfter.delete(workspace.id);
+    return entitlement;
   } catch (error) {
     // A failure must not be cached for the rest of the TTL.
     if (billingEntitlementCache.get(workspace.id) === entry) {
       billingEntitlementCache.delete(workspace.id);
     }
+    billingEntitlementRetryAfter.set(workspace.id, {
+      port,
+      until: getServerNow() + BILLING_ENTITLEMENT_RETRY_AFTER_MS,
+    });
     getLogger('session').warn(
       `Billing entitlement unavailable; allowing local operation: ${formatErrorMessage(error)}`
     );
@@ -922,13 +1123,14 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   workspace: WorkspaceSummary;
   sessionDoc: SessionDocument;
   userTurnId?: string;
-}): Promise<SessionHistory[] | undefined> {
+}): Promise<Awaited<ReturnType<typeof readSessionHistoryMetadata>> | undefined> {
   // Same ordering as session create: settle the plan before reading the doc.
   const entitlement = await getWorkspaceBillingEntitlementBestEffort(args.manager, args.workspace);
   if (!entitlement || isBillingQuotaExempt(entitlement)) return undefined;
+  const backend = await createSessionBackend(args.sessionDoc, await args.sessionDoc.getMetaState());
   const [history, queue] = await Promise.all([
-    args.sessionDoc.getHistory(),
-    args.sessionDoc.getMessageQueue(),
+    readSessionHistoryMetadata(backend.history),
+    backend.getMessageQueue(),
   ]);
   if (
     args.userTurnId &&
@@ -948,23 +1150,86 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   return history;
 }
 
-export async function listChildSessionIds(
-  manager: LoroDocumentManager,
-  parentSessionId: SessionId
-): Promise<SessionId[]> {
-  return (await listSessionMetasForWorkspace(manager))
-    .filter(
-      (session) => session.parentSessionId === parentSessionId && session.id !== parentSessionId
-    )
-    .map((session) => session.id);
+export class SessionManagementAccessDeniedError extends Error {
+  readonly code = 'SESSION_MANAGEMENT_DENIED';
+  readonly retryable = false;
+  constructor() {
+    super(
+      'This session requires machine and project editing access. Read-only access cannot manage it.'
+    );
+  }
 }
 
-async function applySessionAndChildren(
+/** Metadata management needs editing authority, not machine presence or session authorship. */
+export async function assertSessionManagementAccess(args: {
+  auth: AuthContext;
+  workspace: WorkspaceSummary;
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  delegatedRequester?: DelegatedSessionRequester;
+}): Promise<SessionMeta> {
+  const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
+  const { nativeOwnerAccess: nativeOwner } = await resolveDaemonTarget({
+    auth: args.auth,
+    manager: args.manager,
+    workspaceId: args.workspace.id as WorkspaceId,
+    machineId: session.machineId,
+    requesterUserId: resolveSessionRequester(args.auth, undefined, args.delegatedRequester).userId,
+  });
+  const access =
+    nativeOwner !== undefined
+      ? { allowed: nativeOwner }
+      : await readSessionMachineAccess({
+          auth: args.auth,
+          workspaceId: args.workspace.id as WorkspaceId,
+          machineId: session.machineId,
+          delegatedRequester: args.delegatedRequester,
+          localProjectId:
+            session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+        });
+  if (!access.allowed) throw new SessionManagementAccessDeniedError();
+  const current = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
+  if (
+    current.machineId !== session.machineId ||
+    (current.project?.kind === 'local' ? current.project.localProjectId : null) !==
+      (session.project?.kind === 'local' ? session.project.localProjectId : null)
+  )
+    throw new SessionManagementAccessDeniedError();
+  return current;
+}
+
+export async function runSessionOperationWithSyncedMetadata(
+  manager: LoroDocumentManager,
   sessionId: SessionId,
-  childSessionIds: SessionId[],
-  apply: (sessionId: SessionId) => Promise<void>
-): Promise<void> {
-  await Promise.all([sessionId, ...childSessionIds].map(apply));
+  operation: Extract<SessionOperation, 'archive' | 'restore' | 'delete'>,
+  assertCanManage: (sessionId: SessionId) => Promise<unknown>
+): Promise<SessionId[]> {
+  const reason = `session.${operation}:${sessionId}`;
+  await syncWorkspaceMetaForRead(manager, `${reason}:prewrite`);
+  const targets = await readSessionOperationTargets(manager.repo, sessionId, operation);
+  const [root, ...descendants] = targets;
+  if (operation !== 'archive' && root.isArchived !== true) {
+    throw new Error(`Session ${sessionId} is not archived.`);
+  }
+  // Preflight the entire discovered set before any write or cleanup.
+  for (const target of targets) await assertCanManage(target.id);
+  // Keep the root discoverable if deleting a child fails. Writes are not a
+  // transaction; each owning machine observes state and reconciles resources.
+  for (const target of operation === 'delete' ? [...targets].reverse() : targets) {
+    await assertCanManage(target.id);
+    const roomId = getSessionRoomId(target.id);
+    if (operation === 'delete') {
+      await manager.repo.deleteDoc(roomId);
+      await manager.cleanSessionDoc(target.id);
+    } else {
+      await manager.repo.upsertDocMeta(
+        roomId,
+        operation === 'archive' ? buildSessionArchiveMetaPatch() : buildSessionRestoreMetaPatch()
+      );
+    }
+  }
+  await ensureWorkspaceMetaSynced(manager, reason);
+  return descendants.map((session) => session.id);
 }
 
 async function syncMachineFlockDocsForRead(
@@ -972,15 +1237,38 @@ async function syncMachineFlockDocsForRead(
   workspaceId: WorkspaceId,
   machineIds: readonly MachineId[],
   reason: string
-): Promise<void> {
-  await Promise.all(
-    Array.from(new Set(machineIds)).map(
-      async (machineId) =>
+): Promise<MachineFlockFreshness> {
+  const logger = getLogger('session');
+  const results = await Promise.all(
+    Array.from(new Set(machineIds)).map(async (machineId): Promise<MachineFlockFreshness> => {
+      const daemonTarget = await resolveDaemonTarget({ manager, workspaceId, machineId });
+      if (!daemonTarget.isLocalEnvironment && daemonTarget.sameReplica) {
+        return {
+          confirmed: false,
+          error: new FlockSyncUnavailableError({
+            message: `Machine Flock read used the local daemon replica without remote confirmation (${reason}:${machineId})`,
+            reason: 'local-replica-unconfirmed',
+          }),
+        };
+      }
+      try {
         await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
           reason: `${reason}:${machineId}`,
-        })
-    )
+          requireRemoteConfirmation: true,
+        });
+        return { confirmed: true };
+      } catch (error) {
+        logger.warn(
+          `Machine Flock freshness sync was not confirmed (${reason}:${machineId}); continuing from the local replica: ${formatErrorMessage(error)}`
+        );
+        return { confirmed: false, error };
+      }
+    })
   );
+  const failures = results.filter((result) => !result.confirmed);
+  return failures.length > 0
+    ? { confirmed: false, error: new AggregateError(failures.map((failure) => failure.error)) }
+    : { confirmed: true };
 }
 
 export async function resolveLocalProjectRefOrThrow(
@@ -991,22 +1279,35 @@ export async function resolveLocalProjectRefOrThrow(
   requestedBranch?: string,
   useWorktree?: boolean
 ): Promise<ProjectRef> {
-  await syncMachineFlockDocsForRead(manager, workspaceId, [machineId], 'session.local-projects');
+  const normalizedSelector = normalizeCliValue(selector);
+  if (!normalizedSelector) {
+    throw new Error('Missing local project selector.');
+  }
+  const freshness = await syncMachineFlockDocsForRead(
+    manager,
+    workspaceId,
+    [machineId],
+    'session.local-projects'
+  );
   const localProjects = Object.values(
     await readMachineLocalProjects(manager.repo, workspaceId, machineId)
   );
   if (localProjects.length === 0) {
+    assertMachineFlockCacheSufficient(freshness, 'Local project catalog is unavailable.', {
+      kind: 'project',
+      id: normalizedSelector,
+    });
     throw new Error('No local project is registered on this machine for the target workspace.');
-  }
-
-  const normalizedSelector = normalizeCliValue(selector);
-  if (!normalizedSelector) {
-    throw new Error('Missing local project selector.');
   }
 
   const matches = selectLocalProjectsBySelector(localProjects, normalizedSelector);
 
   if (matches.length === 0) {
+    assertMachineFlockCacheSufficient(
+      freshness,
+      `Local project is absent from the local replica: ${normalizedSelector}.`,
+      { kind: 'project', id: normalizedSelector }
+    );
     throw new Error(
       `Local project not found: ${normalizedSelector}. Candidates: ${localProjects
         .map((project) => `${project.name} (${project.id})`)
@@ -1046,7 +1347,7 @@ export async function resolveLocalProjectBranchForCreate(
     return undefined;
   }
 
-  const gitState = await getLocalProjectGitStateAtRootPath(project.rootPath);
+  const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(project.rootPath);
   if (!gitState.git) {
     if (options.requireGit === true) {
       throw new Error('Cannot use --worktree with a local project that is not a git repository.');
@@ -1075,7 +1376,7 @@ export async function resolveLocalProjectBranchForCreate(
   // `branch` is either a selector this project reported or a name a human typed
   // as `--branch`. A typed `main` may match both refs/heads/main and
   // refs/remotes/origin/main, so validate it the way git resolves it.
-  await resolveLocalProjectBranchAtRootPath(project.rootPath, branch, {
+  await localProjectsLegacy.resolveLocalProjectBranchAtRootPath(project.rootPath, branch, {
     preferLocalOnCollision: true,
   });
   return branch;
@@ -1100,7 +1401,7 @@ export function normalizeLocalProjectPathSelector(selector: string): string | un
   if (!normalizedSelector || !isPathLikeLocalProjectSelector(normalizedSelector)) {
     return undefined;
   }
-  return normalizeLocalProjectRootPath(normalizedSelector);
+  return localProjectsLegacy.normalizeLocalProjectRootPath(normalizedSelector);
 }
 
 export function selectLocalProjectsBySelector<T extends LocalProjectSelectorCandidate>(
@@ -1121,7 +1422,8 @@ export function selectLocalProjectsBySelector<T extends LocalProjectSelectorCand
       projectRootPath === normalizedSelector ||
       (normalizedPathSelector !== undefined &&
         projectRootPath !== undefined &&
-        normalizeLocalProjectRootPath(projectRootPath) === normalizedPathSelector)
+        localProjectsLegacy.normalizeLocalProjectRootPath(projectRootPath) ===
+          normalizedPathSelector)
     );
   });
 }
@@ -1133,27 +1435,21 @@ export function filterAuthorizedLocalProjectCandidates<T extends LocalProjectSel
   return localProjects.filter((project) => authorizedLocalProjectIds.has(project.id));
 }
 
-async function resolveWorkspaceOrThrow(
-  auth: AuthContext,
-  selector?: string
-): Promise<WorkspaceSummary> {
-  const workspaces = await listWorkspacesForToken(auth.token);
-  const effectiveSelector =
-    normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
-  return selectWorkspaceSummary(workspaces, effectiveSelector);
-}
-
 async function resolveWorkspaceForSessionOrThrow(
   auth: AuthContext,
   sessionId: SessionId,
   options?: ResolveWorkspaceForSessionOptions
 ): Promise<WorkspaceSummary> {
-  const workspaces = await listWorkspacesForToken(auth.token);
+  const offline = typeof options === 'object' && options.offline === true;
   const selector = typeof options === 'string' ? options : options?.workspace;
-  const shouldSync = typeof options === 'object' && options.offline !== true;
+  const shouldSync = !offline;
   const syncReason = typeof options === 'object' ? options.reason : undefined;
   const effectiveSelector =
     normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
+  const workspaces = await listWorkspaceCandidates(auth, {
+    offline,
+    selector: effectiveSelector,
+  });
   const sessionExistsInWorkspace = async (workspace: WorkspaceSummary): Promise<boolean> =>
     await withWorkspaceManager(auth, workspace, async (manager) => {
       if (shouldSync) {
@@ -1232,31 +1528,60 @@ async function resolveRunningAssistantTurnId(
   sessionId: SessionId
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  const history = await readSessionHistoryMetadata(backend.history);
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
-async function appendUserPromptHistory(args: {
+export async function appendUserPromptHistory(args: {
   sessionDoc: SessionDocument;
   prompt: string;
   userId: string;
   inputConfig?: SessionHistoryInput['inputConfig'];
+  author?: MessageAuthor;
+  inputBlocks?: SessionInputBlock[];
   preallocatedId?: string;
   /** History the caller already read, so the idempotency check can skip a re-read. */
   knownHistory?: readonly SessionHistory[];
-}): Promise<{ id: string; timestamp: string; inputConfig?: SessionTurnInputConfig }> {
+  /** Offer the turn to a running turn: write `pending_apply` without activation. */
+  steer?: boolean;
+  /** Encrypted same-machine derivation root; part of the signed input. */
+  derivedFrom?: { sessionId: string; userTurnId: string };
+  /** Encrypted: this machine's signed intent for the input, written in the same commit. */
+  signMachineInput?: (input: {
+    sessionId: string;
+    targetMachineId: string;
+    userTurnId: string;
+    inputConfig: unknown;
+    derivedFrom?: unknown;
+  }) => Promise<string | undefined>;
+}): Promise<{
+  id: string;
+  timestamp: string;
+  inputConfig?: SessionTurnInputConfig;
+  existingStatus?: SessionHistory['status'];
+}> {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   if (preallocatedId) {
-    const history = args.knownHistory ?? (await sessionDoc.getHistory());
-    const existing = history.find((entry) => entry.id === historyId);
+    const candidate = args.knownHistory?.find((entry) => entry.id === historyId);
+    const existing = candidate ?? (await readHistoryEntry(backend, historyId));
     if (existing) {
-      const existingText = existing.items?.find((item) => item.type === 'text');
       if (
         existing.role !== 'user' ||
-        existingText?.type !== 'text' ||
-        existingText.text !== prompt ||
-        !isDeepStrictEqual(existing.inputConfig ?? {}, inputConfig ?? {})
+        !isDeepStrictEqual(
+          JSON.parse(JSON.stringify(existing.items)),
+          JSON.parse(
+            JSON.stringify(
+              inputBlocksToHistoryItems(args.inputBlocks ?? buildCommandInputBlocks(prompt))
+            )
+          )
+        ) ||
+        !isDeepStrictEqual(
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(existing.inputConfig) ?? {})),
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(inputConfig) ?? {}))
+        )
       ) {
         throw new Error(`Preallocated user turn id is already used: ${historyId}`);
       }
@@ -1264,6 +1589,7 @@ async function appendUserPromptHistory(args: {
         id: historyId,
         timestamp: existing.timestamp,
         ...(existing.inputConfig ? { inputConfig: existing.inputConfig } : {}),
+        existingStatus: existing.status,
       };
     }
   }
@@ -1271,16 +1597,32 @@ async function appendUserPromptHistory(args: {
   const entry: SessionHistoryInput = {
     id: historyId,
     role: 'user',
+    author: args.author ?? { v: 1, kind: 'human', userId },
     timestamp,
-    status: 'pending',
+    status: args.steer ? 'pending_apply' : 'pending',
     read: false,
     userId,
-    items: [{ type: 'text', text: prompt }],
+    items: inputBlocksToHistoryItems(args.inputBlocks ?? buildCommandInputBlocks(prompt)),
     inputConfig,
+    ...(args.derivedFrom ? { derivedFrom: args.derivedFrom } : {}),
     fileDiff: [],
     finished: true,
   };
-  await sessionDoc.updateHistory((history) => [...history, entry]);
+  if (args.signMachineInput && inputConfig) {
+    const meta = await sessionDoc.getMetaState();
+    const e2eeIntent = meta?.machineId
+      ? await args.signMachineInput({
+          sessionId: meta.id,
+          targetMachineId: meta.machineId,
+          userTurnId: historyId,
+          inputConfig,
+          ...(args.derivedFrom ? { derivedFrom: args.derivedFrom } : {}),
+        })
+      : undefined;
+    if (e2eeIntent) entry.e2eeIntent = e2eeIntent;
+  }
+  if (args.steer) await backend.appendHistoryTurn(entry);
+  else await backend.appendUserTurn(entry);
   return {
     id: historyId,
     timestamp,
@@ -1289,17 +1631,24 @@ async function appendUserPromptHistory(args: {
 }
 
 function buildCliHistoryInputConfig(args: {
+  mcpServerIds?: string[];
+  inputBlocks?: SessionInputBlock[];
+  memory?: import('@lody/shared').MemoryBinding;
   prompt: string;
   cliType: SessionMeta['cliType'];
   agentType: SessionMeta['agentType'];
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
-  taskToolsEnabled?: boolean;
   resume?: ACPSessionConfig['resume'];
   chainDepth?: number;
 }): NonNullable<SessionHistoryInput['inputConfig']> {
   return {
+    mcpServerIds: normalizeMcpServerIdSelection(args.mcpServerIds),
+    memory: args.memory,
+    ...(args.inputBlocks?.some((block) => block.type !== 'text')
+      ? { inputBlocks: args.inputBlocks }
+      : {}),
     prompt: args.prompt,
     cliType: args.cliType,
     agentType: args.agentType,
@@ -1309,18 +1658,26 @@ function buildCliHistoryInputConfig(args: {
       args.configOptionValues && Object.keys(args.configOptionValues).length > 0
         ? args.configOptionValues
         : undefined,
-    taskToolsEnabled: args.taskToolsEnabled === true,
     resume: args.resume,
     chainDepth: args.chainDepth,
   };
 }
 
 export type ResolvedTurnDispatchConfig = {
+  mcpServerIds?: string[];
+  memory?: import('@lody/shared').MemoryBinding;
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
-  /** Frozen capability gate for the built-in Lody Task MCP tools. */
-  taskToolsEnabled?: boolean;
+  /** Internal provenance for the builtin mode derived before Operation acceptance. */
+  builtinDefaultModeId?: string;
+  /** Legacy inherited-mode provenance; new configs use inheritedDispatchConfig. */
+  inheritedBuiltinDefaultModeId?: string;
+  /** Accepted inherited selections, kept distinct from current explicit choices on replay. */
+  inheritedDispatchConfig?: Pick<
+    ResolvedTurnDispatchConfig,
+    'modeId' | 'modelId' | 'configOptionValues'
+  >;
   /** Prevent create replay from re-reading mutable defaults from the requester history. */
   inheritSessionDefaults?: false;
   /**
@@ -1334,8 +1691,8 @@ export type ResolvedTurnDispatchConfig = {
    * only becomes concrete ACP ids once the target agent's capabilities are
    * known. Resolved by `applyAgentRunConfigSelection` before validation.
    *
-   * Session creation only: `sendSessionChatResult` does not resolve it, because
-   * a follow-up turn keeps the settings the session was created with.
+   * Session creation only. Chat follow-ups do not resolve it: omitted
+   * mode/model/options inherit from the target Session's last recorded turn.
    */
   runConfig?: AgentRunConfigSelection;
 };
@@ -1351,7 +1708,9 @@ export type ResolvedTurnDispatchConfig = {
  */
 export function applyAgentRunConfigSelection(
   config: ResolvedTurnDispatchConfig,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  freshness: MachineFlockFreshness = { confirmed: true },
+  inheritedModelId?: string
 ): {
   config: ResolvedTurnDispatchConfig;
   validatedConfigIds: ReadonlySet<string>;
@@ -1361,16 +1720,39 @@ export function applyAgentRunConfigSelection(
   if (!hasAgentRunConfigSelection(runConfig)) {
     return { config: rest, validatedConfigIds: new Set(), unverifiedSelections: [] };
   }
-  const resolved = resolveAgentRunConfigSelection(runConfig, capability);
+  const explicitModelId =
+    runConfig?.modelId ??
+    rest.modelId ??
+    getTurnSelectorConfigOptionValue(rest.configOptionValues, capability, 'model');
+  const resolved = validateWithMachineFlockFreshness(
+    freshness,
+    () =>
+      resolveAgentRunConfigSelection(
+        {
+          ...runConfig,
+          modelId: explicitModelId ?? inheritedModelId,
+        },
+        capability
+      ),
+    { kind: 'ACP run config', id: runConfig.modelId }
+  );
+  const explicitModeId =
+    rest.modeId ?? getTurnSelectorConfigOptionValue(rest.configOptionValues, capability, 'mode');
+  // A legacy Plan control occupies the same ACP mode selector as permission.
+  // Independent plan_mode options do not produce resolved.modeId.
+  if (resolved.modeId && explicitModeId && resolved.modeId !== explicitModeId) {
+    throw new Error(
+      `Plan mode requires ACP mode ${resolved.modeId}, which conflicts with explicit mode ${explicitModeId}.`
+    );
+  }
   const configOptionValues = {
     ...(rest.configOptionValues ?? {}),
     ...(resolved.configOptionValues ?? {}),
   };
   return {
     config: {
-      ...(rest.taskToolsEnabled !== undefined ? { taskToolsEnabled: rest.taskToolsEnabled } : {}),
       ...((resolved.modeId ?? rest.modeId) ? { modeId: resolved.modeId ?? rest.modeId } : {}),
-      ...((resolved.modelId ?? rest.modelId) ? { modelId: resolved.modelId ?? rest.modelId } : {}),
+      ...(explicitModelId !== undefined ? { modelId: resolved.modelId ?? explicitModelId } : {}),
       ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
     },
     validatedConfigIds: new Set(resolved.validatedConfigIds ?? []),
@@ -1411,6 +1793,7 @@ export function resolveTurnDispatchConfig(args: {
   mode?: string;
   model?: string;
   configOption?: string[];
+  mcpServerIds?: string;
 }): ResolvedTurnDispatchConfig {
   const modeId = normalizeCliValue(args.mode);
   const modelId = normalizeCliValue(args.model);
@@ -1419,30 +1802,149 @@ export function resolveTurnDispatchConfig(args: {
     modeId: modeId ?? undefined,
     modelId: modelId ?? undefined,
     configOptionValues: parseConfigOptionAssignments(args.configOption),
+    ...(args.mcpServerIds !== undefined
+      ? { mcpServerIds: parseCliMcpServerIds(args.mcpServerIds) }
+      : {}),
   };
+}
+
+export function parseCliMcpServerIds(value: string): string[] {
+  const parsed: unknown = JSON.parse(value);
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length > 1000 ||
+    parsed.some((id) => typeof id !== 'string' || !id.trim() || id.length > 256)
+  ) {
+    throw new Error('--mcp-server-ids must be a JSON array of MCP ids (use [] for none).');
+  }
+  return normalizeMcpServerIdSelection(parsed) ?? [];
+}
+
+function findTurnConfigOptionByCategory(
+  capability: AcpCapabilityCacheEntry | undefined,
+  category: 'mode' | 'model'
+): AcpConfigOptionSummary | undefined {
+  return capability?.configOptions?.find((option) => option.category === category);
+}
+
+function getTurnSelectorConfigOptionValue(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined,
+  category: 'mode' | 'model'
+): string | undefined {
+  const optionId = findTurnConfigOptionByCategory(capability, category)?.id ?? category;
+  const value = values?.[optionId];
+  return typeof value === 'string' ? value : undefined;
 }
 
 export function withBuiltinDefaultTurnMode(
   config: ResolvedTurnDispatchConfig,
-  target: Pick<SessionMeta, 'cliType' | 'agentType'>
+  target: Pick<SessionMeta, 'cliType' | 'agentType'>,
+  capability?: AcpCapabilityCacheEntry
 ): ResolvedTurnDispatchConfig {
-  if (config.modeId || typeof config.configOptionValues?.mode === 'string') {
+  if (
+    config.modeId ||
+    getTurnSelectorConfigOptionValue(config.configOptionValues, capability, 'mode')
+  ) {
     return config;
   }
   const modeId = getBuiltinDefaultModeId(target.cliType, target.agentType);
-  return modeId ? { ...config, modeId } : config;
+  if (!modeId) {
+    return config;
+  }
+  // Match the UI selector: only apply Lody's builtin default when the adapter
+  // actually offers that mode. Grok used to inherit Codex `agent` and Role/MCP
+  // creates then failed with "Unsupported ACP mode for the selected agent".
+  if (capability && !getSupportedTurnSelectorIds(capability, 'mode').has(modeId)) {
+    return config;
+  }
+  return { ...config, modeId };
+}
+
+/**
+ * The inherited permission policy (`_permission` options such as Grok's
+ * `permission_mode`, or a `mode`-category option). Unlike effort and Fast it
+ * does not depend on the model, so a model switch or a partial option override
+ * must not silently reset it to the agent's default.
+ */
+function pickPermissionConfigOptionValues(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined
+): Record<string, string | boolean> | undefined {
+  if (!values) return undefined;
+  const permissionIds = new Set(
+    (capability?.configOptions ?? [])
+      .filter((option) => option.category === '_permission' || option.category === 'mode')
+      .map((option) => option.id)
+  );
+  const picked = Object.fromEntries(Object.entries(values).filter(([id]) => permissionIds.has(id)));
+  return Object.keys(picked).length > 0 ? picked : undefined;
 }
 
 function mergeTurnDispatchConfig(
   explicitConfig: ResolvedTurnDispatchConfig,
-  fallbackConfig: ResolvedTurnDispatchConfig | undefined
+  fallbackConfig: ResolvedTurnDispatchConfig | undefined,
+  capability: AcpCapabilityCacheEntry | undefined
 ): ResolvedTurnDispatchConfig {
+  const inheritedPermission = pickPermissionConfigOptionValues(
+    fallbackConfig?.configOptionValues,
+    capability
+  );
   return {
+    mcpServerIds: explicitConfig.mcpServerIds,
+    memory: explicitConfig.memory ?? fallbackConfig?.memory,
     modeId: explicitConfig.modeId ?? fallbackConfig?.modeId,
     modelId: explicitConfig.modelId ?? fallbackConfig?.modelId,
-    configOptionValues: explicitConfig.configOptionValues ?? fallbackConfig?.configOptionValues,
-    taskToolsEnabled: explicitConfig.taskToolsEnabled ?? fallbackConfig?.taskToolsEnabled,
+    configOptionValues: explicitConfig.configOptionValues
+      ? { ...inheritedPermission, ...explicitConfig.configOptionValues }
+      : fallbackConfig?.configOptionValues,
   };
+}
+
+function readFrozenInheritedTurnConfig(
+  config: ResolvedTurnDispatchConfig,
+  target: Pick<SessionMeta, 'cliType' | 'agentType'>
+): ResolvedTurnDispatchConfig['inheritedDispatchConfig'] {
+  const snapshot = config.inheritedDispatchConfig;
+  const legacyMode =
+    config.inheritedBuiltinDefaultModeId ===
+    getBuiltinDefaultModeId(target.cliType, target.agentType)
+      ? config.inheritedBuiltinDefaultModeId
+      : undefined;
+  const modeId = snapshot?.modeId ?? legacyMode;
+  const inherited = {
+    ...(modeId !== undefined && config.modeId === modeId ? { modeId } : {}),
+    ...(snapshot?.modelId !== undefined && config.modelId === snapshot.modelId
+      ? { modelId: snapshot.modelId }
+      : {}),
+    ...(snapshot?.configOptionValues !== undefined &&
+    isDeepStrictEqual(config.configOptionValues, snapshot.configOptionValues)
+      ? { configOptionValues: snapshot.configOptionValues }
+      : {}),
+  };
+  return Object.keys(inherited).length ? inherited : undefined;
+}
+
+function removeShadowedInheritedSelectors(
+  inherited: ResolvedTurnDispatchConfig | undefined,
+  requested: ResolvedTurnDispatchConfig,
+  capability: AcpCapabilityCacheEntry | undefined
+): void {
+  if (!inherited) return;
+  for (const category of ['mode', 'model'] as const) {
+    const key = category === 'mode' ? 'modeId' : 'modelId';
+    if (getTurnSelectorConfigOptionValue(requested.configOptionValues, capability, category)) {
+      delete inherited[key];
+    }
+    if (requested[key] !== undefined && inherited.configOptionValues) {
+      delete inherited.configOptionValues[
+        findTurnConfigOptionByCategory(capability, category)?.id ?? category
+      ];
+    }
+  }
+  if (inherited.configOptionValues && Object.keys(inherited.configOptionValues).length === 0) {
+    delete inherited.configOptionValues;
+  }
 }
 
 function validateConfigOptionValue(
@@ -1473,38 +1975,217 @@ export function validateTurnConfigOptionValues(
    * capability's `configOptions` only describe the probed model, so re-checking
    * them here would reject values that are valid for the target model.
    */
-  skipIds?: ReadonlySet<string>
+  skipIds?: ReadonlySet<string>,
+  freshness: MachineFlockFreshness = { confirmed: true }
 ): void {
   const entries = Object.entries(values ?? {}).filter(([id]) => !skipIds?.has(id));
   if (entries.length === 0) {
     return;
   }
   if (!capability?.configOptions) {
+    assertMachineFlockCacheSufficient(
+      freshness,
+      'ACP config options are unavailable in the local replica.',
+      { kind: 'ACP option', id: entries[0]?.[0] }
+    );
     throw new Error('ACP config options are unavailable for the selected agent.');
   }
   const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
   for (const [id, value] of entries) {
     const option = optionsById.get(id);
     if (!option) {
+      assertMachineFlockCacheSufficient(
+        freshness,
+        `ACP config option is absent from the local replica: ${id}.`,
+        { kind: 'ACP option', id }
+      );
       throw new Error(`Unknown ACP config option for the selected agent: ${id}.`);
     }
     const error = validateConfigOptionValue(option, value);
     if (error) {
+      if (option.type === 'select' && typeof value === 'string') {
+        assertMachineFlockCacheSufficient(freshness, error, { kind: 'ACP option', id });
+      }
       throw new Error(error);
     }
   }
 }
 
+function validateModelDependentTurnConfigOptionValues(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined,
+  targetModelId: string | undefined,
+  freshness: MachineFlockFreshness = { confirmed: true }
+): ReadonlySet<string> {
+  const validatedIds = new Set<string>();
+  if (!values || !capability || !targetModelId) {
+    return validatedIds;
+  }
+  const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
+  const optionsById = new Map(
+    (withAcpConfigOptionsForModel(capability, targetModelId).configOptions ?? []).map((option) => [
+      option.id,
+      option,
+    ])
+  );
+  const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const declaredSpeedTiers = getAcpModelSpeedTiers(capability, targetModelId);
+  const declaredFast = getAcpModelFastSupport(capability, targetModelId);
+  for (const [id, value] of Object.entries(values)) {
+    if (isTurnEffortEntry(optionsById, id)) {
+      if (typeof value !== 'string') {
+        throw new Error(`Config option "${id}" expects a select value.`);
+      }
+      if (efforts !== undefined) {
+        if (!efforts.includes(value)) {
+          assertMachineFlockCacheSufficient(
+            freshness,
+            `Reasoning effort is absent from the local replica for model ${targetModelId}.`,
+            { kind: 'ACP option', id }
+          );
+          throw new Error(
+            `Invalid reasoning effort for model ${targetModelId}: ${String(value)}. Allowed values: ${efforts.join(', ')}.`
+          );
+        }
+        validatedIds.add(id);
+      } else if (targetModelId !== probedModelId) {
+        validatedIds.add(id);
+      }
+    } else if (isAcpFastModeConfigId(id)) {
+      const option = optionsById.get(id);
+      const isNamedSpeedTier =
+        value === ACP_FAST_MODE_VALUE_FAST || value === ACP_FAST_MODE_VALUE_ULTRAFAST;
+      if (isNamedSpeedTier) {
+        if (declaredSpeedTiers !== undefined) {
+          if (!declaredSpeedTiers.includes(value)) {
+            assertMachineFlockCacheSufficient(
+              freshness,
+              `Speed tier ${value} is unavailable in the local replica for model ${targetModelId}.`,
+              { kind: 'ACP option', id }
+            );
+            throw new Error(
+              declaredSpeedTiers.length === 0
+                ? `Model ${targetModelId} does not offer fast mode.`
+                : `Invalid speed tier for model ${targetModelId}: ${value}. Allowed values: ${[ACP_CONFIG_OPTION_OFF_VALUE, ...declaredSpeedTiers].join(', ')}.`
+            );
+          }
+          validatedIds.add(id);
+          continue;
+        }
+        if (targetModelId !== probedModelId) {
+          validatedIds.add(id);
+          continue;
+        }
+      }
+      if (option?.type === 'boolean' && typeof value !== 'boolean') {
+        throw new Error(`Config option "${id}" expects a boolean value.`);
+      }
+      if (option?.type === 'select') {
+        if (typeof value !== 'string' && typeof value !== 'boolean') {
+          throw new Error(`Config option "${id}" expects a select value.`);
+        }
+        if (typeof value === 'boolean') {
+          if (declaredFast === false && value === true) {
+            assertMachineFlockCacheSufficient(
+              freshness,
+              `Fast mode is unavailable in the local replica for model ${targetModelId}.`,
+              { kind: 'ACP option', id }
+            );
+            throw new Error(`Model ${targetModelId} does not offer fast mode.`);
+          }
+          validatedIds.add(id);
+          continue;
+        }
+        // A custom raw select value has no model-independent toggle meaning.
+        // Leave its membership validation to the ordinary catalog validator.
+        if (value !== ACP_CONFIG_OPTION_ON_VALUE && value !== ACP_CONFIG_OPTION_OFF_VALUE) {
+          continue;
+        }
+      } else if (
+        typeof value !== 'boolean' &&
+        value !== ACP_CONFIG_OPTION_ON_VALUE &&
+        value !== ACP_CONFIG_OPTION_OFF_VALUE
+      ) {
+        throw new Error(`Config option "${id}" expects a boolean or on/off value.`);
+      }
+      // Off on a model without Fast is already the case; on cannot happen.
+      if (declaredFast === false && (value === true || value === ACP_CONFIG_OPTION_ON_VALUE)) {
+        assertMachineFlockCacheSufficient(
+          freshness,
+          `Fast mode is unavailable in the local replica for model ${targetModelId}.`,
+          { kind: 'ACP option', id }
+        );
+        throw new Error(`Model ${targetModelId} does not offer fast mode.`);
+      }
+      // The probe's snapshot says nothing about the target model's Fast; a
+      // declared Fast, or an unknown one, is left to the agent at dispatch.
+      if (declaredFast !== undefined || targetModelId !== probedModelId) {
+        validatedIds.add(id);
+      }
+    }
+  }
+  return validatedIds;
+}
+
+function isTurnEffortEntry(
+  optionsById: ReadonlyMap<string, AcpConfigOptionSummary>,
+  id: string
+): boolean {
+  return isAcpThoughtLevelConfigOption(optionsById.get(id) ?? { id }) || id === 'effort';
+}
+
 export function filterCompatibleTurnConfigOptionValues(
   values: Record<string, string | boolean> | undefined,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  targetModelId?: string
 ): Record<string, string | boolean> | undefined {
-  if (!values || !capability?.configOptions) {
+  if (!values || !capability) {
     return undefined;
   }
-  const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
+  const optionsById = new Map(
+    (withAcpConfigOptionsForModel(capability, targetModelId).configOptions ?? []).map((option) => [
+      option.id,
+      option,
+    ])
+  );
+  const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
+  const efforts = getAcpModelEffortChoices(capability, targetModelId);
+  const speedTiers = getAcpModelSpeedTiers(capability, targetModelId);
+  const fastSupport = getAcpModelFastSupport(capability, targetModelId);
+  // A different (or unknown) probe model cannot invalidate the target's
+  // recorded controls. Without per-model data, preserve them for runtime.
+  const keepUnverified =
+    targetModelId !== probedModelId ||
+    getDeclaredModelControls(capability, targetModelId) !== undefined;
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
+      if (targetModelId) {
+        if (isTurnEffortEntry(optionsById, id)) {
+          if (efforts !== undefined) return typeof value === 'string' && efforts.includes(value);
+          if (keepUnverified) return typeof value === 'string';
+        } else if (isAcpFastModeConfigId(id)) {
+          if (speedTiers !== undefined) {
+            if (speedTiers.length === 0) return false;
+            if (value === ACP_FAST_MODE_VALUE_ULTRAFAST) {
+              return speedTiers.includes(ACP_FAST_MODE_VALUE_ULTRAFAST);
+            }
+            if (value === ACP_FAST_MODE_VALUE_FAST) {
+              return speedTiers.includes(ACP_FAST_MODE_VALUE_FAST);
+            }
+          }
+          // A model known without Fast has nothing to carry a Fast value to.
+          if (fastSupport === false) return false;
+          if (keepUnverified) {
+            return (
+              typeof value === 'boolean' ||
+              value === ACP_CONFIG_OPTION_ON_VALUE ||
+              value === ACP_CONFIG_OPTION_OFF_VALUE ||
+              value === ACP_FAST_MODE_VALUE_FAST ||
+              value === ACP_FAST_MODE_VALUE_ULTRAFAST
+            );
+          }
+        }
+      }
       const option = optionsById.get(id);
       return option !== undefined && validateConfigOptionValue(option, value) === undefined;
     })
@@ -1512,10 +2193,10 @@ export function filterCompatibleTurnConfigOptionValues(
   return Object.keys(compatible).length > 0 ? compatible : undefined;
 }
 
-const getSupportedTurnSelectorIds = (
+function getSupportedTurnSelectorIds(
   capability: AcpCapabilityCacheEntry | undefined,
   category: 'mode' | 'model'
-): Set<string> => {
+): Set<string> {
   const ids = new Set<string>(
     category === 'mode'
       ? (capability?.modes ?? []).map((mode) => mode.id)
@@ -1532,68 +2213,158 @@ const getSupportedTurnSelectorIds = (
     }
   }
   return ids;
-};
+}
 
 export function validateTurnModeAndModel(
   config: Pick<ResolvedTurnDispatchConfig, 'modeId' | 'modelId'>,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  freshness: MachineFlockFreshness = { confirmed: true }
 ): void {
   if (config.modeId && !getSupportedTurnSelectorIds(capability, 'mode').has(config.modeId)) {
+    assertMachineFlockCacheSufficient(
+      freshness,
+      `ACP mode is absent from the local replica: ${config.modeId}.`,
+      { kind: 'ACP mode', id: config.modeId }
+    );
     throw new Error(`Unsupported ACP mode for the selected agent: ${config.modeId}.`);
   }
   if (config.modelId && !getSupportedTurnSelectorIds(capability, 'model').has(config.modelId)) {
+    assertMachineFlockCacheSufficient(
+      freshness,
+      `ACP model is absent from the local replica: ${config.modelId}.`,
+      { kind: 'ACP model', id: config.modelId }
+    );
     throw new Error(`Unsupported ACP model for the selected agent: ${config.modelId}.`);
   }
 }
 
 export function filterCompatibleInheritedTurnConfig(
   config: ResolvedTurnDispatchConfig | undefined,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  targetModelId?: string
 ): ResolvedTurnDispatchConfig | undefined {
   if (!config) {
     return undefined;
   }
   const supportedModes = getSupportedTurnSelectorIds(capability, 'mode');
   const supportedModels = getSupportedTurnSelectorIds(capability, 'model');
+  const modelId =
+    config.modelId && supportedModels.has(config.modelId) ? config.modelId : undefined;
+  const rawModelId = getTurnSelectorConfigOptionValue(
+    config.configOptionValues,
+    capability,
+    'model'
+  );
   const configOptionValues = filterCompatibleTurnConfigOptionValues(
     config.configOptionValues,
-    capability
+    capability,
+    targetModelId ??
+      modelId ??
+      (rawModelId && supportedModels.has(rawModelId) ? rawModelId : undefined)
   );
   return {
     ...(config.modeId && supportedModes.has(config.modeId) ? { modeId: config.modeId } : {}),
-    ...(config.modelId && supportedModels.has(config.modelId) ? { modelId: config.modelId } : {}),
+    ...(modelId ? { modelId } : {}),
     ...(configOptionValues ? { configOptionValues } : {}),
-    ...(config.taskToolsEnabled !== undefined ? { taskToolsEnabled: config.taskToolsEnabled } : {}),
   };
 }
 
-async function readAgentAcpCapability(args: {
+function warnDroppedInheritedMachineFlockSelections(args: {
+  freshness: MachineFlockFreshness;
+  inherited: ResolvedTurnDispatchConfig | undefined;
+  compatible: ResolvedTurnDispatchConfig | undefined;
+  requested: ResolvedTurnDispatchConfig;
+  capability: AcpCapabilityCacheEntry | undefined;
+}): void {
+  if (args.freshness.confirmed || !args.inherited) return;
+  let dropped = false;
+  for (const category of ['mode', 'model'] as const) {
+    const key = category === 'mode' ? 'modeId' : 'modelId';
+    const inheritedId = args.inherited[key];
+    if (
+      inheritedId &&
+      args.requested[key] === undefined &&
+      getTurnSelectorConfigOptionValue(
+        args.requested.configOptionValues,
+        args.capability,
+        category
+      ) === undefined &&
+      args.compatible?.[key] !== inheritedId
+    ) {
+      dropped = true;
+    }
+  }
+  if (args.requested.configOptionValues === undefined) {
+    for (const [id, value] of Object.entries(args.inherited.configOptionValues ?? {})) {
+      const shadowed = (['mode', 'model'] as const).some((category) => {
+        const key = category === 'mode' ? 'modeId' : 'modelId';
+        return (
+          args.requested[key] !== undefined &&
+          id === (findTurnConfigOptionByCategory(args.capability, category)?.id ?? category)
+        );
+      });
+      if (!shadowed && args.compatible?.configOptionValues?.[id] !== value) {
+        dropped = true;
+      }
+    }
+  }
+  if (dropped) {
+    getLogger('session').warn(
+      'Dropped incompatible inherited ACP selections after an unconfirmed catalog read.'
+    );
+  }
+}
+
+type AgentAcpCapabilityReadArgs = {
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   agentConfigId?: AgentConfigMeta['id'];
-}): Promise<AcpCapabilityCacheEntry | undefined> {
+  /** Omission means the caller has no launch-source context; explicit undefined means no override. */
+  runtimeOverrides?: BuiltinRuntimeOverrides;
+  localOnly?: boolean;
+};
+
+async function readAgentAcpCapabilitySnapshot(args: AgentAcpCapabilityReadArgs): Promise<{
+  capability: AcpCapabilityCacheEntry | undefined;
+  freshness: MachineFlockFreshness;
+}> {
   if (!args.agentConfigId) {
-    return undefined;
+    return { capability: undefined, freshness: { confirmed: true } };
   }
-  await syncMachineFlockDocsForRead(
-    args.manager,
-    args.workspaceId,
-    [args.machineId],
-    'session.acp-capabilities'
-  );
+  const freshness = args.localOnly
+    ? { confirmed: true as const }
+    : await syncMachineFlockDocsForRead(
+        args.manager,
+        args.workspaceId,
+        [args.machineId],
+        'session.acp-capabilities'
+      );
   const handle = await args.manager.repo.openFlockDoc(
     getMachineFlockDocId(args.workspaceId, args.machineId)
   );
   const capabilities = getMachineFlockAcpCapabilities(
-    readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    readMachineFlockRowsFromFlock(handle.flock, {
+      families: ACP_CAPABILITY_ROW_FAMILIES,
+    })
   );
-  return capabilities[getAcpCapabilityCacheKey(args.agentConfigId)];
+  const cached = capabilities[getAcpCapabilityCacheKey(args.agentConfigId)];
+  const capability =
+    'runtimeOverrides' in args
+      ? getReadableAcpCapabilityCacheEntryForRuntimeOverrides(cached, args.runtimeOverrides)
+      : getReadableAcpCapabilityCacheEntry(cached);
+  return { capability, freshness };
+}
+
+export async function readAgentAcpCapability(
+  args: AgentAcpCapabilityReadArgs
+): Promise<AcpCapabilityCacheEntry | undefined> {
+  return (await readAgentAcpCapabilitySnapshot(args)).capability;
 }
 
 export function resolveTurnDispatchConfigFromInputConfig(
   inputConfig: SessionTurnInputConfig | undefined,
-  agentConfig: AgentConfigMeta
+  agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
 ): ResolvedTurnDispatchConfig | undefined {
   if (
     inputConfig?.cliType !== agentConfig.cliType ||
@@ -1602,24 +2373,24 @@ export function resolveTurnDispatchConfigFromInputConfig(
     return undefined;
   }
   return {
+    ...(inputConfig.memory ? { memory: inputConfig.memory } : {}),
     ...(inputConfig.modeId ? { modeId: inputConfig.modeId } : {}),
     ...(inputConfig.modelId ? { modelId: inputConfig.modelId } : {}),
     ...(inputConfig.configOptionValues
       ? { configOptionValues: inputConfig.configOptionValues }
       : {}),
-    ...(inputConfig.taskToolsEnabled !== undefined
-      ? { taskToolsEnabled: inputConfig.taskToolsEnabled }
-      : {}),
   };
 }
 
-async function resolveSessionTurnDispatchDefaults(
-  manager: LoroDocumentManager,
-  sessionId: SessionId,
-  agentConfig: AgentConfigMeta
-): Promise<ResolvedTurnDispatchConfig | undefined> {
-  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+/**
+ * Last matching user turn that recorded a model, else the last matching turn.
+ * A model-less follow-up must not hide an earlier selected model.
+ */
+export function resolveTurnDispatchDefaultsFromHistory(
+  history: readonly Pick<SessionHistoryInput, 'role' | 'inputConfig'>[],
+  agent: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
+): ResolvedTurnDispatchConfig | undefined {
+  let fallback: ResolvedTurnDispatchConfig | undefined;
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index];
     if (entry?.role !== 'user') {
@@ -1627,13 +2398,104 @@ async function resolveSessionTurnDispatchDefaults(
     }
     const defaults = resolveTurnDispatchConfigFromInputConfig(
       entry.inputConfig as SessionTurnInputConfig | undefined,
-      agentConfig
+      agent
     );
-    if (defaults) {
+    if (!defaults) {
+      continue;
+    }
+    if (defaults.modelId) {
       return defaults;
     }
+    fallback ??= defaults;
   }
-  return undefined;
+  return fallback;
+}
+
+async function resolveSessionTurnDispatchDefaults(
+  manager: LoroDocumentManager,
+  sessionId: SessionId,
+  agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
+): Promise<ResolvedTurnDispatchConfig | undefined> {
+  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  return resolveTurnDispatchDefaultsFromHistory(
+    await readSessionHistoryMetadata(backend.history),
+    agentConfig
+  );
+}
+
+export function resolveEffectiveSessionChatDispatchConfig(args: {
+  dispatchConfig: ResolvedTurnDispatchConfig;
+  inheritedDispatchConfig?: ResolvedTurnDispatchConfig;
+  target: Pick<SessionMeta, 'cliType' | 'agentType'>;
+  capability?: AcpCapabilityCacheEntry;
+  freshness?: MachineFlockFreshness;
+}): ResolvedTurnDispatchConfig {
+  const freshness = args.freshness ?? { confirmed: true };
+  const previous = args.inheritedDispatchConfig;
+  const explicitModeOption = getTurnSelectorConfigOptionValue(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    'mode'
+  );
+  const explicitModelOption = getTurnSelectorConfigOptionValue(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    'model'
+  );
+  // Inherit run selectors only. The probe's options describe its current
+  // model, so they cannot establish that old options are safe to carry across
+  // an explicit model switch.
+  const inherited = previous
+    ? {
+        modeId: explicitModeOption ? undefined : previous.modeId,
+        modelId: explicitModelOption ? undefined : previous.modelId,
+        configOptionValues:
+          args.dispatchConfig.modelId && args.dispatchConfig.modelId !== previous.modelId
+            ? pickPermissionConfigOptionValues(previous.configOptionValues, args.capability)
+            : previous.configOptionValues,
+      }
+    : undefined;
+  const compatible = filterCompatibleInheritedTurnConfig(
+    inherited,
+    args.capability,
+    args.dispatchConfig.modelId ?? explicitModelOption
+  );
+  const builtinDefault = getBuiltinDefaultModeId(args.target.cliType, args.target.agentType);
+  if (!args.capability && compatible && builtinDefault && inherited?.modeId === builtinDefault) {
+    compatible.modeId = builtinDefault;
+  }
+  if (compatible && previous?.memory) compatible.memory = previous.memory;
+  warnDroppedInheritedMachineFlockSelections({
+    freshness,
+    inherited,
+    compatible,
+    requested: args.dispatchConfig,
+    capability: args.capability,
+  });
+  removeShadowedInheritedSelectors(compatible, args.dispatchConfig, args.capability);
+  const effective = withBuiltinDefaultTurnMode(
+    mergeTurnDispatchConfig(args.dispatchConfig, compatible, args.capability),
+    args.target,
+    args.capability
+  );
+  validateTurnModeAndModel(args.dispatchConfig, args.capability, freshness);
+  const targetModelId =
+    effective.modelId ??
+    getTurnSelectorConfigOptionValue(effective.configOptionValues, args.capability, 'model');
+  const validatedIds = validateModelDependentTurnConfigOptionValues(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    targetModelId,
+    freshness
+  );
+  validateTurnConfigOptionValues(
+    args.dispatchConfig.configOptionValues,
+    args.capability && withAcpConfigOptionsForModel(args.capability, targetModelId),
+    validatedIds,
+    freshness
+  );
+  return effective;
 }
 
 function buildStructuredWaitError(
@@ -1670,7 +2532,11 @@ async function removeHistoryEntryById(
   sessionDoc: SessionDocument,
   historyId: string
 ): Promise<void> {
-  await sessionDoc.updateHistory((history) => history.filter((entry) => entry.id !== historyId));
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  await backend.applyHistoryAction({
+    kind: 'remove-turn',
+    turnId: historyId,
+  });
 }
 
 export async function updateSessionActivityTimestamps(
@@ -1773,111 +2639,40 @@ async function ensureLocalRuntimeAvailable(
   }
 }
 
-function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = normalizeCliValue(process.env[name]);
-  if (!raw) {
-    return fallback;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-async function createMachineRpcClient(args: {
+/**
+ * Rejects only a target that presence reports definitively offline. Delivery
+ * runs through the synced Session document, so no one-shot RPC probe gates it:
+ * an unanswered probe during a transport slowdown is not evidence of offline.
+ * Resolves to the presence that admitted the target (`online` or `unknown`).
+ */
+export async function ensureTargetMachineNotOffline(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
-}): Promise<LoroStreamsMachineRpcClient> {
-  if (!LODY_AUTH_URL) {
-    throw new Error('Cloud machine RPC requires LODY_AUTH_URL');
-  }
-  const logger = getLogger('session');
-  const cliHttpFetch = getCliHttpFetch({ logger });
-  const streamsTokenProvider = createCloudStreamsTokenPort({
-    token: args.auth.token,
-    authBaseUrl: LODY_AUTH_URL,
-    authSiteUrl: LODY_AUTH_SITE_URL,
-    logger,
-  }).createTokenProvider({ workspaceId: args.workspaceId });
-  const baseUrl = await prepareCliStreamsGatewayBaseUrl(streamsTokenProvider);
-  const streamClient = createLoroStreamsJsonStreamClient({
-    bucketId: LORO_STREAMS_BUCKET_ID,
-    getToken: async () => await streamsTokenProvider.getToken(),
-    // Keep the prepared URL available during an auth-triggered token refresh;
-    // prefer a newly returned gateway after the refresh completes.
-    getBaseUrl: () => streamsTokenProvider.getGatewayBaseUrl() ?? baseUrl,
-    shardUrls: getLoroStreamsShardUrls(baseUrl, streamsTokenProvider.getShardHostSuffix()),
-    fetchImpl: cliHttpFetch,
-    timeout: {
-      connectTimeoutMs: readPositiveIntEnv('LODY_LORO_RPC_CONNECT_TIMEOUT_MS', 30_000),
-    },
-  });
-  const client = new LoroStreamsMachineRpcClient({
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'>;
+}): Promise<MachinePresence> {
+  const target = await resolveDaemonTarget({
+    auth: args.auth,
+    manager: args.manager,
     workspaceId: args.workspaceId,
     machineId: args.machineId,
-    streamClient,
-    rpcVersion: LORO_STREAMS_RPC_VERSION,
-    retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
-    now: getServerNow,
-    logger,
   });
-  await client.start();
-  return client;
-}
-
-async function withMachineRpcClient<T>(
-  args: {
-    auth: AuthContext;
-    workspaceId: WorkspaceId;
-    machineId: MachineId;
-  },
-  fn: (client: LoroStreamsMachineRpcClient) => Promise<T>
-): Promise<T> {
-  const client = await createMachineRpcClient(args);
-  try {
-    return await fn(client);
-  } finally {
-    client.stop();
+  if (target.isLocalEnvironment) {
+    if (!target.sameReplica) {
+      throw new Error('Target machine is unavailable in this workspace');
+    }
+    return 'online';
   }
-}
-
-async function ensureTargetMachineOnline(args: {
-  auth: AuthContext;
-  workspaceId: WorkspaceId;
-  machineId: MachineId;
-}): Promise<void> {
   if (args.machineId === args.auth.machineId) {
+    if (target.sameReplica) {
+      return 'online';
+    }
     await ensureLocalRuntimeAvailable(args.machineId, args.workspaceId);
-    return;
+    return 'online';
   }
-
-  const status = await withMachineRpcClient(
-    args,
-    async (client) => await client.requestMachineStatus({ timeoutMs: 10_000 })
-  ).catch((error: unknown) => {
-    throw new Error(
-      `Machine ${args.machineId} is offline or unreachable: ${formatErrorMessage(error)}`
-    );
-  });
-  if (!status?.success) {
-    throw new Error(
-      `Machine ${args.machineId} is offline or unavailable${
-        status?.error ? `: ${status.error}` : '.'
-      }`
-    );
-  }
-}
-
-async function getMachineOnlineState(args: {
-  auth: AuthContext;
-  workspaceId: WorkspaceId;
-  machineId: MachineId;
-}): Promise<{ online: boolean; message?: string }> {
-  try {
-    await ensureTargetMachineOnline(args);
-    return { online: true };
-  } catch (error) {
-    return { online: false, message: formatErrorMessage(error) };
-  }
+  const presence = await readMachinePresence(args.manager, args.machineId);
+  if (presence === 'offline') throw new MachineOfflineError({ machineId: args.machineId });
+  return presence;
 }
 
 export async function readSessionMachineAccess(args: {
@@ -1885,32 +2680,141 @@ export async function readSessionMachineAccess(args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
   requesterUserId?: string;
+  delegatedRequester?: DelegatedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
-  const requesterUserId = resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId);
-  try {
-    return await canRequestMachineForCliToken({
-      token: args.auth.token,
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.requesterUserId,
+    args.delegatedRequester
+  );
+  return await readResolvedSessionMachineAccess({
+    auth: args.auth,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+    requester,
+    ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+  });
+}
+
+export type MachineAccessReaders = {
+  /** Hosted check of both users; `null` while the backend predates it. */
+  delegated: typeof canDelegateMachineUseForCliToken;
+  /** Access of the CLI token's user: owned, or shared with the team (and project shared). */
+  asTokenUser: typeof canRequestMachineForCliToken;
+  /** A requester served by the token user's machines; the target must be one of them. */
+  asServedRequester: typeof canUseMachineForCliToken;
+};
+
+const defaultMachineAccessReaders: MachineAccessReaders = {
+  delegated: canDelegateMachineUseForCliToken,
+  asTokenUser: canRequestMachineForCliToken,
+  asServedRequester: canUseMachineForCliToken,
+};
+
+/**
+ * A delegated caller acts through the machine it runs on, so the target must
+ * be usable by that machine's owner (the token user) and by the human driving
+ * the Turn, each on their own: delegation never widens either one's reach.
+ *
+ * Older backends lack the combined query. Their fallback cannot check a
+ * different human on a machine the owner does not own, so it denies that case.
+ */
+export async function readDelegatedMachineAccess(
+  input: {
+    token: string;
+    tokenUserId: string;
+    workspaceId: string;
+    machineId: string;
+    requesterUserId: string;
+    localProjectId?: string;
+  },
+  readers: MachineAccessReaders = defaultMachineAccessReaders
+): Promise<MachineAccessCheckResult> {
+  const target = {
+    token: input.token,
+    workspaceId: input.workspaceId,
+    machineId: input.machineId,
+    ...(input.localProjectId ? { localProjectId: input.localProjectId } : {}),
+  };
+  const verdict = await readers.delegated({ ...target, requesterUserId: input.requesterUserId });
+  if (verdict) {
+    return verdict;
+  }
+  const owner = await readers.asTokenUser({ ...target, requesterUserId: input.tokenUserId });
+  if (!owner.allowed || input.requesterUserId === input.tokenUserId) {
+    return owner;
+  }
+  return await readers.asServedRequester({ ...target, requesterUserId: input.requesterUserId });
+}
+
+async function readResolvedSessionMachineAccess(args: {
+  auth: AuthContext;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requester: ResolvedSessionRequester;
+  localProjectId?: string;
+  manager?: LoroDocumentManager;
+}): Promise<MachineAccessCheckResult> {
+  const encrypted = await readEncryptedMachineAccess({
+    machineId: args.machineId,
+    requesterUserId: args.requester.userId,
+    ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+  });
+  if (encrypted) return encrypted;
+  const environment = getSessionCommandEnvironment();
+  if (environment) {
+    if (args.auth !== environment.auth) throw new Error('Session command identity mismatch');
+    return environment.checkMachineAccess({
       workspaceId: args.workspaceId,
       machineId: args.machineId,
-      requesterUserId,
-      ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
-    });
-  } catch (error) {
-    throw new Error(`Could not verify machine access: ${formatErrorMessage(error)}`, {
-      cause: error,
+      requesterUserId: args.requester.userId,
+      localProjectId: args.localProjectId,
     });
   }
+  const daemonManager = args.manager ?? getDaemonWorkspace()?.manager;
+  if (daemonManager) {
+    const { nativeOwnerAccess: nativeOwner } = await resolveDaemonTarget({
+      auth: args.auth,
+      manager: daemonManager,
+      workspaceId: args.workspaceId,
+      machineId: args.machineId,
+      requesterUserId: args.requester.userId,
+    });
+    if (nativeOwner !== undefined) {
+      return nativeOwner ? { allowed: true } : { allowed: false, reason: 'requester_not_member' };
+    }
+  }
+  const target = {
+    token: args.auth.token,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+    requesterUserId: args.requester.userId,
+    ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+  };
+  return await readMachineAccessWithBoundedRetry({
+    verify: async () =>
+      args.requester.isDelegated
+        ? await readDelegatedMachineAccess({ ...target, tokenUserId: args.auth.userId })
+        : await canRequestMachineForCliToken(target),
+    onRetry: ({ attempt, maxAttempts, delayMs, error }) => {
+      getLogger('session').warn(
+        `Machine access verification unavailable; retrying ` +
+          `(attempt=${attempt}/${maxAttempts} delayMs=${delayMs}): ${error}`
+      );
+    },
+  });
 }
 
 async function assertMachineAccess(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
   localProjectId?: string;
+  manager?: LoroDocumentManager;
 }): Promise<void> {
-  const access = await readSessionMachineAccess(args);
+  const access = await readResolvedSessionMachineAccess(args);
   if (!access.allowed) {
     throw new Error(`Machine access denied for ${args.machineId}: ${access.reason}`);
   }
@@ -1918,14 +2822,36 @@ async function assertMachineAccess(args: {
 
 async function dispatchTurnFastPath(args: {
   auth: AuthContext;
+  manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   sessionId: SessionId;
   userTurnId: string;
   userId: string;
   timestamp: string;
+  inputOrigin: 'human' | 'agent';
   inputConfig: SessionTurnInputConfig | undefined;
 }): Promise<void> {
+  const { localHost } = await resolveDaemonTarget({
+    auth: args.auth,
+    manager: args.manager,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+  });
+  if (localHost) {
+    await localHost.dispatchSession(
+      args.sessionId,
+      args.inputConfig
+        ? {
+            inputId: args.userTurnId,
+            userId: args.userId,
+            config: args.inputConfig,
+            inputOrigin: args.inputOrigin,
+          }
+        : undefined
+    );
+    return;
+  }
   if (!args.inputConfig) {
     return;
   }
@@ -1938,6 +2864,7 @@ async function dispatchTurnFastPath(args: {
           userTurnId: args.userTurnId,
           userId: args.userId,
           timestamp: args.timestamp,
+          inputOrigin: args.inputOrigin,
           inputConfig: args.inputConfig!,
           timeoutMs: 15_000,
         })
@@ -1961,8 +2888,24 @@ async function writeDispatchPointer(args: {
 }): Promise<void> {
   await args.manager.repo.upsertDocMeta(getSessionRoomId(args.sessionId), {
     latestUserMsgId: args.userTurnId,
-    lastMissingHistoryUserMsgId: undefined,
   } satisfies Partial<SessionMeta>);
+}
+
+async function persistDispatchedSessionWrite(args: {
+  sameReplica: boolean;
+  manager: LoroDocumentManager;
+  sessionDoc: SessionDocument;
+  reason: string;
+}): Promise<void> {
+  if (args.sameReplica) {
+    if (typeof args.manager.repo.flush === 'function') await args.manager.repo.flush();
+    return;
+  }
+  await confirmDispatchSyncedBestEffort({
+    manager: args.manager,
+    sessionDoc: args.sessionDoc,
+    reason: args.reason,
+  });
 }
 
 /**
@@ -1994,7 +2937,14 @@ export async function confirmDispatchSyncedBestEffort(args: {
       );
       return;
     }
-    await ensureWorkspaceMetaSynced(args.manager, `${args.reason}:meta`);
+    // Best effort, on the synchronous tail of create: keep the short default
+    // wait instead of the failing confirmation budget.
+    if (!(await args.manager.waitUntilMetaSynced({ reason: `${args.reason}:meta` }))) {
+      logger.warn(
+        `Session dispatch not yet confirmed by Loro Streams (${args.reason}:meta); ` +
+          `the durable dispatch pointer will converge on reconnect.`
+      );
+    }
   } catch (error) {
     logger.warn(
       `Session dispatch confirmation did not complete (${args.reason}); ` +
@@ -2059,6 +3009,28 @@ export function resolveSessionCommandRequesterUserId(
   return auth.userId;
 }
 
+export function resolveSessionRequester(
+  auth: Pick<AuthContext, 'userId'>,
+  requesterUserId?: string,
+  delegatedRequester?: DelegatedSessionRequester
+): ResolvedSessionRequester {
+  if (!delegatedRequester) {
+    return {
+      userId: resolveSessionCommandRequesterUserId(auth, requesterUserId),
+      isDelegated: false,
+    };
+  }
+  const delegatedUserId = normalizeCliValue(delegatedRequester.userId);
+  if (!delegatedUserId) {
+    throw new Error('Delegated Session requester must identify a user.');
+  }
+  const requested = normalizeCliValue(requesterUserId);
+  if (requested !== undefined && requested !== delegatedUserId) {
+    throw new Error('Requester identity must match the delegated Session requester.');
+  }
+  return { userId: delegatedUserId, isDelegated: true };
+}
+
 export function resolveSessionCreateOwnerUserId(
   requesterUserId: string,
   sessionOwnerUserId?: string
@@ -2095,16 +3067,16 @@ async function listAuthorizedMachineMetasForCreate(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machines: readonly MachineMeta[];
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
 }): Promise<MachineMeta[]> {
   const rows = await Promise.all(
     args.machines.map(async (machine) => ({
       machine,
-      access: await readSessionMachineAccess({
+      access: await readResolvedSessionMachineAccess({
         auth: args.auth,
         workspaceId: args.workspaceId,
         machineId: machine.id,
-        requesterUserId: args.requesterUserId,
+        requester: args.requester,
       }),
     }))
   );
@@ -2121,16 +3093,16 @@ async function filterAuthorizedLocalProjectsForCreate<
   workspaceId: WorkspaceId;
   machineId: MachineId;
   localProjects: readonly T[];
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
 }): Promise<T[]> {
   const rows = await Promise.all(
     args.localProjects.map(async (project) => ({
       project,
-      access: await readSessionMachineAccess({
+      access: await readResolvedSessionMachineAccess({
         auth: args.auth,
         workspaceId: args.workspaceId,
         machineId: args.machineId,
-        requesterUserId: args.requesterUserId,
+        requester: args.requester,
         localProjectId: project.id,
       }),
     }))
@@ -2147,7 +3119,7 @@ async function resolveTargetMachineForCreate(args: {
   auth: AuthContext;
   machineSelector?: string;
   defaultMachineId?: MachineId;
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
   parentSessionId?: SessionId;
 }): Promise<MachineMeta> {
   const machines = await listMachineMetasForWorkspace(args.manager);
@@ -2158,7 +3130,7 @@ async function resolveTargetMachineForCreate(args: {
     auth: args.auth,
     workspaceId: args.workspaceId,
     machines,
-    requesterUserId: args.requesterUserId,
+    requester: args.requester,
   });
   if (authorizedMachines.length === 0) {
     throw new Error('No authorized machines are available in this workspace.');
@@ -2179,8 +3151,13 @@ async function listAgentConfigsForMachine(
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
   machineId: MachineId
-): Promise<AgentConfigMeta[]> {
-  await syncMachineFlockDocsForRead(manager, workspaceId, [machineId], 'session.agent-configs');
+): Promise<{ configs: AgentConfigMeta[]; freshness: MachineFlockFreshness }> {
+  const freshness = await syncMachineFlockDocsForRead(
+    manager,
+    workspaceId,
+    [machineId],
+    'session.agent-configs'
+  );
   const configs = await listMergedAgentConfigs(manager.repo, workspaceId, [machineId]);
   configs.sort((left, right) => {
     const nameCompare = left.name.localeCompare(right.name);
@@ -2189,7 +3166,7 @@ async function listAgentConfigsForMachine(
     }
     return left.id.localeCompare(right.id);
   });
-  return configs;
+  return { configs, freshness };
 }
 
 export function selectDefaultAgentConfigForCreate(
@@ -2222,13 +3199,32 @@ async function resolveAgentConfigForCreate(args: {
   selector?: string;
   currentSession?: SessionMeta;
 }): Promise<AgentConfigMeta> {
-  const configs = await listAgentConfigsForMachine(args.manager, args.workspaceId, args.machineId);
+  const { configs, freshness } = await listAgentConfigsForMachine(
+    args.manager,
+    args.workspaceId,
+    args.machineId
+  );
   if (configs.length === 0) {
+    assertMachineFlockCacheSufficient(freshness, 'Agent config catalog is unavailable.', {
+      kind: 'agent config',
+      id: args.selector,
+    });
     throw new Error(`No agent config exists on machine ${args.machineId}.`);
   }
   const selector =
     normalizeCliValue(args.selector) ?? normalizeCliValue(process.env.LODY_AGENT_CONFIG_ID);
   if (selector) {
+    if (
+      !configs.some(
+        (config) => config.id === selector || normalizeCliValue(config.name) === selector
+      )
+    ) {
+      assertMachineFlockCacheSufficient(
+        freshness,
+        `Agent config is absent from the local replica: ${selector}.`,
+        { kind: 'agent config', id: selector }
+      );
+    }
     return selectUniqueAgentConfigByIdOrName(configs, selector);
   }
   const defaultConfig = selectDefaultAgentConfigForCreate(
@@ -2248,12 +3244,14 @@ async function assertGitHubRepoAccess(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   repoFullName: string;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<void> {
+  if (getSessionCommandEnvironment())
+    throw new Error('Hosted repository contexts are unavailable; use a registered local project.');
   const repos = await listWorkspaceGitHubRepositoriesForCliToken({
     token: args.auth.token,
     workspaceId: args.workspaceId,
-    requesterUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+    requesterUserId: args.requesterUserId,
     enabledOnly: true,
   });
   const normalized = args.repoFullName.toLowerCase();
@@ -2268,16 +3266,19 @@ export async function readLocalProjectGitStateOnMachine(args: {
   machineId: MachineId;
   localProjectId: string;
   localRootPath: string;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<
-  | { success: true; state: Awaited<ReturnType<typeof getLocalProjectGitStateAtRootPath>> }
+  | {
+      success: true;
+      state: Awaited<ReturnType<typeof localProjectsLegacy.getLocalProjectGitStateAtRootPath>>;
+    }
   | { success: false; error: string; message?: string }
 > {
   if (args.machineId === args.auth.machineId) {
     try {
       return {
         success: true,
-        state: await getLocalProjectGitStateAtRootPath(args.localRootPath),
+        state: await localProjectsLegacy.getLocalProjectGitStateAtRootPath(args.localRootPath),
       };
     } catch (error) {
       return { success: false, error: formatErrorMessage(error) };
@@ -2289,7 +3290,7 @@ export async function readLocalProjectGitStateOnMachine(args: {
     async (client) =>
       await client.requestLocalProjectGitState({
         localProjectId: args.localProjectId as LocalProjectId,
-        requestedByUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+        requestedByUserId: args.requesterUserId,
         timeoutMs: 30_000,
       })
   );
@@ -2302,60 +3303,93 @@ export async function readLocalProjectGitStateOnMachine(args: {
   return response;
 }
 
-async function resolveLocalProjectBranchOnMachine(args: {
+/**
+ * Create-time projection of a local project's git state onto the `ProjectRef`
+ * fields the daemon and every GitHub surface later read.
+ */
+type LocalProjectCreateGitContext = {
+  branch?: string;
+  githubRepoFullName?: string;
+};
+
+/**
+ * Pure part of local create resolution: branch selection and GitHub identity
+ * read off one git-state snapshot.
+ *
+ * Identity is resolved for direct and worktree local sessions alike, because a
+ * Session's repository is a property of the project rather than of the workdir
+ * mode; without it `createSessionResult` persists no `repoFullName` and the
+ * client hides `Create PR` / `Commit & Push` and skips post-turn PR detection.
+ * Origin identifies the repository; authenticated GitHub reads establish access.
+ * No product-cloud repository registration is required.
+ */
+export function resolveLocalProjectCreateGitContext(args: {
+  gitState: LocalProjectGitState;
+  requestedBranch?: string;
+  useWorktree?: boolean;
+}): LocalProjectCreateGitContext {
+  const requestedBranch = normalizeCliValue(args.requestedBranch);
+  if (!args.gitState.git) {
+    if (args.useWorktree === true) {
+      throw new Error('Cannot use --worktree with a local project that is not a git repository.');
+    }
+    if (requestedBranch) {
+      throw new Error('Cannot use --branch with a local project that is not a git repository.');
+    }
+    return {};
+  }
+  const githubRepoFullName = normalizeCliValue(args.gitState.githubRepoFullName);
+  const identity = githubRepoFullName ? { githubRepoFullName } : {};
+  // Keep direct local sessions branchless. The target daemon must use the
+  // directory as it exists at dispatch time rather than switching back to a
+  // branch observed by this remote preflight.
+  if (!requestedBranch && args.useWorktree !== true) {
+    return identity;
+  }
+  if (args.gitState.branches.length === 0) {
+    if (requestedBranch) {
+      throw new Error(`Local project branch not found: ${requestedBranch}`);
+    }
+    throw new Error('The local project does not have a branch to use as a worktree base.');
+  }
+  const branch = resolveBaseBranchPreference({
+    preferredBranch: requestedBranch,
+    baseBranch: args.gitState.currentBranch,
+    fallbackBranch: args.gitState.defaultBranch ?? args.gitState.branches[0],
+  });
+  // Only the remote machine can resolve refs, so map a typed `--branch main`
+  // onto one of the selectors it reported instead of demanding an exact match.
+  const selected = selectLocalProjectBranchSelector(args.gitState.branches, branch);
+  if (!selected) {
+    throw new Error(`Local project branch not found: ${branch}`);
+  }
+  return { branch: selected, ...identity };
+}
+
+async function resolveLocalProjectCreateGitContextOnMachine(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   localProjectId: string;
   localRootPath: string;
-  requesterUserId?: string;
+  requesterUserId: string;
   requestedBranch?: string;
   useWorktree?: boolean;
-}): Promise<string | undefined> {
-  // Keep direct local sessions branchless. The target daemon must use the
-  // directory as it exists at dispatch time rather than switching back to a
-  // branch observed by this remote preflight.
-  if (!args.requestedBranch?.trim() && args.useWorktree !== true) {
-    return undefined;
-  }
-
+}): Promise<LocalProjectCreateGitContext> {
   const response = await readLocalProjectGitStateOnMachine(args);
   if (!response.success) {
-    if (args.requestedBranch || args.useWorktree === true) {
+    // Only an explicit branch or a worktree base depends on this read; a direct
+    // local session must still be creatable when the state cannot be read.
+    if (normalizeCliValue(args.requestedBranch) || args.useWorktree === true) {
       throw new Error(response.message ?? response.error);
     }
-    return undefined;
+    return {};
   }
-  if (!response.state.git) {
-    if (args.useWorktree === true) {
-      throw new Error('Cannot use --worktree with a local project that is not a git repository.');
-    }
-    if (args.requestedBranch) {
-      throw new Error('Cannot use --branch with a local project that is not a git repository.');
-    }
-    return undefined;
-  }
-  if (response.state.branches.length === 0) {
-    if (args.requestedBranch?.trim()) {
-      throw new Error(`Local project branch not found: ${args.requestedBranch.trim()}`);
-    }
-    if (args.useWorktree === true) {
-      throw new Error('The local project does not have a branch to use as a worktree base.');
-    }
-    return undefined;
-  }
-  const branch = resolveBaseBranchPreference({
-    preferredBranch: args.requestedBranch,
-    baseBranch: response.state.currentBranch,
-    fallbackBranch: response.state.defaultBranch ?? response.state.branches[0],
+  return resolveLocalProjectCreateGitContext({
+    gitState: response.state,
+    ...(args.requestedBranch ? { requestedBranch: args.requestedBranch } : {}),
+    ...(args.useWorktree !== undefined ? { useWorktree: args.useWorktree } : {}),
   });
-  // Only the remote machine can resolve refs, so map a typed `--branch main`
-  // onto one of the selectors it reported instead of demanding an exact match.
-  const selected = selectLocalProjectBranchSelector(response.state.branches, branch);
-  if (!selected) {
-    throw new Error(`Local project branch not found: ${branch}`);
-  }
-  return selected;
 }
 
 async function resolveLocalProjectRefOnMachineOrThrow(
@@ -2364,15 +3398,28 @@ async function resolveLocalProjectRefOnMachineOrThrow(
   auth: AuthContext,
   machineId: MachineId,
   selector: string,
-  requesterUserId: string | undefined,
+  requester: ResolvedSessionRequester,
   requestedBranch?: string,
   useWorktree?: boolean
 ): Promise<ProjectRef> {
-  await syncMachineFlockDocsForRead(manager, workspaceId, [machineId], 'session.local-projects');
+  const normalizedSelector = normalizeCliValue(selector);
+  if (!normalizedSelector) {
+    throw new Error('Missing local project selector.');
+  }
+  const freshness = await syncMachineFlockDocsForRead(
+    manager,
+    workspaceId,
+    [machineId],
+    'session.local-projects'
+  );
   const localProjects = Object.values(
     await readMachineLocalProjects(manager.repo, workspaceId, machineId)
   );
   if (localProjects.length === 0) {
+    assertMachineFlockCacheSufficient(freshness, 'Local project catalog is unavailable.', {
+      kind: 'project',
+      id: normalizedSelector,
+    });
     throw new Error('No local project is registered on the target machine for this workspace.');
   }
   const authorizedLocalProjects = await filterAuthorizedLocalProjectsForCreate({
@@ -2380,17 +3427,20 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     workspaceId,
     machineId,
     localProjects,
-    requesterUserId,
+    requester,
   });
   if (authorizedLocalProjects.length === 0) {
     throw new Error('No authorized local projects are available on the target machine.');
   }
-  const normalizedSelector = normalizeCliValue(selector);
-  if (!normalizedSelector) {
-    throw new Error('Missing local project selector.');
-  }
   const matches = selectLocalProjectsBySelector(authorizedLocalProjects, normalizedSelector);
   if (matches.length === 0) {
+    if (selectLocalProjectsBySelector(localProjects, normalizedSelector).length === 0) {
+      assertMachineFlockCacheSufficient(
+        freshness,
+        `Local project is absent from the local replica: ${normalizedSelector}.`,
+        { kind: 'project', id: normalizedSelector }
+      );
+    }
     throw new Error(
       `Local project not found on ${machineId}: ${normalizedSelector}. Candidates: ${authorizedLocalProjects
         .map((project) => `${project.name} (${project.id})`)
@@ -2403,13 +3453,13 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     );
   }
   const project = matches[0]!;
-  const branch = await resolveLocalProjectBranchOnMachine({
+  const { branch, githubRepoFullName } = await resolveLocalProjectCreateGitContextOnMachine({
     auth,
     workspaceId,
     machineId,
     localProjectId: project.id,
     localRootPath: project.rootPath,
-    requesterUserId,
+    requesterUserId: requester.userId,
     requestedBranch,
     useWorktree,
   });
@@ -2417,6 +3467,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     kind: 'local',
     localProjectId: project.id,
     ...(branch ? { branch } : {}),
+    ...(githubRepoFullName ? { githubRepoFullName } : {}),
     ...(useWorktree === true ? { useWorktree: true } : {}),
   };
 }
@@ -2480,14 +3531,12 @@ async function resolveCreateContext(args: {
   workspace: WorkspaceSummary;
   manager: LoroDocumentManager;
   options: CreateOptions;
+  requester: ResolvedSessionRequester;
   skipMachineAvailabilityCheck?: boolean;
 }): Promise<ResolvedCreateContext> {
   const workspaceId = args.workspace.id as WorkspaceId;
   const agentSelector = resolveCreateAgentSelector(args.options);
-  const requesterUserId = resolveSessionCommandRequesterUserId(
-    args.auth,
-    args.options.requesterUserId
-  );
+  const requesterUserId = args.requester.userId;
   const parentSelector = normalizeCliValue(args.options.parent);
   const currentSessionId = resolveCreateCurrentSessionId(args.options);
   if (parentSelector && args.options.useCurrentSessionAsParent === true) {
@@ -2521,31 +3570,27 @@ async function resolveCreateContext(args: {
     : undefined;
   assertSupportedParentDepth(parentSession);
 
-  // An explicit taskId wins; otherwise inherit from the session that asked for
-  // this one, which is what keeps agent-spawned work on the same task.
-  const taskId = (normalizeCliValue(args.options.taskId) ?? currentSession?.taskId) as
-    | TaskId
-    | undefined;
   const targetMachine = await resolveTargetMachineForCreate({
     manager: args.manager,
     workspaceId,
     auth: args.auth,
     machineSelector: args.options.machine,
     defaultMachineId: args.options.defaultMachineId,
-    requesterUserId,
+    requester: args.requester,
     parentSessionId,
   });
   await assertMachineAccess({
     auth: args.auth,
     workspaceId,
     machineId: targetMachine.id,
-    requesterUserId,
+    requester: args.requester,
   });
   if (args.skipMachineAvailabilityCheck !== true) {
-    await ensureTargetMachineOnline({
+    await ensureTargetMachineNotOffline({
       auth: args.auth,
       workspaceId,
       machineId: targetMachine.id,
+      manager: args.manager,
     });
   }
   const agentConfig = await resolveAgentConfigForCreate({
@@ -2596,7 +3641,7 @@ async function resolveCreateContext(args: {
       args.auth,
       targetMachine.id,
       normalizedLocalProject,
-      requesterUserId,
+      args.requester,
       requestedBranch,
       args.options.worktree === true
     );
@@ -2606,7 +3651,7 @@ async function resolveCreateContext(args: {
     auth: args.auth,
     workspaceId,
     machineId: targetMachine.id,
-    requesterUserId,
+    requester: args.requester,
     localProjectId: project?.kind === 'local' ? project.localProjectId : undefined,
   });
 
@@ -2616,7 +3661,6 @@ async function resolveCreateContext(args: {
     ...(project ? { project } : {}),
     ...(parentSessionId ? { parentSessionId } : {}),
     ...resolveOpenedBySessionRelation(currentSession),
-    ...(taskId ? { taskId } : {}),
   };
 }
 
@@ -2638,35 +3682,108 @@ export async function validateSessionCreateOptions(args: {
    */
   dispatchConfig?: ResolvedTurnDispatchConfig;
 }): Promise<ResolvedTurnDispatchConfig> {
-  const resolved = await resolveCreateContext(args);
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.options.requesterUserId,
+    args.options.delegatedRequester
+  );
+  const resolved = await resolveCreateContext({ ...args, requester });
   return await resolveEffectiveSessionCreateDispatchConfig({
     manager: args.manager,
     workspaceId: args.workspace.id as WorkspaceId,
     agentConfig: resolved.agentConfig,
+    project: resolved.project,
     openedBySessionId: resolved.openedBySessionId,
     dispatchConfig: args.dispatchConfig ?? resolveTurnDispatchConfig({}),
   });
 }
 
-async function resolveEffectiveSessionCreateDispatchConfig(args: {
+export async function resolveEffectiveSessionCreateDispatchConfig(args: {
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   agentConfig: AgentConfigMeta;
+  project?: ProjectRef;
   openedBySessionId?: SessionId;
   dispatchConfig: ResolvedTurnDispatchConfig;
+  localOnly?: boolean;
+  /** Matching immutable Turn evidence, checked against frozen inherited provenance. */
+  authoredInheritedModel?: { modelId: string | undefined };
 }): Promise<ResolvedTurnDispatchConfig> {
-  const { frozenInheritedInputConfig, ...dispatchConfig } = args.dispatchConfig;
+  const {
+    frozenInheritedInputConfig,
+    builtinDefaultModeId,
+    inheritedBuiltinDefaultModeId,
+    inheritedDispatchConfig: frozenInheritedConfig,
+    ...dispatchConfig
+  } = args.dispatchConfig;
+  const frozenInherited = readFrozenInheritedTurnConfig(args.dispatchConfig, args.agentConfig);
+  if (frozenInherited?.modeId !== undefined) delete dispatchConfig.modeId;
+  if (frozenInherited?.modelId !== undefined) delete dispatchConfig.modelId;
+  if (frozenInherited?.configOptionValues !== undefined) delete dispatchConfig.configOptionValues;
+  const builtinDefault = getBuiltinDefaultModeId(
+    args.agentConfig.cliType,
+    args.agentConfig.agentType
+  );
+  const frozenBuiltinDefault = Boolean(
+    builtinDefault &&
+    inheritedBuiltinDefaultModeId === undefined &&
+    builtinDefaultModeId === builtinDefault &&
+    dispatchConfig.modeId === builtinDefault
+  );
+  // This was a fallback, not a user selection. Re-derive it from the capability
+  // available during materialization so a newly advertised catalog can omit it.
+  // Keep explicit modes and all other selections on their normal validation path.
+  if (frozenBuiltinDefault) delete dispatchConfig.modeId;
+  const mcpServerIds =
+    dispatchConfig.mcpServerIds !== undefined
+      ? [...dispatchConfig.mcpServerIds]
+      : await (async () => {
+          if (!args.localOnly) {
+            if (
+              getDaemonWorkspace()?.manager === args.manager ||
+              args.manager.hasWorkspaceCatalogReader?.()
+            ) {
+              await waitForMcpDefaultCatalog(args.manager, args.workspaceId);
+            } else {
+              await syncMcpCatalog(args.manager, args.workspaceId);
+            }
+          }
+          return readProjectDefaultMcpIds(
+            args.manager.repo,
+            args.workspaceId,
+            args.project,
+            args.agentConfig.machineId
+          );
+        })();
+  if (dispatchConfig.memory) {
+    const machine = (await listMachineMetasForWorkspace(args.manager)).find(
+      (entry) => entry.id === args.agentConfig.machineId
+    );
+    if (!machineSupportsMemoryProviders(machine))
+      throw new Error('Update the target machine to use memory providers.');
+  }
   const inheritedDispatchConfig =
-    frozenInheritedInputConfig !== undefined
-      ? resolveTurnDispatchConfigFromInputConfig(frozenInheritedInputConfig, args.agentConfig)
-      : dispatchConfig.inheritSessionDefaults !== false && args.openedBySessionId
-        ? await resolveSessionTurnDispatchDefaults(
-            args.manager,
-            args.openedBySessionId,
-            args.agentConfig
-          )
-        : undefined;
+    frozenInheritedConfig !== undefined || inheritedBuiltinDefaultModeId !== undefined
+      ? frozenInherited
+      : frozenInheritedInputConfig !== undefined
+        ? resolveTurnDispatchConfigFromInputConfig(frozenInheritedInputConfig, args.agentConfig)
+        : dispatchConfig.inheritSessionDefaults !== false && args.openedBySessionId
+          ? await resolveSessionTurnDispatchDefaults(
+              args.manager,
+              args.openedBySessionId,
+              args.agentConfig
+            )
+          : undefined;
+  // Builtin Role/MCP creates often have no modeId. Read capabilities before
+  // accepting so withBuiltinDefaultTurnMode cannot freeze an unoffered mode.
+  const mayApplyBuiltinDefault =
+    Boolean(getBuiltinDefaultModeId(args.agentConfig.cliType, args.agentConfig.agentType)) &&
+    dispatchConfig.modeId === undefined &&
+    typeof dispatchConfig.configOptionValues?.mode !== 'string' &&
+    inheritedDispatchConfig?.modeId === undefined &&
+    typeof inheritedDispatchConfig?.configOptionValues?.mode !== 'string';
   const needsCapability =
+    mayApplyBuiltinDefault ||
     dispatchConfig.modeId !== undefined ||
     dispatchConfig.modelId !== undefined ||
     dispatchConfig.configOptionValues !== undefined ||
@@ -2674,37 +3791,106 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
     inheritedDispatchConfig?.modeId !== undefined ||
     inheritedDispatchConfig?.modelId !== undefined ||
     inheritedDispatchConfig?.configOptionValues !== undefined;
-  const capability = needsCapability
-    ? await readAgentAcpCapability({
+  const { capability, freshness } = needsCapability
+    ? await readAgentAcpCapabilitySnapshot({
         manager: args.manager,
         workspaceId: args.workspaceId,
         machineId: args.agentConfig.machineId,
         agentConfigId: args.agentConfig.id,
+        runtimeOverrides: args.agentConfig.runtimeOverrides,
+        localOnly: args.localOnly,
       })
-    : undefined;
-  const requested = applyAgentRunConfigSelection(dispatchConfig, capability);
-  validateTurnModeAndModel(requested.config, capability);
+    : { capability: undefined, freshness: { confirmed: true as const } };
+  const compatibleDefaults = filterCompatibleInheritedTurnConfig(
+    inheritedDispatchConfig,
+    capability
+  );
+  // Semantic controls create an explicit option map, replacing inherited raw
+  // options. Only a scalar inherited model survives that replacement.
+  const inheritedModelId = args.authoredInheritedModel
+    ? args.authoredInheritedModel.modelId
+    : compatibleDefaults?.modelId;
+  const requested = applyAgentRunConfigSelection(
+    dispatchConfig,
+    capability,
+    freshness,
+    inheritedModelId
+  );
+  validateTurnModeAndModel(requested.config, capability, freshness);
+  const requestedModelId =
+    requested.config.modelId ??
+    getTurnSelectorConfigOptionValue(requested.config.configOptionValues, capability, 'model');
+  const inherited = filterCompatibleInheritedTurnConfig(
+    inheritedDispatchConfig,
+    capability,
+    requestedModelId
+  );
+  if (inherited && args.authoredInheritedModel) {
+    // The target model is already part of this fixed Turn's identity. Validate
+    // explicit model-dependent controls against it, not a newly filtered default.
+    inherited.modelId = args.authoredInheritedModel.modelId;
+  }
+  if (
+    !capability &&
+    inherited &&
+    builtinDefault &&
+    inheritedDispatchConfig?.modeId === builtinDefault
+  ) {
+    inherited.modeId = builtinDefault;
+  }
+  warnDroppedInheritedMachineFlockSelections({
+    freshness,
+    inherited: inheritedDispatchConfig,
+    compatible: inherited,
+    requested: requested.config,
+    capability,
+  });
+  removeShadowedInheritedSelectors(inherited, requested.config, capability);
+  const merged = mergeTurnDispatchConfig(requested.config, inherited, capability);
+  const effective = withBuiltinDefaultTurnMode(merged, args.agentConfig, capability);
+  const derivedBuiltinDefault =
+    effective.modeId === builtinDefault &&
+    merged.modeId === undefined &&
+    getTurnSelectorConfigOptionValue(merged.configOptionValues, capability, 'mode') === undefined;
+  const targetModelId =
+    effective.modelId ??
+    getTurnSelectorConfigOptionValue(effective.configOptionValues, capability, 'model');
+  const validatedConfigIds = new Set([
+    ...requested.validatedConfigIds,
+    ...validateModelDependentTurnConfigOptionValues(
+      requested.config.configOptionValues,
+      capability,
+      targetModelId,
+      freshness
+    ),
+  ]);
   validateTurnConfigOptionValues(
     requested.config.configOptionValues,
-    capability,
-    requested.validatedConfigIds
+    capability && withAcpConfigOptionsForModel(capability, targetModelId),
+    validatedConfigIds,
+    freshness
   );
+  const inheritedSnapshot = {
+    ...(requested.config.modeId === undefined && inherited?.modeId !== undefined
+      ? { modeId: inherited.modeId }
+      : {}),
+    ...(requested.config.modelId === undefined && inherited?.modelId !== undefined
+      ? { modelId: inherited.modelId }
+      : {}),
+    ...(requested.config.configOptionValues === undefined &&
+    inherited?.configOptionValues !== undefined
+      ? { configOptionValues: inherited.configOptionValues }
+      : {}),
+  };
   return {
-    ...withBuiltinDefaultTurnMode(
-      mergeTurnDispatchConfig(
-        requested.config,
-        filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability)
-      ),
-      args.agentConfig
-    ),
+    ...effective,
+    ...(derivedBuiltinDefault && builtinDefault ? { builtinDefaultModeId: builtinDefault } : {}),
+    ...(Object.keys(inheritedSnapshot).length
+      ? { inheritedDispatchConfig: inheritedSnapshot }
+      : {}),
+    mcpServerIds,
     inheritSessionDefaults: false,
   };
-}
-
-export function shouldQueueMachineDelete(
-  session: Pick<SessionMeta, 'repoFullName' | 'project' | 'isWorktree' | 'parentSessionId'>
-): boolean {
-  return shouldQueueMachineDeleteSession(session);
 }
 
 export function buildSessionArchiveMetaPatch(): Partial<SessionMeta> {
@@ -2720,67 +3906,254 @@ export function buildSessionRestoreMetaPatch(): Partial<SessionMeta> {
   };
 }
 
-export function buildLegacyMachineRestoreQueueCleanupPatch(
-  sessionId: SessionId,
-  machineMeta:
-    | Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'>
-    | undefined
-): Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'> | null {
-  const nextNeedToArchiveSessions = { ...(machineMeta?.needToArchiveSessions ?? {}) };
-  const nextNeedToDeleteSessions = { ...(machineMeta?.needToDeleteSessions ?? {}) };
-  let changed = false;
+/** Resolve once, then persist this JSON before retryable Session materialization. */
+export async function prepareSessionInput(
+  auth: AuthContext,
+  workspace: WorkspaceSummary,
+  manager: LoroDocumentManager,
+  prompt: string,
+  options: CreateOptions,
+  dispatchConfig: ResolvedTurnDispatchConfig,
+  ownerTarget?: Pick<ResolvedCreateContext, 'targetMachine' | 'agentConfig' | 'project'>
+): Promise<PreparedSessionInput> {
+  const envOverrides = parseEnvAssignments(options.env);
+  if (Object.keys(envOverrides).length > 0) {
+    throw new Error(
+      'Per-session --env overrides are no longer persisted. Configure environment variables on the agent config instead.'
+    );
+  }
+  await ensureSessionCreateWorkspaceMetaFresh({
+    manager,
+    workspaceId: workspace.id as WorkspaceId,
+    prewriteSatisfied: options.workspaceMetaPrewriteSatisfied === true,
+  });
+  if (!options.bypassSessionQuota) {
+    await assertSessionCreateQuota({
+      workspace,
+      manager,
+      sessionId: options.sessionId,
+    });
+  }
+  const requester = resolveSessionRequester(
+    auth,
+    options.requesterUserId,
+    options.delegatedRequester
+  );
+  const requesterUserId = requester.userId;
+  const author = resolveSessionInputAuthor(requesterUserId, options.delegatedRequester);
+  const sessionOwnerUserId = resolveSessionCreateOwnerUserId(
+    requesterUserId,
+    options.sessionOwnerUserId
+  );
+  if (
+    ownerTarget &&
+    (ownerTarget.targetMachine.id !== auth.machineId ||
+      ownerTarget.targetMachine.ownerUserId !== auth.userId ||
+      ownerTarget.agentConfig.machineId !== auth.machineId)
+  ) {
+    throw new Error('Host-owned Session target does not belong to the authenticated local owner');
+  }
+  const resolved: ResolvedCreateContext =
+    ownerTarget ?? (await resolveCreateContext({ auth, workspace, manager, options, requester }));
+  const {
+    targetMachine,
+    agentConfig,
+    project,
+    parentSessionId,
+    openedBySessionId,
+    openedByRootSessionId,
+  } = resolved;
+  const authoredDispatchOverrides: Pick<
+    ResolvedTurnDispatchConfig,
+    'modeId' | 'modelId' | 'configOptionValues'
+  > = {};
+  const builtinDefault = getBuiltinDefaultModeId(agentConfig.cliType, agentConfig.agentType);
+  const frozenInherited = readFrozenInheritedTurnConfig(dispatchConfig, agentConfig);
+  const inferredBuiltin = Boolean(
+    builtinDefault &&
+    dispatchConfig.builtinDefaultModeId === builtinDefault &&
+    dispatchConfig.modeId === builtinDefault &&
+    !frozenInherited?.modeId
+  );
+  if (options.sessionId && options.userTurnId && (inferredBuiltin || frozenInherited)) {
+    const existing = await manager.repo.getDocMeta(getSessionRoomId(options.sessionId));
+    const existingMeta = existing?.meta as SessionMeta | undefined;
+    if (
+      existing &&
+      existingMeta &&
+      !isLoroRepoDocDeleted(existing) &&
+      existingMeta.id === options.sessionId &&
+      existingMeta.machineId === targetMachine.id &&
+      existingMeta.userId === sessionOwnerUserId &&
+      existingMeta.agentConfigId === agentConfig.id
+    ) {
+      const sessionDoc = await manager.getOrCreateSessionDoc(options.sessionId);
+      const backend = await createSessionBackend(sessionDoc, existingMeta);
+      const read = await backend.readTurn(options.userTurnId);
+      const prior = read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
+      const authored = normalizeSessionTurnInputConfig(prior?.inputConfig);
+      if (prior) {
+        // Once authored, fallback filtering must not change the fixed Turn. Only
+        // preserve selections reachable from the frozen provenance; the complete
+        // prepared-input identity check still rejects unrelated config changes.
+        const inheritedMode = frozenInherited?.modeId;
+        const allowMode =
+          inferredBuiltin ||
+          inheritedMode !== undefined ||
+          (dispatchConfig.modeId === undefined &&
+            frozenInherited?.configOptionValues !== undefined);
+        if (
+          allowMode &&
+          (authored?.modeId === undefined ||
+            authored.modeId === inheritedMode ||
+            authored.modeId === builtinDefault)
+        ) {
+          authoredDispatchOverrides.modeId = authored?.modeId;
+        }
+        if (
+          frozenInherited?.modelId !== undefined &&
+          (authored?.modelId === undefined || authored.modelId === frozenInherited.modelId)
+        ) {
+          authoredDispatchOverrides.modelId = authored?.modelId;
+        }
+        const inheritedOptions = frozenInherited?.configOptionValues;
+        if (
+          inheritedOptions !== undefined &&
+          Object.entries(authored?.configOptionValues ?? {}).every(
+            ([id, value]) => Object.hasOwn(inheritedOptions, id) && inheritedOptions[id] === value
+          )
+        ) {
+          authoredDispatchOverrides.configOptionValues = authored?.configOptionValues;
+        }
+      }
+    }
+  }
 
-  if (sessionId in nextNeedToArchiveSessions) {
-    delete nextNeedToArchiveSessions[sessionId];
-    changed = true;
-  }
-  if (sessionId in nextNeedToDeleteSessions) {
-    delete nextNeedToDeleteSessions[sessionId];
-    changed = true;
-  }
+  const effectiveDispatchConfig = await resolveEffectiveSessionCreateDispatchConfig({
+    manager,
+    workspaceId: workspace.id as WorkspaceId,
+    agentConfig,
+    project,
+    ...(openedBySessionId ? { openedBySessionId } : {}),
+    dispatchConfig,
+    localOnly: ownerTarget !== undefined,
+    ...(Object.hasOwn(authoredDispatchOverrides, 'modelId')
+      ? { authoredInheritedModel: { modelId: authoredDispatchOverrides.modelId } }
+      : {}),
+  });
+  Object.assign(effectiveDispatchConfig, authoredDispatchOverrides);
 
-  if (!changed) {
-    return null;
-  }
-  return {
-    needToArchiveSessions: nextNeedToArchiveSessions,
-    needToDeleteSessions: nextNeedToDeleteSessions,
+  const sessionId = options.sessionId ?? (uuidV4() as SessionId);
+  const attachments =
+    options.inputAttachments ??
+    (await prepareSessionInputAttachments({
+      paths: options.attach ?? [],
+      cwd: process.cwd(),
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId,
+      sourceMachineId: auth.machineId,
+      targetMachineId: targetMachine.id,
+      ...(options.attach?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
+            ),
+          }
+        : {}),
+    }));
+  const inputBlocks = buildCommandInputBlocks(prompt, attachments);
+  const repoFullName = resolveProjectGitHubRepo(project);
+  const baseBranch = project?.kind === 'local' ? undefined : project?.branch?.trim();
+  // An explicit title is final: `user` blocks both the agent-pushed and the
+  // locally generated title. Otherwise a replaceable draft covers the gap until
+  // the generated title lands, which for ACP-owned titles is after the first turn.
+  const title = normalizeCliValue(options.title);
+  const draftTitle = title ? undefined : deriveDraftSessionTitle(prompt);
+  const meta = {
+    id: sessionId,
+    machineId: targetMachine.id,
+    createdAt: new Date(getServerNow()).toISOString(),
+    userId: sessionOwnerUserId,
+    status: SessionStatusFactory.initializing(),
+    isArchived: false,
+    cliType: agentConfig.cliType,
+    agentType: agentConfig.agentType,
+    historyBackend: resolveNewSessionHistoryBackend(targetMachine, {
+      requested: options.historyBackend,
+      preferred: NEW_SESSION_HISTORY_BACKEND,
+    }),
+    agentConfigId: agentConfig.id,
+    ...(title ? { title, titleSource: 'user' as const } : {}),
+    ...(draftTitle ? { title: draftTitle, titleSource: 'draft' as const } : {}),
+    ...(project ? { project } : {}),
+    ...(repoFullName ? { repoFullName } : {}),
+    ...(baseBranch ? { baseBranch } : {}),
+    ...(parentSessionId ? { parentSessionId } : {}),
+    ...(openedBySessionId ? { openedBySessionId } : {}),
+    ...(openedByRootSessionId ? { openedByRootSessionId } : {}),
+    ...(options.agentRoleId ? { agentRoleId: options.agentRoleId as AgentRoleId } : {}),
+    ...(options.agentRoleRevision !== undefined
+      ? { agentRoleRevision: options.agentRoleRevision }
+      : {}),
+    // `agentRoleId`/`agentRoleRevision` are declared on `SessionMeta` now, so
+    // the provenance fields no longer need a local intersection here.
+  } satisfies SessionMeta;
+
+  const derivedInputId = options.userTurnId ?? uuidV4();
+  const derivation = await classifyDelegatedEncryptedInput(
+    manager,
+    options.delegatedRequester,
+    targetMachine.id,
+    derivedInputId
+  );
+  const derivedFrom = derivation?.derivedFrom;
+  const userTurn: SessionHistoryInput = {
+    id: derivedInputId,
+    role: 'user',
+    timestamp: meta.createdAt,
+    ...(derivedFrom ? { derivedFrom } : {}),
+    // Legacy daemons only understand pending input. Host-owned automation
+    // always uses the inert prepared protocol; remote creates negotiate it.
+    status:
+      ownerTarget || machineSupportsPreparedSessionInputProtocol(targetMachine)
+        ? 'prepared'
+        : 'pending',
+    read: !!ownerTarget || machineSupportsPreparedSessionInputProtocol(targetMachine),
+    userId: requesterUserId,
+    author,
+    items: inputBlocksToHistoryItems(inputBlocks),
+    inputConfig: {
+      ...(options.agentRoleId
+        ? {
+            agentRoleId: options.agentRoleId as AgentRoleId,
+            agentRoleRevision: options.agentRoleRevision,
+            agentRoleSnapshot: options.agentRoleSnapshot,
+          }
+        : {}),
+      ...buildCliHistoryInputConfig({
+        prompt: buildAgentPrompt(
+          composeAgentRolePrompt(options.agentRolePromptPrefix, prompt),
+          agentConfig.prompt ?? ''
+        ),
+        inputBlocks,
+        cliType: agentConfig.cliType,
+        agentType: agentConfig.agentType,
+        mcpServerIds: effectiveDispatchConfig.mcpServerIds,
+        memory: effectiveDispatchConfig.memory,
+        modeId: effectiveDispatchConfig.modeId ?? undefined,
+        modelId: effectiveDispatchConfig.modelId ?? undefined,
+        configOptionValues: effectiveDispatchConfig.configOptionValues,
+        chainDepth: options.chainDepth,
+      }),
+    },
+    fileDiff: [],
+    finished: true,
   };
-}
-
-async function writeMachineFlockCommandRow(
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machineId: MachineId,
-  row: MachineFlockRow,
-  nowMs: number
-): Promise<void> {
-  const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
-  const changed = writeMachineFlockRowToFlock(handle.flock, row, nowMs);
-  if (!changed) {
-    return;
-  }
-  await manager.repo.flush();
-  await handle.syncOnce();
-}
-
-async function deleteMachineFlockCommandRows(
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machineId: MachineId,
-  keys: MachineFlockKey[],
-  nowMs: number
-): Promise<void> {
-  const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
-  let changed = false;
-  for (const key of keys) {
-    changed = deleteMachineFlockRowFromFlock(handle.flock, key, nowMs) || changed;
-  }
-  if (!changed) {
-    return;
-  }
-  await manager.repo.flush();
-  await handle.syncOnce();
+  return { sessionId, meta, userTurn };
 }
 
 export async function createSessionResult(
@@ -2807,78 +4180,23 @@ export async function createSessionResult(
   openedByRootSessionId?: SessionId;
   completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
 }> {
-  const envOverrides = parseEnvAssignments(options.env);
-  if (Object.keys(envOverrides).length > 0) {
-    throw new Error(
-      'Per-session --env overrides are no longer persisted. Configure environment variables on the agent config instead.'
-    );
-  }
-  await ensureSessionCreateWorkspaceMetaFresh({
+  const prepared = await prepareSessionInput(
+    auth,
+    workspace,
     manager,
-    workspaceId: workspace.id as WorkspaceId,
-    prewriteSatisfied: options.workspaceMetaPrewriteSatisfied === true,
-  });
-  if (!options.bypassSessionQuota) {
-    await assertSessionCreateQuota({
-      workspace,
-      manager,
-      sessionId: options.sessionId,
-    });
-  }
-  const requesterUserId = resolveSessionCommandRequesterUserId(auth, options.requesterUserId);
-  const sessionOwnerUserId = resolveSessionCreateOwnerUserId(
-    requesterUserId,
-    options.sessionOwnerUserId
+    prompt,
+    options,
+    dispatchConfig
   );
-  const resolved = await resolveCreateContext({ auth, workspace, manager, options });
-  const {
-    targetMachine,
-    agentConfig,
-    project,
-    parentSessionId,
-    openedBySessionId,
-    openedByRootSessionId,
-    taskId,
-  } = resolved;
-  const effectiveDispatchConfig = await resolveEffectiveSessionCreateDispatchConfig({
-    manager,
-    workspaceId: workspace.id as WorkspaceId,
-    agentConfig,
-    ...(openedBySessionId ? { openedBySessionId } : {}),
-    dispatchConfig,
-  });
-
-  const sessionId = options.sessionId ?? (uuidV4() as SessionId);
+  const { sessionId, meta } = prepared;
   const sessionRoomId = getSessionRoomId(sessionId);
+  const { project, parentSessionId, openedBySessionId, openedByRootSessionId } = meta;
+  const requesterUserId = prepared.userTurn.userId!;
+  const targetMachine = { id: meta.machineId };
+  const agentConfig = { id: meta.agentConfigId! };
+  await materializePreparedSessionInput(manager, prepared);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const repoFullName = resolveProjectGitHubRepo(project);
-  const baseBranch = project?.kind === 'local' ? undefined : project?.branch?.trim();
-  const title = normalizeCliValue(options.title);
-  await manager.repo.upsertDocMeta(sessionRoomId, {
-    id: sessionId,
-    machineId: targetMachine.id,
-    createdAt: new Date(getServerNow()).toISOString(),
-    userId: sessionOwnerUserId,
-    status: SessionStatusFactory.initializing(),
-    isArchived: false,
-    cliType: agentConfig.cliType,
-    agentType: agentConfig.agentType,
-    agentConfigId: agentConfig.id,
-    ...(title ? { title } : {}),
-    ...(project ? { project } : {}),
-    ...(repoFullName ? { repoFullName } : {}),
-    ...(baseBranch ? { baseBranch } : {}),
-    ...(parentSessionId ? { parentSessionId } : {}),
-    ...(openedBySessionId ? { openedBySessionId } : {}),
-    ...(openedByRootSessionId ? { openedByRootSessionId } : {}),
-    ...(options.agentRoleId ? { agentRoleId: options.agentRoleId as AgentRoleId } : {}),
-    ...(options.agentRoleRevision !== undefined
-      ? { agentRoleRevision: options.agentRoleRevision }
-      : {}),
-    ...(taskId ? { taskId } : {}),
-    // `agentRoleId`/`agentRoleRevision` are declared on `SessionMeta` now, so
-    // the provenance fields no longer need a local intersection here.
-  } satisfies SessionMeta);
+  const backend = await createSessionBackend(sessionDoc, meta);
 
   let completionAbortController: AbortController | undefined;
   let completionPromise: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>> | undefined;
@@ -2886,30 +4204,13 @@ export async function createSessionResult(
   // running the turn, so a later failure must not roll the session back.
   let dispatched = false;
   try {
-    const modeId = effectiveDispatchConfig.modeId;
-    const modelId = effectiveDispatchConfig.modelId;
-    const sessionCreatePrompt = buildAgentPrompt(prompt, agentConfig.prompt ?? '');
-    const userTurn = await appendUserPromptHistory({
-      sessionDoc,
-      prompt,
-      userId: requesterUserId,
-      inputConfig: buildCliHistoryInputConfig({
-        prompt: sessionCreatePrompt,
-        cliType: agentConfig.cliType,
-        agentType: agentConfig.agentType,
-        modeId: modeId ?? undefined,
-        modelId: modelId ?? undefined,
-        configOptionValues: effectiveDispatchConfig.configOptionValues,
-        taskToolsEnabled: taskId ? true : effectiveDispatchConfig.taskToolsEnabled,
-        chainDepth: options.chainDepth,
-      }),
-      preallocatedId: options.userTurnId,
-    });
+    const userTurn = prepared.userTurn;
     const userTurnId = userTurn.id;
     completionAbortController = structuredOutput ? new AbortController() : undefined;
     completionPromise = structuredOutput
       ? waitForTurnCompletion({
           sessionDoc,
+          backend,
           userTurnId,
           outputMode: structuredOutput.outputMode,
           timeoutMs: structuredOutput.timeoutMs,
@@ -2918,51 +4219,40 @@ export async function createSessionResult(
         })
       : undefined;
 
-    await updateSessionActivityTimestampsBestEffort(manager, sessionId);
-    await manager.repo.upsertDocMeta(sessionRoomId, {
-      status: SessionStatusFactory.idle(),
-    } satisfies Partial<SessionMeta>);
-    await writeDispatchPointer({ manager, sessionId, userTurnId });
+    if (!(await isPreparedSessionDispatched(manager, prepared))) {
+      await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+      await manager.repo.upsertDocMeta(sessionRoomId, {
+        status: SessionStatusFactory.idle(),
+      } satisfies Partial<SessionMeta>);
+    }
+    if (!options.delegatedRequester)
+      sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    await commitPreparedSessionDispatch(manager, prepared);
     dispatched = true;
-    await confirmDispatchSyncedBestEffort({
+    const daemonTarget = await resolveDaemonTarget({
+      auth,
+      manager,
+      workspaceId: workspace.id as WorkspaceId,
+      machineId: targetMachine.id,
+    });
+    await persistDispatchedSessionWrite({
+      sameReplica: daemonTarget.sameReplica,
       manager,
       sessionDoc,
       reason: `session.create:${sessionId}`,
     });
     await dispatchTurnFastPath({
       auth,
+      manager,
       workspaceId: workspace.id as WorkspaceId,
       machineId: targetMachine.id,
       sessionId,
       userTurnId,
       userId: requesterUserId,
       timestamp: userTurn.timestamp,
+      inputOrigin: options.delegatedRequester ? 'agent' : 'human',
       inputConfig: userTurn.inputConfig,
     });
-    if (taskId) {
-      // AFTER the fast path on purpose: this opens and syncs the task document,
-      // which is a network round trip, and the prompt must not wait on it
-      // (context/cli-prompt-hot-path.md). Best effort too — it runs past the
-      // dispatch point of no rollback, so a failure must never unwind a running
-      // session, and the reverse pointer on session meta is already durable.
-      // Still awaited rather than fired: this command's workspace transport is
-      // torn down on return, so an un-awaited write could be dropped.
-      await linkTaskSessionFromCli(
-        manager,
-        workspace.id as WorkspaceId,
-        taskId,
-        {
-          sessionId,
-          // A Run from the app authors its own session and links it there, so a
-          // taskId arriving here is either delegated automation (an explicit
-          // run) or an agent spawning helpers.
-          origin: options.taskLinkOrigin ?? 'agent-spawn',
-          ...(openedBySessionId ? { parentSessionId: openedBySessionId } : {}),
-        },
-        { agentConfigId: agentConfig.id }
-      ).catch(() => undefined);
-    }
-
     return {
       sessionId,
       machineId: targetMachine.id,
@@ -2973,7 +4263,6 @@ export async function createSessionResult(
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(openedBySessionId ? { openedBySessionId } : {}),
       ...(openedByRootSessionId ? { openedByRootSessionId } : {}),
-      ...(taskId ? { taskId } : {}),
       completionPromise,
     };
   } catch (error) {
@@ -2983,7 +4272,7 @@ export async function createSessionResult(
     // was committed. After dispatch, deleting the session would destroy an
     // already-running turn (and its title) — the durable pointer plus Operation
     // store own eventual delivery instead.
-    if (!dispatched) {
+    if (!dispatched && !options.sessionId) {
       await rollbackPendingSessionCreate(manager, sessionId);
     }
     throw error;
@@ -2997,12 +4286,52 @@ export async function validateSessionChatTarget(args: {
   manager: LoroDocumentManager;
   sessionId: SessionId;
   requesterUserIdOverride?: string;
+  delegatedRequester?: DelegatedSessionRequester;
+  workspaceMetaPrewriteSatisfied?: boolean;
 }): Promise<SessionMeta> {
-  await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
-  const requesterUserId = resolveSessionCommandRequesterUserId(
+  const requester = resolveSessionRequester(
     args.auth,
-    args.requesterUserIdOverride
+    args.requesterUserIdOverride,
+    args.delegatedRequester
   );
+  return await validateSessionChatTargetForRequester({
+    auth: args.auth,
+    workspace: args.workspace,
+    manager: args.manager,
+    sessionId: args.sessionId,
+    requester,
+    workspaceMetaPrewriteSatisfied: args.workspaceMetaPrewriteSatisfied,
+  });
+}
+
+async function validateSessionChatTargetForRequester(args: {
+  auth: AuthContext;
+  workspace: WorkspaceSummary;
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  requester: ResolvedSessionRequester;
+  workspaceMetaPrewriteSatisfied?: boolean;
+}): Promise<SessionMeta> {
+  let needsMetaSync = args.workspaceMetaPrewriteSatisfied !== true;
+  if (needsMetaSync) {
+    const localRecord = await args.manager.repo.getDocMeta(getSessionRoomId(args.sessionId));
+    if (localRecord?.meta && !isLoroRepoDocDeleted(localRecord)) {
+      const localMeta = localRecord.meta as SessionMeta;
+      const { authority } = await resolveDaemonTargetOrThrow({
+        auth: args.auth,
+        manager: args.manager,
+        workspaceId: args.workspace.id as WorkspaceId,
+        machineId: localMeta.machineId,
+        requesterUserId: args.requester.userId,
+      });
+      if (authority === 'local-daemon') {
+        needsMetaSync = false;
+      }
+    }
+  }
+  if (needsMetaSync) {
+    await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
+  }
   const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
   if (session.isArchived) {
     throw new Error(`Session ${args.sessionId} is archived. Restore it before chatting.`);
@@ -3011,16 +4340,49 @@ export async function validateSessionChatTarget(args: {
     auth: args.auth,
     workspaceId: args.workspace.id as WorkspaceId,
     machineId: session.machineId,
-    requesterUserId,
+    requester: args.requester,
     localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+    manager: args.manager,
   });
-  await ensureTargetMachineOnline({
+  await ensureTargetMachineNotOffline({
     auth: args.auth,
     workspaceId: args.workspace.id as WorkspaceId,
     machineId: session.machineId,
+    manager: args.manager,
   });
   return session;
 }
+
+// Cold token/gateway lookup and subscription setup need more time than an offer.
+const REMOTE_STEER_CONNECT_TIMEOUT_MS = 15_000;
+
+/**
+ * What actually happened to an Agent chat at send time. Advisory: absent when
+ * the outcome is uncertain or was decided by an earlier attempt or replay.
+ */
+export type SessionChatDelivery = 'steered' | 'queued' | 'dispatched';
+
+const withDelivery = <T extends object>(
+  result: T,
+  delivery: SessionChatDelivery | undefined
+): T & { delivery?: SessionChatDelivery } => (delivery ? { ...result, delivery } : result);
+
+/** Maps a steer verdict to a receipt; rejected steers become ordinary input. */
+export const deliveryFromSteerResponse = (
+  response: Pick<SessionSteerResponse, 'applied' | 'disposition'>
+): SessionChatDelivery | undefined => {
+  if (response.applied) return 'steered';
+  switch (response.disposition) {
+    case 'unsupported':
+      return 'queued';
+    // stale-turn is ambiguous: promoted to the queue, or consumed after the
+    // provider accepted it too late. Report nothing rather than a false queue.
+    case 'no-active-turn':
+      return 'dispatched';
+    default:
+      return undefined;
+  }
+};
 
 export async function sendSessionChatResult(
   auth: AuthContext,
@@ -3039,40 +4401,48 @@ export async function sendSessionChatResult(
     userTurnId: string;
     chainDepth: number;
     bypassSessionQuota?: boolean;
-  }
+    /** Agent chat: steer a running turn instead of queueing behind it. */
+    steerActiveTurn?: boolean;
+    workspaceMetaPrewriteSatisfied?: boolean;
+    prevalidatedTarget?: SessionMeta;
+  },
+  delegatedRequester?: DelegatedSessionRequester,
+  input?: { paths?: string[]; attachments?: SessionInputAttachment[] }
 ): Promise<{
   sessionId: SessionId;
   machineId: MachineId;
   workspaceId: WorkspaceId;
   userTurnId: string;
+  delivery?: SessionChatDelivery;
   completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
 }> {
-  const requesterUserId = resolveSessionCommandRequesterUserId(auth, requesterUserIdOverride);
-  const session = await validateSessionChatTarget({
-    auth,
-    workspace,
+  const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
+  const requesterUserId = requester.userId;
+  const author = resolveSessionInputAuthor(requesterUserId, delegatedRequester);
+  const session =
+    orchestration?.prevalidatedTarget ??
+    (await validateSessionChatTargetForRequester({
+      auth,
+      workspace,
+      manager,
+      sessionId,
+      requester,
+      workspaceMetaPrewriteSatisfied: orchestration?.workspaceMetaPrewriteSatisfied,
+    }));
+
+  const daemonTarget = await syncSessionDocUnlessLocalDaemon({
     manager,
     sessionId,
-    requesterUserIdOverride,
-  });
-  if (dispatchConfig.modeId || dispatchConfig.modelId || dispatchConfig.configOptionValues) {
-    const capability = await readAgentAcpCapability({
-      manager,
+    reason: `session.chat:${sessionId}:prewrite:doc`,
+    authorityContext: {
+      auth,
       workspaceId: workspace.id as WorkspaceId,
       machineId: session.machineId,
-      agentConfigId: session.agentConfigId,
-    });
-    validateTurnModeAndModel(dispatchConfig, capability);
-    validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
-  }
-  const effectiveDispatchConfig = withBuiltinDefaultTurnMode(dispatchConfig, session);
-
-  await syncDocForRead(
-    manager,
-    getSessionRoomId(sessionId),
-    `session.chat:${sessionId}:prewrite:doc`
-  );
+      requesterUserId,
+    },
+  });
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   const quotaHistory = orchestration?.bypassSessionQuota
     ? undefined
     : await checkSessionTurnQuotaAndReadHistory({
@@ -3081,29 +4451,247 @@ export async function sendSessionChatResult(
         sessionDoc,
         userTurnId: orchestration?.userTurnId,
       });
+  const historyForDefaults = quotaHistory ?? (await readSessionHistoryMetadata(backend.history));
+  const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
+    historyForDefaults,
+    session
+  );
+  const mayApplyBuiltinDefault =
+    Boolean(getBuiltinDefaultModeId(session.cliType, session.agentType)) &&
+    !dispatchConfig.modeId &&
+    typeof dispatchConfig.configOptionValues?.mode !== 'string' &&
+    inheritedDispatchConfig?.modeId === undefined &&
+    typeof inheritedDispatchConfig?.configOptionValues?.mode !== 'string';
+  const { capability, freshness } =
+    dispatchConfig.modeId ||
+    dispatchConfig.modelId ||
+    dispatchConfig.configOptionValues ||
+    inheritedDispatchConfig?.modeId !== undefined ||
+    inheritedDispatchConfig?.modelId !== undefined ||
+    inheritedDispatchConfig?.configOptionValues !== undefined ||
+    mayApplyBuiltinDefault
+      ? await readAgentAcpCapabilitySnapshot({
+          manager,
+          workspaceId: workspace.id as WorkspaceId,
+          machineId: session.machineId,
+          agentConfigId: session.agentConfigId,
+        })
+      : { capability: undefined, freshness: { confirmed: true as const } };
+  const effectiveDispatchConfig = resolveEffectiveSessionChatDispatchConfig({
+    dispatchConfig,
+    inheritedDispatchConfig,
+    target: session,
+    capability,
+    freshness,
+  });
+  effectiveDispatchConfig.mcpServerIds =
+    dispatchConfig.mcpServerIds !== undefined
+      ? [...dispatchConfig.mcpServerIds]
+      : (resolveSessionConversationConfig(historyForDefaults).mcpServerIds ?? []);
+  // An unconfigured follow-up retains the target's selected Role, never the sender's.
+  // Explicit execution changes clear it rather than claiming an unchanged preset.
+  const roleSelection =
+    !dispatchConfig.modeId &&
+    !dispatchConfig.modelId &&
+    !dispatchConfig.configOptionValues &&
+    !dispatchConfig.runConfig
+      ? resolveSessionConversationConfig(historyForDefaults)
+      : undefined;
+  const attachments =
+    input?.attachments ??
+    (await prepareSessionInputAttachments({
+      paths: input?.paths ?? [],
+      cwd: process.cwd(),
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId,
+      sourceMachineId: auth.machineId,
+      targetMachineId: session.machineId,
+      ...(input?.paths?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
+            ),
+          }
+        : {}),
+    }));
+  const inputBlocks = buildCommandInputBlocks(prompt, attachments);
+  const localHost = daemonTarget.localHost;
+  const derivedInputId = orchestration?.userTurnId ?? uuidV4();
+  const derivation = await classifyDelegatedEncryptedInput(
+    manager,
+    delegatedRequester,
+    session.machineId,
+    derivedInputId
+  );
+  const derivedFrom = derivation?.derivedFrom;
+  const maySteer = derivation?.principal !== 'member';
+  const remoteMachine = session.machineId !== auth.machineId;
+  // A shared member's derivation never steers another principal's running turn.
+  const steerTurnId =
+    orchestration?.steerActiveTurn && maySteer
+      ? remoteMachine
+        ? resolveActiveAssistantTurnId(historyForDefaults)
+        : localHost?.readActiveTurnId(sessionId)
+      : undefined;
   const userTurn = await appendUserPromptHistory({
+    steer: steerTurnId !== undefined,
+    ...(derivedFrom ? { derivedFrom } : {}),
+    ...(manager.isEncryptedWorkspace()
+      ? { signMachineInput: (input) => manager.signMachineInput(input) }
+      : {}),
+    inputBlocks,
     sessionDoc,
     prompt,
     userId: requesterUserId,
-    inputConfig: buildCliHistoryInputConfig({
-      prompt,
-      cliType: session.cliType,
-      agentType: session.agentType,
-      modeId: effectiveDispatchConfig.modeId,
-      modelId: effectiveDispatchConfig.modelId,
-      configOptionValues: effectiveDispatchConfig.configOptionValues,
-      taskToolsEnabled: effectiveDispatchConfig.taskToolsEnabled,
-      resume: session.acpSessionId ?? undefined,
-      chainDepth: orchestration?.chainDepth,
-    }),
-    preallocatedId: orchestration?.userTurnId,
-    knownHistory: quotaHistory,
+    author,
+    inputConfig: {
+      agentRoleId: roleSelection?.agentRoleId ?? null,
+      agentRoleRevision: roleSelection?.agentRoleRevision,
+      agentRoleSnapshot: roleSelection?.agentRoleSnapshot,
+      ...buildCliHistoryInputConfig({
+        inputBlocks,
+        prompt,
+        cliType: session.cliType,
+        agentType: session.agentType,
+        mcpServerIds: effectiveDispatchConfig.mcpServerIds,
+        memory: effectiveDispatchConfig.memory,
+        modeId: effectiveDispatchConfig.modeId,
+        modelId: effectiveDispatchConfig.modelId,
+        configOptionValues: effectiveDispatchConfig.configOptionValues,
+        resume: session.acpSessionId ?? undefined,
+        chainDepth: orchestration?.chainDepth,
+      }),
+    },
+    preallocatedId: orchestration?.userTurnId ?? (derivation ? derivedInputId : undefined),
   });
   const userTurnId = userTurn.id;
+  const result = {
+    sessionId,
+    machineId: session.machineId,
+    workspaceId: workspace.id as WorkspaceId,
+    userTurnId,
+  };
+  // Local steer recovery stays execution-owned. A remote replay may instead be
+  // an orphan left by a sender crash or failed fallback write; never offer it twice.
+  if (userTurn.existingStatus === 'pending_apply') {
+    if (!remoteMachine) return result;
+    const promoted = await backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: userTurnId,
+      status: 'pending',
+      onlyPendingApply: true,
+    });
+    if (!promoted.matched) return result;
+  }
+  if (
+    remoteMachine &&
+    steerTurnId !== undefined &&
+    userTurn.existingStatus === undefined &&
+    userTurn.inputConfig
+  ) {
+    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    // Bound setup separately: cold connections must not consume the offer's
+    // five-second response budget. Late setup must never send after fallback.
+    let accepting = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const inputConfig = userTurn.inputConfig;
+    const setupTimeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        accepting = false;
+        resolve(null);
+      }, REMOTE_STEER_CONNECT_TIMEOUT_MS);
+    });
+    const request = withMachineRpcClient(
+      { auth, workspaceId: workspace.id as WorkspaceId, machineId: session.machineId },
+      async (client) => {
+        if (!accepting) return null;
+        clearTimeout(timer);
+        timer = undefined;
+        return client.requestSessionSteer({
+          sessionId,
+          expectedTurnId: steerTurnId,
+          userTurnId,
+          userId: requesterUserId,
+          timestamp: userTurn.timestamp,
+          inputConfig,
+          timeoutMs: 5_000,
+        });
+      }
+    );
+    try {
+      const response = await Promise.race([request, setupTimeout]);
+      if (response?.applied) {
+        await backend.applyHistoryAction({
+          kind: 'user-status',
+          turnId: userTurnId,
+          status: 'processing',
+          deliveredSteer: true,
+          onlyPendingApply: true,
+        });
+        return { ...result, delivery: 'steered' };
+      }
+      if (response?.recoveryOwned) {
+        return withDelivery(result, deliveryFromSteerResponse(response));
+      }
+    } catch {
+      // Setup, transport and response failures never fail the accepted chat.
+    } finally {
+      accepting = false;
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    // An RPC lost before arrival has no execution-owned recovery. pending_apply
+    // is skipped forever by dispatch, so prefer a possible duplicate follow-up
+    // over an orphan. Never retry the steer; preserve any already-settled status.
+    getLogger('session').warn(
+      `Remote steer unconfirmed; queueing follow-up ${sessionId}/${userTurnId}`
+    );
+    const promoted = await backend.applyHistoryAction({
+      kind: 'user-status',
+      turnId: userTurnId,
+      status: 'pending',
+      onlyPendingApply: true,
+    });
+    const current = await readHistoryEntry(backend, userTurnId);
+    if (!promoted.matched && current?.status !== 'pending' && current?.status !== 'seen')
+      return result;
+  }
+  if (
+    steerTurnId !== undefined &&
+    userTurn.existingStatus === undefined &&
+    !remoteMachine &&
+    localHost &&
+    userTurn.inputConfig
+  ) {
+    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
+    await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    const response = await localHost.steerSession({
+      sessionId,
+      expectedTurnId: steerTurnId,
+      userTurnId,
+      userId: requesterUserId,
+      timestamp: userTurn.timestamp,
+      inputConfig: userTurn.inputConfig,
+    });
+    return withDelivery(result, deliveryFromSteerResponse(response));
+  }
+  // A busy target without an applied steer (including an unconfirmed remote one)
+  // runs this input after the current turn. Retries keep their earlier outcome.
+  const ordinaryDelivery: SessionChatDelivery | undefined =
+    !orchestration?.steerActiveTurn || !maySteer || userTurn.existingStatus !== undefined
+      ? undefined
+      : steerTurnId === undefined
+        ? 'dispatched'
+        : 'queued';
   const completionAbortController = structuredOutput ? new AbortController() : undefined;
   const completionPromise = structuredOutput
     ? waitForTurnCompletion({
         sessionDoc,
+        backend,
         userTurnId,
         outputMode: structuredOutput.outputMode,
         timeoutMs: structuredOutput.timeoutMs,
@@ -3117,21 +4705,25 @@ export async function sendSessionChatResult(
   let dispatched = false;
   try {
     await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+    if (!delegatedRequester) sessionDoc.recordHumanInputReceipt(userTurnId, requesterUserId);
     await writeDispatchPointer({ manager, sessionId, userTurnId });
     dispatched = true;
-    await confirmDispatchSyncedBestEffort({
+    await persistDispatchedSessionWrite({
+      sameReplica: daemonTarget.sameReplica,
       manager,
       sessionDoc,
       reason: `session.chat:${sessionId}:${userTurnId}`,
     });
     await dispatchTurnFastPath({
       auth,
+      manager,
       workspaceId: workspace.id as WorkspaceId,
       machineId: session.machineId,
       sessionId,
       userTurnId,
       userId: requesterUserId,
       timestamp: userTurn.timestamp,
+      inputOrigin: delegatedRequester ? 'agent' : 'human',
       inputConfig: userTurn.inputConfig,
     });
     return {
@@ -3139,6 +4731,7 @@ export async function sendSessionChatResult(
       machineId: session.machineId,
       workspaceId: workspace.id as WorkspaceId,
       userTurnId,
+      ...(ordinaryDelivery ? { delivery: ordinaryDelivery } : {}),
       completionPromise,
     };
   } catch (error) {
@@ -3152,7 +4745,6 @@ export async function sendSessionChatResult(
       await manager.repo
         .upsertDocMeta(getSessionRoomId(sessionId), {
           latestUserMsgId: undefined,
-          lastMissingHistoryUserMsgId: undefined,
         } satisfies Partial<SessionMeta>)
         .catch(() => undefined);
     }
@@ -3167,15 +4759,18 @@ async function buildSessionShowResult(
 ): Promise<SessionShowResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const docState = (await sessionDoc.getDocState()) as SessionDocMeta | undefined;
-  const history = docState?.history ?? [];
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  const [directory, queue] = await Promise.all([
+    backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+    backend.getMessageQueue(),
+  ]);
 
   return {
     workspace,
     session,
-    historyCount: history.length,
-    latestHistoryAt: history[history.length - 1]?.timestamp,
-    messageQueueCount: docState?.mq?.length ?? 0,
+    historyCount: directory.length,
+    latestHistoryAt: sessionHistoryActivityAt(directory[directory.length - 1]?.scalars),
+    messageQueueCount: queue.length,
   };
 }
 
@@ -3210,18 +4805,23 @@ async function readSessionLiveStatus(args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
   sessionId: SessionId;
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'>;
 }): Promise<{
   machineOnline: boolean;
   liveStatus: SessionStatusResult['liveStatus'];
 }> {
-  const machineOnline = await getMachineOnlineState(args);
-  if (!machineOnline.online) {
+  let presence: MachinePresence;
+  try {
+    presence = await ensureTargetMachineNotOffline(args);
+  } catch (error) {
     return {
       machineOnline: false,
-      liveStatus: deriveSessionLiveStatus(machineOnline),
+      liveStatus: deriveSessionLiveStatus({ online: false, message: formatErrorMessage(error) }),
     };
   }
-
+  // Presence owns online/offline; the live-status RPC only adds freshness. With
+  // unknown presence, an answered RPC is the only online evidence.
+  const unknownPresence = presence === 'unknown';
   try {
     const response = await withMachineRpcClient(
       args,
@@ -3230,7 +4830,7 @@ async function readSessionLiveStatus(args: {
     );
     if (!response?.success) {
       return {
-        machineOnline: true,
+        machineOnline: !unknownPresence || response !== null,
         liveStatus: deriveSessionLiveStatus({
           online: true,
           message: response?.error ?? 'Target machine did not answer the live status request.',
@@ -3247,7 +4847,7 @@ async function readSessionLiveStatus(args: {
     };
   } catch (error) {
     return {
-      machineOnline: true,
+      machineOnline: !unknownPresence,
       liveStatus: deriveSessionLiveStatus({
         online: true,
         message: formatErrorMessage(error),
@@ -3258,11 +4858,14 @@ async function readSessionLiveStatus(args: {
 
 export type SessionLiveStatusBatchItem = {
   sessionId: SessionId;
-  machineOnline: boolean;
+  /** Three-state; an unanswered RPC never turns unknown presence into offline. */
+  machinePresence: MachinePresence;
   state?: string;
   fresh: boolean;
   observedAt?: number;
   reason?: string;
+  /** Present only when the owning daemon supports and could read it. */
+  activity?: SessionLiveActivity;
 };
 
 /** Reuse one Machine RPC client for every Session owned by that Machine. */
@@ -3270,7 +4873,28 @@ export async function readSessionLiveStatusesMany(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   sessions: ReadonlyArray<Pick<SessionMeta, 'id' | 'machineId'>>;
+  manager: Pick<LoroDocumentManager, 'getMachinePresenceView'> & {
+    repo?: Pick<LoroDocumentManager['repo'], 'getDocMeta'>;
+  };
 }): Promise<Map<SessionId, SessionLiveStatusBatchItem>> {
+  const environment = getSessionCommandEnvironment();
+  if (environment) {
+    const output = new Map<SessionId, SessionLiveStatusBatchItem>();
+    for (const session of args.sessions) {
+      output.set(
+        session.id,
+        session.machineId === environment.auth.machineId
+          ? await environment.host.readLiveStatus(session.id)
+          : {
+              sessionId: session.id,
+              machinePresence: 'offline',
+              fresh: false,
+              reason: 'Machine unavailable in local workspace',
+            }
+      );
+    }
+    return output;
+  }
   const groups = new Map<MachineId, Array<Pick<SessionMeta, 'id' | 'machineId'>>>();
   for (const session of args.sessions) {
     const group = groups.get(session.machineId) ?? [];
@@ -3280,22 +4904,38 @@ export async function readSessionLiveStatusesMany(args: {
   const output = new Map<SessionId, SessionLiveStatusBatchItem>();
   await Promise.all(
     [...groups].map(async ([machineId, sessions]) => {
-      const online = await getMachineOnlineState({
-        auth: args.auth,
-        workspaceId: args.workspaceId,
-        machineId,
-      });
-      if (!online.online) {
+      let presence: MachinePresence;
+      try {
+        presence = await ensureTargetMachineNotOffline({ ...args, machineId });
+      } catch (error) {
+        const reason = formatErrorMessage(error);
+        // Definite presence absence, or this machine's own runtime being down, is offline;
+        // a presence read failure proves nothing about the target.
+        const failedPresence: MachinePresence =
+          error instanceof MachineOfflineError || machineId === args.auth.machineId
+            ? 'offline'
+            : 'unknown';
         for (const session of sessions) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: false,
+            machinePresence: failedPresence,
             fresh: false,
-            ...(online.message ? { reason: online.message } : {}),
+            reason,
           });
         }
         return;
       }
+      const unknownPresence = presence === 'unknown';
+      // Older daemons reject the activity flag, so only ask machines advertising it.
+      const includeActivity = await args.manager.repo
+        ?.getDocMeta(getMachineRoomId(machineId))
+        .then((record) =>
+          machineSupportsProtocolCapability(
+            record?.meta as MachineMeta,
+            MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity
+          )
+        )
+        .catch(() => false);
       try {
         const responses = await withMachineRpcClient(
           { auth: args.auth, workspaceId: args.workspaceId, machineId },
@@ -3306,6 +4946,7 @@ export async function readSessionLiveStatusesMany(args: {
                 response: await client.requestSessionLiveStatus({
                   sessionId: session.id,
                   timeoutMs: 10_000,
+                  ...(includeActivity ? { includeActivity: true } : {}),
                 }),
               }))
             )
@@ -3313,13 +4954,16 @@ export async function readSessionLiveStatusesMany(args: {
         for (const { session, response } of responses) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: true,
+            machinePresence: unknownPresence && response === null ? 'unknown' : 'online',
             fresh: response?.success === true,
             ...(response?.state ? { state: response.state } : {}),
             ...(response?.success === true && typeof response.observedAtMs === 'number'
               ? { observedAt: response.observedAtMs }
               : {}),
             ...(!response?.success && response?.error ? { reason: response.error } : {}),
+            ...(response?.success === true && response.activity
+              ? { activity: response.activity }
+              : {}),
           });
         }
       } catch (error) {
@@ -3327,7 +4971,7 @@ export async function readSessionLiveStatusesMany(args: {
         for (const session of sessions) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: true,
+            machinePresence: presence,
             fresh: false,
             reason,
           });
@@ -3346,13 +4990,15 @@ async function buildSessionStatusResult(
 ): Promise<SessionStatusResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  const history = await readSessionHistoryMetadata(backend.history);
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
     workspaceId: workspace.id as WorkspaceId,
     machineId: session.machineId,
     sessionId,
+    manager,
   });
 
   return {
@@ -3454,7 +5100,7 @@ function printHumanSessionStatus(result: SessionStatusResult): void {
   console.log(`parentSessionId: ${result.parentSessionId ?? '-'}`);
 }
 
-async function runSessionCommand(
+export async function runSessionCommand(
   options: CommonOptions,
   action: () => Promise<void>
 ): Promise<void> {
@@ -3462,6 +5108,8 @@ async function runSessionCommand(
     rootLogger.setDebug(true);
   }
 
+  // Keep diagnostics off stdout through setup, action, cleanup, and exit flushing.
+  const restoreLogging = options.json || options.jsonl ? routeLoggerToStderr() : () => {};
   try {
     await syncCommandTime('session');
     await action();
@@ -3481,6 +5129,8 @@ async function runSessionCommand(
       getLogger('session').error(message);
     }
     await exitSessionCommand(1);
+  } finally {
+    restoreLogging();
   }
 }
 
@@ -3526,14 +5176,19 @@ const sessionCreateCommand = new Command('create')
   .option('--machine <idOrName>', 'Target machine id or name')
   .option('--agent <idOrName>', 'Agent config id or name')
   .option('--agent-config <idOrName>', 'Agent config id or name')
+  .option(
+    '--agent-role <idOrName>',
+    'Agent Role id or name; the Role overrides --machine, --agent(-config), --mode, --model and --config-option'
+  )
   .option('--parent <sessionId>', 'Parent session whose work context should be reused')
   .option('--use-current-session-as-parent', 'Use LODY_SESSION_ID as the parent session')
-  .option('--title <title>', 'Session title')
+  .option('--title <title>', 'Fixed session title (default: generated from the prompt)')
   .option('--repo <owner/repo>', 'GitHub repository to attach')
   .option('--local-project <id|name|path>', 'Local project id, name, or root path')
   .option('--worktree', 'Create an isolated git worktree for --local-project')
   .option('--branch <name>', 'Git branch to use for GitHub repos or local git projects')
   .option('--mode <modeId>', 'ACP mode override')
+  .option('--mcp-server-ids <json>', 'MCP ids as a JSON array; [] disables all')
   .option('--model <modelId>', 'ACP model override')
   .option(
     '--config-option <keyValue>',
@@ -3547,12 +5202,18 @@ const sessionCreateCommand = new Command('create')
     collectListOption,
     []
   )
+  .option('--attach <path>', 'Attach a file from this machine; repeatable', collectListOption, [])
   .option('--prompt <text>', 'Prompt text')
   .option('--prompt-file <path>', 'Read prompt text from file, or - for stdin')
   .option('--json', 'Print JSON output')
   .option('--jsonl', 'Print JSON Lines output')
   .option('--wait', 'Wait for the assistant turn to complete before exiting')
   .option('--timeout <seconds>', 'Wait timeout in seconds for --wait', parsePositiveIntOption)
+  .option(
+    '--history-backend <kind>',
+    'History backend for this session (default: loro)',
+    parseSessionHistoryBackend
+  )
   .option('--debug', 'Enable debug output')
   .argument('[prompt]', 'Prompt text')
   .action(async (promptArg: string | undefined, options: CreateOptions) => {
@@ -3565,17 +5226,43 @@ const sessionCreateCommand = new Command('create')
         const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
         const prompt = await readPromptText(options, promptArg);
         await withWorkspaceManager(auth, workspace, async (manager) => {
-          const dispatchConfig = resolveTurnDispatchConfig({
-            mode: options.mode,
-            model: options.model,
-            configOption: options.configOption,
-          });
+          const agentRoleSelector = normalizeCliValue(options.agentRole);
+          const resolvedAgentRole = agentRoleSelector
+            ? await resolveAgentRoleCreateFromCatalog({
+                manager,
+                workspaceId: workspace.id as WorkspaceId,
+                selector: agentRoleSelector,
+                prompt,
+                overrides: options,
+              })
+            : undefined;
+          let effectivePrompt = prompt;
+          let dispatchConfig: ResolvedTurnDispatchConfig;
+          if (resolvedAgentRole) {
+            if (resolvedAgentRole.ignoredOverrides.length > 0) {
+              console.error(
+                `Warning: --agent-role ${resolvedAgentRole.role.id} overrides ${resolvedAgentRole.ignoredOverrides.join(', ')}; the Role's machine, agent config, and run configuration take precedence.`
+              );
+            }
+            applyAgentRoleCreateTarget(options, resolvedAgentRole);
+            effectivePrompt = resolvedAgentRole.prompt;
+            dispatchConfig = resolvedAgentRole.dispatchConfig;
+          } else {
+            dispatchConfig = resolveTurnDispatchConfig({
+              mode: options.mode,
+              model: options.model,
+              configOption: options.configOption,
+            });
+          }
+          if (options.mcpServerIds !== undefined) {
+            dispatchConfig.mcpServerIds = parseCliMcpServerIds(options.mcpServerIds);
+          }
           const shouldWaitForCompletion = shouldWaitForSessionCompletion(options);
           const result = await createSessionResult(
             auth,
             workspace,
             manager,
-            prompt,
+            effectivePrompt,
             options,
             dispatchConfig,
             shouldWaitForCompletion
@@ -3703,6 +5390,7 @@ const sessionChatCommand = new Command('chat')
   .description('Send a new user prompt to an existing session')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--mode <modeId>', 'ACP mode override')
+  .option('--mcp-server-ids <json>', 'MCP ids as a JSON array; [] disables all')
   .option('--model <modelId>', 'ACP model override')
   .option(
     '--config-option <keyValue>',
@@ -3710,6 +5398,7 @@ const sessionChatCommand = new Command('chat')
     collectListOption,
     []
   )
+  .option('--attach <path>', 'Attach a file from this machine; repeatable', collectListOption, [])
   .option('--prompt <text>', 'Prompt text')
   .option('--prompt-file <path>', 'Read prompt text from file, or - for stdin')
   .option('--json', 'Print JSON output')
@@ -3742,11 +5431,13 @@ const sessionChatCommand = new Command('chat')
           sessionIdArg,
           promptArg,
           envSessionId: process.env.LODY_SESSION_ID,
-          hasNonPositionalPromptSource: hasNonPositionalPromptSource({
-            prompt: options.prompt,
-            promptFile: options.promptFile,
-            stdinText: stdinState.text,
-          }),
+          hasNonPositionalPromptSource:
+            Boolean(options.attach?.length) ||
+            hasNonPositionalPromptSource({
+              prompt: options.prompt,
+              promptFile: options.promptFile,
+              stdinText: stdinState.text,
+            }),
         });
 
         const workspace = await resolveWorkspaceForSessionOrThrow(
@@ -3761,6 +5452,7 @@ const sessionChatCommand = new Command('chat')
             mode: options.mode,
             model: options.model,
             configOption: options.configOption,
+            mcpServerIds: options.mcpServerIds,
           });
           const shouldWaitForCompletion = shouldWaitForSessionCompletion(options);
           const result = await sendSessionChatResult(
@@ -3776,7 +5468,11 @@ const sessionChatCommand = new Command('chat')
                   timeoutMs: resolveStructuredOutputTimeoutMs(options.timeout),
                   onEvent: outputMode === 'jsonl' ? (event) => printJson(event) : undefined,
                 }
-              : undefined
+              : undefined,
+            undefined,
+            undefined,
+            undefined,
+            { paths: options.attach }
           );
           const completionPromise = result.completionPromise;
           const response = {
@@ -3850,15 +5546,98 @@ const sessionChatCommand = new Command('chat')
     }
   );
 
+/** Cancel a Session's running turn through the caller's workspace manager. */
+export async function cancelSessionTurn(args: {
+  auth: AuthContext;
+  workspaceId: WorkspaceId;
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  turnId?: string;
+  operationCancel?: boolean;
+}) {
+  const { auth, workspaceId, manager, sessionId } = args;
+  await syncSessionReadData(manager, sessionId, undefined, `session.cancel:${sessionId}`);
+  const session = await resolveSessionMetaOrThrow(manager, sessionId);
+  await assertMachineAccess({
+    auth,
+    workspaceId,
+    machineId: session.machineId,
+    requester: resolveSessionRequester(auth),
+    localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
+  });
+  // Already-stopped cancellation stays idempotent even when the daemon is offline.
+  const turnId = await resolveRunningAssistantTurnId(manager, sessionId);
+  if (!turnId) return { ok: true as const, sessionId, alreadyStopped: true as const };
+  const expectedTurnId = normalizeCliValue(args.turnId);
+  if (expectedTurnId && turnId !== expectedTurnId)
+    return {
+      ok: true as const,
+      sessionId,
+      alreadyStopped: true as const,
+      expectedTurnId,
+      activeTurnId: turnId,
+    };
+
+  await ensureTargetMachineNotOffline({
+    auth,
+    workspaceId,
+    machineId: session.machineId,
+    manager,
+  });
+
+  const machine = await manager.repo.getDocMeta(getMachineRoomId(session.machineId));
+  const inboxCancel = getSessionCancelProtocolFields(
+    machine?.meta,
+    uuidV4(),
+    !args.operationCancel
+  );
+  const response =
+    session.machineId === auth.machineId
+      ? extractCancelResponse(
+          await dispatchLocalControl({
+            type: 'session/cancel',
+            sessionId,
+            machineId: auth.machineId,
+            workspaceId,
+            turnId,
+            ...inboxCancel,
+          })
+        )
+      : await withMachineRpcClient(
+          { auth, workspaceId, machineId: session.machineId },
+          async (client) =>
+            await client.requestSessionCancel({
+              sessionId,
+              turnId,
+              timeoutMs: 10_000,
+              ...inboxCancel,
+            })
+        );
+
+  if (!response) {
+    throw new Error(`Machine ${session.machineId} did not answer the cancel request.`);
+  }
+
+  if (!response.success) {
+    throw new Error(response.error ?? `Failed to cancel ${sessionId}.`);
+  }
+
+  return { ok: true as const, sessionId, response };
+}
+
 const sessionCancelCommand = new Command('cancel')
   .description('Cancel the current running turn for a session')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--turn-id <turnId>', 'Cancel only when this exact assistant turn is active')
+  .addOption(new Option('--operation-cancel', 'Internal accepted-task cancellation').hideHelp())
   .option('--json', 'Print JSON output')
   .option('--debug', 'Enable debug output')
   .argument('[sessionId]', 'Session ID; falls back to LODY_SESSION_ID')
   .action(
-    async (sessionIdArg: string | undefined, options: CommonOptions & { turnId?: string }) => {
+    async (
+      sessionIdArg: string | undefined,
+      options: CommonOptions & { turnId?: string; operationCancel?: boolean }
+    ) => {
       await runSessionCommand(options, async () => {
         const auth = getAuthContextOrThrow();
         const sessionId = (normalizeCliValue(sessionIdArg) ??
@@ -3872,81 +5651,25 @@ const sessionCancelCommand = new Command('cancel')
           sessionId,
           options.workspace
         );
-        await withWorkspaceManager(auth, workspace, async (manager) => {
-          await syncSessionReadData(manager, sessionId, undefined, `session.cancel:${sessionId}`);
-          const session = await resolveSessionMetaOrThrow(manager, sessionId);
-          const workspaceId = workspace.id as WorkspaceId;
-          await assertMachineAccess({
+        const result = await withWorkspaceManager(auth, workspace, (manager) =>
+          cancelSessionTurn({
             auth,
-            workspaceId,
-            machineId: session.machineId,
-            localProjectId:
-              session.project?.kind === 'local' ? session.project.localProjectId : undefined,
-          });
-          // Already-stopped cancellation stays idempotent even when the daemon is offline.
-          const turnId = await resolveRunningAssistantTurnId(manager, sessionId);
-          if (!turnId) {
-            if (options.json) {
-              printJson({ ok: true, sessionId, alreadyStopped: true });
-            } else {
-              console.log(`Session ${sessionId} has no active turn.`);
-            }
-            return;
-          }
-          const expectedTurnId = normalizeCliValue(options.turnId);
-          if (expectedTurnId && turnId !== expectedTurnId) {
-            if (options.json) {
-              printJson({
-                ok: true,
-                sessionId,
-                alreadyStopped: true,
-                expectedTurnId,
-                activeTurnId: turnId,
-              });
-            } else {
-              console.log(`Target turn ${expectedTurnId} is no longer active in ${sessionId}.`);
-            }
-            return;
-          }
-
-          await ensureTargetMachineOnline({ auth, workspaceId, machineId: session.machineId });
-
-          const response =
-            session.machineId === auth.machineId
-              ? extractCancelResponse(
-                  await dispatchLocalControl({
-                    type: 'session/cancel',
-                    sessionId,
-                    machineId: auth.machineId,
-                    workspaceId,
-                    turnId,
-                  })
-                )
-              : await withMachineRpcClient(
-                  { auth, workspaceId, machineId: session.machineId },
-                  async (client) =>
-                    await client.requestSessionCancel({ sessionId, turnId, timeoutMs: 10_000 })
-                );
-
-          if (!response) {
-            throw new Error(`Machine ${session.machineId} did not answer the cancel request.`);
-          }
-
-          if (!response.success) {
-            throw new Error(response.error ?? `Failed to cancel ${sessionId}.`);
-          }
-
-          if (options.json) {
-            printJson({
-              ok: true,
-              sessionId,
-              response,
-            });
-            return;
-          }
-
+            workspaceId: workspace.id as WorkspaceId,
+            manager,
+            sessionId,
+            turnId: options.turnId,
+            operationCancel: options.operationCancel,
+          })
+        );
+        if (options.json) {
+          printJson(result);
+        } else if (result.response) {
           console.log(`Cancelled ${sessionId}`);
-        });
+        } else if (result.expectedTurnId) {
+          console.log(`Target turn ${result.expectedTurnId} is no longer active in ${sessionId}.`);
+        } else {
+          console.log(`Session ${sessionId} has no active turn.`);
+        }
       });
     }
   );
@@ -3958,6 +5681,10 @@ const sessionListCommand = new Command('list')
   .option('--all', 'Include active and archived sessions')
   .option('--opened-by <sessionId>', 'Only include sessions opened by this session id')
   .option('--opened-by-current', 'Only include sessions opened by LODY_SESSION_ID')
+  .option('--query <text>', 'Filter session titles or ids')
+  .option('--machine-id <id>', 'Filter by machine id')
+  .option('--agent-config-id <id>', 'Filter by Agent configuration id')
+  .option('--agent-role-id <id>', 'Filter by Agent Role creation provenance')
   .option('--limit <count>', 'Maximum number of sessions to print', parsePositiveIntOption)
   .option('--offline', 'Read the local cache without syncing first')
   .option('--json', 'Print JSON output')
@@ -3965,7 +5692,9 @@ const sessionListCommand = new Command('list')
   .action(async (options: ListOptions) => {
     await runSessionCommand(options, async () => {
       const auth = getAuthContextOrThrow();
-      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
+      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace, {
+        offline: options.offline,
+      });
       if (options.openedBy && options.openedByCurrent === true) {
         throw new Error('Pass either --opened-by or --opened-by-current, not both.');
       }
@@ -3986,6 +5715,12 @@ const sessionListCommand = new Command('list')
             archivedOnly: options.archived,
             includeAll: options.all,
             openedBySessionId,
+            ...z.object(SessionDiscoveryFilterShape).parse({
+              query: options.query,
+              machineId: options.machineId,
+              agentConfigId: options.agentConfigId,
+              agentRoleId: options.agentRoleId,
+            }),
           })
         );
         const limited =
@@ -4004,6 +5739,198 @@ const sessionListCommand = new Command('list')
       });
     });
   });
+
+const sessionObserveCommand = new Command('observe')
+  .description(
+    'Observe persisted Session state without executing or marking messages read (Cloud CLI)'
+  )
+  .option('--workspace <selector>', 'Target workspace id, slug, or name')
+  .option('--all', 'Observe the selected Workspace catalog and active Sessions')
+  .option('--follow', 'Keep observing subsequent turns; requires --jsonl')
+  .option('--json', 'Print the current snapshot as JSON')
+  .option('--jsonl', 'Print versioned JSON Lines events')
+  .option('--debug', 'Enable debug output')
+  .argument('[sessionId]', 'Session ID; falls back to LODY_SESSION_ID outside --all')
+  .action(
+    async (
+      sessionIdArg: string | undefined,
+      options: CommonOptions & { follow?: boolean; all?: boolean }
+    ) => {
+      await runSessionCommand(options, async () => {
+        const selection = resolveObserveSelection(
+          sessionIdArg,
+          options,
+          process.env.LODY_SESSION_ID
+        );
+        const auth = getAuthContextOrThrow();
+        const sessionId = selection.sessionId;
+        const workspace = selection.all
+          ? selectWorkspaceSummary(await listWorkspacesForToken(auth.token), options.workspace)
+          : await resolveWorkspaceForSessionOrThrow(auth, sessionId as SessionId, {
+              workspace: options.workspace,
+              reason: `session.observe.resolve:${sessionId}`,
+            });
+        await withWorkspaceManager(auth, workspace, async (manager) => {
+          await syncWorkspaceMetaForRead(manager, 'session.observe:meta');
+          const stop = new AbortController();
+          let resolveStopped = () => {};
+          const stopped = new Promise<void>((resolve) => {
+            resolveStopped = resolve;
+          });
+          let failure: unknown;
+          const stopObserving = () => {
+            stop.abort();
+            resolveStopped();
+          };
+          const fail = (error: unknown) => {
+            if (!stop.signal.aborted) {
+              failure = error;
+              stopObserving();
+            }
+          };
+          const write = createSessionObserveWriter({
+            output: process.stdout,
+            workspaceId: workspace.id as WorkspaceId,
+            streamId: uuidV4(),
+            now: getServerNow,
+            signal: stop.signal,
+          });
+          const emit = options.jsonl ? write : async () => {};
+          const attempt = <T>(run: () => Promise<T>) =>
+            Effect.tryPromise({ try: run, catch: (error) => error });
+          await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                yield* Effect.acquireRelease(
+                  Effect.sync(() => {
+                    process.once('SIGINT', stopObserving);
+                    process.once('SIGTERM', stopObserving);
+                  }),
+                  () =>
+                    Effect.sync(() => {
+                      process.off('SIGINT', stopObserving);
+                      process.off('SIGTERM', stopObserving);
+                    })
+                );
+                if (selection.all) {
+                  const reader = new WorkspaceSessionObserver({
+                    listMetas: () => listSessionMetasForWorkspace(manager),
+                    async readMeta(id) {
+                      const raw = await manager.repo.getDocMeta(getSessionRoomId(id));
+                      if (isLoroRepoDocDeleted(raw)) return null;
+                      if (!raw?.meta) throw new Error(`Session metadata is unavailable: ${id}`);
+                      return raw.meta as SessionMeta;
+                    },
+                    open: (id, onEvent) =>
+                      acquireSessionObservation({
+                        manager,
+                        sessionId: id,
+                        signal: stop.signal,
+                        emit: onEvent,
+                        onError: fail,
+                      }),
+                    emit,
+                    onError: fail,
+                    follow: options.follow === true,
+                  });
+                  yield* Effect.acquireRelease(Effect.succeed(reader), (owned) =>
+                    Effect.promise(() => owned.close())
+                  );
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() =>
+                      manager.repo.watch(
+                        (event) => {
+                          if (event.kind === 'doc-metadata') {
+                            const id = getSessionIdFromRoomId(event.docId);
+                            if (id) reader.refresh(id);
+                          }
+                        },
+                        { kinds: ['doc-metadata'] }
+                      )
+                    ),
+                    (watch) => Effect.sync(() => watch.unsubscribe())
+                  );
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() => manager.onMetaRoomSynced(() => reader.refresh())),
+                    (unsubscribe) => Effect.sync(unsubscribe)
+                  );
+                  yield* attempt(() => reader.start());
+                  if (!options.jsonl) {
+                    if (options.json)
+                      printJson({
+                        ok: true,
+                        version: 1,
+                        workspaceId: workspace.id,
+                        sessions: reader.current,
+                      });
+                    else
+                      for (const session of reader.current)
+                        console.log(
+                          `${session.sessionId}\t${session.state}\t${session.title ?? ''}`
+                        );
+                  }
+                  if (options.follow) yield* Effect.promise(() => stopped);
+                } else {
+                  if (!sessionId) throw new Error('Missing Session ID.');
+                  const handle = yield* Effect.acquireRelease(
+                    attempt(() =>
+                      acquireSessionObservation({
+                        manager,
+                        sessionId,
+                        signal: stop.signal,
+                        emit,
+                        onError: fail,
+                        onRemoved: resolveStopped,
+                      })
+                    ),
+                    (owned) =>
+                      Effect.promise(async () => {
+                        await owned?.close();
+                      })
+                  );
+                  if (!handle) return;
+                  const { observer } = handle;
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() =>
+                      manager.repo.watch(
+                        (event) => {
+                          if (
+                            event.kind === 'doc-metadata' &&
+                            event.docId === getSessionRoomId(sessionId)
+                          )
+                            observer.refresh();
+                        },
+                        { kinds: ['doc-metadata'] }
+                      )
+                    ),
+                    (watch) => Effect.sync(() => watch.unsubscribe())
+                  );
+                  observer.refresh();
+                  yield* attempt(() => observer.flush());
+                  if (observer.current) {
+                    if (options.jsonl) yield* attempt(() => write({ type: 'ready', sessionId }));
+                    else if (options.json)
+                      printJson({
+                        ok: true,
+                        version: 1,
+                        workspaceId: workspace.id,
+                        session: observer.current,
+                      });
+                    else
+                      console.log(
+                        `${sessionId}\t${observer.current.state}\t${observer.current.latestTurn?.state ?? '-'}\t${observer.current.title ?? ''}`
+                      );
+                    if (options.follow) yield* Effect.promise(() => stopped);
+                  }
+                }
+                if (failure) yield* Effect.fail(failure);
+              })
+            )
+          );
+        });
+      });
+    }
+  );
 
 const sessionHistoryCommand = new Command('history')
   .description('Read visible session transcript history')
@@ -4048,8 +5975,8 @@ const sessionHistoryCommand = new Command('history')
         );
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-        const transcript = toSessionTranscriptEntries(await sessionDoc.getHistory());
-        const entries = selectSessionTranscriptEntries(transcript, {
+        const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+        const { total, entries } = await readSessionTranscript(backend, {
           all: options.all,
           limit: options.limit,
           reverse: options.reverse,
@@ -4060,7 +5987,7 @@ const sessionHistoryCommand = new Command('history')
             ok: true,
             workspaceId: workspace.id,
             sessionId,
-            total: transcript.length,
+            total,
             returned: entries.length,
             entries,
           });
@@ -4185,9 +6112,11 @@ const sessionRenameCommand = new Command('rename')
           options.workspace
         );
         await withWorkspaceManager(auth, workspace, async (manager) => {
-          await resolveSessionMetaOrThrow(manager, sessionId);
+          await syncWorkspaceMetaForRead(manager, `session.rename:${sessionId}:prewrite`);
+          await assertSessionManagementAccess({ auth, workspace, manager, sessionId });
           await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
             title,
+            titleSource: 'user',
           } satisfies Partial<SessionMeta>);
           await ensureWorkspaceMetaSynced(manager, `session.rename:${sessionId}`);
 
@@ -4217,42 +6146,18 @@ const sessionArchiveCommand = new Command('archive')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.archive:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const session = await resolveSessionMetaOrThrow(manager, sessionId);
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
-        await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-          manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionArchiveMetaPatch())
+        const childSessionIds = await runSessionOperationWithSyncedMetadata(
+          manager,
+          sessionId,
+          'archive',
+          (targetId) =>
+            assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
         );
-
-        if (
-          !session.parentSessionId &&
-          session.machineId !== undefined &&
-          session.machineId.length > 0
-        ) {
-          const requestedAt = getServerNow();
-          await writeMachineFlockCommandRow(
-            manager,
-            workspace.id as WorkspaceId,
-            session.machineId,
-            {
-              key: machineFlockKeys.archiveSessionCommand(sessionId),
-              value: buildMachineArchiveSessionCommand({ requestedAt }),
-            },
-            requestedAt
-          );
-          const machineRoomId = getMachineRoomId(session.machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          await manager.repo.upsertDocMeta(machineRoomId, {
-            needToArchiveSessions: {
-              ...(machineMeta?.needToArchiveSessions ?? {}),
-              [sessionId]: true,
-            },
-          });
-        }
-        await ensureWorkspaceMetaSynced(manager, `session.archive:${sessionId}`);
 
         if (options.json) {
           printJson({ ok: true, sessionId, archivedChildSessionIds: childSessionIds });
@@ -4279,39 +6184,18 @@ const sessionRestoreCommand = new Command('restore')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.restore:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const session = await resolveSessionMetaOrThrow(manager, sessionId);
-        if (session.isArchived !== true) {
-          throw new Error(`Session ${sessionId} is not archived.`);
-        }
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
-        await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-          manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionRestoreMetaPatch())
+        const childSessionIds = await runSessionOperationWithSyncedMetadata(
+          manager,
+          sessionId,
+          'restore',
+          (targetId) =>
+            assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
         );
-
-        if (session.machineId !== undefined && session.machineId.length > 0) {
-          const nowMs = getServerNow();
-          const machineRoomId = getMachineRoomId(session.machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
-          if (machinePatch) {
-            await manager.repo.upsertDocMeta(machineRoomId, machinePatch);
-          }
-          await deleteMachineFlockCommandRows(
-            manager,
-            workspace.id as WorkspaceId,
-            session.machineId,
-            [
-              machineFlockKeys.archiveSessionCommand(sessionId),
-              machineFlockKeys.deleteSessionCommand(sessionId),
-            ],
-            nowMs
-          );
-        }
-        await ensureWorkspaceMetaSynced(manager, `session.restore:${sessionId}`);
 
         if (options.json) {
           printJson({ ok: true, sessionId, restoredChildSessionIds: childSessionIds });
@@ -4338,116 +6222,18 @@ const sessionDeleteCommand = new Command('delete')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.delete:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const session = await resolveSessionMetaOrThrow(manager, sessionId);
-        if (session.isArchived !== true) {
-          throw new Error(`Session ${sessionId} is not archived. Archive it before deleting.`);
-        }
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
-        const machineId =
-          session.machineId !== undefined && session.machineId.length > 0
-            ? session.machineId
-            : undefined;
-        const shouldQueueDelete = shouldQueueMachineDelete(session);
-
-        if (machineId && shouldQueueDelete) {
-          const requestedAt = getServerNow();
-          const machineRoomId = getMachineRoomId(machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          const machineFlockHandle = await manager.repo.openFlockDoc(
-            getMachineFlockDocId(workspace.id as WorkspaceId, machineId)
-          );
-          const machineMetaForCleanup = {
-            ...(machineMeta ?? {}),
-            localProjects: {
-              ...(machineMeta?.localProjects ?? {}),
-              ...getMachineFlockLocalProjects(
-                readMachineFlockRowsFromFlock(machineFlockHandle.flock, {
-                  families: ['localProject'],
-                })
-              ),
-            },
-          } satisfies Pick<
-            MachineLegacyMetaFields,
-            'needToArchiveSessions' | 'needToDeleteSessions' | 'localProjects'
-          >;
-          let nextNeedToArchiveSessions: Record<SessionId, boolean> | undefined;
-          if (machineMetaForCleanup.needToArchiveSessions?.[sessionId] !== undefined) {
-            nextNeedToArchiveSessions = {
-              ...(machineMetaForCleanup.needToArchiveSessions ?? {}),
-            };
-            delete nextNeedToArchiveSessions[sessionId];
-          }
-          await deleteMachineFlockCommandRows(
-            manager,
-            workspace.id as WorkspaceId,
-            machineId,
-            [machineFlockKeys.archiveSessionCommand(sessionId)],
-            requestedAt
-          );
-          const deleteCommand = buildMachineDeleteSessionCommand({
-            session,
-            machineMeta: machineMetaForCleanup,
-            requestedAt,
-            existing: machineMeta?.needToDeleteSessions?.[sessionId],
-          });
-          if (nextNeedToArchiveSessions !== undefined || deleteCommand) {
-            await manager.repo.upsertDocMeta(machineRoomId, {
-              ...(nextNeedToArchiveSessions !== undefined
-                ? { needToArchiveSessions: nextNeedToArchiveSessions }
-                : {}),
-              ...(deleteCommand
-                ? {
-                    needToDeleteSessions: {
-                      ...(machineMeta?.needToDeleteSessions ?? {}),
-                      [sessionId]: machineDeleteCommandToQueueItem(deleteCommand),
-                    },
-                  }
-                : {}),
-            });
-          }
-          if (deleteCommand) {
-            await writeMachineFlockCommandRow(
-              manager,
-              workspace.id as WorkspaceId,
-              machineId,
-              {
-                key: machineFlockKeys.deleteSessionCommand(sessionId),
-                value: deleteCommand,
-              },
-              requestedAt
-            );
-          }
-        } else if (machineId) {
-          const requestedAt = getServerNow();
-          const machineRoomId = getMachineRoomId(machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
-          if (machinePatch) {
-            await manager.repo.upsertDocMeta(machineRoomId, machinePatch);
-          }
-          await deleteMachineFlockCommandRows(
-            manager,
-            workspace.id as WorkspaceId,
-            machineId,
-            [
-              machineFlockKeys.archiveSessionCommand(sessionId),
-              machineFlockKeys.deleteSessionCommand(sessionId),
-            ],
-            requestedAt
-          );
-        }
-
-        await applySessionAndChildren(sessionId, childSessionIds, async (id) => {
-          await manager.repo.deleteDoc(getSessionRoomId(id));
-          await manager.cleanSessionDoc(id);
-        });
-        await ensureWorkspaceMetaSynced(manager, `session.delete:${sessionId}`);
+        const childSessionIds = await runSessionOperationWithSyncedMetadata(
+          manager,
+          sessionId,
+          'delete',
+          (targetId) =>
+            assertSessionManagementAccess({ auth, workspace, manager, sessionId: targetId })
+        );
 
         if (options.json) {
           printJson({ ok: true, sessionId, deletedChildSessionIds: childSessionIds });
@@ -4466,9 +6252,80 @@ export const sessionCommand = new Command('session')
   .addCommand(sessionCancelCommand)
   .addCommand(sessionListCommand)
   .addCommand(sessionHistoryCommand)
+  .addCommand(sessionObserveCommand)
   .addCommand(sessionShowCommand)
   .addCommand(sessionStatusCommand)
   .addCommand(sessionRenameCommand)
   .addCommand(sessionArchiveCommand)
   .addCommand(sessionRestoreCommand)
   .addCommand(sessionDeleteCommand);
+
+export type SessionDocReadAuthorityContext = {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+};
+
+async function resolveDaemonTargetOrThrow(args: {
+  auth: Pick<AuthContext, 'userId' | 'machineId'>;
+  manager: LoroDocumentManager;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requesterUserId: string;
+}): Promise<DaemonTargetResolution> {
+  const resolved = await resolveDaemonTarget(args);
+  if (resolved.authority === 'denied') {
+    throw new Error(`Machine access denied for ${args.machineId}: workspace_access_revoked`);
+  }
+  return resolved;
+}
+
+async function syncSessionDocUnlessLocalDaemon(args: {
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  reason: string;
+  authorityContext?: SessionDocReadAuthorityContext;
+}): Promise<DaemonTargetResolution> {
+  if (!args.authorityContext) {
+    await syncDocForRead(args.manager, getSessionRoomId(args.sessionId), args.reason);
+    return {
+      sameReplica: false,
+      isLocalEnvironment: false,
+      authority: 'remote-or-unverified',
+      nativeOwnerAccess: undefined,
+    };
+  }
+  const resolved = await resolveDaemonTargetOrThrow({
+    auth: args.authorityContext.auth,
+    manager: args.manager,
+    workspaceId: args.authorityContext.workspaceId,
+    machineId: args.authorityContext.machineId,
+    requesterUserId: args.authorityContext.requesterUserId,
+  });
+  if (resolved.authority !== 'local-daemon') {
+    await syncDocForRead(args.manager, getSessionRoomId(args.sessionId), args.reason);
+  }
+  return resolved;
+}
+
+export async function readSessionMcpIdsForAuthoring(
+  manager: LoroDocumentManager,
+  sessionId: SessionId,
+  explicitIds?: readonly string[],
+  authorityContext?: SessionDocReadAuthorityContext
+): Promise<string[]> {
+  if (explicitIds !== undefined) return [...explicitIds];
+  await syncSessionDocUnlessLocalDaemon({
+    manager,
+    sessionId,
+    reason: 'session-mcp-selection',
+    authorityContext,
+  });
+  const doc = await manager.getOrCreateSessionDoc(sessionId);
+  const backend = await createSessionBackend(doc, await doc.getMetaState());
+  return (
+    resolveSessionConversationConfig(await readSessionHistoryMetadata(backend.history))
+      .mcpServerIds ?? []
+  );
+}

@@ -59,3 +59,8 @@ export const PresenceUnknownStaysSilent: Story = {
     }),
   },
 };
+
+/** E2EE has no presence transport yet; absence is not evidence of being offline. */
+export const EncryptedPresenceUnavailable: Story = {
+  args: { state: { kind: 'presence-unavailable' } },
+};

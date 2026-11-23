@@ -1,8 +1,7 @@
-import { execFile } from 'child_process';
+import { toShared } from '@/platform/process-options';
 import path from 'path';
 import os from 'os';
 import * as fs from 'fs';
-import { promisify } from 'util';
 
 import {
   type AcpSessionNotification,
@@ -29,12 +28,14 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { extractTextFromAgentResponse } from './response-utils';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { normalizeConfigOptions } from './acp-capabilities';
 import { readLegacySessionModelState } from './acp-capability-normalization';
 import { parseLodyMessagePhase } from './lody-acp-extension';
 
-const execFileAsync = promisify(execFile);
 const TITLE_GIT_TIMEOUT_MS = 5_000;
+const CODEX_TITLE_TIMEOUT_MS = 5 * 60_000;
 export const TITLE_TASK_PROMPT_MAX_CHARS = 4_000;
 
 const truncateTitleTaskPrompt = (taskPrompt: string): string => {
@@ -92,6 +93,8 @@ export async function applyTitleConfigOptions(options: {
   acpSessionId: ACPSessionId;
   sessionResponse: unknown;
   configOptionValues: Record<string, AcpConfigOptionValue>;
+  requireAvailable?: boolean;
+  signal?: AbortSignal;
   logger: Logger;
 }): Promise<void> {
   const sessionResponse = options.sessionResponse as {
@@ -106,6 +109,7 @@ export async function applyTitleConfigOptions(options: {
   });
 
   for (const [key, value] of entries) {
+    options.signal?.throwIfAborted();
     const currentOption = currentConfigOptions.find((option) => option.id === key);
     if (currentOption && canApplyConfigOptionValue(currentOption, value)) {
       const updatedConfigOptions = await options.client.setSessionConfigOption(
@@ -127,18 +131,21 @@ export async function applyTitleConfigOptions(options: {
       continue;
     }
 
+    if (options.requireAvailable) {
+      throw new Error(`Unavailable title config option ${key}=${String(value)}`);
+    }
     options.logger.debug(
       `[title-generator] Skipping unavailable title config option ${key}=${String(value)}`
     );
   }
+  options.signal?.throwIfAborted();
 }
 
 export const extractTitleFromAgentResponse = (response: unknown): string | null =>
   extractTextFromAgentResponse(response);
 
 export const extractTitleChunkFromNotification = (
-  notification: AcpSessionNotification,
-  agentType?: AgentType
+  notification: AcpSessionNotification
 ): string | null => {
   const update = notification.update;
   if (update.sessionUpdate !== 'agent_message_chunk') {
@@ -150,12 +157,7 @@ export const extractTitleChunkFromNotification = (
   }
 
   const phase = parseLodyMessagePhase(update._meta);
-  if (agentType === 'codex') {
-    if (phase !== 'final_answer') {
-      return null;
-    }
-    return content.text;
-  }
+  // Codex also permits an unknown phase, especially with custom providers.
   if (phase !== undefined && phase !== 'final_answer') {
     return null;
   }
@@ -235,12 +237,17 @@ export const sanitizeGeneratedTitle = (candidate?: string | null): string | null
 const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<boolean> => {
   const isGitRepo = async (): Promise<boolean> => {
     try {
-      const result = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
-        cwd: workdir,
-        encoding: 'utf8',
-        timeout: TITLE_GIT_TIMEOUT_MS,
-      });
-      return String(result.stdout ?? '').trim() === 'true';
+      const result = await runCommandTextLegacy(
+        {
+          command: 'git',
+          args: ['rev-parse', '--is-inside-work-tree'],
+          cwd: workdir,
+          timeout: TITLE_GIT_TIMEOUT_MS,
+          check: 'exit-0',
+        },
+        toShared()
+      );
+      return result.stdout.trim() === 'true';
     } catch {
       return false;
     }
@@ -251,11 +258,16 @@ const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<
   }
 
   try {
-    await execFileAsync('git', ['init', '--quiet'], {
-      cwd: workdir,
-      encoding: 'utf8',
-      timeout: TITLE_GIT_TIMEOUT_MS,
-    });
+    await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['init', '--quiet'],
+        cwd: workdir,
+        timeout: TITLE_GIT_TIMEOUT_MS,
+        check: 'exit-0',
+      },
+      toShared()
+    );
   } catch (error) {
     logger.debug(
       `[title-generator] Failed to init git repo in ${workdir}: ${formatErrorMessage(error)}`
@@ -283,9 +295,12 @@ export type GenerateTitleOptions = {
   agentType: AgentType;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
+  magpieGatewayUrl?: string;
   taskPrompt: string;
   logger: Logger;
   env?: Record<string, string>;
+  codexProfile?: import('./codex-profile-runtime').CodexProfileExecution;
   titleConfig?: TitleGenerationConfig;
 };
 
@@ -299,24 +314,32 @@ export const generateTitleIsolated = async (
 
   const tryGenerateWithArgs = async (extraArgs: string[]): Promise<string | null> => {
     let collectedText = '';
+    let unphasedText = '';
     const startupStartedAt = Date.now();
     options.logger.debug(
       `[title-generator] Starting isolated title ACP agent (cliType=${options.cliType} agentType=${options.agentType})`
     );
     const { agentProcess, client, acpSessionId, sessionResponse } = await startLocalAcpAgent({
+      codexProfile: options.codexProfile,
       cliType: options.cliType,
       agentType: options.agentType,
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
+      agentConfigId: options.agentConfigId,
+      magpieGatewayUrl: options.magpieGatewayUrl,
       workdir,
       env: { ...process.env, ...options.env, LODY_TITLE_AGENT: '1' },
       logger: options.logger,
       terminalManager: noopTerminalManager,
       terminalEnabled: false,
       onUpdateMessage: (msg) => {
-        const text = extractTitleChunkFromNotification(msg, options.agentType);
+        const text = extractTitleChunkFromNotification(msg);
         if (text) {
-          collectedText += text;
+          if (parseLodyMessagePhase(msg.update._meta) === 'final_answer') {
+            collectedText += text;
+          } else {
+            unphasedText += text;
+          }
         }
       },
       onRequestPermission: async (
@@ -331,58 +354,108 @@ export const generateTitleIsolated = async (
       }ms)`
     );
 
+    const titleAbort = new AbortController();
+    const timeoutMs =
+      options.cliType === 'builtin' && options.agentType === 'codex'
+        ? CODEX_TITLE_TIMEOUT_MS
+        : undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const prompt = buildTitlePrompt(options.taskPrompt);
+      const generate = async (): Promise<string | null> => {
+        const prompt = buildTitlePrompt(options.taskPrompt);
 
-      const configuredValues = options.titleConfig?.configOptionValues;
-      const configOptionValues =
-        configuredValues && Object.keys(configuredValues).length > 0
-          ? configuredValues
-          : computeTitleGenerationDefaults(
-              options.cliType,
-              options.agentType,
-              normalizeConfigOptions(sessionResponse.configOptions) ?? []
-            );
+        const configuredValues = options.titleConfig?.configOptionValues;
+        const configOptionValues =
+          configuredValues && Object.keys(configuredValues).length > 0
+            ? configuredValues
+            : computeTitleGenerationDefaults(
+                options.cliType,
+                options.agentType,
+                normalizeConfigOptions(sessionResponse.configOptions) ?? []
+              );
 
-      if (configOptionValues) {
-        if (client) {
-          await applyTitleConfigOptions({
-            client,
-            acpSessionId,
-            sessionResponse,
-            configOptionValues,
-            logger: options.logger,
-          });
+        if (configOptionValues) {
+          if (client) {
+            await applyTitleConfigOptions({
+              client,
+              acpSessionId,
+              sessionResponse,
+              configOptionValues,
+              requireAvailable: options.cliType === 'builtin' && options.agentType === 'codex',
+              signal: titleAbort.signal,
+              logger: options.logger,
+            });
+          }
         }
-      }
 
-      options.logger.debug(`[title-generator] Sending title prompt (acpSessionId=${acpSessionId})`);
-      const response = await client?.prompt(acpSessionId, prompt);
-      options.logger.debug(
-        `[title-generator] Title prompt returned (acpSessionId=${acpSessionId})`
-      );
+        // Title material is only what the agent streams in answer to this prompt;
+        // everything delivered before this line is discarded. pi-acp emits its startup
+        // banner (or, with quietStartup, its update notice) as an untyped
+        // agent_message_chunk right after session/new, outside any turn, and without this
+        // reset it filled sanitizeTitle's 80-character window. What puts that chunk ahead
+        // of the reset is the config round trip above: applying an option is a real
+        // request to the agent. A titleConfig whose every value the agent cannot apply
+        // skips that request, and is not covered.
+        collectedText = '';
+        unphasedText = '';
 
-      const deadline = Date.now() + 10000;
-      while (Date.now() < deadline && collectedText.trim() === '') {
-        await sleep(100);
-      }
+        titleAbort.signal.throwIfAborted();
+        options.logger.debug(
+          `[title-generator] Sending title prompt (acpSessionId=${acpSessionId})`
+        );
+        const response = await client?.prompt(
+          acpSessionId,
+          prompt,
+          timeoutMs === undefined ? undefined : { signal: titleAbort.signal }
+        );
+        titleAbort.signal.throwIfAborted();
+        options.logger.debug(
+          `[title-generator] Title prompt returned (acpSessionId=${acpSessionId})`
+        );
 
-      const fromStream = sanitizeGeneratedTitle(collectedText);
-      if (fromStream) {
-        return fromStream;
-      }
+        const deadline = Date.now() + 10000;
+        while (Date.now() < deadline && collectedText.trim() === '' && unphasedText.trim() === '') {
+          await sleep(100);
+          titleAbort.signal.throwIfAborted();
+        }
 
-      const rawTitle = extractTextFromAgentResponse(response);
-      const sanitized = sanitizeGeneratedTitle(rawTitle);
-      if (sanitized) {
-        return sanitized;
-      }
-      return fallbackTitle;
+        // Explicit final answers take precedence over compatibility text. Never
+        // concatenate unknown-phase commentary with a phase-aware final answer.
+        const fromStream = sanitizeGeneratedTitle(
+          collectedText.trim() ? collectedText : unphasedText
+        );
+        if (fromStream) {
+          return fromStream;
+        }
+
+        const rawTitle = extractTextFromAgentResponse(response);
+        const sanitized = sanitizeGeneratedTitle(rawTitle);
+        if (sanitized) {
+          return sanitized;
+        }
+        return fallbackTitle;
+      };
+
+      if (timeoutMs === undefined) return await generate();
+
+      // A deadline on the waiter alone would leave the ACP process and its raw
+      // request running. Abort the title work, then the finally block ends its tree.
+      const deadline = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          const error = new Error(`Codex title generation exceeded ${timeoutMs}ms`);
+          titleAbort.abort(error);
+          reject(error);
+        }, timeoutMs);
+        timeout.unref?.();
+      });
+      return await Promise.race([generate(), deadline]);
     } finally {
+      clearTimeout(timeout);
       await shutdownLocalAcpAgent({
         agentProcess,
         client,
         acpSessionId,
+        deleteSession: true,
         logger: options.logger,
         sessionLabel: `title-generator:${options.cliType}/${options.agentType}`,
       });

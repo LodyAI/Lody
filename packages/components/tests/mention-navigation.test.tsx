@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
-
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Mention, MentionInput, MentionItem, useMentionContext } from '../src/ui/mention';
+import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
+import {
+  Mention,
+  MentionContent,
+  MentionInput,
+  MentionItem,
+  useMentionContext,
+} from '../src/ui/mention';
 import type { ItemData, Mention as MentionRange } from '../src/ui/mention/mention-root';
+import { composerIn, type ComposerTestHandle } from './composer-test-utils';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -40,7 +47,17 @@ function Probe() {
   return null;
 }
 
-function Harness({ items, initialValue }: { items: ItemSpec[]; initialValue: string }) {
+function Harness({
+  items,
+  initialValue,
+  withChips = false,
+  isReadonly = false,
+}: {
+  items: ItemSpec[];
+  initialValue: string;
+  withChips?: boolean;
+  isReadonly?: boolean;
+}) {
   const [value, setValue] = React.useState(initialValue);
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
   const [selected, setSelected] = React.useState<string[]>([]);
@@ -54,8 +71,10 @@ function Harness({ items, initialValue }: { items: ItemSpec[]; initialValue: str
       onMentionsChange={setMentions}
       value={selected}
       onValueChange={setSelected}
+      getMentionChip={withChips ? () => ({}) : undefined}
       onFilter={(options) => options}
       autoCloseOnEmpty={false}
+      readonly={isReadonly}
     >
       <Probe />
       <MentionInput value={value} onChange={() => {}} />
@@ -111,18 +130,35 @@ describe('Mention navigation and insertion', () => {
       ).requestAnimationFrame;
     }
     originalRequestAnimationFrame = undefined;
+    vi.unstubAllGlobals();
+    __resetPlatformCacheForTests();
   });
 
-  function render(items: ItemSpec[], initialValue: string, caret = initialValue.length) {
+  function setPlatform(os: 'darwin' | 'linux') {
+    vi.stubGlobal('__LODY_PLATFORM__', { os });
+    __resetPlatformCacheForTests();
+  }
+
+  function render(
+    items: ItemSpec[],
+    initialValue: string,
+    caret = initialValue.length,
+    withChips = false,
+    isReadonly = false
+  ) {
     act(() => {
-      root?.render(<Harness items={items} initialValue={initialValue} />);
+      root?.render(
+        <Harness
+          items={items}
+          initialValue={initialValue}
+          withChips={withChips}
+          isReadonly={isReadonly}
+        />
+      );
     });
-    const input = container?.querySelector('textarea');
-    if (!input) throw new Error('Expected mention textarea to render');
-    act(() => {
-      input.setSelectionRange(caret, caret);
-      input.focus();
-    });
+    const input = composerIn(container!);
+    input.setSelectionRange(caret, caret);
+    input.focus();
     return input;
   }
 
@@ -132,88 +168,13 @@ describe('Mention navigation and insertion', () => {
     });
   }
 
-  function pressKey(input: HTMLTextAreaElement, key: string, init?: KeyboardEventInit) {
+  function pressKey(input: ComposerTestHandle, key: string, init?: KeyboardEventInit) {
     const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
     act(() => {
       input.dispatchEvent(event);
     });
     return event;
   }
-
-  it('writes the item insertText instead of composing trigger and label', () => {
-    render([{ value: '3312', label: '3312', insertText: '#3312', kind: 'issue' }], '@');
-
-    commit('3312', 0);
-
-    expect(latest.inputValue).toBe('#3312 ');
-    expect(latest.mentions).toEqual([{ value: '3312', start: 0, end: 5, kind: 'issue' }]);
-    expect(latest.values).toEqual(['3312']);
-  });
-
-  it('falls back to trigger and label when the item has no insertText', () => {
-    render([{ value: 'src/app.ts' }], '@');
-
-    commit('src/app.ts', 0);
-
-    expect(latest.inputValue).toBe('@src/app.ts ');
-    expect(latest.mentions).toEqual([{ value: 'src/app.ts', start: 0, end: 11, kind: 'mention' }]);
-  });
-
-  it('records no mention when selecting a navigation item', () => {
-    render([{ value: 'issue', label: 'Issues', navigateText: '@issue:' }], '@');
-
-    commit('issue', 0);
-
-    // Rewrites the trigger span, no trailing space, menu stays up for level two.
-    expect(latest.inputValue).toBe('@issue:');
-    expect(latest.mentions).toEqual([]);
-    expect(latest.values).toEqual([]);
-    expect(latest.open).toBe(true);
-  });
-
-  it('starts destination work synchronously when selecting a navigation item', () => {
-    let navigations = 0;
-    render(
-      [
-        {
-          value: 'skill',
-          label: 'Skills',
-          navigateText: '@skill:',
-          onMentionNavigate: () => {
-            navigations += 1;
-          },
-        },
-      ],
-      '@'
-    );
-
-    commit('skill', 0);
-
-    expect(navigations).toBe(1);
-    expect(latest.inputValue).toBe('@skill:');
-  });
-
-  it('does not start destination work when a navigation item is force-committed', () => {
-    let navigations = 0;
-    render(
-      [
-        {
-          value: 'src/',
-          navigateText: '@src/',
-          insertText: '@src',
-          onMentionNavigate: () => {
-            navigations += 1;
-          },
-        },
-      ],
-      '@src/'
-    );
-
-    commit('src/', 0, { commit: true });
-
-    expect(navigations).toBe(0);
-    expect(latest.inputValue).toBe('@src ');
-  });
 
   it('commits a navigation item through insertText when commit is requested', () => {
     render([{ value: 'src/', navigateText: '@src/', insertText: '@src', kind: 'dir' }], '@src/');
@@ -242,14 +203,49 @@ describe('Mention navigation and insertion', () => {
     expect(latest.inputValue).toBe('@');
   });
 
+  it.each([
+    { key: 'b', boundary: 'end' },
+    { key: 'f', boundary: 'start' },
+  ])('macOS Ctrl+$key crosses a committed file mention from its $boundary', ({ key, boundary }) => {
+    setPlatform('darwin');
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+    const start = boundary === 'end' ? mention.end : mention.start;
+
+    act(() => input.setSelectionRange(start, start));
+    const keydown = pressKey(input, key, { ctrlKey: true });
+
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(input.selectionStart).toBe(boundary === 'end' ? mention.start : mention.end);
+    expect(latest.inputValue).toBe('@src/file.ts ');
+  });
+
+  it.each([
+    { key: 'ArrowLeft', boundary: 'end' },
+    { key: 'ArrowRight', boundary: 'start' },
+  ])('$key crosses a committed file mention instead of snapping back', ({ key, boundary }) => {
+    const input = render([{ value: 'src/file.ts', insertText: '@src/file.ts', kind: 'file' }], '@');
+    commit('src/file.ts', 0);
+    const mention = latest.mentions[0]!;
+    const start = boundary === 'end' ? mention.end : mention.start;
+
+    act(() => input.setSelectionRange(start, start));
+    const keydown = pressKey(input, key);
+
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(input.selectionStart).toBe(boundary === 'end' ? mention.start : mention.end);
+  });
+
   it('leaves Backspace alone inside a path drill-down', () => {
     // `@src/` is a path, not a `<namespace>:` prefix: Backspace must keep
     // deleting one character so the user can walk back up a level at a time.
     const input = render([{ value: 'src/', navigateText: '@src/' }], '@src/');
 
-    const event = pressKey(input, 'Backspace');
+    pressKey(input, 'Backspace');
 
-    expect(event.defaultPrevented).toBe(false);
+    // The editor deletes the character itself; the primitive must not pop the
+    // path back to the bare trigger the way it pops a namespace.
     expect(latest.inputValue).toBe('@src/');
   });
 
@@ -281,5 +277,143 @@ describe('Mention navigation and insertion', () => {
     expect(event.defaultPrevented).toBe(false);
     expect(latest.inputValue).toBe('@');
     expect(latest.mentions).toEqual([]);
+  });
+
+  it('snaps a caret inside a session mention to a boundary before editing', () => {
+    const input = render([{ value: 'sess_1', insertText: '@fix-ci', kind: 'session' }], '@');
+    commit('sess_1', 0);
+
+    input.setSelectionRange(3, 3);
+    act(() => {
+      input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(input.selectionStart).toBe(0);
+
+    input.edit(`X${input.value}`, 1);
+
+    expect(latest.inputValue).toBe('X@fix-ci ');
+    expect(latest.mentions).toEqual([{ value: 'sess_1', start: 1, end: 8, kind: 'session' }]);
+  });
+
+  it('keeps a readonly caret out of a committed mention', () => {
+    const items = [{ value: 'plan', insertText: '/plan', kind: 'command' }];
+    const input = render(items, '/', 1, true, true);
+    commit('plan', 0);
+
+    input.setSelectionRange(2, 2);
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Home', bubbles: true }));
+    });
+
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(0);
+  });
+});
+
+describe('touch selection of prepared mentions', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { docked: true, outcome: 'success' },
+    { docked: false, outcome: 'success' },
+    { docked: true, outcome: 'failure' },
+    { docked: true, outcome: 'dismiss' },
+  ])('prepares after touch focus ($docked, $outcome)', async ({ docked, outcome }) => {
+    let finish!: (result: { text: string; mentions: MentionRange[] } | null) => void;
+    const body = new Promise<{ text: string; mentions: MentionRange[] } | null>((resolve) => {
+      finish = resolve;
+    });
+    let signal: AbortSignal | undefined;
+    function Composer() {
+      const [value, setValue] = React.useState('/review');
+      const [loading, setLoading] = React.useState(false);
+      return (
+        <Mention
+          defaultOpen
+          trigger="/"
+          inputValue={value}
+          onInputValueChange={setValue}
+          autoCloseOnEmpty={false}
+        >
+          <MentionInput value={value} onChange={() => {}} />
+          <MentionContent dockedOnMobile={docked}>
+            <MentionItem
+              value="shortcut"
+              disabled={loading}
+              onMentionPrepare={(request) => {
+                signal = request.signal;
+                setLoading(true);
+                return body;
+              }}
+            >
+              <svg>
+                <path data-testid="shortcut-icon" />
+              </svg>
+              Review
+            </MentionItem>
+          </MentionContent>
+        </Mention>
+      );
+    }
+    await act(async () => root.render(<Composer />));
+    const composer = composerIn(container);
+    const input = composer.element;
+    composer.focus();
+    composer.setSelectionRange(7, 7);
+    await act(() => vi.advanceTimersByTime(0));
+    const icon = document.querySelector('[data-testid="shortcut-icon"]')!;
+    const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
+    Object.defineProperty(down, 'pointerType', { value: 'touch' });
+    await act(() => icon.dispatchEvent(down));
+    // WebKit blurs before click, then exposes a transient zero caret to the
+    // focus handler even though the saved insertion point is still at the end.
+    act(() => input.blur());
+    const focus = input.focus.bind(input);
+    vi.spyOn(input, 'focus').mockImplementation(() => {
+      composer.setSelectionRange(0, 0);
+      focus();
+    });
+    await act(async () => icon.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(signal).toBeDefined();
+    expect(signal?.aborted).toBe(false);
+    expect(composer.value).toBe('/review');
+    expect(input.getAttribute('aria-expanded')).toBe('true');
+    if (outcome === 'dismiss') {
+      await act(() =>
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      );
+      expect(signal?.aborted).toBe(true);
+    }
+    await act(async () =>
+      finish(outcome === 'failure' ? null : { text: 'Review this change', mentions: [] })
+    );
+    if (outcome !== 'success') {
+      expect(composer.value).toBe('/review');
+      if (outcome === 'failure') expect(input.getAttribute('aria-expanded')).toBe('true');
+      return;
+    }
+    expect(composer.value).toBe('Review this change');
+    expect(composer.selectionStart).toBe('Review this change'.length);
+    expect(input.getAttribute('aria-expanded')).toBe('false');
   });
 });

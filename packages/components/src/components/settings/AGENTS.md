@@ -1,0 +1,144 @@
+# Settings surfaces
+
+`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+Parent `AGENTS.md` files also apply.
+
+Settings owns the workspace catalog surfaces (Providers, MCP servers, Agent
+Roles). Before saving a catalog row, follow the durability rule in
+[shared source contracts](../../../../shared/src/AGENTS.md#workspace-mcp--roles).
+Lody Agent connections, Sorbet endpoints and [the harness surface](../harness/AGENTS.md)
+follow [Lody Agent setup](README.md#lody-agent-setup).
+
+## Layout and components
+
+- Desktop overlay close is `absolute` on the RIGHT pane only (equal `top`/`right`
+  inset); the pane's in-scroll `padding-right` keeps chrome off that column.
+- Settings style in StyleX from `surface.ts`/`compact-layout.tsx`. The desktop pane
+  header names every page; a page hands it actions and a one-line lead through
+  `settings-page-header.tsx`, never its own title. Groups are flat in `settingsFlat`
+  (pane, project window), else cards. Group by meaning, no one-row groups; a helper
+  says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
+- Preferences grammar: `CompactRow`, one answer; records: name, state, menu/detail.
+  Its four switches bind translated labels and rendered helpers.
+- `SettingsLineTabs` keeps a held tab's full ID on its overflow menu item as
+  `data-settings-tab-overflow-id`; visible tabs retain `data-tab`. Labels may repeat.
+- `share-management-setting.tsx` lists published static copies via the scoped cloud
+  query. Ordinary members see their publications; admins see the workspace inventory.
+  Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
+  copy/reset/revoke; settings must never reconstruct a credential from cloud data.
+  Key state by user/workspace and gate the whole surface with `teamSharing`.
+  A share outlives its source, so both "View conversation" and "Update deployment"
+  require the session in the local metadata cache; opening it closes the desktop
+  settings overlay. Rationale:
+  [share inventory jump](../../../../../.agents/notes/implemented/feature/2026-09-15-share-inventory-session-jump.md).
+
+- Desktop Settings > Projects stacks every source (each machine, then GitHub
+  owners) as a `CompactSection` of ruled project rows. Clicking a project opens
+  a nested project window (header, page tabs) — never inline the editor beside the list.
+  Mobile keeps the previous stacked list. Local-project deletion reuses
+  `useRemoveLocalProject` directly, without a confirmation overlay.
+  Follow the parent removal contract.
+  Do not RPC-probe worktree/skills on offline remotes, and
+  never surface `machine_rpc_unavailable` as an editor error. The GitHub source
+  row must paint from `lody:githubReposCache` on first frame; do not wait on
+  `listWorkspaceReposWithStatus` to decide whether GitHub exists.
+- Project create/edit: `project-create-wizard.tsx`, scope first; read-only: `ProjectGroupView`.
+- Settings rows (`compact-layout.tsx`) give labels remaining width and controls their
+  content width. Never size columns from viewport breakpoints: the panel
+  clips controls. Desktop Settings nav follows panel width; keep categories/drafts,
+  reveal the selection and wrap actions.
+- Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
+  DeepSeek Harness official vs custom endpoint is dialog form state only: persist
+  `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
+  `https://api.deepseek.com/anthropic`) and never a new AgentConfigMeta field. Model ids come from
+  the endpoint's OpenAI-compatible discovery response during live verification; official
+  Messages and legacy Chat roots share the provider's official `/models` endpoint. Do not
+  add a parallel manual catalog field. Additional env cannot override either connection
+  key, and changing endpoint or credential invalidates the dialog's prior live
+  verification.
+- Keep three.js/R3F behind the lazy usage-calendar module so lightweight and SSR
+  consumers never evaluate its renderer graph.
+- Hourly labels use device time. Calendar and day-detail keys use UTC
+  ([timeline rules](../../../../../specs/usage-timeline.md)).
+  Cache bounded day snapshots per auth session/workspace/date for one hour;
+  refresh expiry without blanking data. Keep auth/capability gates
+  ([cache](../../../../../specs/usage-detail-cache.md)).
+- Interface/terminal fonts exclude symbol families in `lib/local-fonts.ts`; option
+  names stay on the default interface font. Five tiers write `--ui-font-size`;
+  sizes use `@lody/ui` text tokens. Font ligatures in the Text group writes
+  `--lody-font-ligatures` for conversation, code, and tool output.
+- Quota UI requires Core `rateLimits`; refresh also requires `query: true`.
+  Keep cached values while the shared Provider RPC refreshes.
+- Provider rows show identity, read-only remaining quota, a direct flat forecast
+  action, and a persistent Provider `…` menu. The forecast action opens its dialog
+  in one step; no quota-details interstitial or forecast probability belongs in
+  the overview. Listing rows does not fetch forecasts:
+  [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
+- The usage share card is a fixed-format report, not a second `ChatShareCard`:
+  fixed aspects, period = page range, headline = range total.
+  Derive numbers through `usage-share-stats.ts` (stamp the metric on stats,
+  never pass it beside them). Money: `formatUsdCompact` headline,
+  `formatUsdTight` cells — never `truncate`. Tokens/member anonymity are
+  defaults; cost substitutes for tokens; member slices never include email.
+  Both cards reuse `lib/share-image-export.ts` and `components/share-theme-scope.ts`;
+  never fork them. Pinned cards bind product and avatar StyleX themes locally;
+  inherited aliases keep the app's resolved colours.
+  `StatsSettingsView` gates its lazy dialog with opt-in `shareCard` for public-landing
+  reuse. Type and spacing use `TEXT`, `PAD_X`, and `RHYTHM`, never fresh `text-[…]`
+  or off-grid padding. `PAD_X` aligns every band, including the footer.
+  `ASPECT_SIZE` includes the backdrop; size against the
+  48px-shorter framed case. Keep every band but the headline `shrink-0`.
+  The graphic follows the range
+  (hour skyline, day-by-hour grid, or 53-week calendar, as on the Usage screen);
+  every kind fits the one `GRAPHIC_H` box so card height never depends on range. Leave the space beside the headline empty.
+
+- Provider automation binds `agent-provider-add` to the actual resolved machine
+  and `agent-config-dialog` to its captured machine through `data-machine-id`.
+  Preserve these identities when selection falls back or a dialog remains open.
+  Add actions and the dialog itself must honor the provider list's workspace RPC
+  restriction before mounting probes or persisting a draft. Signed file RPC
+  availability does not grant provider management; same-machine IPC remains available.
+
+## Agent Roles
+
+Roles are read and written from Settings, mentioned from the composer, and
+resolved by CLI MCP creation, so these are cross-surface rules rather than
+component details.
+
+- Before changing Role settings or dispatch, read the authoritative
+  [shared Role contracts](../../../../shared/AGENTS.md#workspace-mcp-and-agent-roles).
+  Each "Runs on" row of the editor owns that target's agent, run config and memory;
+  discovery and creation use that exact machine's Provider RPC. Memory settings
+  reuse Agents machine tabs/pills and catalog rows. A missing nmem install stays
+  on the page with the provider URL; it must not open a blocking dialog. Adding a
+  target suggests, never silently drops: unsupported values show as issues.
+  The Role list is one flat list naming each row's machines; memory shortcuts
+  scroll to a Role without filtering. Only a ready Provider
+  inventory can mark an identity missing; deleting a link never deletes provider data.
+
+## Workspace ownership
+
+- Ownership transfer is an owner-only danger-zone slot shared by desktop and mobile.
+  `workspace-ownership-transfer.tsx` collects an existing member and exact workspace
+  name, then calls the cloud mutation through `account-setting.tsx`. Refresh session
+  and active organization after success; cache refresh failure must not claim transfer
+  failed. Card changes use the billing Portal separately; transfer keeps the current card.
+
+- Nightly downloads live below Download apps in desktop/Web About.
+
+## Seat billing
+
+- Ordinary join approval refreshes the Better Auth member cache after commitment.
+  The existing owner-state subscription carries an optional roster version for
+  cross-device refresh. Cache or marker failure preserves approval; scope the
+  panel by account/workspace and retain changes arriving during a refresh.
+
+- Reuse `SeatCostNotice` in invitation and approval entry points. Approval must show
+  the current cost and deferred collection policy before committing membership.
+- Removal/leave do not cancel accrued service fees. Deleted workspace invoices stay
+  reachable for the retained billing owner through `deleted-workspace-billing.tsx`
+  in personal Account settings; invoice details reuse `BillingInvoiceDetails`.
+
+- Billing telemetry: never infer payment from returns; exclude URLs, codes and raw errors.
+
+- GitHub installation: follow [authorization/recovery](README.md#github-installation).

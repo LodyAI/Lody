@@ -1,44 +1,55 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Archive,
   ChevronDown,
   ChevronLeft,
+  CircleAlert,
+  Eye,
   File as FileIcon,
   Github,
   Hand,
-  Loader2,
   MessageCircle,
   Pin,
   Search,
   Settings as SettingsIcon,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
+import { useAtomValue } from 'jotai';
+import { useTranslation } from 'react-i18next';
+import { Spinner } from '@lody/ui/spinner';
 import { MdChat, MdSettings } from 'react-icons/md';
 import { FaRegFileCode } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
 import type { SessionPullRequestCiState, SessionPullRequestReadiness } from '@lody/shared';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { cn } from '@/lib/utils';
 import { useLongPress } from '@/hooks/use-long-press';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
+import { sessionPrMergeStatusAtomFamily } from '@/atoms/session-pr-merge-status';
 import {
   SessionMergeablePill,
   SessionPrIcon,
   SessionRowAuthorAvatar,
+  SessionSendProgressRing,
   type SessionRowOpenedByTreeSlot,
 } from '@/components/sidebar-row-shared';
-import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { MobileEdgeBackSwipeZone } from './mobile-edge-back-swipe';
+import { useMobileBackRevealClass, useMobileDrillExit } from './mobile-drill-page-layout';
 import { MobileFilterPillBar, type FilterPill } from './mobile-filter-pill-bar';
 import {
   MobileChatList,
   type MobileChatGroupBy,
   type MobileChatListSelectionLabels,
 } from './mobile-chat-list';
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
+import { MobileSettingsFoldContext } from './mobile-settings-fold-context';
 import { MobileInitialLetterAvatar } from './mobile-initial-letter-avatar';
 import {
   MobileWorkspaceTabBar,
@@ -50,7 +61,10 @@ function MobileReactIcon({ icon: Icon, className }: { icon: IconType; className?
   /* Fill the sized wrapper — not size="1em" (inherits the tab label's 0.72rem). */
   return (
     <span
-      className={cn('inline-flex shrink-0 items-center justify-center [&_svg]:h-full [&_svg]:w-full', className)}
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center [&_svg]:h-full [&_svg]:w-full',
+        className
+      )}
       aria-hidden="true"
     >
       <Icon />
@@ -122,6 +136,19 @@ export type MobileConversationItem = {
   isOffline?: boolean;
   hasUnreadMessages?: boolean;
   isPinned?: boolean;
+  /** Pin section and manual order of a pinned conversation (see specs/pinned-session-sections.md). */
+  pinSectionId?: string | null;
+  orderKey?: string | null;
+  /** The conversation's own message and read times; the Status view derives unread from them. */
+  lastMessageAt?: number | null;
+  lastReadAt?: number | null;
+  /** Status view state (specs/sidebar-status-view.md). */
+  snoozedUntil?: number | null;
+  settledAt?: number | null;
+  focusRestoredAt?: number | null;
+  /** Later rows: how long until the conversation returns to Focus (`3h`). */
+  snoozeCountdown?: string | null;
+  readOnly?: boolean;
   /** Machine id the conversation lives on. Powers the machine filter. */
   machineId?: string | null;
   /** PRECISE Session that created this one — `lody session create` with a
@@ -189,9 +216,6 @@ export type MobileProjectScreenLabels = {
   searchPlaceholder?: string;
   /** Aria label for the X chip that clears the search query. */
   clearSearchAriaLabel?: string;
-  /** @deprecated Chat list no longer shows a section heading in the
-     active (non-archived) mode. Kept for call-site compatibility. */
-  allConversationsHeading?: string;
   /** Heading rendered above the project list when the archive toggle
      is on. Falls back to "归档对话" when omitted. */
   archivedConversationsHeading?: string;
@@ -277,7 +301,7 @@ export type MobileProjectScreenProps = {
  * Status indicator — priority matches desktop `TaskIndicator`:
  *
  *   waiting-permission  →  <Hand>  text-status-warning
- *   working             →  <Loader2 animate-spin>  text-primary
+ *   working             →  <Spinner>  text-primary
  *   unread              →  small primary dot (not a large filled disc)
  *   idle                →  null (slot stays reserved for title alignment)
  * ----------------------------------------------------------------------- */
@@ -296,11 +320,18 @@ function StatusIndicator({
     );
   }
   if (isWorking) {
-    return <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" aria-label="running" />;
+    return <Spinner className="h-4 w-4 shrink-0 text-primary" aria-label="running" />;
   }
   if (hasUnreadMessages) {
+    /* The 8px dot lives in a 16px node box, like the spinner and the hand.
+       Without the box it is 8px wide, so a widened child slot (`w-8
+       justify-start`) left-aligns it 4px off the tree node while the 16px
+       marks stay centered. Keeping the node box the same width for every
+       status keeps the dot on the trunk and in line with the top-level rows. */
     return (
-      <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="unread" />
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-label="unread">
+        <span className="h-2 w-2 rounded-full bg-primary" />
+      </span>
     );
   }
   return null;
@@ -426,7 +457,7 @@ export function conversationRowHasActivity(conversation: MobileConversationItem)
  * Conversation row — Linear-inspired single line:
  *   [status circle] [team owner?] [pin?] title .............. [+/-] [worktree] [PR]
  * Always-on leading status, comfortable row height, medium title weight.
- * Age / branch / project meta omitted. `secondaryField` kept for callers.
+ * Age / branch / project meta omitted.
  *
  * The trailing metric cluster keeps the desktop sidebar's order and glyphs
  * (`sidebar-row-shared.tsx`): line diff, then the worktree marker, then the PR
@@ -445,7 +476,6 @@ export function ConversationRow({
   onToggleSelect,
   onLongPress,
   treeSlot,
-  secondaryField: _secondaryField = 'branch',
 }: {
   conversation: MobileConversationItem;
   selected: boolean;
@@ -474,12 +504,9 @@ export function ConversationRow({
      undefined for a plain top-level row. Built by the caller with the shared
      `buildSessionRowOpenedByTreeSlot` so the labels match the desktop sidebar. */
   treeSlot?: SessionRowOpenedByTreeSlot;
-  /** @deprecated Second-line branch/project meta is no longer shown.
-     Kept so existing callers (home Chat tab, project page, list
-     grouping) do not need a simultaneous API change. */
-  secondaryField?: 'branch' | 'project';
 }) {
-  void _secondaryField;
+  const { t } = useTranslation();
+  const prMergeStatus = useAtomValue(sessionPrMergeStatusAtomFamily(conversation.id));
   const treeChild = treeSlot?.kind === 'child' ? treeSlot : null;
   /* One node, one meaning. An active row shows its status and drops both the
      fold chevron and the ├/└ — same rule the desktop sidebar row applies. */
@@ -495,13 +522,22 @@ export function ConversationRow({
      a bare number covers callers that only carry the compact fields. */
   const showPr =
     Boolean(conversation.prUrl?.trim()) ||
-    (typeof conversation.prNumber === 'number' && conversation.prNumber > 0);
-  const prStatus = conversation.prStatus ?? 'open';
+    (typeof conversation.prNumber === 'number' && conversation.prNumber > 0) ||
+    prMergeStatus != null;
+  const prStatus =
+    prMergeStatus?.phase === 'merged' ? 'merged' : (conversation.prStatus ?? 'open');
+  const isPrMerging = prMergeStatus?.phase === 'merging';
+  const isPrMergeFailed = prMergeStatus?.phase === 'failed';
   /* Readiness can linger on a terminal PR (the webhook fan-out flips status to
      merged but cannot clear the poller's record), so gate the pill on the PR
      still being live — same reasoning as the desktop sidebar row. */
   const isMergeable =
-    showPr && conversation.prReadiness === 'y' && prStatus !== 'merged' && prStatus !== 'closed';
+    showPr &&
+    !isPrMerging &&
+    !isPrMergeFailed &&
+    conversation.prReadiness === 'y' &&
+    prStatus !== 'merged' &&
+    prStatus !== 'closed';
   /* The pill takes the line diff's slot: once a PR is ready, "it can merge" is
      the more useful fact than how many lines changed. Hidden on the open
      conversation, whose own info bar owns the merge control. */
@@ -541,9 +577,7 @@ export function ConversationRow({
         'mobile-project-conversation-row relative flex min-h-11 w-full items-center gap-2.5 border-0 px-4 py-2.5 text-left shadow-none outline-none transition-colors',
         /* Solid canvas (not transparent) so nothing under the row can
            read as a divider hairline between list items. */
-        selected && !selectionMode
-          ? 'bg-muted/50'
-          : 'bg-background active:bg-muted/40',
+        selected && !selectionMode ? 'bg-muted/50' : 'bg-background active:bg-muted/40',
         selectionMode && isSelected && 'bg-primary/10'
       )}
     >
@@ -563,7 +597,7 @@ export function ConversationRow({
           <Checkbox
             checked={isSelected}
             tabIndex={-1}
-            className="pointer-events-none h-4 w-4"
+            className="pointer-events-none"
             aria-hidden="true"
           />
         ) : (
@@ -579,7 +613,11 @@ export function ConversationRow({
         {conversation.isPinned ? (
           /* h-4 matches ~15px title optically (glyph fills less than
              the box, so h-3 read as much smaller than the type). */
-          <Pin aria-label="pinned" className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+          <Pin
+            aria-label="pinned"
+            className="h-4 w-4 shrink-0 text-muted-foreground"
+            strokeWidth={2}
+          />
         ) : null}
         <span
           className={cn(
@@ -590,7 +628,18 @@ export function ConversationRow({
         >
           {conversation.title}
         </span>
+        {conversation.readOnly ? (
+          <Eye
+            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+            aria-label={t('sessions.access.read')}
+          />
+        ) : null}
       </div>
+      {conversation.snoozeCountdown ? (
+        <span data-snooze-countdown="" {...stylex.props(rowStyles.countdown)}>
+          {conversation.snoozeCountdown}
+        </span>
+      ) : null}
       {showMergeablePill ? (
         <SessionMergeablePill />
       ) : hasChanges && !isMergeable ? (
@@ -605,7 +654,26 @@ export function ConversationRow({
           aria-label="Worktree"
         />
       ) : null}
-      {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={conversation.prCiState} /> : null}
+      {isPrMergeFailed ? (
+        <span
+          data-session-pr-merge-phase="failed"
+          className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+        >
+          <CircleAlert className="h-3.5 w-3.5 text-destructive" strokeWidth={2.25} />
+        </span>
+      ) : isPrMerging ? (
+        <span
+          data-session-pr-merge-phase="merging"
+          className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+        >
+          <SessionSendProgressRing className="text-pr-merged" />
+        </span>
+      ) : showPr ? (
+        <SessionPrIcon
+          prStatus={prStatus}
+          prCiState={prMergeStatus?.phase === 'merged' ? null : conversation.prCiState}
+        />
+      ) : null}
     </button>
   );
 
@@ -669,6 +737,12 @@ export function MobileProjectScreen({
   /* Scroll container handed to `MobileWorkspaceTabBar` so the dock
      collapses while the user scrolls. */
   const listScrollRef = useRef<HTMLDivElement>(null);
+  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+  const setListRef = useCallback((element: HTMLDivElement | null) => {
+    listScrollRef.current = element;
+    setListElement(element);
+  }, []);
+  const settingsFold = useHorizontalFoldLayout(listElement, selectedProjectTab === 'settings');
   const [filesScrollSignal, setFilesScrollSignal] =
     useState<MobileWorkspaceTabBarScrollSignal | null>(null);
   const handleFilesScrollActivity = useCallback((scrollTop: number) => {
@@ -737,24 +811,27 @@ export function MobileProjectScreen({
     return false;
   }, [filterPills]);
 
-  /* If we're being mounted because the user just *backed out of* a
-     session-detail page, the chat already played its slide-off to the
-     right — replaying our forward push-enter on top of that would look
-     like an iOS push on a pop. `useState` initializer + flag consume
-     keeps the value stable across re-renders and self-clears so a real
-     forward navigation to this page still gets its enter slide. */
-  const [skipEnterAnimation] = useState(() => consumeMobileBackNavigation());
+  /* Mounted as the destination of a Back (e.g. leaving Settings opened from
+     this project): skip the forward push and play the parallax reveal. */
+  const backRevealClass = useMobileBackRevealClass();
+
+  /* Leaving the project pops it like every other drill page: the page
+     slides off to the right over home instead of unmounting and letting
+     home pop into view. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const animatedBack = useMobileDrillExit(rootRef, onBack) ?? onBack;
 
   return (
-    <div className="mobile-home-app safe-areas relative h-full min-h-0 w-full overflow-hidden text-foreground">
+    <div
+      ref={rootRef}
+      className="mobile-home-app safe-areas relative h-full min-h-0 w-full overflow-hidden text-foreground"
+    >
       {/* iOS-style push enter: slide in from the right on mount, unless
-         we're a back-navigation destination (see `skipEnterAnimation`
-         above). The back navigation has no exit animation — see
-         `mobile-settings-layout.tsx` for the rationale (the brief
-         frame between exit-animation end and route unmount flashes the
-         html bg). */}
+         we're a back-navigation destination (see `backRevealClass`
+         above). Back slides this panel off via `animatedBack`. */}
       <motion.div
-        initial={skipEnterAnimation ? false : { x: '100%' }}
+        data-mobile-drill-panel=""
+        initial={backRevealClass ? false : { x: '100%' }}
         animate={{ x: 0 }}
         transition={PROJECT_TRANSITION}
         /* Column flex: header + (search) + (pills) all sit ABOVE the
@@ -763,17 +840,24 @@ export function MobileProjectScreen({
            conversation list, not running through the header + pills.
            See the user-reported bug "scrollbar should be above the
            pills". */
-        className="mobile-home-shell relative flex h-full w-full flex-col bg-background"
+        className={cn(
+          'mobile-home-shell relative flex h-full w-full flex-col bg-background',
+          backRevealClass
+        )}
       >
         {filesTabNested ? null : (
-          <MobileEdgeBackSwipeZone isNativeApp={isNativeAppShell()} onBack={onBack} zIndex={20} />
+          <MobileEdgeBackSwipeZone
+            isNativeApp={isNativeAppShell()}
+            onBack={animatedBack}
+            zIndex={20}
+          />
         )}
         {selectedProjectTab === 'chat' ? (
           <ProjectChatTopBar
             project={project}
             displayName={displayName}
             labels={labels}
-            onBack={onBack}
+            onBack={animatedBack}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             showArchived={showArchived}
@@ -790,7 +874,7 @@ export function MobileProjectScreen({
             onBack={
               selectedProjectTab === 'files' && (fileNavSegments?.length ?? 0) > 0 && onFileNavBack
                 ? onFileNavBack
-                : onBack
+                : animatedBack
             }
           />
         )}
@@ -814,13 +898,15 @@ export function MobileProjectScreen({
         </AnimatePresence>
 
         <div
-          ref={listScrollRef}
+          ref={setListRef}
           className={cn(
-            'scrollbar-pro relative min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
+            'scrollbar-pro relative min-h-0 flex-1 pt-1 [scrollbar-gutter:auto]',
+            settingsFold ? 'overflow-hidden' : 'overflow-y-auto',
             /* The bottom tabbar floats fixed at the viewport bottom,
                so the scrollable content needs padding to clear it
                (height + safe-area). Same trick the home screen uses. */
-            'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
+            !settingsFold &&
+              'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
           )}
         >
           {selectedProjectTab === 'chat' ? (
@@ -848,14 +934,11 @@ export function MobileProjectScreen({
                    project's surface, so the project label would be
                    redundant chrome — branch is the disambiguating piece
                    of info between rows. */
-                rowSecondaryField="branch"
                 /* Active list is flat — no "全部对话" section label. Only
                    the archived surface keeps a heading so the mode is
                    obvious. */
                 flatHeading={
-                  showArchived
-                    ? (labels.archivedConversationsHeading ?? '归档对话')
-                    : undefined
+                  showArchived ? (labels.archivedConversationsHeading ?? '归档对话') : undefined
                 }
                 firstGroupTrailing={
                   hasFilterPills ? (
@@ -881,8 +964,9 @@ export function MobileProjectScreen({
             )
           ) : null}
           {selectedProjectTab === 'files' ? renderedFilesTabContent : null}
-          {selectedProjectTab === 'settings'
-            ? (settingsTabContent ?? (
+          {selectedProjectTab === 'settings' ? (
+            <MobileSettingsFoldContext.Provider value={settingsFold}>
+              {settingsTabContent ?? (
                 <ProjectTabPlaceholder
                   icon={
                     <SettingsIcon
@@ -894,8 +978,9 @@ export function MobileProjectScreen({
                   title={labels.settingsTabPlaceholderTitle ?? labels.settingsTab ?? '设置'}
                   body={labels.settingsTabPlaceholderBody ?? '即将上线'}
                 />
-              ))
-            : null}
+              )}
+            </MobileSettingsFoldContext.Provider>
+          ) : null}
         </div>
 
         {showProjectTabBar ? (
@@ -1141,7 +1226,7 @@ function ProjectListFilterToggle({
         open && 'border-primary/40 bg-primary/15 text-primary'
       )}
     >
-      <CarbonSettingsAdjust className="h-4 w-4 text-current" aria-hidden="true" />
+      <SlidersHorizontal className="h-4 w-4 text-current" strokeWidth={1.8} aria-hidden="true" />
       {hasActiveFilters && !open ? (
         <span
           aria-hidden="true"
@@ -1237,3 +1322,13 @@ function ProjectEmptyState({ label }: { label: string }) {
     </div>
   );
 }
+
+const rowStyles = stylex.create({
+  countdown: {
+    flexShrink: 0,
+    fontSize: textScale.captionSize,
+    lineHeight: 1,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+});

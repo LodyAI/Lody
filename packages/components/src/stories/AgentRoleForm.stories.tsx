@@ -1,14 +1,27 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { userEvent } from 'storybook/test';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 import { AgentRoleForm, type AgentRoleFormProps } from '@/components/settings/agent-role-form';
+import { SettingsEditorDialogFrame } from './settings-editor-dialog-frame';
 import type { AcpSelectorOptions } from '@/components/shared/acp-selector-options';
-import { EMPTY_AGENT_ROLE_FORM_VALUE, type AgentRoleFormValue } from '@/lib/agent-role-form';
+import {
+  createAgentRoleTargetFormValue,
+  EMPTY_AGENT_ROLE_FORM_VALUE,
+  type AgentRoleFormValue,
+  type AgentRoleTargetFormValue,
+} from '@/lib/agent-role-form';
 
 const machines = [
   { machineId: 'machine-1' as MachineId, label: 'Studio', online: true },
   { machineId: 'machine-2' as MachineId, label: 'Build box', online: false },
+  { machineId: 'machine-3' as MachineId, label: 'Linux runner', online: true },
 ];
+
+const targetAgentLabels = {
+  ['machine-1' as MachineId]: 'Codex',
+  ['machine-2' as MachineId]: 'Claude',
+};
 
 const agentConfigs = [
   { agentConfigId: 'config-1' as AgentConfigId, label: 'Codex' },
@@ -19,6 +32,7 @@ const selectorOptions: AcpSelectorOptions = {
   capabilityAuthority: 'authoritative',
   defaultModeId: 'default',
   defaultModelId: 'gpt-5.6-sol',
+  modelReasoningEfforts: undefined,
   modeOptions: [
     { value: 'default', label: 'Default' },
     { value: 'plan', label: 'Plan' },
@@ -51,15 +65,30 @@ const selectorOptions: AcpSelectorOptions = {
   ],
 };
 
+const studio: AgentRoleTargetFormValue = {
+  ...createAgentRoleTargetFormValue('machine-1' as MachineId),
+  agentConfigId: 'config-1' as AgentConfigId,
+  modelId: 'gpt-5.6-sol',
+  modeId: 'default',
+  configOptionValues: { thought_level: 'high', 'fast-mode': false },
+};
+
+const buildBox: AgentRoleTargetFormValue = {
+  ...createAgentRoleTargetFormValue('machine-2' as MachineId),
+  agentConfigId: 'config-2' as AgentConfigId,
+  modelId: 'gpt-5.6-luna',
+  modeId: 'plan',
+  configOptionValues: { thought_level: 'medium', 'fast-mode': true },
+};
+
 const configured: AgentRoleFormValue = {
   ...EMPTY_AGENT_ROLE_FORM_VALUE,
   name: 'Code Reviewer',
+  description: 'Call this agent to review code changes for correctness before merging.',
   emoji: '🔍',
-  machineId: 'machine-1' as MachineId,
-  agentConfigId: 'config-1' as AgentConfigId,
-  modelId: 'gpt-5.6-sol',
-  configOptionValues: { thought_level: 'high' },
   promptPrefix: 'Check correctness before style.',
+  targets: [studio],
+  activeMachineId: 'machine-1' as MachineId,
 };
 
 /** The dialog owns the value in the product; the story owns it here. */
@@ -81,15 +110,18 @@ const meta = {
     errors: [],
     onSubmit: () => undefined,
     onCancel: () => undefined,
-    className: 'min-h-0 flex-1',
+    targetAgentLabels,
   },
+  parameters: { layout: 'fullscreen' },
   decorators: [
-    // Mirrors the settings dialog that hosts the form: a fixed-height panel the
-    // form's own scroll body and sticky footer size themselves against.
-    (Story) => (
-      <div className="mx-auto flex h-[620px] w-[620px] flex-col overflow-hidden rounded-lg border bg-background">
+    (Story, { args }) => (
+      <SettingsEditorDialogFrame
+        title={args.isEditing ? 'Edit Agent Role' : 'New Agent Role'}
+        description="A Role never stores API keys or MCP selections."
+        height="min(680px, 88dvh)"
+      >
         <Story />
-      </div>
+      </SettingsEditorDialogFrame>
     ),
   ],
 } satisfies Meta<typeof StatefulAgentRoleForm>;
@@ -99,10 +131,13 @@ type Story = StoryObj<typeof meta>;
 
 export const NewRole: Story = {
   args: {
-    value: EMPTY_AGENT_ROLE_FORM_VALUE,
-    agentConfigs: [],
+    value: {
+      ...EMPTY_AGENT_ROLE_FORM_VALUE,
+      targets: [createAgentRoleTargetFormValue('machine-1' as MachineId)],
+      activeMachineId: 'machine-1' as MachineId,
+    },
     selectorOptions: null,
-    errors: ['name_required', 'machine_required', 'agent_config_required'],
+    errors: ['name_required', 'agent_config_required'],
   },
 };
 
@@ -124,7 +159,7 @@ export const SharedWithWorkspace: Story = {
 /** The machine has no providers yet: nothing is offered in their place. */
 export const MachineWithoutAgentConfigs: Story = {
   args: {
-    value: { ...configured, agentConfigId: null },
+    value: { ...configured, targets: [{ ...studio, agentConfigId: null }] },
     agentConfigs: [],
     selectorOptions: null,
   },
@@ -141,7 +176,7 @@ export const CapabilitiesUnavailable: Story = {
 /** A saved model that the agent stopped publishing — reported, never swapped. */
 export const IncompatibleRunConfig: Story = {
   args: {
-    value: { ...configured, modelId: 'gpt-5.5-retired' },
+    value: { ...configured, targets: [{ ...studio, modelId: 'gpt-5.5-retired' }] },
     issues: [
       { kind: 'model_unsupported', value: 'gpt-5.5-retired' },
       { kind: 'option_unsupported', configId: 'legacy_effort' },
@@ -159,4 +194,56 @@ export const SavedLocallyNotSynced: Story = {
     error:
       'Saved on this device but not yet synced to the workspace (offline). Other members cannot see it yet.',
   },
+};
+
+/**
+ * Runs on two machines. Each row is one machine and shows the `@` token that
+ * runs the Role there; the open row holds that machine's own agent, model and
+ * memory, and the `@` name field appears once there is more than one machine.
+ */
+export const TwoMachines: Story = {
+  args: {
+    value: {
+      ...configured,
+      targets: [studio, { ...buildBox, alias: 'Reviewer-CI' }],
+      activeMachineId: 'machine-2' as MachineId,
+    },
+    isEditing: true,
+  },
+};
+
+/** Every machine row closed: the list alone says where the Role runs. */
+export const AllMachinesCollapsed: Story = {
+  args: {
+    value: { ...configured, targets: [studio, buildBox], activeMachineId: null },
+    isEditing: true,
+  },
+};
+
+/** Machines the Role does not run on yet are one menu away, added in one step. */
+export const AddMachineMenu: Story = {
+  args: { isEditing: true },
+  play: async ({ canvasElement }) => {
+    const add = [...canvasElement.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Add machine')
+    );
+    if (!add) throw new Error('Add machine button missing');
+    await userEvent.click(add);
+  },
+};
+
+/** Many machines stay a short menu rather than a strip of tabs. */
+export const ManyMachines: Story = {
+  args: {
+    machines: [
+      ...machines,
+      ...Array.from({ length: 12 }, (_, index) => ({
+        machineId: `extra-machine-${index}` as MachineId,
+        label: `Development workstation ${index + 1}`,
+        online: index % 2 === 0,
+      })),
+    ],
+    isEditing: true,
+  },
+  play: AddMachineMenu.play,
 };

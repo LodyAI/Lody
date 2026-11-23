@@ -1,8 +1,69 @@
-import type { ElementType } from 'react';
+import type { ElementType, ReactNode } from 'react';
 import { ArrowUpRight, GitBranchPlus } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 
-import { Button } from '@/ui/button';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+
+const styles = stylex.create({
+  root: { minWidth: 0 },
+  action: {
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
+    minWidth: 0,
+    height: '32px',
+    gap: space[2],
+    paddingInline: '10px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: `color-mix(in oklab, ${colors.separator} 60%, transparent)`,
+    borderRadius: '6px',
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+      ':hover': 'color-mix(in oklab, hsl(var(--muted)) 50%, transparent)',
+      ':disabled:hover': 'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+    },
+    textAlign: 'left',
+    fontSize: '12px',
+    lineHeight: '16px',
+    color: colors.secondaryLabel,
+    transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+  },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+  label: { flexShrink: 0 },
+  title: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 500,
+    color: colors.label,
+  },
+  detail: {
+    minWidth: 0,
+    flexGrow: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  end: { display: 'flex', alignItems: 'center', flexShrink: 0, gap: space[2], marginLeft: 'auto' },
+  actionIcon: {
+    width: '14px',
+    height: '14px',
+    opacity: {
+      default: 0.6,
+      ':is([data-session-relation-action]:hover *)': 1,
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+});
 
 export function SessionRelationCard({
   label,
@@ -13,6 +74,8 @@ export function SessionRelationCard({
   actionIcon: ActionIcon = ArrowUpRight,
   className,
   relation,
+  status,
+  detail,
 }: {
   label: string;
   sessionTitle: string;
@@ -22,35 +85,34 @@ export function SessionRelationCard({
   actionIcon?: ElementType<{ className?: string }>;
   className?: string;
   relation: 'opened' | 'opened-by';
+  status?: ReactNode;
+  /** Optional one-glance context under the title (a reply preview, an error). */
+  detail?: ReactNode;
 }) {
+  // One line: the info bar's related-Sessions chip is the persistent index,
+  // so the in-stream record only needs what happened, to whom, and a way there.
   return (
-    <div
-      data-session-relation-card={relation}
-      className={cn(
-        'flex min-w-0 flex-col items-stretch gap-2.5 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3',
-        className
-      )}
-    >
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <div className="min-w-0 flex-1">
-          <div className="text-xs leading-4 text-muted-foreground">{label}</div>
-          <div className="truncate text-sm font-medium text-foreground" title={sessionTitle}>
-            {sessionTitle}
-          </div>
-        </div>
-      </div>
-      <Button
+    <div data-session-relation-card={relation} {...withClassName(stylex.props(styles.root), className)}>
+      <button
         type="button"
-        variant="outline"
-        size="sm"
-        className="h-7 shrink-0 self-end gap-1.5 px-2.5 text-xs sm:self-auto"
+        data-session-relation-action
         disabled={!onAction}
         onClick={onAction}
+        title={sessionTitle}
+        aria-label={`${actionLabel}: ${sessionTitle}`}
+        {...stylex.props(styles.action)}
       >
-        {actionLabel}
-        <ActionIcon className="h-3.5 w-3.5" aria-hidden="true" />
-      </Button>
+        <Icon {...stylex.props(styles.icon)} aria-hidden="true" />
+        <span {...stylex.props(styles.label)}>{label}</span>
+        <span {...stylex.props(styles.title)}>{sessionTitle}</span>
+        {detail ? <span {...stylex.props(styles.detail)}>· {detail}</span> : null}
+        <span {...stylex.props(styles.end)}>
+          {status}
+          {onAction ? (
+            <ActionIcon {...stylex.props(styles.actionIcon)} aria-hidden="true" />
+          ) : null}
+        </span>
+      </button>
     </div>
   );
 }

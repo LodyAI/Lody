@@ -1,5 +1,8 @@
-import { useCallback } from 'react';
-import { useCloudMutation } from '@lody/platform/react';
+import { useSessionOwnerAccess } from './use-session-owner-access';
+import { useSessionManagementGuard } from './use-session-management-guard';
+import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
+import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
+import { useCallback, useMemo, useRef } from 'react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
 import type {
@@ -12,40 +15,52 @@ import type {
   SessionToCreate,
   MachineId,
   MachineLegacyMetaFields,
-  SessionDocMeta,
   SessionTurnInputConfig,
   MachineFlockKey,
-  MachineFlockRow,
+  SessionGoalAction,
+  SessionGoalResponse,
 } from '@lody/shared';
 import {
-  buildMachineArchiveSessionCommand,
-  buildMachineDeleteSessionCommand,
   getMachineRoomId,
   getMachineFlockDocId,
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
   machineFlockKeys,
-  machineDeleteCommandToQueueItem,
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
   getServerNow,
+  LEGACY_SESSION_HISTORY_BACKEND,
+  ROOST_SESSION_HISTORY_BACKEND,
   evaluateSessionCreateQuota,
   formatSessionQuotaRejection,
   isConvexUnauthenticatedError,
   isLoroRepoDocDeleted,
-  normalizeSessionTurnInputConfig,
   readMachineFlockRowsFromFlock,
   sanitizeMessageTextSpans,
-  shouldQueueMachineDeleteSession,
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  OPERATION_INBOX_PROTOCOL_VERSION,
+  planStatusViewCommand,
+  type StatusViewCommand,
+  type StatusViewState,
+  type StatusViewWrite,
+  getSessionCancelRequestMarker,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 // Default import: `debug` is CJS. Named `{ debug }` breaks Vite 8 / TanStack
 // module-runner interop used by site-docs SSR (UNEXPECTED named-export error).
 import debug from 'debug';
-import { v4 as uuidv4 } from 'uuid';
-import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import {
+  activeWorkspaceRuntimeAtom,
+  type SessionDocDraft,
+  type WorkspaceRuntime,
+} from '@/atoms/runtime';
+import {
+  clearSessionRunConfigDraftsAtom,
+  sessionRunConfigDraftAccountAtom,
+} from '@/atoms/session-run-config-drafts';
 import {
   setDocMetaByRoomIdAtom,
   sessionMetaCacheAtom,
@@ -56,22 +71,21 @@ import {
   getRpcDeliveredTurnKey,
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
-import { resolveSessionCreateRepoFullName } from '@/lib/session-repo';
-import { collectSessionLifecycleIds } from '@/lib/session-lifecycle';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
+import { roostHistoryFeatureEnabledAtom } from '@/atoms/settings';
+import { statusViewPatchToMeta, statusViewSessionsFromMetas } from '@/lib/status-view-state';
+import { deleteWorkspacePinSection, writeWorkspacePinSection } from '@/lib/workspace-catalog-write';
+import {
+  createSessionSubmission,
+  type CreateSessionResult,
+  type StartSessionResult,
+} from '@/lib/session-submission';
 
 const log = debug('lody:session-actions');
 
 type RepoDocMetaPatch = Parameters<WorkspaceRuntime['repo']['upsertDocMeta']>[1];
-type CreateSessionResult = {
-  sessionId: SessionId;
-  sessionMeta: SessionMeta;
-};
-type StartSessionResult = CreateSessionResult & {
-  historyEntry: SessionHistory;
-};
 
 export type SessionChatType = 'regular' | 'side_chat';
 
@@ -114,7 +128,7 @@ export function countSessionMentions(items: SessionHistoryInput['items']): Sessi
   for (const item of items ?? []) {
     if (item.type !== 'text' || typeof item.text !== 'string') continue;
     for (const span of sanitizeMessageTextSpans(item.text, item.spans) ?? []) {
-      if (span.kind === 'pasted_text') continue;
+      if (span.kind === 'pasted_text' || span.kind === 'message_quote') continue;
       counts[span.kind] += 1;
     }
   }
@@ -132,63 +146,6 @@ export function countSessionMentions(items: SessionHistoryInput['items']): Sessi
     mention_command_count: counts.command,
     mention_agent_role_count: counts.agent_role,
   };
-}
-
-function buildSessionCreateResult(payload: SessionToCreate): CreateSessionResult {
-  const sessionId = payload.sessionId ?? (uuidv4() as SessionId);
-  const sessionMeta: SessionMeta = {
-    id: sessionId,
-    machineId: payload.machineId,
-    userId: payload.userId,
-    status: SessionStatusFactory.idle(),
-    isArchived: false,
-    createdAt: new Date().toISOString(),
-    cliType: payload.cliType,
-    agentType: payload.agentType,
-    agentConfigId: payload.agentConfigId,
-    acpSessionId: undefined,
-    diffStats: undefined,
-  };
-  if (payload.title?.trim()) {
-    sessionMeta.title = payload.title.trim();
-    sessionMeta.titleSource = payload.titleSource ?? 'user';
-  }
-  if (payload.fromFeedbackPostId?.trim()) {
-    sessionMeta.fromFeedbackPostId = payload.fromFeedbackPostId.trim();
-  }
-  const repoFullName = resolveSessionCreateRepoFullName(payload);
-  if (repoFullName) {
-    sessionMeta.repoFullName = repoFullName;
-  }
-  if (payload.project) {
-    sessionMeta.project = payload.project;
-  }
-  if (
-    payload.isWorktree === true ||
-    payload.project?.kind === 'github' ||
-    payload.project?.useWorktree === true
-  ) {
-    sessionMeta.isWorktree = true;
-  }
-  const baseBranch =
-    payload.project?.kind === 'local'
-      ? undefined
-      : payload.project?.branch?.trim() || payload.branchName?.trim();
-  if (baseBranch) {
-    sessionMeta.baseBranch = baseBranch;
-  }
-  if (payload.parentSessionId) {
-    sessionMeta.parentSessionId = payload.parentSessionId;
-  }
-  // Where this session came from, not how it runs: the launch config above is
-  // already frozen, so nothing re-reads the mutable Role catalog from these.
-  if (payload.agentRoleId) {
-    sessionMeta.agentRoleId = payload.agentRoleId;
-    if (typeof payload.agentRoleRevision === 'number') {
-      sessionMeta.agentRoleRevision = payload.agentRoleRevision;
-    }
-  }
-  return { sessionId, sessionMeta };
 }
 
 /**
@@ -255,31 +212,6 @@ async function assertArchivedLocalProjectCanRestore(
   }
 }
 
-async function writeMachineFlockRowBestEffort(
-  runtime: WorkspaceRuntime,
-  machineId: string,
-  row: MachineFlockRow,
-  reason: string
-): Promise<void> {
-  try {
-    await writeMachineFlockRowRequired(runtime, machineId, row);
-  } catch (error) {
-    log('[machine-flock] failed to write command row', { machineId, reason, error });
-  }
-}
-
-async function writeMachineFlockRowRequired(
-  runtime: WorkspaceRuntime,
-  machineId: string,
-  row: MachineFlockRow
-): Promise<void> {
-  await runtime.writer.flockRowPut(
-    getMachineFlockDocId(runtime.workspaceId, machineId as MachineId),
-    row.key,
-    row.value
-  );
-}
-
 async function deleteMachineFlockRowsBestEffort(
   runtime: WorkspaceRuntime,
   machineId: string,
@@ -296,89 +228,112 @@ async function deleteMachineFlockRowsBestEffort(
   }
 }
 
-async function cleanupMachineSessionCommandQueues(
-  runtime: WorkspaceRuntime,
-  machineId: string,
-  sessionId: SessionId,
-  reason: string
-): Promise<void> {
-  const machineRoomId = getMachineRoomId(machineId as MachineId);
-  const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
-    | MachineLegacyMetaFields
-    | undefined;
-  const needToArchiveSessions = machineMeta?.needToArchiveSessions ?? {};
-  const needToDeleteSessions = machineMeta?.needToDeleteSessions ?? {};
-
-  let nextNeedToArchiveSessions: typeof needToArchiveSessions | undefined;
-  let nextNeedToDeleteSessions: typeof needToDeleteSessions | undefined;
-
-  if (needToArchiveSessions[sessionId] !== undefined) {
-    const { [sessionId]: _, ...rest } = needToArchiveSessions;
-    nextNeedToArchiveSessions = rest;
-  }
-
-  if (needToDeleteSessions[sessionId] !== undefined) {
-    const { [sessionId]: _, ...rest } = needToDeleteSessions;
-    nextNeedToDeleteSessions = rest;
-  }
-
-  if (nextNeedToArchiveSessions !== undefined || nextNeedToDeleteSessions !== undefined) {
-    await runtime.writer.upsertDocMeta(machineRoomId, {
-      ...(nextNeedToArchiveSessions !== undefined
-        ? { needToArchiveSessions: nextNeedToArchiveSessions }
-        : {}),
-      ...(nextNeedToDeleteSessions !== undefined
-        ? { needToDeleteSessions: nextNeedToDeleteSessions }
-        : {}),
-    } as unknown as RepoDocMetaPatch);
-  }
-
-  await deleteMachineFlockRowsBestEffort(
-    runtime,
-    machineId,
-    [
-      machineFlockKeys.archiveSessionCommand(sessionId),
-      machineFlockKeys.deleteSessionCommand(sessionId),
-    ],
-    reason
-  );
-}
-
 export type SessionActions = {
   createSession: (payload: SessionToCreate) => Promise<CreateSessionResult>;
   startSession: (
     payload: SessionToCreate,
-    history: Omit<SessionHistoryInput, 'id'>
+    history: Omit<SessionHistoryInput, 'id'>,
+    attachments?: SessionAttachmentDraft[]
   ) => Promise<StartSessionResult>;
   addSessionHistory: (
     sessionId: SessionId,
     history: Omit<SessionHistoryInput, 'id'>,
-    options?: { dispatch?: boolean }
+    options?: {
+      dispatch?: boolean;
+      guideExpectedTurnId?: string;
+      attachments?: SessionAttachmentDraft[];
+      onAccepted?: () => void;
+    }
   ) => Promise<SessionHistory>;
   requestSessionDispatch: (
     sessionId: SessionId,
     userTurnId: string,
     options?: { inputConfig?: SessionTurnInputConfig; machineId?: MachineId | null }
   ) => Promise<void>;
-  requestSessionCancel: (sessionId: SessionId, turnId: string) => Promise<void>;
+  /**
+   * Stop by default. `interrupt` only ends the turn so queued input runs next
+   * (interrupt-and-send): it carries no Stop identity, so no daemon pauses the
+   * Inbox or cancels the queued input's eligibility.
+   */
+  requestSessionCancel: (
+    sessionId: SessionId,
+    turnId: string,
+    options?: { interrupt?: boolean }
+  ) => Promise<void>;
   requestSessionSteer: (
     sessionId: SessionId,
     expectedTurnId: string,
     userTurnId: string,
     options?: { machineId?: MachineId | null }
   ) => Promise<boolean>;
+  /**
+   * Run a goal action through the agent's control extension.
+   *
+   * Status-only actions reach a goal whose prompt is still open, which the chat
+   * path cannot do: that prompt is the session's only turn slot.
+   */
+  requestSessionGoal: (
+    sessionId: SessionId,
+    action: SessionGoalAction,
+    options?: { objective?: string; userId?: string; machineId?: MachineId | null }
+  ) => Promise<SessionGoalResponse | null>;
   touchSessionActivity: (sessionId: SessionId) => Promise<void>;
   updateSessionStatus: (sessionId: SessionId, status: SessionStatus) => Promise<void>;
   updateSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
+  updateSessionMetadata: (sessionId: SessionId, patch: Record<string, unknown>) => Promise<void>;
   /** Reassign `SessionMeta.userId` to another workspace member. */
   transferSessionOwner: (sessionId: SessionId, nextUserId: string) => Promise<void>;
   markSessionRead: (sessionId: SessionId, lastMessageAt?: number | null) => Promise<void>;
+  markSessionUnread: (sessionId: SessionId) => Promise<void>;
+  /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
-  archiveSession: (sessionId: SessionId) => Promise<void>;
+  /** Archives contained Tabs; opened Sessions only with `includeOpenedSessions`. */
+  archiveSession: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
+  setTreeCollaborationStopped: (sessionId: SessionId, stopped: boolean) => Promise<void>;
+  setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
+  /**
+   * Plan a Status view or pin-section command with the shared planner and
+   * write the result. `state` is what the caller's list shows (order, presence,
+   * permissions); opened sub-conversations and the target's own metadata are
+   * read from the Repo. Every affected Session passes the guard before any write.
+   */
+  runStatusViewCommand: (
+    command: StatusViewCommand,
+    state?: StatusViewState
+  ) => Promise<StatusViewWrite[]>;
+  /** Snooze a session until `snoozedUntil` (epoch ms) in the Status view's Later section. */
+  snoozeSession: (
+    sessionId: SessionId,
+    snoozedUntil: number,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
+  /** Mark a session as settled in the Status view's Settled section. */
+  settleSession: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
+  /** Restore a snoozed or settled session back to Focus. */
+  moveSessionToFocus: (
+    sessionId: SessionId,
+    options?: { includeOpenedSessions?: boolean }
+  ) => Promise<void>;
 };
+
+const randomByte = () => Math.floor(Math.random() * 256);
+
+const emptyStatusViewState = (): StatusViewState => ({
+  sessions: [],
+  sections: [],
+  sectionsLoaded: false,
+  canManageSections: true,
+  nowMs: getServerNow(),
+});
 
 const extractSessionStatus = (value: unknown): Session['status'] | undefined => {
   if (!value || typeof value !== 'object') {
@@ -436,14 +391,19 @@ function buildSessionActivityPatch(
 async function upsertSessionActivityPatch(
   runtime: WorkspaceRuntime,
   sessionId: SessionId,
-  proposal: SessionActivityProposal
+  proposal: SessionActivityProposal,
+  assertCanManage?: (ids: readonly SessionId[]) => Promise<void>
 ): Promise<SessionMeta | undefined> {
   const roomId = getSessionRoomId(sessionId);
   const existing = await runtime.repo.getDocMeta(roomId);
   if (isLoroRepoDocDeleted(existing)) return undefined;
   const meta = existing?.meta as SessionMeta | undefined;
+  // A held creation is written with its first message. Activity must not
+  // publish a partial session that hides its local placeholder meanwhile.
+  if (!meta?.id && runtime.pendingSends?.hasPendingCreation(sessionId)) return undefined;
   const patch = buildSessionActivityPatch(meta, proposal);
   if (Object.keys(patch).length > 0) {
+    await assertCanManage?.([sessionId]);
     await runtime.writer.upsertDocMeta(roomId, patch as RepoDocMetaPatch);
   }
   return meta;
@@ -452,85 +412,29 @@ async function upsertSessionActivityPatch(
 export async function touchSessionActivityMeta(
   runtime: WorkspaceRuntime,
   sessionId: SessionId,
-  proposal: SessionActivityProposal
+  proposal: SessionActivityProposal,
+  assertCanManage?: (ids: readonly SessionId[]) => Promise<void>
 ): Promise<void> {
-  const meta = await upsertSessionActivityPatch(runtime, sessionId, proposal);
+  if (assertCanManage) {
+    const target = (await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta as
+      | SessionMeta
+      | undefined;
+    await assertCanManage(
+      target?.parentSessionId ? [sessionId, target.parentSessionId] : [sessionId]
+    );
+  }
+  const meta = await upsertSessionActivityPatch(runtime, sessionId, proposal, assertCanManage);
   const parentSessionId = meta?.parentSessionId;
   if (parentSessionId && parentSessionId !== sessionId) {
-    await upsertSessionActivityPatch(runtime, parentSessionId, proposal);
+    await upsertSessionActivityPatch(runtime, parentSessionId, proposal, assertCanManage);
   }
-}
-
-/**
- * Fire the `session/dispatch-turn` Machine RPC fast path for a user turn that
- * is (or is about to be) durable. Returns a promise resolving to whether the
- * machine accepted the offer, or null when the offer cannot be built. The RPC
- * only accelerates dispatch — the durable `latestUserMsgId` pointer write
- * remains recovery truth.
- */
-function fireSessionDispatchTurnRpc(
-  runtime: WorkspaceRuntime,
-  store: ReturnType<typeof useStore>,
-  args: {
-    sessionId: SessionId;
-    userTurnId: string;
-    machineId: MachineId | null | undefined;
-    timestamp: string | undefined;
-    inputConfig: SessionTurnInputConfig | undefined;
-    dispatchUserId: string | undefined;
-  }
-): Promise<boolean> | null {
-  const { sessionId, userTurnId, machineId, timestamp, inputConfig, dispatchUserId } = args;
-  // The Machine RPC fast path rides the facade's per-target routing: local
-  // machines go over the local socket RPC, remote machines over the cloud
-  // JSON stream.
-  if (!machineId || !timestamp || !inputConfig || !dispatchUserId) {
-    return null;
-  }
-  const rpcArgs = {
-    sessionId,
-    userTurnId,
-    userId: dispatchUserId,
-    timestamp,
-    inputConfig,
-  };
-  // Attachments ride as R2/local references, so payloads are normally
-  // small; skip the fast path for pathological sizes rather than risk an
-  // oversized stream append.
-  try {
-    if (JSON.stringify(rpcArgs).length > 256 * 1024) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-  return runtime
-    .requestSessionDispatchTurn(machineId, rpcArgs)
-    .then((response) => {
-      if (response?.accepted) {
-        store.set(rpcDeliveredTurnsAtom, (previous) =>
-          addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
-        );
-        return true;
-      }
-      log(
-        'session dispatch-turn rpc not accepted for %s/%s: %s',
-        sessionId,
-        userTurnId,
-        response
-          ? `${response.disposition}${response.error ? `: ${response.error}` : ''}`
-          : 'timeout'
-      );
-      return false;
-    })
-    .catch((error) => {
-      log('session dispatch-turn rpc threw for %s/%s: %o', sessionId, userTurnId, error);
-      return false;
-    });
 }
 
 export function useSessionActions(): SessionActions {
+  const getOwnerAccessReason = useSessionOwnerAccess();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const assertCanManageSessions = useSessionManagementGuard(runtime);
+  const roostHistoryEnabled = useAtomValue(roostHistoryFeatureEnabledAtom);
   const setDocMetaByRoomId = useSetAtom(setDocMetaByRoomIdAtom);
   const store = useStore();
   // Convex dedupes identical subscriptions client-side, so this shares the
@@ -541,7 +445,7 @@ export function useSessionActions(): SessionActions {
   );
   const postHog = usePostHog();
   const { isAuthenticated: isConvexAuthenticated, requestAuthRecovery } = useAuthenticatedConvex();
-  const recordMyWorkspaceDailyActiveUser = useCloudMutation(
+  const recordMyWorkspaceDailyActiveUser = useLegacyWorkspaceMutation(
     cloudOperations.activity.recordMyWorkspaceDailyActiveUser
   );
 
@@ -558,22 +462,6 @@ export function useSessionActions(): SessionActions {
       });
     },
     [isConvexAuthenticated, recordMyWorkspaceDailyActiveUser, requestAuthRecovery]
-  );
-
-  const getSessionLifecycleMetas = useCallback(
-    (sessionId: SessionId, rootMeta: SessionMeta): SessionMeta[] => {
-      const cache = store.get(sessionMetaCacheAtom);
-      const sessionsById = new Map(
-        Object.values(cache).map((session) => [session.id, session] as const)
-      );
-      sessionsById.set(sessionId, { ...rootMeta, id: rootMeta.id ?? sessionId });
-      return collectSessionLifecycleIds(sessionId, [...sessionsById.values()]).map((id) => {
-        const session = sessionsById.get(id);
-        if (!session) throw new Error(`Session metadata missing for lifecycle child ${id}`);
-        return session;
-      });
-    },
-    [store]
   );
 
   const assertSessionCreateAllowed = useCallback(
@@ -600,172 +488,98 @@ export function useSessionActions(): SessionActions {
     [billingEntitlement, runtime, store]
   );
 
-  const createSession = useCallback(
-    async (payload: SessionToCreate): Promise<CreateSessionResult> => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      const { sessionId, sessionMeta } = buildSessionCreateResult(payload);
-      const sessionRoomId = getSessionRoomId(sessionId);
-      // The local Flock index is the session-count source of truth. Incomplete
-      // local state fails open so session creation never depends on Convex
-      // availability or a server-side reservation.
-      assertSessionCreateAllowed(sessionId);
-      if (payload.parentSessionId) {
-        // Creating a child session (filter/sieve) is an explicit active user action.
-        recordWorkspaceActivity(runtime.workspaceId);
-      }
-
-      const metaWrite = runtime.writer.upsertDocMeta(sessionRoomId, sessionMeta);
-      // Stream pre-creation is a warm-up, not part of accepting the user's turn.
-      // Rejected: awaiting it here lets a stuck createStream() prevent history
-      // and dispatch writes. Room join/retry handles stream_not_found recovery.
-      void runtime.ensureDocStream(sessionRoomId).catch((error: unknown) => {
-        console.warn('Failed to pre-create session doc stream', { sessionId, error });
-      });
-      await metaWrite;
-      setDocMetaByRoomId(sessionRoomId, sessionMeta);
-
-      return { sessionId, sessionMeta };
-    },
-    [assertSessionCreateAllowed, recordWorkspaceActivity, runtime, setDocMetaByRoomId]
+  const {
+    createSession,
+    startSession,
+    addSessionHistory,
+    requestSessionDispatch,
+    requestSessionSteer,
+  } = useMemo(
+    () =>
+      createSessionSubmission({
+        runtime,
+        defaultHistoryBackend: roostHistoryEnabled
+          ? ROOST_SESSION_HISTORY_BACKEND
+          : LEGACY_SESSION_HISTORY_BACKEND,
+        assertSessionCreateAllowed,
+        assertSessionEditable: (sessionId) => assertCanManageSessions([sessionId]),
+        recordWorkspaceActivity,
+        publishSessionMeta: setDocMetaByRoomId,
+        readSessionMeta: (sessionId) =>
+          store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)],
+        // Key below every existing orderKey so a new top-level conversation
+        // lands at the top of Status Focus; child Sessions get none (they
+        // render nested under their opener row).
+        planNewSessionOrderKey: () => {
+          const write = planStatusViewCommand(
+            {
+              ...emptyStatusViewState(),
+              related: statusViewSessionsFromMetas(Object.values(store.get(sessionMetaCacheAtom))),
+            },
+            { type: 'newSessionOrder', sessionId: '' },
+            { nowMs: getServerNow(), randomByte }
+          )[0];
+          return write?.type === 'session' ? write.patch.orderKey : undefined;
+        },
+        onRpcDelivered: (sessionId, turnId) =>
+          store.set(rpcDeliveredTurnsAtom, (previous) =>
+            addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, turnId))
+          ),
+        recordChat: (meta, sessionId, first, items) =>
+          capturePostHogEvent(postHog, 'session/chat', {
+            user_id: meta?.userId,
+            workspace_id: runtime?.workspaceId,
+            session_id: sessionId,
+            machine_id: meta?.machineId,
+            agent_config_id: meta?.agentConfigId,
+            cli_type: meta?.cliType,
+            agent_type: meta?.agentType,
+            project_kind: meta?.project?.kind ?? null,
+            is_first_message: first,
+            session_type: resolveSessionChatType(meta),
+            ...countSessionMentions(items),
+          }),
+      }),
+    [
+      runtime,
+      roostHistoryEnabled,
+      assertSessionCreateAllowed,
+      assertCanManageSessions,
+      recordWorkspaceActivity,
+      setDocMetaByRoomId,
+      store,
+      postHog,
+    ]
   );
 
-  const startSession = useCallback(
-    async (
-      payload: SessionToCreate,
-      history: Omit<SessionHistoryInput, 'id'>
-    ): Promise<StartSessionResult> => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      const { sessionId, sessionMeta } = buildSessionCreateResult(payload);
-      const sessionRoomId = getSessionRoomId(sessionId);
-      const historyEntry = { ...history, id: uuidv4() } as SessionHistory;
-      const inputConfig = normalizeSessionTurnInputConfig(historyEntry.inputConfig);
-      const userId = historyEntry.userId?.trim();
-      const timestamp = historyEntry.timestamp?.trim();
-      if (historyEntry.role !== 'user' || !userId || !timestamp || !inputConfig) {
-        throw new Error(`Cannot start session with invalid user history (sessionId=${sessionId})`);
-      }
-
-      assertSessionCreateAllowed(sessionId);
-      recordWorkspaceActivity(runtime.workspaceId);
-      void runtime.ensureDocStream(sessionRoomId).catch((error: unknown) => {
-        console.warn('Failed to pre-create session doc stream', { sessionId, error });
-      });
-      await runtime.writer.startSession(
-        sessionId,
-        sessionMeta as unknown as Record<string, unknown>,
-        historyEntry as unknown as Record<string, unknown>,
-        {
-          userTurnId: historyEntry.id,
-          userId,
-          timestamp,
-          inputConfig: inputConfig as unknown as Record<string, unknown>,
-        }
-      );
-      setDocMetaByRoomId(sessionRoomId, sessionMeta);
-      capturePostHogEvent(postHog, 'session/chat', {
-        user_id: sessionMeta.userId,
-        workspace_id: runtime.workspaceId,
-        session_id: sessionId,
-        machine_id: sessionMeta.machineId,
-        agent_config_id: sessionMeta.agentConfigId,
-        cli_type: sessionMeta.cliType,
-        agent_type: sessionMeta.agentType,
-        project_kind: sessionMeta.project?.kind ?? null,
-        is_first_message: true,
-        session_type: resolveSessionChatType(sessionMeta),
-        ...countSessionMentions(history.items),
-      });
-      return { sessionId, sessionMeta, historyEntry };
+  const updateSessionMetadata = useCallback(
+    async (sessionId: SessionId, patch: Record<string, unknown>) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      await assertCanManageSessions([sessionId]);
+      await runtime.writer.upsertDocMeta(getSessionRoomId(sessionId), patch);
     },
-    [postHog, recordWorkspaceActivity, assertSessionCreateAllowed, runtime, setDocMetaByRoomId]
+    [runtime, assertCanManageSessions]
   );
 
-  const addSessionHistory = useCallback(
+  const assertReadablePreferences = useCallback(
+    (ids: readonly SessionId[]) => assertCanManageSessions(ids, true),
+    [assertCanManageSessions]
+  );
+  const updateSessionPreference = useCallback(
     async (
       sessionId: SessionId,
-      history: Omit<SessionHistoryInput, 'id'>,
-      options?: { dispatch?: boolean }
+      patch: {
+        isPinned?: boolean;
+        pinSectionId?: string | undefined;
+        orderKey?: string | undefined;
+        lastReadAt?: number;
+      }
     ) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-
-      // Sending any user message (new chat, reply, child-session/filter reply)
-      // counts as an explicit active user action.
-      if (history.role === 'user') {
-        recordWorkspaceActivity(runtime.workspaceId);
-      }
-
-      const entry = { ...history, id: uuidv4() } as SessionHistory;
-
-      // The pending user turn is authored through the writer seam. In direct
-      // (web/cloud) mode the writer authors it into the renderer's own repo,
-      // exactly as `sessionStore.setState(history.push(entry))` did before. In
-      // intent (Electron local-first) mode it forwards the append to the CLI —
-      // the sole author — which relays the authored op back into the local
-      // mirror and up to Loro Streams. This resolves when the write is ACCEPTED
-      // (the send hot-path accept boundary), not when remote sync completes; the
-      // caller may clear the composer / navigate once it returns. It REJECTS
-      // when the write did not happen (intent failed after bounded retries),
-      // which propagates to the send paths' failure branches — the composer
-      // stays intact and the error is surfaced instead of the message silently
-      // vanishing.
-      //
-      let dispatch:
-        | {
-            userTurnId: string;
-            userId: string;
-            timestamp: string;
-            inputConfig: Record<string, unknown>;
-          }
-        | undefined;
-      if (options?.dispatch) {
-        const inputConfig = normalizeSessionTurnInputConfig(entry.inputConfig);
-        const userId = entry.userId?.trim();
-        const timestamp = entry.timestamp?.trim();
-        if (!userId || !timestamp || !inputConfig) {
-          throw new Error(`Cannot dispatch invalid user history entry (sessionId=${sessionId})`);
-        }
-        dispatch = {
-          userTurnId: entry.id,
-          userId,
-          timestamp,
-          inputConfig: inputConfig as unknown as Record<string, unknown>,
-        };
-      }
-      await runtime.writer.appendSessionTurn(
-        sessionId,
-        entry as unknown as Record<string, unknown>,
-        dispatch
-      );
-      // session/chat fires once for every user message dispatched through Lody —
-      // the session-creating turn AND every follow-up — so it tracks active-use
-      // frequency, unlike session/start_success which only covers creation. This
-      // is the single convergence point for both the chat-landing (new session)
-      // and session-chat-interface (reply/queue/child) send paths.
-      if (history.role === 'user') {
-        const sessionMeta = store.get(sessionMetaCacheAtom)[getSessionRoomId(sessionId)];
-        capturePostHogEvent(postHog, 'session/chat', {
-          user_id: sessionMeta?.userId,
-          workspace_id: runtime.workspaceId,
-          session_id: sessionId,
-          machine_id: sessionMeta?.machineId,
-          agent_config_id: sessionMeta?.agentConfigId,
-          cli_type: sessionMeta?.cliType,
-          agent_type: sessionMeta?.agentType,
-          project_kind: sessionMeta?.project?.kind ?? null,
-          is_first_message: false,
-          session_type: resolveSessionChatType(sessionMeta),
-          ...countSessionMentions(history.items),
-        });
-      }
-      return entry;
+      if (!runtime) throw new Error('Runtime not ready');
+      await assertReadablePreferences([sessionId]);
+      await runtime.writer.upsertDocMeta(getSessionRoomId(sessionId), patch);
     },
-    [runtime, recordWorkspaceActivity, postHog, store]
+    [runtime, assertReadablePreferences]
   );
 
   const updateSessionStatus = useCallback(
@@ -791,101 +605,40 @@ export function useSessionActions(): SessionActions {
       if (prevStatus && nextStatus === prevStatus) {
         return;
       }
-      await runtime.writer.upsertDocMeta(roomId, { status: nextStatus } as Partial<SessionMeta>);
+      await updateSessionMetadata(sessionId, { status: nextStatus } as Partial<SessionMeta>);
     },
-    [runtime]
-  );
-
-  const requestSessionDispatch = useCallback(
-    async (
-      sessionId: SessionId,
-      userTurnId: string,
-      options?: { inputConfig?: SessionTurnInputConfig; machineId?: MachineId | null }
-    ) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
-      const inputConfig =
-        options?.inputConfig ?? normalizeSessionTurnInputConfig(entry?.inputConfig);
-      const dispatchUserId = entry?.userId?.trim();
-      let rpcAcceptedPromise: Promise<boolean> | null = null;
-      const startDispatchTurnRpc = (machineId: MachineId | null | undefined): void => {
-        // The durable pointer write below remains recovery truth.
-        rpcAcceptedPromise = fireSessionDispatchTurnRpc(runtime, store, {
-          sessionId,
-          userTurnId,
-          machineId,
-          timestamp: entry?.timestamp,
-          inputConfig,
-          dispatchUserId,
-        });
-      };
-
-      // Local history writes are the accept boundary. Remote document sync is a
-      // sibling of dispatch signaling, never a blocker for clearing the composer.
-      // Hold a store ref for the flush so eviction cannot unload the doc mid-flush.
-      void runtime
-        .withSessionStore(sessionId, (sessionStore) => sessionStore.waitUntilSynced())
-        .catch((error: unknown) => {
-          console.warn('Failed to sync session doc after dispatch request', {
-            sessionId,
-            userTurnId,
-            error,
-          });
-        });
-      startDispatchTurnRpc(options?.machineId ?? null);
-      const roomId = getSessionRoomId(sessionId);
-      const existing = await runtime.repo.getDocMeta(roomId);
-      if (isLoroRepoDocDeleted(existing)) {
-        return;
-      }
-      if (!options?.machineId) {
-        const meta = existing?.meta as SessionMeta | undefined;
-        startDispatchTurnRpc(meta?.machineId ?? null);
-      }
-      try {
-        await runtime.writer.upsertDocMeta(roomId, {
-          latestUserMsgId: userTurnId,
-          lastMissingHistoryUserMsgId: undefined,
-        } as Partial<SessionMeta>);
-      } catch (error) {
-        // The RPC fast path may already have delivered this turn to the CLI; a
-        // rejection here would make callers toast "failed to send" for a turn
-        // that is actually running, inviting a duplicate resend. Only surface
-        // the failure when the fast path did not deliver.
-        if (await rpcAcceptedPromise) {
-          console.warn('Dispatch metadata write failed after RPC fast-path delivery', {
-            sessionId,
-            userTurnId,
-            error,
-          });
-          return;
-        }
-        throw error;
-      }
-    },
-    [runtime, store]
+    [runtime, updateSessionMetadata]
   );
 
   const requestSessionCancel = useCallback(
-    async (sessionId: SessionId, turnId: string) => {
+    async (sessionId: SessionId, turnId: string, options?: { interrupt?: boolean }) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      await assertCanManageSessions([sessionId]);
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
+      const interrupt = options?.interrupt === true;
       const meta = existing?.meta as SessionMeta | undefined;
       const machineId = meta?.machineId;
+      const machine = machineId
+        ? await runtime.repo.getDocMeta(getMachineRoomId(machineId))
+        : undefined;
+      const supportsInbox = machineSupportsProtocolCapability(
+        machine?.meta,
+        MACHINE_PROTOCOL_CAPABILITIES.operationInbox,
+        OPERATION_INBOX_PROTOCOL_VERSION
+      );
+      const cancelId = supportsInbox && !interrupt ? crypto.randomUUID() : undefined;
       if (machineId) {
-        // Fast-path RPC is intentionally redundant with the durable meta fallback below.
+        // RPC and the durable control request share an identity, even if either arrives late.
         void runtime
-          .requestSessionCancel(machineId, sessionId, turnId, { timeoutMs: 2_000 })
+          .requestSessionCancel(machineId, sessionId, turnId, {
+            timeoutMs: 2_000,
+            ...(cancelId ? { cancelId } : {}),
+            ...(interrupt && supportsInbox ? { pauseInbox: false } : {}),
+          })
           .then((response) => {
             if (response && !response.success) {
               log('session cancel rpc failed for %s/%s: %s', sessionId, turnId, response.error);
@@ -895,105 +648,54 @@ export function useSessionActions(): SessionActions {
             log('session cancel rpc threw for %s/%s: %o', sessionId, turnId, error);
           });
       }
-      await runtime.writer.upsertDocMeta(roomId, {
-        // Stop targets the assistant turn currently on screen, not the originating user turn.
-        lastCanceledTurn: turnId,
+      if (!interrupt) {
+        // Keep the observed drafts paused before publishing the durable Stop
+        // marker. The immediate RPC above must not wait for a store read.
+        await runtime.sendResources.withSessionStore(sessionId, (sessionStore) => {
+          sessionStore.setState((draft: SessionDocDraft) => {
+            for (const item of draft.mq ?? []) item.paused = true;
+            if (cancelId) draft.cancelRequest = { id: cancelId, turnId };
+          });
+        });
+      }
+      if (cancelId) {
+        await runtime.repo.flush();
+      }
+      await updateSessionMetadata(sessionId, {
+        lastCanceledTurn: cancelId ? getSessionCancelRequestMarker(cancelId) : turnId,
       } as Partial<SessionMeta>);
     },
-    [runtime]
+    [runtime, updateSessionMetadata, assertCanManageSessions]
   );
 
-  const requestSessionSteer = useCallback(
+  const requestSessionGoal = useCallback(
     async (
       sessionId: SessionId,
-      expectedTurnId: string,
-      userTurnId: string,
-      options?: { machineId?: MachineId | null }
-    ): Promise<boolean> => {
+      action: SessionGoalAction,
+      options?: { objective?: string; userId?: string; machineId?: MachineId | null }
+    ): Promise<SessionGoalResponse | null> => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
-      const inputConfig = normalizeSessionTurnInputConfig(entry?.inputConfig);
-      const userId = entry?.userId?.trim();
+      await assertCanManageSessions([sessionId]);
       const roomId = getSessionRoomId(sessionId);
-      let machineId = options?.machineId ?? null;
-      if (!machineId) {
-        const existing = await runtime.repo.getDocMeta(roomId);
-        const meta = isLoroRepoDocDeleted(existing)
-          ? undefined
-          : (existing?.meta as SessionMeta | undefined);
-        machineId = meta?.machineId ?? null;
+      const existing = await runtime.repo.getDocMeta(roomId);
+      const meta = isLoroRepoDocDeleted(existing)
+        ? undefined
+        : (existing?.meta as SessionMeta | undefined);
+      const machineId = options?.machineId ?? meta?.machineId ?? null;
+      const userId = options?.userId?.trim() || meta?.userId;
+      if (!machineId || !userId) {
+        return null;
       }
-      if (!entry || !inputConfig || !userId || !machineId) {
-        return false;
-      }
-      const response = await runtime.requestSessionSteer(machineId, {
+      return await runtime.requestSessionGoal(machineId, {
         sessionId,
-        expectedTurnId,
-        userTurnId,
+        action,
+        ...(options?.objective ? { objective: options.objective } : {}),
         userId,
-        timestamp: entry.timestamp,
-        inputConfig,
       });
-      if (response?.applied) {
-        store.set(rpcDeliveredTurnsAtom, (previous) =>
-          addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
-        );
-        return true;
-      }
-      if (response?.disposition === 'no-active-turn') {
-        // The target prompt ended before the CLI submitted the steer. Reuse
-        // the same user turn as a normal follow-up instead of leaving it stuck
-        // in pending_apply. Other failures must not fall back because the
-        // provider may already have committed the steer.
-        // Re-acquire the store for the write: the steer RPC above can run long,
-        // and we must not hold a store ref across it.
-        const promoted = await runtime.withSessionStore(sessionId, (sessionStore) => {
-          let didPromote = false;
-          sessionStore.setState((draft: SessionDocMeta) => {
-            const pendingEntry = draft.history.find(
-              (item) => item.id === userTurnId && item.role === 'user'
-            );
-            if (pendingEntry?.status === 'pending_apply') {
-              pendingEntry.status = 'pending';
-              pendingEntry.read = false;
-              didPromote = true;
-            }
-          });
-          return didPromote;
-        });
-        // A duplicate response must not reset a turn that another request has
-        // already promoted, started, or completed.
-        if (!promoted) {
-          return false;
-        }
-        await requestSessionDispatch(sessionId, userTurnId, {
-          inputConfig,
-          machineId,
-        });
-        log(
-          'session steer promoted to ordinary dispatch for %s/%s after target turn ended',
-          sessionId,
-          userTurnId
-        );
-        return false;
-      }
-      log(
-        'session steer not applied for %s/%s: %s',
-        sessionId,
-        userTurnId,
-        response
-          ? `${response.disposition}${response.error ? `: ${response.error}` : ''}`
-          : 'timeout'
-      );
-      return false;
     },
-    [requestSessionDispatch, runtime, store]
+    [runtime, assertCanManageSessions]
   );
 
   const touchSessionActivity = useCallback(
@@ -1002,9 +704,16 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
       const now = getServerNow();
-      await touchSessionActivityMeta(runtime, sessionId, { lastMessageAt: now, lastReadAt: now });
+      await assertCanManageSessions([sessionId]);
+      await touchSessionActivityMeta(
+        runtime,
+        sessionId,
+        { lastMessageAt: now, lastReadAt: now },
+        assertCanManageSessions
+      );
+      await runStatusViewCommandRef.current({ type: 'touchOnSend', sessionId });
     },
-    [runtime]
+    [runtime, assertCanManageSessions]
   );
 
   const updateSessionTitle = useCallback(
@@ -1019,19 +728,18 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
-      await runtime.writer.upsertDocMeta(roomId, {
+      await updateSessionMetadata(sessionId, {
         title: nextTitle,
         titleSource: 'user',
       } as Partial<SessionMeta>);
     },
-    [runtime]
+    [runtime, updateSessionMetadata]
   );
 
   /**
    * Hand a session to another workspace member. `SessionMeta.userId` is the
    * owner: it drives the My/Team scope split, the sidebar author avatar, and
-   * CLI-side owner checks (Code Collab writes, usage attribution). Anyone in
-   * the workspace may transfer, mirroring task owner assignment.
+   * CLI-side owner checks (Code Collab writes, usage attribution). Assignment never changes machine/project sharing.
    */
   const transferSessionOwner = useCallback(
     async (sessionId: SessionId, nextUserId: string) => {
@@ -1045,11 +753,15 @@ export function useSessionActions(): SessionActions {
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
       if (isLoroRepoDocDeleted(existing)) return;
-      await runtime.writer.upsertDocMeta(roomId, {
+      if (!existing) throw new Error('Session not found');
+      await assertCanManageSessions([sessionId]);
+      const reason = getOwnerAccessReason(existing?.meta as SessionMeta, userId);
+      if (reason) throw new Error(reason);
+      await updateSessionMetadata(sessionId, {
         userId,
       } as Partial<SessionMeta>);
     },
-    [runtime]
+    [runtime, updateSessionMetadata, assertCanManageSessions, getOwnerAccessReason]
   );
 
   const markSessionRead = useCallback(
@@ -1057,10 +769,76 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const readAt = getFiniteTimestamp(lastMessageAt) ?? getServerNow();
-      await touchSessionActivityMeta(runtime, sessionId, { lastReadAt: readAt });
+      const now = getServerNow();
+      const baseReadAt = getFiniteTimestamp(lastMessageAt) ?? now;
+      const roomId = getSessionRoomId(sessionId);
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const snoozedUntil = getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : 0;
+      const readAt = Math.max(baseReadAt, expiredSnoozeAt);
+      await assertReadablePreferences([sessionId]);
+      await touchSessionActivityMeta(
+        runtime,
+        sessionId,
+        { lastReadAt: readAt },
+        assertReadablePreferences
+      );
+      const rootId = cachedMeta?.parentSessionId;
+      const rootMeta = rootId
+        ? (store.get(sessionMetaCacheAtom)[getSessionRoomId(rootId)] as SessionMeta | undefined)
+        : undefined;
+      const rootSnoozedUntil = getFiniteTimestamp(rootMeta?.snoozedUntil);
+      if (
+        rootId &&
+        rootSnoozedUntil !== null &&
+        rootSnoozedUntil <= now &&
+        rootSnoozedUntil > readAt
+      ) {
+        await touchSessionActivityMeta(
+          runtime,
+          rootId,
+          { lastReadAt: rootSnoozedUntil },
+          assertReadablePreferences
+        );
+      }
     },
-    [runtime]
+    [runtime, store, assertReadablePreferences]
+  );
+
+  const markSessionUnread = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      if (isLoroRepoDocDeleted(existing)) return;
+      // Prefer the repo read, but fall back to the same rendered metadata cache
+      // as Archive. A sidebar row can arrive before the repo read hydrates; an
+      // action offered on that visible row must not become a silent no-op.
+      const repoMeta = existing?.meta as SessionMeta | undefined;
+      const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
+      const lastMessageAt =
+        getFiniteTimestamp(repoMeta?.lastMessageAt) ??
+        getFiniteTimestamp(cachedMeta?.lastMessageAt);
+      const now = getServerNow();
+      const snoozedUntil =
+        getFiniteTimestamp(repoMeta?.snoozedUntil) ?? getFiniteTimestamp(cachedMeta?.snoozedUntil);
+      const expiredSnoozeAt = snoozedUntil !== null && snoozedUntil <= now ? snoozedUntil : null;
+      const effectiveLastMessageAt =
+        lastMessageAt !== null && expiredSnoozeAt !== null
+          ? Math.max(lastMessageAt, expiredSnoozeAt)
+          : (lastMessageAt ?? expiredSnoozeAt);
+      if (effectiveLastMessageAt === null) return;
+
+      // Unread is the durable comparison `effectiveLastMessageAt > lastReadAt`. Move
+      // only this receipt behind the latest known activity; do not touch the
+      // activity timestamp, which would reorder the sidebar.
+      await updateSessionPreference(sessionId, {
+        lastReadAt: effectiveLastMessageAt - 1,
+      } as Partial<SessionMeta>);
+    },
+    [runtime, store, updateSessionPreference]
   );
 
   const invalidateExternalHistoryCatalog = useCallback(
@@ -1127,6 +905,8 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
 
+      await assertCanManageSessions([sessionId]);
+      const draftOwner = store.get(sessionRunConfigDraftAccountAtom);
       const sessionRoomId = getSessionRoomId(sessionId);
       const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
         | SessionMeta
@@ -1141,12 +921,22 @@ export function useSessionActions(): SessionActions {
         );
       }
 
-      await Promise.all([
-        runtime.writer.deleteDoc(sessionRoomId),
-        runtime.releaseSessionStore(sessionId),
-      ]);
+      // Held sends never write after this: cancellation joins any in-flight write.
+      await runtime.pendingSends?.cancelSessions([sessionId]);
+      await assertCanManageSessions([sessionId]);
+      await runtime.writer.deleteDoc(sessionRoomId);
+      if (runtime.accountId) {
+        store.set(clearSessionRunConfigDraftsAtom, {
+          accountId: runtime.accountId,
+          lifetime: draftOwner.lifetime,
+          workspaceId: runtime.workspaceId,
+          sessionIds: [sessionId],
+        });
+      }
+      await runtime.repo.flush();
+      await runtime.releaseSessionStore(sessionId);
     },
-    [invalidateExternalHistoryCatalog, runtime]
+    [invalidateExternalHistoryCatalog, runtime, store, assertCanManageSessions]
   );
 
   const deleteSessions = useCallback(
@@ -1154,83 +944,92 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const sessions = Object.values(store.get(sessionMetaCacheAtom));
-      const allIds = new Set(sessionIds);
-      for (const id of sessionIds) {
-        for (const lifecycleId of collectSessionLifecycleIds(id, sessions)) {
-          allIds.add(lifecycleId);
-        }
-      }
-      const uniqueIds = Array.from(allIds);
-      await Promise.all(
-        uniqueIds.map(async (id) => {
-          await deleteSessionDocuments(id);
-        })
-      );
+      await assertCanManageSessions(sessionIds);
+      await Promise.all(sessionIds.map((id) => deleteSessionDocuments(id)));
     },
-    [runtime, store, deleteSessionDocuments]
+    [runtime, deleteSessionDocuments, assertCanManageSessions]
+  );
+
+  const setTreeCollaborationStopped = useCallback(
+    async (sessionId: SessionId, stopped: boolean) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const targets = await runtime.readSessionOperationTargets(sessionId, 'collaboration');
+      await assertCanManageSessions(targets.map((target) => target.id));
+      for (const machineId of new Set(targets.map((target) => target.machineId))) {
+        const machine = await runtime.repo.getDocMeta(getMachineRoomId(machineId));
+        if (
+          !machineSupportsProtocolCapability(
+            machine?.meta,
+            MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl
+          )
+        )
+          throw new Error(
+            'Update every machine in this conversation tree before controlling collaboration'
+          );
+      }
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed before controlling collaboration');
+      }
+      // Stop the root first, so late descendants inherit its barrier. Restore it last.
+      for (const target of stopped ? targets : [...targets].reverse()) {
+        await updateSessionMetadata(target.id, {
+          collaborationStopped: stopped,
+        } as Partial<SessionMeta>);
+      }
+      if (stopped) await runtime.pendingSends?.cancelSessions(targets.map((target) => target.id));
+    },
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
   );
 
   const archiveSession = useCallback(
-    async (sessionId: SessionId) => {
-      log('[session-archive] start', { sessionId });
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
+      const includeOpenedSessions = options?.includeOpenedSessions === true;
+      log('[session-archive] start', { sessionId, includeOpenedSessions });
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-
-      const sessionRoomId = getSessionRoomId(sessionId);
-      const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
-        | SessionMeta
-        | undefined;
-      if (!sessionMeta) {
-        throw new Error(`Session metadata missing for ${sessionId}`);
+      const unwritten = runtime.pendingSends?.hasPendingCreation(sessionId) ?? false;
+      if (unwritten && !(await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta?.id) {
+        // Only a runtime-owned, uncommitted creation is cancelled here; no Repo mutation.
+        if (store.get(activeWorkspaceRuntimeAtom) !== runtime)
+          throw new Error('Workspace changed before archiving');
+        await runtime.pendingSends?.cancelSessions([sessionId]);
+        log('[session-archive] canceled unwritten conversation', { sessionId });
+        return;
       }
-      log('[session-archive] session meta loaded', {
+      const archiveTargets = await runtime.readSessionOperationTargets(
         sessionId,
-        machineId: sessionMeta.machineId,
-      });
-
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
-      for (const session of lifecycleSessions) {
-        if (typeof window !== 'undefined') {
-          sendIpc('terminal.closeSession', { sessionId: session.id });
-        }
-        await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
+        includeOpenedSessions ? 'archive-tree' : 'archive'
+      );
+      await assertCanManageSessions(archiveTargets.map((target) => target.id));
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed before archiving');
+      }
+      // Held follow-ups would otherwise be written into archived conversations.
+      await runtime.pendingSends?.cancelSessions(archiveTargets.map((session) => session.id));
+      for (const session of archiveTargets) {
+        // The archived state is the whole request: the owning machine observes
+        // it, releases the runtime, and reconciles the worktree directory.
+        await updateSessionMetadata(session.id, {
           isArchived: true,
           status: SessionStatusFactory.idle(),
         } as Partial<SessionMeta>);
-
-        // Child tabs share the owning Session's workspace and machine command.
-        if (session.parentSessionId) continue;
-
-        const machineId = session.machineId;
-        const requestedAt = getServerNow();
-        await writeMachineFlockRowBestEffort(
-          runtime,
-          machineId,
-          {
-            key: machineFlockKeys.archiveSessionCommand(session.id),
-            value: buildMachineArchiveSessionCommand({ requestedAt }),
-          },
-          'archiveSession'
-        );
-        const machineRoomId = getMachineRoomId(machineId);
-        const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
-          | MachineLegacyMetaFields
-          | undefined;
-        await runtime.writer.upsertDocMeta(machineRoomId, {
-          needToArchiveSessions: {
-            ...(machineMeta?.needToArchiveSessions ?? {}),
-            [session.id]: true,
-          },
-        } as unknown as RepoDocMetaPatch);
+        if (typeof window !== 'undefined') {
+          // Cleanup failure cannot undo the accepted archive state.
+          try {
+            sendIpc('terminal.closeSession', { sessionId: session.id });
+          } catch (error) {
+            log('[session-archive] terminal cleanup failed', { sessionId: session.id, error });
+          }
+        }
       }
-      log('[session-archive] lifecycle archived', {
+      await runtime.repo.flush();
+      log('[session-archive] archived', {
         sessionId,
-        lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
+        targetSessionIds: archiveTargets.map((session) => session.id),
       });
     },
-    [runtime, getSessionLifecycleMetas]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
   );
 
   const restoreSession = useCallback(
@@ -1240,116 +1039,46 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
 
-      const sessionRoomId = getSessionRoomId(sessionId);
-      const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
-        | SessionMeta
-        | undefined;
-      if (!sessionMeta) {
-        throw new Error(`Session metadata missing for ${sessionId}`);
-      }
+      const restoreTargets = await runtime.readSessionOperationTargets(sessionId, 'restore');
+      await assertCanManageSessions(restoreTargets.map((target) => target.id));
+      const [sessionMeta] = restoreTargets;
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
-
-      for (const session of lifecycleSessions) {
-        await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed before restoring');
+      }
+      // Restore is a lifecycle change only; every tab keeps its close flag.
+      for (const session of restoreTargets) {
+        await updateSessionMetadata(session.id, {
           isArchived: false,
         } as Partial<SessionMeta>);
-        if (!session.parentSessionId) {
-          await cleanupMachineSessionCommandQueues(
-            runtime,
-            session.machineId,
-            session.id,
-            'restoreSession'
-          );
-        }
       }
-      log('[session-restore] lifecycle restored', {
+      log('[session-restore] restored', {
         sessionId,
-        lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
+        targetSessionIds: restoreTargets.map((session) => session.id),
       });
     },
-    [runtime, getSessionLifecycleMetas]
+    [runtime, store, assertCanManageSessions, updateSessionMetadata]
+  );
+
+  const setSessionTabClosed = useCallback(
+    async (sessionId: SessionId, closed: boolean) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const roomId = getSessionRoomId(sessionId);
+      const entry = await runtime.repo.getDocMeta(roomId);
+      if (isLoroRepoDocDeleted(entry)) throw new Error('Session was deleted');
+      const meta = entry?.meta ?? store.get(sessionMetaCacheAtom)[roomId];
+      if (!meta) throw new Error('Session metadata is still loading');
+      await updateSessionMetadata(sessionId, { isTabClosed: closed });
+    },
+    [runtime, store, updateSessionMetadata]
   );
 
   const deleteArchivedSessionMeta = useCallback(
     async (sessionMeta: SessionMeta) => {
       if (!runtime) throw new Error('Runtime not ready');
-      const sessionId = sessionMeta.id;
-      const shouldQueueMachineCleanup = shouldQueueMachineDeleteSession(sessionMeta);
-
-      if (!shouldQueueMachineCleanup) {
-        if (sessionMeta.machineId) {
-          await cleanupMachineSessionCommandQueues(
-            runtime,
-            sessionMeta.machineId,
-            sessionId,
-            'deleteSession'
-          );
-        }
-        await deleteSessionDocuments(sessionId);
-        return;
-      }
-
-      const machineId = sessionMeta.machineId;
-      const machineRoomId = getMachineRoomId(machineId);
-      const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
-        | MachineLegacyMetaFields
-        | undefined;
-      const machineFlockHandle = await runtime.repo.openFlockDoc(
-        getMachineFlockDocId(runtime.workspaceId, machineId)
-      );
-      const machineMetaForCleanup = {
-        localProjects: {
-          ...(machineMeta?.localProjects ?? {}),
-          ...getMachineFlockLocalProjects(
-            readMachineFlockRowsFromFlock(machineFlockHandle.flock, {
-              families: ['localProject'],
-            })
-          ),
-        },
-      } satisfies Pick<MachineLegacyMetaFields, 'localProjects'>;
-      const needToArchiveSessions = machineMeta?.needToArchiveSessions ?? {};
-      const needToDeleteSessions = machineMeta?.needToDeleteSessions ?? {};
-      const requestedAt = getServerNow();
-      let nextNeedToArchiveSessions: typeof needToArchiveSessions | undefined;
-      if (needToArchiveSessions[sessionId] !== undefined) {
-        const { [sessionId]: _, ...rest } = needToArchiveSessions;
-        nextNeedToArchiveSessions = rest;
-      }
-
-      const deleteCommand = buildMachineDeleteSessionCommand({
-        session: sessionMeta,
-        machineMeta: machineMetaForCleanup,
-        requestedAt,
-        existing: needToDeleteSessions[sessionId],
-      });
-
-      await deleteMachineFlockRowsBestEffort(
-        runtime,
-        machineId,
-        [machineFlockKeys.archiveSessionCommand(sessionId)],
-        'deleteSession'
-      );
-      await runtime.writer.upsertDocMeta(machineRoomId, {
-        ...(nextNeedToArchiveSessions !== undefined
-          ? { needToArchiveSessions: nextNeedToArchiveSessions }
-          : {}),
-        ...(deleteCommand
-          ? {
-              needToDeleteSessions: {
-                ...needToDeleteSessions,
-                [sessionId]: machineDeleteCommandToQueueItem(deleteCommand),
-              },
-            }
-          : {}),
-      } as unknown as RepoDocMetaPatch);
-      if (deleteCommand) {
-        await writeMachineFlockRowRequired(runtime, machineId, {
-          key: machineFlockKeys.deleteSessionCommand(sessionId),
-          value: deleteCommand,
-        });
-      }
-      await deleteSessionDocuments(sessionId, { cleanupLaunchConfig: false });
+      // Deleting the doc leaves a deletion marker the owning machine reconciles
+      // its worktree directory against; no machine command is needed.
+      await deleteSessionDocuments(sessionMeta.id);
     },
     [runtime, deleteSessionDocuments]
   );
@@ -1358,34 +1087,172 @@ export function useSessionActions(): SessionActions {
     async (sessionId: SessionId) => {
       log('[session-delete] start', { sessionId });
       if (!runtime) throw new Error('Runtime not ready');
-      const loadedMeta = (await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta as
-        | SessionMeta
-        | undefined;
-      if (!loadedMeta) throw new Error(`Session metadata missing for ${sessionId}`);
-      const rootMeta = { ...loadedMeta, id: loadedMeta.id ?? sessionId };
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, rootMeta);
+      const deleteTargets = await runtime.readSessionOperationTargets(sessionId, 'delete');
+      await assertCanManageSessions(deleteTargets.map((target) => target.id));
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed before deleting');
+      }
 
-      for (const session of lifecycleSessions.reverse()) {
+      for (const session of [...deleteTargets].reverse()) {
         await deleteArchivedSessionMeta(session);
       }
-      log('[session-delete] lifecycle deleted', { sessionId });
+      log('[session-delete] deleted', {
+        sessionId,
+        targetSessionIds: deleteTargets.map((session) => session.id),
+      });
     },
-    [runtime, getSessionLifecycleMetas, deleteArchivedSessionMeta]
+    [runtime, store, deleteArchivedSessionMeta, assertCanManageSessions]
   );
 
-  const setSessionPinned = useCallback(
-    async (sessionId: SessionId, isPinned: boolean) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
+  const readSessionMetas = useCallback(
+    async (sessionId: SessionId, includeOpened: boolean): Promise<SessionMeta[]> => {
+      if (!runtime) throw new Error('Runtime not ready');
+      if (includeOpened) {
+        const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
+        if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+          throw new Error('Workspace changed during session operation');
+        }
+        return tree;
       }
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
-      if (isLoroRepoDocDeleted(existing)) return;
-      await runtime.writer.upsertDocMeta(roomId, {
-        isPinned,
-      } as Partial<SessionMeta>);
+      if (isLoroRepoDocDeleted(existing)) return [];
+      const meta =
+        (existing?.meta as SessionMeta | undefined) ??
+        (store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined);
+      return meta ? [{ ...meta, id: sessionId }] : [];
     },
-    [runtime]
+    [runtime, store]
+  );
+
+  /** Every affected Session passes its guard before the first write. */
+  const applyStatusViewWrites = useCallback(
+    async (writes: readonly StatusViewWrite[]) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const managed: SessionId[] = [];
+      const preferred: SessionId[] = [];
+      for (const write of writes) {
+        if (write.type !== 'session') continue;
+        (write.access === 'manage' ? managed : preferred).push(write.sessionId as SessionId);
+      }
+      if (managed.length > 0) await assertCanManageSessions(managed);
+      if (preferred.length > 0) await assertReadablePreferences(preferred);
+      for (const write of writes) {
+        if (write.type === 'session') {
+          await runtime.writer.upsertDocMeta(
+            getSessionRoomId(write.sessionId as SessionId),
+            statusViewPatchToMeta(write.patch) as RepoDocMetaPatch
+          );
+        } else if (write.type === 'putSection') {
+          await writeWorkspacePinSection(runtime, write.section);
+        } else {
+          await deleteWorkspacePinSection(runtime, write.sectionId);
+        }
+      }
+    },
+    [runtime, assertCanManageSessions, assertReadablePreferences]
+  );
+
+  const runStatusViewCommand = useCallback(
+    async (requested: StatusViewCommand, state?: StatusViewState) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      let command = requested;
+      const base = state ?? emptyStatusViewState();
+      const listed = new Set(base.sessions.map((session) => session.id));
+      let reached: SessionMeta[] = [];
+      switch (command.type) {
+        case 'snooze':
+        case 'settle':
+        case 'moveToFocus':
+          reached = await readSessionMetas(command.sessionId as SessionId, command.includeOpened);
+          break;
+        case 'move':
+          // A row dropped into Focus brings its opened sub-conversations along.
+          reached = await readSessionMetas(
+            command.sessionId as SessionId,
+            command.to.area === 'focus'
+          );
+          break;
+        case 'touchOnSend': {
+          reached = await readSessionMetas(command.sessionId as SessionId, false);
+          const rootId = reached[0]?.parentSessionId;
+          if (rootId) {
+            command = { type: 'touchOnSend', sessionId: rootId };
+            reached = await readSessionMetas(rootId, false);
+          }
+          break;
+        }
+        case 'setPinned': {
+          const pinnedId = command.sessionId;
+          const target = await readSessionMetas(pinnedId as SessionId, false);
+          if (target.length === 0) return [];
+          // The new pin's key is planned against every pin in the default section.
+          reached = [
+            ...Object.values(store.get(sessionMetaCacheAtom)).filter(
+              (meta) => meta.isArchived !== true && meta.id !== pinnedId
+            ),
+            ...target,
+          ];
+          break;
+        }
+        default:
+          break;
+      }
+      const related = statusViewSessionsFromMetas(reached, {
+        keepArchivedId: 'sessionId' in command ? command.sessionId : undefined,
+      }).filter((session) => !listed.has(session.id));
+      const writes = planStatusViewCommand(
+        { ...base, related: [...(base.related ?? []), ...related] },
+        command,
+        { nowMs: getServerNow(), randomByte }
+      );
+      await applyStatusViewWrites(writes);
+      return writes;
+    },
+    [runtime, store, readSessionMetas, applyStatusViewWrites]
+  );
+  const runStatusViewCommandRef = useRef(runStatusViewCommand);
+  runStatusViewCommandRef.current = runStatusViewCommand;
+
+  const setSessionPinned = useCallback(
+    async (sessionId: SessionId, pinned: boolean) => {
+      await runStatusViewCommand({ type: 'setPinned', sessionId, pinned });
+    },
+    [runStatusViewCommand]
+  );
+
+  const snoozeSession = useCallback(
+    async (sessionId: SessionId, until: number, options?: { includeOpenedSessions?: boolean }) => {
+      await runStatusViewCommand({
+        type: 'snooze',
+        sessionId,
+        until,
+        includeOpened: options?.includeOpenedSessions === true,
+      });
+    },
+    [runStatusViewCommand]
+  );
+
+  const settleSession = useCallback(
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
+      await runStatusViewCommand({
+        type: 'settle',
+        sessionId,
+        includeOpened: options?.includeOpenedSessions === true,
+      });
+    },
+    [runStatusViewCommand]
+  );
+
+  const moveSessionToFocus = useCallback(
+    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
+      await runStatusViewCommand({
+        type: 'moveToFocus',
+        sessionId,
+        includeOpened: options?.includeOpenedSessions === true,
+      });
+    },
+    [runStatusViewCommand]
   );
 
   return {
@@ -1395,15 +1262,24 @@ export function useSessionActions(): SessionActions {
     requestSessionDispatch,
     requestSessionCancel,
     requestSessionSteer,
+    requestSessionGoal,
     touchSessionActivity,
     updateSessionStatus,
     updateSessionTitle,
+    updateSessionMetadata,
+    setSessionTabClosed,
     transferSessionOwner,
     markSessionRead,
+    markSessionUnread,
     deleteSessions,
     archiveSession,
+    setTreeCollaborationStopped,
     restoreSession,
     deleteArchivedSession,
     setSessionPinned,
+    runStatusViewCommand,
+    snoozeSession,
+    settleSession,
+    moveSessionToFocus,
   };
 }

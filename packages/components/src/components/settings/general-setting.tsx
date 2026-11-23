@@ -1,36 +1,38 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useId, useMemo, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
-  ElectronAutoLaunchStatusResult,
   GetNotificationPermissionStatusResult,
   OpenSystemNotificationSettingsResult,
-  SetElectronAutoLaunchResult,
 } from '@lody/shared';
 import { Trash2 } from 'lucide-react';
-import { Loading } from '@/ui';
-import { Button } from '@/ui/button';
-import { Switch } from '@/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
-import { toast } from 'sonner';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
+import { Switch } from '@lody/ui/switch';
+import { Select } from '@lody/ui/select';
+import { toast } from '@/lib/toast';
 import {
   electronSessionCompletionNotificationsEnabledAtom,
+  electronSuppressMobilePushWhenFocusedAtom,
   mobileKeyboardActionAtom,
+  prRemoteImagesEnabledAtom,
   queuedMessageBehaviorAtom,
   sessionSidebarCodeChangesOnlyAtom,
   userAtom,
 } from '@/atoms';
 import { useAtom, useAtomValue } from 'jotai';
+import { usePlatformCapability } from '@lody/platform/react';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
-import { AutoArchiveSection } from './auto-archive-setting';
-import { ExperimentalFeaturesSection } from './experimental-features-setting';
+import { ExperimentalFeatureRows } from './experimental-features-setting';
 import {
-  getOneSignalPermissionState,
-  getOneSignalPushSubscriptionOptedIn,
-  initOneSignal,
-} from '@/lib/onesignal';
+  getPushPermissionState,
+  getPushSubscriptionOptedIn,
+  initPush,
+} from '@/lib/push-notifications';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { ClearCacheConfirmDialog, useClearCache } from './clear-cache';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -39,8 +41,26 @@ import { MobileGeneralSettings } from '@/components/mobile/mobile-general-settin
 import { PathLaunchersSettings } from './path-launchers-setting';
 import { QueuedMessageBehaviorControl } from './queued-message-behavior-control';
 import { CliDaemonSetting } from './cli-daemon-setting';
-import { useAppCapability } from '@/lib/app-platform';
 import { getIpcServices } from '@/lib/electron-ipc-client';
+import { useElectronAutoLaunch } from '@/hooks/use-electron-auto-launch';
+
+const styles = stylex.create({
+  /** A row a deep link can land on, clear of the sticky header above it. */
+  anchor: { scrollMarginTop: '96px' },
+  /** A select takes a fixed column on a wide panel and the row on a narrow one. */
+  select: { width: { default: '100%', '@media (min-width: 640px)': '220px' } },
+  helperLines: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  error: { color: colors.destructive },
+  /** Holds a switch's place while its state loads, so the row does not jump. */
+  switchSlot: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '36px',
+    height: '20px',
+  },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+});
 
 type ElectronPlatform = 'darwin' | 'win32' | 'linux' | 'unknown';
 
@@ -107,27 +127,48 @@ function useElectronEnabledSetting(
  */
 export function GeneralSettingsComponent() {
   const { t } = useTranslation();
-  const githubIntegrationAvailable = useAppCapability('githubIntegration');
+  const preferenceId = useId();
+  const codeChangesLabelId = `${preferenceId}-code-changes-label`;
+  const codeChangesHelperId = `${preferenceId}-code-changes-helper`;
+  const prImagesLabelId = `${preferenceId}-pr-images-label`;
+  const prImagesHelperId = `${preferenceId}-pr-images-helper`;
+  const notificationLabelId = `${preferenceId}-notification-label`;
+  const notificationHelperId = `${preferenceId}-notification-helper`;
   const postHog = usePostHog();
   const user = useAtomValue(userAtom);
   const [electronCompletionNotificationsEnabled, setElectronCompletionNotificationsEnabled] =
     useAtom(electronSessionCompletionNotificationsEnabledAtom);
+  const [suppressMobilePushWhenFocused, setSuppressMobilePushWhenFocused] = useAtom(
+    electronSuppressMobilePushWhenFocusedAtom
+  );
+  const mobilePushAvailable = usePlatformCapability('notifications');
   const [mobileKeyboardAction, setMobileKeyboardAction] = useAtom(mobileKeyboardActionAtom);
   const [sessionSidebarCodeChangesOnly, setSessionSidebarCodeChangesOnly] = useAtom(
     sessionSidebarCodeChangesOnlyAtom
   );
   const [queuedMessageBehavior, setQueuedMessageBehavior] = useAtom(queuedMessageBehaviorAtom);
+  const [prImagesEnabled, setPrImagesEnabled] = useAtom(prRemoteImagesEnabledAtom);
   const [preventSleepEnabled, setPreventSleepEnabled] = useState(true);
   const [cliAutoStartEnabled, setCliAutoStartEnabled] = useState(true);
   const [cliAutoStartLoading, setCliAutoStartLoading] = useState(false);
   const clearCache = useClearCache();
   const isMobile = useIsMobile();
   const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
+  const autoLaunch = useElectronAutoLaunch(isElectron && !isMobile);
   const isNative = !isElectron && isNativeAppShell();
   const showMobileInputSettings = isMobile || isNative;
   const selectedMobileKeyboardAction = isMobileKeyboardAction(mobileKeyboardAction)
     ? mobileKeyboardAction
     : 'send';
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so the list is stated once and drives both.
+  const mobileKeyboardActionOptions = useMemo(
+    () => [
+      { value: 'send', label: t('settings.input.mobileKeyboardAction.send') },
+      { value: 'newline', label: t('settings.input.mobileKeyboardAction.newline') },
+    ],
+    [t]
+  );
   const electronPlatform = useMemo(() => {
     if (!isElectron || typeof window === 'undefined') {
       return 'unknown';
@@ -137,15 +178,11 @@ export function GeneralSettingsComponent() {
   const [notificationSupported, setNotificationSupported] = useState(isNative);
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [oneSignalReady, setOneSignalReady] = useState(false);
+  const [pushClientReady, setPushReady] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
-  const [autoLaunchSupported, setAutoLaunchSupported] = useState(false);
-  const [autoLaunchLoading, setAutoLaunchLoading] = useState(false);
   const isSwitchDisabled = isElectron
     ? !notificationSupported || isProcessing
-    : !notificationSupported || !oneSignalReady || isProcessing;
-  const autoLaunchSwitchDisabled = !autoLaunchSupported || autoLaunchLoading;
+    : !notificationSupported || !pushClientReady || isProcessing;
 
   const readElectronNotificationPermission =
     useCallback(async (): Promise<ElectronNotificationPermissionStatusResult> => {
@@ -208,18 +245,16 @@ export function GeneralSettingsComponent() {
       };
     }, []);
 
-  const readOneSignalPushSubscriptionEnabled = useCallback(async (): Promise<
-    boolean | undefined
-  > => {
+  const readPushSubscriptionEnabled = useCallback(async (): Promise<boolean | undefined> => {
     if (typeof window === 'undefined' || isElectron) {
       return undefined;
     }
 
-    const oneSignal = await initOneSignal().catch(() => null);
-    if (!oneSignal) {
+    const pushClient = await initPush().catch(() => null);
+    if (!pushClient) {
       return undefined;
     }
-    return getOneSignalPushSubscriptionOptedIn(oneSignal);
+    return getPushSubscriptionOptedIn(pushClient);
   }, [isElectron]);
 
   const syncNotificationPermission = useCallback(async () => {
@@ -242,28 +277,28 @@ export function GeneralSettingsComponent() {
     if (isNative) {
       // notificationSupported is seeded from isNative, so it is already true here.
       try {
-        const oneSignal = await initOneSignal();
-        const supported = Boolean(oneSignal);
-        setOneSignalReady(supported);
+        const pushClient = await initPush();
+        const supported = Boolean(pushClient);
+        setPushReady(supported);
 
-        if (!oneSignal) {
+        if (!pushClient) {
           setPermissionStatus('default');
           setNotificationsEnabled(false);
           return;
         }
 
-        const currentPermission = await getOneSignalPermissionState(oneSignal);
+        const currentPermission = await getPushPermissionState(pushClient);
         setPermissionStatus(currentPermission);
         if (currentPermission !== 'granted') {
           setNotificationsEnabled(false);
           return;
         }
 
-        const pushSubscriptionEnabled = await getOneSignalPushSubscriptionOptedIn(oneSignal);
+        const pushSubscriptionEnabled = await getPushSubscriptionOptedIn(pushClient);
         setNotificationsEnabled(pushSubscriptionEnabled ?? false);
       } catch (error) {
         console.error('Failed to sync native notification permission', error);
-        setOneSignalReady(false);
+        setPushReady(false);
         setPermissionStatus('default');
         setNotificationsEnabled(false);
       }
@@ -285,14 +320,14 @@ export function GeneralSettingsComponent() {
       return;
     }
 
-    const webPushSubscriptionEnabled = await readOneSignalPushSubscriptionEnabled();
+    const webPushSubscriptionEnabled = await readPushSubscriptionEnabled();
     if (typeof webPushSubscriptionEnabled === 'boolean') {
       setNotificationsEnabled(webPushSubscriptionEnabled);
       return;
     }
 
-    if (!oneSignalReady) {
-      // Web push status is managed by OneSignal subscription state, not browser permission only.
+    if (!pushClientReady) {
+      // Web push status is managed by Push subscription state, not browser permission only.
       setNotificationsEnabled(false);
       return;
     }
@@ -303,9 +338,9 @@ export function GeneralSettingsComponent() {
     electronCompletionNotificationsEnabled,
     isElectron,
     isNative,
-    oneSignalReady,
+    pushClientReady,
     readElectronNotificationPermission,
-    readOneSignalPushSubscriptionEnabled,
+    readPushSubscriptionEnabled,
   ]);
 
   useEffect(() => {
@@ -343,12 +378,12 @@ export function GeneralSettingsComponent() {
   }, [electronCompletionNotificationsEnabled, isElectron, syncNotificationPermission]);
 
   useEffect(() => {
-    if (isElectron || !oneSignalReady) {
+    if (isElectron || !pushClientReady) {
       return undefined;
     }
     void syncNotificationPermission();
     return undefined;
-  }, [isElectron, oneSignalReady, syncNotificationPermission]);
+  }, [isElectron, pushClientReady, syncNotificationPermission]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || window.__LODY_ELECTRON__ === true) {
@@ -356,52 +391,21 @@ export function GeneralSettingsComponent() {
     }
 
     let active = true;
-    void initOneSignal()
-      .then((oneSignal) => {
-        if (!active || !oneSignal?.Notifications) {
+    void initPush()
+      .then((pushClient) => {
+        if (!active || !pushClient?.Notifications) {
           return;
         }
-        setOneSignalReady(true);
+        setPushReady(true);
       })
       .catch((error: unknown) => {
         if (!active) {
           return;
         }
-        setOneSignalReady(false);
-        console.error('OneSignal init failed', error);
+        setPushReady(false);
+        console.error('Push init failed', error);
       });
 
-    return () => {
-      active = false;
-    };
-  }, [isElectron]);
-
-  useEffect(() => {
-    const services = getIpcServices();
-    const getAutoLaunchStatus = services
-      ? services.app.getAutoLaunchStatus.bind(services.app)
-      : undefined;
-    if (!isElectron || typeof window === 'undefined' || !getAutoLaunchStatus) {
-      setAutoLaunchSupported(false);
-      setAutoLaunchEnabled(false);
-      return undefined;
-    }
-
-    let active = true;
-    const loadAutoLaunchStatus = async () => {
-      try {
-        const result: ElectronAutoLaunchStatusResult = await getAutoLaunchStatus();
-        if (!active) return;
-        setAutoLaunchSupported(result.supported);
-        setAutoLaunchEnabled(result.enabled);
-      } catch {
-        if (!active) return;
-        setAutoLaunchSupported(false);
-        setAutoLaunchEnabled(false);
-      }
-    };
-
-    void loadAutoLaunchStatus();
     return () => {
       active = false;
     };
@@ -410,39 +414,52 @@ export function GeneralSettingsComponent() {
   useElectronEnabledSetting(isElectron, 'getPreventSleepEnabled', setPreventSleepEnabled);
   useElectronEnabledSetting(isElectron, 'getCliAutoStartEnabled', setCliAutoStartEnabled);
 
-  const permissionLabel = useMemo(() => {
-    if (isElectron && !notificationsEnabled) {
-      return t('settings.notifications.disabledDesktop');
-    }
-    switch (permissionStatus) {
-      case 'granted':
-        return t('settings.notifications.permissionGranted');
-      case 'denied':
-        return t(
-          isElectron
-            ? 'settings.notifications.permissionDeniedStatusDesktop'
-            : isNative
-              ? 'settings.notifications.permissionDeniedStatusNative'
-              : 'settings.notifications.permissionDeniedStatus'
-        );
-      default:
-        return t('settings.notifications.permissionDefault');
-    }
-  }, [isElectron, isNative, notificationsEnabled, permissionStatus, t]);
-
-  const disableReason = useMemo(() => {
-    if (!notificationSupported) {
-      return t('settings.notifications.reason.notSupported');
-    }
-    if (!isElectron && !oneSignalReady) {
-      return t('settings.notifications.reason.notReady');
-    }
-    return undefined;
-  }, [isElectron, notificationSupported, oneSignalReady, t]);
-
   const desktopHint = useMemo(() => {
     return t(getDesktopNotificationHintKey(electronPlatform));
   }, [electronPlatform, t]);
+
+  // The switch already says whether notifications are on. The helper speaks
+  // only when something stops them from working, and says what to do about it.
+  const notificationProblem = useMemo((): ReactNode => {
+    if (!notificationSupported) {
+      return (
+        <span {...stylex.props(styles.error)}>
+          {isElectron
+            ? t('settings.notifications.unsupportedDesktop')
+            : t('settings.notifications.unsupported')}
+        </span>
+      );
+    }
+    if (permissionStatus === 'denied') {
+      const status = t(
+        isElectron
+          ? 'settings.notifications.permissionDeniedStatusDesktop'
+          : isNative
+            ? 'settings.notifications.permissionDeniedStatusNative'
+            : 'settings.notifications.permissionDeniedStatus'
+      );
+      if (!isElectron) return status;
+      return (
+        <span {...stylex.props(styles.helperLines)}>
+          <span>{status}</span>
+          <span>{desktopHint}</span>
+        </span>
+      );
+    }
+    if (!isElectron && !pushClientReady && !isProcessing) {
+      return t('settings.notifications.reason.notReady');
+    }
+    return undefined;
+  }, [
+    desktopHint,
+    isElectron,
+    isNative,
+    isProcessing,
+    notificationSupported,
+    pushClientReady,
+    permissionStatus,
+    t,
+  ]);
 
   const openSystemNotificationSettings =
     useCallback(async (): Promise<OpenSystemNotificationSettingsResult> => {
@@ -535,27 +552,27 @@ export function GeneralSettingsComponent() {
         return;
       }
 
-      if (!oneSignalReady) {
+      if (!pushClientReady) {
         toast.error(t('settings.notifications.notReady'));
         return;
       }
 
-      const oneSignal = await initOneSignal();
-      if (!oneSignal?.Notifications) {
+      const pushClient = await initPush();
+      if (!pushClient?.Notifications) {
         toast.error(t('settings.notifications.notReady'));
         return;
       }
 
       if (checked) {
         const pushSurface = isNative ? 'native' : 'web';
-        // push/permission_prompt_shown (spec §8f.3, P0, tier A): the OneSignal
+        // push/permission_prompt_shown (spec §8f.3, P0, tier A): the Push
         // OS permission prompt is about to be requested from settings.
         capturePostHogEvent(postHog, 'push/permission_prompt_shown', {
           surface: pushSurface,
           source: 'settings',
         });
 
-        const result = (await oneSignal.Notifications.requestPermission()) ? 'granted' : 'denied';
+        const result = (await pushClient.Notifications.requestPermission()) ? 'granted' : 'denied';
         setPermissionStatus(result);
 
         if (result !== 'granted') {
@@ -578,13 +595,14 @@ export function GeneralSettingsComponent() {
         });
 
         if (user) {
-          await oneSignal.User.PushSubscription.optIn();
-          await oneSignal.login(user?.id);
-          setNotificationsEnabled(true);
+          await pushClient.User.PushSubscription.optIn();
+          await pushClient.login(user?.id);
+          const registered = await getPushSubscriptionOptedIn(pushClient);
+          setNotificationsEnabled(registered);
+          if (!registered) throw new Error('Push registration was not confirmed');
           // push/subscribed + push/token_registered (spec §8f.3, P0/P0): the
-          // user opted in and OneSignal logged in the external id, so this
-          // install is now a registered push target. We never send the raw
-          // token; OneSignal owns it.
+          // backend confirmed this installation for the current login.
+          // Never include the token in analytics.
           capturePostHogEvent(postHog, 'push/subscribed', {
             surface: pushSurface,
             source: 'settings',
@@ -595,7 +613,7 @@ export function GeneralSettingsComponent() {
           });
         }
       } else {
-        await oneSignal.User.PushSubscription.optOut();
+        await pushClient.User.PushSubscription.optOut();
         setNotificationsEnabled(false);
       }
     } catch (error) {
@@ -617,31 +635,6 @@ export function GeneralSettingsComponent() {
     }
   };
 
-  const handleToggleAutoLaunch = async (checked: boolean) => {
-    if (!isElectron || !getIpcServices()) {
-      return;
-    }
-
-    const previous = autoLaunchEnabled;
-    setAutoLaunchEnabled(checked);
-    setAutoLaunchLoading(true);
-    try {
-      const result: SetElectronAutoLaunchResult =
-        await getIpcServices()!.app.setAutoLaunchEnabled(checked);
-      if (!result.ok) {
-        setAutoLaunchEnabled(previous);
-        toast.error(t('settings.general.autoLaunch.toggleFailed', 'Failed to update auto launch'));
-      } else {
-        setAutoLaunchEnabled(result.enabled);
-      }
-    } catch {
-      setAutoLaunchEnabled(previous);
-      toast.error(t('settings.general.autoLaunch.toggleFailed', 'Failed to update auto launch'));
-    } finally {
-      setAutoLaunchLoading(false);
-    }
-  };
-
   const handleToggleCliAutoStart = async (checked: boolean) => {
     if (!isElectron || !getIpcServices()) {
       return;
@@ -656,11 +649,15 @@ export function GeneralSettingsComponent() {
         setCliAutoStartEnabled(result.enabled);
       } else {
         setCliAutoStartEnabled(previous);
-        toast.error(t('settings.general.cliAutoStart.toggleFailed', 'Failed to update auto start'));
+        toast.error(
+          t('settings.general.cliAutoStart.toggleFailed', 'Failed to update local agent setting')
+        );
       }
     } catch {
       setCliAutoStartEnabled(previous);
-      toast.error(t('settings.general.cliAutoStart.toggleFailed', 'Failed to update auto start'));
+      toast.error(
+        t('settings.general.cliAutoStart.toggleFailed', 'Failed to update local agent setting')
+      );
     } finally {
       setCliAutoStartLoading(false);
     }
@@ -673,11 +670,9 @@ export function GeneralSettingsComponent() {
       <div className={settingContainerClass}>
         {showMobileInputSettings ? (
           <CompactSection title={t('settings.input.title')}>
-            <CompactRow
-              label={t('settings.input.mobileKeyboardAction.label')}
-              helper={t('settings.input.mobileKeyboardAction.helper')}
-            >
-              <Select
+            <CompactRow label={t('settings.input.mobileKeyboardAction.label')}>
+              <Select.Root
+                items={mobileKeyboardActionOptions}
                 value={selectedMobileKeyboardAction}
                 onValueChange={(value) => {
                   if (isMobileKeyboardAction(value)) {
@@ -685,31 +680,34 @@ export function GeneralSettingsComponent() {
                   }
                 }}
               >
-                <SelectTrigger className="w-full sm:w-[220px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="send">
-                    {t('settings.input.mobileKeyboardAction.send')}
-                  </SelectItem>
-                  <SelectItem value="newline">
-                    {t('settings.input.mobileKeyboardAction.newline')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                <div {...stylex.props(styles.select)}>
+                  <Select.Trigger>
+                    <Select.Value />
+                  </Select.Trigger>
+                </div>
+                <Select.Content>
+                  {mobileKeyboardActionOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
             </CompactRow>
           </CompactSection>
         ) : null}
 
-        <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70 bg-card/60 text-sm">
+        {/* Settings are grouped by what they are about, so no group is one row
+          and no row needs a sentence to say where it applies. */}
+        <CompactSection title={t('settings.general.sections.conversations', 'Conversations')}>
           <CompactRow
             label={t(
               'settings.general.sessions.queuedMessageBehavior.label',
               'Queued message behavior'
             )}
-            helper={t(
+            info={t(
               'settings.general.sessions.queuedMessageBehavior.helper',
-              'Choose whether messages sent while the agent is working wait in the queue or steer the active response.'
+              'For messages you send while the agent is working.'
             )}
           >
             <QueuedMessageBehaviorControl
@@ -717,50 +715,51 @@ export function GeneralSettingsComponent() {
               onChange={setQueuedMessageBehavior}
             />
           </CompactRow>
+          {isElectron ? (
+            <div id="path-launchers" {...stylex.props(styles.anchor)}>
+              <PathLaunchersSettings isElectron={isElectron} platform={electronPlatform} inline />
+            </div>
+          ) : null}
           <CompactRow
+            labelId={codeChangesLabelId}
+            helperId={codeChangesHelperId}
             label={t(
               'settings.general.sessions.codeOnlyLineChanges.label',
               'Show code-only line changes'
             )}
             helper={t(
               'settings.general.sessions.codeOnlyLineChanges.helper',
-              'When enabled, session sidebar line counts exclude docs, tests, and dev files.'
+              'Sidebar line counts skip docs, tests, and dev config.'
             )}
           >
             <Switch
               id="session-sidebar-code-changes-only-toggle"
+              aria-labelledby={codeChangesLabelId}
+              aria-describedby={codeChangesHelperId}
               checked={sessionSidebarCodeChangesOnly}
               onCheckedChange={setSessionSidebarCodeChangesOnly}
             />
           </CompactRow>
-
           <CompactRow
+            labelId={notificationLabelId}
+            helperId={notificationHelperId}
             label={
               isElectron
                 ? t('settings.notifications.enableToggleDesktop')
                 : t('settings.notifications.enableToggle')
             }
-            helper={
-              <span className="flex flex-col gap-0.5">
-                <span>{permissionLabel}</span>
-                {disableReason && !isProcessing ? <span>{disableReason}</span> : null}
-                {isElectron && permissionStatus !== 'granted' ? <span>{desktopHint}</span> : null}
-                {!notificationSupported ? (
-                  <span className="text-destructive">
-                    {isElectron
-                      ? t('settings.notifications.unsupportedDesktop')
-                      : t('settings.notifications.unsupported')}
-                  </span>
-                ) : null}
-              </span>
-            }
-            alignTop
+            helper={notificationProblem}
+            alignTop={notificationProblem != null}
           >
             {isProcessing ? (
-              <Loading size="sm" className="h-5 w-9" />
+              <span {...stylex.props(styles.switchSlot)}>
+                <Spinner size="small" label={t('common.loading', 'Loading...')} />
+              </span>
             ) : (
               <Switch
                 id="notification-toggle"
+                aria-labelledby={notificationLabelId}
+                aria-describedby={notificationProblem != null ? notificationHelperId : undefined}
                 checked={notificationsEnabled}
                 disabled={isSwitchDisabled}
                 onCheckedChange={(checked) => {
@@ -769,41 +768,21 @@ export function GeneralSettingsComponent() {
               />
             )}
           </CompactRow>
-        </div>
+        </CompactSection>
         {isElectron && (
-          <CompactSection title={t('settings.general.autoLaunch.title', 'Startup')}>
-            <CliDaemonSetting />
-            <CompactRow
-              label={t('settings.general.autoLaunch.label', 'Launch at startup')}
-              helper={t(
-                'settings.general.autoLaunch.helper',
-                'Automatically run Lody when you sign in'
-              )}
-            >
-              {autoLaunchLoading ? (
-                <Loading size="sm" className="h-5 w-9" />
-              ) : (
-                <Switch
-                  id="auto-launch-toggle"
-                  checked={autoLaunchEnabled}
-                  disabled={autoLaunchSwitchDisabled}
-                  onCheckedChange={(checked) => {
-                    void handleToggleAutoLaunch(checked);
-                  }}
-                />
-              )}
-            </CompactRow>
-            <div id="cli-auto-start" className="scroll-mt-24">
+          <CompactSection title={t('settings.general.sections.thisComputer', 'This computer')}>
+            <div id="cli-auto-start" {...stylex.props(styles.anchor)}>
               <CompactRow
                 label={t('settings.general.cliAutoStart.label', 'Run local agent')}
-                helper={t(
+                info={t(
                   'settings.general.cliAutoStart.helper',
-                  'Lody runs an agent on this computer to work on your local projects. Turn this off to use Lody only as a control panel for agents running on other machines.'
+                  'Turn off to use Lody only to control agents on other machines.'
                 )}
-                alignTop
               >
                 {cliAutoStartLoading ? (
-                  <Loading size="sm" className="h-5 w-9" />
+                  <span {...stylex.props(styles.switchSlot)}>
+                    <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                  </span>
                 ) : (
                   <Switch
                     id="cli-auto-start-toggle"
@@ -815,7 +794,27 @@ export function GeneralSettingsComponent() {
                 )}
               </CompactRow>
             </div>
-            <div id="prevent-sleep" className="scroll-mt-24">
+            <CliDaemonSetting />
+            <AutoLaunchSettingRows autoLaunch={autoLaunch} />
+            {mobilePushAvailable && (
+              <CompactRow
+                label={t(
+                  'settings.general.suppressMobilePushWhenFocused.label',
+                  'Pause phone notifications while using this computer'
+                )}
+                info={t(
+                  'settings.general.suppressMobilePushWhenFocused.helper',
+                  'While Lody is focused on this computer, finished tasks skip your phone. Permission requests and questions still notify.'
+                )}
+              >
+                <Switch
+                  id="suppress-mobile-push-when-focused-toggle"
+                  checked={suppressMobilePushWhenFocused}
+                  onCheckedChange={setSuppressMobilePushWhenFocused}
+                />
+              </CompactRow>
+            )}
+            <div id="prevent-sleep" {...stylex.props(styles.anchor)}>
               <CompactRow label={t('settings.general.preventSleep.label', 'Prevent sleep')}>
                 <Switch
                   id="prevent-sleep-toggle"
@@ -832,31 +831,38 @@ export function GeneralSettingsComponent() {
                 />
               </CompactRow>
             </div>
+            <CompactRow
+              labelId={prImagesLabelId}
+              helperId={prImagesHelperId}
+              label={t('settings.general.prImages.label', 'Automatically load PR images')}
+              helper={t(
+                'settings.general.prImages.helper',
+                'When off, load images individually. Image websites can see your IP address.'
+              )}
+            >
+              <Switch
+                aria-labelledby={prImagesLabelId}
+                aria-describedby={prImagesHelperId}
+                checked={prImagesEnabled === true}
+                onCheckedChange={setPrImagesEnabled}
+              />
+            </CompactRow>
           </CompactSection>
         )}
 
-        {githubIntegrationAvailable ? <AutoArchiveSection /> : null}
-
-        <ExperimentalFeaturesSection />
-
-        {isElectron && (
-          <div id="path-launchers" className="scroll-mt-24">
-            <PathLaunchersSettings isElectron={isElectron} platform={electronPlatform} />
-          </div>
-        )}
-
         {/* Clear local cache stays last in General settings. */}
-        <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70 bg-card/60 text-sm">
+        <CompactSection title={t('settings.general.sections.advanced', 'Advanced')}>
+          <ExperimentalFeatureRows />
           <CompactRow
             label={t('settings.cache.clearCache.label')}
-            helper={t('settings.cache.clearCache.description')}
+            info={t('settings.cache.clearCache.description')}
           >
-            <Button variant="outline" size="sm" onClick={() => clearCache.setDialogOpen(true)}>
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+            <Button variant="secondary" size="small" onClick={() => clearCache.setDialogOpen(true)}>
+              <Trash2 {...stylex.props(styles.icon)} />
               {t('settings.cache.clearCache.button')}
             </Button>
           </CompactRow>
-        </div>
+        </CompactSection>
       </div>
       <ClearCacheConfirmDialog
         open={clearCache.dialogOpen}
@@ -864,6 +870,90 @@ export function GeneralSettingsComponent() {
         isClearing={clearCache.isClearing}
         onConfirm={() => void clearCache.confirmClear()}
       />
+    </>
+  );
+}
+
+type AutoLaunchState = Pick<
+  ReturnType<typeof useElectronAutoLaunch>,
+  | 'supported'
+  | 'enabled'
+  | 'hideWindowOnAutoLaunch'
+  | 'loading'
+  | 'enabledLoading'
+  | 'hideWindowLoading'
+  | 'updateEnabled'
+  | 'updateHideWindow'
+>;
+
+/**
+ * Launch at startup, and the one setting that only means something once it
+ * is on. A switch that cannot be used here says why under its name, and the
+ * name steps back with it, so an off switch and an unavailable one never look
+ * alike. The operating system decides whether Lody can register as a login
+ * item (the main process supports macOS and Windows), and hiding the window
+ * only applies to a launch at startup.
+ */
+export function AutoLaunchSettingRows({ autoLaunch }: { autoLaunch: AutoLaunchState }) {
+  const { t } = useTranslation();
+  // Still reading the state is not "unavailable": say nothing until it is known.
+  const unsupported = !autoLaunch.supported && !autoLaunch.enabledLoading;
+  const needsLaunch = autoLaunch.supported && !autoLaunch.enabled;
+  const unsupportedReason = t(
+    'settings.general.autoLaunch.unsupported',
+    'Available on macOS and Windows only.'
+  );
+  return (
+    <>
+      <CompactRow
+        label={t('settings.general.autoLaunch.label', 'Launch at startup')}
+        helper={unsupported ? unsupportedReason : undefined}
+        disabled={unsupported}
+      >
+        {autoLaunch.enabledLoading ? (
+          <span {...stylex.props(styles.switchSlot)}>
+            <Spinner size="small" label={t('common.loading', 'Loading...')} />
+          </span>
+        ) : (
+          <Switch
+            id="auto-launch-toggle"
+            checked={autoLaunch.enabled}
+            disabled={!autoLaunch.supported || autoLaunch.loading}
+            onCheckedChange={(checked) => {
+              void autoLaunch.updateEnabled(checked);
+            }}
+          />
+        )}
+      </CompactRow>
+      <CompactRow
+        label={t('settings.general.autoLaunch.hideWindowLabel', 'Hide window on auto-launch')}
+        helper={
+          unsupported
+            ? unsupportedReason
+            : needsLaunch
+              ? t(
+                  'settings.general.autoLaunch.hideWindowNeedsLaunch',
+                  'Applies once Launch at startup is on.'
+                )
+              : undefined
+        }
+        disabled={unsupported || needsLaunch}
+      >
+        {autoLaunch.hideWindowLoading ? (
+          <span {...stylex.props(styles.switchSlot)}>
+            <Spinner size="small" label={t('common.loading', 'Loading...')} />
+          </span>
+        ) : (
+          <Switch
+            id="auto-launch-hide-window-toggle"
+            checked={autoLaunch.hideWindowOnAutoLaunch}
+            disabled={!autoLaunch.enabled || autoLaunch.loading}
+            onCheckedChange={(checked) => {
+              void autoLaunch.updateHideWindow(checked);
+            }}
+          />
+        )}
+      </CompactRow>
     </>
   );
 }

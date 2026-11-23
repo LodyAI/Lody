@@ -1,9 +1,9 @@
 import http from 'node:http';
 import { writeSync } from 'node:fs';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { NodeStreamableHTTPServerTransport, toNodeHandler } from '@modelcontextprotocol/node';
+import { createMcpHandler } from '@modelcontextprotocol/server';
 import { SessionIdSchema } from '@lody/shared';
-import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { createFileLogger, type Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -16,7 +16,6 @@ import {
   MCP_HTTP_MACHINE_ID_HEADER,
   MCP_HTTP_PREFERRED_PORT_ENV,
   MCP_HTTP_SESSION_ID_HEADER,
-  MCP_HTTP_TASK_TOOLS_ENABLED_HEADER,
   MCP_HTTP_TOKEN_ENV,
   MCP_HTTP_WORKDIR_B64_HEADER,
   MCP_HTTP_WORKSPACE_ID_HEADER,
@@ -146,6 +145,7 @@ const listen = (server: http.Server, preferredPort: number): Promise<number> =>
 
 export function createMcpHttpServer(token: string, logger: Logger): http.Server {
   const server = http.createServer((req, res) => {
+    logRequestOutcome(req, res, logger);
     void handleRequest(req, res, token, logger).catch((error: unknown) => {
       logger.error(`[mcp-http-host] request failed: ${formatErrorMessage(error)}`);
       if (!res.headersSent) {
@@ -170,6 +170,30 @@ export function createMcpHttpServer(token: string, logger: Logger): http.Server 
   return server;
 }
 
+/**
+ * One line per request in this host's own log. An agent that reports a status
+ * this host never logged got it from something in between — typically a proxy
+ * that intercepted loopback. Failures are warnings; successes stay at debug.
+ */
+const logRequestOutcome = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  logger: Logger
+): void => {
+  const startedAtMs = Date.now();
+  res.once('close', () => {
+    const sessionId = SessionIdSchema.safeParse(singleHeader(req, MCP_HTTP_SESSION_ID_HEADER));
+    const line = `[mcp-http-host] ${req.method ?? '?'} ${
+      res.writableFinished ? res.statusCode : 'aborted'
+    } ${Date.now() - startedAtMs}ms session=${sessionId.success ? sessionId.data : '-'}`;
+    if (res.writableFinished && res.statusCode < 400) {
+      logger.debug(line);
+    } else {
+      logger.warn(line);
+    }
+  });
+};
+
 const timingSafeTokenEqual = (provided: string, expected: string): boolean => {
   // Hash both sides so the comparison is constant-time regardless of length.
   const a = createHash('sha256').update(provided).digest();
@@ -189,15 +213,8 @@ const parseSessionContextHeaders = (req: http.IncomingMessage): McpSessionContex
   const rawSessionId = singleHeader(req, MCP_HTTP_SESSION_ID_HEADER);
   const workspaceId = singleHeader(req, MCP_HTTP_WORKSPACE_ID_HEADER);
   const machineId = singleHeader(req, MCP_HTTP_MACHINE_ID_HEADER);
-  const taskToolsEnabled = singleHeader(req, MCP_HTTP_TASK_TOOLS_ENABLED_HEADER);
   const workdirB64 = singleHeader(req, MCP_HTTP_WORKDIR_B64_HEADER);
-  if (
-    !rawSessionId ||
-    !workspaceId ||
-    !machineId ||
-    (taskToolsEnabled !== '0' && taskToolsEnabled !== '1') ||
-    !workdirB64
-  ) {
+  if (!rawSessionId || !workspaceId || !machineId || !workdirB64) {
     return null;
   }
   const sessionId = SessionIdSchema.safeParse(rawSessionId);
@@ -217,9 +234,8 @@ const parseSessionContextHeaders = (req: http.IncomingMessage): McpSessionContex
     sessionId: sessionId.data,
     workspaceId,
     machineId,
-    taskToolsEnabled: taskToolsEnabled === '1',
     workdir,
-    localControlSocketPath: getLocalControlSocketPath(),
+    localControlSocketPath: process.env.LODY_MCP_SOCKET_PATH?.trim() || undefined,
   };
 };
 
@@ -300,12 +316,19 @@ async function handleRequest(
     return;
   }
 
+  if (req.headers['mcp-protocol-version'] === '2026-07-28') {
+    const handler = createMcpHandler(buildLodyMcpServer);
+    res.on('close', () => void handler.close());
+    await runWithMcpSessionContext(context, () => toNodeHandler(handler)(req, res));
+    return;
+  }
+
   // Stateless streamable HTTP: one server + transport pair per request, torn
   // down when the response closes. The MCP client re-initializes per
   // connection, and every tool call carries its full context in headers, so no
   // cross-request state is needed and concurrent sessions cannot interleave.
-  const server = buildLodyMcpServer({ taskToolsEnabled: context.taskToolsEnabled });
-  const transport = new StreamableHTTPServerTransport({
+  const server = buildLodyMcpServer();
+  const transport = new NodeStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
   });

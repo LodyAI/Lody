@@ -1,0 +1,401 @@
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import {
+  SCHEDULE_CUSTOM_HOURS_MAX,
+  SCHEDULE_CUSTOM_MINUTES_MAX,
+  SCHEDULE_HOUR_STEPS,
+  SCHEDULE_MINUTE_STEPS,
+  SCHEDULE_RECURRENCE_KINDS,
+  SCHEDULE_WEEKDAYS,
+  changeScheduleRecurrenceKind,
+  instantToZonedLocalInput,
+  zonedLocalInputToInstant,
+  normalizeScheduleWeekdays,
+  type ScheduleRecurrence,
+  type ScheduleRecurrenceKind,
+  type ScheduleWeekday,
+} from '@lody/shared';
+import { NumberField } from '@lody/ui/number-field';
+import { Select } from '@lody/ui/select';
+import { cn } from '@/lib/utils';
+import { describeRecurrence, weekdayNames } from './schedule-format';
+import { PropertyRow, ghostValueClass } from './schedule-property-row';
+
+/**
+ * Time and date are typed, not picked: the browser's picker button is hidden,
+ * so the field is only its editable segments (hours, minutes, …). Chromium is
+ * the product runtime; its `calendar-picker-indicator` is also what opens the
+ * popup on click, so hiding it removes the picker entirely.
+ */
+const manualTimeInputClass = 'w-auto tabular-nums [&::-webkit-calendar-picker-indicator]:hidden';
+
+/** The "Every" menu's last entry; selecting it reveals a typed number. */
+const CUSTOM_STEP = 'custom';
+
+/** Small square toggles; one row of seven for weekdays, a 7-wide grid for dates. */
+function DayToggles({
+  values,
+  options,
+  onChange,
+  disabled,
+  grid,
+}: {
+  values: readonly number[];
+  options: readonly { value: number; short: string; long: string }[];
+  onChange: (next: number[]) => void;
+  disabled?: boolean;
+  grid?: boolean;
+}) {
+  const selected = new Set(values);
+  return (
+    <div
+      className={cn(
+        'flex flex-wrap justify-end gap-1',
+        grid && 'grid grid-cols-7 justify-items-end'
+      )}
+    >
+      {options.map((option) => {
+        const on = selected.has(option.value);
+        return (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            aria-pressed={on}
+            aria-label={option.long}
+            onClick={() =>
+              onChange(
+                on
+                  ? values.filter((entry) => entry !== option.value)
+                  : [...values, option.value].sort((a, b) => a - b)
+              )
+            }
+            className={cn(
+              'size-7 rounded-md text-[0.8em] font-normal tabular-nums transition-colors disabled:opacity-50',
+              on
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-foreground/[0.04] text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground dark:bg-white/[0.05] dark:hover:bg-white/[0.10]'
+            )}
+          >
+            {option.short}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Rows that slide in and out as the rule changes shape.
+ *
+ * Height animates from the row's own content, so the card grows to fit the
+ * seven weekday toggles or the 31-day grid rather than jumping. Reduced motion
+ * collapses to an instant switch.
+ */
+function Reveal({ id, children }: { id: string; children: React.ReactNode }) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.div
+      key={id}
+      layout
+      initial={reduce ? false : { height: 0, opacity: 0 }}
+      animate={{ height: 'auto', opacity: 1 }}
+      exit={reduce ? undefined : { height: 0, opacity: 0 }}
+      transition={{ duration: 0.18, ease: 'easeOut' }}
+      className="overflow-hidden"
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/**
+ * The time rule, as the few shapes people actually set.
+ *
+ * Every option is a named rule; the persisted trigger is derived by
+ * `@lody/shared`. There is no cron here: a stored rule the picker cannot name
+ * is shown read-only with a "Replace" affordance, never rewritten.
+ */
+export function ScheduleRecurrenceEditor({
+  value,
+  onChange,
+  now,
+  timeZone,
+  disabled,
+}: {
+  value: ScheduleRecurrence;
+  onChange: (next: ScheduleRecurrence) => void;
+  now: number;
+  /**
+   * The target machine's clock. Every wall time here — including a one-off
+   * run — is read on it; there is no zone picker.
+   */
+  timeZone: string;
+  disabled?: boolean;
+}) {
+  const { t, i18n } = useTranslation();
+  const kindLabels: Record<Exclude<ScheduleRecurrenceKind, 'unsupported'>, string> = {
+    daily: t('schedules.repeat.daily', 'Every day'),
+    weekdays: t('schedules.repeat.weekdays', 'Every weekday'),
+    weekly: t('schedules.repeat.weekly', 'Every week'),
+    monthly: t('schedules.repeat.monthly', 'Every month'),
+    hours: t('schedules.repeat.hours', 'Every few hours'),
+    minutes: t('schedules.repeat.minutes', 'Every few minutes'),
+    once: t('schedules.repeat.once', 'Once'),
+  };
+  const hasWallClock =
+    value.kind === 'daily' ||
+    value.kind === 'weekdays' ||
+    value.kind === 'weekly' ||
+    value.kind === 'monthly';
+  const timeValue = hasWallClock
+    ? `${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}`
+    : '';
+  const shortWeekdays = weekdayNames(i18n.language, 'narrow');
+  const isStep = value.kind === 'minutes' || value.kind === 'hours';
+  const presetSteps: readonly number[] = isStep
+    ? value.kind === 'minutes'
+      ? SCHEDULE_MINUTE_STEPS
+      : SCHEDULE_HOUR_STEPS
+    : [];
+  // "Custom" is kept per kind: choosing it on minutes must not leave hours in
+  // custom mode. A stored step that is not a preset always opens as custom.
+  const [customKind, setCustomKind] = useState<'minutes' | 'hours' | null>(null);
+  const isCustomStep = isStep && (customKind === value.kind || !presetSteps.includes(value.every));
+  const stepItems = isStep
+    ? [
+        ...presetSteps.map((step) => ({
+          value: String(step),
+          label:
+            value.kind === 'minutes'
+              ? t('schedules.everyMinutes', { count: step, defaultValue: '{{count}} minutes' })
+              : t('schedules.everyHours', { count: step, defaultValue: '{{count}} hours' }),
+        })),
+        { value: CUSTOM_STEP, label: t('schedules.repeat.custom', 'Custom') },
+      ]
+    : [];
+  const longWeekdays = weekdayNames(i18n.language, 'long');
+
+  if (value.kind === 'unsupported') {
+    return (
+      <PropertyRow
+        label={t('schedules.repeat.label', 'Repeat')}
+        hint={t(
+          'schedules.repeat.unsupportedHint',
+          'This rule was created with an older version and can no longer be edited here. Replace it to change it.'
+        )}
+      >
+        <div className="flex items-center gap-2">
+          <span className="truncate text-[0.9em] text-foreground">
+            {describeRecurrence(value, t, i18n.language)}
+          </span>
+          <button
+            type="button"
+            disabled={disabled}
+            className="shrink-0 text-[0.9em] text-primary underline-offset-2 hover:underline disabled:opacity-50"
+            onClick={() => onChange(changeScheduleRecurrenceKind(value, 'daily', now, timeZone))}
+          >
+            {t('schedules.repeat.replace', 'Replace')}
+          </button>
+        </div>
+      </PropertyRow>
+    );
+  }
+
+  return (
+    <>
+      <PropertyRow label={t('schedules.repeat.label', 'Repeat')}>
+        <Select.Root
+          value={value.kind}
+          disabled={disabled}
+          items={SCHEDULE_RECURRENCE_KINDS.map((kind) => ({
+            value: kind,
+            label: kindLabels[kind],
+          }))}
+          onValueChange={(kind) => {
+            if (
+              typeof kind === 'string' &&
+              (SCHEDULE_RECURRENCE_KINDS as readonly string[]).includes(kind)
+            )
+              onChange(
+                changeScheduleRecurrenceKind(
+                  value,
+                  kind as Exclude<ScheduleRecurrenceKind, 'unsupported'>,
+                  now,
+                  timeZone
+                )
+              );
+          }}
+        >
+          <Select.Trigger size="small" aria-label={t('schedules.repeat.label', 'Repeat')}>
+            <Select.Value />
+          </Select.Trigger>
+          <Select.Content>
+            {SCHEDULE_RECURRENCE_KINDS.map((kind) => (
+              <Select.Item key={kind} value={kind}>
+                {kindLabels[kind]}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
+      </PropertyRow>
+
+      <AnimatePresence initial={false} mode="popLayout">
+        {value.kind === 'minutes' || value.kind === 'hours' ? (
+          <Reveal key="every" id="every">
+            <PropertyRow label={t('schedules.repeat.every', 'Every')}>
+              <div className="flex min-w-0 items-center justify-end gap-2">
+                {isCustomStep ? (
+                  <>
+                    <NumberField.Root
+                      className="w-20 shrink-0"
+                      value={value.every}
+                      min={1}
+                      max={
+                        value.kind === 'minutes'
+                          ? SCHEDULE_CUSTOM_MINUTES_MAX
+                          : SCHEDULE_CUSTOM_HOURS_MAX
+                      }
+                      step={1}
+                      disabled={disabled}
+                      // An emptied field is not a choice; the last whole number stays.
+                      onValueChange={(next) => {
+                        if (next === null || !Number.isFinite(next)) return;
+                        const every = Math.round(next);
+                        if (every >= 1 && every !== value.every) onChange({ ...value, every });
+                      }}
+                    >
+                      <NumberField.Input
+                        size="small"
+                        className="tabular-nums"
+                        aria-label={
+                          value.kind === 'minutes'
+                            ? t('schedules.repeat.customMinutes', 'Number of minutes')
+                            : t('schedules.repeat.customHours', 'Number of hours')
+                        }
+                      />
+                    </NumberField.Root>
+                    <span className="shrink-0 text-[0.9em] text-muted-foreground">
+                      {value.kind === 'minutes'
+                        ? t('schedules.repeat.unitMinutes', 'minutes')
+                        : t('schedules.repeat.unitHours', 'hours')}
+                    </span>
+                  </>
+                ) : null}
+                <Select.Root
+                  value={isCustomStep ? CUSTOM_STEP : String(value.every)}
+                  disabled={disabled}
+                  items={stepItems}
+                  // A controlled Select can emit an empty value while its option
+                  // list is swapped (hours → minutes); that is not a choice.
+                  onValueChange={(every) => {
+                    if (every === CUSTOM_STEP) {
+                      setCustomKind(value.kind);
+                      return;
+                    }
+                    const step = Number(every);
+                    if (Number.isInteger(step) && step > 0) {
+                      setCustomKind(null);
+                      onChange({ ...value, every: step });
+                    }
+                  }}
+                >
+                  <Select.Trigger size="small" aria-label={t('schedules.repeat.every', 'Every')}>
+                    <Select.Value />
+                  </Select.Trigger>
+                  <Select.Content>
+                    {stepItems.map((item) => (
+                      <Select.Item key={item.value} value={item.value}>
+                        {item.label}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+              </div>
+            </PropertyRow>
+          </Reveal>
+        ) : null}
+
+        {value.kind === 'weekly' ? (
+          <Reveal key="weekdays" id="weekdays">
+            <PropertyRow label={t('schedules.repeat.on', 'On')}>
+              <DayToggles
+                values={value.weekdays}
+                disabled={disabled}
+                options={SCHEDULE_WEEKDAYS.map((day: ScheduleWeekday) => ({
+                  value: day,
+                  short: shortWeekdays[day]!,
+                  long: longWeekdays[day]!,
+                }))}
+                onChange={(weekdays) =>
+                  onChange({
+                    ...value,
+                    weekdays: normalizeScheduleWeekdays(weekdays as ScheduleWeekday[]),
+                  })
+                }
+              />
+            </PropertyRow>
+          </Reveal>
+        ) : null}
+
+        {value.kind === 'monthly' ? (
+          <Reveal key="days" id="days">
+            <PropertyRow label={t('schedules.repeat.onDays', 'On days')} align="start">
+              <DayToggles
+                grid
+                values={value.days}
+                disabled={disabled}
+                options={Array.from({ length: 31 }, (_, index) => ({
+                  value: index + 1,
+                  short: String(index + 1),
+                  long: t('schedules.repeat.dayOfMonthN', 'Day {{day}}', { day: index + 1 }),
+                }))}
+                onChange={(days) => onChange({ ...value, days })}
+              />
+            </PropertyRow>
+          </Reveal>
+        ) : null}
+
+        {hasWallClock ? (
+          <Reveal key="time" id="time">
+            <PropertyRow label={t('schedules.repeat.at', 'At')}>
+              <input
+                type="time"
+                required
+                disabled={disabled}
+                aria-label={t('schedules.repeat.at', 'At')}
+                className={cn(ghostValueClass, manualTimeInputClass)}
+                value={timeValue}
+                onChange={(event) => {
+                  const [hour, minute] = event.target.value.split(':');
+                  if (hour === undefined || minute === undefined) return;
+                  onChange({ ...value, hour: Number(hour), minute: Number(minute) });
+                }}
+              />
+            </PropertyRow>
+          </Reveal>
+        ) : null}
+
+        {value.kind === 'once' ? (
+          <Reveal key="once" id="once">
+            <PropertyRow label={t('schedules.repeat.runAt', 'Run at')}>
+              <input
+                type="datetime-local"
+                required
+                disabled={disabled}
+                aria-label={t('schedules.repeat.runAt', 'Run at')}
+                className={cn(ghostValueClass, manualTimeInputClass)}
+                value={instantToZonedLocalInput(Date.parse(value.at), timeZone)}
+                onChange={(event) => {
+                  const at = zonedLocalInputToInstant(event.target.value, timeZone);
+                  if (at !== null) onChange({ ...value, at: new Date(at).toISOString() });
+                }}
+              />
+            </PropertyRow>
+          </Reveal>
+        ) : null}
+      </AnimatePresence>
+    </>
+  );
+}

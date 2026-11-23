@@ -1,0 +1,120 @@
+import { createElement, type ReactNode } from 'react';
+import type { PlatformE2eeWorkspaces } from '@lody/platform';
+
+/** Browser equivalent of the owning route suite's injected platform and display ports.
+ * The route, retirement owner and signed-ledger verification remain production code. */
+export const fixture = {
+  workspaceId: 'control-reader-workspace',
+  accountId: 'synthetic-account',
+  genesisHash: '',
+  port: undefined as PlatformE2eeWorkspaces | undefined,
+  checkpoints: [] as number[],
+  modes: [] as string[],
+};
+const noop = () => {};
+export const desktopWindowId = () => '';
+export const readEncryptedLocalIdentity = () => null;
+export const isE2eeMemberRemoved = () => false;
+export const e2eeAccessLoss = () => null;
+export const retainEncryptedWorkspaceCleanup = noop;
+export const resumeEncryptedWorkspaceCleanup = async () => {};
+export const createFileRoute = () => (options: { component: () => ReactNode }) => ({
+  options,
+  useParams: () => ({ workspaceId: fixture.workspaceId }),
+});
+export const useNavigate = () => noop;
+export const useSetAtom = () => noop;
+// The recovery switch is off here, so the console offers no backup restore.
+export const useAtomValue = () => false;
+export const e2eeRecoveryVaultFeatureEnabledAtom = {};
+export const getIpcServices = () => undefined;
+// Matches the recovery switch above: no passkey recovery port.
+export const useRecoveryPort = () => null;
+export const useE2eeRecoverySection = () => undefined;
+export const useWorkspaceRecoveryReady = () => undefined;
+export const isElectronRenderer = () => false;
+export const isNativeAppShell = () => false;
+export const setWorkspaceContextAtom = {};
+export const mintAdmittedWorkspaceTicket = (input: {
+  accountId: string;
+  slug: string;
+  workspaceId: string;
+  hasDeviceCredential: boolean;
+  hasCurrentKey: boolean;
+}) =>
+  input.hasDeviceCredential && input.hasCurrentKey
+    ? {
+        accountId: input.accountId,
+        slug: input.slug,
+        workspaceId: input.workspaceId,
+      }
+    : null;
+export const runtimeInitializingAtom = {};
+export const useE2eeAccountId = () => fixture.accountId;
+export const usePlatform = () => ({ e2eeWorkspaces: fixture.port });
+export const usePlatformSession = () => ({
+  status: 'authenticated',
+  user: { id: fixture.accountId },
+});
+export const usePlatformWorkspaces = () => ({ status: 'ready', workspaces: [] });
+// No other workspace here, so "Workspaces" has no ordinary workspace to return to.
+export const getPreferredOrdinaryWorkspaceSlug = () => null;
+export const readPreferredWorkspaceSlug = () => null;
+export const useTranslation = () => ({ t: (key: string) => key });
+export const readWorkspaceModeEvidence = () => ({});
+export const readE2eeGenesisPin = () => fixture.genesisHash;
+export const readObservedLedgerCheckpoint = () => undefined;
+export const recoverE2eeWorkspaceIdentity = async () => {};
+export const repairUnreadableE2eeCaches = noop;
+export const resetObservedLedgerProgress = noop;
+export const retainEncryptedWorkspaceMode = (
+  _storage: unknown,
+  _account: string,
+  mode: { genesisHash: string }
+) => {
+  fixture.modes.push(mode.genesisHash);
+};
+export const retainObservedLedgerCheckpoint = (
+  _storage: unknown,
+  _account: string,
+  _workspace: string,
+  history: { view: { length: number } }
+) => {
+  fixture.checkpoints.push(history.view.length);
+  return true;
+};
+export const classifyE2eeControlFailure = () => ({ kind: 'network', code: 'synthetic' });
+export const personalHostFailureCode = () => undefined;
+export const e2eeControlDiagnostics = () => '{}';
+export const E2eeWorkspaceControlPage = ({
+  history,
+  failure,
+}: {
+  history: { view: { length: number } } | null;
+  failure: unknown;
+}) =>
+  createElement(
+    'output',
+    { 'data-control-state': true },
+    failure ? 'failed' : (history?.view.length ?? 'loading')
+  );
+export const E2eeRemoteMachinePairing = () => null;
+export const E2eeRemoteMachineDisclosure = ({ children }: { children?: ReactNode }) => children;
+export const E2eeAddDeviceCard = () => null;
+export const E2eeIdentityRecovery = () => null;
+export const E2eeTeamSettingsHost = () => null;
+export const E2eePersonalPairing = () => null;
+export const E2eeAutomaticPairingPage = () => null;
+export const E2eeAccountPairingRequest = () => null;
+export const E2eeAccountPairingApprove = () => null;
+export const E2eeAccountPairingKeyRetry = () => null;
+// The lost-access entry is a styled display page; this suite exercises the route.
+export const E2eeLostAccessEntry = () => null;
+// No hosted account here, so the lost-access page offers no workspace removal.
+export const useE2eeWorkspaceRemoval = () => undefined;
+// The approval guide replaces the full page only for devices that still need approval.
+export const E2eeDeviceApprovalGuide = () =>
+  createElement('output', { 'data-approval-guide': true });
+export const E2eeLedgerAudit = () => null;
+// Places console content on a tab; the stub page above ignores tabs.
+export const E2eeConsoleSection = ({ children }: { children?: ReactNode }) => children;

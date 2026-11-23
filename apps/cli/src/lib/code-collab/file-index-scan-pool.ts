@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { MessageChannel, type MessagePort } from 'node:worker_threads';
+import { waitForCodeCollabTask } from './code-collab-task';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +18,16 @@ import type {
 import { tinypoolRuntimeOptions, type TinypoolRuntime } from './tinypool-runtime';
 
 type TinypoolInstance = {
-  run(payload: FileIndexWorkerInput): Promise<FileIndexWorkerResult>;
+  run(
+    payload: FileIndexWorkerInput,
+    options?: {
+      transferList?: MessagePort[];
+      channel?: {
+        onMessage: (send: (message: unknown) => void) => void;
+        postMessage: (message: unknown) => void;
+      };
+    }
+  ): Promise<FileIndexWorkerResult>;
   destroy(): Promise<void>;
 };
 
@@ -85,41 +97,101 @@ async function initPool(): Promise<TinypoolInstance | null> {
 }
 
 export async function scanDirectoryEntriesInWorker(
-  input: FileIndexScanWorkerInput
+  input: FileIndexScanWorkerInput,
+  signal?: AbortSignal
 ): Promise<Map<string, CodeCollabV2FileTreeValue> | null> {
   const activePool = await getPool();
   if (!activePool) {
     return null;
   }
   try {
-    const result = await activePool.run(input);
+    const result = await runWorker(activePool, input, signal);
     if (result.kind !== 'scan') {
       logFallbackOnce('unexpected_scan_result');
       return null;
     }
     return new Map(result.entries);
   } catch (error) {
+    signal?.throwIfAborted();
     logFallbackOnce('pool_run_failed', error);
     return null;
   }
 }
 
 export async function computeFullFileIndexStateInWorker(
-  input: FileIndexFullStateWorkerInput
+  input: FileIndexFullStateWorkerInput,
+  signal?: AbortSignal
 ): Promise<FileIndexFullStateWorkerResult | null> {
   const activePool = await getPool();
   if (!activePool) {
     return null;
   }
   try {
-    const result = await activePool.run(input);
+    const result = await runWorker(activePool, input, signal);
     if (result.kind !== 'full-state') {
       logFallbackOnce('unexpected_full_state_result');
       return null;
     }
     return result;
   } catch (error) {
+    signal?.throwIfAborted();
     logFallbackOnce('pool_run_failed', error);
     return null;
   }
+}
+
+async function runWorker(
+  activePool: TinypoolInstance,
+  input: FileIndexWorkerInput,
+  signal?: AbortSignal
+): Promise<FileIndexWorkerResult> {
+  signal?.throwIfAborted();
+  if (!signal) return await activePool.run(input);
+  if (tinypoolRuntimeOptions().runtime === 'child_process') {
+    const cancellationId = randomUUID();
+    let send: ((message: unknown) => void) | undefined;
+    const abort = () => send?.({ cancellationId, type: 'code-collab-abort' });
+    const work = activePool.run(
+      { ...input, signal: undefined, cancellationId },
+      {
+        channel: {
+          onMessage: (post) => {
+            send = post;
+          },
+          postMessage: (message) => {
+            if (
+              typeof message !== 'object' ||
+              message === null ||
+              !('cancellationId' in message) ||
+              message.cancellationId !== cancellationId ||
+              !('type' in message) ||
+              message.type !== 'code-collab-ready'
+            )
+              return;
+            signal.addEventListener('abort', abort, { once: true });
+            if (signal.aborted) abort();
+          },
+        },
+      }
+    );
+    return await waitForCodeCollabTask(
+      work.finally(() => signal.removeEventListener('abort', abort)),
+      signal
+    );
+  }
+  // Cooperative cancellation keeps the worker alive until its process owner has
+  // reaped Git children. Tinypool's signal option terminates the thread instead.
+  const { port1, port2 } = new MessageChannel();
+  const abort = () => port1.postMessage('abort');
+  signal.addEventListener('abort', abort, { once: true });
+  const work = activePool.run(
+    { ...input, signal: undefined, cancellationPort: port2 },
+    { transferList: [port2] }
+  );
+  const drained = work.finally(() => {
+    signal.removeEventListener('abort', abort);
+    port1.close();
+    port2.close();
+  });
+  return await waitForCodeCollabTask(drained, signal);
 }

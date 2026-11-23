@@ -1,6 +1,11 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
-import type { MachineFlockRowMap, MachineId, MachineViewMeta } from '@lody/shared';
+import {
+  ACP_CAPABILITY_ROW_FAMILIES,
+  type MachineFlockRowMap,
+  type MachineId,
+  type MachineViewMeta,
+} from '@lody/shared';
 
 import { getMachineMetaByIdAtomFamily } from '@/atoms';
 import { mergeMachineFlockMachineMeta } from '@/lib/machine-flock-machine-meta-overlay';
@@ -22,7 +27,7 @@ export function useResolvedMachineMeta(
       'dotlodyPath',
       'localProject',
       'deleteLocalProjectCommand',
-      'acpCapability',
+      ...ACP_CAPABILITY_ROW_FAMILIES,
       'rateLimit',
     ],
     remoteSyncDelayMs: RESOLVED_MACHINE_FLOCK_REMOTE_SYNC_DELAY_MS,

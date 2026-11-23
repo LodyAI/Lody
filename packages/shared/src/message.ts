@@ -1,3 +1,5 @@
+import type { ManagedDaemonUpdateStatus, ManagedDaemonUpgradeOptions } from './daemon-update';
+import type { ProjectLocalMemberProbe, SessionProjectRun } from './workspace-project';
 import type {
   MachineId,
   ACPSessionConfig,
@@ -5,6 +7,7 @@ import type {
   WorkspaceId,
   ProjectRef,
   LocalProjectId,
+  LocalProjectBranchListResult,
   LocalProjectGitState,
   LocalProjectHistoryCatalogItem,
   LocalProjectHistoryProvider,
@@ -12,12 +15,15 @@ import type {
   WorktreeSetupScriptConfig,
   AgentConfigId,
   AgentConfigCliType,
-  BuiltinRuntimeOverrides,
-  CustomAcpLaunchSpec,
   SessionImageGroupContent,
   SessionImagePayload,
   SessionFilePayload,
+  SessionHistoryInput,
+  SessionHistoryChange,
   SessionTurnInputConfig,
+  AcpCapabilityCacheEntry,
+  AcpAuthMethodSummary,
+  SessionGoalAction,
 } from '.';
 import type {
   PreviewCandidateReportRequest,
@@ -26,9 +32,13 @@ import type {
   SessionPreviewCreateResponse,
   SessionPreviewRevokeRequest,
   SessionPreviewRevokeResponse,
+  SessionPreviewStatusRequest,
+  SessionPreviewStatusResponse,
 } from './preview';
 import type { ProjectSkillsResult } from './acp/skills';
 import type { RpcSecretPublicKey } from './rpc-secret';
+import type { SessionHistoryContentPatch } from './session-data/history-patches';
+import type { BugReportClientLog } from './bug-report';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 
 export type PermissionOutcome = RequestPermissionResponse['outcome'] & {
@@ -44,23 +54,21 @@ export type {
   SessionPreviewEndpointReleaseResponse,
   SessionPreviewRevokeRequest,
   SessionPreviewRevokeResponse,
+  SessionPreviewStatusRequest,
+  SessionPreviewStatusResponse,
 } from './preview';
-
-// ============================================
-// CONTROL PROTOCOL MESSAGES
-// ============================================
 
 export type SessionStartMeta = {
   fromFeedbackPostId?: string;
 };
 
-// Session Create Messages
 export interface SessionCreateRequest {
   type: 'session/create';
   sessionId: SessionId;
   machineId: MachineId;
   workspaceId: WorkspaceId;
   project?: ProjectRef;
+  projectRun?: SessionProjectRun;
   meta?: SessionStartMeta;
   acpSessionConfig: ACPSessionConfig;
   worktreeSetup?: WorktreeSetupScriptConfig;
@@ -82,7 +90,6 @@ export type SessionCreateResponse = {
   error?: string;
 };
 
-// Session Create Ack - sent immediately when local control accepts the request
 export type SessionCreateAck = {
   type: 'session/create_ack';
   sessionId: SessionId;
@@ -118,7 +125,6 @@ export interface SessionChatResponse {
   error?: string;
 }
 
-// Session Chat Ack - sent immediately when local control accepts the request
 export type SessionChatAck = {
   type: 'session/chat_ack';
   sessionId: SessionId;
@@ -132,6 +138,12 @@ export interface SessionCancelRequest {
   workspaceId: WorkspaceId;
   /** Target assistant turn id. This is intentionally not the userTurnId. */
   turnId: string;
+  /** Shared identity for the Stop RPC and its durable fallback. */
+  cancelId?: string;
+  /** Internal cancellation does not persist a user message pause. */
+  pauseInbox?: boolean;
+  /** When present, cancel only this native subagent; never cancel the parent turn. */
+  subagentTaskId?: string;
 }
 
 export interface SessionCancelResponse {
@@ -160,11 +172,39 @@ export interface SessionSteerResponse {
   userTurnId: string;
   /** True only after adapter activation and CLI turn-ownership commit. */
   applied: boolean;
-  disposition: 'applied' | 'unsupported' | 'no-active-turn' | 'stale-turn' | 'busy' | 'error';
+  /** The daemon owns recovery; clients must not republish a dispatch pointer. */
+  recoveryOwned?: boolean;
+  disposition:
+    | 'applied'
+    | 'unsupported'
+    | 'no-active-turn'
+    | 'stale-turn'
+    | 'busy'
+    | 'delivery-unknown'
+    /** Proven undelivered, but durable promotion failed; clients may repair dispatch. */
+    | 'promotion-failed'
+    | 'error';
   error?: string;
 }
 
-// Permission Messages
+/**
+ * Answer to a goal control request.
+ *
+ * `accepted` means the machine took responsibility for the action, including
+ * when it is queued. `disposition` says how it reached the agent, which the
+ * caller cannot otherwise see: `applied` completed out of band, `turn_started`
+ * runs inside a prompt Lody just opened, and `queued` waits for the turn that
+ * currently owns the session's prompt slot.
+ */
+export interface SessionGoalResponse {
+  type: 'session/goal_response';
+  sessionId: SessionId;
+  action: SessionGoalAction;
+  accepted: boolean;
+  disposition: 'applied' | 'turn_started' | 'queued' | 'unsupported' | 'error';
+  error?: string;
+}
+
 export interface PermissionRequestMessage {
   type: 'session/permission_request';
   sessionId: SessionId;
@@ -179,11 +219,6 @@ export interface PermissionResponseMessage {
   outcome: PermissionOutcome;
 }
 
-// ============================================
-// MACHINE STATUS AND CONTROL MESSAGES
-// ============================================
-
-// Machine resource information
 export interface MachineResourceInfo {
   totalMemoryGB: number;
   usedMemoryGB: number;
@@ -192,11 +227,13 @@ export interface MachineResourceInfo {
   cpuUsagePercent: number;
 }
 
-// Machine Status Request (Client -> Server -> Machine)
 export interface MachineStatusRequest {
   type: 'machine/status';
   machineId: MachineId;
   workspaceId: WorkspaceId;
+  /** Only for daemons advertising `machineDiskStatus`. */
+  includeDisk?: true;
+  includeDaemonUpdate?: true;
 }
 
 export type MachineLifecycleLaunchMode = 'daemon' | 'foreground' | 'electron' | 'unknown';
@@ -210,13 +247,23 @@ export interface MachineLifecycleCapability {
   reason?: MachineLifecycleUnsupportedReason;
 }
 
-// Machine Status Response (Machine -> Server -> Client)
 export interface MachineStatusResponse {
   type: 'machine/status_response';
   machineId: MachineId;
   success: boolean;
   resources?: MachineResourceInfo;
+  /** Sent only when the request asked with `includeDisk`. */
+  disk?: { totalGB: number; freeGB: number; usedPercent: number };
   lifecycle?: MachineLifecycleCapability;
+  daemonUpdate?: ManagedDaemonUpdateStatus | null;
+  error?: string;
+}
+
+export interface MachinePreviewControlResponse {
+  type: 'machine/preview-control_response';
+  machineId: MachineId;
+  success: boolean;
+  runtimeNonce?: string;
   error?: string;
 }
 
@@ -247,6 +294,8 @@ export type MachineLifecycleDisposition =
 
 export interface MachineRestartRequest {
   type: 'machine/restart';
+  /** Restore an owned, retired installation identity before the next worker starts. */
+  restoreMachineId?: MachineId;
   machineId: MachineId;
   workspaceId: WorkspaceId;
   requesterUserId: string;
@@ -277,6 +326,7 @@ export interface MachineUpgradeRequest {
   requestId: string;
   /** Defaults to `latest`; exact semver-like versions are also accepted. */
   targetVersion?: string;
+  upgrade?: ManagedDaemonUpgradeOptions;
 }
 
 export interface MachineUpgradeResponse {
@@ -291,17 +341,39 @@ export interface MachineUpgradeResponse {
   error?: string;
 }
 
+export interface MachineProviderRateLimitsRefreshRequest {
+  type: 'machine/provider-rate-limits-refresh';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  configId: AgentConfigId;
+}
+
+export interface MachineProviderRateLimitsRefreshResponse {
+  type: 'machine/provider-rate-limits-refresh_response';
+  machineId: MachineId;
+  configId: AgentConfigId;
+  success: boolean;
+}
+
 export interface MachineAcpCapabilitiesRefreshRequest {
   type: 'machine/acp-capabilities-refresh';
   machineId: MachineId;
   workspaceId: WorkspaceId;
   configId: AgentConfigId;
-  cliType: AgentConfigCliType;
-  agentType: string;
-  /** Launch spec for probing `cliType: 'custom'` agents. */
-  customAcp?: CustomAcpLaunchSpec;
-  runtimeOverrides?: BuiltinRuntimeOverrides;
-  env?: Record<string, string>;
+  /**
+   * Start the agent even when the persisted entry still matches the launch
+   * inputs. Reserved for requests a user or a setup workflow made on purpose
+   * (Settings refresh, post-authentication verification, provider setup); the
+   * default path answers from the cache when it can.
+   */
+  force?: boolean;
+  /**
+   * Switch the probe session to every advertised model and record each model's
+   * own option list, reporting `reading-model-options` progress. Sent only to
+   * daemons that advertise `acpModelOptionsRead`; the strict schema of older
+   * daemons rejects the key.
+   */
+  readModelOptions?: true;
 }
 
 export interface MachineAcpCapabilitiesRefreshResponse {
@@ -328,6 +400,8 @@ export interface MachineAcpCapabilitiesRefreshResponse {
     category?: string;
     optionCount: number;
   }>;
+  /** Complete persisted entry for immediate renderer convergence after the refresh RPC. */
+  capability?: AcpCapabilityCacheEntry;
   /** Available slash commands advertised by the agent. */
   availableCommands?: Array<{
     name: string;
@@ -339,32 +413,82 @@ export interface MachineAcpCapabilitiesRefreshResponse {
   error?: string;
 }
 
-export interface MachineAcpAuthMethodSummary {
-  type: 'agent' | 'env_var' | 'terminal';
-  id?: string;
-  name?: string;
+export interface MachineAcpAuthMethodSummary extends AcpAuthMethodSummary {}
+
+export type MachineAcpAuthenticationFormField =
+  | {
+      id: string;
+      type: 'text';
+      label: string;
+      description?: string;
+      required: boolean;
+      defaultValue?: string;
+    }
+  | {
+      id: string;
+      type: 'secret';
+      label: string;
+      description?: string;
+      required: boolean;
+    }
+  | {
+      id: string;
+      type: 'select';
+      label: string;
+      description?: string;
+      required: boolean;
+      options: Array<{ value: string; label: string }>;
+      defaultValue?: string;
+    };
+
+export interface MachineAcpAuthenticationForm {
+  title?: string;
   description?: string;
-  /** Display-only. The machine resolves the trusted executable and arguments. */
-  args?: string[];
+  fields: MachineAcpAuthenticationFormField[];
 }
 
-export interface MachineAcpAuthenticateRequest {
+type MachineAcpAuthenticateRequestBase = {
   type: 'machine/acp-authenticate';
   machineId: MachineId;
   workspaceId: WorkspaceId;
   requestId: string;
-  action: 'start' | 'cancel' | 'submit-code';
-  /** Target login request for a one-time browser authorization code. */
-  authenticationRequestId?: string;
-  /** One-time provider input; never log or copy it into durable Lody product state. */
-  authorizationCode?: string;
-  configId?: AgentConfigId;
-  cliType: AgentConfigCliType;
-  agentType: string;
-  customAcp?: CustomAcpLaunchSpec;
-  runtimeOverrides?: BuiltinRuntimeOverrides;
-  env?: Record<string, string>;
-}
+};
+
+export type MachineAcpAuthenticateRequest = MachineAcpAuthenticateRequestBase &
+  (
+    | {
+        action: 'start';
+        /** Daemon-authoritative persisted Provider config. No launch fields cross RPC. */
+        configId: AgentConfigId;
+        /**
+         * Sign-in method the reader picked from the agent's advertised list.
+         * The daemon still validates it against what the agent advertises now,
+         * and falls back to its own picker when the cached list is stale.
+         */
+        methodId?: string;
+      }
+    | {
+        action: 'cancel';
+        /** Authentication request whose frozen daemon-side target is cancelled. */
+        authenticationRequestId: string;
+      }
+    | {
+        action: 'submit-code';
+        /** Target login request for a one-time browser authorization code. */
+        authenticationRequestId: string;
+        /** One-time provider input; never log or copy it into durable Lody product state. */
+        authorizationCode: string;
+      }
+    | {
+        action: 'submit-input';
+        /** Authentication request whose frozen daemon-side target owns the interaction. */
+        authenticationRequestId: string;
+        /** Target interaction when replying to a method picker, URL consent, or form. */
+        interactionId: string;
+        /** Ephemeral interaction payload. It is encrypted by remote Machine RPC. */
+        authenticationInput: string;
+      }
+  );
 
 export interface MachineAcpAuthenticateResponse {
   type: 'machine/acp-authenticate_response';
@@ -372,7 +496,17 @@ export interface MachineAcpAuthenticateResponse {
   requestId: string;
   agentType: string;
   success: boolean;
-  disposition: 'authenticated' | 'cancelled' | 'not-running' | 'input-accepted' | 'error';
+  /**
+   * `method-required` means the agent advertises several sign-in methods and
+   * the user must pick one; the request is then repeated with `methodId`.
+   */
+  disposition:
+    | 'authenticated'
+    | 'cancelled'
+    | 'not-running'
+    | 'input-accepted'
+    | 'method-required'
+    | 'error';
   /** Present when a post-login capability refresh was requested. */
   capabilitiesRefreshed?: boolean;
   /** A successful login command can still leave the runtime requiring auth. */
@@ -386,7 +520,21 @@ export interface MachineAcpAuthenticationProgressMessage {
   machineId: MachineId;
   requestId: string;
   agentType: string;
-  status: 'starting' | 'authorization' | 'output' | 'authenticated' | 'cancelled' | 'error';
+  status:
+    | 'starting'
+    | 'auth-methods'
+    | 'authorization'
+    | 'input-required'
+    | 'runtime-download'
+    | 'output'
+    | 'authenticated'
+    | 'cancelled'
+    | 'error';
+  authMethods?: MachineAcpAuthMethodSummary[];
+  /** Opaque id echoed by submit-input. */
+  interactionId?: string;
+  message?: string;
+  form?: MachineAcpAuthenticationForm;
   authorizationUrl?: string;
   /** Device user code entered on the provider's authorization page. */
   userCode?: string;
@@ -394,10 +542,18 @@ export interface MachineAcpAuthenticationProgressMessage {
   acceptsAuthorizationCode?: boolean;
   /** Ephemeral target-machine key used only to encrypt the one-time browser code. */
   authorizationCodePublicKey?: RpcSecretPublicKey;
+  /** Ephemeral target-machine key for generic authentication interaction input. */
+  authenticationInputPublicKey?: RpcSecretPublicKey;
+  /** URL-mode ACP elicitation requires an explicit user action before navigation. */
+  requiresAuthorizationConsent?: boolean;
   expiresInSeconds?: number;
   stream?: 'stdout' | 'stderr';
   output?: string;
   error?: string;
+  /** Managed runtime installed before the login process can spawn. */
+  runtimeName?: string;
+  runtimePhase?: 'downloading' | 'verifying' | 'extracting' | 'publishing' | 'complete';
+  runtimePercent?: number;
 }
 
 /**
@@ -464,7 +620,9 @@ export type MachineAcpBinaryProgressStatus =
   | 'installed'
   | 'unsupported-platform'
   | 'incompatible-host'
-  | 'error';
+  | 'error'
+  /** Not a binary phase: a forced refresh is reading one model's options. */
+  | 'reading-model-options';
 
 export interface MachineAcpBinaryProgressMessage {
   type: 'machine/acp-binary-progress';
@@ -480,6 +638,15 @@ export interface MachineAcpBinaryProgressMessage {
   required?: string;
   command?: string;
   error?: string;
+  /**
+   * `reading-model-options` only: the config being refreshed and the model
+   * whose options are being read, `modelIndex` of `modelCount` (1-based).
+   */
+  configId?: string;
+  modelId?: string;
+  modelName?: string;
+  modelIndex?: number;
+  modelCount?: number;
 }
 
 /**
@@ -500,6 +667,11 @@ export interface MachineBugReportRequest {
   reporterUserId: string;
   /** Signed requester proof minted by the backend for this workspace+machine. */
   requestToken: string;
+  /**
+   * The reporter's client log, merged into the uploaded logs. Sent only to a
+   * machine advertising `bugReportClientLog`.
+   */
+  clientLog?: BugReportClientLog;
 }
 
 export interface MachineBugReportResponse {
@@ -508,39 +680,6 @@ export interface MachineBugReportResponse {
   success: boolean;
   bugReportId?: string;
   error?: string;
-}
-
-/**
- * @deprecated Legacy compatibility only. Code Collab v1's session-scoped host
- * runtime has been removed; v2 file operations use machine RPC methods under
- * `code-collab/*`.
- */
-export interface SessionCodeCollabHostStartRequest {
-  type: 'session/code-collab-host-start';
-  machineId: MachineId;
-  workspaceId: WorkspaceId;
-  sessionId: SessionId;
-  requestedByUserId: string;
-}
-
-export type SessionCodeCollabHostStartStatus =
-  | 'started'
-  | 'already-running'
-  | 'disabled'
-  | 'failed'
-  | 'stopped';
-
-/**
- * @deprecated Legacy compatibility response for `session/code-collab-host-start`.
- * Current CLIs return `success: false` / `status: 'disabled'`.
- */
-export interface SessionCodeCollabHostStartResponse {
-  type: 'session/code-collab-host-start_response';
-  sessionId: SessionId;
-  success: boolean;
-  status?: SessionCodeCollabHostStartStatus;
-  error?: string;
-  message?: string;
 }
 
 export interface SessionImageUploadRequest {
@@ -606,6 +745,37 @@ export interface SessionFileUploadResponse {
  *
  * Mirrors `SessionFileUploadRequest`; the only difference is the message type.
  */
+export type SessionImagePrepareLocalRequest = import('zod').infer<
+  typeof import('./message-schemas').SessionImagePrepareLocalRequestSchema
+>;
+export type SessionImagePrepareLocalResponse = import('zod').infer<
+  typeof import('./message-schemas').SessionImagePrepareLocalResponseSchema
+>;
+export type SessionImageResolveLocalRequest = import('zod').infer<
+  typeof import('./message-schemas').SessionImageResolveLocalRequestSchema
+>;
+export type SessionImageResolveLocalResponse = import('zod').infer<
+  typeof import('./message-schemas').SessionImageResolveLocalResponseSchema
+>;
+
+export type SessionAttachmentPrepareRequest = {
+  type: 'session/attachment-prepare';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+  path: string;
+  kind: 'file' | 'image';
+  fileName: string;
+  mimeType: string;
+};
+export type SessionAttachmentPrepareResponse = {
+  type: 'session/attachment-prepare_response';
+  sessionId: SessionId;
+  success: boolean;
+  error?: string;
+  attachment?: import('./ai').SessionLocalAttachment;
+};
+
 export interface SessionFileSendLocalRequest {
   type: 'session/file-send-local';
   machineId: MachineId;
@@ -629,8 +799,196 @@ export interface SessionFileSendLocalResponse {
   files?: SessionFilePayload[];
 }
 
-// Local CLI control (Electron -> local CLI) message subsets
+/**
+ * Local renderer bridge for history owned by a machine-side backend such as
+ * Roost. The payload is deliberately storage-neutral: the CLI resolves the
+ * selected SessionBackend and the renderer never receives physical segments.
+ */
+export interface SessionHistoryReadRequest {
+  type: 'session/history-read';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+  query: SessionHistoryReadQuery;
+}
+
+/** Bounded logical reads over the owner session's active history branch. */
+export type SessionHistoryReadQuery =
+  | SessionHistoryInspectionQuery
+  | { readonly kind: 'inputAcceptance'; readonly entry: unknown }
+  | { readonly kind: 'count'; readonly withCheckpoint?: true }
+  | { readonly kind: 'readAt'; readonly position: number }
+  | { readonly kind: 'readTurn'; readonly turnId: string; readonly atCheckpoint?: string }
+  | {
+      readonly kind: 'readRange';
+      readonly from: number;
+      readonly to: number;
+      readonly atCheckpoint?: string;
+    }
+  | {
+      readonly kind: 'readDirectory';
+      readonly from: number;
+      readonly to: number;
+      readonly atCheckpoint?: string;
+    }
+  | {
+      readonly kind: 'readQuery';
+      readonly from: number;
+      readonly to: number;
+      readonly transcriptVisibility?: boolean;
+      readonly atCheckpoint?: string;
+    }
+  | { readonly kind: 'readLatestPage'; readonly limit: number; readonly withCheckpoint?: boolean }
+  | {
+      readonly kind: 'readOlderPage';
+      readonly cursor: string;
+      readonly limit: number;
+      readonly withCheckpoint?: boolean;
+    }
+  | {
+      readonly kind: 'readChanges';
+      readonly checkpoint: string;
+      readonly includeBodiesFrom?: number;
+      readonly withPatches?: true;
+    }
+  | { readonly kind: 'readAll' }
+  | { readonly kind: 'readTurnOutput'; readonly userTurnId: string };
+
+/** Coherent owner queries negotiated by sessionHistoryInspection v2. */
+export type SessionHistoryInspectionQuery =
+  | { readonly kind: 'readMetadata' }
+  | { readonly kind: 'readLatestGoal' }
+  | { readonly kind: 'readTranscript'; readonly limit?: number; readonly reverse?: boolean }
+  | {
+      readonly kind: 'readQuerySnapshot';
+      readonly from?: number;
+      readonly to?: number;
+      readonly transcriptVisibility?: boolean;
+    }
+  | {
+      readonly kind: 'readSelection';
+      readonly positions: readonly number[];
+      readonly token: string;
+      readonly transcriptVisibility?: boolean;
+    }
+  | { readonly kind: 'readReplayPrompt'; readonly excludeTurnId?: string };
+
+/** Complete logical changes since one owner-issued durable observation. */
+export type SessionHistoryChanges =
+  | {
+      readonly state: 'ready';
+      readonly checkpoint: string;
+      readonly from?: number;
+      readonly ids: readonly string[];
+      readonly patches?: {
+        readonly baseCheckpoint: string;
+        readonly turns: readonly {
+          readonly turnId: string;
+          readonly operations: readonly SessionHistoryContentPatch[];
+        }[];
+      };
+      readonly bodies?: {
+        readonly changed: readonly SessionHistoryInput[];
+        readonly from?: number;
+        readonly suffix: readonly SessionHistoryInput[];
+      };
+    }
+  | { readonly state: 'reset'; readonly checkpoint: string };
+
+export interface SessionHistoryReadResponse {
+  type: 'session/history-read_response';
+  retryReason?: 'superseded';
+  sessionId: SessionId;
+  success: boolean;
+  result?: unknown;
+  /** One locally durable observation, including the bounded page's bodies. */
+  historyRevision?: number;
+  historyCount?: number;
+  historyChange?: SessionHistoryChange | null;
+  pageTurns?: readonly SessionHistoryInput[];
+  error?: string;
+}
+
+export type SessionHistorySubscription = {
+  readonly id: string;
+} & (
+  | {
+      readonly action: 'open';
+      readonly checkpoint?: string;
+      readonly includeBodiesFrom?: number;
+      readonly withPatches?: true;
+    }
+  | { readonly action: 'close' }
+);
+
+export interface SessionHistoryPublication {
+  readonly checkpoint: string;
+  readonly revision: number;
+  readonly delta?: {
+    readonly baseCheckpoint: string;
+    readonly includeBodiesFrom: number;
+    readonly withPatches?: true;
+    readonly response: SessionHistoryReadResponse;
+  };
+}
+
+export interface SessionHistorySubscriptionRequest {
+  readonly type: 'session/history-subscription';
+  readonly workspaceId: WorkspaceId;
+  readonly machineId: MachineId;
+  readonly sessionId: SessionId;
+  readonly subscription: SessionHistorySubscription;
+}
+
+export type SessionHistorySubscriptionResponse = {
+  readonly type: 'session/history-subscription_response';
+  readonly sessionId: SessionId;
+  readonly subscriptionId: string;
+} & (
+  | { readonly event: 'publication'; readonly publication: SessionHistoryPublication }
+  | { readonly event: 'closed'; readonly error?: string }
+);
+
+export type SessionHistoryWriteOperation =
+  | 'accept_input'
+  | 'accept_input_and_dispatch'
+  | 'append'
+  | 'replace'
+  | 'respond_permission'
+  | 'apply_action'
+  | 'replace_editable_tail'
+  | 'apply_import'
+  | 'copy_history';
+
+export interface SessionHistoryWriteRequest {
+  type: 'session/history-write';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+  operation: SessionHistoryWriteOperation;
+  payload: unknown;
+}
+
+export interface SessionHistoryWriteResponse {
+  type: 'session/history-write_response';
+  sessionId: SessionId;
+  operation: SessionHistoryWriteOperation;
+  success: boolean;
+  result?: unknown;
+  historyRevision?: number;
+  historyCount?: number;
+  historyChange?: SessionHistoryChange | null;
+  error?: string;
+}
+
+export type DshProvidersRequest = { type: 'machine/dsh-providers'; machineId: MachineId };
+export type DshProvidersResponse = {
+  type: 'machine/dsh-providers_response';
+  providers: Array<{ id: string; name: string }>;
+};
+
 export type LocalSessionControlRequest =
+  | DshProvidersRequest
   | SessionCreateRequest
   | SessionChatRequest
   | SessionCancelRequest
@@ -639,45 +997,68 @@ export type LocalSessionControlRequest =
   | MachinePingRequest
   | MachineRestartRequest
   | MachineUpgradeRequest
+  | MachineProviderRateLimitsRefreshRequest
   | MachineAcpCapabilitiesRefreshRequest
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest
   | MachineAcpBinaryInstallRequest
-  | SessionCodeCollabHostStartRequest
   | SessionImageUploadRequest
   | SessionFileUploadRequest
   | SessionFileSendLocalRequest
+  | SessionImagePrepareLocalRequest
+  | SessionImageResolveLocalRequest
+  | SessionAttachmentPrepareRequest
+  | SessionHistoryReadRequest
+  | SessionHistorySubscriptionRequest
+  | SessionHistoryWriteRequest
   | PreviewCandidateReportRequest
   | SessionPreviewCreateRequest
-  | SessionPreviewRevokeRequest;
+  | SessionPreviewRevokeRequest
+  | SessionPreviewStatusRequest;
 
 export type LocalSessionControlResponse =
+  | DshProvidersResponse
   | SessionCreateAck
   | SessionCreateResponse
   | SessionChatAck
   | SessionChatResponse
   | SessionCancelResponse
   | SessionSteerResponse
+  | SessionGoalResponse
   | MachineStatusResponse
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
   | MachineAcpBinaryStatusResponse
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage
-  | SessionCodeCollabHostStartResponse
   | SessionImageUploadResponse
   | SessionFileUploadResponse
   | SessionFileSendLocalResponse
+  | SessionImagePrepareLocalResponse
+  | SessionImageResolveLocalResponse
+  | SessionAttachmentPrepareResponse
+  | SessionHistoryReadResponse
+  | SessionHistorySubscriptionResponse
+  | SessionHistoryWriteResponse
   | PreviewCandidateReportResponse
   | SessionPreviewCreateResponse
-  | SessionPreviewRevokeResponse;
+  | SessionPreviewRevokeResponse
+  | SessionPreviewStatusResponse;
 
 export type LocalProjectFileListResult = {
   paths: string[];
+  truncated: boolean;
+};
+
+export type LocalProjectFileSearchResult = {
+  /** Best matches first, at most the requested limit. */
+  paths: string[];
+  /** The host's file index hit its size cap, so a match may be missing. */
   truncated: boolean;
 };
 
@@ -808,173 +1189,208 @@ export type LocalProjectWorktreeCleanupResult = {
 
 export type LocalProjectControlRequest =
   | {
-    type: 'local-project/add';
-    machineId: MachineId;
-    rootPath: string;
-    workspace?: string;
-    allWorkspaces?: boolean;
-  }
+      type: 'local-project/add';
+      machineId: MachineId;
+      rootPath: string;
+      workspace?: string;
+      allWorkspaces?: boolean;
+    }
   | {
-    type: 'local-project/prepare-add';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    rootPath: string;
-  }
+      type: 'local-project/prepare-add';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      rootPath: string;
+      inspect?: boolean;
+    }
   | {
-    type: 'local-project/list-roots';
-    machineId: MachineId;
-  }
+      type: 'local-project/list-roots';
+      machineId: MachineId;
+    }
   | {
-    type: 'local-project/browse-dir';
-    machineId: MachineId;
-    workspaceId?: WorkspaceId;
-    absolutePath?: string;
-    showHidden?: boolean;
-    limit?: number;
-    cursor?: string;
-  }
+      type: 'local-project/browse-dir';
+      machineId: MachineId;
+      workspaceId?: WorkspaceId;
+      absolutePath?: string;
+      showHidden?: boolean;
+      limit?: number;
+      cursor?: string;
+    }
   | {
-    type: 'local-project/delete';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-  }
+      type: 'local-project/create-directory';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      parentPath: string;
+      name: string;
+    }
   | {
-    type: 'local-project/removal-preflight';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/delete';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+    }
   | {
-    type: 'local-project/list';
-    machineId: MachineId;
-  }
+      type: 'local-project/removal-preflight';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/git-state';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-  }
+      type: 'local-project/list';
+      machineId: MachineId;
+    }
   | {
-    type: 'local-project/list-files';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    maxFiles?: number;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/git-state';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+    }
   | {
-    type: 'local-project/list-dir';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    relativePath: string;
-    limit?: number;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/list-branches';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      query?: string;
+      limit?: number;
+      cursor?: string;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/list-skills';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    skillDirs: string[];
-    requestedByUserId?: string;
-  }
+      type: 'local-project/list-files';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      maxFiles?: number;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/list-global-skills';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    requestedByUserId?: string;
-  }
+      /**
+       * Host-side path search: the machine matches `query` against its own
+       * file list and returns only the best `limit` paths, so a client never
+       * pulls the full list to filter it. Older daemons reject this type; the
+       * client then falls back to `local-project/list-files`.
+       */
+      type: 'local-project/search-files';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      query: string;
+      limit?: number;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/read-file';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    relativePath: string;
-    maxBytes?: number;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/list-dir';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      relativePath: string;
+      limit?: number;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/checkout-branch';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    branchName: string;
-  }
+      type: 'local-project/list-skills';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      skillDirs: string[];
+      knownFingerprint?: string;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/get-worktree-setup';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/list-global-skills';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      knownFingerprint?: string;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/set-worktree-setup';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    config: WorktreeSetupScriptConfig;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/read-file';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      relativePath: string;
+      maxBytes?: number;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/get-worktree-cleanup';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/checkout-branch';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      branchName: string;
+    }
   | {
-    type: 'local-project/set-worktree-cleanup';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    config: WorktreeCleanupScriptConfig;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/get-worktree-setup';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/sync-history';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    provider: LocalProjectHistoryProvider;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/set-worktree-setup';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      config: WorktreeSetupScriptConfig;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/import-history';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    provider: LocalProjectHistoryProvider;
-    acpSessionIds: string[];
-    requestedByUserId?: string;
-  }
+      type: 'local-project/get-worktree-cleanup';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'local-project/resolve-history-conflict';
-    machineId: MachineId;
-    workspaceId: WorkspaceId;
-    localProjectId: LocalProjectId;
-    provider: LocalProjectHistoryProvider;
-    sessionId: SessionId;
-    acpSessionId: string;
-    requestedByUserId?: string;
-  }
+      type: 'local-project/set-worktree-cleanup';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      config: WorktreeCleanupScriptConfig;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'worktree/list-files';
-    machineId: MachineId;
-    repoFullName: string;
-    sessionId: SessionId;
-    maxFiles?: number;
-  }
+      type: 'local-project/sync-history';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      provider: LocalProjectHistoryProvider;
+      requestedByUserId?: string;
+    }
   | {
-    type: 'worktree/read-file';
-    machineId: MachineId;
-    repoFullName: string;
-    sessionId: SessionId;
-    relativePath: string;
-    maxBytes?: number;
-  };
+      type: 'local-project/import-history';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      provider: LocalProjectHistoryProvider;
+      acpSessionIds: string[];
+      requestedByUserId?: string;
+    }
+  | {
+      type: 'local-project/resolve-history-conflict';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      provider: LocalProjectHistoryProvider;
+      sessionId: SessionId;
+      acpSessionId: string;
+      requestedByUserId?: string;
+    }
+  | {
+      type: 'worktree/list-files';
+      machineId: MachineId;
+      repoFullName: string;
+      sessionId: SessionId;
+      maxFiles?: number;
+    }
+  | {
+      type: 'worktree/read-file';
+      machineId: MachineId;
+      repoFullName: string;
+      sessionId: SessionId;
+      relativePath: string;
+      maxBytes?: number;
+    };
 
 export type LocalProjectControlErrorCode =
   | 'invalid_request'
@@ -985,6 +1401,7 @@ export type LocalProjectControlErrorCode =
   | 'access_denied'
   | 'local_project_not_found'
   | 'path_invalid'
+  | 'already_exists'
   | 'execution_failed'
   | 'invalid_response';
 
@@ -1004,74 +1421,73 @@ type LocalProjectControlOkResponse<TType extends LocalProjectControlRequest['typ
 
 export type LocalProjectControlResponse =
   | LocalProjectControlOkResponse<
-    'local-project/add',
-    {
-      localProjectId: LocalProjectId;
-      name: string;
-      rootPath: string;
-      workspaceIds: WorkspaceId[];
-    }
-  >
+      'local-project/add',
+      {
+        localProjectId: LocalProjectId;
+        name: string;
+        rootPath: string;
+        workspaceIds: WorkspaceId[];
+      }
+    >
   | LocalProjectControlOkResponse<
-    'local-project/prepare-add',
-    {
-      localProjectId: LocalProjectId;
-      name: string;
-      rootPath: string;
-      alreadyRegistered: boolean;
-    }
-  >
+      'local-project/prepare-add',
+      {
+        localProjectId: LocalProjectId;
+        name: string;
+        rootPath: string;
+        alreadyRegistered: boolean;
+        inspection?: ProjectLocalMemberProbe;
+      }
+    >
   | LocalProjectControlOkResponse<'local-project/list-roots', LocalProjectBrowseRootsResult>
   | LocalProjectControlOkResponse<'local-project/browse-dir', LocalProjectBrowseDirectoryResult>
+  | LocalProjectControlOkResponse<'local-project/create-directory', { path: string }>
   | LocalProjectControlOkResponse<
-    'local-project/delete',
-    {
-      localProjectId: LocalProjectId;
-      name: string;
-      rootPath: string;
-      workspaceIds: WorkspaceId[];
-    }
-  >
+      'local-project/delete',
+      {
+        localProjectId: LocalProjectId;
+        name: string;
+        rootPath: string;
+        workspaceIds: WorkspaceId[];
+      }
+    >
   | LocalProjectControlOkResponse<
-    'local-project/removal-preflight',
-    LocalProjectWorktreeCleanupPreflightResult
-  >
+      'local-project/removal-preflight',
+      LocalProjectWorktreeCleanupPreflightResult
+    >
   | LocalProjectControlOkResponse<
-    'local-project/list',
-    { workspaces: LocalProjectWorkspaceSummary[] }
-  >
+      'local-project/list',
+      { workspaces: LocalProjectWorkspaceSummary[] }
+    >
   | LocalProjectControlOkResponse<'local-project/git-state', LocalProjectGitState>
+  | LocalProjectControlOkResponse<'local-project/list-branches', LocalProjectBranchListResult>
   | LocalProjectControlOkResponse<'local-project/list-files', LocalProjectFileListResult>
+  | LocalProjectControlOkResponse<'local-project/search-files', LocalProjectFileSearchResult>
   | LocalProjectControlOkResponse<'local-project/list-dir', LocalProjectDirectoryListResult>
   | LocalProjectControlOkResponse<'local-project/list-skills', ProjectSkillsResult>
   | LocalProjectControlOkResponse<'local-project/list-global-skills', ProjectSkillsResult>
   | LocalProjectControlOkResponse<'local-project/read-file', LocalProjectFileReadResult | null>
   | LocalProjectControlOkResponse<'local-project/checkout-branch', LocalProjectCheckoutBranchResult>
   | LocalProjectControlOkResponse<
-    'local-project/get-worktree-setup',
-    WorktreeSetupScriptConfig | null
-  >
+      'local-project/get-worktree-setup',
+      WorktreeSetupScriptConfig | null
+    >
   | LocalProjectControlOkResponse<'local-project/set-worktree-setup', WorktreeSetupScriptConfig>
   | LocalProjectControlOkResponse<
-    'local-project/get-worktree-cleanup',
-    WorktreeCleanupScriptConfig | null
-  >
+      'local-project/get-worktree-cleanup',
+      WorktreeCleanupScriptConfig | null
+    >
   | LocalProjectControlOkResponse<'local-project/set-worktree-cleanup', WorktreeCleanupScriptConfig>
   | LocalProjectControlOkResponse<'local-project/sync-history', LocalProjectHistoryCatalogResult>
   | LocalProjectControlOkResponse<'local-project/import-history', LocalProjectHistoryImportResult>
   | LocalProjectControlOkResponse<
-    'local-project/resolve-history-conflict',
-    LocalProjectHistoryConflictResolveResult
-  >
+      'local-project/resolve-history-conflict',
+      LocalProjectHistoryConflictResolveResult
+    >
   | LocalProjectControlOkResponse<'worktree/list-files', LocalProjectFileListResult>
   | LocalProjectControlOkResponse<'worktree/read-file', LocalProjectFileReadResult | null>
   | LocalProjectControlErrorResponse;
 
-// ============================================
-// MESSAGE TYPE UNIONS
-// ============================================
-
-// Client to Server Messages
 export type ClientToServer =
   | SessionCreateRequest
   | SessionChatRequest
@@ -1081,12 +1497,12 @@ export type ClientToServer =
   | MachinePingRequest
   | MachineRestartRequest
   | MachineUpgradeRequest
+  | MachineProviderRateLimitsRefreshRequest
   | MachineAcpCapabilitiesRefreshRequest
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest
   | MachineAcpBinaryInstallRequest;
 
-// Server to Client Messages
 export type ServerToClient =
   | SessionCreateResponse
   | SessionCreateAck
@@ -1098,6 +1514,7 @@ export type ServerToClient =
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1105,7 +1522,6 @@ export type ServerToClient =
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage;
 
-// Machine to Server Messages
 export type MachineToServer =
   | PermissionRequestMessage
   | SessionCreateResponse
@@ -1115,6 +1531,7 @@ export type MachineToServer =
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1122,7 +1539,6 @@ export type MachineToServer =
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage;
 
-// Server to Machine Messages
 export type ServerToMachine =
   | SessionCreateRequest
   | SessionChatRequest
@@ -1132,14 +1548,13 @@ export type ServerToMachine =
   | MachinePingRequest
   | MachineRestartRequest
   | MachineUpgradeRequest
+  | MachineProviderRateLimitsRefreshRequest
   | MachineAcpCapabilitiesRefreshRequest
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest
   | MachineAcpBinaryInstallRequest;
 
-// Combined message types
 export type ServerReceiveMessage = ClientToServer | MachineToServer;
 export type ServerSendMessage = ServerToClient | ServerToMachine;
 
-// WebSocket message type for general use
 export type WebSocketMessage = ServerReceiveMessage | ServerSendMessage;

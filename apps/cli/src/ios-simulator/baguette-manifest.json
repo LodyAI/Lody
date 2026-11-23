@@ -1,0 +1,10 @@
+{
+  "version": "0.2.15",
+  "platform": "darwin-arm64",
+  "fileName": "baguette_v0.2.15_macOS_arm64.tar.gz",
+  "size": 36387179,
+  "sha256": "b8f8e6a1fda09f3cf8580a84e48961472ad444dd528530f099258649af594fb5",
+  "executableSha256": "1396a1bbe2e130b697f86eb212825e9c3a2cedc6a5adf3e9b176999e348318d7",
+  "source": "https://github.com/tddworks/baguette/releases/download/v0.2.15/baguette_v0.2.15_macOS_arm64.tar.gz",
+  "revision": "fd0eefe55e1e1e3df7878bf05674e01596fdee09"
+}

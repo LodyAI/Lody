@@ -2,12 +2,12 @@ import { expect, test } from '@playwright/test';
 
 test('keeps ordered-list counters and periods on the same marker line', async ({ page }) => {
   const response = await page.goto(
-    '/iframe.html?id=ai-markdownrenderer--loose-list-with-multi-paragraph-items&viewMode=story'
+    '/iframe.html?id=sessions-assistantturnalignment--conversation-rhythm&viewMode=story'
   );
   expect(response?.ok()).toBeTruthy();
 
   const listItems = page.locator('#storybook-root .markdown-renderer ol > li');
-  await expect(listItems).toHaveCount(4);
+  await expect(listItems).toHaveCount(3);
 
   const markerStyles = await listItems.evaluateAll((items) =>
     items.map((item) => {

@@ -1,19 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type { SessionId } from '@lody/shared';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import { Button } from '@/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Dialog } from '@/ui/dialog';
+import { Button } from '@lody/ui/button';
+import { Textarea } from '@lody/ui/textarea';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
+import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 
 const MAX_VISIBLE_TITLE_LINES = 4;
 
@@ -64,7 +58,18 @@ export function RenameSessionDialogView({
   const { t } = useTranslation();
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // The field is held as state rather than in a ref so that measuring and
+  // observing follow the element itself: the dialog content can remount under
+  // us, and an effect keyed on anything else would keep working on the node it
+  // first saw.
+  const [titleField, setTitleField] = useState<HTMLTextAreaElement | null>(null);
+  const measuredWidthRef = useRef<number | null>(null);
+
+  const resizeTitle = useCallback((field: HTMLTextAreaElement | null) => {
+    if (!field) return;
+    resizeTitleTextarea(field);
+    measuredWidthRef.current = field.clientWidth;
+  }, []);
 
   useEffect(() => {
     if (target) {
@@ -74,23 +79,22 @@ export function RenameSessionDialogView({
   }, [target]);
 
   useLayoutEffect(() => {
-    if (textareaRef.current) {
-      resizeTitleTextarea(textareaRef.current);
-    }
-  }, [draft, target]);
+    resizeTitle(titleField);
+  }, [draft, titleField, resizeTitle]);
 
+  // How many lines a title wraps to is only knowable once the field has its
+  // real width, and the measurement above can run before the portalled dialog
+  // panel has been laid out. Without this the field keeps the one-line height
+  // that first measurement produced and clips a wrapped title. Width is the
+  // only input that changes here — the heights written back never alter it —
+  // so re-measuring on an unchanged width would be pure churn.
   useEffect(() => {
-    const handleResize = () => {
-      if (textareaRef.current) {
-        resizeTitleTextarea(textareaRef.current);
-      }
-    };
-
-    if (target) {
-      window.addEventListener('resize', handleResize);
-    }
-    return () => window.removeEventListener('resize', handleResize);
-  }, [target]);
+    if (!titleField) return undefined;
+    return observeResizeOnAnimationFrame(titleField, () => {
+      if (titleField.clientWidth === measuredWidthRef.current) return;
+      resizeTitle(titleField);
+    });
+  }, [titleField, resizeTitle]);
 
   const handleOpenChange = (open: boolean) => {
     if (!open && !saving) {
@@ -117,20 +121,20 @@ export function RenameSessionDialogView({
   };
 
   return (
-    <Dialog open={target != null} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
-        <DialogHeader className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
-          <DialogTitle className="text-base">
+    <Dialog.Root open={target != null} onOpenChange={handleOpenChange}>
+      <Dialog.Content className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
+        <Dialog.Header className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
+          <Dialog.Title className="text-base">
             {t('sidebar.renameChat.title', 'Rename Chat')}
-          </DialogTitle>
-          <DialogDescription className="leading-5">
+          </Dialog.Title>
+          <Dialog.Description className="leading-5">
             {t('sidebar.renameChat.description', 'Enter a new name for this chat.')}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
         <div className="px-4 py-4 sm:px-5">
           <Textarea
-            ref={textareaRef}
+            ref={setTitleField}
             autoFocus
             rows={1}
             value={draft}
@@ -147,12 +151,12 @@ export function RenameSessionDialogView({
           />
         </div>
 
-        <DialogFooter className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
-          <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
+        <Dialog.Footer className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
+          <Button variant="secondary" size="small" onClick={onClose} disabled={saving}>
             {t('common.cancel', 'Cancel')}
           </Button>
           <Button
-            size="sm"
+            size="small"
             onClick={() => {
               void handleSubmit();
             }}
@@ -160,9 +164,9 @@ export function RenameSessionDialogView({
           >
             {t('common.save', 'Save')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 

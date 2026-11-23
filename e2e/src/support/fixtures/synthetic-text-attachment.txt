@@ -1,0 +1,4 @@
+Synthetic local text attachment.
+
+This fixture exists only for the LODY-ATTACHMENT-001 Electron user journey.
+It contains no user, customer, or agent transcript data.

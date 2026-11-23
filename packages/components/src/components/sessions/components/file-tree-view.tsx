@@ -5,6 +5,8 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight, CloudOff, FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import { getMachineFlockLocalProjects, type FileTreeItem, type SessionMeta } from '@lody/shared';
 import { type TreeDataItem } from '@/components/tree-view';
+import { ContextMenu } from '@lody/ui/context-menu';
+import { useSessionFileActions, type SessionFileMenuItem } from '@/hooks/use-session-file-actions';
 import { FileTreeSkeleton, FileTreeStatePanel } from './file-tree-states';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
 import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
@@ -41,7 +43,8 @@ import { currentWorkspaceIdAtom, getMachineMetaByIdAtomFamily, userAtom } from '
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { runtimeAtom } from '@/atoms/runtime';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
-import { Button, ScrollArea } from '@/ui';
+import { Button } from '@/ui';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import {
   createFileIconComponent,
   createFolderIconComponent,
@@ -56,6 +59,12 @@ interface FileTreeViewProps {
   fileProviderPending?: boolean;
   fileProviderMessage?: string;
   autoCodeCollab?: boolean;
+  /**
+   * Right-click actions for file rows, from `useSessionFileActions`. The owner
+   * passes them because it also renders the same actions in the side panel ⋯
+   * menu, and both must offer exactly the same set. Must be stable.
+   */
+  fileMenuItems?: readonly SessionFileMenuItem[];
   // Paths of files that appear in the session "Changes" list. When provided,
   // these drive the modified-file highlight in the tree (provider metadata does
   // not carry per-file modified state in live mode). Omitted by Storybook /
@@ -204,10 +213,16 @@ function VirtualFileTree({
   data,
   viewportRef,
   viewStateKey,
+  fileMenuItems,
 }: {
   readonly data: readonly TreeDataItem[];
   readonly viewportRef: RefObject<HTMLDivElement | null>;
   readonly viewStateKey?: string;
+  /**
+   * Right-click actions for FILE rows. Must be referentially stable — the rows
+   * are memoized against per-frame scroll re-renders.
+   */
+  readonly fileMenuItems?: readonly SessionFileMenuItem[];
 }) {
   const [viewState, updateViewState] = useFileTreeViewState(viewStateKey);
   const selectedId = viewState.selectedId;
@@ -237,7 +252,7 @@ function VirtualFileTree({
   });
 
   // The virtualizer reads `getScrollElement()` from a layout effect, and the
-  // Radix ScrollArea viewport it points at is an ANCESTOR host node: React
+  // Base UI ScrollArea viewport it points at is an ANCESTOR host node: React
   // attaches that ref only after this child's layout effects have already run,
   // so the first pass always sees `null` and produces an empty range. The
   // viewport can also legitimately measure 0 while the panel is still being
@@ -303,6 +318,7 @@ function VirtualFileTree({
             selected={selectedId === row.item.id}
             onSelect={selectRow}
             onToggleDirectory={toggleDirectory}
+            fileMenuItems={fileMenuItems}
           />
         ))}
       </div>
@@ -330,6 +346,7 @@ function VirtualFileTree({
             virtualSize={virtualItem.size}
             onSelect={selectRow}
             onToggleDirectory={toggleDirectory}
+            fileMenuItems={fileMenuItems}
           />
         );
       })}
@@ -349,6 +366,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   virtualSize,
   onSelect,
   onToggleDirectory,
+  fileMenuItems,
 }: {
   readonly row: VirtualFileTreeRowModel;
   readonly selected: boolean;
@@ -356,6 +374,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   readonly virtualSize?: number;
   readonly onSelect: (itemId: string) => void;
   readonly onToggleDirectory: (itemId: string) => void;
+  readonly fileMenuItems?: readonly SessionFileMenuItem[];
 }) {
   const item = row.item;
   const disabled = item.disabled === true;
@@ -379,7 +398,11 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
     item.onClick?.();
   };
 
-  return (
+  // A directory always carries a `children` array (empty while a lazy one is
+  // uninitialized); only a file has none. `hasChildren` cannot stand in for
+  // this — an empty directory has none either.
+  const isFile = item.children === undefined;
+  const rowButton = (
     <button
       type="button"
       role="treeitem"
@@ -388,7 +411,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
       aria-selected={selected}
       disabled={disabled}
       className={cn(
-        'group flex w-full items-center pr-2 text-left text-sm outline-none hover:bg-hover hover:text-hover-foreground focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-ring',
+        'group flex w-full items-center pr-2 text-left text-[0.9em] outline-none hover:bg-hover hover:text-hover-foreground focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-ring',
         // `w-full` resolves against the positioned ancestor once absolute, so
         // the hover/selection background still spans the full row.
         virtualStart !== undefined && 'absolute left-0 top-0',
@@ -436,6 +459,34 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
       </span>
     </button>
   );
+
+  // Only files get a menu, and only when the surface resolved actions for this
+  // session — no menu at all beats a menu that can only disappoint. An item can
+  // still decline a specific path, so filter before deciding to render.
+  if (!isFile || !fileMenuItems || fileMenuItems.length === 0) return rowButton;
+  const visibleMenuItems = fileMenuItems.filter(
+    (menuItem) => menuItem.isAvailable?.(item.id) ?? true
+  );
+  if (visibleMenuItems.length === 0) return rowButton;
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger>{rowButton}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-[190px]">
+        {visibleMenuItems.map((menuItem) => {
+          const ItemIcon = menuItem.icon;
+          return (
+            <ContextMenu.Item
+              key={menuItem.id}
+              icon={ItemIcon}
+              onClick={() => menuItem.run(item.id)}
+            >
+              {menuItem.label}
+            </ContextMenu.Item>
+          );
+        })}
+      </ContextMenu.Content>
+    </ContextMenu.Root>
+  );
 });
 
 function ControlledFileTreeView({
@@ -445,6 +496,7 @@ function ControlledFileTreeView({
   fileProviderMessage,
   changedFilePaths,
   viewStateKey,
+  fileMenuItems,
 }: ControlledFileTreeViewProps) {
   const { t } = useTranslation();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -536,6 +588,7 @@ function ControlledFileTreeView({
           data={fileTreeData}
           viewportRef={scrollViewportRef}
           viewStateKey={viewStateKey}
+          {...(fileMenuItems === undefined ? {} : { fileMenuItems })}
         />
       </div>
     </ScrollArea>
@@ -564,6 +617,7 @@ const AutoFileTreeView = ({
   autoCodeCollab = true,
   changedFilePaths,
   viewStateKey,
+  fileMenuItems,
 }: FileTreeViewProps) => {
   const { t } = useTranslation();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -676,6 +730,7 @@ const AutoFileTreeView = ({
   const providerFileTree = useFileWorkspaceTree(activeFileProvider, {
     enabled: shouldUseProviderFileList,
   });
+  const sessionFileActions = useSessionFileActions({ session, fileProvider: activeFileProvider });
 
   const localFileTree = useMemo(
     () => buildFileTreeFromPaths(localProjectFileData.entry?.paths ?? []),
@@ -813,7 +868,7 @@ const AutoFileTreeView = ({
           localError ?? t('sessions.localProject.files.loadFailed', 'Failed to load files.')
         }
         action={
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleRetryLocalFiles}>
+          <Button variant="secondary" size="small" onClick={handleRetryLocalFiles}>
             <RefreshCw className="h-3.5 w-3.5" />
             {t('sessions.codeSession.files.retry', 'Try again')}
           </Button>
@@ -855,10 +910,11 @@ const AutoFileTreeView = ({
           data={fileTreeData}
           viewportRef={scrollViewportRef}
           viewStateKey={viewStateKey}
+          fileMenuItems={fileMenuItems ?? sessionFileActions.menuItems}
         />
 
         {shouldUseLocalFileList && localListTruncated ? (
-          <div className="pt-2 text-xs text-muted-foreground">{localTruncatedLabel}</div>
+          <div className="pt-2 text-[0.8em] text-muted-foreground">{localTruncatedLabel}</div>
         ) : null}
       </div>
     </ScrollArea>

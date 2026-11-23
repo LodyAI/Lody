@@ -16,6 +16,12 @@ export type LocalProbeResult = {
 export const localProbeResultAtom = atom<LocalProbeResult | null>(null);
 
 /**
+ * Presentation only: retains the desktop machine's position during CLI outages.
+ * Never use this identity to authorize or route local operations.
+ */
+export const lastKnownLocalMachineIdAtom = atom<MachineId | null>(null);
+
+/**
  * Has local desktop CLI identity resolution completed at least once?
  * Non-Electron renderers resolve immediately with no local machine.
  */
@@ -113,6 +119,7 @@ export const localHomeDirAtom = atom<string | null>((get) => {
 /** Effect: mirror Electron CLI state into renderer atoms without browser localhost probing. */
 export const localProbeEffectAtom = atomEffect((_get, set) => {
   if (!hasBrowserWindow() || !isElectronRenderer()) {
+    set(lastKnownLocalMachineIdAtom, null);
     set(localProbeResultAtom, null);
     set(localProbeAttemptedAtom, true);
     set(localAgentEnabledAtom, false);
@@ -121,6 +128,7 @@ export const localProbeEffectAtom = atomEffect((_get, set) => {
   }
 
   if (!getIpcServices()) {
+    set(lastKnownLocalMachineIdAtom, null);
     set(localProbeResultAtom, null);
     set(localProbeAttemptedAtom, true);
     set(localAgentEnabledAtom, false);
@@ -131,6 +139,9 @@ export const localProbeEffectAtom = atomEffect((_get, set) => {
   let cancelled = false;
   const applyState = (state: ElectronCliState) => {
     if (cancelled) return;
+    const machineId = getMachineIdFromCliState(state);
+    if (!state.localAgentEnabled) set(lastKnownLocalMachineIdAtom, null);
+    else if (machineId) set(lastKnownLocalMachineIdAtom, machineId);
     set(localAgentEnabledAtom, state.localAgentEnabled);
     set(localProbeResultAtom, getLocalProbeResultFromCliState(state));
     set(localProbeAttemptedAtom, true);

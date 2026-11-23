@@ -50,6 +50,7 @@ function InteractiveInviteScreen({ initial }: { initial?: InviteEntry[] } = {}) 
 
   return (
     <InviteScreenView
+      seatPreview={{ status: 'not_billed', reason: 'free' }}
       email={email}
       onEmailChange={setEmail}
       onAdd={handleAdd}
@@ -72,6 +73,7 @@ const meta = {
   },
   tags: ['autodocs'],
   args: {
+    seatPreview: { status: 'not_billed', reason: 'free' },
     onEmailChange: fn(),
     onAdd: fn(),
     onRemove: fn(),
@@ -99,7 +101,12 @@ const sample: InviteEntry[] = [
 const mixed: InviteEntry[] = [
   { id: '1', email: 'alice@team.dev', status: 'sent' },
   { id: '2', email: 'bob@team.dev', status: 'sending' },
-  { id: '3', email: 'charlie@team.dev', status: 'failed', errorMessage: 'Email rejected by upstream' },
+  {
+    id: '3',
+    email: 'charlie@team.dev',
+    status: 'failed',
+    errorMessage: 'Email rejected by upstream',
+  },
   { id: '4', email: 'dana@team.dev', status: 'pending' },
 ];
 
@@ -169,4 +176,27 @@ export const Interactive: Story = {
     inputError: null,
   },
   render: () => <InteractiveInviteScreen />,
+};
+
+export const PaidBatch: Story = {
+  globals: { locale: 'zh_CN' },
+  args: {
+    email: '',
+    invites: sample,
+    sending: false,
+    inputError: null,
+    seatPreview: {
+      status: 'billed',
+      interval: 'year',
+      addedSeats: 2,
+      unitAmount: 9600,
+      proratedAmount: 16938,
+      invoiceAt: Date.UTC(2026, 10, 24),
+      currentPeriodEnd: Date.UTC(2027, 8, 24),
+      seatCount: 3,
+      nextSeatCount: 5,
+      nextRenewalAmount: 48000,
+      currency: 'usd',
+    },
+  },
 };

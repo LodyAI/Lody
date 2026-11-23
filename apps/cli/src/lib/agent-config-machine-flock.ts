@@ -1,8 +1,10 @@
 import {
-  deleteMachineFlockRowFromFlock,
+  deleteAgentConfigFromFlock,
   getAgentConfigRoomId,
   getMachineFlockAgentConfigs,
+  getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDocId,
+  getServerNow,
   isAgentConfigDocRoomId,
   isLoroRepoDocDeleted,
   isMachineDocRoomId,
@@ -12,15 +14,28 @@ import {
   type AgentConfigId,
   type AgentConfigMeta,
   type AgentConfigCliType,
+  type ManagedBuiltinAgentType,
   type MachineId,
   type WorkspaceId,
-  writeMachineFlockRowToFlock,
+  writeAgentConfigToFlock,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 
 export type MachineFlockSyncScheduler = {
   markMachineFlockDocDirty: (machineId: MachineId, options?: { reason?: string }) => void;
 };
+
+/** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
+export async function readMachineBuiltinAgentOptOuts(
+  repo: LoroRepo,
+  workspaceId: WorkspaceId,
+  machineId: MachineId
+): Promise<Set<ManagedBuiltinAgentType>> {
+  const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+  return getMachineFlockBuiltinAgentOptOuts(
+    readMachineFlockRowsFromFlock(handle.flock, { families: ['builtinAgentOptOut'] })
+  );
+}
 
 export async function readMachineAgentConfigs(
   repo: LoroRepo,
@@ -96,6 +111,21 @@ export async function listMergedAgentConfigs(
   return mergeAgentConfigs(loroRepoMetaConfigs, machineFlockConfigs);
 }
 
+/** The machine's only provider of this type; none when absent or ambiguous. */
+export async function findSoleMachineAgentConfig(
+  repo: LoroRepo,
+  workspaceId: WorkspaceId,
+  machineId: MachineId,
+  cliType: AgentConfigCliType,
+  agentType: string
+): Promise<AgentConfigMeta | undefined> {
+  const matches = (await listMergedAgentConfigs(repo, workspaceId, [machineId])).filter(
+    (config) =>
+      config.cliType === cliType && config.agentType === agentType && config.machineId === machineId
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export async function upsertMachineAgentConfig(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
@@ -103,10 +133,8 @@ export async function upsertMachineAgentConfig(
   options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, config.machineId));
-  const changed = writeMachineFlockRowToFlock(handle.flock, {
-    key: machineFlockKeys.agentConfig(config.id),
-    value: config,
-  });
+  // Writing the row also retracts the same-type opt-out, both in one commit (see writeAgentConfigToFlock).
+  const changed = writeAgentConfigToFlock(handle.flock, config);
   if (!changed) {
     await deleteLoroRepoMetaAgentConfigIfPresent(repo, config.id);
     return;
@@ -129,10 +157,8 @@ export async function deleteMachineAgentConfig(
   options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, config.machineId));
-  const changed = deleteMachineFlockRowFromFlock(
-    handle.flock,
-    machineFlockKeys.agentConfig(config.id)
-  );
+  // Deleting the row also records an opt-out when needed, both in one commit (see deleteAgentConfigFromFlock).
+  const changed = deleteAgentConfigFromFlock(handle.flock, config, getServerNow());
   if (!changed) {
     await deleteLoroRepoMetaAgentConfigIfPresent(repo, config.id);
     return;

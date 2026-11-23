@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "scopes": {
+    "apps/cli": 7379,
+    "apps/electron": 1552,
+    "apps/mobile": 7,
+    "apps/mobile-capacitor": 300,
+    "e2e/cucumber.mjs": 0,
+    "e2e/fixtures": 1,
+    "e2e/scripts": 3,
+    "e2e/src": 76,
+    "packages/cli-supervisor": 31,
+    "packages/client-e2ee": 187,
+    "packages/cloud-api": 0,
+    "packages/code-review-helper": 234,
+    "packages/code-review-viewer": 0,
+    "packages/components": 19053,
+    "packages/e2ee-client": 550,
+    "packages/e2ee-core": 548,
+    "packages/e2ee-lab": 378,
+    "packages/e2ee-machine-sharing": 64,
+    "packages/ignore": 105,
+    "packages/iroh-native": 22,
+    "packages/loro-streams-rpc": 248,
+    "packages/platform": 13,
+    "packages/shared": 2142,
+    "packages/turn-diff-store": 14,
+    "packages/ui": 767
+  }
+}

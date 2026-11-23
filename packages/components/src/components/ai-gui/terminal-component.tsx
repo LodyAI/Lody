@@ -9,7 +9,14 @@ import {
 } from 'react';
 import Anser from 'anser';
 import { Terminal } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { cn } from '@/lib/utils';
+import {
+  CONVERSATION_PANEL_FRAME_CLASS,
+  CONVERSATION_PANEL_HEADER_CLASS,
+  CONVERSATION_PANEL_HEADER_RULE_CLASS,
+} from './conversation-panel';
 import {
   createVSCodeTerminalTheme,
   resolveAnsiColorToCss,
@@ -17,18 +24,19 @@ import {
 } from '@/lib/vscode-theme';
 import { useActiveVSCodeTheme } from '../../theme-provider';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
-import {
-  conversationTextFontSizeStyle,
-  terminalTextFontSizeStyle,
-} from './conversation-font-size-classes';
+import { terminalTextFontSizeStyle } from './conversation-font-size-classes';
 import { prepareTerminalPreview } from './terminal-preview';
 
 export { prepareTerminalPreview } from './terminal-preview';
 
+const typography = stylex.create({
+  caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
+});
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const renderAnsiToReactNodes = ({
+export const renderAnsiToReactNodes = ({
   value,
   terminalTheme,
 }: {
@@ -151,7 +159,14 @@ export const TerminalComponent = memo(function TerminalComponent({
   const headerContent = (
     <>
       <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1 truncate text-[11px] font-medium">{title}</div>
+      <div
+        className={cn(
+          'min-w-0 flex-1 truncate font-medium',
+          stylex.props(typography.caption).className
+        )}
+      >
+        {title}
+      </div>
     </>
   );
 
@@ -159,102 +174,113 @@ export const TerminalComponent = memo(function TerminalComponent({
     <div
       className={cn(
         'overflow-hidden',
-        showBorder ? 'rounded-md border border-border/60 bg-background/70 shadow-xs' : null,
+        showBorder ? CONVERSATION_PANEL_FRAME_CLASS : null,
         className
       )}
     >
-      {showHeader ? (
-        onHeaderClick ? (
-          <button
-            type="button"
-            className={cn(
-              'flex w-full items-center gap-2 bg-muted/70 px-3 py-1.5 text-left text-foreground transition-colors hover:bg-muted',
-              bodyVisible ? 'border-b border-border/60' : null
-            )}
-            onClick={onHeaderClick}
-            aria-expanded={headerExpanded}
-          >
-            {headerContent}
-          </button>
-        ) : (
-          <div className="flex items-center gap-2 border-b border-border/60 bg-muted/70 px-3 py-1.5 text-foreground">
-            {headerContent}
-          </div>
-        )
-      ) : null}
-
-      {bodyVisible ? (
-        <div
-          className={cn(showBackground ? 'bg-muted/[0.35]' : null, 'text-foreground')}
-          style={terminalContainerStyle}
-        >
-          {shouldRenderInput ? (
+      {/* The terminal's own surface (VS Code `terminal.background`, or the muted
+          fallback) wraps the header AND the body, so the header's raised tint
+          steps away from the SAME base the output sits on. While the surface
+          lived on the body alone, the header was tinting the frame instead and
+          the step measured -1 in dark and inverted to +7 in light. */}
+      <div
+        className={cn(showBackground && !terminalBackgroundColor ? 'bg-muted/[0.35]' : null)}
+        style={terminalContainerStyle}
+      >
+        {showHeader ? (
+          onHeaderClick ? (
+            <button
+              type="button"
+              className={cn(
+                CONVERSATION_PANEL_HEADER_CLASS,
+                'w-full text-left transition-colors hover:bg-hover',
+                bodyVisible ? CONVERSATION_PANEL_HEADER_RULE_CLASS : null
+              )}
+              onClick={onHeaderClick}
+              aria-expanded={headerExpanded}
+              data-conversation-disclosure={headerExpanded === undefined ? undefined : 'inline'}
+            >
+              {headerContent}
+            </button>
+          ) : (
             <div
               className={cn(
-                'flex items-start gap-2 px-3 py-2 font-terminal',
-                hasOutput ? 'border-b border-border/50' : null
+                CONVERSATION_PANEL_HEADER_CLASS,
+                bodyVisible ? CONVERSATION_PANEL_HEADER_RULE_CLASS : null
               )}
             >
-              <span
-                className="leading-none text-muted-foreground"
-                style={conversationTextFontSizeStyle(fontSize)}
-              >
-                $
-              </span>
-              <pre
-                className="scrollbar-pro min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words font-terminal"
-                style={terminalTextFontSizeStyle(fontSize)}
-              >
-                {command}
-              </pre>
+              {headerContent}
             </div>
-          ) : null}
+          )
+        ) : null}
 
-          {hasOutput ? (
-            <div
-              ref={outputRef}
-              className={cn(
-                'relative',
-                shouldUseFullOutput
-                  ? null
-                  : shouldUseScrollOutput || isFocused
-                    ? cn(
-                        'scrollbar-pro overflow-auto',
-                        shouldUseScrollOutput ? null : 'ring-1 ring-ring/30'
-                      )
-                    : 'overflow-hidden'
-              )}
-              style={{
-                maxHeight:
-                  !shouldUseFullOutput && (shouldUseScrollOutput || isFocused)
-                    ? focusedMaxHeightPx
-                    : undefined,
-              }}
-            >
-              <pre
-                className="px-3 py-2 font-terminal leading-relaxed whitespace-pre-wrap break-words"
-                style={terminalTextFontSizeStyle(fontSize)}
+        {bodyVisible ? (
+          <div className="text-foreground">
+            {shouldRenderInput ? (
+              <div
+                className={cn(
+                  'flex items-start gap-2 px-3 py-2 font-terminal',
+                  hasOutput ? 'border-b border-border/50' : null
+                )}
               >
-                {renderAnsiToReactNodes({ value: outputTextForDisplay, terminalTheme })}
-              </pre>
-
-              {!shouldUseScrollOutput && !shouldUseFullOutput && !isFocused && isTruncatedView ? (
-                <button
-                  type="button"
-                  className="absolute inset-0 h-full cursor-pointer bg-transparent"
-                  onClick={() => setIsFocused(true)}
-                  aria-label="Focus terminal output"
+                <span className="text-muted-foreground" style={terminalTextFontSizeStyle(fontSize)}>
+                  $
+                </span>
+                <pre
+                  className="scrollbar-pro min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words font-terminal"
+                  style={terminalTextFontSizeStyle(fontSize)}
                 >
-                  <div
-                    className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-muted/90 to-transparent"
-                    style={collapsedOutputFadeStyle}
-                  />
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+                  {command}
+                </pre>
+              </div>
+            ) : null}
+
+            {hasOutput ? (
+              <div
+                ref={outputRef}
+                className={cn(
+                  'relative',
+                  shouldUseFullOutput
+                    ? null
+                    : shouldUseScrollOutput || isFocused
+                      ? cn(
+                          'scrollbar-pro overflow-auto',
+                          shouldUseScrollOutput ? null : 'ring-1 ring-ring/30'
+                        )
+                      : 'overflow-hidden'
+                )}
+                style={{
+                  maxHeight:
+                    !shouldUseFullOutput && (shouldUseScrollOutput || isFocused)
+                      ? focusedMaxHeightPx
+                      : undefined,
+                }}
+              >
+                <pre
+                  className="px-3 py-2 font-terminal whitespace-pre-wrap break-words"
+                  style={terminalTextFontSizeStyle(fontSize)}
+                >
+                  {renderAnsiToReactNodes({ value: outputTextForDisplay, terminalTheme })}
+                </pre>
+
+                {!shouldUseScrollOutput && !shouldUseFullOutput && !isFocused && isTruncatedView ? (
+                  <button
+                    type="button"
+                    className="absolute inset-0 h-full cursor-pointer bg-transparent"
+                    onClick={() => setIsFocused(true)}
+                    aria-label="Focus terminal output"
+                  >
+                    <div
+                      className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-muted/90 to-transparent"
+                      style={collapsedOutputFadeStyle}
+                    />
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 });

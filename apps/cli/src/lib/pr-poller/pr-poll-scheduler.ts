@@ -1,6 +1,17 @@
-import { collectViewedSessionIdsFromPresence, getServerNow, type SessionId } from '@lody/shared';
+import { statusRefreshInterval } from './pr-poll-priority';
+import { collectStatusTargets } from './pr-poll-targets';
+import { selectWorkflowHead } from './workflow-runs';
+import {
+  isPullRequestExplicitlyLinked,
+  planPullRequestLinkCheck,
+  collectViewedSessionIdsFromPresence,
+  getServerNow,
+  type LodyPresenceStateMap,
+  type SessionId,
+} from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { reportIfWasmFault } from '@/lib/loro/wasm-runtime-health';
 import { buildPrPollBatchQuery, type PrPollBatchQuery } from './graphql-batch-builder';
 import type {
   GitHubGraphQlClient,
@@ -11,18 +22,17 @@ import type {
 import type { PrPollerConfig } from './pr-poller-config';
 import {
   applyProviderSafetyFloor,
+  evaluateScopeGate,
   fullScopeQuota,
-  isScopeFrozen,
   nextRepoCooldown,
   refillScopeQuota,
-  scopeQuotaAvailableAtMs,
   spendScopeQuota,
+  type PrPollScopeGate,
 } from './pr-poll-quota';
 import { emptyPrPollerState, type PrPollerState, type PrPollerStateStore } from './pr-poller-state';
 import { selectHighOwners } from './pr-poll-priority';
 import {
   computeNextWakeAtMs,
-  computeTargetDueAtMs,
   pickNextBatch,
   planDueBatches,
   prPollTargetKey,
@@ -31,13 +41,22 @@ import {
 } from './pr-poll-select';
 import {
   computeDiscoveryFingerprint,
+  computePrPollMetaSignature,
   enumeratePrPollTargets,
-  resolveOwnerRepositoryContext,
+  projectMemberRepositoryContext,
+  discoveryOwnerKey,
   type AliveSessionMeta,
   type PrPollSessionEntry,
 } from './pr-poll-targets';
-import { planAssociation, planPullRequestMetaWrite } from './pr-poll-writeback';
-import type { ResolvedGitHubCredential } from './github-credential-resolver';
+import {
+  planAssociation,
+  planPullRequestMetaWrite,
+  planUnlinkedRemoval,
+} from './pr-poll-writeback';
+import {
+  AMBIENT_CREDENTIAL_REFRESH_MS,
+  type ResolvedGitHubCredential,
+} from './github-credential-resolver';
 import type { PrPollMetaPatch, PrPollerWorkspaceHandle } from './pr-poller-workspace';
 
 /**
@@ -66,6 +85,16 @@ const NEW_VIEWER_DEBOUNCE_MS = 1_000;
 const META_UPDATE_DEBOUNCE_MS = 2_000;
 const CREDENTIAL_RETRY_MS = 60_000;
 const CREDENTIAL_LOG_THROTTLE_MS = 10 * 60_000;
+/**
+ * How long a `(workspace, repo) → credential scope` observation may be used as
+ * a fast negative before the credential must be resolved for real again. Scope
+ * gating skips whole scopes without resolving credentials; this bound is what
+ * stops a long freeze from locking out a NEWLY available credential that would
+ * resolve to a different, ungated scope. It equals the resolver's own ambient
+ * refresh cadence: a remembered scope must never be staler than the credential
+ * it was learned from, or gating would delay login/account changes past it.
+ */
+const SCOPE_MAPPING_TTL_MS = AMBIENT_CREDENTIAL_REFRESH_MS;
 /** Freeze when GitHub signals a limit without a usable resetAt. */
 const DEFAULT_RATE_LIMIT_FREEZE_MS = 10 * 60_000;
 /**
@@ -96,6 +125,7 @@ type WorkspaceRuntime = {
   metadataUpdateTimer: NodeJS.Timeout | null;
   presenceWakeTimer: NodeJS.Timeout | null;
   lastCredentialLogAtMs: number;
+  confirmedAssociations: Map<SessionId, Set<string>>;
 };
 
 /** Per-owner effect outcome of one applied batch (gates the success stamps). */
@@ -113,7 +143,8 @@ export type PrPollSchedulerDeps = {
   config: PrPollerConfig;
   stateStore: PrPollerStateStore;
   logger: Logger;
-  client: Pick<GitHubGraphQlClient, 'executeBatch'>;
+  client: Pick<GitHubGraphQlClient, 'executeBatch'> &
+    Partial<Pick<GitHubGraphQlClient, 'executeWorkflows'>>;
   nowMs?: () => number;
 };
 
@@ -133,6 +164,16 @@ export class PrPollScheduler {
   private readonly lastAttemptAtMs = new Map<string, number>();
   /** Anti-starvation streak across wakes (see `pickNextBatch`). */
   private consecutiveHighDispatches = 0;
+  /**
+   * Last observed `(workspace, repo) → credential scope`, with the observation
+   * time. Credentials decide scopes, so this is the only way to know which
+   * scope a repo belongs to WITHOUT resolving its credential; it is used as a
+   * fast negative only (skip an already-gated scope) and expires after
+   * `SCOPE_MAPPING_TTL_MS` so a new credential always gets a real resolve.
+   */
+  private readonly knownRepoScopes = new Map<string, { scope: string; observedAtMs: number }>();
+  /** Per `scope|reason` suppression window for the scope-gate skip logs. */
+  private readonly scopeGateLogUntilMs = new Map<string, number>();
   private chain: Promise<void> = Promise.resolve();
   private wakeTimer: NodeJS.Timeout | null = null;
   private wakeAtMs: number | null = null;
@@ -187,6 +228,7 @@ export class PrPollScheduler {
       metadataUpdateTimer: null,
       presenceWakeTimer: null,
       lastCredentialLogAtMs: 0,
+      confirmedAssociations: new Map(),
     };
     this.workspaces.set(handle.workspaceId, runtime);
 
@@ -303,11 +345,12 @@ export class PrPollScheduler {
     } while (this.chain !== previous);
   }
 
-  // ------------------------------------------------------------------ facts
-
   /**
    * Viewing/activity only shift dueness (computed fresh on every wake), so a
    * presence change just needs a debounced wake — no state invalidation.
+   * It goes through `scheduleWake`, never straight to `runWake`: presence
+   * heartbeats fire on their own cadence and must not be able to pull a wake
+   * in front of a gate (see `scheduleWake`).
    */
   private onPresenceChanged(runtime: WorkspaceRuntime): void {
     if (!this.started || !runtime.ready || runtime.presenceWakeTimer) {
@@ -315,7 +358,7 @@ export class PrPollScheduler {
     }
     runtime.presenceWakeTimer = setTimeout(() => {
       runtime.presenceWakeTimer = null;
-      this.enqueue(() => this.runWake());
+      this.scheduleWake();
     }, NEW_VIEWER_DEBOUNCE_MS);
     runtime.presenceWakeTimer.unref?.();
   }
@@ -342,7 +385,7 @@ export class PrPollScheduler {
         }
         const result = await this.applyPendingSessionMetadata(runtime);
         if (result.changed) {
-          await this.runWake();
+          this.scheduleWake();
         }
       });
     }, META_UPDATE_DEBOUNCE_MS);
@@ -404,8 +447,18 @@ export class PrPollScheduler {
         changed = runtime.sessionMetas.delete(sessionId) || changed;
         continue;
       }
+      // The replica always takes the fresh meta, but only a change the poll
+      // projection can actually see (targets, repository context, lane input)
+      // counts as `changed` — an unrelated write (title, status, usage) must
+      // not re-project or wake.
+      const previous = runtime.sessionMetas.get(sessionId);
       runtime.sessionMetas.set(sessionId, { sessionId, meta });
-      changed = true;
+      if (
+        !previous ||
+        computePrPollMetaSignature(previous.meta) !== computePrPollMetaSignature(meta)
+      ) {
+        changed = true;
+      }
     }
     if (changed) {
       this.projectRuntimeEntries(runtime);
@@ -440,6 +493,23 @@ export class PrPollScheduler {
     return fingerprints;
   }
 
+  /**
+   * Presence only raises viewed Sessions to the high lane. This runs from timers
+   * with no caller to catch for it, so a failed read (a faulted Loro instance
+   * throws here) degrades to "nobody viewing" instead of an uncaught exception.
+   */
+  private readPresenceStates(runtime: WorkspaceRuntime): LodyPresenceStateMap {
+    try {
+      return runtime.handle.getPresenceStates() ?? {};
+    } catch (error) {
+      reportIfWasmFault(error);
+      this.deps.logger.debug(
+        `[pr-poller] Presence read failed for ${runtime.handle.workspaceId}: ${formatErrorMessage(error)}`
+      );
+      return {};
+    }
+  }
+
   /** Facts → schedulable targets: one pure pass over all ready workspaces. */
   private buildTargets(nowMs: number): SchedulableTarget[] {
     const { config } = this.deps;
@@ -448,30 +518,36 @@ export class PrPollScheduler {
       if (!runtime.ready) {
         continue;
       }
-      const viewed = collectViewedSessionIdsFromPresence(
-        runtime.handle.getPresenceStates() ?? {},
-        nowMs
-      );
+      const viewed = collectViewedSessionIdsFromPresence(this.readPresenceStates(runtime), nowMs);
       const highOwners = selectHighOwners(runtime.entries, viewed, nowMs, {
         activityWindowMs: config.activityWindowMs,
         highOwnerCap: config.highOwnerCap,
       });
+      const workflowOwners = runtime.handle.workflowObservationOwners?.();
       for (const entry of runtime.entries) {
         const lane = highOwners.has(entry.ownerSessionId) ? 'high' : 'low';
-        for (const statusTarget of entry.statusTargets) {
+        const workflowDemand = workflowOwners?.has(entry.ownerSessionId) ?? false;
+        const ownerMeta = runtime.sessionMetas.get(entry.ownerSessionId)?.meta;
+        const statusTargets =
+          ownerMeta && workflowDemand ? collectStatusTargets(ownerMeta, true) : entry.statusTargets;
+        for (const statusTarget of statusTargets) {
           targets.push(
             this.makeTarget(runtime, entry, {
               kind: 'status',
               repoFullName: statusTarget.repoFullName,
               lane,
+              // A link the provider could not read retries at the slow discovery cadence.
               desiredIntervalMs:
-                lane === 'high' ? config.highIntervalMs : config.lowStatusIntervalMs,
+                statusTarget.pendingLink === 'unreadable'
+                  ? config.lowDiscoveryIntervalMs
+                  : statusRefreshInterval(lane, workflowDemand, config),
               qualifier: String(statusTarget.prNumber),
               status: statusTarget,
             })
           );
         }
-        if (entry.discoveryTarget) {
+        for (const discoveryTarget of entry.discoveryTargets ??
+          (entry.discoveryTarget ? [entry.discoveryTarget] : [])) {
           // A discovery target with open/draft PRs rides the status cadence
           // (same batch, zero extra requests); a bare discovery target uses
           // the slower discovery cadence.
@@ -482,11 +558,13 @@ export class PrPollScheduler {
           targets.push(
             this.makeTarget(runtime, entry, {
               kind: 'discovery',
-              repoFullName: entry.discoveryTarget.repoFullName,
+              repoFullName: discoveryTarget.repoFullName,
               lane,
               desiredIntervalMs: lane === 'high' ? config.highIntervalMs : lowIntervalMs,
-              qualifier: entry.discoveryTarget.branch,
-              discovery: entry.discoveryTarget,
+              qualifier: discoveryTarget.memberId
+                ? JSON.stringify([discoveryTarget.memberId, discoveryTarget.branch])
+                : discoveryTarget.branch,
+              discovery: discoveryTarget,
             })
           );
         }
@@ -523,8 +601,6 @@ export class PrPollScheduler {
     };
   }
 
-  // -------------------------------------------------------------- wake loop
-
   private enqueue(fn: () => Promise<void>): void {
     this.chain = this.chain.then(fn).catch((error: unknown) => {
       this.deps.logger.debug(`[pr-poller] Poll chain error: ${formatErrorMessage(error)}`);
@@ -539,17 +615,35 @@ export class PrPollScheduler {
     this.wakeAtMs = null;
   }
 
+  /**
+   * Recompute the wake time from current facts. Every externally triggered
+   * wake (start, workspace ready, presence, metadata) goes through here, and
+   * `scheduleWakeAt` only ever moves a wake EARLIER — so an external trigger
+   * can advance a wake but never jump a gate: a due batch whose scope is
+   * frozen / out of tokens / cooling down contributes its availability time,
+   * not `nowMs`. Without this, presence heartbeats and unrelated metadata
+   * writes each buy a full wake that can only skip.
+   */
   private scheduleWake(): void {
     if (!this.started) {
       return;
     }
     const nowMs = this.nowMs();
     const targets = this.buildTargets(nowMs);
+    const gateHints: number[] = [];
+    let dispatchableNow = false;
+    for (const batch of planDueBatches(targets, nowMs)) {
+      const known = this.knownScopeGate(batch, nowMs);
+      if (known?.gate.gated) {
+        gateHints.push(known.gate.availableAtMs);
+        continue;
+      }
+      dispatchableNow = true;
+    }
     // Already-due targets (fresh registration, restart catch-up) run now;
-    // otherwise wake at the earliest future dueness, capped.
-    const anyDue = targets.some((target) => computeTargetDueAtMs(target) <= nowMs);
+    // otherwise wake at the earliest future dueness or gate opening, capped.
     this.scheduleWakeAt(
-      anyDue ? nowMs : computeNextWakeAtMs(targets, [], nowMs, MAX_WAKE_INTERVAL_MS)
+      dispatchableNow ? nowMs : computeNextWakeAtMs(targets, gateHints, nowMs, MAX_WAKE_INTERVAL_MS)
     );
   }
 
@@ -579,11 +673,17 @@ export class PrPollScheduler {
   }
 
   private async runWake(): Promise<void> {
+    await this.applyLocalUnlinks();
     const nowMs = this.nowMs();
     const targets = this.buildTargets(nowMs);
     this.pruneState(targets);
-    const remaining: PrPollBatchPlan[] = planDueBatches(targets, nowMs);
     const deferredHints: number[] = [];
+    // Gate whole scopes BEFORE the batch loop: a frozen/empty/cooling scope
+    // blocks every repo it owns, so resolving each repo's credential only to
+    // skip it is pure waste (and one log line per repo per wake).
+    const remaining: PrPollBatchPlan[] = planDueBatches(targets, nowMs).filter(
+      (batch) => !this.deferGatedBatch(batch, nowMs, deferredHints)
+    );
     while (remaining.length > 0) {
       const batch = pickNextBatch(
         remaining,
@@ -606,8 +706,74 @@ export class PrPollScheduler {
     );
   }
 
+  /**
+   * An unlink needs no provider query: drop unlinked URLs from the association
+   * list of every owned Session that still holds one (fresh meta, ownership
+   * revalidated). A failure leaves the URL in the list for the next wake;
+   * readers already hide it.
+   */
+  private async applyLocalUnlinks(): Promise<void> {
+    for (const runtime of this.workspaces.values()) {
+      if (!runtime.ready) continue;
+      for (const { sessionId, meta } of runtime.sessionMetas.values()) {
+        if (meta.parentSessionId || meta.isArchived || !planUnlinkedRemoval(meta)) continue;
+        try {
+          const fresh = await runtime.handle.readOwnerMeta(sessionId);
+          if (!fresh || fresh.isArchived || fresh.machineId !== runtime.handle.machineId) continue;
+          const plan = planUnlinkedRemoval(fresh);
+          if (!plan) continue;
+          const patch: PrPollMetaPatch = {};
+          if (plan.pullRequests) patch.pullRequests = plan.pullRequests;
+          if (plan.pullRequestState) patch.pullRequestState = plan.pullRequestState;
+          await runtime.handle.writeOwnerMeta(sessionId, patch);
+          runtime.sessionMetas.set(sessionId, { sessionId, meta: { ...fresh, ...patch } });
+          this.projectRuntimeEntries(runtime);
+        } catch (error) {
+          this.deps.logger.debug(
+            `[pr-poller] Failed to remove unlinked PRs for session ${sessionId}: ${formatErrorMessage(error)}`
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Record that explicitly linked PRs could not be read (missing, no access, or
+   * no credential). Only `prLinkCheck:*` keys are written, once per link generation.
+   */
+  private async recordUnreadableLinks(
+    runtime: WorkspaceRuntime,
+    targets: readonly SchedulableTarget[],
+    urls?: ReadonlySet<string>
+  ): Promise<void> {
+    const byOwner = new Map<SessionId, string[]>();
+    for (const target of targets) {
+      const url = target.status?.pendingLink ? target.status.url : null;
+      if (!url || (urls && !urls.has(url))) continue;
+      byOwner.set(target.ownerSessionId, [...(byOwner.get(target.ownerSessionId) ?? []), url]);
+    }
+    for (const [ownerSessionId, ownerUrls] of byOwner) {
+      try {
+        const fresh = await runtime.handle.readOwnerMeta(ownerSessionId);
+        if (!fresh || fresh.isArchived || fresh.machineId !== runtime.handle.machineId) continue;
+        const nowMs = this.nowMs();
+        const linkChecks = ownerUrls.flatMap((url) => {
+          const check = planPullRequestLinkCheck(fresh, url, nowMs);
+          return check ? [check] : [];
+        });
+        if (linkChecks.length > 0)
+          await runtime.handle.writeOwnerMeta(ownerSessionId, { linkChecks });
+      } catch (error) {
+        this.deps.logger.debug(
+          `[pr-poller] Failed to record unreadable PR links for session ${ownerSessionId}: ${formatErrorMessage(error)}`
+        );
+      }
+    }
+  }
+
   /** Bound the persisted state to currently-enumerated targets of ready workspaces. */
   private pruneState(targets: readonly SchedulableTarget[]): void {
+    this.pruneGateMemory(this.nowMs());
     const readyWorkspaceIds = new Set(
       Array.from(this.workspaces.values())
         .filter((runtime) => runtime.ready)
@@ -628,6 +794,15 @@ export class PrPollScheduler {
       }
       for (const entry of runtime.entries) {
         validOwners.add(`${runtime.handle.workspaceId}:${entry.ownerSessionId}`);
+        for (const memberId of entry.projectMemberIds ?? [])
+          validOwners.add(
+            `${runtime.handle.workspaceId}:${discoveryOwnerKey(entry.ownerSessionId, memberId)}`
+          );
+      }
+      for (const owner of runtime.confirmedAssociations.keys()) {
+        if (!validOwners.has(`${runtime.handle.workspaceId}:${owner}`)) {
+          runtime.confirmedAssociations.delete(owner);
+        }
       }
     }
     for (const key of Object.keys(this.state.discoveryFingerprints)) {
@@ -635,6 +810,25 @@ export class PrPollScheduler {
       if (readyWorkspaceIds.has(workspaceId) && !validOwners.has(key)) {
         delete this.state.discoveryFingerprints[key];
         this.deps.stateStore.deleteDiscoveryFingerprint(key);
+      }
+    }
+  }
+
+  /**
+   * Both gate caches are keyed by repo/scope and are only ever valid for a
+   * bounded window, so expired entries are dead weight: drop them on every
+   * wake instead of letting a long-lived daemon accumulate one per repository
+   * it has ever polled.
+   */
+  private pruneGateMemory(nowMs: number): void {
+    for (const [key, known] of this.knownRepoScopes) {
+      if (nowMs - known.observedAtMs >= SCOPE_MAPPING_TTL_MS) {
+        this.knownRepoScopes.delete(key);
+      }
+    }
+    for (const [key, untilMs] of this.scopeGateLogUntilMs) {
+      if (nowMs >= untilMs) {
+        this.scopeGateLogUntilMs.delete(key);
       }
     }
   }
@@ -649,7 +843,10 @@ export class PrPollScheduler {
       return false;
     }
     const nowMs = this.nowMs();
-    const credential = await runtime.handle.resolveCredential(batch.repoFullName);
+    const credential = await runtime.handle.resolveCredential(
+      batch.repoFullName,
+      batch.nativeCredentials
+    );
     if (!credential) {
       if (nowMs - runtime.lastCredentialLogAtMs >= CREDENTIAL_LOG_THROTTLE_MS) {
         runtime.lastCredentialLogAtMs = nowMs;
@@ -659,8 +856,10 @@ export class PrPollScheduler {
       }
       this.markAttempt(batch.targets, nowMs);
       deferredHints.push(nowMs + CREDENTIAL_RETRY_MS);
+      await this.recordUnreadableLinks(runtime, batch.targets);
       return false;
     }
+    this.rememberRepoScope(batch, credential.credentialScope, nowMs);
 
     const gate = this.preflightScope(credential, batch.repoFullName, deferredHints);
     if (!gate) {
@@ -693,6 +892,7 @@ export class PrPollScheduler {
     // truncated ones keep their dueness and form the next batch (no silent
     // starvation of the tail).
     this.markAttempt(this.includedTargets(batch, query), nowMs);
+    let activeCredential = credential;
     let outcome = await this.deps.client.executeBatch(query, credential.token);
     this.counters.calls += 1;
     let outcomeScope = gate.scope;
@@ -703,13 +903,18 @@ export class PrPollScheduler {
       // that scope's own freeze/bucket/cooldown gates, and quota must be
       // charged to the scope that actually made the call.
       runtime.handle.invalidateCredential(batch.repoFullName, credential);
-      const retried = await runtime.handle.resolveCredential(batch.repoFullName);
+      const retried = await runtime.handle.resolveCredential(
+        batch.repoFullName,
+        batch.nativeCredentials
+      );
       if (retried) {
+        this.rememberRepoScope(batch, retried.credentialScope, this.nowMs());
         const retryGate = this.preflightScope(retried, batch.repoFullName, deferredHints);
         if (!retryGate) {
           this.counters.skips += 1;
           return true;
         }
+        activeCredential = retried;
         outcome = await this.deps.client.executeBatch(query, retried.token);
         this.counters.calls += 1;
         outcomeScope = retryGate.scope;
@@ -725,6 +930,74 @@ export class PrPollScheduler {
       outcome,
       deferredHints
     );
+    if (
+      outcome.kind === 'success' &&
+      this.deps.client.executeWorkflows &&
+      runtime.handle.recordWorkflowObservations
+    ) {
+      const observations = [
+        ...outcome.batch.pullRequests.flatMap((item) => (item.ok && item.pr ? [item.pr] : [])),
+        ...outcome.batch.discoveries.flatMap((item) => (item.ok ? item.prs : [])),
+      ];
+      const heads = new Map<string, SessionId[]>();
+      const workflowOwners = runtime.handle.workflowObservationOwners?.();
+      for (const ownerId of new Set(batch.targets.map((target) => target.ownerSessionId))) {
+        if (!workflowOwners?.has(ownerId)) continue;
+        const meta = await runtime.handle.readOwnerMeta(ownerId);
+        if (!meta || meta.machineId !== runtime.handle.machineId || meta.isArchived) continue;
+        const head = selectWorkflowHead(meta, batch.repoFullName, observations);
+        if (head) heads.set(head, [...(heads.get(head) ?? []), ownerId]);
+      }
+      for (const [head, owners] of heads) {
+        // Actions denial must not disable ordinary PR observation; credentials still share quota.
+        const workflowsGate = this.preflightScope(
+          activeCredential,
+          `${batch.repoFullName}#actions`,
+          deferredHints
+        );
+        if (!workflowsGate) break;
+        const workflows = await this.deps.client.executeWorkflows(
+          batch.repoFullName,
+          head,
+          activeCredential.token
+        );
+        this.counters.calls += 1;
+        if (workflows.kind === 'token-invalid')
+          runtime.handle.invalidateCredential(batch.repoFullName, activeCredential);
+        await this.handleOutcome(
+          runtime,
+          { ...batch, targets: [] },
+          query,
+          workflowsGate.scope,
+          workflowsGate.cooldownKey,
+          workflows,
+          deferredHints
+        );
+        if (workflows.kind !== 'success') continue;
+        for (const ownerId of owners) {
+          try {
+            const meta = await runtime.handle.readOwnerMeta(ownerId);
+            if (
+              !meta ||
+              meta.machineId !== runtime.handle.machineId ||
+              meta.isArchived ||
+              selectWorkflowHead(meta, batch.repoFullName, observations) !== head
+            )
+              continue;
+            await runtime.handle.recordWorkflowObservations(
+              meta,
+              batch.repoFullName,
+              head,
+              workflows.batch.workflowRuns ?? [],
+              workflows.batch.workflowGap ?? true,
+              this.nowMs()
+            );
+          } catch (cause) {
+            logger.warn('[pr-poller] Workflow observation publication failed', cause);
+          }
+        }
+      }
+    }
     return true;
   }
 
@@ -756,37 +1029,103 @@ export class PrPollScheduler {
     repoFullName: string,
     deferredHints: number[]
   ): { scope: string; cooldownKey: string } | null {
-    const { config, logger } = this.deps;
     const nowMs = this.nowMs();
     const scope = credential.credentialScope;
-    const cooldownKey = `${scope}:${repoFullName}`;
-    const cooldown = this.state.repoCooldowns[cooldownKey];
-    if (cooldown && cooldown.nextRetryAtMs > nowMs) {
-      deferredHints.push(cooldown.nextRetryAtMs);
+    const gate = this.scopeGate(scope, repoFullName, nowMs);
+    this.state.scopes[scope] = gate.quota;
+    if (gate.gated) {
+      this.logScopeGate(scope, repoFullName, gate, nowMs);
+      deferredHints.push(gate.availableAtMs);
       return null;
     }
+    return { scope, cooldownKey: `${scope}:${repoFullName}` };
+  }
 
-    const quota = refillScopeQuota(
-      this.state.scopes[scope] ?? fullScopeQuota(nowMs, config),
+  private scopeGate(scope: string, repoFullName: string, nowMs: number): PrPollScopeGate {
+    return evaluateScopeGate({
+      quota: this.state.scopes[scope],
+      repoCooldown: this.state.repoCooldowns[`${scope}:${repoFullName}`],
       nowMs,
-      config
+      config: this.deps.config,
+    });
+  }
+
+  private repoScopeKey(
+    workspaceId: string,
+    repoFullName: string,
+    nativeCredentials = false
+  ): string {
+    return `${workspaceId}|${repoFullName}|${nativeCredentials}`;
+  }
+
+  /**
+   * Gate a batch by the scope its credential resolved to LAST time, without
+   * resolving anything. Returns null when that mapping is unknown or older
+   * than `SCOPE_MAPPING_TTL_MS` — then the batch must take the real path, so a
+   * newly available credential (possibly on a different, ungated scope) can
+   * never be locked out by a stale mapping.
+   */
+  private knownScopeGate(
+    batch: PrPollBatchPlan,
+    nowMs: number
+  ): { scope: string; gate: PrPollScopeGate } | null {
+    const known = this.knownRepoScopes.get(
+      this.repoScopeKey(batch.workspaceId, batch.repoFullName, batch.nativeCredentials)
     );
-    this.state.scopes[scope] = quota;
-
-    if (isScopeFrozen(quota, nowMs)) {
-      logger.debug(`[pr-poller] Scope ${scope} is frozen; skipping ${repoFullName}`);
-      deferredHints.push(quota.frozenUntilMs ?? nowMs + DEFAULT_RATE_LIMIT_FREEZE_MS);
+    if (!known || nowMs - known.observedAtMs >= SCOPE_MAPPING_TTL_MS) {
       return null;
     }
-    if (quota.tokens < 1) {
-      logger.debug(
-        `[pr-poller] Bucket empty for scope ${scope}; skipping ${repoFullName} until refill`
-      );
-      deferredHints.push(scopeQuotaAvailableAtMs(quota, nowMs, config));
-      return null;
-    }
+    return { scope: known.scope, gate: this.scopeGate(known.scope, batch.repoFullName, nowMs) };
+  }
 
-    return { scope, cooldownKey };
+  private rememberRepoScope(batch: PrPollBatchPlan, scope: string, nowMs: number): void {
+    this.knownRepoScopes.set(
+      this.repoScopeKey(batch.workspaceId, batch.repoFullName, batch.nativeCredentials),
+      {
+        scope,
+        observedAtMs: nowMs,
+      }
+    );
+  }
+
+  private deferGatedBatch(batch: PrPollBatchPlan, nowMs: number, deferredHints: number[]): boolean {
+    const known = this.knownScopeGate(batch, nowMs);
+    if (!known?.gate.gated) {
+      return false;
+    }
+    this.logScopeGate(known.scope, batch.repoFullName, known.gate, nowMs);
+    deferredHints.push(known.gate.availableAtMs);
+    this.counters.skips += 1;
+    return true;
+  }
+
+  /**
+   * One skip log per `(scope, reason)` per gate window. An exhausted bucket is
+   * the STEADY state for a handful of repos on one credential, so logging per
+   * repo per wake produced thousands of identical lines a day and hid
+   * everything else; the window ends exactly when the gate can next open.
+   */
+  private logScopeGate(
+    scope: string,
+    repoFullName: string,
+    gate: Extract<PrPollScopeGate, { gated: true }>,
+    nowMs: number
+  ): void {
+    if (gate.reason === 'repo-cooldown') {
+      // Already logged with its backoff when the cooldown was entered.
+      return;
+    }
+    const key = `${scope}|${gate.reason}`;
+    if (nowMs < (this.scopeGateLogUntilMs.get(key) ?? 0)) {
+      return;
+    }
+    this.scopeGateLogUntilMs.set(key, gate.availableAtMs);
+    const until = new Date(gate.availableAtMs).toISOString();
+    this.deps.logger.debug(
+      gate.reason === 'frozen'
+        ? `[pr-poller] Scope ${scope} is frozen; skipping ${repoFullName} and every other repo on this scope until ${until}`
+        : `[pr-poller] Bucket empty for scope ${scope}; skipping ${repoFullName} and every other repo on this scope until refill at ${until}`
+    );
   }
 
   private async handleOutcome(
@@ -857,6 +1196,8 @@ export class PrPollScheduler {
       }
       case 'repo-not-found-or-forbidden':
       case 'token-invalid': {
+        if (outcome.kind === 'repo-not-found-or-forbidden')
+          await this.recordUnreadableLinks(runtime, batch.targets);
         const next = nextRepoCooldown(
           this.state.repoCooldowns[cooldownKey],
           outcome.kind,
@@ -912,8 +1253,12 @@ export class PrPollScheduler {
         if (!entry?.ok || !effects?.discoveryOk) {
           continue;
         }
-        const fingerprintKey = `${target.workspaceId}:${target.ownerSessionId}`;
-        const fingerprint = computeDiscoveryFingerprint(target.repoFullName, branch);
+        const fingerprintKey = `${target.workspaceId}:${discoveryOwnerKey(target.ownerSessionId, target.discovery?.memberId)}`;
+        const fingerprint = computeDiscoveryFingerprint(
+          target.repoFullName,
+          branch,
+          target.discovery.activityAtMs ?? null
+        );
         if (this.state.discoveryFingerprints[fingerprintKey] !== fingerprint) {
           this.state.discoveryFingerprints[fingerprintKey] = fingerprint;
           this.deps.stateStore.upsertDiscoveryFingerprint(fingerprintKey, fingerprint);
@@ -948,9 +1293,20 @@ export class PrPollScheduler {
     for (const [ownerSessionId, targets] of owners) {
       const observations: PrObservation[] = [];
       const discovered: PrObservation[] = [];
+      const linked: PrObservation[] = [];
+      const unreadableLinks: string[] = [];
       let queriedBranch: string | null = null;
+      let memberId: string | undefined;
       for (const target of targets) {
-        if (target.status) {
+        if (target.status?.pendingLink) {
+          const result = results.pullRequests.find(
+            (candidate) => candidate.prNumber === target.status?.prNumber
+          );
+          // The provider's own URL becomes the association entry; a confirmed
+          // null is unreadable and never becomes an association.
+          if (result?.pr) linked.push(result.pr);
+          else if (result?.ok) unreadableLinks.push(target.status.url);
+        } else if (target.status) {
           const result = results.pullRequests.find(
             (candidate) => candidate.prNumber === target.status?.prNumber && candidate.pr
           );
@@ -962,6 +1318,7 @@ export class PrPollScheduler {
         const branch = target.discovery?.branch;
         if (branch) {
           queriedBranch = branch;
+          memberId = target.discovery?.memberId;
           const discovery = results.discoveries.find((candidate) => candidate.branch === branch);
           for (const pr of discovery?.prs ?? []) {
             discovered.push(pr);
@@ -973,9 +1330,13 @@ export class PrPollScheduler {
         await this.applyOwner(runtime, ownerSessionId, batch.repoFullName, {
           observations,
           discovered,
+          linked,
           queriedBranch,
+          memberId,
         })
       );
+      if (unreadableLinks.length > 0)
+        await this.recordUnreadableLinks(runtime, targets, new Set(unreadableLinks));
     }
     return ownerResults;
   }
@@ -987,7 +1348,10 @@ export class PrPollScheduler {
     args: {
       observations: PrObservation[];
       discovered: PrObservation[];
+      /** Provider-confirmed explicitly linked PRs not yet associated. */
+      linked?: PrObservation[];
       queriedBranch: string | null;
+      memberId?: string;
     }
   ): Promise<OwnerEffectResult> {
     const { logger } = this.deps;
@@ -1006,7 +1370,7 @@ export class PrPollScheduler {
       // queriedBranch)`. A repo/branch switch while the request was in flight
       // invalidates the DISCOVERY results (they belong to the old context);
       // status observations stay valid (URL-keyed, branch-independent).
-      const freshContext = resolveOwnerRepositoryContext(freshMeta);
+      const freshContext = projectMemberRepositoryContext(freshMeta, args.memberId, repoFullName);
       const contextUnchanged =
         args.queriedBranch === null ||
         (freshContext.repoFullName === repoFullName && freshContext.branch === args.queriedBranch);
@@ -1016,26 +1380,58 @@ export class PrPollScheduler {
       const newlyAssociated: PrObservation[] = [];
       const associationPlan = planAssociation({
         meta: freshMeta,
+        ...(freshMeta.projectRun ? { repoFullName } : {}),
         observations: args.observations,
         discovered,
         runtimeBranch: freshContext.branch,
+        confirmedAssociationUrls: runtime.handle.associatePullRequest
+          ? (runtime.confirmedAssociations.get(ownerSessionId) ?? new Set())
+          : undefined,
       });
       if (associationPlan) {
         const observation = discovered.find((pr) => pr.url === associationPlan.url);
-        const associated = await runtime.handle.associatePullRequest({
-          repoFullName,
-          prNumber: associationPlan.prNumber,
-          prUrl: associationPlan.url,
-          branch: freshContext.branch ?? '',
-          status: associationPlan.status,
-          ownerSessionId,
-        });
-        if (associated && observation) {
-          this.counters.discoveries += 1;
+        let associated =
+          !runtime.handle.associatePullRequest ||
+          (runtime.confirmedAssociations.get(ownerSessionId)?.has(associationPlan.url) ?? false);
+        try {
+          if (!associated && runtime.handle.associatePullRequest)
+            associated = await runtime.handle.associatePullRequest({
+              repoFullName,
+              prNumber: associationPlan.prNumber,
+              prUrl: associationPlan.url,
+              branch: freshContext.branch ?? '',
+              status: associationPlan.status,
+              ownerSessionId,
+            });
+        } catch (error) {
           logger.debug(
-            `[pr-poller] Discovered PR #${associationPlan.prNumber} (${associationPlan.status}) for session ${ownerSessionId}; association created`
+            `[pr-poller] Webhook association failed for ${associationPlan.url}: ${formatErrorMessage(error)}`
           );
-          // Local meta write only AFTER backend association success.
+        }
+        if (associated) {
+          runtime.confirmedAssociations.set(
+            ownerSessionId,
+            new Set([
+              ...(runtime.confirmedAssociations.get(ownerSessionId) ?? []),
+              associationPlan.url,
+            ])
+          );
+        } else {
+          discoveryOk = false;
+          // An earlier empty discovery must not make a newly published terminal
+          // PR idle while its webhook association still needs retrying.
+          const key = `${runtime.handle.workspaceId}:${discoveryOwnerKey(ownerSessionId, args.memberId)}`;
+          delete this.state.discoveryFingerprints[key];
+          this.deps.stateStore.deleteDiscoveryFingerprint(key);
+        }
+        if (observation) {
+          if (!(freshMeta.pullRequests ?? []).some((pr) => pr.url === observation.url))
+            this.counters.discoveries += 1;
+          logger.debug(
+            `[pr-poller] Discovered PR #${associationPlan.prNumber} (${associationPlan.status}) for session ${ownerSessionId}; observation accepted`
+          );
+          // Repository read access proves the summary. Hosted webhook linkage
+          // is a separate effect and must not hide an observed PR from the UI.
           freshMeta = await runtime.handle.readOwnerMeta(ownerSessionId);
           if (
             !freshMeta ||
@@ -1044,23 +1440,83 @@ export class PrPollScheduler {
           ) {
             return failed;
           }
+          const publicationContext = projectMemberRepositoryContext(
+            freshMeta,
+            args.memberId,
+            repoFullName
+          );
+          if (
+            publicationContext.repoFullName !== repoFullName ||
+            publicationContext.branch !== args.queriedBranch
+          )
+            return failed;
           newlyAssociated.push(observation);
-        } else {
-          // Association must land before any local write; retry the whole
-          // round (query included) at the attempt floor.
-          discoveryOk = false;
         }
       }
 
+      // Explicit links: the provider confirmed the PR by number. Revalidate the
+      // link on fresh meta (an unlink while the query ran wins), then publish
+      // it and run the same hosted webhook linkage as a discovered PR. Linkage
+      // failure is retried on later rounds while the PR is open.
+      for (const observation of args.linked ?? []) {
+        if (
+          !isPullRequestExplicitlyLinked(freshMeta, observation.url) ||
+          newlyAssociated.some((pr) => pr.url === observation.url)
+        )
+          continue;
+        newlyAssociated.push(observation);
+        this.counters.discoveries += 1;
+        logger.debug(
+          `[pr-poller] Linked PR #${observation.number} (${observation.status}) for session ${ownerSessionId}`
+        );
+      }
+      if (runtime.handle.associatePullRequest) {
+        const linkedOpen = [...(args.linked ?? []), ...args.observations].filter(
+          (pr) =>
+            (pr.status === 'open' || pr.status === 'draft') &&
+            isPullRequestExplicitlyLinked(freshMeta, pr.url) &&
+            !runtime.confirmedAssociations.get(ownerSessionId)?.has(pr.url)
+        );
+        for (const pr of linkedOpen) {
+          let associated = false;
+          try {
+            associated = await runtime.handle.associatePullRequest({
+              repoFullName,
+              prNumber: pr.number,
+              prUrl: pr.url,
+              branch: pr.headRefName,
+              status: pr.status,
+              ownerSessionId,
+            });
+          } catch (error) {
+            logger.debug(
+              `[pr-poller] Webhook association failed for ${pr.url}: ${formatErrorMessage(error)}`
+            );
+          }
+          if (associated)
+            runtime.confirmedAssociations.set(
+              ownerSessionId,
+              new Set([...(runtime.confirmedAssociations.get(ownerSessionId) ?? []), pr.url])
+            );
+        }
+      }
+
+      await runtime.handle.recordObservations?.(
+        freshMeta,
+        repoFullName,
+        [...args.observations, ...discovered],
+        this.nowMs()
+      );
       const plan = planPullRequestMetaWrite({
         meta: freshMeta,
+        ...(freshMeta.projectRun ? { repoFullName } : {}),
         observations: [...args.observations, ...discovered],
         newlyAssociated,
         runtimeBranch: freshContext.branch,
         nowSec: Math.floor(this.nowMs() / 1000),
       });
       if (plan) {
-        const patch: PrPollMetaPatch = {};
+        const patch: PrPollMetaPatch = { lifecycle: plan.lifecycle };
         if (plan.pullRequests) {
           patch.pullRequests = plan.pullRequests;
         }

@@ -1,16 +1,17 @@
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
 import {
+  bindAgentRoleTarget,
+  formatAgentRoleMentionValue,
   getAgentRoleEmoji,
-  getAgentRoleMentionSlug,
-  selectMentionableAgentRoles,
+  getAgentRoleTargetMentionSlug,
+  getAgentRoleTargets,
   type AgentRole,
-  type AgentRoleMentionScope,
+  type AgentRoleAvailability,
   type MachineId,
   type MachineViewMeta,
   type TextRewrite,
 } from '@lody/shared';
-import { userAtom } from '@/atoms';
 import type { AgentRoleDetailSubject } from '@/components/sessions/agent-role-detail-pane';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import {
@@ -18,7 +19,6 @@ import {
   type HydratedMentions,
 } from '@/components/mentions/mention-hydration';
 import { rankMentionCandidates } from '@/components/mentions/mention-rank';
-import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import {
   useAgentRoleAvailability,
@@ -43,12 +43,19 @@ import {
 
 export type AgentRoleMentionItem = {
   /**
-   * The text written after `@`, derived from the Role's name. Whitespace-free
-   * by construction, and it changes when the name does — which is why the
+   * The text written after `@`, derived from the Role's name — or, for one of
+   * several targets, its alias or the name and machine. Whitespace-free by
+   * construction, and it changes when the name does — which is why the
    * committed range carries the id instead.
    */
   slug: string;
+  /** What the committed range carries: `formatAgentRoleMentionValue`. */
+  value: string;
+  /** The row's title: the name, the alias, or `name · machine`. */
+  label: string;
+  /** Bound to this item's machine: its inline target is the one that runs. */
   role: AgentRole;
+  availability: AgentRoleAvailability;
   /**
    * The bound agent and the machine it runs on, carried so the detail pane can
    * resolve this Role's stored ids into the labels that agent publishes, and
@@ -59,142 +66,127 @@ export type AgentRoleMentionItem = {
   machine?: Pick<MachineViewMeta, 'acpCapabilities' | 'name'> | null;
 };
 
-// ---------------------------------------------------------------------------
-// Work-context scope
-// ---------------------------------------------------------------------------
-
-/**
- * What a composer is attached to, as far as Roles are concerned.
- *
- * Kept separate from the shared `AgentRoleMentionScope` so the rule is decidable
- * from the composer's own props: which machines the user may reach is resolved
- * later, by the hook that already reads the visible-machine index.
- */
-export type AgentRoleMentionContext =
-  | { kind: 'github' }
-  | { kind: 'machine'; machineId: MachineId | null };
-
-/**
- * Where a composer's Roles may run.
- *
- * A GitHub project is the only context that opens up: the target Session clones
- * the repo itself, so it can live on another authorized machine. A Local
- * Project — and a plain chat, in V1 — is pinned to the machine the work is on,
- * because a Role elsewhere could not reach that filesystem. A GitHub session
- * that is already checked out on a machine (`localWorktree`) is pinned for the
- * same reason.
- */
-export const buildAgentRoleMentionContext = (options: {
-  mentionSource: MentionProjectSource | undefined;
-  /** The machine this chat runs on, when it has one. */
-  currentMachineId: string | null | undefined;
-}): AgentRoleMentionContext => {
-  const currentMachineId = (options.currentMachineId || null) as MachineId | null;
-  const { mentionSource } = options;
-  if (mentionSource?.kind === 'local') {
-    return { kind: 'machine', machineId: mentionSource.machineId };
-  }
-  // A GitHub project whose files are being read out of a live worktree is
-  // already checked out on one machine, so it is pinned like a local project.
-  if (mentionSource?.kind === 'github' && mentionSource.repoFullName) {
-    return mentionSource.localWorktree
-      ? { kind: 'machine', machineId: mentionSource.localWorktree.machineId }
-      : { kind: 'github' };
-  }
-  if (mentionSource?.kind === 'provider' && mentionSource.githubRepoFullName) {
-    return { kind: 'github' };
-  }
-  return { kind: 'machine', machineId: currentMachineId };
-};
-
-export const resolveAgentRoleMentionScope = (
-  context: AgentRoleMentionContext,
-  authorizedMachineIds: ReadonlySet<MachineId>
-): AgentRoleMentionScope =>
-  context.kind === 'github'
-    ? { kind: 'authorized_machines', machineIds: authorizedMachineIds }
-    : { kind: 'machine', machineId: context.machineId };
-
-// ---------------------------------------------------------------------------
-// Candidates
-// ---------------------------------------------------------------------------
-
-/** Matches the other categories' caps: every row is an arrow-key stop. */
-const MAX_AGENT_ROLE_SUGGESTIONS = 50;
-
+/** Available matches precede disabled matches, even when the latter score higher. */
 export const selectAgentRoleMentionCandidates = (
   items: readonly AgentRoleMentionItem[],
   term: string,
-  limit = MAX_AGENT_ROLE_SUGGESTIONS
-): AgentRoleMentionItem[] =>
-  rankMentionCandidates(items, term, {
-    limit,
-    fields: (item) => [item.slug, item.role.name],
-  });
+  limit = items.length
+): AgentRoleMentionItem[] => {
+  const rank = (available: boolean) =>
+    rankMentionCandidates(
+      items.filter((item) => (item.availability.kind === 'available') === available),
+      term,
+      { limit, fields: (item) => [item.slug, item.label, item.role.name] }
+    );
+  return [...rank(true), ...rank(false)].slice(0, limit);
+};
 
-// ---------------------------------------------------------------------------
-// Items
-// ---------------------------------------------------------------------------
-
+/**
+ * One item per machine a Role runs on. A single-target Role is one item, named
+ * and mentioned as today. A Role on several machines lists every target, each
+ * labelled by its alias or `name · machine`; the preferred machine's target
+ * comes first so the composer's own machine is the first choice.
+ */
 export const buildAgentRoleMentionItems = (
   roles: readonly AgentRole[],
   resolve: {
+    availability: (role: AgentRole) => AgentRoleAvailability;
     machine: (machineId: MachineId) => AgentRoleMentionItem['machine'] | undefined;
     agentConfig: (role: AgentRole) => AgentRoleDetailSubject['agentConfig'] | undefined;
-  }
+  },
+  preferredMachineId?: MachineId | null
 ): AgentRoleMentionItem[] =>
-  roles.map((role) => ({
-    slug: getAgentRoleMentionSlug(role),
-    role,
-    machine: resolve.machine(role.machineId) ?? null,
-    agentConfig: resolve.agentConfig(role),
-  }));
+  [...roles]
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
+    .flatMap((role) => {
+      const targets = getAgentRoleTargets(role);
+      const multi = targets.length > 1;
+      const ordered = preferredMachineId
+        ? [
+            ...targets.filter((target) => target.machineId === preferredMachineId),
+            ...targets.filter((target) => target.machineId !== preferredMachineId),
+          ]
+        : targets;
+      return ordered.flatMap((target) => {
+        const bound = bindAgentRoleTarget(role, target.machineId);
+        if (!bound) return [];
+        const machine = resolve.machine(target.machineId) ?? null;
+        const machineName = machine?.name || target.machineId;
+        const label = !multi ? role.name : target.alias || `${role.name} · ${machineName}`;
+        return [
+          {
+            // `@Reviewer-MacBook`: the separator dot is for reading, not typing.
+            slug: getAgentRoleTargetMentionSlug({
+              roleName: role.name,
+              alias: target.alias,
+              machineName,
+              multiTarget: multi,
+            }),
+            value: formatAgentRoleMentionValue(role.id, multi ? target.machineId : undefined),
+            label,
+            role: bound,
+            availability: resolve.availability(bound),
+            machine,
+            agentConfig: resolve.agentConfig(bound),
+          },
+        ];
+      });
+    });
 
 /**
- * The Roles this composer may offer, already filtered by visibility,
- * executability, and work context.
+ * Every readable Role, with execution availability retained for disabled menu
+ * rows. Only available items may expand before send.
+ *
+ * No work-context scope: a Role may be dispatched from any composer to any
+ * machine the user can reach, and "reachable" is already the availability
+ * resolver's `machine_unknown` rule over the same visible-machine index.
  *
  * One owner, like `useSessionMentionItems`: the menu and the before-send
  * expansion both need the same list, and deriving it twice would re-resolve
  * every Role's availability on each machine-presence tick.
  */
-export function useAgentRoleMentionItems(context: AgentRoleMentionContext): AgentRoleMentionItem[] {
-  const currentUserId = useAtomValue(userAtom)?.id ?? null;
+export function useAgentRoleMentionItems(
+  /** The composer's machine, whose targets lead; ordering only. */
+  preferredMachineId?: MachineId | null
+): AgentRoleMentionItem[] {
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const { machines } = useVisibleMachineMetas();
   const { roles } = useWorkspaceAgentRoles();
   const { resolve } = useAgentRoleAvailability(roles);
 
   return React.useMemo(() => {
-    const mentionable = selectMentionableAgentRoles(roles, {
-      currentUserId,
-      scope: resolveAgentRoleMentionScope(context, new Set(machines.keys())),
-      getAvailability: resolve,
-    });
     // Indexed once: the same list is walked per Role, and this rebuilds on
     // every machine-presence tick.
     const agentConfigById = new Map(agentConfigs.map((config) => [config.id, config]));
-    return buildAgentRoleMentionItems(mentionable, {
-      machine: (machineId) => machines.get(machineId),
-      agentConfig: (role) => agentConfigById.get(role.agentConfigId),
-    });
-  }, [agentConfigs, context, currentUserId, machines, resolve, roles]);
+    return buildAgentRoleMentionItems(
+      roles,
+      {
+        availability: resolve,
+        machine: (machineId) => machines.get(machineId),
+        agentConfig: (role) => agentConfigById.get(role.agentConfigId),
+      },
+      preferredMachineId
+    );
+  }, [agentConfigs, machines, preferredMachineId, resolve, roles]);
 }
 
-// ---------------------------------------------------------------------------
-// Text: hydration and before-send expansion
-// ---------------------------------------------------------------------------
-
 /**
- * The instruction the current agent receives in place of the chip.
+ * The reference the current agent receives in place of the chip. It names the
+ * Role, not an action: the user's own words say what to do with it.
  *
  * Carries the Role id and nothing else that matters: the machine, agent config,
  * model, reasoning, and prompt prefix come from the workspace catalog, so the
  * agent cannot restate them differently. Operation acceptance freezes the
  * resolved configuration for recovery and retry.
  */
-export const buildAgentRoleMentionPrompt = (role: { id: string; name: string }): string =>
-  `use lody mcp to create a session with agent role[id: ${role.id}, name: ${role.name}]`;
+export const buildAgentRoleMentionPrompt = (
+  role: { id: string; name: string },
+  /** Only for a Role on several machines: the target the user picked. */
+  machineId?: string
+): string =>
+  machineId
+    ? `[Agent Role: ${role.name} (agentRoleId: ${role.id}, agentRoleMachineId: ${machineId})]`
+    : `[Agent Role: ${role.name} (agentRoleId: ${role.id})]`;
 
 export const buildAgentRoleMentionRewrites = (
   text: string,
@@ -204,17 +196,20 @@ export const buildAgentRoleMentionRewrites = (
   const rewrites: TextRewrite[] = [];
   for (const mention of mentions) {
     if (mention.kind !== 'agent_role' || !mention.value) continue;
-    const item = items.find((candidate) => candidate.role.id === mention.value);
+    const item = items.find((candidate) => candidate.value === mention.value);
     const label = text.slice(mention.start, mention.end).replace(/^@/, '');
     // An unknown Role id is left verbatim on purpose: the Role may have been
     // deleted, unshared, or become unavailable since the draft was written, and
     // a stale token the agent can ignore beats an instruction to create a
     // Session from something that no longer authorizes one.
-    if (!item || !label) continue;
+    if (!item || item.availability.kind !== 'available' || !label) continue;
     rewrites.push({
       start: mention.start,
       end: mention.end,
-      replacement: buildAgentRoleMentionPrompt(item.role),
+      replacement: buildAgentRoleMentionPrompt(
+        item.role,
+        item.value === item.role.id ? undefined : item.role.machineId
+      ),
       // The mark is frozen with the span, not resolved when the bubble renders:
       // a sent message shows the Role as it was, and painting history must not
       // depend on the mutable catalog being loaded.
@@ -244,7 +239,11 @@ export const hydrateAgentRoleMentionsFromText = (
 ): HydratedMentions =>
   hydrateSlugMentionsFromText({
     text,
-    slugToValue: new Map(items.map((item) => [item.slug, item.role.id as string])),
+    slugToValue: new Map(
+      items
+        .filter((item) => item.availability.kind === 'available')
+        .map((item) => [item.slug, item.value])
+    ),
     kind: 'agent_role',
     knownFileTokens,
   });

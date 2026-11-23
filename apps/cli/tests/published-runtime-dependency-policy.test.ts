@@ -6,11 +6,11 @@ import {
 
 describe('published runtime dependency policy', () => {
   it('accepts exact stable and prerelease semantic versions', () => {
-    expect(isExactSemverSpecifier('1.14.1')).toBe(true);
+    expect(isExactSemverSpecifier('1.15.1')).toBe(true);
     expect(isExactSemverSpecifier('1.2.0-beta.14')).toBe(true);
   });
 
-  it.each(['^1.14.1', '~1.14.1', '>=1.14.1', 'workspace:^1.14.1'])(
+  it.each(['^1.15.1', '~1.15.1', '>=1.15.1', 'workspace:^1.15.1'])(
     'rejects the non-exact specifier %s',
     (specifier) => {
       expect(isExactSemverSpecifier(specifier)).toBe(false);
@@ -22,7 +22,7 @@ describe('published runtime dependency policy', () => {
       collectRuntimeDependencyVersionIssues({
         dependencyBlocks: [
           {
-            'loro-crdt': '^1.14.1',
+            'loro-crdt': '^1.15.1',
             '@lydell/node-pty': '1.2.0-beta.15',
           },
         ],
@@ -33,7 +33,7 @@ describe('published runtime dependency policy', () => {
       {
         dependencyName: 'loro-crdt',
         expectedVersion: 'an exact semantic version',
-        actualVersion: '^1.14.1',
+        actualVersion: '^1.15.1',
       },
       {
         dependencyName: '@lydell/node-pty',

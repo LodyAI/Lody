@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { AgentConfigMeta } from '@lody/shared';
 
 import { AgentIcon } from '@/components/icons/agent-icon';
-import { DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 
 /**
  * "Recently used" run configurations, rendered at the top of
@@ -75,17 +75,17 @@ export function RecentRunConfigMenuGroup({
 
   return (
     <>
-      <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+      <Menu.GroupLabel className="text-xs font-normal text-muted-foreground">
         {t('chat.runConfig.recentLabel', 'Recently used')}
-      </DropdownMenuLabel>
+      </Menu.GroupLabel>
       {items.map((item) => (
-        <DropdownMenuItem
+        <Menu.Item
           key={item.id}
           // The row is assembled from several spans, so give Radix an explicit
           // string for typeahead and screen readers instead of the DOM soup.
-          textValue={describeItem(item, planLabel, fastLabel)}
+          label={describeItem(item, planLabel, fastLabel)}
           title={describeItem(item, planLabel, fastLabel)}
-          onSelect={() => onSelect(item.id)}
+          onClick={() => onSelect(item.id)}
           // A recent entry must never set the menu's width: a long agent name
           // would otherwise stretch the whole dropdown and drag the Agent /
           // Model / Reasoning values out to the far edge. Past this cap the
@@ -105,36 +105,26 @@ export function RecentRunConfigMenuGroup({
               className="h-4 w-4 shrink-0"
             />
           )}
-          {/* One left-packed phrase — "Claude · Opus 5 · High" reads as a single
-              configuration, the way the trigger face does. The dots only work
-              while the parts stay adjacent, so nothing in here may grow; the
-              row's slack goes to the spacer before the glyph column instead.
-              Name and model both shrink, proportionally to their length, so
-              the longer one gives up more: a fixed-width model truncated names
-              to "Cla…", and a min-width floor padded a short name like "Grok"
-              and reopened the gap before the dot. */}
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className="min-w-0 truncate">{item.role?.name ?? item.agent.name}</span>
+          {/* Agent holds the left edge; model and reasoning are pushed to a
+              right-hand column so all three scan down the list the way the
+              Agent / Model / Reasoning rows below this group do. The name takes
+              the row's slack and truncates first, because the right column is
+              the part a returning user is comparing between rows. */}
+          <span className="min-w-0 flex-1 truncate">{item.role?.name ?? item.agent.name}</span>
+          {/* No dot between name and model: the separator only reads as one
+              phrase while the parts are adjacent, and they no longer are. The
+              model keeps its own cap so a long name cannot push it off the cap
+              set on the row. */}
+          <span className="flex shrink-0 items-center gap-1.5 pl-2 text-xs text-muted-foreground">
             {item.modelLabel ? (
-              <>
-                <RowDot />
-                <span className="min-w-0 max-w-32 truncate text-xs text-muted-foreground">
-                  {item.modelLabel}
-                </span>
-              </>
+              <span className="min-w-0 max-w-32 truncate">{item.modelLabel}</span>
             ) : null}
-            {item.reasoningLabel ? (
-              <>
-                <RowDot />
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {item.reasoningLabel}
-                </span>
-              </>
-            ) : null}
+            {item.modelLabel && item.reasoningLabel ? <RowDot /> : null}
+            {item.reasoningLabel ? <span className="shrink-0">{item.reasoningLabel}</span> : null}
           </span>
           {/* Glyphs park in a right-hand column so plan/fast can be scanned
               down the list instead of hunted at the end of each phrase. */}
-          <span className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+          <span className="flex shrink-0 items-center gap-1 pl-2">
             {item.planOn ? (
               <ListChecks
                 className="h-3.5 w-3.5 text-primary"
@@ -146,9 +136,9 @@ export function RecentRunConfigMenuGroup({
               <Zap className="h-3.5 w-3.5 text-primary" strokeWidth={1.8} aria-hidden="true" />
             ) : null}
           </span>
-        </DropdownMenuItem>
+        </Menu.Item>
       ))}
-      <DropdownMenuSeparator />
+      <Menu.Separator />
     </>
   );
 }

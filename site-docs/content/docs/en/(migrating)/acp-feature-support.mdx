@@ -1,0 +1,124 @@
+---
+title: ACP and Extension Feature Support
+description: A support matrix for Lody's built-in ACP providers — standard ACP capabilities plus the Lody extension features each provider adapter negotiates through acp-extension-core.
+---
+
+# ACP and Extension Feature Support
+
+This page is for readers coming from Codex, Claude Code, or another ACP agent who want to know
+which capabilities carry over. It explains what ACP is, how Lody extends it, and what each built-in
+provider supports. If you have not connected a runtime yet, start with
+[Coming from Codex or Claude Code](/docs/from-codex-claude-code) or [Agent Config](/docs/quickstart).
+
+## What ACP is
+
+[Agent Client Protocol](https://agentclientprotocol.com/) (ACP) is an open protocol between a
+client—the app you use—and an agent that does the work. Lody is an ACP client. It launches the
+provider's ACP server, negotiates capabilities during `initialize`, and then exchanges prompts,
+streaming updates, tool calls, permission requests, and session lifecycle events over that one
+connection.
+
+ACP covers the common core, so two ACP agents can still differ in optional features: images,
+embedded context, session resume or fork, MCP transports, elicitation, and more. That is why Lody
+negotiates capabilities instead of assuming them. The baseline works for every built-in provider:
+text prompts, streaming updates, tool calls, permission requests, cancellation, and Lody's
+filesystem and terminal callbacks.
+
+## How Lody extends ACP
+
+Lody's own capabilities live in [`acp-extension-core`](https://github.com/LodyAI/acp-extension-core),
+a provider-neutral contract on top of ACP v1. Features such as streaming subagent events, usage
+accounting, rate limits, durable goals, and context compaction need a stable shared description, so
+each one is versioned and advertised independently under `_meta.lody`:
+
+- the agent advertises what it implements on `InitializeResponse.agentCapabilities._meta.lody`;
+- the client advertises its own features on `InitializeRequest.clientCapabilities._meta.lody`;
+- a missing key means the peer does not support that feature, and support for one feature never
+  implies support for another.
+
+The public `acp-extension-*` adapters translate each runtime into this contract, so the Lody client
+reads the same shape regardless of which provider is behind the connection. A custom or registry ACP
+agent can implement the same keys. See the
+[capability catalog](https://github.com/LodyAI/acp-extension-core#capability-catalog) for the exact
+payloads.
+
+## Support at a glance
+
+The table combines standard ACP capabilities (prefixed `ACP:`) with Lody extension capabilities
+(prefixed `Lody:`). All nine providers share the ACP baseline described above; only the optional
+capabilities below differ by provider. Provider names link to the runtime or adapter repository.
+
+| Provider             | ACP: image | ACP: embedded context | ACP: load | ACP: resume | ACP: fork | ACP: extra directories | ACP: MCP | ACP: logout | ACP: elicitation | Lody: subagent events | Lody: session title | Lody: usage | Lody: rate limits | Lody: fork at turn | Lody: steering | Lody: tasks | Lody: subagents | Lody: goal | Lody: compaction |
+| -------------------- | ---------- | --------------------- | --------- | ----------- | --------- | ---------------------- | -------- | ----------- | ---------------- | --------------------- | ------------------- | ----------- | ----------------- | ------------------ | -------------- | ----------- | --------------- | ---------- | ---------------- |
+| <a href="https://github.com/LodyAI/acp-extension-claude" target="_blank" rel="noreferrer"><strong>Claude Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-codex" target="_blank" rel="noreferrer"><strong>Codex</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-grok" target="_blank" rel="noreferrer"><strong>Grok</strong></a> | — | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓³ | — | — | — |
+| <a href="https://github.com/LodyAI/acp-extension-kimi" target="_blank" rel="noreferrer"><strong>Kimi Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ◐⁴ | ✓ | ✓ | ✓ | — | ✓¹ | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-devin" target="_blank" rel="noreferrer"><strong>Devin</strong></a> | ✓ | ✓ | ✓ | — | — | ✓ | HTTP+SSE | — | ✓ | ✓ | — | — | — | — | — | — | — | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-pi" target="_blank" rel="noreferrer"><strong>Pi</strong></a> | ✓ | ✓ | ✓ | ✓ | — | — | — | — | ✓ | ✓ | — | ✓ | — | — | ✓ | — | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-dsh" target="_blank" rel="noreferrer"><strong>DeepSeek Harness</strong></a> | ◐⁵ | — | ✓ | ✓ | ✓ | — | HTTP | — | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓¹ | ✓ | ✓ | ✓ |
+| <a href="https://github.com/bubbuild/bub" target="_blank" rel="noreferrer"><strong>Bub</strong></a> | — | — | ✓ | ✓ | — | — | HTTP+SSE | — | ✓ | — | — | — | — | — | ✓ | — | — | — | — |
+| <a href="https://github.com/arcships/dimcode" target="_blank" rel="noreferrer"><strong>Dimcode</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Legend:
+
+- **✓** — the provider declares the capability (for standard ACP, it advertises it in `initialize`).
+- **◐** — partially declared; see the notes below.
+- **—** — not declared by the provider.
+
+### Extension capability reference
+
+The `Lody:` columns describe what the provider declares. These are the provider-side
+capabilities behind each column:
+
+- **subagent events** — the adapter streams child-agent snapshots, progress, and output on
+  `_lody/subagents/event`.
+- **session title** — the adapter generates the title and pushes it as a standard
+  `session_info_update` tagged with `_meta.lody.titleSource`.
+- **usage** — context and token accounting on the standard `usage_update`, with per-model totals.
+- **rate limits** — quota snapshots on `_lody/rate_limits/update`, with an optional
+  `_lody/rate_limits/get` query.
+- **fork at turn** — `session/fork` can name the historical turn to fork from.
+- **steering** — guidance can be injected into an in-flight turn through `_lody/session/steer` or
+  `_meta.lody.steer`.
+- **tasks** — background or scheduled work reported on the normal tool-call lifecycle with
+  `_meta.lody.task`.
+- **subagents** — subagent lifecycle, plus optional list, cancel, and output queries.
+- **goal** — a durable session goal that survives past one prompt, with set, pause, resume, and
+  clear actions.
+- **compaction** — context compaction and retry reported as a tool lifecycle with
+  `_meta.lody.activity`.
+
+Notes:
+
+1. **Tasks:** Claude Code, Codex, Kimi Code, and DeepSeek Harness declare background tasks; Grok
+   declares scheduled tasks. None of them declares both.
+2. **Subagents:** Claude Code and Codex declare the lifecycle only, not the list, cancel, or output
+   queries.
+3. **Grok tasks** are scheduled tasks only.
+4. **Kimi Code session title** is advertised only when the installed Kimi engine supports its title
+   feature; otherwise Lody generates the title itself.
+5. **DeepSeek Harness image input** depends on the selected model. The adapter enables the capability
+   only when the active model declares image input.
+6. **Dimcode MCP:** Dimcode advertises Streamable HTTP and SSE but reports stdio MCP as unsupported.
+
+In the `ACP: MCP` column, `HTTP+SSE` means the provider advertises both transports and `HTTP` means
+it advertises only HTTP. Stdio MCP is the usual ACP baseline; Dimcode is the exception in note 6.
+The `Devin` and `Grok` standard ACP columns reflect their official runtimes, while the Lody columns
+show what the Lody compatibility proxy adds. `Bub` and `Dimcode` are external ACP servers launched by
+Lody; their rows reflect what those servers declare themselves, including the Lody extensions they
+implement.
+
+The support information above reflects the capability declarations shipped with Lody's adapters and
+external ACP servers. Lody reads the negotiated result at session start, so a provider update can
+change what appears in the app before this page is updated. For an independent, versioned comparison
+of standard ACP implementations, see [ACP Wall](https://github.com/wibus-wee/acp-wall).
+
+## Next
+
+<Cards>
+  <Card href="/docs/from-codex-claude-code" title="Coming from Codex or Claude Code" />
+  <Card href="/docs/quickstart" title="Agent Config" />
+  <Card href="/docs/cli-runtimes" title="CLI Runtime Types" />
+  <Card href="/docs/concepts" title="Concepts & Glossary" />
+</Cards>

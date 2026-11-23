@@ -27,18 +27,6 @@ function createHarness(initiallyCommitted = false) {
   }
 }
 
-void test('routes a caught initial render through fatal IPC after the boundary commits', () => {
-  const harness = createHarness()
-  const error = new Error('caught during initial render')
-
-  harness.reporting.onReactCaughtError(error)
-  harness.commit()
-  harness.flush()
-
-  assert.deepEqual(harness.fatalReports, [{ error, scope: 'react:caught' }])
-  assert.deepEqual(harness.bootFailures, [])
-})
-
 void test('shows the boot fallback for an uncaught initial render with no commit', () => {
   const harness = createHarness()
   const error = new Error('uncaught during initial render')
@@ -66,42 +54,65 @@ void test('persists caught and uncaught post-mount render errors without replaci
   assert.deepEqual(harness.bootFailures, [])
 })
 
-void test('routes unhandled rejections according to actual commit state', () => {
-  const initial = createHarness()
-  const initialError = new Error('initial rejection')
-  initial.reporting.onUnhandledRejection({ reason: initialError })
-  initial.flush()
-
-  assert.deepEqual(initial.bootFailures, [{ error: initialError, scope: 'unhandledrejection' }])
-  assert.deepEqual(initial.fatalReports, [])
-
-  const mounted = createHarness(true)
-  const mountedError = new Error('mounted rejection')
-  mounted.reporting.onUnhandledRejection({ reason: mountedError })
-  mounted.flush()
-
-  assert.deepEqual(mounted.fatalReports, [{ error: mountedError, scope: 'unhandledrejection' }])
-  assert.deepEqual(mounted.bootFailures, [])
-})
-
-void test('deduplicates the same Error across React and window reporting paths', () => {
-  const harness = createHarness(true)
-  const error = new Error('reported twice')
-
-  harness.reporting.onReactCaughtError(error)
-  harness.reporting.onWindowError({ error, message: error.message })
-  harness.flush()
-
-  assert.deepEqual(harness.fatalReports, [{ error, scope: 'react:caught' }])
-  assert.deepEqual(harness.bootFailures, [])
-})
-
-void test('routes a synchronous pre-commit failure to the boot fallback', () => {
-  const harness = createHarness()
-  const error = new Error('router setup failed')
-
-  harness.reporting.reportSynchronousError(error)
-  harness.flush()
-
-  assert.deepEqual(harness.bootFailures, [{ error, scope: 'boot:synchronous' }])
+void test('recovery reload awaits IPC rejection and falls back to document reload', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { runInNewContext } = await import('node:vm')
+  const { createRequire } = await import('node:module')
+  const require = createRequire(import.meta.url)
+  const ts = require('typescript')
+  const source = await readFile(new URL('./recovery-entry.ts', import.meta.url), 'utf8')
+  for (const mode of ['rejected', 'unavailable', 'accepted']) {
+    let options
+    let page = 'recovery'
+    const deps = {
+      '@lody/components/lib/boot-failure': {
+        renderBootFailure: (_root, _error, value) => {
+          options = value
+        }
+      },
+      '@lody/components/lib/electron-ipc-client': {
+        getIpcServices: () =>
+          mode === 'unavailable'
+            ? null
+            : {
+                app: {
+                  requestRendererReload: async () => {
+                    if (mode === 'rejected') throw new Error('IPC refused')
+                    page = 'product'
+                  },
+                  reportRendererFatalError: async () => {
+                    throw new Error('report refused')
+                  }
+                }
+              }
+      }
+    }
+    runInNewContext(
+      ts.transpileModule(source, {
+        compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
+      }).outputText,
+      {
+        exports: {},
+        URLSearchParams,
+        document: { getElementById: () => ({}) },
+        window: {
+          location: {
+            hash: '#source=did-fail-load',
+            reload: () => {
+              page = 'document-reloaded'
+            }
+          }
+        },
+        console: { warn() {} },
+        require: (id) => {
+          if (!(id in deps)) throw new Error(id)
+          return deps[id]
+        }
+      }
+    )
+    await options.onReload()
+    assert.equal(page, mode === 'accepted' ? 'product' : 'document-reloaded')
+    // Report rejection is observed rather than becoming an unhandled rejection.
+    await options.onCopy()
+  }
 })

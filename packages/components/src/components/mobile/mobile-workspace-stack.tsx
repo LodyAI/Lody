@@ -1,7 +1,8 @@
-import { useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useParams, useRouter, useSearch } from '@tanstack/react-router';
 import type { SessionId } from '@lody/shared';
+import { useMobileComposerPresentation } from '@/components/chat/submission/use-composer-navigation-focus';
 import { ChatLanding } from '@/components/chat/chat-landing';
 import SessionDetail from '@/components/sessions/session-detail';
 import { AppThemeShell } from '@/components/app-theme-shell';
@@ -92,6 +93,17 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
   const sessionSearch = useSearch({ from: SESSION_ROUTE_ID, shouldThrow: false });
   const sessionId = sessionParams?.sessionId as SessionId | undefined;
   const open = sessionId != null;
+  const composerPresentation = useMobileComposerPresentation(sessionId);
+  const [presentedSessionId, setPresentedSessionId] = useState<string>();
+  const { onPresented } = composerPresentation;
+  const acknowledgeSession = useCallback(
+    (id: string) => {
+      if (id !== sessionId) return;
+      setPresentedSessionId(id);
+      onPresented();
+    },
+    [sessionId, onPresented]
+  );
 
   // Keep the last opened session's props sticky so the drawer still renders its
   // content while it slides *out* (the route — and thus `sessionId` — is gone
@@ -102,6 +114,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
     tab?: string;
     pr?: number;
     browser?: boolean;
+    simulator?: boolean;
   } | null>(null);
   if (sessionId) {
     lastSessionRef.current = {
@@ -109,6 +122,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
       tab: sessionSearch?.tab,
       pr: sessionSearch?.pr,
       browser: sessionSearch?.browser,
+      simulator: sessionSearch?.simulator,
     };
   }
   const rendered = lastSessionRef.current;
@@ -131,21 +145,24 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
     <>
       <ChatLanding
         workspaceSlug={workspaceName}
+        mobilePresentedSessionId={open ? presentedSessionId : undefined}
         preSelectedContext={base.context}
         preSelectedMachine={base.machine}
         preSelectedProject={base.project}
         preSelectedRepo={base.repo}
       />
-      {/* repositionInputs is platform-scoped, not unconditionally off. On mobile
-         web (`interactive-widget=resizes-content`) the keyboard shrinks the layout
-         viewport, so vaul's visualViewport handler captures the shrunk height as
-         "initial" and never restores it after the keyboard closes — the composer
-         stays lifted (#2761). But in the native shell the keyboard overlays the
-         content and `--native-keyboard-height` stays 0px on Android, so vaul's
-         repositionInputs is the only thing lifting the composer above the keyboard
-         and restoring it on close. Off on web, on natively.
-         See context/mobile-keyboard.md. */}
+      {/* Enable the shared Drawer's native keyboard handling. ui/drawer.tsx
+         uses a live viewport bottom inset on non-iOS side drawers, supporting
+         both resizing WebViews and overlay keyboards without caching a shrunk
+         height. iOS keeps CSS sizing and its native composer offset. Mobile web leaves layout to the
+         browser (`interactive-widget=resizes-content`); Vaul's cached height
+         previously left the composer lifted after keyboard dismissal (#2761). */}
       <Drawer
+        // A newly created session replaces the composer in one paint. Mounting
+        // already open uses Vaul's own non-animated entry; later Back/swipe and
+        // ordinary session opens keep their existing transitions.
+        key={composerPresentation.key}
+        defaultOpen={composerPresentation.defaultOpen}
         direction="right"
         repositionInputs={isNativeAppShell()}
         open={open}
@@ -158,8 +175,10 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
            the same offset on this portal'd drawer would stack both offsets and
            push the composer up by roughly two keyboard heights. */}
         <DrawerContent
+          skipOpenAnimation={open && composerPresentation.skipOpenAnimation}
           className="safe-areas w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
           data-sidebar-swipe-open-disabled
+          data-lody-session-drawer
         >
           <DrawerTitle className="sr-only">
             {t('sessions.prTab.conversation', 'Conversation')}
@@ -183,7 +202,9 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
                      exit animation and flashes a few frames. */
                   urlPrNumber={open ? rendered.pr : undefined}
                   urlBrowser={open ? rendered.browser : false}
+                  urlSimulator={open ? rendered.simulator : false}
                   onMobileBack={handleClose}
+                  onMobilePresented={open ? acknowledgeSession : undefined}
                 />
               </AppThemeShell>
             )}

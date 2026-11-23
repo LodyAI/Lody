@@ -1,5 +1,26 @@
-import React, { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import React, { forwardRef, type ComponentProps, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { ArrowUpRight, ChevronRight } from 'lucide-react';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
+import { settingsBoxed } from './material.stylex';
+import { settingsSurface as surface } from './surface';
+import { SettingsInfo } from './settings-info';
+
+/**
+ * The settings card for a standalone catalog row (MCP server, Agent role,
+ * provider): the same card a section draws. Spread it with `stylex.props` so a
+ * caller's layout classes compose rather than restating the material.
+ */
+export const settingsCard = surface.card;
+
+/**
+ * A group of records a person manages (servers, roles, repositories, machines,
+ * projects) rather than questions about a preference: it keeps its card even
+ * on a flat page, since the box says "this set" and the rules between records
+ * carry the eye from a name to its controls.
+ */
+export const settingsRecordsCard = [settingsBoxed, surface.card] as const;
 
 interface CompactSectionProps {
   title?: string;
@@ -8,17 +29,41 @@ interface CompactSectionProps {
   /** Free-form content on the right of the header (rendered as-is, unlike
    * `actions` which are coerced into icon buttons). */
   headerRight?: ReactNode;
+  headerRightUnclipped?: boolean;
+  /** A group that destroys something — leave, transfer, delete — says so on its card. */
+  tone?: 'default' | 'danger';
+  /** A collection of records rather than preferences keeps its card on a flat page. */
+  boxed?: boolean;
   children: ReactNode;
   className?: string;
-  contentClassName?: string;
 }
+
+const rowStyles = stylex.create({
+  flush: { paddingInline: 0 },
+  labelLine: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
+});
 
 interface CompactRowProps {
   label: string;
+  /** Optional identity mark beside the label and helper. */
+  leading?: ReactNode;
+  /** Controls associate these IDs through aria-labelledby / aria-describedby. */
+  labelId?: string;
+  helperId?: string;
   helper?: ReactNode;
+  info?: ReactNode;
+  /** Interactive disclosure content needs a block container rather than a paragraph. */
+  helperBlock?: boolean;
   children?: ReactNode;
   className?: string;
   alignTop?: boolean;
+  /** The enclosing dialog or collapsible panel already owns horizontal padding. */
+  inset?: boolean;
+  /**
+   * The row's control cannot be used here. Its name steps back with the
+   * control, and the helper should say why.
+   */
+  disabled?: boolean;
 }
 
 export function CompactSection({
@@ -26,87 +71,242 @@ export function CompactSection({
   description,
   actions,
   headerRight,
+  headerRightUnclipped = false,
+  tone = 'default',
+  boxed = false,
   children,
   className,
-  contentClassName,
 }: CompactSectionProps) {
+  // The section owns the lines between its rows, so every child is one line of
+  // the card whether or not it is a `CompactRow`.
+  const lines = React.Children.toArray(children);
   return (
     <section
-      className={cn('rounded-lg border border-border/70 bg-card/60 text-sm shadow-none', className)}
+      {...stylex.props(
+        surface.section,
+        Boolean(title || headerRight) && surface.sectionTitled,
+        boxed && surface.sectionBoxed
+      )}
     >
       {title || headerRight ? (
-        <header className="flex min-h-10 items-center justify-between gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
-          <div className="min-w-0 flex-1 leading-tight">
-            {title ? <p className="text-xs font-semibold text-muted-foreground">{title}</p> : null}
-            {description && <p className="text-[11px] text-muted-foreground/90">{description}</p>}
+        <header {...stylex.props(surface.sectionHeader)}>
+          <div {...stylex.props(surface.sectionHeading)}>
+            {title ? (
+              <p
+                {...stylex.props(
+                  surface.sectionTitle,
+                  tone === 'danger' && surface.sectionTitleDanger
+                )}
+              >
+                {title}
+              </p>
+            ) : null}
+            {description ? (
+              <p {...stylex.props(surface.sectionDescription)}>{description}</p>
+            ) : null}
           </div>
           {headerRight ? (
-            <div className="min-w-0 shrink truncate text-right text-[11px] text-muted-foreground">
+            <div
+              {...stylex.props(
+                surface.sectionAside,
+                headerRightUnclipped && surface.sectionAsideUnclipped
+              )}
+            >
               {headerRight}
             </div>
           ) : null}
           {actions ? (
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div {...stylex.props(surface.sectionActions)}>
               {React.Children.map(actions, (child) => {
                 if (
-                  !React.isValidElement<{
-                    size?: string;
-                    variant?: string;
-                    className?: string;
-                  }>(child)
+                  !React.isValidElement<{ size?: string; variant?: string; icon?: boolean }>(child)
                 ) {
                   return child;
                 }
-
+                // A header action is a ghost icon button: it sits beside the
+                // group's name, not on the card, so it takes no material.
                 return React.cloneElement(child, {
-                  size: child.props.size ?? 'icon',
-                  variant: child.props.variant ?? 'default',
-                  className: cn(
-                    'h-7 w-7 rounded-md shadow-xs focus-visible:ring-1 focus-visible:ring-ring/60',
-                    child.props.className
-                  ),
+                  size: child.props.size ?? 'small',
+                  variant: child.props.variant ?? 'ghost',
+                  icon: child.props.icon ?? true,
                 });
               })}
             </div>
           ) : null}
         </header>
       ) : null}
-      <div className={cn('divide-y divide-border/60', contentClassName)}>{children}</div>
+      <div
+        {...withClassName(
+          stylex.props(
+            boxed && settingsBoxed,
+            surface.card,
+            tone === 'danger' && surface.cardDanger
+          ),
+          className
+        )}
+      >
+        {lines.map((line, index) => (
+          <div
+            key={React.isValidElement(line) && line.key != null ? line.key : index}
+            {...stylex.props(surface.line, index > 0 && surface.lineRuled)}
+          >
+            {line}
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
 
 export function CompactRow({
   label,
+  leading,
+  labelId,
+  helperId,
   helper,
+  info,
+  helperBlock = false,
   children,
   className,
   alignTop = false,
+  inset = true,
+  disabled = false,
 }: CompactRowProps) {
+  const Helper = helperBlock ? 'div' : 'p';
+  const text = (
+    <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
+      <div {...stylex.props(rowStyles.labelLine)}>
+        <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
+          {label}
+        </p>
+        {info != null ? <SettingsInfo label={label}>{info}</SettingsInfo> : null}
+      </div>
+      {helper ? (
+        <Helper id={helperId} {...stylex.props(surface.rowHelper)}>
+          {helper}
+        </Helper>
+      ) : null}
+    </div>
+  );
+
   return (
     <div
-      className={cn(
-        // The control column hugs its content and the label column absorbs the rest. Settings
-        // render inside a panel that is much narrower than the window, so a column capped at a
-        // fixed px width (which a viewport breakpoint cannot see) would eat the whole row and
-        // push the control past the panel's clipped edge.
-        'flex flex-col gap-2 px-3 py-2 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
-        alignTop && 'sm:items-start sm:[&>div:last-child]:self-start',
-        !alignTop && 'sm:items-center',
+      {...withClassName(
+        stylex.props(surface.row, alignTop && surface.rowTop, !inset && rowStyles.flush),
         className
       )}
+      data-disabled={disabled ? '' : undefined}
     >
-      {/* Helper copy is capped so it stays readable on a wide panel; a bare label is free to
-          use the whole column, because long command names should not wrap early. */}
-      <div className={cn('min-w-0', helper && 'sm:max-w-[520px]')}>
-        <p className="font-medium leading-tight text-foreground">{label}</p>
-        {helper && <p className="text-[11px] text-muted-foreground leading-tight">{helper}</p>}
-      </div>
+      {/* A bare label may use the whole column: long command names should not wrap early. */}
+      {leading ? (
+        <div {...stylex.props(surface.rowIdentity)}>
+          {leading}
+          {text}
+        </div>
+      ) : (
+        text
+      )}
       {children ? (
-        <div className="min-w-0 flex flex-wrap items-center gap-2 text-sm sm:justify-end sm:pl-4">
+        <div {...stylex.props(surface.rowControl, alignTop && surface.rowControlTop)}>
           {children}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+interface CompactLinkRowProps extends Omit<ComponentProps<'button'>, 'className' | 'children'> {
+  label: string;
+  helper?: ReactNode;
+  /** The row's answer, before its end mark (an amount, a count). */
+  detail?: ReactNode;
+  /** Where the row leads: out of Lody (`external`) or into a dialog (`open`). */
+  to?: 'external' | 'open';
+}
+
+/**
+ * A row that is itself the link: its name on the left, and at its end a quiet
+ * mark for where it leads — a page outside Lody or a dialog. It carries no
+ * button, so the row never says its name twice ("Website · Visit website").
+ * A dialog trigger may render it (`render={<CompactLinkRow …/>}`).
+ */
+export const CompactLinkRow = forwardRef<HTMLButtonElement, CompactLinkRowProps>(
+  function CompactLinkRow(
+    { label, helper, detail, to = 'external', type = 'button', ...rest },
+    ref
+  ) {
+    const Mark = to === 'external' ? ArrowUpRight : ChevronRight;
+    return (
+      <button
+        ref={ref}
+        type={type}
+        {...rest}
+        {...stylex.props(surface.row, surface.pressableLine, surface.linkRow)}
+      >
+        <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
+          <p {...stylex.props(surface.rowLabel)}>{label}</p>
+          {helper ? <p {...stylex.props(surface.rowHelper)}>{helper}</p> : null}
+        </div>
+        <span {...stylex.props(surface.rowControl, surface.linkEnd)}>
+          {detail != null ? <span {...stylex.props(surface.linkValue)}>{detail}</span> : null}
+          <Mark {...stylex.props(surface.linkMark)} aria-hidden="true" />
+        </span>
+      </button>
+    );
+  }
+);
+
+/**
+ * An empty catalog, in its list's own geometry: the records card it will
+ * hold, with one quiet line where the records will be. No centred icon. A
+ * catalog the page adds records to uses `SettingsEmptyState` instead; `action`
+ * is for a list whose way in is not the page's add (installing the GitHub App).
+ */
+export function SettingsEmptyList({
+  children,
+  action,
+}: {
+  children: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div {...stylex.props(settingsRecordsCard)}>
+      {action ? (
+        <div {...stylex.props(surface.cardNote, surface.cardNoteWithAction)}>
+          <span>{children}</span>
+          {action}
+        </div>
+      ) : (
+        <p {...stylex.props(surface.cardNote)}>{children}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * An empty catalog whose records the page adds (Agent Roles, MCP servers,
+ * Prompt Shortcuts): the records card it will hold, naming what is missing,
+ * what a record is for, and the add action. The page hides its header add
+ * button while this shows, so the action appears once.
+ */
+export function SettingsEmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  action: ReactNode;
+}) {
+  return (
+    <div {...stylex.props(settingsRecordsCard)}>
+      <div {...stylex.props(surface.emptyState)}>
+        <p {...stylex.props(surface.emptyStateTitle)}>{title}</p>
+        {description != null ? (
+          <p {...stylex.props(surface.emptyStateDescription)}>{description}</p>
+        ) : null}
+        <div {...stylex.props(surface.emptyStateAction)}>{action}</div>
+      </div>
     </div>
   );
 }

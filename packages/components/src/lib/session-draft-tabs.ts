@@ -1,7 +1,11 @@
+import { windowStorage } from './desktop-window';
 import type {
   AcpConfigOptionValue,
+  AgentConfigMeta,
   AgentConfigCliType,
   AgentConfigId,
+  AgentRole,
+  AgentRoleId,
   SessionId,
 } from '@lody/shared';
 import { isValidSessionImagePathSegment, SessionIdSchema } from '@lody/shared';
@@ -15,6 +19,7 @@ const draftSessionTabSchema = z.object({
   sessionId: z.string().optional(),
   prompt: z.string(),
   agentConfigId: z.string().optional(),
+  agentRoleId: z.string().optional(),
   cliType: z.enum(['builtin', 'registry', 'custom']),
   agentType: z.string(),
   modeId: z.string().nullable(),
@@ -52,19 +57,40 @@ const persistedViewerTabSchema = z.discriminatedUnion('type', [
     label: z.string(),
   }),
 ]);
-const persistedSidePanelTabSchema = z.enum(['files', 'changes', 'pr', 'browser']);
+const persistedSidePanelTabSchema = z.enum([
+  'files',
+  'changes',
+  'pr',
+  'browser',
+  'ios-simulator',
+  'android-emulator',
+]);
 const persistedSidePanelStateSchema = z
   .object({
     open: z.boolean(),
     tab: persistedSidePanelTabSchema.nullable().default(null),
     tabs: z.array(persistedSidePanelTabSchema).default([]),
     sideSessionId: SessionIdSchema.nullable().default(null),
+    split: z
+      .tuple([persistedSidePanelTabSchema, persistedSidePanelTabSchema])
+      .nullable()
+      .default(null),
   })
   .transform((state) => {
     const tabs = [...new Set(state.tabs)];
+    const [splitStart, splitEnd] = state.split ?? [];
     return {
       ...state,
       tabs,
+      // A split outlives neither of its tabs.
+      split:
+        splitStart &&
+        splitEnd &&
+        splitStart !== splitEnd &&
+        tabs.includes(splitStart) &&
+        tabs.includes(splitEnd)
+          ? ([splitStart, splitEnd] as const)
+          : null,
       // States written before functional side-panel tabs became opt-in only
       // stored the selected tab. Treat those sessions as unopened so the new
       // empty state is the first thing users see.
@@ -83,6 +109,8 @@ export type DraftSessionTab = {
   sessionId: SessionId;
   prompt: string;
   agentConfigId?: AgentConfigId;
+  /** Role preference for this not-yet-created Session. */
+  agentRoleId?: AgentRoleId;
   cliType: AgentConfigCliType;
   agentType: string;
   modeId: string | null;
@@ -158,6 +186,33 @@ export const createDraftSessionTab = (options: {
   };
 };
 
+/**
+ * Apply a Role as a complete new-Session preference to a child-tab draft.
+ *
+ * A draft tab has not created its Session yet, so unlike an existing Session it
+ * may move to the Role's bound Agent Config. Unpinned run-config fields are
+ * cleared here so the selected agent's defaults can fill them during the normal
+ * ACP reconcile pass; retaining values from the previous agent would make the
+ * footer claim the Role while dispatching unrelated settings.
+ */
+export const buildDraftSessionAgentRolePatch = (
+  role: AgentRole,
+  agentConfig: AgentConfigMeta
+): Partial<DraftSessionTab> | null => {
+  if (agentConfig.id !== role.agentConfigId || agentConfig.machineId !== role.machineId) {
+    return null;
+  }
+  return {
+    agentRoleId: role.id,
+    agentConfigId: agentConfig.id,
+    cliType: agentConfig.cliType,
+    agentType: agentConfig.agentType,
+    modeId: role.runConfig.modeId ?? null,
+    modelId: role.runConfig.modelId ?? null,
+    configOptionValues: role.runConfig.configOptionValues,
+  };
+};
+
 export const getDraftTabLabel = (
   draft: Pick<DraftSessionTab, 'prompt'>,
   fallback = 'New Tab'
@@ -174,7 +229,7 @@ export const readPersistedDraftTabs = (parentSessionId: SessionId): DraftSession
   if (typeof window === 'undefined') {
     return [];
   }
-  return parseStoredDraftTabs(localStorage.getItem(getDraftTabsStorageKey(parentSessionId)));
+  return parseStoredDraftTabs(windowStorage().getItem(getDraftTabsStorageKey(parentSessionId)));
 };
 
 export const writePersistedDraftTabs = (
@@ -186,11 +241,14 @@ export const writePersistedDraftTabs = (
   }
 
   try {
+    const storage = windowStorage();
+    const key = getDraftTabsStorageKey(parentSessionId);
     const persistedDraftTabs = draftTabs.filter((draft) => draft.prompt.length > 0);
-    localStorage.setItem(
-      getDraftTabsStorageKey(parentSessionId),
-      JSON.stringify(persistedDraftTabs)
-    );
+    if (persistedDraftTabs.length === 0) {
+      storage.removeItem(key);
+      return;
+    }
+    storage.setItem(key, JSON.stringify(persistedDraftTabs));
   } catch {
     // ignore
   }
@@ -202,7 +260,7 @@ export const readStoredTabOrder = (parentSessionId: SessionId): string[] => {
   }
 
   try {
-    const raw = localStorage.getItem(getTabOrderStorageKey(parentSessionId));
+    const raw = windowStorage().getItem(getTabOrderStorageKey(parentSessionId));
     if (!raw) {
       return [];
     }
@@ -219,7 +277,7 @@ export const writeStoredTabOrder = (parentSessionId: SessionId, tabOrder: string
   }
 
   try {
-    localStorage.setItem(getTabOrderStorageKey(parentSessionId), JSON.stringify(tabOrder));
+    windowStorage().setItem(getTabOrderStorageKey(parentSessionId), JSON.stringify(tabOrder));
   } catch {
     // ignore
   }
@@ -233,7 +291,7 @@ export const readStoredLastActiveTabState = (
   }
 
   try {
-    const raw = localStorage.getItem(getLastActiveTabStorageKey(parentSessionId));
+    const raw = windowStorage().getItem(getLastActiveTabStorageKey(parentSessionId));
     if (!raw) {
       return null;
     }
@@ -253,7 +311,7 @@ export const writeStoredLastActiveTabState = (
   }
 
   try {
-    localStorage.setItem(getLastActiveTabStorageKey(parentSessionId), JSON.stringify(state));
+    windowStorage().setItem(getLastActiveTabStorageKey(parentSessionId), JSON.stringify(state));
   } catch {
     // ignore
   }
@@ -272,6 +330,28 @@ export const replaceTabOrderId = (
   }
   const nextOrder = tabOrder.map((id) => (id === currentId ? nextId : id));
   return nextOrder.includes(nextId) ? nextOrder : [...nextOrder, nextId];
+};
+
+/** Adds a tab after the currently displayed fallback tabs without disturbing saved order. */
+export const appendTabOrderId = (
+  tabOrder: string[],
+  displayedTabIds: Iterable<string>,
+  nextId: string
+): string[] => {
+  const nextOrder = [...tabOrder];
+  const seen = new Set(nextOrder);
+
+  for (const id of displayedTabIds) {
+    if (!seen.has(id)) {
+      nextOrder.push(id);
+      seen.add(id);
+    }
+  }
+  if (!seen.has(nextId)) {
+    nextOrder.push(nextId);
+  }
+
+  return nextOrder;
 };
 
 export const removeTabOrderId = (tabOrder: string[], targetId: string): string[] =>

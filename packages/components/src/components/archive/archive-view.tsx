@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMySessionScope } from '@/hooks/use-visible-session-metas';
+import { isSessionInMyScope } from '@/lib/session-visibility';
+import { getLatestPullRequestInfo } from '@/components/sessions/session-list-rows';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from '@tanstack/react-router';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   Archive,
   ArrowDownAZ,
@@ -24,26 +27,17 @@ import {
   Undo2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Checkbox } from '@/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import { Input } from '@/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import * as stylex from '@stylexjs/stylex';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Checkbox } from '@lody/ui/checkbox';
+import { Dialog } from '@/ui/dialog';
+import { Menu } from '@/ui/menu';
+import { Input } from '@lody/ui/input';
+import { archiveSearchFieldTheme } from './archive-search.stylex';
+import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceSlugAtom, setMobileDrawerOpenAtom, userAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { archiveScopeAtom } from '@/atoms/sidebar-state';
@@ -55,7 +49,9 @@ import {
 } from '@/hooks/use-session-actions';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrganization } from '@/hooks/useOrganization';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { useVisibleArchivedSessionMetas } from '@/hooks/use-visible-session-metas';
+import { availableLocalHistoryMachineIds } from '@/lib/session-visibility';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import { UserAvatar } from '@/components/user-avatar';
@@ -64,8 +60,6 @@ import { WebArchiveScreen } from './web-archive-screen';
 import {
   getMachineFlockLocalProjects,
   getSessionLaunchConfigLegacyFields,
-  getSessionPullRequestLegacyFields,
-  parseGitHubPrNumber,
   type MachineId,
   type PrStatus,
   type SessionId,
@@ -73,6 +67,12 @@ import {
 } from '@lody/shared';
 import { useMachineFlockRowsByMachineIds } from '@/hooks/use-machine-flock-rows';
 import { buildArchivedSessionTree } from '@/lib/archived-session-tree';
+import { formatCompactRelativeTime } from '@/lib/format-relative-time';
+import {
+  flattenVisibleArchiveRows,
+  type ArchiveVirtualRow,
+} from '@/lib/archive-list-virtualization';
+import { ArchiveListWindow } from './archive-list-window';
 
 export type ArchivedSessionGroup = {
   key: string;
@@ -90,9 +90,478 @@ export type ArchivedSessionGroup = {
 
 type PrStatusMeta = {
   icon: LucideIcon;
-  className: string;
+  tone: 'open' | 'merged' | 'closed' | 'draft';
   label: string;
 };
+
+const WIDE = '@media (min-width: 640px)';
+const ROW_HOVER = `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`;
+const ROW_RULE = `inset 0 1px 0 ${colors.separator}`;
+
+const styles = stylex.create({
+  /* A session row. On desktop it is one ruled line of its group's card, which
+     `ArchiveListWindow` draws under the rows; its height is the virtualizer's
+     estimate, so a static and a virtualized card are the same height. */
+  row: {
+    position: 'relative',
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: '100%',
+    minWidth: 0,
+    height: '36px',
+    paddingInlineStart: '28px',
+    paddingInlineEnd: space[2],
+    backgroundColor: { default: 'transparent', ':hover': ROW_HOVER },
+    boxShadow: 'none',
+    cornerShape: corner.shape,
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  rowNested: { paddingInlineStart: '44px' },
+  rowRuled: {
+    boxShadow: ROW_RULE,
+  },
+  rowFirst: {
+    borderTopLeftRadius: radius.large,
+    borderTopRightRadius: radius.large,
+  },
+  rowLast: {
+    borderBottomLeftRadius: radius.large,
+    borderBottomRightRadius: radius.large,
+  },
+  rowSelected: {
+    backgroundColor: { default: colors.selectedFill, ':hover': colors.selectedFill },
+  },
+  /* A phone row sits flat on the page, inside its swipe row. */
+  mobileRow: {
+    position: 'relative',
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: '100%',
+    minWidth: 0,
+    minHeight: '56px',
+    paddingBlock: space[1],
+    paddingInlineStart: space[6],
+    paddingInlineEnd: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    boxShadow: 'none',
+    cursor: 'pointer',
+  },
+  mobileRowNested: { paddingInlineStart: '40px' },
+  checkboxSlot: {
+    position: 'absolute',
+    left: space[2],
+    top: '50%',
+    transform: 'translateY(-50%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileCheckboxSlot: { left: space[1.5] },
+  /* Until a row is selected, its checkbox appears with the pointer. */
+  revealOnRowHover: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      ':focus-within': 1,
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  iconSlot: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '20px',
+  },
+  agentIcon: { width: '14px', height: '14px', color: colors.secondaryLabel },
+  titleCell: { flexGrow: 1, flexShrink: 1, flexBasis: '0%', minWidth: 0 },
+  title: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: 'block',
+    width: '100%',
+    textAlign: 'start',
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.label,
+    outlineStyle: 'none',
+  },
+  prSlot: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+  },
+  glyph: { width: '16px', height: '16px' },
+  prOpen: { color: 'hsl(var(--github-open))' },
+  prMerged: { color: 'hsl(var(--github-merged))' },
+  prClosed: { color: 'hsl(var(--github-closed))' },
+  prDraft: { color: 'hsl(var(--github-draft))' },
+  branchCell: {
+    display: { default: 'none', [WIDE]: 'block' },
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: '160px',
+    minWidth: 0,
+    maxWidth: '192px',
+  },
+  meta: {
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  truncate: {
+    display: 'block',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  time: {
+    flexShrink: 0,
+    width: '40px',
+    textAlign: 'end',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  diffCell: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[1.5],
+    width: '80px',
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  added: { color: 'hsl(var(--github-addition))' },
+  removed: { color: 'hsl(var(--github-deletion))' },
+  avatarAnchor: { display: 'inline-flex', flexShrink: 0 },
+  /* A row's actions answer the pointer on that row, or a keyboard inside them. */
+  actions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: '2px',
+    opacity: 0,
+    pointerEvents: 'none',
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  actionsLive: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      ':focus-within': 1,
+    },
+    pointerEvents: {
+      default: 'none',
+      [stylex.when.ancestor(':hover')]: 'auto',
+      ':focus-within': 'auto',
+    },
+  },
+  mobileBody: {
+    display: 'flex',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'flex-start',
+    gap: space[2],
+    minWidth: 0,
+  },
+  mobileBodySelecting: { paddingInlineStart: space[2] },
+  mobileIconSlot: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '16px',
+    height: '16px',
+    marginTop: '2px',
+  },
+  mobileText: { flexGrow: 1, flexShrink: 1, flexBasis: '0%', minWidth: 0 },
+  mobileLine: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  mobileTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.label,
+    outlineStyle: 'none',
+  },
+  mobileDiff: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  mobileTime: { flexShrink: 0, fontVariantNumeric: 'tabular-nums' },
+  mobileMetaLine: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    marginTop: '2px',
+  },
+  removedNote: { display: 'inline-flex', flexShrink: 0, alignItems: 'center', gap: space[1] },
+  noteGlyph: { flexShrink: 0, width: '12px', height: '12px' },
+  /* An inline PR mark on the phone's meta line: a glyph that opens a link. */
+  mobilePrLink: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '16px',
+    height: '16px',
+    padding: 0,
+    margin: 0,
+    borderWidth: 0,
+    borderRadius: radius.mini,
+    cornerShape: corner.shape,
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
+  },
+  mobileBranch: {
+    minWidth: 0,
+    maxWidth: '120px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  swipeRestore: { backgroundColor: colors.hoverFill, color: colors.label },
+  swipeDelete: { backgroundColor: colors.destructive, color: colors.onDestructive },
+
+  /* A group's heading, above its card: it names the group from outside it and
+     folds it. The slot is the virtualizer's estimate, the heading sits at its foot. */
+  headerSlot: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'flex-end',
+    height: '36px',
+    paddingBottom: space[1],
+  },
+  headerSlotLocal: { height: '40px' },
+  header: {
+    position: 'relative',
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: '100%',
+    minWidth: 0,
+    height: '32px',
+    margin: 0,
+    paddingInline: space[2],
+    borderWidth: 0,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: text.subheadlineSize,
+    fontWeight: 500,
+    lineHeight: text.subheadlineLeading,
+    textAlign: 'start',
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  headerCheckbox: {
+    position: 'absolute',
+    left: space[2],
+    top: '50%',
+    transform: 'translateY(-50%)',
+    zIndex: 10,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerGlyphSlot: {
+    position: 'relative',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '20px',
+    height: '20px',
+  },
+  headerGlyph: {
+    position: 'absolute',
+    width: '16px',
+    height: '16px',
+    color: colors.tertiaryLabel,
+    transitionProperty: 'opacity, rotate',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  /* At rest the group's kind shows; the pointer swaps it for the fold chevron. */
+  kindGlyph: { opacity: { default: 1, [stylex.when.ancestor(':hover')]: 0 } },
+  foldGlyph: { opacity: { default: 0, [stylex.when.ancestor(':hover')]: 1 } },
+  hidden: { opacity: 0 },
+  folded: { rotate: '-90deg' },
+  headerLabel: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  headerLocal: { display: 'flex', alignItems: 'baseline', gap: space[2], minWidth: 0 },
+  headerLocalName: {
+    flexShrink: 0,
+    minWidth: 0,
+    maxWidth: '40%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  headerLocalPath: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    fontWeight: 400,
+    color: colors.tertiaryLabel,
+    direction: 'rtl',
+    unicodeBidi: 'plaintext',
+  },
+  headerCount: {
+    flexShrink: 0,
+    fontSize: text.footnoteSize,
+    fontWeight: 400,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.tertiaryLabel,
+  },
+  badgeGlyph: { width: '100%', height: '100%' },
+
+  section: { width: '100%', minWidth: 0, marginBottom: space[4] },
+  sectionFolded: { marginBottom: space[2] },
+  sessions: { display: 'flex', flexDirection: 'column', width: '100%', minWidth: 0 },
+  sessionsCard: {
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+  },
+
+  content: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    minWidth: 0,
+    minHeight: 0,
+  },
+  toolbarBand: {
+    boxSizing: 'border-box',
+    flexShrink: 0,
+    width: '100%',
+    paddingTop: space[4],
+    paddingInline: { default: space[4], [WIDE]: space[6] },
+  },
+  toolbar: {
+    display: 'flex',
+    flexDirection: { default: 'column', [WIDE]: 'row' },
+    alignItems: { default: 'stretch', [WIDE]: 'center' },
+    gap: space[2],
+    width: '100%',
+    minWidth: 0,
+    marginBottom: space[3],
+  },
+  toolbarSearchRow: {
+    display: 'flex',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+  },
+  search: { flexGrow: 1, flexShrink: 1, flexBasis: '0%', minWidth: 0 },
+  toolbarMenus: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
+  triggerGlyph: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
+  triggerLabel: {
+    minWidth: 0,
+    maxWidth: '120px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  triggerLabelShort: { maxWidth: '104px' },
+  searchGlyph: { width: '14px', height: '14px' },
+  empty: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    width: '100%',
+    minHeight: 0,
+    overflowX: 'hidden',
+    overflowY: 'auto',
+    paddingBottom: space[4],
+    paddingInline: { default: space[4], [WIDE]: space[6] },
+    textAlign: 'center',
+  },
+  emptyGlyph: { width: '48px', height: '48px', color: colors.tertiaryLabel },
+  emptyTitle: {
+    margin: 0,
+    marginTop: space[4],
+    fontSize: text.bodySize,
+    fontWeight: 500,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  emptyDescription: {
+    margin: 0,
+    marginTop: space[1],
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.tertiaryLabel,
+  },
+});
+
+const PR_TONE_STYLES = {
+  open: styles.prOpen,
+  merged: styles.prMerged,
+  closed: styles.prClosed,
+  draft: styles.prDraft,
+} as const;
 
 function SessionAgentIcon({ session, className }: { session: SessionMeta; className?: string }) {
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(session.agentConfigId));
@@ -109,51 +578,25 @@ function SessionAgentIcon({ session, className }: { session: SessionMeta; classN
 const PR_STATUS_META: Record<PrStatus, PrStatusMeta> = {
   open: {
     icon: GitPullRequest,
-    className: 'text-github-open',
+    tone: 'open',
     label: 'Open',
   },
   merged: {
     icon: GitMerge,
-    className: 'text-github-merged',
+    tone: 'merged',
     label: 'Merged',
   },
   closed: {
     icon: GitPullRequestClosed,
-    className: 'text-github-closed',
+    tone: 'closed',
     label: 'Closed',
   },
   draft: {
     icon: GitPullRequestDraft,
-    className: 'text-github-draft',
+    tone: 'draft',
     label: 'Draft',
   },
 };
-
-function formatRelativeTime(dateValue: number | string | undefined, now: Date): string {
-  if (!dateValue) return '--';
-
-  const date = typeof dateValue === 'number' ? new Date(dateValue) : new Date(dateValue);
-  if (!Number.isFinite(date.getTime())) return '--';
-
-  const diffMs = Math.max(0, now.getTime() - date.getTime());
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-
-  const weeks = Math.floor(days / 7);
-  if (weeks < 4) return `${weeks}w`;
-
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo`;
-
-  const years = Math.floor(days / 365);
-  return `${years}y`;
-}
 
 type ArchiveSortMode = 'newest' | 'oldest' | 'title';
 type ArchiveGroupMode = 'project' | 'flat';
@@ -318,26 +761,16 @@ function getArchivedSessionItemViewModel(
   session: SessionMeta,
   now: Date
 ): ArchivedSessionItemViewModel {
-  const title = session.title?.trim() || 'Untitled session';
-  const relativeTime = formatRelativeTime(session.lastMessageAt, now);
+  const title = sessionTitle(session);
+  const relativeTime = formatCompactRelativeTime(session.lastMessageAt, now);
   const branchName = session.branchName?.trim() || '';
   const diffStats = session.diffStats ?? { allChange: { add: 0, del: 0 } };
   const hasChanges = diffStats.allChange.add !== 0 || diffStats.allChange.del !== 0;
 
-  const pullRequests = session.pullRequests ?? [];
-  const latestPr =
-    pullRequests.length > 0
-      ? pullRequests.some((pr) => getSessionPullRequestLegacyFields(pr).reportedAt)
-        ? [...pullRequests].sort((a, b) =>
-            (getSessionPullRequestLegacyFields(b).reportedAt ?? '').localeCompare(
-              getSessionPullRequestLegacyFields(a).reportedAt ?? ''
-            )
-          )[0]
-        : pullRequests[pullRequests.length - 1]
-      : null;
-  const prUrl = latestPr?.url?.trim() || null;
-  const prStatus = latestPr?.status ?? 'open';
-  const prNumber = prUrl ? parseGitHubPrNumber(prUrl) : null;
+  const latestPr = getLatestPullRequestInfo(session);
+  const prUrl = latestPr.url?.trim() || null;
+  const prStatus = latestPr.status ?? 'open';
+  const prNumber = latestPr.number;
   const prStatusMeta = prUrl ? PR_STATUS_META[prStatus] : null;
   const PrIcon = prStatusMeta?.icon ?? null;
   const prTooltipLabel = prNumber
@@ -384,6 +817,12 @@ type MobileArchivedSessionItemProps = ArchivedSessionItemBaseProps & {
   hideActionLabels: boolean;
 };
 
+type DesktopArchivedSessionItemProps = ArchivedSessionItemBaseProps & {
+  /** Where the row sits in its group's card: the first is not ruled, the ends are rounded. */
+  isFirstInGroup: boolean;
+  isLastInGroup: boolean;
+};
+
 function DesktopArchivedSessionItem({
   session,
   depth,
@@ -400,7 +839,9 @@ function DesktopArchivedSessionItem({
   onToggleSelect,
   onEnterMultiSelect,
   owner,
-}: ArchivedSessionItemBaseProps) {
+  isFirstInGroup,
+  isLastInGroup,
+}: DesktopArchivedSessionItemProps) {
   const {
     title,
     relativeTime,
@@ -421,22 +862,25 @@ function DesktopArchivedSessionItem({
     onNavigate(session.id);
   }, [isMultiSelectMode, onNavigate, onToggleSelect, session.id]);
 
+  const prToneStyle = prStatusMeta ? PR_TONE_STYLES[prStatusMeta.tone] : null;
+  const restoreText = restoreAvailable ? restoreLabel : restoreUnavailableLabel;
+
   return (
     <div
-      className={cn(
-        'group relative flex w-full min-w-0 items-center gap-2 rounded-md py-1.5 pl-6 pr-2',
-        depth === 1 && 'pl-10',
-        'border border-transparent bg-transparent',
-        'hover:bg-hover hover:text-hover-foreground',
-        isSelected && 'bg-selection text-selection-foreground hover:bg-selection',
-        'cursor-pointer',
-        'transition-colors'
+      {...stylex.props(
+        stylex.defaultMarker(),
+        styles.row,
+        depth === 1 && styles.rowNested,
+        !isFirstInGroup && styles.rowRuled,
+        isFirstInGroup && styles.rowFirst,
+        isLastInGroup && styles.rowLast,
+        isSelected && styles.rowSelected
       )}
       data-session-depth={depth}
       onClick={handleRowClick}
     >
       {isMultiSelectMode ? (
-        <div className="absolute left-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center">
+        <div {...stylex.props(styles.checkboxSlot)}>
           <Checkbox
             checked={isSelected}
             onCheckedChange={() => onToggleSelect(session.id)}
@@ -445,7 +889,7 @@ function DesktopArchivedSessionItem({
           />
         </div>
       ) : (
-        <div className="absolute left-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+        <div {...stylex.props(styles.checkboxSlot, styles.revealOnRowHover)}>
           <Checkbox
             checked={false}
             onCheckedChange={() => onEnterMultiSelect(session.id)}
@@ -455,144 +899,150 @@ function DesktopArchivedSessionItem({
         </div>
       )}
 
-      <div className="w-5 shrink-0 flex items-center justify-center">
-        <SessionAgentIcon session={session} className="h-3.5 w-3.5 text-muted-foreground" />
+      <div {...stylex.props(styles.iconSlot)}>
+        <SessionAgentIcon session={session} className={stylex.props(styles.agentIcon).className} />
       </div>
 
-      <div className="min-w-0 flex-1">
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <span className="block w-full truncate text-left text-sm text-foreground/85">
-              {title}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top">{title}</TooltipContent>
-        </Tooltip>
-      </div>
-
-      <div className="flex w-5 shrink-0 items-center justify-center">
-        {prUrl && PrIcon && prStatusMeta && (
-          <Tooltip delayDuration={300}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className={cn(
-                  'inline-flex h-5 w-5 items-center justify-center rounded-sm',
-                  'transition-colors hover:bg-muted/30',
-                  prStatusMeta.className
-                )}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  window.open(prUrl, '_blank', 'noopener,noreferrer');
+      <div {...stylex.props(styles.titleCell)}>
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            delay={300}
+            render={
+              <span
+                role="button"
+                tabIndex={0}
+                aria-pressed={isMultiSelectMode ? isSelected : undefined}
+                data-id={`archive-session:${session.id}`}
+                data-scope-item="row"
+                {...stylex.props(styles.title)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  handleRowClick();
                 }}
               >
-                <PrIcon className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">{prTooltipLabel}</TooltipContent>
-          </Tooltip>
+                {title}
+              </span>
+            }
+          />
+          <Tooltip.Content side="top">{title}</Tooltip.Content>
+        </Tooltip.Root>
+      </div>
+
+      <div {...stylex.props(styles.prSlot)}>
+        {prUrl && PrIcon && prStatusMeta && (
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              delay={300}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="mini"
+                  icon
+                  aria-label={prTooltipLabel}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.open(prUrl, '_blank', 'noopener,noreferrer');
+                  }}
+                >
+                  <PrIcon {...stylex.props(styles.glyph, prToneStyle)} />
+                </Button>
+              }
+            />
+            <Tooltip.Content side="top">{prTooltipLabel}</Tooltip.Content>
+          </Tooltip.Root>
         )}
       </div>
 
-      <div className="hidden min-w-0 max-w-[12rem] shrink basis-40 sm:block">
+      <div {...stylex.props(styles.branchCell)}>
         {branchName ? (
-          <Tooltip delayDuration={300}>
-            <TooltipTrigger asChild>
-              <span className="block truncate text-xs text-muted-foreground">{branchName}</span>
-            </TooltipTrigger>
-            <TooltipContent side="top">{branchName}</TooltipContent>
-          </Tooltip>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              delay={300}
+              render={<span {...stylex.props(styles.meta, styles.truncate)}>{branchName}</span>}
+            />
+            <Tooltip.Content side="top">{branchName}</Tooltip.Content>
+          </Tooltip.Root>
         ) : null}
       </div>
 
-      <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-        {relativeTime}
-      </span>
+      <span {...stylex.props(styles.meta, styles.time)}>{relativeTime}</span>
 
-      <div className="flex w-20 shrink-0 items-center justify-end gap-1.5 text-xs tabular-nums">
+      <div {...stylex.props(styles.diffCell)}>
         {hasChanges ? (
           <>
-            <span className="text-code-added">+{diffStats.allChange.add}</span>
-            <span className="text-code-removed">-{diffStats.allChange.del}</span>
+            <span {...stylex.props(styles.added)}>+{diffStats.allChange.add}</span>
+            <span {...stylex.props(styles.removed)}>-{diffStats.allChange.del}</span>
           </>
         ) : null}
       </div>
 
-      <div className="w-5 shrink-0 flex items-center justify-center">
+      <div {...stylex.props(styles.iconSlot)}>
         {owner && (
-          <Tooltip delayDuration={500}>
-            <TooltipTrigger asChild>
-              <span className="inline-flex shrink-0">
-                <UserAvatar
-                  user={owner}
-                  className="h-4 w-4"
-                  fallbackClassName="text-[8px] font-medium"
-                />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top">{owner.name ?? 'Unknown'}</TooltipContent>
-          </Tooltip>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              delay={500}
+              render={
+                <span {...stylex.props(styles.avatarAnchor)}>
+                  <UserAvatar user={owner} size="mini" />
+                </span>
+              }
+            />
+            <Tooltip.Content side="top">{owner.name ?? 'Unknown'}</Tooltip.Content>
+          </Tooltip.Root>
         )}
       </div>
 
-      <div
-        className={cn(
-          'flex items-center gap-0.5 shrink-0',
-          'opacity-0 pointer-events-none',
-          !isMultiSelectMode && 'group-hover:opacity-100 group-hover:pointer-events-auto',
-          'transition-opacity duration-100'
-        )}
-      >
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className={cn(
-                'inline-flex h-6 w-6 items-center justify-center rounded-sm',
-                'text-muted-foreground/70 transition-colors',
-                'hover:text-foreground hover:bg-muted/50',
-                'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70',
-                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
-              )}
-              aria-label={restoreAvailable ? restoreLabel : restoreUnavailableLabel}
-              disabled={!restoreAvailable}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onRestore(session.id);
-              }}
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            {restoreAvailable ? restoreLabel : restoreUnavailableLabel}
-          </TooltipContent>
-        </Tooltip>
+      <div {...stylex.props(styles.actions, !isMultiSelectMode && styles.actionsLive)}>
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            delay={300}
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="mini"
+                icon
+                aria-label={restoreText}
+                disabled={!restoreAvailable}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onRestore(session.id);
+                }}
+              >
+                <Undo2 {...stylex.props(styles.glyph)} />
+              </Button>
+            }
+          />
+          <Tooltip.Content side="top">{restoreText}</Tooltip.Content>
+        </Tooltip.Root>
 
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className={cn(
-                'inline-flex h-6 w-6 items-center justify-center rounded-sm',
-                'text-muted-foreground/70 transition-colors',
-                'hover:text-destructive hover:bg-destructive/10',
-                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
-              )}
-              aria-label={deleteLabel}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onDelete(session);
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">{deleteLabel}</TooltipContent>
-        </Tooltip>
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            delay={300}
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="mini"
+                icon
+                tone="destructive"
+                aria-label={deleteLabel}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDelete(session);
+                }}
+              >
+                <Trash2 {...stylex.props(styles.glyph)} />
+              </Button>
+            }
+          />
+          <Tooltip.Content side="top">{deleteLabel}</Tooltip.Content>
+        </Tooltip.Root>
       </div>
     </div>
   );
@@ -665,13 +1115,7 @@ function MobileArchivedSessionItem({
 
   const row = (
     <div
-      className={cn(
-        'group relative flex w-full min-w-0 items-center gap-2 rounded-md py-1 pl-6 pr-2',
-        depth === 1 && 'pl-10',
-        'border border-transparent bg-transparent',
-        'cursor-pointer',
-        'transition-colors'
-      )}
+      {...stylex.props(styles.mobileRow, depth === 1 && styles.mobileRowNested)}
       data-session-depth={depth}
       onClick={handleRowClick}
       onTouchStart={handleTouchStart}
@@ -679,7 +1123,7 @@ function MobileArchivedSessionItem({
       onTouchMove={clearLongPressTimer}
     >
       {isMultiSelectMode && (
-        <div className="absolute left-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center">
+        <div {...stylex.props(styles.checkboxSlot, styles.mobileCheckboxSlot)}>
           <Checkbox
             checked={isSelected}
             onCheckedChange={() => onToggleSelect(session.id)}
@@ -689,74 +1133,91 @@ function MobileArchivedSessionItem({
         </div>
       )}
 
-      <div className={cn('min-w-0 flex-1 flex items-start gap-2', isMultiSelectMode && 'pl-2')}>
-        <div className="mt-0.5 shrink-0 flex items-center justify-center w-4 h-4">
-          <SessionAgentIcon session={session} className="h-3.5 w-3.5 text-muted-foreground" />
+      <div {...stylex.props(styles.mobileBody, isMultiSelectMode && styles.mobileBodySelecting)}>
+        <div {...stylex.props(styles.mobileIconSlot)}>
+          <SessionAgentIcon
+            session={session}
+            className={stylex.props(styles.agentIcon).className}
+          />
         </div>
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm text-foreground/85 flex-1">{title}</span>
+        <div {...stylex.props(styles.mobileText)}>
+          <div {...stylex.props(styles.mobileLine)}>
+            <span
+              role="button"
+              tabIndex={0}
+              aria-pressed={isMultiSelectMode ? isSelected : undefined}
+              data-id={`archive-session:${session.id}`}
+              data-scope-item="row"
+              {...stylex.props(styles.mobileTitle)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                handleRowClick();
+              }}
+            >
+              {title}
+            </span>
             {hasChanges && (
-              <div className="flex items-center gap-1 tabular-nums shrink-0 text-xs">
-                <span className="text-code-added">+{diffStats.allChange.add}</span>
-                <span className="text-code-removed">-{diffStats.allChange.del}</span>
+              <div {...stylex.props(styles.mobileDiff)}>
+                <span {...stylex.props(styles.added)}>+{diffStats.allChange.add}</span>
+                <span {...stylex.props(styles.removed)}>-{diffStats.allChange.del}</span>
               </div>
             )}
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-              {relativeTime}
-            </span>
+            <span {...stylex.props(styles.meta, styles.mobileTime)}>{relativeTime}</span>
             {owner && (
-              <Tooltip delayDuration={500}>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex shrink-0">
-                    <UserAvatar
-                      user={owner}
-                      className="h-4 w-4"
-                      fallbackClassName="text-[8px] font-medium"
-                    />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">{owner.name ?? 'Unknown'}</TooltipContent>
-              </Tooltip>
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  delay={500}
+                  render={
+                    <span {...stylex.props(styles.avatarAnchor)}>
+                      <UserAvatar user={owner} size="mini" />
+                    </span>
+                  }
+                />
+                <Tooltip.Content side="top">{owner.name ?? 'Unknown'}</Tooltip.Content>
+              </Tooltip.Root>
             )}
           </div>
 
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+          <div {...stylex.props(styles.meta, styles.mobileMetaLine)}>
             {!restoreAvailable ? (
-              <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
-                <CircleAlert className="h-3 w-3" aria-hidden="true" />
+              <span {...stylex.props(styles.removedNote)}>
+                <CircleAlert {...stylex.props(styles.noteGlyph)} aria-hidden="true" />
                 {removedProjectLabel}
               </span>
             ) : null}
             {prUrl && PrIcon && prStatusMeta && (
-              <Tooltip delayDuration={300}>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className={cn(
-                      'inline-flex h-4 w-4 items-center justify-center rounded-sm shrink-0',
-                      prStatusMeta.className
-                    )}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      window.open(prUrl, '_blank', 'noopener,noreferrer');
-                    }}
-                  >
-                    <PrIcon className="h-3 w-3" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">{prTooltipLabel}</TooltipContent>
-              </Tooltip>
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  delay={300}
+                  render={
+                    <button
+                      type="button"
+                      {...stylex.props(styles.mobilePrLink)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        window.open(prUrl, '_blank', 'noopener,noreferrer');
+                      }}
+                    >
+                      <PrIcon
+                        {...stylex.props(styles.noteGlyph, PR_TONE_STYLES[prStatusMeta.tone])}
+                      />
+                    </button>
+                  }
+                />
+                <Tooltip.Content side="top">{prTooltipLabel}</Tooltip.Content>
+              </Tooltip.Root>
             )}
             {branchName && (
-              <Tooltip delayDuration={300}>
-                <TooltipTrigger asChild>
-                  <span className="truncate max-w-[120px]">{branchName}</span>
-                </TooltipTrigger>
-                <TooltipContent side="top">{branchName}</TooltipContent>
-              </Tooltip>
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  delay={300}
+                  render={<span {...stylex.props(styles.mobileBranch)}>{branchName}</span>}
+                />
+                <Tooltip.Content side="top">{branchName}</Tooltip.Content>
+              </Tooltip.Root>
             )}
           </div>
         </div>
@@ -771,8 +1232,6 @@ function MobileArchivedSessionItem({
   return (
     <SwipeActionRow
       enabled
-      className="rounded-md"
-      contentClassName="bg-background"
       actions={[
         ...(restoreAvailable
           ? [
@@ -780,9 +1239,9 @@ function MobileArchivedSessionItem({
                 key: 'restore',
                 label: restoreActionLabel,
                 ariaLabel: restoreLabel,
-                icon: <Undo2 className="h-4 w-4" />,
+                icon: <Undo2 {...stylex.props(styles.glyph)} />,
                 hideLabel: hideActionLabels,
-                className: 'bg-muted text-foreground',
+                className: stylex.props(styles.swipeRestore).className,
                 onClick: () => onRestore(session.id),
               },
             ]
@@ -791,15 +1250,114 @@ function MobileArchivedSessionItem({
           key: 'delete',
           label: deleteActionLabel,
           ariaLabel: deleteLabel,
-          icon: <Trash2 className="h-4 w-4" />,
+          icon: <Trash2 {...stylex.props(styles.glyph)} />,
           hideLabel: hideActionLabels,
-          className: 'bg-destructive text-destructive-foreground',
+          className: stylex.props(styles.swipeDelete).className,
           onClick: () => onDelete(session),
         },
       ]}
     >
       {row}
     </SwipeActionRow>
+  );
+}
+
+type ArchivedSessionGroupHeaderProps = {
+  group: ArchivedSessionGroup;
+  chatLabel: string;
+  removedProjectLabel: string;
+  isMultiSelectMode: boolean;
+  selectedIds: Set<SessionId>;
+  onToggleCollapse: () => void;
+  onToggleGroupSelect: (groupKey: string, sessionIds: SessionId[]) => void;
+};
+
+function ArchivedSessionGroupHeader({
+  group,
+  chatLabel,
+  removedProjectLabel,
+  isMultiSelectMode,
+  selectedIds,
+  onToggleCollapse,
+  onToggleGroupSelect,
+}: ArchivedSessionGroupHeaderProps) {
+  const isChat = group.kind === 'chat';
+  const isLocal = group.kind === 'local';
+  const restoreAvailable = !isLocal || group.local?.available === true;
+  const HeaderIcon = isChat ? MessageCircle : isLocal ? Folder : Github;
+  const label = isChat ? chatLabel : group.label;
+  const groupKey = group.key;
+  const groupSessionIds = useMemo(() => group.sessions.map((s) => s.id), [group.sessions]);
+  const selectedInGroup = useMemo(
+    () => groupSessionIds.filter((id) => selectedIds.has(id)).length,
+    [groupSessionIds, selectedIds]
+  );
+  const allSelected = selectedInGroup === group.sessions.length && group.sessions.length > 0;
+  const someSelected = selectedInGroup > 0 && !allSelected;
+
+  return (
+    <div {...stylex.props(styles.headerSlot, isLocal && styles.headerSlotLocal)}>
+      <button
+        type="button"
+        data-id={`archive-group:${groupKey}`}
+        data-scope-item="row"
+        onClick={onToggleCollapse}
+        {...stylex.props(stylex.defaultMarker(), styles.header)}
+      >
+        {isMultiSelectMode && (
+          <div
+            {...stylex.props(styles.headerCheckbox)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+            }}
+          >
+            <Checkbox
+              checked={allSelected}
+              indeterminate={someSelected}
+              onCheckedChange={() => onToggleGroupSelect(groupKey, groupSessionIds)}
+              aria-label={`Select all in ${label}`}
+            />
+          </div>
+        )}
+        <span {...stylex.props(styles.headerGlyphSlot)}>
+          <HeaderIcon
+            {...stylex.props(
+              styles.headerGlyph,
+              isMultiSelectMode ? styles.hidden : styles.kindGlyph
+            )}
+          />
+          <ChevronDown
+            {...stylex.props(
+              styles.headerGlyph,
+              isMultiSelectMode ? styles.hidden : styles.foldGlyph,
+              group.collapsed && styles.folded
+            )}
+          />
+        </span>
+        {isLocal ? (
+          <span {...stylex.props(styles.headerLabel)}>
+            <span {...stylex.props(styles.headerLocal)}>
+              <span {...stylex.props(styles.headerLocalName)}>{group.local?.name ?? label}</span>
+              <span
+                {...stylex.props(styles.headerLocalPath)}
+                title={group.local?.title ?? undefined}
+              >
+                {group.local?.path ?? label}
+              </span>
+            </span>
+          </span>
+        ) : (
+          <span {...stylex.props(styles.headerLabel)}>{label}</span>
+        )}
+        <span {...stylex.props(styles.headerCount)}>({group.sessions.length})</span>
+        {!restoreAvailable ? (
+          <Badge icon={<CircleAlert {...stylex.props(styles.badgeGlyph)} aria-hidden="true" />}>
+            {removedProjectLabel}
+          </Badge>
+        ) : null}
+      </button>
+    </div>
   );
 }
 
@@ -851,182 +1409,348 @@ export function ArchivedSessionGroupSection({
   membersByUserId,
   hideGroupHeader = false,
 }: ArchivedSessionGroupSectionProps) {
-  const isChat = group.kind === 'chat';
-  const isLocal = group.kind === 'local';
-  const restoreAvailable = !isLocal || group.local?.available === true;
-  const HeaderIcon = isChat ? MessageCircle : isLocal ? Folder : Github;
-  const label = isChat ? chatLabel : group.label;
-  const groupKey = group.key;
-
-  const groupSessionIds = useMemo(() => group.sessions.map((s) => s.id), [group.sessions]);
-  const selectedInGroup = useMemo(
-    () => groupSessionIds.filter((id) => selectedIds.has(id)).length,
-    [groupSessionIds, selectedIds]
-  );
-  const allSelected = selectedInGroup === group.sessions.length && group.sessions.length > 0;
-  const someSelected = selectedInGroup > 0 && !allSelected;
-
-  const groupCheckboxState: boolean | 'indeterminate' = allSelected
-    ? true
-    : someSelected
-      ? 'indeterminate'
-      : false;
-
   const showHeader = !hideGroupHeader;
   const showSessions = hideGroupHeader || !group.collapsed;
   const sessionTree = useMemo(() => buildArchivedSessionTree(group.sessions), [group.sessions]);
 
   return (
-    <div className={cn('mb-4 w-full min-w-0', group.collapsed && showHeader ? 'mb-2' : '')}>
+    <div {...stylex.props(styles.section, group.collapsed && showHeader && styles.sectionFolded)}>
       {showHeader ? (
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          className={cn(
-            'group/header relative flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5',
-            'text-sm font-medium text-foreground/80',
-            'cursor-pointer transition-colors hover:bg-hover/40'
-          )}
-        >
-          {isMultiSelectMode && (
-            <div
-              className="absolute left-1.5 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center"
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-              }}
-            >
-              <Checkbox
-                checked={groupCheckboxState}
-                onCheckedChange={() => onToggleGroupSelect(groupKey, groupSessionIds)}
-                aria-label={`Select all in ${label}`}
-              />
-            </div>
-          )}
-          <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-            <HeaderIcon
-              className={cn(
-                'absolute h-4 w-4 text-muted-foreground/80 transition-opacity duration-100',
-                isMultiSelectMode ? 'opacity-0' : 'group-hover/header:opacity-0'
-              )}
-            />
-            <ChevronDown
-              className={cn(
-                'absolute h-4 w-4 text-muted-foreground/70 opacity-0',
-                'transition-[opacity,translate,scale] duration-100',
-                isMultiSelectMode ? '' : 'group-hover/header:opacity-100',
-                group.collapsed ? '-rotate-90' : 'rotate-0'
-              )}
-            />
-          </span>
-          {isLocal ? (
-            <span className="min-w-0 flex-1 truncate text-left">
-              <span className="flex min-w-0 items-baseline gap-2">
-                <span className="max-w-[40%] shrink-0 truncate">{group.local?.name ?? label}</span>
-                <span
-                  className="min-w-0 flex-1 truncate font-normal text-muted-foreground/60 [direction:rtl] [unicode-bidi:plaintext]"
-                  title={group.local?.title ?? undefined}
-                >
-                  {group.local?.path ?? label}
-                </span>
-              </span>
-            </span>
-          ) : (
-            <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-          )}
-          <span className="text-xs tabular-nums text-muted-foreground/60">
-            ({group.sessions.length})
-          </span>
-          {!restoreAvailable ? (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              <CircleAlert className="h-3 w-3" aria-hidden="true" />
-              {removedProjectLabel}
-            </span>
-          ) : null}
-        </button>
+        <ArchivedSessionGroupHeader
+          group={group}
+          chatLabel={chatLabel}
+          removedProjectLabel={removedProjectLabel}
+          isMultiSelectMode={isMultiSelectMode}
+          selectedIds={selectedIds}
+          onToggleCollapse={onToggleCollapse}
+          onToggleGroupSelect={onToggleGroupSelect}
+        />
       ) : null}
 
       {showSessions ? (
-        <div className={cn('flex w-full min-w-0 flex-col', showHeader && 'mt-1')}>
-          {sessionTree.map(({ item: session, depth }) =>
-            isMobile ? (
-              <MobileArchivedSessionItem
-                key={session.id}
-                session={session}
-                depth={depth}
-                now={now}
-                onRestore={onRestore}
-                onDelete={onDelete}
-                onNavigate={onNavigate}
-                restoreLabel={restoreLabel}
-                restoreAvailable={restoreAvailable}
-                restoreUnavailableLabel={restoreUnavailableLabel}
-                removedProjectLabel={removedProjectLabel}
-                restoreActionLabel={restoreActionLabel}
-                deleteLabel={deleteLabel}
-                deleteActionLabel={deleteActionLabel}
-                hideActionLabels={group.kind !== 'repo'}
-                isMultiSelectMode={isMultiSelectMode}
-                isSelected={selectedIds.has(session.id)}
-                onToggleSelect={onToggleSelect}
-                onEnterMultiSelect={onEnterMultiSelect}
-                owner={membersByUserId.get(session.userId)}
-              />
-            ) : (
-              <DesktopArchivedSessionItem
-                key={session.id}
-                session={session}
-                depth={depth}
-                now={now}
-                onRestore={onRestore}
-                onDelete={onDelete}
-                onNavigate={onNavigate}
-                restoreLabel={restoreLabel}
-                restoreAvailable={restoreAvailable}
-                restoreUnavailableLabel={restoreUnavailableLabel}
-                removedProjectLabel={removedProjectLabel}
-                deleteLabel={deleteLabel}
-                isMultiSelectMode={isMultiSelectMode}
-                isSelected={selectedIds.has(session.id)}
-                onToggleSelect={onToggleSelect}
-                onEnterMultiSelect={onEnterMultiSelect}
-                owner={membersByUserId.get(session.userId)}
-              />
-            )
-          )}
+        <div {...stylex.props(styles.sessions, !isMobile && styles.sessionsCard)}>
+          {sessionTree.map(({ item: session, depth }, index) => (
+            <ArchivedSessionRow
+              key={session.id}
+              group={group}
+              session={session}
+              depth={depth}
+              isFirstInGroup={index === 0}
+              isLastInGroup={index === sessionTree.length - 1}
+              now={now}
+              isMobile={isMobile}
+              onRestore={onRestore}
+              onDelete={onDelete}
+              onNavigate={onNavigate}
+              restoreLabel={restoreLabel}
+              restoreUnavailableLabel={restoreUnavailableLabel}
+              removedProjectLabel={removedProjectLabel}
+              restoreActionLabel={restoreActionLabel}
+              deleteLabel={deleteLabel}
+              deleteActionLabel={deleteActionLabel}
+              isMultiSelectMode={isMultiSelectMode}
+              isSelected={selectedIds.has(session.id)}
+              onToggleSelect={onToggleSelect}
+              onEnterMultiSelect={onEnterMultiSelect}
+              owner={membersByUserId.get(session.userId)}
+            />
+          ))}
         </div>
       ) : null}
     </div>
   );
 }
 
+function ArchivedSessionRow({
+  group,
+  session,
+  depth,
+  isFirstInGroup,
+  isLastInGroup,
+  now,
+  isMobile,
+  onRestore,
+  onDelete,
+  onNavigate,
+  restoreLabel,
+  restoreUnavailableLabel,
+  removedProjectLabel,
+  restoreActionLabel,
+  deleteLabel,
+  deleteActionLabel,
+  isMultiSelectMode,
+  isSelected,
+  onToggleSelect,
+  onEnterMultiSelect,
+  owner,
+}: {
+  group: ArchivedSessionGroup;
+  session: SessionMeta;
+  depth: 0 | 1;
+  isFirstInGroup: boolean;
+  isLastInGroup: boolean;
+  now: Date;
+  isMobile: boolean;
+  onRestore: (sessionId: SessionId) => void;
+  onDelete: (session: SessionMeta) => void;
+  onNavigate: (sessionId: SessionId) => void;
+  restoreLabel: string;
+  restoreUnavailableLabel: string;
+  removedProjectLabel: string;
+  restoreActionLabel: string;
+  deleteLabel: string;
+  deleteActionLabel: string;
+  isMultiSelectMode: boolean;
+  isSelected: boolean;
+  onToggleSelect: (sessionId: SessionId) => void;
+  onEnterMultiSelect: (sessionId: SessionId) => void;
+  owner?: { name?: string | null; image?: string | null } | null;
+}) {
+  const restoreAvailable = group.kind !== 'local' || group.local?.available === true;
+  if (isMobile) {
+    return (
+      <MobileArchivedSessionItem
+        session={session}
+        depth={depth}
+        now={now}
+        onRestore={onRestore}
+        onDelete={onDelete}
+        onNavigate={onNavigate}
+        restoreLabel={restoreLabel}
+        restoreAvailable={restoreAvailable}
+        restoreUnavailableLabel={restoreUnavailableLabel}
+        removedProjectLabel={removedProjectLabel}
+        restoreActionLabel={restoreActionLabel}
+        deleteLabel={deleteLabel}
+        deleteActionLabel={deleteActionLabel}
+        hideActionLabels={group.kind !== 'repo'}
+        isMultiSelectMode={isMultiSelectMode}
+        isSelected={isSelected}
+        onToggleSelect={onToggleSelect}
+        onEnterMultiSelect={onEnterMultiSelect}
+        owner={owner}
+      />
+    );
+  }
+  return (
+    <DesktopArchivedSessionItem
+      session={session}
+      depth={depth}
+      now={now}
+      onRestore={onRestore}
+      onDelete={onDelete}
+      onNavigate={onNavigate}
+      restoreLabel={restoreLabel}
+      restoreAvailable={restoreAvailable}
+      restoreUnavailableLabel={restoreUnavailableLabel}
+      removedProjectLabel={removedProjectLabel}
+      deleteLabel={deleteLabel}
+      isMultiSelectMode={isMultiSelectMode}
+      isSelected={isSelected}
+      onToggleSelect={onToggleSelect}
+      onEnterMultiSelect={onEnterMultiSelect}
+      owner={owner}
+      isFirstInGroup={isFirstInGroup}
+      isLastInGroup={isLastInGroup}
+    />
+  );
+}
+
+export type ArchiveSessionListProps = Omit<
+  ArchivedSessionGroupSectionProps,
+  'group' | 'onToggleCollapse' | 'hideGroupHeader'
+> & {
+  groups: ArchivedSessionGroup[];
+  hideGroupHeader: boolean;
+  listScopeId: string;
+  onToggleCollapse: (groupKey: string) => void;
+  resetScrollKey?: string;
+};
+
+export function ArchiveSessionList({
+  groups,
+  now,
+  onRestore,
+  onDelete,
+  onNavigate,
+  onToggleCollapse,
+  restoreLabel,
+  restoreUnavailableLabel,
+  removedProjectLabel,
+  restoreActionLabel,
+  deleteLabel,
+  deleteActionLabel,
+  chatLabel,
+  isMobile,
+  isMultiSelectMode,
+  selectedIds,
+  onToggleSelect,
+  onToggleGroupSelect,
+  onEnterMultiSelect,
+  membersByUserId,
+  hideGroupHeader,
+  listScopeId,
+  resetScrollKey,
+}: ArchiveSessionListProps) {
+  const rows = useMemo(
+    () => flattenVisibleArchiveRows(groups, { hideGroupHeader }),
+    [groups, hideGroupHeader]
+  );
+  const groupByKey = useMemo(() => {
+    const map = new Map<string, ArchivedSessionGroup>();
+    for (const group of groups) map.set(group.key, group);
+    return map;
+  }, [groups]);
+  // A session row opens its group's card when the row above it is not one of the group's sessions.
+  const firstSessionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    rows.forEach((row, index) => {
+      if (row.kind !== 'session') return;
+      const previous = rows[index - 1];
+      if (previous?.kind !== 'session' || previous.groupKey !== row.groupKey) keys.add(row.key);
+    });
+    return keys;
+  }, [rows]);
+  const sessionById = useMemo(() => {
+    const map = new Map<SessionId, SessionMeta>();
+    for (const group of groups) {
+      for (const session of group.sessions) map.set(session.id, session);
+    }
+    return map;
+  }, [groups]);
+
+  const renderRow = useCallback(
+    (row: ArchiveVirtualRow) => {
+      const group = groupByKey.get(row.groupKey);
+      if (!group) return null;
+      if (row.kind === 'header') {
+        return (
+          <ArchivedSessionGroupHeader
+            group={group}
+            chatLabel={chatLabel}
+            removedProjectLabel={removedProjectLabel}
+            isMultiSelectMode={isMultiSelectMode}
+            selectedIds={selectedIds}
+            onToggleCollapse={() => onToggleCollapse(row.groupKey)}
+            onToggleGroupSelect={onToggleGroupSelect}
+          />
+        );
+      }
+      const session = sessionById.get(row.sessionId);
+      if (!session) return null;
+      return (
+        <ArchivedSessionRow
+          group={group}
+          session={session}
+          depth={row.depth}
+          isFirstInGroup={firstSessionKeys.has(row.key)}
+          isLastInGroup={row.isLastInGroup}
+          now={now}
+          isMobile={isMobile}
+          onRestore={onRestore}
+          onDelete={onDelete}
+          onNavigate={onNavigate}
+          restoreLabel={restoreLabel}
+          restoreUnavailableLabel={restoreUnavailableLabel}
+          removedProjectLabel={removedProjectLabel}
+          restoreActionLabel={restoreActionLabel}
+          deleteLabel={deleteLabel}
+          deleteActionLabel={deleteActionLabel}
+          isMultiSelectMode={isMultiSelectMode}
+          isSelected={selectedIds.has(session.id)}
+          onToggleSelect={onToggleSelect}
+          onEnterMultiSelect={onEnterMultiSelect}
+          owner={membersByUserId.get(session.userId)}
+        />
+      );
+    },
+    [
+      chatLabel,
+      deleteActionLabel,
+      deleteLabel,
+      firstSessionKeys,
+      groupByKey,
+      isMobile,
+      isMultiSelectMode,
+      membersByUserId,
+      now,
+      onDelete,
+      onEnterMultiSelect,
+      onNavigate,
+      onRestore,
+      onToggleCollapse,
+      onToggleGroupSelect,
+      onToggleSelect,
+      removedProjectLabel,
+      restoreActionLabel,
+      restoreLabel,
+      restoreUnavailableLabel,
+      selectedIds,
+      sessionById,
+    ]
+  );
+
+  return (
+    <ArchiveListWindow
+      rows={rows}
+      isMobile={isMobile}
+      listScopeId={listScopeId}
+      renderRow={renderRow}
+      resetScrollKey={resetScrollKey}
+    />
+  );
+}
+
 export function ArchiveView() {
   const { t } = useTranslation();
+  const listScopeId = useId();
   const router = useRouter();
   const isMobile = useIsMobile();
   const user = useAtomValue(userAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
-  const { archivedSessions } = useVisibleArchivedSessionMetas();
+  const {
+    archivedSessions,
+    workspaceHistoryReadable,
+    historyOnlySessionIds,
+    visibleMachineIds,
+    visibleLocalProjectKeys,
+  } = useVisibleArchivedSessionMetas();
+  const rejectHistoryWrite = useCallback(
+    (ids: string[]) => {
+      if (!ids.some((id) => historyOnlySessionIds.has(id))) return false;
+      toast.info(t('sessions.historyMachineUnavailable'));
+      return true;
+    },
+    [historyOnlySessionIds, workspaceHistoryReadable, t]
+  );
   const { restoreSession, deleteArchivedSession } = useSessionActions();
   const openMobileDrawer = useSetAtom(setMobileDrawerOpenAtom);
   const [deleteConfirmSession, setDeleteConfirmSession] = useState<SessionMeta | null>(null);
   const [archiveScope, setArchiveScope] = useAtom(archiveScopeAtom);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<ArchiveSortMode>('newest');
-  const [groupMode, setGroupMode] = useState<ArchiveGroupMode>('project');
+  const [groupMode, setGroupMode] = useState<ArchiveGroupMode>('flat');
   const { activeOrganization } = useOrganization();
+  const { members: directoryMembers } = useWorkspaceMembers();
   const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
+  const { currentUserId: myAccountId, ownedMachineIds } = useMySessionScope();
   const localMachineId = useAtomValue(localMachineIdAtom);
   const archivedLocalSessionMachineIds = useMemo(
     () =>
-      Array.from(
-        new Set(
-          archivedSessions
-            .filter((session) => session.project?.kind === 'local')
-            .map((session) => session.machineId as MachineId)
-        )
-      ),
-    [archivedSessions]
+      workspaceHistoryReadable
+        ? availableLocalHistoryMachineIds(
+            archivedSessions,
+            visibleMachineIds,
+            visibleLocalProjectKeys
+          )
+        : Array.from(
+            new Set(
+              archivedSessions
+                .filter((session) => session.project?.kind === 'local')
+                .map((session) => session.machineId as MachineId)
+            )
+          ),
+    [archivedSessions, workspaceHistoryReadable, visibleMachineIds, visibleLocalProjectKeys]
   );
   const machineFlockRowsByMachineId = useMachineFlockRowsByMachineIds(
     archivedLocalSessionMachineIds,
@@ -1041,9 +1765,17 @@ export function ArchiveView() {
     'Re-add this local project to restore its conversations.'
   );
 
-  // Build member lookup map for creator avatars
   const membersByUserId = useMemo(() => {
     const map = new Map<string, { name?: string | null; image?: string | null }>();
+    if (directoryMembers.length > 0) {
+      for (const member of directoryMembers) {
+        map.set(member.userId, {
+          name: member.displayName ?? member.name,
+          image: member.image,
+        });
+      }
+      return map;
+    }
     const members = activeOrganization?.members;
     if (members) {
       for (const member of members) {
@@ -1056,19 +1788,22 @@ export function ArchiveView() {
       }
     }
     return map;
-  }, [activeOrganization?.members]);
+  }, [activeOrganization?.members, directoryMembers]);
 
   // Filter archived sessions based on scope (my/team + local privacy).
   const scopedArchivedSessions = useMemo(() => {
-    const userId = user?.id ?? null;
+    const userId = myAccountId;
     const base =
       archiveScope === 'my'
         ? userId
-          ? archivedSessions.filter((session) => session.userId === userId)
+          ? archivedSessions.filter((session) => isSessionInMyScope(session, userId))
           : []
         : archivedSessions;
 
-    // Local projects are private per-user: never show other users' local sessions.
+    // Encrypted history is workspace-readable; the My/Team choice still applies.
+    if (workspaceHistoryReadable) return base;
+
+    // Ordinary local projects remain private per-user.
     if (!userId) {
       return base.filter((session) => session.project?.kind !== 'local');
     }
@@ -1079,15 +1814,23 @@ export function ArchiveView() {
       // Always allow local machine sessions (even if machine meta is missing ownerUserId due to older data).
       if (localMachineId && session.machineId === localMachineId) return true;
 
-      const machine = machineMetaMap.get(session.machineId);
-      if (machine?.ownerUserId === userId) return true;
+      if (ownedMachineIds.has(session.machineId)) return true;
 
       // My scope is already filtered by userId; keep local sessions visible even if owner meta hasn't updated yet.
-      if (archiveScope === 'my' && session.userId === userId) return true;
+      if (archiveScope === 'my' && isSessionInMyScope(session, userId)) return true;
 
       return false;
     });
-  }, [archivedSessions, archiveScope, localMachineId, machineMetaMap, user?.id]);
+  }, [
+    archivedSessions,
+    archiveScope,
+    ownedMachineIds,
+    myAccountId,
+    localMachineId,
+    machineMetaMap,
+    user?.id,
+    workspaceHistoryReadable,
+  ]);
 
   const localProjectLabelByKey = useMemo(() => {
     const map = new Map<
@@ -1137,12 +1880,13 @@ export function ArchiveView() {
 
   const canRestoreArchivedSession = useCallback(
     (session: SessionMeta): boolean => {
+      if (historyOnlySessionIds.has(session.id)) return false;
       const project = session.project;
       if (project?.kind !== 'local') return true;
       const key = `local:${session.machineId}:${project.localProjectId}`;
       return localProjectLabelByKey.get(key)?.available === true;
     },
-    [localProjectLabelByKey]
+    [localProjectLabelByKey, workspaceHistoryReadable, historyOnlySessionIds]
   );
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
@@ -1186,6 +1930,7 @@ export function ArchiveView() {
   };
 
   const handleRestore = (sessionId: SessionId) => {
+    if (rejectHistoryWrite([sessionId])) return;
     const session = scopedArchivedSessions.find((candidate) => candidate.id === sessionId);
     if (!session || !canRestoreArchivedSession(session)) {
       toast.info(restoreUnavailableLabel);
@@ -1202,6 +1947,7 @@ export function ArchiveView() {
   };
 
   const handleDelete = (session: SessionMeta) => {
+    if (rejectHistoryWrite([session.id])) return;
     setDeleteConfirmSession(session);
   };
 
@@ -1217,12 +1963,18 @@ export function ArchiveView() {
     const sessionId = deleteConfirmSession?.id;
     setDeleteConfirmSession(null);
     if (!sessionId) return;
+    if (rejectHistoryWrite([sessionId])) return;
     try {
       await deleteArchivedSession(sessionId);
     } catch (error) {
       showPermanentDeleteError(error);
     }
-  }, [deleteArchivedSession, deleteConfirmSession?.id, showPermanentDeleteError]);
+  }, [
+    deleteArchivedSession,
+    deleteConfirmSession?.id,
+    rejectHistoryWrite,
+    showPermanentDeleteError,
+  ]);
 
   const handleNavigateToSession = useCallback(
     (sessionId: SessionId) => {
@@ -1310,6 +2062,7 @@ export function ArchiveView() {
     if (isBulkActionBusy || hasUnrestorableSessionInSelection) return;
     const sessionIds = Array.from(selectedIds);
     if (sessionIds.length === 0) return;
+    if (rejectHistoryWrite(sessionIds)) return;
 
     setBulkActionInFlight('restore');
     try {
@@ -1338,6 +2091,7 @@ export function ArchiveView() {
     hasUnrestorableSessionInSelection,
     isBulkActionBusy,
     restoreSession,
+    rejectHistoryWrite,
     selectedIds,
   ]);
 
@@ -1345,6 +2099,7 @@ export function ArchiveView() {
     if (isBulkActionBusy) return;
     const sessionIds = Array.from(selectedIds);
     if (sessionIds.length === 0) return;
+    if (rejectHistoryWrite(sessionIds)) return;
 
     setBulkActionInFlight('delete');
     try {
@@ -1377,6 +2132,7 @@ export function ArchiveView() {
     isBulkActionBusy,
     selectedIds,
     deleteArchivedSession,
+    rejectHistoryWrite,
     exitMultiSelect,
     showPermanentDeleteError,
   ]);
@@ -1436,110 +2192,89 @@ export function ArchiveView() {
 
   /* Mobile: scope sits after search (was in the header). Desktop keeps
      scope in the WebArchiveScreen header and only group/sort here. */
+  const chevron = <ChevronDown {...stylex.props(styles.triggerGlyph)} aria-hidden="true" />;
+  const GroupGlyph = groupMode === 'flat' ? List : Layers;
+  const SortGlyph =
+    sortMode === 'title' ? ArrowDownAZ : sortMode === 'oldest' ? Clock : ArrowUpDown;
   const archiveToolbar = (
-    <div className="mb-3 flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <div className="relative min-w-0 flex-1">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <Input
-            type="search"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={t('archive.searchPlaceholder', 'Search archived sessions…')}
-            aria-label={t('archive.search', 'Search archive')}
-            className="h-8 border-foreground/[0.10] bg-background pl-8 text-sm shadow-none dark:border-input-border dark:bg-input"
-          />
-        </div>
+    <div {...stylex.props(styles.toolbar)}>
+      <div {...stylex.props(styles.toolbarSearchRow)}>
+        <Input
+          type="search"
+          size="small"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder={t('archive.searchPlaceholder', 'Search archived sessions…')}
+          aria-label={t('archive.search', 'Search archive')}
+          leading={<Search {...stylex.props(styles.searchGlyph)} aria-hidden="true" />}
+          className={stylex.props(styles.search, archiveSearchFieldTheme).className}
+        />
         {isMobile ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 shrink-0 gap-1.5 border-foreground/[0.10] bg-background px-2.5 text-xs font-medium shadow-none dark:border-input-border"
-              >
-                <span className="max-w-[6.5rem] truncate">{scopeLabel}</span>
-                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuRadioGroup
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button type="button" variant="ghost" size="small">
+                  <span {...stylex.props(styles.triggerLabel, styles.triggerLabelShort)}>
+                    {scopeLabel}
+                  </span>
+                  {chevron}
+                </Button>
+              }
+            />
+            <Menu.Content align="end">
+              <Menu.RadioGroup
                 value={archiveScope}
                 onValueChange={(value) => {
                   if (value === 'my' || value === 'team') setArchiveScope(value);
                 }}
               >
-                <DropdownMenuRadioItem value="my">
-                  {t('sessions.sidebar.my', 'My Tasks')}
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="team">
+                <Menu.RadioItem value="my">{t('sessions.sidebar.my', 'My Tasks')}</Menu.RadioItem>
+                <Menu.RadioItem value="team">
                   {t('sessions.sidebar.team', 'All Tasks')}
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                </Menu.RadioItem>
+              </Menu.RadioGroup>
+            </Menu.Content>
+          </Menu.Root>
         ) : null}
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 border-foreground/[0.10] bg-background px-2.5 text-xs font-medium shadow-none dark:border-input-border"
-            >
-              {groupMode === 'flat' ? (
-                <List className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              ) : (
-                <Layers className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              )}
-              <span className="max-w-[7rem] truncate">{groupLabel}</span>
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuRadioGroup
+      <div {...stylex.props(styles.toolbarMenus)}>
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button type="button" variant="ghost" size="small">
+                <GroupGlyph {...stylex.props(styles.triggerGlyph)} aria-hidden="true" />
+                <span {...stylex.props(styles.triggerLabel)}>{groupLabel}</span>
+                {chevron}
+              </Button>
+            }
+          />
+          <Menu.Content align="end">
+            <Menu.RadioGroup
               value={groupMode}
               onValueChange={(value) => {
                 if (value === 'project' || value === 'flat') setGroupMode(value);
               }}
             >
-              <DropdownMenuRadioItem value="project">
+              <Menu.RadioItem value="project">
                 {t('archive.group.project', 'By project')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="flat">
-                {t('archive.group.flat', 'One list')}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              </Menu.RadioItem>
+              <Menu.RadioItem value="flat">{t('archive.group.flat', 'One list')}</Menu.RadioItem>
+            </Menu.RadioGroup>
+          </Menu.Content>
+        </Menu.Root>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 border-foreground/[0.10] bg-background px-2.5 text-xs font-medium shadow-none dark:border-input-border"
-            >
-              {sortMode === 'title' ? (
-                <ArrowDownAZ className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              ) : sortMode === 'oldest' ? (
-                <Clock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              ) : (
-                <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              )}
-              <span className="max-w-[7.5rem] truncate">{sortLabel}</span>
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuRadioGroup
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button type="button" variant="ghost" size="small">
+                <SortGlyph {...stylex.props(styles.triggerGlyph)} aria-hidden="true" />
+                <span {...stylex.props(styles.triggerLabel)}>{sortLabel}</span>
+                {chevron}
+              </Button>
+            }
+          />
+          <Menu.Content align="end">
+            <Menu.RadioGroup
               value={sortMode}
               onValueChange={(value) => {
                 if (value === 'newest' || value === 'oldest' || value === 'title') {
@@ -1547,60 +2282,55 @@ export function ArchiveView() {
                 }
               }}
             >
-              <DropdownMenuRadioItem value="newest">
+              <Menu.RadioItem value="newest">
                 {t('archive.sort.newest', 'Newest first')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="oldest">
+              </Menu.RadioItem>
+              <Menu.RadioItem value="oldest">
                 {t('archive.sort.oldest', 'Oldest first')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="title">
-                {t('archive.sort.title', 'Title A–Z')}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              </Menu.RadioItem>
+              <Menu.RadioItem value="title">{t('archive.sort.title', 'Title A–Z')}</Menu.RadioItem>
+            </Menu.RadioGroup>
+          </Menu.Content>
+        </Menu.Root>
       </div>
     </div>
   );
 
   const archiveContent = (
-    <div className="box-border w-full min-w-full px-4 py-4 sm:px-6">
-      {archiveToolbar}
+    <div {...stylex.props(styles.content)}>
+      <div {...stylex.props(styles.toolbarBand)}>{archiveToolbar}</div>
       {groupedSessions.length === 0 || filteredArchivedSessions.length === 0 ? (
-        <div className="flex w-full flex-col items-center justify-center py-12 text-center">
-          <Archive className="h-12 w-12 text-muted-foreground/40" />
-          <p className="mt-4 text-sm font-medium text-muted-foreground">{emptyLabel}</p>
-          <p className="mt-1 text-xs text-muted-foreground/70">{emptyDescription}</p>
+        <div {...stylex.props(styles.empty)}>
+          <Archive {...stylex.props(styles.emptyGlyph)} />
+          <p {...stylex.props(styles.emptyTitle)}>{emptyLabel}</p>
+          <p {...stylex.props(styles.emptyDescription)}>{emptyDescription}</p>
         </div>
       ) : (
-        <div className="flex w-full min-w-0 flex-col">
-          {groupedSessions.map((group) => (
-            <ArchivedSessionGroupSection
-              key={group.key}
-              group={group}
-              now={now}
-              onRestore={handleRestore}
-              onDelete={handleDelete}
-              onNavigate={handleNavigateToSession}
-              onToggleCollapse={() => handleToggleCollapse(group.key)}
-              restoreLabel={restoreLabel}
-              restoreUnavailableLabel={restoreUnavailableLabel}
-              removedProjectLabel={removedProjectLabel}
-              restoreActionLabel={restoreActionLabel}
-              deleteLabel={deleteLabel}
-              deleteActionLabel={deleteActionLabel}
-              chatLabel={chatLabel}
-              isMobile={isMobile}
-              isMultiSelectMode={isMultiSelectMode}
-              selectedIds={selectedIds}
-              onToggleSelect={handleToggleSelect}
-              onToggleGroupSelect={handleToggleGroupSelect}
-              onEnterMultiSelect={handleEnterMultiSelect}
-              membersByUserId={membersByUserId}
-              hideGroupHeader={groupMode === 'flat'}
-            />
-          ))}
-        </div>
+        <ArchiveSessionList
+          groups={groupedSessions}
+          now={now}
+          onRestore={handleRestore}
+          onDelete={handleDelete}
+          onNavigate={handleNavigateToSession}
+          onToggleCollapse={handleToggleCollapse}
+          restoreLabel={restoreLabel}
+          restoreUnavailableLabel={restoreUnavailableLabel}
+          removedProjectLabel={removedProjectLabel}
+          restoreActionLabel={restoreActionLabel}
+          deleteLabel={deleteLabel}
+          deleteActionLabel={deleteActionLabel}
+          chatLabel={chatLabel}
+          isMobile={isMobile}
+          isMultiSelectMode={isMultiSelectMode}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onToggleGroupSelect={handleToggleGroupSelect}
+          onEnterMultiSelect={handleEnterMultiSelect}
+          membersByUserId={membersByUserId}
+          hideGroupHeader={groupMode === 'flat'}
+          listScopeId={listScopeId}
+          resetScrollKey={`${archiveScope}:${groupMode}:${sortMode}:${normalizedSearchQuery}`}
+        />
       )}
     </div>
   );
@@ -1608,14 +2338,14 @@ export function ArchiveView() {
   const archiveDialogs = (
     <>
       {/* Single-item delete confirm dialog */}
-      <Dialog
+      <Dialog.Root
         open={deleteConfirmSession != null}
         onOpenChange={(open) => setDeleteConfirmSession(open ? deleteConfirmSession : null)}
       >
-        <DialogContent className={cn(isMobile ? '' : 'max-w-sm')}>
-          <DialogHeader>
-            <DialogTitle>{t('archive.deleteConfirm.title', 'Delete permanently?')}</DialogTitle>
-            <DialogDescription>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>{t('archive.deleteConfirm.title', 'Delete permanently?')}</Dialog.Title>
+            <Dialog.Description>
               {deleteConfirmSession?.repoFullName
                 ? t(
                     'archive.deleteConfirm.description.codeSession',
@@ -1625,10 +2355,10 @@ export function ArchiveView() {
                     'archive.deleteConfirm.description.chatSession',
                     'This will permanently delete the chat session.'
                   )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteConfirmSession(null)}>
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Footer>
+            <Button variant="secondary" onClick={() => setDeleteConfirmSession(null)}>
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
@@ -1639,26 +2369,26 @@ export function ArchiveView() {
             >
               {deleteButtonLabel}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
 
       {/* Bulk delete confirm dialog */}
-      <Dialog
+      <Dialog.Root
         open={bulkDeleteConfirmOpen}
         onOpenChange={(open) => {
           if (bulkActionInFlight === 'delete') return;
           setBulkDeleteConfirmOpen(open);
         }}
       >
-        <DialogContent className={cn(isMobile ? '' : 'max-w-sm')}>
-          <DialogHeader>
-            <DialogTitle>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>
               {t('archive.bulkDeleteConfirm.title', 'Delete {{count}} sessions permanently?', {
                 count: selectedCount,
               })}
-            </DialogTitle>
-            <DialogDescription>
+            </Dialog.Title>
+            <Dialog.Description>
               {hasCodeSessionInSelection
                 ? t(
                     'archive.bulkDeleteConfirm.description.mixed',
@@ -1668,11 +2398,11 @@ export function ArchiveView() {
                     'archive.bulkDeleteConfirm.description.chatOnly',
                     'This will permanently delete the selected sessions.'
                   )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Footer>
             <Button
-              variant="outline"
+              variant="secondary"
               disabled={bulkActionInFlight === 'delete'}
               onClick={() => setBulkDeleteConfirmOpen(false)}
             >
@@ -1687,9 +2417,9 @@ export function ArchiveView() {
             >
               {deleteButtonLabel}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 

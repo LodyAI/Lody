@@ -13,3 +13,20 @@ export const isSessionContextCompacting = (
   }
   return false;
 };
+
+export type CanStopAgentOptions = {
+  activeAssistantTurnId: string | null;
+  isGoalActive: boolean;
+  canPauseGoal: boolean;
+};
+
+/**
+ * Stop is exposed exactly while the last assistant turn is unfinished (or a goal
+ * can be paused), never from live activity: a turn whose agent died stays
+ * stoppable, and the daemon closes it.
+ */
+export const canStopAgentEnabled = ({
+  activeAssistantTurnId,
+  isGoalActive,
+  canPauseGoal,
+}: CanStopAgentOptions): boolean => activeAssistantTurnId != null || (isGoalActive && canPauseGoal);

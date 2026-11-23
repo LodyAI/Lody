@@ -1,24 +1,23 @@
 import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Trash2 } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { markCacheClearPending, reloadApp } from '@/lib/clear-local-cache';
+import { Trash2 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
+import { AlertDialog } from '@/ui/dialog';
+import { restartIntoCacheClear } from '@/lib/clear-local-cache';
+
+const styles = stylex.create({
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+});
 
 /**
  * Shared logic for the "Clear cache" settings action. The actual delete runs at
  * the next boot (see `maybeClearLodyCacheOnBoot`); here we navigate to the
- * conversation page, set the boot flag, and reload — so the user lands back on
- * chat with a freshly rebuilt local cache.
+ * conversation page and restart into the clear (a relaunch on the desktop, a
+ * reload elsewhere) — so the user lands back on chat with a freshly rebuilt
+ * local cache.
  */
 export function useClearCache() {
   const navigate = useNavigate();
@@ -40,8 +39,7 @@ export function useClearCache() {
     } catch {
       // Navigation is best-effort; we reload regardless.
     }
-    markCacheClearPending();
-    reloadApp();
+    if (!(await restartIntoCacheClear())) setIsClearing(false);
   }, [navigate, params.workspaceName]);
 
   return { dialogOpen, setDialogOpen, isClearing, confirmClear };
@@ -60,35 +58,30 @@ export function ClearCacheConfirmDialog({
 }) {
   const { t } = useTranslation();
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t('settings.cache.clearCache.confirmTitle')}</AlertDialogTitle>
-          <AlertDialogDescription>
+    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+      <AlertDialog.Content>
+        <AlertDialog.Header>
+          <AlertDialog.Title>{t('settings.cache.clearCache.confirmTitle')}</AlertDialog.Title>
+          <AlertDialog.Description>
             {t('settings.cache.clearCache.confirmDescription')}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isClearing}>{t('common.cancel')}</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={(event) => {
+          </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+          <AlertDialog.Cancel disabled={isClearing}>{t('common.cancel')}</AlertDialog.Cancel>
+          <Button
+            onClick={() => {
               // Keep the dialog open while we navigate + reload so the button can
               // show its in-progress state instead of flashing closed.
-              event.preventDefault();
               onConfirm();
             }}
             disabled={isClearing}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            variant="destructive"
           >
-            {isClearing ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-            )}
+            {isClearing ? <Spinner size="small" /> : <Trash2 {...stylex.props(styles.icon)} />}
             {t('settings.cache.clearCache.confirmButton')}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          </Button>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
   );
 }

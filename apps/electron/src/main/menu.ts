@@ -1,4 +1,7 @@
+import { productWindows } from './window-state'
+import { requestRendererReload } from './renderer-recovery'
 import { app, BrowserWindow, Menu, shell } from 'electron'
+import { closeFocusedTabOrWindow } from './close-focused-tab-or-window'
 import type { AppUpdaterService } from './services/app-updater-service'
 import en from '../../../../locales/en.json'
 import zhCN from '../../../../locales/zh_CN.json'
@@ -34,7 +37,7 @@ function sendMenuAction(action: string): void {
   if (!menuOptions) {
     return
   }
-  let window = menuOptions.getMainWindow()
+  let window = BrowserWindow.getFocusedWindow() ?? menuOptions.getMainWindow()
   if (!window || window.isDestroyed()) {
     window = menuOptions.openOrFocusMainWindow()
   }
@@ -51,6 +54,19 @@ function sendMenuAction(action: string): void {
     return
   }
   contents.send('app.menuAction', action)
+}
+
+function handleCloseFocusedTabOrWindow(targetWindow?: Electron.BaseWindow): void {
+  const focused =
+    targetWindow && 'webContents' in targetWindow
+      ? (targetWindow as BrowserWindow)
+      : BrowserWindow.getFocusedWindow()
+  closeFocusedTabOrWindow({
+    focused,
+    mainWindow:
+      focused && productWindows.has(focused) ? focused : (menuOptions?.getMainWindow() ?? null),
+    sendCloseCurrentTabOrWindow: () => sendMenuAction('close-current-tab-or-window')
+  })
 }
 
 function buildAndSetMenu(): void {
@@ -117,23 +133,11 @@ function buildAndSetMenu(): void {
           accelerator: 'CmdOrCtrl+N',
           click: () => sendMenuAction('new-session')
         },
-        ...(isMac
-          ? [
-              {
-                label: t(locale, 'menu.closeTab'),
-                // macOS ignores registerAccelerator:false, so omit the native accelerator
-                // and let the renderer own Cmd+W without the menu consuming it first.
-                click: () => sendMenuAction('close-tab')
-              }
-            ]
-          : [
-              {
-                label: t(locale, 'menu.closeTab'),
-                accelerator: 'CmdOrCtrl+W' as const,
-                registerAccelerator: false,
-                click: () => sendMenuAction('close-tab')
-              }
-            ]),
+        {
+          label: t(locale, 'menu.close'),
+          accelerator: 'CmdOrCtrl+W',
+          click: (_item, targetWindow) => handleCloseFocusedTabOrWindow(targetWindow)
+        },
         ...(isMac
           ? []
           : [
@@ -188,8 +192,21 @@ function buildAndSetMenu(): void {
     {
       label: t(locale, 'menu.view'),
       submenu: [
-        { role: 'reload', accelerator: 'CmdOrCtrl+R' },
-        { role: 'forceReload' },
+        {
+          label: t(locale, 'menu.reload'),
+          accelerator: 'CmdOrCtrl+R',
+          click: (_item, window) => {
+            if (window instanceof BrowserWindow) requestRendererReload(window)
+          }
+        },
+        {
+          label: t(locale, 'menu.forceReload'),
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: (_item, window) => {
+            if (window instanceof BrowserWindow)
+              requestRendererReload(window, { ignoreCache: true })
+          }
+        },
         { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },
@@ -216,7 +233,8 @@ function buildAndSetMenu(): void {
           : [
               {
                 label: t(locale, 'menu.closeWindow'),
-                click: () => menuOptions?.getMainWindow()?.close()
+                click: (_item: Electron.MenuItem, target?: Electron.BaseWindow) =>
+                  (target ?? BrowserWindow.getFocusedWindow())?.close()
               }
             ])
       ] as Electron.MenuItemConstructorOptions[]
@@ -252,6 +270,16 @@ export function setupApplicationMenu(options: SetupApplicationMenuOptions): void
   buildAndSetMenu()
 }
 
+/**
+ * Translate into the product language the menus are currently drawn in. Exposed
+ * so the window context menu (`context-menu.ts`) speaks that same language
+ * without owning a second copy of the locale state.
+ */
+export function translateMenu(key: string, fallback: string): string {
+  const resources = localeResources[currentLocale] ?? localeResources.en
+  return resources[key] ?? localeResources.en[key] ?? fallback
+}
+
 export function setMenuLanguage(locale: string): void {
   if (locale === 'en' || locale === 'zh_CN') {
     currentLocale = locale
@@ -259,4 +287,8 @@ export function setMenuLanguage(locale: string): void {
     currentLocale = 'en'
   }
   buildAndSetMenu()
+}
+
+export function translateAppText(key: string): string {
+  return t(currentLocale, key)
 }

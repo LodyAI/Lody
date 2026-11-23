@@ -1,5 +1,9 @@
 import { useCallback, useRef } from 'react';
+import { useAtomValue } from 'jotai';
+import { currentWorkspaceIdAtom } from '@/atoms';
+import { readPastedSessionLink } from '@/lib/session-deep-link';
 import type { ClipboardEvent, KeyboardEvent, ReactNode, Ref } from 'react';
+import { usePostHog } from '@/lib/posthog-context';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
@@ -7,7 +11,7 @@ import type { PersistedMentionRange } from '@/components/mentions/mention-persis
 import type { AcpCommandSummary, AgentConfigCliType } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   ChatComposer,
   type ChatComposerFileItem,
@@ -16,10 +20,25 @@ import {
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { ErrorBoundary } from '@/components/error-boundary';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import { ArrowUp, Bug, Download, ExternalLink, Loader2, Settings } from 'lucide-react';
+import { ArrowUp, CornerDownLeft, Settings } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
+import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
+import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
+import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
+import { DialogChatLandingScreen } from './dialog-chat-landing-screen';
+import { type ComposerInputElement, getComposerSelection } from '@/ui/mention/composer-input';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  // The Return glyph inside the dialog's submit button: part of the label,
+  // one step quieter than the word. An icon, never the ↩ character, which
+  // macOS paints as a colour emoji.
+  chord: { opacity: 0.6, flexShrink: 0 },
+});
 
 export type ChatLandingTone = 'light' | 'dark';
 
@@ -30,6 +49,14 @@ export interface ChatLandingViewProps {
   tone: ChatLandingTone;
   /** Whether the view is in mobile mode */
   isMobile?: boolean;
+  /**
+   * `page` is the new-chat route; `dialog` is the compact layout of a landing
+   * embedded in a dialog: hints and composer only, no greeting, ambient boards,
+   * page chrome or sidebar session drop target. Ignored on mobile.
+   */
+  layout?: 'page' | 'dialog';
+  /** DOM id of the prompt; an embedded landing needs its own beside the page's. */
+  promptId?: string;
   /** Scope root for desktop keyboard navigation (web layout only) — wraps the config
    *  controls + composer so arrow/Esc nav stays out of the sidebar and page chrome. */
   navRootRef?: Ref<HTMLDivElement>;
@@ -48,17 +75,18 @@ export interface ChatLandingViewProps {
   /** Callback when prompt changes */
   onPromptChange: (value: string) => void;
   /** Callback for prompt keydown events */
-  onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPromptKeyDown?: (event: KeyboardEvent<ComposerInputElement>) => void;
   /** Callback for prompt paste events */
-  onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onPromptPaste?: (event: ClipboardEvent<ComposerInputElement>) => void;
   /** Callback when files are dropped onto the composer */
   onImageDrop?: (files: File[]) => void;
   /** Placeholder text for the prompt textarea */
   promptPlaceholder?: string;
+  compactPlaceholderName?: string | null;
   /** Mobile keyboard action hint for the prompt textarea */
   promptEnterKeyHint?: 'send' | 'enter';
   /** Ref for the prompt textarea */
-  promptRef?: Ref<HTMLTextAreaElement>;
+  promptRef?: Ref<ComposerInputElement>;
   /** Inline pasted text drafts rendered as protected tokens inside the textarea */
   pastedTextDrafts?: PastedTextDraft[];
   /** Callback when pasted text draft ranges change */
@@ -83,8 +111,6 @@ export interface ChatLandingViewProps {
   onFileRetry?: (id: string) => void;
   /** Per-turn MCP selection, rendered inside the composer's "+" menu. */
   mcp?: AttachmentAddMenuMcp;
-  /** @deprecated Use topSelector and footerSelector instead */
-  selector?: ReactNode;
   /** Selector node displayed above the textarea (e.g., repo, branch) */
   topSelector?: ReactNode;
   /** Selector node displayed inside the input footer (e.g., model, mode) */
@@ -98,6 +124,8 @@ export interface ChatLandingViewProps {
   composerStatusTone?: 'error' | 'warning' | 'info';
   /** Context switch (Local Projects / GitHub Worktrees) shown below the title */
   contextSwitch?: ReactNode;
+  /** Shown under the desktop greeting; the mobile landing ignores it. */
+  ambient?: ReactNode;
   /** Whether the submit button is disabled */
   submitDisabled?: boolean;
   /** Draft is handed off for durable acceptance but remains restorable on failure. */
@@ -108,6 +136,12 @@ export interface ChatLandingViewProps {
   submitLabel?: string;
   /** Label for submit button when idle */
   submittingLabel?: string;
+  /**
+   * The dialog layout's dismiss action, beside its labelled submit button.
+   * Absent: no Cancel button (the panel's own close still dismisses).
+   */
+  onCancel?: () => void;
+  cancelLabel?: string;
   /** Hint type to display around the composer area */
   hintType?: ChatLandingHintType;
   /**
@@ -116,12 +150,14 @@ export interface ChatLandingViewProps {
    * Electron client we instead reassure that the local daemon is still coming
    * up (`daemon-starting`).
    */
-  noMachineVariant?: 'download-client' | 'daemon-starting';
+  noMachineVariant?: NoMachineHintVariant;
   /** No-machine hint message shown to web/mobile users without a client. */
+  hintDownloadClientTitle?: string;
   hintDownloadClientMessage?: string;
   /** Label for the download-client button. */
   hintDownloadClientLabel?: string;
   /** No-machine hint message shown in the Electron client while the daemon boots. */
+  hintDaemonStartingTitle?: string;
   hintDaemonStartingMessage?: string;
   /** Label for the report-bug button in the daemon-starting hint. */
   hintReportBugLabel?: string;
@@ -168,7 +204,7 @@ export interface ChatLandingViewProps {
  */
 function useSessionMentionDrop(enabled: boolean) {
   const mentionActionsRef = useRef<CombinedMentionTextareaHandle | null>(null);
-  const { dropZone, overlayActive } = useSessionMentionDropZone({
+  const { dropZone, pointerDropRef, overlayActive } = useSessionMentionDropZone({
     enabled,
     onDropSessionId: useCallback((sessionId: string) => {
       mentionActionsRef.current?.insertSessionMention(sessionId);
@@ -177,6 +213,7 @@ function useSessionMentionDrop(enabled: boolean) {
   return {
     mentionActionsRef,
     dropZone,
+    pointerDropRef,
     overlayActive,
   };
 }
@@ -184,6 +221,8 @@ function useSessionMentionDrop(enabled: boolean) {
 export function ChatLandingView({
   tone,
   isMobile = false,
+  layout = 'page',
+  promptId: promptIdProp,
   navRootRef,
   mentionSource,
   availableCommands,
@@ -195,6 +234,7 @@ export function ChatLandingView({
   onPromptPaste,
   onImageDrop,
   promptPlaceholder,
+  compactPlaceholderName,
   promptEnterKeyHint = 'send',
   promptRef,
   pastedTextDrafts = [],
@@ -210,7 +250,6 @@ export function ChatLandingView({
   onFileRemove,
   onFileRetry,
   mcp,
-  selector,
   topSelector,
   footerSelector,
   bottomBar,
@@ -218,15 +257,20 @@ export function ChatLandingView({
   composerStatusMessage,
   composerStatusTone = 'info',
   contextSwitch,
+  ambient,
   submitDisabled = false,
   submissionPending = false,
   onSubmit,
   submitLabel = 'Send',
   submittingLabel = 'Sending...',
+  onCancel,
+  cancelLabel = 'Cancel',
   hintType = null,
   noMachineVariant = 'download-client',
-  hintDownloadClientMessage = "It looks like the desktop client isn't running yet. Download it to get started:",
+  hintDownloadClientTitle = "Nothing's plugged in yet",
+  hintDownloadClientMessage = 'Your agents run on the desktop client. Install and open it, and your machine will show up here.',
   hintDownloadClientLabel = 'Download the client',
+  hintDaemonStartingTitle = 'Plugging in…',
   hintDaemonStartingMessage = "The local daemon doesn't seem to have finished starting yet. If you run into trouble, report a bug and we'll take a look.",
   hintReportBugLabel = 'Report a Bug',
   hintNoAgentConfigMessage = 'No agent configured. Go to settings to create one:',
@@ -241,9 +285,60 @@ export function ChatLandingView({
   resetKeys = [],
   errorLabels = {},
 }: ChatLandingViewProps) {
-  const isDark = tone === 'dark';
-  const { mentionActionsRef, dropZone, overlayActive } = useSessionMentionDrop(
-    !isMobile && !submissionPending
+  const postHog = usePostHog();
+  const isDialogLayout = !isMobile && layout === 'dialog';
+  const promptId = promptIdProp ?? (isMobile ? 'chat-prompt-mobile' : 'chat-prompt');
+  // A dialog's backdrop covers the sidebar, so no session can be dragged in.
+  const { mentionActionsRef, dropZone, pointerDropRef, overlayActive } = useSessionMentionDrop(
+    !isMobile && !submissionPending && !isDialogLayout
+  );
+  // A folder is not an attachment — it becomes a `@path` mention, through the
+  // same handle the session drop uses, so it lands in this composer's draft.
+  const handleDirectoryDrop = useCallback(
+    (directories: File[]) => {
+      const insertions = directories.flatMap((directory) => {
+        const localPath = getDroppedFileLocalPath(directory);
+        return localPath ? [toPathMentionInsertion(localPath, 'dir')] : [];
+      });
+      mentionActionsRef.current?.insertPathMentions(insertions);
+    },
+    [mentionActionsRef]
+  );
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const handlePromptPasteWithSessionUrl = useCallback(
+    (event: ClipboardEvent<ComposerInputElement>) => {
+      const text = event.clipboardData.getData('text/plain');
+      // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
+      const sessionUrl = text
+        ? (readPastedSessionLink(text, workspaceId) ?? parseAppSessionUrl(text))
+        : null;
+      if (sessionUrl) {
+        if (isPlainLinkPasteShortcut(event)) {
+          capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+            converted: false,
+            surface: 'chat_landing',
+          });
+        } else {
+          const target = event.currentTarget;
+          const { start: at, end: replaceEnd } = getComposerSelection(target);
+          if (
+            mentionActionsRef.current?.insertSessionMention(sessionUrl.sessionId, {
+              at,
+              replaceEnd,
+            })
+          ) {
+            capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+              converted: true,
+              surface: 'chat_landing',
+            });
+            event.preventDefault();
+            return;
+          }
+        }
+      }
+      onPromptPaste?.(event);
+    },
+    [mentionActionsRef, onPromptPaste, postHog, workspaceId]
   );
 
   const {
@@ -255,11 +350,6 @@ export function ChatLandingView({
   const hintButtonClassName = cn(
     'group flex w-fit items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors',
     'border-border bg-background/70 text-foreground hover:bg-muted/60'
-  );
-
-  const primaryActionButtonClassName = cn(
-    'h-8 w-8 rounded-full shadow-xs transition-all',
-    'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px] focus-visible:ring-ring focus-visible:ring-offset-background'
   );
 
   // No-agent-config hint shown in scrollable area (not as overlay)
@@ -288,73 +378,67 @@ export function ChatLandingView({
   const isDaemonStartingHint = noMachineVariant === 'daemon-starting';
   const noMachineHintNode =
     hintType === 'no-machine' ? (
-      <div
-        className={cn(
-          'flex items-start gap-3 rounded-lg border px-4 py-3',
-          'border-border/60 bg-background/60 text-muted-foreground'
-        )}
-      >
-        {isDaemonStartingHint ? (
-          <Loader2
-            className={cn(
-              'mt-0.5 h-4 w-4 shrink-0 animate-spin opacity-70',
-              'text-muted-foreground'
-            )}
-          />
-        ) : (
-          <Download className={cn('mt-0.5 h-4 w-4 shrink-0 opacity-70', 'text-muted-foreground')} />
-        )}
-        <div className="flex flex-1 flex-col gap-2">
-          <p className="text-sm">
-            {isDaemonStartingHint ? hintDaemonStartingMessage : hintDownloadClientMessage}
-          </p>
-          {isDaemonStartingHint ? (
-            <button type="button" onClick={onReportBug} className={hintButtonClassName}>
-              <Bug className="h-3.5 w-3.5 opacity-70" />
-              <span>{hintReportBugLabel}</span>
-            </button>
-          ) : (
-            <button type="button" onClick={onDownloadClient} className={hintButtonClassName}>
-              <span>{hintDownloadClientLabel}</span>
-              <ExternalLink className="h-3.5 w-3.5 opacity-50 transition-opacity group-hover:opacity-100" />
-            </button>
-          )}
-          <p
-            className={cn(
-              'text-xs',
-              isDark ? 'text-muted-foreground/80' : 'text-muted-foreground/90'
-            )}
-          >
-            {hintDiscordMessage}{' '}
-            <a
-              href="https://discord.gg/E8mZtMu38s"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-foreground/70 underline transition-colors hover:text-foreground/90"
-            >
-              {hintDiscordLabel}
-            </a>
-          </p>
-        </div>
-      </div>
+      <NoMachineHint
+        variant={noMachineVariant}
+        title={isDaemonStartingHint ? hintDaemonStartingTitle : hintDownloadClientTitle}
+        message={isDaemonStartingHint ? hintDaemonStartingMessage : hintDownloadClientMessage}
+        downloadLabel={hintDownloadClientLabel}
+        reportBugLabel={hintReportBugLabel}
+        discordMessage={hintDiscordMessage}
+        discordLabel={hintDiscordLabel}
+        onDownloadClient={onDownloadClient}
+        onReportBug={onReportBug}
+      />
     ) : null;
 
   const primaryActionNode = (
     <ErrorBoundary name="ChatLandingPrimaryAction" variant="inline" resetKeys={resetKeys}>
       <Button
         type="button"
-        size="icon"
-        variant="ghost"
+        variant="primary"
+        size="medium"
+        shape="pill"
+        icon
+        data-testid="composer-send"
         onClick={onSubmit}
         disabled={submitDisabled}
         aria-label={submissionPending ? submittingLabel : submitLabel}
-        className={cn(primaryActionButtonClassName, isMobile ? 'h-6 w-6' : 'h-7 w-7')}
       >
-        {submissionPending ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <ArrowUp className="h-4 w-4" />
-        )}
+        {submissionPending ? <Spinner className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
+      </Button>
+    </ErrorBoundary>
+  );
+
+  // A create dialog states its action in words, with the chord that sends it.
+  // Enter sends too (the prompt's own keydown); the chord is what a person
+  // who has learned to press it for a newline-friendly editor expects.
+  const dialogActionsNode = (
+    <ErrorBoundary name="ChatLandingPrimaryAction" variant="inline" resetKeys={resetKeys}>
+      {onCancel ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          data-testid="composer-cancel"
+          onClick={onCancel}
+          disabled={submissionPending}
+        >
+          {cancelLabel}
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        variant="primary"
+        size="small"
+        data-testid="composer-send"
+        onClick={onSubmit}
+        disabled={submitDisabled}
+        aria-label={submissionPending ? submittingLabel : submitLabel}
+      >
+        {submissionPending ? <Spinner className="h-3.5 w-3.5" /> : null}
+        <span>{submitLabel}</span>
+        {/* Return sends, as in the new-conversation composer. */}
+        <CornerDownLeft size={14} strokeWidth={2} aria-hidden {...stylex.props(styles.chord)} />
       </Button>
     </ErrorBoundary>
   );
@@ -364,12 +448,12 @@ export function ChatLandingView({
       <div className="text-sm font-semibold text-foreground">{somethingWentWrong}</div>
       <div className="mt-1 text-xs text-muted-foreground">{composerCrashed}</div>
       <textarea
-        id={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
-        ref={promptRef}
+        id={promptId}
+        ref={promptRef as Ref<HTMLTextAreaElement>}
         value={submissionPending ? '' : promptValue}
         onChange={(event) => onPromptChange(event.target.value)}
         onKeyDown={onPromptKeyDown}
-        onPaste={onPromptPaste}
+        onPaste={handlePromptPasteWithSessionUrl}
         rows={isMobile ? 3 : 4}
         enterKeyHint={promptEnterKeyHint}
         placeholder={promptPlaceholder}
@@ -395,7 +479,7 @@ export function ChatLandingView({
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1">{selector ?? footerSelector}</div>
+        <div className="flex flex-wrap items-center gap-1">{footerSelector}</div>
         <div className="ml-auto flex items-center gap-2">
           {primaryActionNode}
           <button
@@ -420,19 +504,21 @@ export function ChatLandingView({
       {composerNotice}
       <ChatComposer
         tone={tone}
-        variant={isMobile ? 'landing' : 'session'}
+        variant={isMobile ? 'landing' : isDialogLayout ? 'modal' : 'session'}
         mentionSource={mentionSource}
         availableCommands={availableCommands}
         skillAgent={skillAgent}
-        promptId={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
+        promptId={promptId}
         promptRef={promptRef}
         promptValue={submissionPending ? '' : promptValue}
         onPromptChange={onPromptChange}
         onPromptKeyDown={onPromptKeyDown}
-        onPromptPaste={onPromptPaste}
+        onPromptPaste={handlePromptPasteWithSessionUrl}
         onImageDrop={submissionPending ? undefined : onImageDrop}
+        onDirectoryDrop={submissionPending ? undefined : handleDirectoryDrop}
         imageDropDisabled={submissionPending}
         promptPlaceholder={promptPlaceholder}
+        compactPlaceholderName={compactPlaceholderName}
         promptDisabled={submissionPending}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
@@ -451,13 +537,13 @@ export function ChatLandingView({
         onFileRetry={submissionPending ? undefined : onFileRetry}
         mcp={mcp}
         topSelector={topSelector}
-        footerSelector={footerSelector ?? selector}
+        footerSelector={footerSelector}
         bottomBar={bottomBar}
         statusMessage={composerStatusMessage}
         statusTone={composerStatusTone}
-        primaryAction={primaryActionNode}
+        primaryAction={isDialogLayout ? dialogActionsNode : primaryActionNode}
         autoResize
-        maxRows={isMobile ? 10 : 11}
+        maxRows={isMobile ? 10 : isDialogLayout ? 14 : 11}
       />
     </ErrorBoundary>
   );
@@ -475,14 +561,34 @@ export function ChatLandingView({
     );
   }
 
+  if (isDialogLayout) {
+    return (
+      <DialogChatLandingScreen
+        navRootRef={navRootRef}
+        composer={composerNode}
+        noMachineHint={noMachineHintNode}
+        agentConfigHint={agentConfigHintNode}
+      />
+    );
+  }
+
   return (
     <WebChatLandingScreen
       title={title}
       dropActive={overlayActive}
       dropKind="session-mention"
       dropHandlers={dropZone.handlers}
+      dropRef={pointerDropRef}
       navRootRef={navRootRef}
       contextSwitch={contextSwitch}
+      ambient={
+        ambient == null ? null : (
+          // The boards are optional; a failure there must never take the composer with it.
+          <ErrorBoundary name="ChatLandingAmbient" variant="inline">
+            {ambient}
+          </ErrorBoundary>
+        )
+      }
       composer={composerNode}
       noMachineHint={noMachineHintNode}
       agentConfigHint={agentConfigHintNode}

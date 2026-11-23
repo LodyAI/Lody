@@ -39,30 +39,36 @@ export type TurnHistoryGateArgs = {
   logger: Logger;
   sessionId: SessionId;
   userTurnId: string;
-  /** Read the CLI-local session history (mirror state; cheap). */
-  readHistory: () => Promise<SessionHistoryInput[]>;
+  /** Check whether the expected user turn is present. */
+  hasUserTurn?: (turnId: string) => Promise<boolean>;
+  /** History source used when hasUserTurn is absent. */
+  readHistory?: () => Promise<SessionHistoryInput[]>;
   /** Subscribe to local doc changes (remote imports included); returns unsubscribe. */
   subscribeHistory: (listener: () => void) => (() => void) | undefined;
   /**
    * Runs exactly once, right before waiters are released (skipped on dispose).
    * Used to create the turn's assistant entry so every gated writer resumes
-   * against an existing, correctly-ordered entry. Errors are logged and do not
-   * keep the gate closed — downstream flushes self-create the entry by id.
+   * against an existing, correctly-ordered entry. Errors are logged. The original
+   * deadline releases waiters even if this callback never returns, but lets it
+   * finish adding author/model metadata while the turn is live. Only disposal
+   * aborts later callback steps; it cannot undo an already-issued write.
    */
-  onBeforeOpen?: (reason: TurnHistoryGateOpenReason) => Promise<void>;
+  onBeforeOpen?: (reason: TurnHistoryGateOpenReason, signal: AbortSignal) => Promise<void>;
   timeoutMs?: number;
 };
 
 /**
- * Bounded wait for the user turn entry to sync. Doc sync and Machine RPC both
- * ride Loro Streams, so "RPC delivered but the entry never syncs" implies a
- * degraded transport; 20s covers slow room join + catch-up without making a
- * genuinely broken uplink freeze turn output forever.
+ * Bounded wait for the user turn entry to sync. Opening early lets a concurrent
+ * Loro insert order the reply before the user message permanently (#1753); a
+ * longer wait holds the turn's visible output and finalization. One minute
+ * covers reconnect-length sync stalls while keeping a stuck turn short.
+ * Roost sessions are unaffected: the owner appends the user turn itself.
  */
-export const DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS = 20_000;
+export const DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS = 60_000;
 
 export class TurnHistoryGate {
-  private open = false;
+  private readonly beforeOpenAbort = new AbortController();
+  private phase: 'waiting' | 'opening' | 'open' = 'waiting';
   private readonly opened: Promise<void>;
   private releaseWaiters: () => void = () => {};
   private unsubscribe: (() => void) | undefined;
@@ -73,7 +79,7 @@ export class TurnHistoryGate {
 
   private constructor(private readonly args: TurnHistoryGateArgs | null) {
     if (!args) {
-      this.open = true;
+      this.phase = 'open';
       this.opened = Promise.resolve();
       return;
     }
@@ -86,11 +92,13 @@ export class TurnHistoryGate {
       void this.openGate('timeout');
     }, timeoutMs);
     this.timer.unref?.();
-    this.unsubscribe = args.subscribeHistory(() => this.scheduleCheck());
+    try {
+      this.unsubscribe = args.subscribeHistory(() => this.scheduleCheck());
+    } catch (error) {
+      this.log('debug', `Turn history subscription failed: ${formatErrorMessage(error)}`);
+    }
     if (!this.unsubscribe) {
-      args.logger.debug(
-        `[${args.sessionId}] Turn history gate has no doc subscription; relying on timeout`
-      );
+      this.log('debug', 'Turn history gate has no doc subscription; relying on timeout');
     }
     this.scheduleCheck();
   }
@@ -106,7 +114,7 @@ export class TurnHistoryGate {
   }
 
   get isOpen(): boolean {
-    return this.open;
+    return this.phase === 'open';
   }
 
   /** Resolves when turn-scoped history writes may proceed. Never rejects. */
@@ -119,13 +127,15 @@ export class TurnHistoryGate {
    * eviction). Late flushes self-create the assistant entry when needed.
    */
   dispose(): void {
+    // Timeout may already have opened the gate while its callback is pending.
+    this.beforeOpenAbort.abort();
     void this.openGate('disposed');
   }
 
   /** Serialized, coalescing presence check — one read at a time per gate. */
   private scheduleCheck(): void {
     const args = this.args;
-    if (this.open || !args) {
+    if (this.phase !== 'waiting' || !args) {
       return;
     }
     if (this.checking) {
@@ -137,62 +147,85 @@ export class TurnHistoryGate {
       try {
         do {
           this.recheckRequested = false;
-          if (this.open) {
+          if (this.phase !== 'waiting') {
             return;
           }
-          const history = await args.readHistory();
-          const present = history.some(
-            (entry) => entry.role === 'user' && entry.id === args.userTurnId
-          );
+          const present = args.hasUserTurn
+            ? await args.hasUserTurn(args.userTurnId)
+            : (await args.readHistory!()).some(
+                (entry) => entry.role === 'user' && entry.id === args.userTurnId
+              );
           if (present) {
             await this.openGate('user-turn-synced');
             return;
           }
         } while (this.recheckRequested);
       } catch (error) {
-        args.logger.debug(
-          `[${args.sessionId}] Turn history gate check failed: ${formatErrorMessage(error)}`
-        );
+        this.log('debug', `Turn history gate check failed: ${formatErrorMessage(error)}`);
       } finally {
         this.checking = false;
       }
     })();
   }
 
+  /** Diagnostics are best effort; a broken sink cannot hold a conversation. */
+  private log(level: 'debug' | 'warn' | 'error', message: string): void {
+    try {
+      this.args?.logger[level](`[${this.args.sessionId}] ${message}`);
+    } catch {
+      // The gate's deadline and release remain authoritative if logging fails.
+    }
+  }
+
+  private detachHistory(): void {
+    const unsubscribe = this.unsubscribe;
+    this.unsubscribe = undefined;
+    try {
+      unsubscribe?.();
+    } catch (error) {
+      this.log('debug', `Turn history unsubscribe failed: ${formatErrorMessage(error)}`);
+    }
+  }
+
+  private release(): void {
+    if (this.phase === 'open') return;
+    this.phase = 'open';
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.detachHistory();
+    this.releaseWaiters();
+  }
+
   private async openGate(reason: TurnHistoryGateOpenReason): Promise<void> {
-    if (this.open) {
+    if (this.phase === 'open') return;
+    if (reason === 'disposed') {
+      this.release();
       return;
     }
-    this.open = true;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
+    if (reason === 'timeout') {
+      this.log(
+        'warn',
+        `Turn history deadline reached after ${Date.now() - this.createdAtMs}ms; releasing writes even if the user entry or its assistant-entry write is still pending`
+      );
     }
-    this.unsubscribe?.();
-    this.unsubscribe = undefined;
-
-    const args = this.args;
-    if (args) {
-      const waitedMs = Date.now() - this.createdAtMs;
-      if (reason === 'timeout') {
-        args.logger.warn(
-          `[${args.sessionId}] User turn ${args.userTurnId} did not sync within ${waitedMs}ms; releasing turn history writes (output may order before the user message)`
-        );
-      } else {
-        args.logger.debug(
-          `[${args.sessionId}] Turn history gate opened (${reason}) after ${waitedMs}ms`
-        );
-      }
-      if (reason !== 'disposed' && args.onBeforeOpen) {
-        try {
-          await args.onBeforeOpen(reason);
-        } catch (error) {
-          args.logger.error(
-            `[${args.sessionId}] Turn history gate onBeforeOpen failed: ${formatErrorMessage(error)}`
-          );
-        }
-      }
+    if (this.phase === 'opening') {
+      if (reason === 'timeout') this.release();
+      return;
     }
-    this.releaseWaiters();
+    this.phase = 'opening';
+    this.detachHistory();
+    try {
+      this.log('debug', `Turn history gate opening (${reason})`);
+      const beforeOpen = this.args?.onBeforeOpen?.(reason, this.beforeOpenAbort.signal);
+      // The original deadline covers the callback too. At the deadline start
+      // its best-effort write, observe its outcome, and release without awaiting it.
+      if (reason === 'timeout') this.release();
+      await beforeOpen;
+    } catch (error) {
+      this.log('error', `Turn history gate onBeforeOpen failed: ${formatErrorMessage(error)}`);
+    } finally {
+      // Late completion belongs only to this gate, never to its successor.
+      this.release();
+    }
   }
 }

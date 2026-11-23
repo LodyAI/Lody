@@ -1,5 +1,15 @@
-const SITE_URL = 'https://lody.ai';
+import { absolutePageUrl, SITE_URL } from './site-url.mjs';
 const OG_IMAGE_PATH = '/og-image.png';
+const DEFAULT_DESCRIPTION =
+  'Lody is a team workspace for running AI coding agents in parallel with isolated Git worktrees, live diff review, GitHub integration, and mobile access.';
+
+/** Append `| Lody` to a document head title unless it is already branded. */
+export function brandTitle(title: string, brand = 'Lody'): string {
+  if (!title) return brand;
+  if (title.toLowerCase().includes(brand.toLowerCase())) return title;
+  if (/(?:\| Lody|– Lody|- Lody)$/u.test(title)) return title;
+  return `${title} | ${brand}`;
+}
 
 type Alternate = {
   lang: 'en-US' | 'zh-CN';
@@ -17,14 +27,6 @@ export type SiteHead = {
   /** Optional raw <script> tags (e.g. JSON-LD) for the document head. */
   scripts?: Array<{ type?: string; children?: string }>;
 };
-
-function absoluteUrl(path: string): string {
-  const url = new URL(path, SITE_URL);
-  if (url.pathname !== '/' && !url.pathname.endsWith('/') && !/\.[^/]+$/u.test(url.pathname)) {
-    url.pathname += '/';
-  }
-  return url.toString();
-}
 
 function robotsContent(robots: Robots | undefined): string | undefined {
   if (!robots) return undefined;
@@ -49,9 +51,9 @@ export function pageHead(args: {
   /** Serialized JSON-LD object (placed in head as application/ld+json). */
   jsonLd?: Record<string, unknown> | readonly Record<string, unknown>[];
 }): SiteHead {
-  const description = args.description ?? 'Lody AI';
-  const canonical = absoluteUrl(args.path);
-  const image = absoluteUrl(args.image ?? OG_IMAGE_PATH);
+  const description = args.description ?? DEFAULT_DESCRIPTION;
+  const canonical = absolutePageUrl(args.path);
+  const image = new URL(args.image ?? OG_IMAGE_PATH, SITE_URL).toString();
   const robots = robotsContent(args.robots);
   const jsonLdNodes = args.jsonLd ? (Array.isArray(args.jsonLd) ? args.jsonLd : [args.jsonLd]) : [];
 
@@ -80,14 +82,14 @@ export function pageHead(args: {
       ...(args.alternates ?? []).map((alternate) => ({
         rel: 'alternate',
         hrefLang: alternate.lang,
-        href: absoluteUrl(alternate.path),
+        href: absolutePageUrl(alternate.path),
       })),
       ...(args.alternates && args.alternates.length > 0
         ? [
             {
               rel: 'alternate',
               hrefLang: 'x-default',
-              href: absoluteUrl(args.alternates[0]?.path ?? args.path),
+              href: absolutePageUrl(args.alternates[0]?.path ?? args.path),
             },
           ]
         : []),

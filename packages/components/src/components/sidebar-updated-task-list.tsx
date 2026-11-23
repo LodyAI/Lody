@@ -12,34 +12,30 @@ import {
   GitBranch,
   GitPullRequest,
   Link2,
-  Loader2,
   LockKeyhole,
   Pencil,
   Pin,
   PinOff,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
-import { TooltipProvider } from '@/ui/tooltip';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
+import { Tooltip } from '@lody/ui/tooltip';
+import { ContextMenu } from '@lody/ui/context-menu';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
   SessionPrIcon,
   SessionMergeablePill,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
+  SidebarListSkeleton,
   SidebarSectionHeader,
+  SidebarSessionTitleText,
   type SidebarRowKind,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
@@ -52,6 +48,7 @@ import type {
 import type { TaskListPullRequestOpen, TaskListTaskOwner } from '@/components/task-list';
 import { SessionSharingIndicator } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type SidebarUpdatedItemKind = SidebarRowKind;
 
@@ -102,7 +99,7 @@ export type SidebarUpdatedItem = {
 
 /**
  * The Updated organize mode renders ONE section ("Chats") — a flat
- * recency-sorted list. The bucket plumbing (collapse / show-all state maps,
+ * recency-sorted list. The bucket plumbing (collapse / reveal state maps,
  * toggle callbacks) survives from the earlier today/week/older design, now
  * keyed by the single 'all' bucket.
  */
@@ -137,34 +134,6 @@ export type SidebarUpdatedContextMenuLabels = {
  */
 function HeaderActionRow({ action }: { action: ReactNode }) {
   return <div className="flex h-7 shrink-0 items-center justify-end">{action}</div>;
-}
-
-function SidebarUpdatedTaskListSkeleton({ className }: { className?: string }) {
-  // Three buckets each with a header and a couple of rows; matches the
-  // TaskListSkeleton density so the two organize modes look the same when
-  // the session list is still loading.
-  const bucketRows: string[][] = [
-    ['w-[68%]', 'w-[58%]', 'w-[74%]'],
-    ['w-[60%]', 'w-[52%]'],
-  ];
-  return (
-    <div className={cn('flex flex-col gap-4', className)}>
-      {bucketRows.map((rows, bucketIndex) => (
-        <div key={bucketIndex} className="space-y-2">
-          <Skeleton className="h-3 w-16" />
-          <div className="space-y-2 rounded-lg border border-border/50 p-2">
-            {rows.map((width, rowIndex) => (
-              <div key={rowIndex} className="flex items-center gap-2 px-1 py-1.5">
-                <Skeleton className="h-7 w-7 rounded-md" />
-                <Skeleton className={cn('h-3', width)} />
-                <Skeleton className="ml-auto h-3 w-10" />
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 function parseGitHubPrNumber(url: string): number | null {
@@ -210,21 +179,21 @@ export function sortUpdatedItems(items: SidebarUpdatedItem[]): SidebarUpdatedIte
 
 /**
  * When a bucket has more than this many rows, the row list collapses to the
- * latest N and reveals a "Show all (count)" toggle. Mirrors the per-group
- * preview pattern in TaskList, but with a higher threshold because Updated
- * mode is a flat firehose rather than a small per-repo group.
+ * latest N and reveals a "Show more" stepper. Mirrors the per-group preview
+ * pattern in TaskList, but with a higher threshold because Updated mode is a
+ * flat firehose rather than a small per-repo group.
  */
-export const SHOW_FULL_BUCKET_THRESHOLD = 20;
+export const UPDATED_BUCKET_PREVIEW_MAX = 20;
 
 export function getVisibleUpdatedItems(
   orderedItems: SidebarUpdatedItem[],
-  canToggleFullList: boolean,
-  showFull: boolean
+  canRevealRows: boolean,
+  revealedRows: number
 ): SidebarUpdatedItem[] {
-  if (!canToggleFullList || showFull || orderedItems.length <= SHOW_FULL_BUCKET_THRESHOLD) {
+  if (!canRevealRows || orderedItems.length <= UPDATED_BUCKET_PREVIEW_MAX) {
     return orderedItems;
   }
-  return orderedItems.slice(0, SHOW_FULL_BUCKET_THRESHOLD);
+  return orderedItems.slice(0, UPDATED_BUCKET_PREVIEW_MAX + revealedRows);
 }
 
 export type SidebarUpdatedTaskListProps = {
@@ -280,12 +249,14 @@ export type SidebarUpdatedTaskListProps = {
   onToggleBucket?: (key: SidebarUpdatedBucketKey) => void;
   toggleBucketLabel?: string;
   /**
-   * Per-bucket "show all" state. When false (default) and the bucket exceeds
-   * {@link SHOW_FULL_BUCKET_THRESHOLD} items, only the latest N render and a
-   * "Show all" button appears.
+   * Per-bucket incremental reveal. When a bucket exceeds
+   * {@link UPDATED_BUCKET_PREVIEW_MAX} rows, only the latest N render and a
+   * "Show more" button uncovers one more page per click; "Show less" returns
+   * to the preview.
    */
-  showFullBuckets?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
-  onToggleFullBucket?: (key: SidebarUpdatedBucketKey) => void;
+  revealedRowsByBucket?: Partial<Record<SidebarUpdatedBucketKey, number>>;
+  onShowMore?: (key: SidebarUpdatedBucketKey) => void;
+  onShowLess?: (key: SidebarUpdatedBucketKey) => void;
   /**
    * Always-visible action rendered at the right end of the FIRST bucket's
    * header row (desktop sidebar filter trigger). While loading or empty the
@@ -321,8 +292,9 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
   collapsedBuckets,
   onToggleBucket,
   toggleBucketLabel,
-  showFullBuckets,
-  onToggleFullBucket,
+  revealedRowsByBucket,
+  onShowMore,
+  onShowLess,
   headerAction,
 }: SidebarUpdatedTaskListProps) {
   const { t } = useTranslation();
@@ -406,7 +378,11 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
     return (
       <div className="flex flex-col">
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
-        <SidebarUpdatedTaskListSkeleton className={className} />
+        <SidebarListSkeleton
+          className={className}
+          showHeaderIcon={false}
+          sectionClassName="mb-4 last:mb-0"
+        />
       </div>
     );
   }
@@ -429,10 +405,10 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
   }
 
   const canToggleBucket = typeof onToggleBucket === 'function';
-  const canToggleFullBucket = typeof onToggleFullBucket === 'function';
+  const canToggleFullBucket = typeof onShowMore === 'function';
 
   return (
-    <TooltipProvider>
+    <Tooltip.Provider>
       <div className={cn('flex flex-col', className)}>
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
@@ -441,13 +417,18 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
             if (!canToggleBucket) return;
             onToggleBucket?.(bucket.key);
           };
-          const showFull = Boolean(showFullBuckets?.[bucket.key]);
-          const overflows = bucket.items.length > SHOW_FULL_BUCKET_THRESHOLD;
-          const visibleItems = getVisibleUpdatedItems(bucket.items, canToggleFullBucket, showFull);
-          const showToggleFullList = canToggleFullBucket && overflows && !collapsed;
-          const toggleFullListLabel = showFull
-            ? t('sessions.showLess', 'Show less')
-            : t('sessions.showAll', 'Show all ({{count}})', { count: bucket.items.length });
+          const revealedRows = revealedRowsByBucket?.[bucket.key] ?? 0;
+          const overflows = bucket.items.length > UPDATED_BUCKET_PREVIEW_MAX;
+          const hasMoreRows = bucket.items.length > UPDATED_BUCKET_PREVIEW_MAX + revealedRows;
+          const visibleItems = getVisibleUpdatedItems(
+            bucket.items,
+            canToggleFullBucket,
+            revealedRows
+          );
+          const showMoreRow = canToggleFullBucket && overflows && hasMoreRows && !collapsed;
+          const showLessRow = canToggleFullBucket && overflows && revealedRows > 0 && !collapsed;
+          const showMoreLabel = t('sessions.showMore', 'Show more');
+          const showLessLabel = t('sessions.showLess', 'Show less');
           return (
             <div
               key={bucket.key}
@@ -496,7 +477,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
                       archiveConfirmLabel={archiveLabels.confirm}
                     />
                   ))}
-                  {showToggleFullList ? (
+                  {showMoreRow ? (
                     <button
                       type="button"
                       data-sidebar-updated-show-more={bucket.key}
@@ -506,14 +487,34 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
                         'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                         'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
                       )}
-                      aria-label={toggleFullListLabel}
-                      onClick={() => onToggleFullBucket?.(bucket.key)}
+                      aria-label={showMoreLabel}
+                      onClick={() => onShowMore?.(bucket.key)}
                     >
                       <span
                         className="flex h-4 w-4 items-center justify-center"
                         aria-hidden="true"
                       />
-                      <span>{toggleFullListLabel}</span>
+                      <span>{showMoreLabel}</span>
+                    </button>
+                  ) : null}
+                  {showLessRow ? (
+                    <button
+                      type="button"
+                      data-sidebar-updated-show-less={bucket.key}
+                      className={cn(
+                        'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
+                        'transition-colors',
+                        'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+                      )}
+                      aria-label={showLessLabel}
+                      onClick={() => onShowLess?.(bucket.key)}
+                    >
+                      <span
+                        className="flex h-4 w-4 items-center justify-center"
+                        aria-hidden="true"
+                      />
+                      <span>{showLessLabel}</span>
                     </button>
                   ) : null}
                 </div>
@@ -522,7 +523,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
           );
         })}
       </div>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 });
 
@@ -660,8 +661,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       Boolean(shareMenuState) ||
       Boolean(branchName) ||
       (showPr && Boolean(onOpenPullRequest)));
-  const titleFontClassName = item.isPinned ? 'font-normal' : 'font-medium';
-
   const handlePrOpen =
     onOpenPullRequest && prUrl
       ? () =>
@@ -696,30 +695,34 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       className={cn(
         'min-w-0 w-full truncate bg-transparent outline-hidden',
         'border border-sidebar-ring/40 rounded-sm px-1 -mx-1',
-        'text-sm',
-        titleFontClassName
+        'text-sm font-normal'
       )}
     />
   ) : (
-    <span
+    <SidebarSessionTitleText
+      sessionId={item.id}
+      selected={showSelectedState}
       className={cn(
-        'min-w-0 flex-1 truncate',
-        titleFontClassName,
-        showSelectedState
-          ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground dark:text-sidebar-foreground/75 group-hover/row:text-sidebar-hover-foreground'
+        'min-w-0 flex-1 truncate font-normal',
+        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
       )}
     >
       {item.title}
-    </span>
+    </SidebarSessionTitleText>
   );
+
+  const [rowMenuOpen, setRowMenuOpen] = useState(false);
 
   const row = (
     <div
       role={!useAnchor && onSelect ? 'button' : undefined}
       tabIndex={!useAnchor && onSelect ? 0 : undefined}
+      aria-current={selected ? 'page' : undefined}
+      data-id={`updated:${item.id}`}
+      data-scope-item="row"
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
+      data-menu-open={rowMenuOpen ? '' : undefined}
       className={cn(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
@@ -730,9 +733,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         !showSelectedState &&
           onSelect &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
         showSelectedState &&
-          'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
+          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
         // Keyboard-only focus ring — see TaskList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.
@@ -771,15 +774,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       ) : null}
 
       <div className="flex w-full min-w-0 items-center gap-1.5 text-sm">
-        <SessionRowLeadingSlot
-          isWaitingPermission={item.isWaitingPermission}
-          isWorking={item.isWorking}
-          hasUnreadMessages={item.hasUnreadMessages}
-          showMenuButton={hasMenuActions}
-          menuLabel={contextMenuLabels.moreActions}
-          fadeClassName="group-hover/row:opacity-0"
-          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto"
-        />
+        <SessionRowLeadingSlot />
         {showPinnedIcon && item.isPinned ? (
           <Pin
             aria-hidden="true"
@@ -803,15 +798,15 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         >
           {titleNode}
         </div>
-        {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
+        {/* Keep PR at the right edge. Line totals stay in the hover card. */}
         <SidebarRowEndSlot
-          fadeClassName="group-hover/row:opacity-0"
+          sessionId={item.id}
+          isWaitingPermission={item.isWaitingPermission}
+          isWorking={item.isWorking}
+          hasUnreadMessages={item.hasUnreadMessages}
+          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
           restIcon={
-            showPr ||
-            hasChanges ||
-            showMergeablePill ||
-            isMobile ||
-            item.sharing?.visibility === 'private' ? (
+            showPr || showMergeablePill || isMobile || item.sharing?.visibility === 'private' ? (
               <span
                 className={cn(
                   'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',
@@ -819,17 +814,20 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 )}
               >
                 {isMobile ? <span>{relativeTime}</span> : null}
-                {showMergeablePill ? (
-                  <SessionMergeablePill />
-                ) : hasChanges && !isMergeable ? (
-                  <span className="flex items-center gap-1">
-                    <span className="text-code-added">+{addedLines}</span>
-                    <span className="text-code-removed">-{deletedLines}</span>
-                  </span>
+                {showMergeablePill ? <SessionMergeablePill /> : null}
+                {showPr ? (
+                  <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
                 ) : null}
-                {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={item.prCiState} /> : null}
                 {item.sharing ? <SessionSharingIndicator state={item.sharing} /> : null}
               </span>
+            ) : undefined
+          }
+          menu={
+            hasMenuActions ? (
+              <SessionRowMenuButton
+                label={contextMenuLabels.moreActions}
+                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+              />
             ) : undefined
           }
           archive={
@@ -838,7 +836,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 label={archiveTooltipLabel}
                 confirmLabel={archiveConfirmLabel}
                 onConfirm={() => onArchive?.(item.id)}
-                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto"
+                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
               />
             ) : undefined
           }
@@ -877,79 +875,81 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   }
 
   const menuRow = hasMenuActions ? (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-[180px]">
+    <ContextMenu.Root onOpenChange={setRowMenuOpen}>
+      <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-[180px]">
         {handlePrOpen ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={GitPullRequest}
+            onClick={() => {
               handlePrOpen();
             }}
           >
-            <GitPullRequest />
             {contextMenuLabels.openPr}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {handlePrOpen && (canRename || canTogglePin || canArchive || canCopyUrl || branchName) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {canRename ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={Pencil}
+            onClick={() => {
               onBeginRename(item.id, item.title);
             }}
           >
-            <Pencil />
             {contextMenuLabels.rename}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canTogglePin ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={item.isPinned ? PinOff : Pin}
+            onClick={() => {
               onTogglePin?.(item.id, !item.isPinned);
             }}
           >
-            {item.isPinned ? <PinOff /> : <Pin />}
             {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canArchive ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={Archive}
+            onClick={() => {
               onArchive?.(item.id);
             }}
           >
-            <Archive />
             {contextMenuLabels.archive}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {(canRename || canTogglePin || canArchive) && (canCopyUrl || branchName) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {canCopyUrl ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={Link2}
+            onClick={() => {
               onCopyUrl?.(item.id);
             }}
           >
-            <Link2 />
             {contextMenuLabels.copyUrl}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {shareMenuState ? (
-          <ContextMenuItem
+          <ContextMenu.Item
             disabled={shareMenuState !== 'share'}
-            onSelect={() => {
+            icon={
+              shareMenuState === 'share' ? (
+                Users
+              ) : shareMenuState === 'loading' ? (
+                <Spinner size="small" label={null} />
+              ) : (
+                LockKeyhole
+              )
+            }
+            onClick={() => {
               onShareWithTeam?.(item.id);
             }}
           >
-            {shareMenuState === 'share' ? (
-              <Users />
-            ) : shareMenuState === 'loading' ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <LockKeyhole />
-            )}
             {shareMenuState === 'share'
               ? contextMenuLabels.shareWithTeam
               : shareMenuState === 'unregistered'
@@ -957,20 +957,20 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 : shareMenuState === 'owner-only'
                   ? contextMenuLabels.onlyOwnerCanShare
                   : contextMenuLabels.loadingSharing}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {branchName ? (
-          <ContextMenuItem
-            onSelect={() => {
-              void navigator.clipboard.writeText(branchName).catch(() => {});
+          <ContextMenu.Item
+            icon={GitBranch}
+            onClick={() => {
+              void copyTextToClipboard(branchName).catch(() => {});
             }}
           >
-            <GitBranch />
             {contextMenuLabels.copyBranch}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
-      </ContextMenuContent>
-    </ContextMenu>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   ) : (
     row
   );

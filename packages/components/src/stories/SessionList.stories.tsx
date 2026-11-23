@@ -26,6 +26,7 @@ type TaskListDemoProps = SessionListProps & {
 function TaskListDemo({
   sessions,
   repos,
+  isLoading,
   selectedSessionId,
   containerClassName,
   collapsedOpenedBySessionIds,
@@ -119,6 +120,7 @@ function TaskListDemo({
         <SessionList
           sessions={taskState}
           repos={repoState}
+          isLoading={isLoading}
           chatsCollapsed={chatsCollapsed}
           selectedSessionId={selectedId}
           onSelect={setSelectedId}
@@ -126,6 +128,24 @@ function TaskListDemo({
           onToggleChatsCollapsed={() => setChatsCollapsed((prev) => !prev)}
           onArchiveSession={archiveTask}
           onRenameSession={renameTask}
+          onTogglePinSession={(sessionId, pinned) =>
+            setTaskState((prev) =>
+              prev.map((task) =>
+                task.sessionId === sessionId ? { ...task, isPinned: pinned } : task
+              )
+            )
+          }
+          onMarkSessionUnread={(sessionId) =>
+            setTaskState((prev) =>
+              prev.map((task) =>
+                task.sessionId === sessionId ? { ...task, hasUnreadMessages: true } : task
+              )
+            )
+          }
+          onCopySessionUrl={(sessionId) =>
+            void navigator.clipboard.writeText(`/demo/sessions/${sessionId}`).catch(() => {})
+          }
+          onOpenPullRequest={() => {}}
           onNew={createTask}
           onMoveRepo={(move) => setRepoState(move.nextRepos)}
           getSessionHref={(sessionId) => `/demo/sessions/${sessionId}`}
@@ -249,6 +269,63 @@ const DEFAULT_ARGS: SessionListProps = {
 
 export const Default: Story = {
   args: DEFAULT_ARGS,
+  render: (args) => <TaskListDemo {...args} />,
+};
+
+export const LongTitles: Story = {
+  name: 'Long Titles',
+  args: {
+    ...DEFAULT_ARGS,
+    selectedSessionId: undefined,
+    repos: [{ repoFullName: 'lody-dev/product', collapsed: false }],
+    sessions: [
+      {
+        ...DEFAULT_ARGS.sessions[0]!,
+        sessionId: 'long-title',
+        repoFullName: 'lody-dev/product',
+        title: 'Polish the animated sidebar title for long conversations',
+        prUrl: undefined,
+        prNumber: undefined,
+        isWorking: false,
+        hasUnreadMessages: false,
+      },
+      {
+        ...DEFAULT_ARGS.sessions[1]!,
+        sessionId: 'short-title',
+        repoFullName: 'lody-dev/product',
+        title: 'A short title stays still',
+        prUrl: undefined,
+        prNumber: undefined,
+        isWorking: false,
+        hasUnreadMessages: false,
+      },
+    ],
+  },
+  render: (args) => <TaskListDemo {...args} containerClassName="w-[300px]" />,
+};
+
+/**
+ * The desktop row context menu carrying every action: right-click a row (or its
+ * hover ⋯) on a repo session like "Browser notifications" — pin, mark unread,
+ * rename, copy link/branch, open PR and archive all render. zh_CN matches the
+ * shipping sidebar.
+ */
+export const RowContextMenu: Story = {
+  name: 'Row Context Menu',
+  args: DEFAULT_ARGS,
+  parameters: {
+    globals: { theme: 'light', locale: 'zh_CN' },
+  },
+  render: (args) => <TaskListDemo {...args} />,
+};
+
+export const Loading: Story = {
+  args: {
+    ...DEFAULT_ARGS,
+    sessions: [],
+    repos: [],
+    isLoading: true,
+  },
   render: (args) => <TaskListDemo {...args} />,
 };
 
@@ -497,6 +574,35 @@ function buildPrState(
   };
 }
 
+const MERGEABLE_ALIGNMENT_ARGS: SessionListProps = {
+  repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+  sessions: [
+    buildStateTask('align-open', 'Open PR', 'loro-dev/lody', 4, {
+      ...buildPrState('loro-dev/lody', 421, 'open'),
+    }),
+    buildStateTask('align-open-ready', 'Open PR · mergeable', 'loro-dev/lody', 6, {
+      ...buildPrState('loro-dev/lody', 422, 'open'),
+      prReadiness: 'y',
+    }),
+    buildStateTask('align-ci', 'Open PR · checks passed', 'loro-dev/lody', 8, {
+      ...buildPrState('loro-dev/lody', 423, 'open'),
+      prCiState: 's',
+    }),
+    buildStateTask('align-ci-ready', 'Open PR · checks passed · mergeable', 'loro-dev/lody', 10, {
+      ...buildPrState('loro-dev/lody', 424, 'open'),
+      prCiState: 's',
+      prReadiness: 'y',
+    }),
+  ],
+};
+
+/** The PR mark stays in the end slot's 20px reserve when Mergeable appears. */
+export const MergeablePrIconAlignment: Story = {
+  name: 'Mergeable PR icon alignment',
+  args: MERGEABLE_ALIGNMENT_ARGS,
+  render: (args) => <TaskListDemo {...args} />,
+};
+
 const ALL_DIFF_AND_PR_STATES_ARGS: SessionListProps = {
   selectedSessionId: 'state-open-mixed',
   repos: [
@@ -630,7 +736,7 @@ const ALL_DIFF_AND_PR_STATES_ARGS: SessionListProps = {
 /**
  * A long, scrollable session list containing every PR status and the important
  * diff combinations. No group has more than five rows, so Storybook renders all
- * cases immediately instead of hiding part of the matrix behind “Show all”.
+ * cases immediately instead of hiding part of the matrix behind “Show more”.
  */
 export const AllDiffAndPrStates: Story = {
   name: 'All Diff and PR States',
@@ -640,17 +746,15 @@ export const AllDiffAndPrStates: Story = {
   ),
 };
 
-// ---------------------------------------------------------------------------
-// MCP-opened independent Sessions (`SessionMeta.openedBySessionId`)
-// ---------------------------------------------------------------------------
-
 /**
  * `lody_session_create` records the Session that opened each new one. The
  * sidebar indents those rows under their opener, but they stay INDEPENDENT
  * Sessions — own machine, own project, own lifecycle — not `parentSessionId`
  * child tabs. Covered here: an opener with several opened Sessions, a working
  * one, an unread one, the active one, and an orphan whose opener is not in this
- * list (archived / another scope) and therefore stays top-level.
+ * list (archived / another scope) and therefore stays top-level. The working and
+ * unread children keep their ├/└ and carry their status at the row's right edge,
+ * where it stands in for the diff / PR cluster.
  */
 const OPENED_SESSIONS_ARGS: SessionListProps = {
   selectedSessionId: 'mcp-opened-2',
@@ -714,10 +818,10 @@ export const OpenedSessionsLight: Story = {
 };
 
 /**
- * The opener itself is WORKING. Status outranks the tree at that node, so the
- * opener shows its spinner instead of the disclosure — the same rule an active
- * opened Session follows when it drops its ├/└. Folding is still reachable
- * from the row's context menu, which carries the identical toggle.
+ * The opener itself is WORKING. Its disclosure stays put and the spinner shows at
+ * the row's END slot, replacing the diff / PR metrics there — the same rule an
+ * active opened Session follows while keeping its ├/└. Nothing about the tree
+ * depends on activity any more.
  */
 export const OpenedSessionsActiveOpener: Story = {
   name: 'Opened Sessions (MCP) · Active opener',

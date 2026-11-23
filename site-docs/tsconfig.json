@@ -26,10 +26,9 @@
     "lib/**/*.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
-    "types/**/*.d.ts",
     ".source/**/*.ts",
     "source.config.ts",
     "vite.config.ts"
   ],
-  "exclude": ["node_modules", "app/**/*.ts", "app/**/*.tsx"]
+  "exclude": ["node_modules", "app/**/*.ts", "app/**/*.tsx", "lib/**/*.test.ts"]
 }

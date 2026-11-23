@@ -1,27 +1,34 @@
 import { v4 as uuidV4 } from 'uuid';
+import { isLodySubagentEvent, isLodySubagentOutput } from 'acp-extension-core';
 
 import type {
   AcpSessionNotification,
   MessageContent,
+  PermissionOutcome,
   SessionHistoryInput,
   SessionId,
 } from '@lody/shared';
 import {
   getServerNow,
   sanitizeGoalObjective,
+  stripToolCallPayloadsForHistory,
   truncateTerminalOutputForHistory,
+  ToolCallContentSchema,
+  parseHistoryWrite,
+  HistoryWriteError,
+  MessageContentSchema,
+  parseLodyTaskMeta,
+  parseDevinSubagentTaskMeta,
+  getDevinSubagentContextId,
 } from '@lody/shared';
 import type { ModelInfo } from '@lody/shared';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 import type { Logger } from '@/utils/logger';
 import { captureMessage } from '@/instrument';
 import type { SessionDocument } from '@/lib/loro/doc';
+import type { SessionBackend } from '@/session/session-backend';
 import type { SessionPlanEntry } from '@lody/shared';
-import { applyNotificationOnHistory } from './history-apply';
-import {
-  deriveLocationsFromToolCallContent,
-  stripToolCallContentForHistory,
-} from './tool-call-history';
+import { deriveLocationsFromToolCallContent } from './tool-call-history';
 import { buildMessageContentFromNotification } from './history-apply';
 
 export type { ApplyNotificationOnHistoryOptions } from './history-apply';
@@ -31,9 +38,30 @@ export {
   buildMessageContentFromNotification,
 } from './history-apply';
 
-// ---------------------------------------------------------------------------
-// Cross-call enrichment state
-// ---------------------------------------------------------------------------
+type ACPHistoryCallbacksBackend = Pick<
+  SessionBackend,
+  'readHistoryCount' | 'readHistoryDirectory' | 'readTurn' | 'applyAgentBatch' | 'setPlan'
+>;
+
+/**
+ * Production SessionDocuments are always bound during initialization. Keep a
+ * legacy fallback only for small data-only test fixtures that do not expose a
+ * backend accessor; a real document must never silently write Loro history
+ * after a backend selection failed or was omitted.
+ */
+const resolveBoundHistoryBackend = <T>(
+  doc: SessionDocument,
+  explicit?: T
+): T | SessionBackend | undefined => {
+  const accessor = (doc as unknown as { getSessionBackend?: () => SessionBackend })
+    .getSessionBackend;
+  const bound = explicit ?? accessor?.call(doc);
+  if (!bound && typeof accessor === 'function') {
+    throw new Error(`Session backend is not bound for ${doc.sessionId}`);
+  }
+  return bound;
+};
+
 //
 // When notifications arrive one at a time (streamed mode), a completed update
 // may arrive in a separate `handleACPUpdateMessage()` call from the in-progress
@@ -44,6 +72,7 @@ export {
 type ToolCallAccumulator = {
   /** Parsed JSON from the last complete in-progress content block. */
   parsedInput: Record<string, unknown>;
+  status?: 'pending' | 'in_progress' | 'completed' | 'failed';
   /** Base title from the initial tool_call (e.g. "Shell", "ReadFile"). */
   baseTitle?: string;
   /** Last refined title from an in-progress tool_call_update (e.g. "Shell: echo hello"). */
@@ -71,8 +100,30 @@ type TerminalOutputAccumulator = {
 
 type TerminalOutputState = Map<string, TerminalOutputAccumulator>;
 
+/**
+ * Running non-terminal tool text, per toolCallId. ACP content is a snapshot that
+ * replaces the previous one, but every replaced CRDT write stays in the document
+ * history. Once a call has written its budget, later snapshots wait in memory and
+ * only the last one is stored when the call ends.
+ */
+type RunningToolTextAccumulator = {
+  written: number;
+  deferred?: AcpToolCallUpdateContent;
+};
+
+type RunningToolTextState = Map<string, RunningToolTextAccumulator>;
+
+type AcpToolCallUpdateContent = NonNullable<
+  Extract<AcpSessionNotification['update'], { sessionUpdate: 'tool_call_update' }>['content']
+>;
+
+/** Text a single running tool call may write to history before it is deferred. */
+const RUNNING_TOOL_TEXT_HISTORY_BUDGET = 64 * 1024;
+
 const enrichmentStateByDoc = new WeakMap<SessionDocument, EnrichmentState>();
+const subagentEnrichmentByDoc = new WeakMap<SessionDocument, Map<string, EnrichmentState>>();
 const terminalOutputStateByDoc = new WeakMap<SessionDocument, TerminalOutputState>();
+const runningToolTextStateByDoc = new WeakMap<SessionDocument, RunningToolTextState>();
 
 const getEnrichmentState = (doc: SessionDocument): EnrichmentState => {
   let state = enrichmentStateByDoc.get(doc);
@@ -88,6 +139,15 @@ const getTerminalOutputState = (doc: SessionDocument): TerminalOutputState => {
   if (!state) {
     state = new Map();
     terminalOutputStateByDoc.set(doc, state);
+  }
+  return state;
+};
+
+const getRunningToolTextState = (doc: SessionDocument): RunningToolTextState => {
+  let state = runningToolTextStateByDoc.get(doc);
+  if (!state) {
+    state = new Map();
+    runningToolTextStateByDoc.set(doc, state);
   }
   return state;
 };
@@ -142,20 +202,82 @@ export const handleACPUpdateMessage = async (
     getCurrentSessionTurnId?: (sessionId: SessionId) => string | undefined;
     targetAssistantEntryId?: string;
     allowAutonomousAssistantEntry?: boolean;
-    editCallback?: (edits: readonly AcpAgentEditEvidence[]) => void | Promise<void>;
-    standardDiffCallback?: (diffs: readonly AcpStandardDiffBlockEvidence[]) => void | Promise<void>;
+    editCallback?: (
+      edits: readonly AcpAgentEditEvidence[],
+      assistantEntryId?: string
+    ) => void | Promise<void>;
+    standardDiffCallback?: (
+      diffs: readonly AcpStandardDiffBlockEvidence[],
+      assistantEntryId?: string
+    ) => void | Promise<void>;
+    /** Stable per-notification identities aligned with the input batch. */
+    operationIds?: readonly string[];
     logger?: Logger;
+    backend?: ACPHistoryCallbacksBackend;
   },
   model?: ModelInfo
 ) => {
   const batch = Array.isArray(messages) ? messages : [messages];
-  const validBatch = filterInvalidNotifications(batch, callbacks?.logger);
-  const enrichedBatch = enrichNotificationBatch(validBatch, getEnrichmentState(doc));
+  const valid = filterInvalidNotifications(batch, callbacks?.logger, callbacks?.operationIds);
+  const validBatch = valid.notifications;
+  const rootEnrichedBatch = enrichNotificationBatch(validBatch, getEnrichmentState(doc));
+  const childGroups = new Map<
+    string,
+    { state: EnrichmentState; batch: AcpSessionNotification[]; indices: number[] }
+  >();
+  let childStates = subagentEnrichmentByDoc.get(doc);
+  if (!childStates) {
+    childStates = new Map();
+    subagentEnrichmentByDoc.set(doc, childStates);
+  }
+  for (const [index, message] of rootEnrichedBatch.entries()) {
+    if (message.update.sessionUpdate !== 'subagent_event' || message.update.event.type !== 'output')
+      continue;
+    const event = message.update.event;
+    const key = JSON.stringify([event.sessionId, event.runId]);
+    let group = childGroups.get(key);
+    if (!group) {
+      const state = childStates.get(key) ?? new Map<string, ToolCallAccumulator>();
+      childStates.set(key, state);
+      group = { state, batch: [], indices: [] };
+      childGroups.set(key, group);
+    }
+    group.batch.push({ sessionId: event.sessionId, update: event.update });
+    group.indices.push(index);
+  }
+  const enrichedBatch = [...rootEnrichedBatch];
+  for (const group of childGroups.values()) {
+    group.batch = enrichNotificationBatch(group.batch, group.state);
+    for (const [offset, child] of group.batch.entries()) {
+      const index = group.indices[offset];
+      if (index === undefined) continue;
+      const original = enrichedBatch[index];
+      if (
+        original?.update.sessionUpdate !== 'subagent_event' ||
+        original.update.event.type !== 'output' ||
+        !isLodySubagentOutput(child.update)
+      )
+        continue;
+      enrichedBatch[index] = {
+        ...original,
+        update: { ...original.update, event: { ...original.update.event, update: child.update } },
+      };
+    }
+  }
   const terminalOutputState = getTerminalOutputState(doc);
   const terminalOutputSnapshot = cloneTerminalOutputState(terminalOutputState);
-  const persistableBatch = filterNotificationsForHistory(
-    compactTerminalNotificationsForHistory(enrichedBatch, terminalOutputState)
+  const runningToolTextState = getRunningToolTextState(doc);
+  const runningToolTextSnapshot = new Map(
+    [...runningToolTextState].map(([id, running]) => [id, { ...running }])
   );
+  const persistable = filterNotificationsForHistory(
+    boundRunningToolTextForHistory(
+      compactTerminalNotificationsForHistory(enrichedBatch, terminalOutputState),
+      runningToolTextState
+    ),
+    valid.operationIds
+  );
+  const persistableBatch = persistable.notifications;
   const latestPlan = extractLatestPlanSnapshot(validBatch);
   // Lazily get the turn ID only when actually needed to avoid errors on no-op batches.
   // Some notification batches (e.g., filtered session_info_update or tool_call_update)
@@ -172,51 +294,178 @@ export const handleACPUpdateMessage = async (
   };
 
   try {
+    const boundBackend = resolveBoundHistoryBackend(doc, callbacks?.backend);
     if (persistableBatch.length > 0) {
-      await doc.updateHistory((history) => {
-        const targetTurnId = getTargetTurnId();
-        if (!targetTurnId && callbacks?.allowAutonomousAssistantEntry !== true) {
-          callbacks?.logger?.warn(
-            `[${doc.sessionId}] Dropping ${persistableBatch.length} ACP history notifications without an assistant entry target`
-          );
-          return history;
-        }
+      const targetTurnId = getTargetTurnId();
+      if (!targetTurnId && callbacks?.allowAutonomousAssistantEntry !== true) {
+        callbacks?.logger?.warn(
+          `[${doc.sessionId}] Dropping ${persistableBatch.length} ACP history notifications without an assistant entry target`
+        );
+      } else {
+        // Tool/subagent updates can belong to older turns. Only text/thought
+        // chunks have a target-local ownership contract; retain full routing otherwise.
+        // Devin subagent-tagged chunks need the whole-history view too — the
+        // applier can only drop them when it can see the owner task row, which
+        // may live in an older entry.
+        const targetOnly = Boolean(
+          targetTurnId &&
+          persistableBatch.every(
+            ({ update }) =>
+              (update.sessionUpdate === 'agent_message_chunk' ||
+                update.sessionUpdate === 'agent_thought_chunk') &&
+              update.content.type === 'text' &&
+              getDevinSubagentContextId(update._meta) === null
+          )
+        );
         const createId = targetTurnId ? () => targetTurnId : uuidV4;
-        return applyNotificationOnHistory(history, persistableBatch, model, {
-          createId,
+        await (boundBackend ?? doc.agentWrites).applyAgentBatch({
+          notifications: persistableBatch,
+          ...(persistable.operationIds ? { operationIds: persistable.operationIds } : {}),
           ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
+          ...(targetOnly ? { entryBound: true } : {}),
+          createId,
+          ...(model ? { model } : {}),
         });
-      });
+      }
     }
     // Evidence is derived from the same enriched notification, but it is only
     // safe to publish after the corresponding history write commits. Otherwise
     // a retried terminal notification records the same diff twice.
+    const childEvidenceOwners = new Map<
+      string,
+      {
+        entryId: string;
+        toolCallIds: ReadonlySet<string>;
+      }
+    >();
+    const evidenceRunKeys = new Set(
+      [...childGroups]
+        .filter(([, group]) =>
+          group.batch.some(
+            ({ update }) =>
+              update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update'
+          )
+        )
+        .map(([key]) => key)
+    );
+    if (evidenceRunKeys.size > 0 && (callbacks?.editCallback || callbacks?.standardDiffCallback)) {
+      // Ownership comes from the committed run, not the turn that happened to flush it.
+      const backend = boundBackend;
+      const directory = backend
+        ? await backend.readHistoryDirectory(0, await backend.readHistoryCount())
+        : await doc.sessionData.history.readDirectory(0, await doc.sessionData.history.count());
+      for (const row of directory) {
+        if (!row.turnId || row.scalars?.role !== 'assistant') continue;
+        const read = backend
+          ? await backend.readTurn(row.turnId)
+          : await doc.sessionData.history.readTurn(row.turnId);
+        if (read.state !== 'ready') continue;
+        for (const stored of read.turn.items ?? []) {
+          if (
+            !stored ||
+            typeof stored !== 'object' ||
+            !('type' in stored) ||
+            stored.type !== 'subagent_task'
+          )
+            continue;
+          const parsed = MessageContentSchema.safeParse(stored);
+          if (!parsed.success || parsed.data.type !== 'subagent_task') continue;
+          const item = parsed.data;
+          if (!item.run) continue;
+          const key = JSON.stringify([item.run.sessionId, item.taskId]);
+          if (!evidenceRunKeys.has(key)) continue;
+          childEvidenceOwners.set(key, {
+            entryId: read.turn.id,
+            toolCallIds: new Set(
+              item.run.items
+                .filter((content) => content.type === 'tool_call')
+                .map((content) => content.toolCallId)
+            ),
+          });
+          evidenceRunKeys.delete(key);
+        }
+        if (evidenceRunKeys.size === 0) break;
+      }
+    }
     if (callbacks?.editCallback) {
       await triggerEditCallbacksFromNotifications(
-        enrichedBatch,
+        enrichedBatch.filter((message) => !isSubagentPermissionMirror(message)),
         getEnrichmentState(doc),
         callbacks.editCallback
       );
+      for (const [key, group] of childGroups) {
+        const owner = childEvidenceOwners.get(key);
+        if (!owner) continue;
+        await triggerEditCallbacksFromNotifications(
+          group.batch.filter((message) => hasPersistedSubagentTool(message, owner.toolCallIds)),
+          group.state,
+          (edits) => callbacks.editCallback?.(edits, owner.entryId)
+        );
+      }
     }
     if (callbacks?.standardDiffCallback) {
       await triggerStandardDiffCallbacksFromNotifications(
-        enrichedBatch,
+        enrichedBatch.filter((message) => !isSubagentPermissionMirror(message)),
         getEnrichmentState(doc),
         callbacks.standardDiffCallback
       );
+      for (const [key, group] of childGroups) {
+        const owner = childEvidenceOwners.get(key);
+        if (!owner) continue;
+        await triggerStandardDiffCallbacksFromNotifications(
+          group.batch.filter((message) => hasPersistedSubagentTool(message, owner.toolCallIds)),
+          group.state,
+          (diffs) => callbacks.standardDiffCallback?.(diffs, owner.entryId)
+        );
+      }
+    }
+    for (const message of enrichedBatch) {
+      if (message.update.sessionUpdate !== 'subagent_event') continue;
+      const event = message.update.event;
+      if (
+        event.type === 'snapshot' &&
+        ['completed', 'failed', 'cancelled'].includes(event.snapshot.state)
+      ) {
+        childStates.delete(JSON.stringify([event.sessionId, event.runId]));
+        const subagentScopePrefix = `${JSON.stringify(['subagent', event.sessionId, event.runId]).slice(0, -1)},`;
+        for (const key of terminalOutputState.keys()) {
+          if (key.startsWith(subagentScopePrefix)) terminalOutputState.delete(key);
+        }
+        for (const key of runningToolTextState.keys()) {
+          if (key.startsWith(subagentScopePrefix)) runningToolTextState.delete(key);
+        }
+      }
     }
   } catch (error) {
     // Terminal compaction consumes its cross-flush accumulator before the doc
     // write. Restore it when that write fails so retrying the original terminal
     // notification can still emit the accumulated output.
     restoreTerminalOutputState(terminalOutputState, terminalOutputSnapshot);
+    runningToolTextState.clear();
+    for (const [id, running] of runningToolTextSnapshot) runningToolTextState.set(id, running);
     throw error;
   }
 
   if (latestPlan) {
-    await doc.setPlan(latestPlan);
+    if (callbacks?.backend) await callbacks.backend.setPlan(latestPlan);
+    else await doc.setPlan(latestPlan);
   }
 };
+
+function hasPersistedSubagentTool(
+  message: AcpSessionNotification,
+  toolCallIds: ReadonlySet<string>
+): boolean {
+  const update = message.update;
+  if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update')
+    return false;
+  return toolCallIds.has(update.toolCallId);
+}
+
+function isSubagentPermissionMirror(message: AcpSessionNotification): boolean {
+  const lody = message.update._meta?.lody;
+  return !!lody && typeof lody === 'object' && 'subagentRunId' in lody;
+}
 
 type ACPHistoryAppendCallbacks = Omit<
   NonNullable<Parameters<typeof handleACPUpdateMessage>[2]>,
@@ -260,14 +509,38 @@ export const appendAutonomousACPNotifications = async (
 
 const filterInvalidNotifications = (
   batch: AcpSessionNotification[],
-  logger?: Logger
-): AcpSessionNotification[] => {
+  logger?: Logger,
+  operationIds?: readonly string[]
+): { notifications: AcpSessionNotification[]; operationIds?: string[] } => {
+  if (operationIds && operationIds.length !== batch.length) {
+    throw new Error('ACP notification operation IDs must match the input batch length');
+  }
   const out: AcpSessionNotification[] = [];
-  for (const message of batch) {
+  const outOperationIds: string[] = [];
+  for (const [index, message] of batch.entries()) {
     const { update, sessionId } = message;
-    const validation = validateNotificationForHistory(update);
+    let validation = validateNotificationForHistory(update);
+    if (
+      validation.ok &&
+      (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') &&
+      update.content != null
+    ) {
+      try {
+        // Validate before enrichment touches known block fields (e.g. text.trim).
+        // Unknown provider variants remain JSON, rather than masquerading as known text.
+        parseHistoryWrite(ToolCallContentSchema.array(), update.content);
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        validation = {
+          ok: false,
+          reason: 'invalid_tool_content',
+          details: { issues: error.issues },
+        };
+      }
+    }
     if (validation.ok) {
       out.push(message);
+      if (operationIds) outOperationIds.push(operationIds[index]!);
       continue;
     }
 
@@ -288,7 +561,10 @@ const filterInvalidNotifications = (
       },
     });
   }
-  return out;
+  return {
+    notifications: out,
+    ...(operationIds ? { operationIds: outOperationIds } : {}),
+  };
 };
 
 const validateNotificationForHistory = (
@@ -299,6 +575,10 @@ const validateNotificationForHistory = (
   }
 
   switch (update.sessionUpdate) {
+    case 'subagent_event':
+      return isLodySubagentEvent(update.event)
+        ? { ok: true }
+        : { ok: false, reason: 'invalid_subagent_event' };
     case 'agent_message_chunk':
     case 'agent_thought_chunk': {
       const content = update.content as { type?: unknown; text?: unknown } | undefined;
@@ -388,11 +668,6 @@ const describeValue = (value: unknown): string => {
   return typeof value;
 };
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Title-to-kind heuristic for agents that don't send `kind`
-// ---------------------------------------------------------------------------
-
 /** Tool kind values used in enrichment — superset of ACP ToolKind to cover internal kinds. */
 type EnrichmentToolKind =
   | 'read'
@@ -450,10 +725,6 @@ const normalizeToolKind = (kind: unknown): EnrichmentToolKind | undefined =>
     ? (kind as EnrichmentToolKind)
     : undefined;
 
-// ---------------------------------------------------------------------------
-// Content block helpers
-// ---------------------------------------------------------------------------
-
 type AcpContentLike = ReadonlyArray<{ type: string; content?: { type: string; text?: string } }>;
 
 /** Extract all non-empty text strings from ACP tool-call content blocks of type "content". */
@@ -486,10 +757,8 @@ const tryParseJsonFromContentBlocks = (content: AcpContentLike): Record<string, 
   return null;
 };
 
-// ---------------------------------------------------------------------------
 // Notification enrichment (single pass — replaces the former
 // `propagateToolCallState` + `enrichKimiToolData` two-pass pipeline)
-// ---------------------------------------------------------------------------
 
 /**
  * Enrich a batch of ACP notifications before history filtering.
@@ -497,9 +766,8 @@ const tryParseJsonFromContentBlocks = (content: AcpContentLike): Record<string, 
  * This single-pass enrichment handles two concerns:
  *
  * 1. **Title propagation** — Agents like Kimi refine the title during streaming
- *    (e.g. "Shell" → "Shell: cat hello.txt"). In-progress updates that carry the
- *    refined title are later filtered out, so we propagate the best title to the
- *    completed/failed update.
+ *    (e.g. "Shell" → "Shell: cat hello.txt"). Retain that title for sparse
+ *    completed/failed updates and for terminal-output projection.
  *
  * 2. **Missing field injection** — Agents that use ACP terminal RPCs (e.g. Kimi)
  *    don't set `kind`, `rawInput`, `rawOutput`, or `locations`. We derive them
@@ -512,17 +780,27 @@ const enrichNotificationBatch = (
   batch: AcpSessionNotification[],
   state: EnrichmentState
 ): AcpSessionNotification[] => {
-  // --- Collect phase: scan all notifications and accumulate per-toolCallId state ---
-  for (const { update } of batch) {
+  // Apply in wire order: looking ahead would mark running output completed
+  // before the actual response, and lose sparse post-result hook updates.
+  return batch.map((original) => {
+    let message = original;
+    let update = message.update;
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
-      continue;
+      return message;
     }
 
     const id = update.toolCallId;
+    const previous = state.get(id) ?? { parsedInput: {} };
+    state.set(id, previous);
+    if (update.status != null) previous.status = update.status;
+    else if (previous.status) {
+      update = { ...update, status: previous.status };
+      message = { ...message, update };
+    }
     const isTerminal = update.status === 'completed' || update.status === 'failed';
 
     // Derive kind and track titles from non-terminal notifications
-    if (update.title && !isTerminal) {
+    if ((update.title || update.kind) && !isTerminal) {
       let acc = state.get(id);
       if (!acc) {
         acc = { parsedInput: {} };
@@ -530,19 +808,21 @@ const enrichNotificationBatch = (
       }
 
       const explicitKind = normalizeToolKind(update.kind);
-      const titleKind = deriveKindFromTitle(update.title);
+      const titleKind = update.title ? deriveKindFromTitle(update.title) : undefined;
       if (explicitKind) {
         acc.kind = explicitKind;
       } else if (titleKind) {
         acc.kind = titleKind;
       }
 
-      if (update.sessionUpdate === 'tool_call') {
-        acc.baseTitle = update.title;
-      } else {
-        acc.refinedTitle = update.title;
+      if (update.title) {
+        if (update.sessionUpdate === 'tool_call') acc.baseTitle = update.title;
+        else acc.refinedTitle = update.title;
       }
     }
+
+    // A present list supersedes every earlier diff, including an explicit clear.
+    if (Array.isArray(update.content)) state.get(id)?.editDiffsByPath?.clear();
 
     // Accumulate edit evidence from non-terminal updates (Claude Code's completed update is
     // bare; see ToolCallAccumulator.editDiffsByPath).
@@ -597,16 +877,6 @@ const enrichNotificationBatch = (
         acc.parsedInput = parsed;
       }
     }
-  }
-
-  if (state.size === 0) return batch;
-
-  // --- Apply phase: patch notifications using accumulated state ---
-  return batch.map((message) => {
-    const { update } = message;
-    if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
-      return message;
-    }
 
     const acc = state.get(update.toolCallId);
     if (!acc) return message;
@@ -654,7 +924,7 @@ const enrichNotificationBatch = (
     if (
       typeof parsedPath === 'string' &&
       parsedPath.length > 0 &&
-      !(Array.isArray(update.locations) && update.locations.length > 0) &&
+      update.locations == null &&
       !deriveLocationsFromToolCallContent(update.content)
     ) {
       patches.locations = [{ path: parsedPath }];
@@ -722,9 +992,63 @@ const terminalOutputFromNotification = (
   };
 };
 
-const withoutTerminalSources = (message: AcpSessionNotification): AcpSessionNotification => {
-  if (message.update.sessionUpdate !== 'tool_call_update') return message;
-  const update = message.update;
+type ToolCallOrUpdate = Extract<
+  AcpSessionNotification['update'],
+  { sessionUpdate: 'tool_call' | 'tool_call_update' }
+>;
+
+type ScopedToolNotification = {
+  scopeKey: string;
+  update: ToolCallOrUpdate;
+  asMessage: AcpSessionNotification;
+  isSubagent: boolean;
+  rewrite: (nextUpdate: ToolCallOrUpdate) => AcpSessionNotification;
+};
+
+const unwrapScopedToolNotification = (
+  message: AcpSessionNotification
+): ScopedToolNotification | undefined => {
+  const { update } = message;
+  if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+    return {
+      scopeKey: JSON.stringify(['root', update.toolCallId]),
+      update,
+      asMessage: message,
+      isSubagent: false,
+      rewrite: (nextUpdate) => ({ ...message, update: nextUpdate }) as AcpSessionNotification,
+    };
+  }
+  if (update.sessionUpdate === 'subagent_event' && update.event.type === 'output') {
+    const event = update.event;
+    const childUpdate = event.update;
+    if (
+      childUpdate.sessionUpdate !== 'tool_call' &&
+      childUpdate.sessionUpdate !== 'tool_call_update'
+    ) {
+      return undefined;
+    }
+    return {
+      scopeKey: JSON.stringify(['subagent', event.sessionId, event.runId, childUpdate.toolCallId]),
+      update: childUpdate,
+      asMessage: { sessionId: event.sessionId, update: childUpdate } as AcpSessionNotification,
+      isSubagent: true,
+      rewrite: (nextUpdate) =>
+        ({
+          ...message,
+          update: {
+            ...update,
+            event: {
+              ...event,
+              update: nextUpdate,
+            },
+          },
+        }) as AcpSessionNotification,
+    };
+  }
+  return undefined;
+};
+
+const withoutTerminalSourcesFromToolUpdate = (update: ToolCallOrUpdate): ToolCallOrUpdate => {
   const meta = (update as Record<string, unknown>)._meta;
   const claudeCode =
     meta && typeof meta === 'object' && !Array.isArray(meta)
@@ -739,17 +1063,14 @@ const withoutTerminalSources = (message: AcpSessionNotification): AcpSessionNoti
       : meta;
 
   return {
-    ...message,
-    update: {
-      ...update,
-      rawOutput: undefined,
-      // A provider may put the same terminal snapshot in a fenced `content`
-      // block. Keep only structured diffs here; the command is derived from
-      // rawInput/enrichment and the output is materialized on completion.
-      content: update.content?.filter((content) => content.type === 'diff'),
-      ...(nextMeta === undefined ? {} : { _meta: nextMeta }),
-    },
-  } as AcpSessionNotification;
+    ...update,
+    rawOutput: undefined,
+    // A provider may put the same terminal snapshot in a fenced `content`
+    // block. Keep only structured diffs here; the command is derived from
+    // rawInput/enrichment and the output is materialized on completion.
+    content: update.content?.filter((content) => content.type === 'diff'),
+    ...(nextMeta === undefined ? {} : { _meta: nextMeta }),
+  } as ToolCallOrUpdate;
 };
 
 /**
@@ -762,13 +1083,16 @@ const compactTerminalNotificationsForHistory = (
   state: TerminalOutputState
 ): AcpSessionNotification[] =>
   batch.map((message) => {
-    if (message.update.sessionUpdate !== 'tool_call_update') return message;
+    const scoped = unwrapScopedToolNotification(message);
+    if (!scoped) return message;
 
-    const { toolCallId, status } = message.update;
-    const extracted = terminalOutputFromNotification(message);
+    const { scopeKey, update, asMessage, isSubagent, rewrite } = scoped;
+    const { status } = update;
+    const extracted =
+      terminalOutputFromNotification(asMessage) ?? runningExecuteTextOutput(asMessage);
     if (extracted) {
-      const previous = state.get(toolCallId);
-      state.set(toolCallId, {
+      const previous = state.get(scopeKey);
+      state.set(scopeKey, {
         output: appendTerminalTail(previous?.output ?? '', extracted.output),
         truncated: previous?.truncated === true || extracted.truncated,
         exitStatus: extracted.exitStatus ?? previous?.exitStatus,
@@ -777,36 +1101,117 @@ const compactTerminalNotificationsForHistory = (
 
     const isTerminalStatus = status === 'completed' || status === 'failed';
     if (!isTerminalStatus) {
-      return extracted ? withoutTerminalSources(message) : message;
+      return extracted ? rewrite(withoutTerminalSourcesFromToolUpdate(update)) : message;
     }
 
-    const terminal = state.get(toolCallId);
-    state.delete(toolCallId);
+    const terminal = state.get(scopeKey);
+    state.delete(scopeKey);
     if (!terminal) return message;
 
-    const stripped = withoutTerminalSources(message);
-    if (stripped.update.sessionUpdate !== 'tool_call_update') return stripped;
-    return {
+    const stripped = withoutTerminalSourcesFromToolUpdate(update);
+    if (isSubagent) {
+      return rewrite({
+        ...stripped,
+        // `isLodySubagentOutput` only accepts ACP wire `content` blocks, so pass the
+        // compacted 1 KiB tail through `rawOutput` for `buildToolCallMessageForHistory`.
+        rawOutput: {
+          output: terminal.output,
+          truncated: terminal.truncated,
+          ...(terminal.exitStatus?.exitCode != null
+            ? { exit_code: terminal.exitStatus.exitCode }
+            : {}),
+        },
+      } as ToolCallOrUpdate);
+    }
+
+    return rewrite({
       ...stripped,
-      update: {
-        ...stripped.update,
-        content: [
-          ...(stripped.update.content ?? []),
-          {
-            type: 'terminal_output',
-            output: terminal.output,
-            stream: 'combined',
-            truncated: terminal.truncated,
-            exitStatus: terminal.exitStatus,
-          },
-        ],
-      },
-    } as AcpSessionNotification;
+      content: [
+        ...(stripped.content ?? []),
+        {
+          type: 'terminal_output',
+          output: terminal.output,
+          stream: 'combined',
+          truncated: terminal.truncated,
+          exitStatus: terminal.exitStatus,
+        },
+      ],
+    } as ToolCallOrUpdate);
+  });
+
+/**
+ * A running execute call's plain `content` text is a terminal snapshot even when
+ * no structured or fenced form identifies it. Completion updates keep their own
+ * path: enrichment turns their text into `rawOutput`.
+ */
+const runningExecuteTextOutput = (
+  message: AcpSessionNotification
+): TerminalOutputAccumulator | undefined => {
+  const update = message.update;
+  if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
+    return undefined;
+  }
+  if (update.status === 'completed' || update.status === 'failed') return undefined;
+  if (update.kind !== 'execute' || !Array.isArray(update.content)) return undefined;
+  const texts = extractTextFromContentBlocks(update.content);
+  if (texts.length === 0) return undefined;
+  return { output: texts.join('\n'), truncated: false };
+};
+
+const toolTextLength = (content: AcpToolCallUpdateContent): number =>
+  extractTextFromContentBlocks(content).reduce((total, text) => total + text.length, 0);
+
+const boundToolCallUpdateContentForMemory = (
+  content: AcpToolCallUpdateContent
+): AcpToolCallUpdateContent =>
+  content.flatMap((block) =>
+    block.type === 'terminal'
+      ? [block]
+      : (stripToolCallPayloadsForHistory([
+          block as unknown as Parameters<typeof stripToolCallPayloadsForHistory>[0][number],
+        ]) as unknown as AcpToolCallUpdateContent)
+  );
+
+/**
+ * Bounds how much replaced running-tool text a call can leave in the CRDT
+ * history. Read/edit payloads are stripped by the shared compactor, and
+ * execute output has already been reduced to a terminal tail above.
+ */
+const boundRunningToolTextForHistory = (
+  batch: AcpSessionNotification[],
+  state: RunningToolTextState
+): AcpSessionNotification[] =>
+  batch.map((message) => {
+    const scoped = unwrapScopedToolNotification(message);
+    if (!scoped) return message;
+    const { scopeKey, update, rewrite } = scoped;
+    if (update.status === 'completed' || update.status === 'failed') {
+      const running = state.get(scopeKey);
+      state.delete(scopeKey);
+      if (!running?.deferred || update.content !== undefined) return message;
+      return rewrite({ ...update, content: running.deferred } as ToolCallOrUpdate);
+    }
+    if (update.kind === 'read' || update.kind === 'edit' || !Array.isArray(update.content)) {
+      return message;
+    }
+    const length = toolTextLength(update.content);
+    if (length === 0) return message;
+    const running = state.get(scopeKey) ?? { written: 0 };
+    state.set(scopeKey, running);
+    if (!running.deferred && running.written + length <= RUNNING_TOOL_TEXT_HISTORY_BUDGET) {
+      running.written += length;
+      return message;
+    }
+    running.deferred = boundToolCallUpdateContentForMemory(update.content);
+    const withoutContent = { ...update };
+    delete withoutContent.content;
+    return rewrite(withoutContent as ToolCallOrUpdate);
   });
 
 const filterNotificationsForHistory = (
-  batch: AcpSessionNotification[]
-): AcpSessionNotification[] => {
+  batch: AcpSessionNotification[],
+  operationIds?: readonly string[]
+): { notifications: AcpSessionNotification[]; operationIds?: string[] } => {
   const shouldKeep = (message: AcpSessionNotification): boolean => {
     const update = message.update;
     switch (update.sessionUpdate) {
@@ -833,18 +1238,17 @@ const filterNotificationsForHistory = (
         );
     }
     if (update.sessionUpdate !== 'tool_call_update') return true;
-    // Tool call updates are often "full snapshots" (especially terminal output). Persisting all
-    // intermediate snapshots causes the CRDT history to blow up. We keep only terminal state
-    // transitions that represent a finished tool call.
-    if (update.status === 'completed' || update.status === 'failed') return true;
-
-    // Claude Code sends rawInput in a tool_call_update (~14% of Bash calls, ~50% of Read/Grep,
-    // and ALL Edit calls). Keep these updates so we can extract terminal commands, diff blocks,
-    // and locations from them.
-    const rawInput = update.rawInput;
-    if (rawInput && typeof rawInput === 'object' && Object.keys(rawInput as object).length > 0) {
+    // Task snapshots are small lifecycle facts, not replaceable tool output.
+    // The history applier merges them by taskId for both live and resumed views.
+    if (parseLodyTaskMeta(update._meta) ?? parseDevinSubagentTaskMeta(update._meta)) return true;
+    // Terminal payloads have already been compacted. Other tool fields are
+    // independent patches: a title/list-only update may be their only delivery.
+    if (
+      ['status', 'title', 'kind', 'content', 'locations', 'rawInput', 'rawOutput'].some(
+        (field) => (update as Record<string, unknown>)[field] != null
+      )
+    )
       return true;
-    }
 
     // Claude Code sends toolResponse in updates with status=null. Keep these updates
     // so we can extract terminal output from _meta.claudeCode.toolResponse.
@@ -861,7 +1265,17 @@ const filterNotificationsForHistory = (
     return false;
   };
 
-  return batch.filter(shouldKeep);
+  const notifications: AcpSessionNotification[] = [];
+  const filteredOperationIds: string[] = [];
+  for (const [index, message] of batch.entries()) {
+    if (!shouldKeep(message)) continue;
+    notifications.push(message);
+    if (operationIds) filteredOperationIds.push(operationIds[index]!);
+  }
+  return {
+    notifications,
+    ...(operationIds ? { operationIds: filteredOperationIds } : {}),
+  };
 };
 
 /**
@@ -967,10 +1381,9 @@ const triggerEditCallbacksFromNotifications = async (
         ? { oldString: rawInputRecord.old_string, newString: rawInputRecord.new_string }
         : acc?.editReplacement;
 
-    // Diff blocks on the completed update win; accumulated in-progress blocks fill the gaps
-    // (Claude Code's terminal update carries no content at all).
+    // Only omission reuses the earlier list; an explicit list replaces it wholly.
     const diffBlocks = new Map<string, { oldText?: string; newText: string; isCreate: boolean }>(
-      acc?.editDiffsByPath ?? []
+      update.content == null ? (acc?.editDiffsByPath ?? []) : []
     );
     for (const content of contents) {
       if (content.type !== 'diff') continue;
@@ -1082,6 +1495,7 @@ const triggerStandardDiffCallbacksFromNotifications = async (
 const extractLatestPlanSnapshot = (batch: AcpSessionNotification[]): SessionPlanEntry[] | null => {
   for (let i = batch.length - 1; i >= 0; i -= 1) {
     const update = batch[i]?.update;
+    if (getDevinSubagentContextId(update?._meta) !== null) continue;
     const entries =
       update?.sessionUpdate === 'plan'
         ? update.entries
@@ -1098,25 +1512,12 @@ const extractLatestPlanSnapshot = (batch: AcpSessionNotification[]): SessionPlan
   }
   return null;
 };
-
-// ---------------------------------------------------------------------------
-// Loro history entry helpers (bridge the CRDT item type to MessageContent[])
-// ---------------------------------------------------------------------------
-
-type ToolCallMessageContent = Extract<MessageContent, { type: 'tool_call' }>;
 type GoalMessageContent = Extract<MessageContent, { type: 'goal' }>;
 
 const readEntryItems = (entry: SessionHistoryInput): MessageContent[] => {
   const rawItems = entry.items;
   return Array.isArray(rawItems) ? (rawItems as unknown as MessageContent[]) : [];
 };
-
-const writeEntryItems = (entry: SessionHistoryInput, items: MessageContent[]) => {
-  entry.items = items as unknown as SessionHistoryInput['items'];
-};
-
-const isUnfinishedAssistantEntry = (entry: SessionHistoryInput | undefined): boolean =>
-  entry?.role === 'assistant' && entry.finished !== true && typeof entry.endedAt !== 'number';
 
 const createAssistantHistoryEntry = (id: string): SessionHistoryInput => ({
   id,
@@ -1128,21 +1529,10 @@ const createAssistantHistoryEntry = (id: string): SessionHistoryInput => ({
   fileDiff: [],
 });
 
-const findLatestUnfinishedAssistantEntry = (
-  history: SessionHistoryInput[]
-): SessionHistoryInput | undefined => {
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const entry = history[index];
-    if (isUnfinishedAssistantEntry(entry)) {
-      return entry;
-    }
-  }
-  return undefined;
-};
-
 export type ThreadGoalHistoryOptions = {
   targetEntryId?: string;
   createId?: () => string;
+  backend?: Pick<SessionBackend, 'applyHistoryAction'>;
 };
 
 export const upsertThreadGoalInHistory = async (
@@ -1155,229 +1545,78 @@ export const upsertThreadGoalInHistory = async (
     objective: sanitizeGoalObjective(goal.objective),
   };
 
-  await doc.updateHistory((history) => {
-    // Single sweep: replace an existing snapshot for this thread in place, and
-    // drop any prior `cleared` snapshots for OTHER threads so only the most
-    // recent goal stays visible in the banner.
-    let replaced = false;
-    for (const entry of history) {
-      const items = readEntryItems(entry);
-      let touched = false;
-      const nextItems: MessageContent[] = [];
-      for (const item of items) {
-        if (item.type === 'goal' && item.threadId === sanitizedGoal.threadId) {
-          nextItems.push(sanitizedGoal);
-          replaced = true;
-          touched = true;
-          continue;
-        }
-        if (item.type === 'goal' && item.status === 'cleared') {
-          touched = true;
-          continue;
-        }
-        nextItems.push(item);
-      }
-      if (touched) {
-        writeEntryItems(entry, nextItems);
-      }
-    }
-
-    if (replaced) {
-      return history;
-    }
-
-    let targetEntry =
-      options.targetEntryId !== undefined
-        ? history.find((entry) => entry.id === options.targetEntryId && entry.role === 'assistant')
-        : undefined;
-
-    if (!targetEntry) {
-      targetEntry = findLatestUnfinishedAssistantEntry(history);
-    }
-
-    if (!targetEntry) {
-      targetEntry = createAssistantHistoryEntry(
-        options.targetEntryId ?? options.createId?.() ?? uuidV4()
-      );
-      history.push(targetEntry);
-    }
-
-    writeEntryItems(targetEntry, [...readEntryItems(targetEntry), sanitizedGoal]);
-    return history;
-  });
+  const action = {
+    kind: 'upsert-goal' as const,
+    goal: sanitizedGoal,
+    targetTurnId: options.targetEntryId,
+    fallback: createAssistantHistoryEntry(
+      options.targetEntryId ?? options.createId?.() ?? uuidV4()
+    ),
+  };
+  const backend = resolveBoundHistoryBackend(doc, options.backend);
+  if (backend) {
+    await backend.applyHistoryAction(action);
+  } else {
+    await doc.sessionData.commands.applyHistoryAction(action);
+  }
 };
 
 export const clearThreadGoalFromHistory = async (
   doc: SessionDocument,
-  threadId: string
+  threadId: string,
+  options: { backend?: Pick<SessionBackend, 'applyHistoryAction'> } = {}
 ): Promise<void> => {
   // Mark the goal as cleared in-place so the snapshot remains visible until a new
   // goal arrives. The previous behavior removed the entry entirely, which made
   // the cleared state invisible to the user the moment they pressed clear.
-  await doc.updateHistory((history) => {
-    for (const entry of history) {
-      const items = readEntryItems(entry);
-      let touched = false;
-      const nextItems = items.map((item) => {
-        if (item.type !== 'goal' || item.threadId !== threadId) return item;
-        if (item.status === 'cleared') return item;
-        touched = true;
-        return { ...item, status: 'cleared' as const, updatedAt: getServerNow() };
-      });
-      if (touched) {
-        writeEntryItems(entry, nextItems);
-      }
-    }
-    return history;
-  });
-};
-
-const sanitizeToolCallContentForHistory = (
-  content: ToolCallMessageContent['content'] | undefined,
-  kind: ToolCallMessageContent['kind'] | undefined
-): ToolCallMessageContent['content'] | undefined => {
-  if (!content) return undefined;
-  const filtered = stripToolCallContentForHistory(kind ?? null, content);
-  return filtered.length ? filtered : undefined;
+  const action = {
+    kind: 'clear-goal' as const,
+    threadId,
+    updatedAt: getServerNow(),
+  };
+  const backend = resolveBoundHistoryBackend(doc, options.backend);
+  if (backend) {
+    await backend.applyHistoryAction(action);
+  } else {
+    await doc.sessionData.commands.applyHistoryAction(action);
+  }
 };
 
 export const ensurePermissionRequestOnToolCall = async (
   doc: SessionDocument,
   requestId: string,
   request: RequestPermissionRequest,
-  _model?: ModelInfo
+  _model?: ModelInfo,
+  backend?: Pick<SessionBackend, 'applyHistoryAction'>
 ): Promise<boolean> => {
-  const toolCallId = request.toolCall.toolCallId;
-  let persisted = false;
-  await doc.updateHistory((history) => {
-    let updated = false;
-    history.forEach((entry) => {
-      const parsed = readEntryItems(entry);
-      let entryUpdated = false;
-      const nextContents = parsed.map((content) => {
-        if (content.type === 'tool_call' && content.toolCallId === toolCallId) {
-          entryUpdated = true;
-          updated = true;
-          return mergeToolCallWithPermission(content, requestId, request);
-        }
-        return content;
-      });
-      if (entryUpdated) {
-        persisted = true;
-        writeEntryItems(entry, nextContents);
-      }
-    });
-
-    if (!updated) {
-      const latestEntry = history[history.length - 1];
-      if (
-        latestEntry?.role === 'assistant' &&
-        latestEntry.finished !== true &&
-        typeof latestEntry.endedAt !== 'number'
-      ) {
-        persisted = true;
-        writeEntryItems(latestEntry, [
-          ...readEntryItems(latestEntry),
-          buildToolCallFromPermissionRequest(requestId, request),
-        ]);
-      }
-    }
-
-    return history;
-  });
-  return persisted;
+  const action = {
+    kind: 'permission-request',
+    requestId,
+    request,
+  } as const;
+  const boundBackend = resolveBoundHistoryBackend(doc, backend);
+  const result = boundBackend
+    ? await boundBackend.applyHistoryAction(action)
+    : await doc.sessionData.commands.applyHistoryAction(action);
+  return result.matched ?? false;
 };
 
 export const updatePermissionOutcomeInHistory = async (
   doc: SessionDocument,
   requestId: string,
   outcome: RequestPermissionResponse['outcome'],
-  _logger: Logger
-) => {
-  await doc.updateHistory((history) => {
-    history.forEach((entry) => {
-      const parsed = readEntryItems(entry);
-      let entryUpdated = false;
-      const nextContents = parsed.map((content) => {
-        if (content.type === 'tool_call' && content.permissionRequest?.requestId === requestId) {
-          entryUpdated = true;
-          return {
-            ...content,
-            permissionRequest: content.permissionRequest
-              ? { ...content.permissionRequest, outcome }
-              : content.permissionRequest,
-          };
-        }
-        return content;
-      });
-      if (entryUpdated) {
-        writeEntryItems(entry, nextContents);
-      }
-    });
-    return history;
-  });
-};
-
-const mergeToolCallWithPermission = (
-  toolCall: ToolCallMessageContent,
-  requestId: string,
-  request: RequestPermissionRequest
-): ToolCallMessageContent => {
-  const tool = request.toolCall;
-  const kind = (toolCall.kind ?? tool.kind ?? undefined) as
-    | ToolCallMessageContent['kind']
-    | undefined;
-  const content = sanitizeToolCallContentForHistory(
-    toolCall.content ?? tool.content ?? undefined,
-    kind
-  );
-  const locations =
-    toolCall.locations ??
-    (Array.isArray(tool.locations) && tool.locations.length > 0 ? tool.locations : undefined) ??
-    deriveLocationsFromToolCallContent(tool.content);
-  const requestMeta = (request as { _meta?: unknown })._meta;
-  const permissionMeta =
-    typeof requestMeta === 'object' && requestMeta !== null && !Array.isArray(requestMeta)
-      ? (requestMeta as Record<string, unknown>)
-      : undefined;
-  return {
-    ...toolCall,
-    title: toolCall.title ?? tool.title ?? null,
-    kind,
-    status: toolCall.status ?? tool.status ?? 'pending',
-    content,
-    locations,
-    permissionRequest: {
-      requestId,
-      options: request.options,
-      ...(permissionMeta ? { _meta: permissionMeta } : {}),
-      outcome: toolCall.permissionRequest?.outcome,
-    },
-  };
-};
-
-const buildToolCallFromPermissionRequest = (
-  requestId: string,
-  request: RequestPermissionRequest
-): ToolCallMessageContent => {
-  const kind = request.toolCall.kind ?? undefined;
-  const content = sanitizeToolCallContentForHistory(request.toolCall.content ?? undefined, kind);
-  const explicitLocations =
-    Array.isArray(request.toolCall.locations) && request.toolCall.locations.length > 0
-      ? request.toolCall.locations
-      : undefined;
-  const locations =
-    explicitLocations ?? deriveLocationsFromToolCallContent(request.toolCall.content);
-  const base: ToolCallMessageContent = {
-    type: 'tool_call',
-    toolCallId: request.toolCall.toolCallId,
-    title: request.toolCall.title ?? null,
-    status: request.toolCall.status ?? 'pending',
-    kind,
-    content,
-    locations,
-  };
-  return mergeToolCallWithPermission(base, requestId, request);
+  logger: Logger,
+  backend?: Pick<SessionBackend, 'respondPermission'>
+): Promise<boolean> => {
+  // Domain command instead of a whole-history callback: the adapter locates the
+  // matching tool call by request id and writes only that turn's outcome.
+  const boundBackend = resolveBoundHistoryBackend(doc, backend);
+  const result = boundBackend
+    ? await boundBackend.respondPermission(requestId, outcome as PermissionOutcome)
+    : await doc.sessionData.commands.respondPermission(requestId, outcome as PermissionOutcome);
+  if (!result)
+    logger.debug(`Permission outcome for ${requestId} not applied: not_found_or_already_set`);
+  return result;
 };
 
 /**

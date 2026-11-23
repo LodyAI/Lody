@@ -1,4 +1,4 @@
 {
   "title": "Lody 文档",
-  "pages": ["index", "(getting-started)", "(core-concepts)", "(features)"]
+  "pages": ["index", "(getting-started)", "(core-concepts)", "(guides)", "(reference)", "(migrating)"]
 }

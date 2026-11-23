@@ -1,0 +1,552 @@
+// @vitest-environment jsdom
+// A failed pending send is an ordinary user message, not an error report: the
+// same reason must appear exactly ONCE (on the attachment that failed), the
+// message level must stay a short status, and an attachment that finished must
+// not be dragged into the failure. Regressions here are what made the row read
+// like a debug panel.
+
+// A failed pending send is an ordinary user message, not an error report: the
+// same reason must appear exactly ONCE (on the attachment that failed), the
+// message level must stay a short status, and an attachment that finished must
+// not be dragged into the failure. Regressions here are what made the row read
+// like a debug panel.
+import { act, createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  inputBlocksToHistoryItems,
+  type SessionHistory,
+  type SessionHistoryParsed,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
+
+import { Provider, createStore } from 'jotai';
+import {
+  addRpcDeliveredTurn,
+  getRpcDeliveredTurnKey,
+  rpcDeliveredTurnsAtom,
+} from '../src/atoms/session-dispatch-delivery';
+
+import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
+import { MessageRowView } from '../src/components/ai-gui/view';
+import { ForceDesktopLayoutProvider } from '../src/hooks/use-mobile';
+
+import {
+  PendingMessageRow,
+  SessionPendingMessages,
+  useSessionPendingMessages,
+} from '../src/components/chat/session-pending-messages';
+import type { SessionAttachmentDraft } from '../src/lib/session-attachment-draft';
+import {
+  createPendingSessionSends,
+  type PendingSessionSend,
+} from '../src/lib/session-pending-sends';
+import {
+  clearSessionImageCache,
+  seedSessionImageCache,
+  peekSessionImageUrl,
+} from '../src/lib/session-image-cache';
+import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
+
+import { initI18n } from '../src/i18n';
+
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+const REASON = 'Network error while preparing the file';
+const sessionId = 'pending-row-session' as SessionId;
+
+const readyImage: SessionAttachmentDraft = {
+  id: 'ready-image',
+  kind: 'image',
+  source: new Blob(['image']),
+  name: 'design.png',
+  mimeType: 'image/png',
+  lastModified: 0,
+  ready: { type: 'image', imageId: 'uploaded', mimeType: 'image/png', sizeBytes: 16 },
+  progress: 100,
+};
+
+const readyFile: SessionAttachmentDraft = {
+  id: 'ready-file',
+  kind: 'file',
+  source: new Blob(['notes']),
+  name: 'notes.md',
+  mimeType: 'text/markdown',
+  lastModified: 0,
+  ready: { type: 'file', fileId: 'uploaded-file', fileName: 'notes.md', sizeBytes: 5 },
+  progress: 100,
+} as SessionAttachmentDraft;
+
+const failedFile: SessionAttachmentDraft = {
+  id: 'failed-file',
+  kind: 'file',
+  source: new Blob(['archive']),
+  name: 'evidence.zip',
+  mimeType: 'application/zip',
+  lastModified: 0,
+  error: REASON,
+  progress: 0,
+};
+
+const record = (overrides: Partial<PendingSessionSend> = {}): PendingSessionSend =>
+  ({
+    id: 'pending-turn',
+    sessionId,
+    workspaceId: 'pending-row-workspace' as WorkspaceId,
+    sequence: 1,
+    attachments: [],
+    entry: {
+      id: 'pending-turn',
+      role: 'user',
+      userId: 'tester',
+      timestamp: '2026-09-15T00:00:00.000Z',
+      status: 'pending',
+      read: false,
+      finished: true,
+      items: [{ type: 'text', text: 'Take a look at these.' }],
+      fileDiff: [],
+    } as unknown as SessionHistory,
+    delivery: { kind: 'dispatch' },
+    ...overrides,
+  }) as PendingSessionSend;
+
+describe('PendingMessageRow failure presentation', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  const onRetry = vi.fn();
+  const onCancel = vi.fn();
+
+  it('shows already prepared media from the immutable message without attachment drafts', async () => {
+    const identity = {
+      workspaceId: 'pending-row-workspace' as WorkspaceId,
+      sessionId,
+      imageId: 'prepared-image',
+    };
+    await seedSessionImageCache(identity, new Blob(['image']));
+    const base = record();
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, identity.workspaceId);
+    store.set(authTokenAtom, 'synthetic-preview-token');
+    const html = renderToStaticMarkup(
+      createElement(
+        Provider,
+        { store },
+        createElement(PendingMessageRow, {
+          record: record({
+            inputState: 'sending',
+            persisted: true,
+            historyBackend: 'roost',
+            attachments: [],
+            entry: {
+              ...base.entry,
+              items: inputBlocksToHistoryItems([
+                { type: 'image', imageId: 'prepared-image', mimeType: 'image/png', sizeBytes: 5 },
+                {
+                  type: 'file',
+                  fileId: 'prepared-file',
+                  fileName: 'prepared.txt',
+                  mimeType: 'text/plain',
+                  sizeBytes: 5,
+                },
+              ]),
+            },
+          }),
+          onRetry,
+          onCancel,
+        })
+      )
+    );
+    const content = document.createElement('div');
+    content.innerHTML = html;
+    expect(content.textContent).toContain('prepared.txt');
+    expect(content.querySelector('img')?.getAttribute('src')).toBe(peekSessionImageUrl(identity));
+    expect(content.querySelector('[role="status"]')).toBeNull();
+  });
+
+  beforeEach(async () => {
+    await initI18n('en');
+    // jsdom ships no object-URL support; the image card needs one to preview.
+    let nextUrl = 0;
+    vi.stubGlobal(
+      'URL',
+      class extends URL {
+        static createObjectURL() {
+          return `blob:pending-row-${++nextUrl}`;
+        }
+        static revokeObjectURL() {}
+      }
+    );
+    onRetry.mockClear();
+    onCancel.mockClear();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    if (root) {
+      await act(async () => {
+        root?.unmount();
+      });
+      root = undefined;
+    }
+    container?.remove();
+    container = undefined;
+    clearSessionImageCache();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const render = async (value: PendingSessionSend) => {
+    await act(async () => {
+      root?.render(createElement(PendingMessageRow, { record: value, onRetry, onCancel }));
+    });
+    return container!;
+  };
+
+  it('keeps the delivery circle from local admission through history handoff and only checks a delivered turn', async () => {
+    for (const inputState of ['saving', 'sending', 'unknown', 'confirmed'] as const) {
+      const host = await render(record({ inputState, historyBackend: 'roost' }));
+      expect(host.textContent).toContain('Take a look at these.');
+      expect(host.querySelector('[title="Sending"] svg circle')).not.toBeNull();
+      expect(host.querySelector('[title="Delivered"]')).toBeNull();
+      expect(host.querySelector('[role="status"]')).toBeNull();
+      expect(host.querySelector('button')).toBeNull();
+    }
+
+    const renderHistory = async (status: 'pending' | 'seen') => {
+      await act(async () => {
+        root?.render(
+          createElement(MessageRowView, {
+            sessionId,
+            message: { ...record().entry, status } as unknown as SessionHistoryParsed,
+          })
+        );
+      });
+    };
+    await renderHistory('pending');
+    expect(container?.querySelector('[title="Sending"] svg circle')).not.toBeNull();
+    expect(container?.querySelector('[title="Delivered"]')).toBeNull();
+
+    await renderHistory('seen');
+    expect(container?.querySelector('[title="Sending"]')).toBeNull();
+    expect(container?.querySelector('[title="Delivered"] svg')).not.toBeNull();
+  });
+
+  it('shows owner confirmation on the local row and keeps the check across pending history handoff', async () => {
+    const store = createStore();
+    const input = record({ inputState: 'sending', historyBackend: 'roost' });
+    const draw = async (row: ReturnType<typeof createElement>) =>
+      act(async () => {
+        root?.render(createElement(Provider, { store }, row));
+      });
+    await draw(createElement(PendingMessageRow, { record: input, onRetry, onCancel }));
+    expect(container?.querySelector('[title="Sending"] svg circle')).not.toBeNull();
+    await act(async () => {
+      store.set(rpcDeliveredTurnsAtom, (previous) =>
+        addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, input.id))
+      );
+    });
+    expect(container?.querySelector('[title="Delivered"] svg')).not.toBeNull();
+    expect(container?.querySelector('[title="Sending"]')).toBeNull();
+    await draw(
+      createElement(MessageRowView, {
+        sessionId,
+        message: { ...input.entry, status: 'pending' } as unknown as SessionHistoryParsed,
+      })
+    );
+    expect(container?.querySelector('[title="Delivered"] svg')).not.toBeNull();
+    expect(container?.querySelector('[title="Sending"]')).toBeNull();
+  });
+
+  /**
+   * Counts only LEAF elements carrying the reason. An ancestor inherits the same
+   * textContent, so counting every element would report a container plus its own
+   * text as two separate displays of one reason.
+   */
+  const reasonNodes = (host: HTMLElement) =>
+    [...host.querySelectorAll('*')].filter(
+      (node) => node.childElementCount === 0 && node.textContent?.trim() === REASON
+    );
+
+  it('prints the attachment reason once and keeps the message status short', async () => {
+    const host = await render(record({ error: REASON, attachments: [readyImage, failedFile] }));
+
+    expect(reasonNodes(host)).toHaveLength(1);
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('Not sent');
+  });
+
+  it('shows the record reason only when no attachment carries one', async () => {
+    const host = await render(record({ error: REASON, attachments: [readyImage] }));
+
+    expect(reasonNodes(host)).toHaveLength(1);
+    expect(
+      host.querySelector('.border-destructive\\/30')?.contains(host.querySelector('img'))
+    ).toBe(false);
+  });
+
+  // Image frames match the delivered image and carry no caption, so a failed
+  // image's reason must still reach the reader through the row notice.
+  it('explains a failed image through the row notice', async () => {
+    const host = await render(
+      record({
+        error: REASON,
+        attachments: [{ ...readyImage, id: 'failed-image', ready: undefined, error: REASON }],
+      })
+    );
+
+    expect(reasonNodes(host)).toHaveLength(1);
+  });
+
+  it('retains the image after preparation releases the source, including remounts', async () => {
+    const held = record({ attachments: [{ ...readyImage, ready: undefined, progress: 40 }] });
+    const host = await render(held);
+    const image = host.querySelector('img');
+    const frame = image?.parentElement;
+    expect(image?.getAttribute('src')).toBe('blob:pending-row-1');
+    await seedSessionImageCache(
+      { workspaceId: held.workspaceId as WorkspaceId, sessionId, imageId: 'uploaded' },
+      readyImage.source!
+    );
+    const url = peekSessionImageUrl({
+      workspaceId: held.workspaceId as WorkspaceId,
+      sessionId,
+      imageId: 'uploaded',
+    });
+    const prepared = record({ attachments: [{ ...readyImage, source: undefined }] });
+    await render(prepared);
+    expect(host.querySelector('img')).toBe(image);
+    expect(image?.parentElement).toBe(frame);
+    expect(image?.getAttribute('src')).toBe(url);
+    expect(host.querySelector('[role="progressbar"]')).toBeNull();
+
+    await act(async () => root?.render(null));
+    await render(prepared);
+    expect(host.querySelector('img')?.getAttribute('src')).toBe(url);
+  });
+
+  it('preserves sender name and desktop profile trigger across uploading, accepted local input and committed history', async () => {
+    const sender = { name: 'Maya Chen', email: 'maya.chen@example.com', image: null };
+    const draw = async (node: ReturnType<typeof createElement>) => {
+      await act(async () => {
+        root?.render(createElement(ForceDesktopLayoutProvider, null, node));
+      });
+    };
+
+    await draw(
+      createElement(PendingMessageRow, {
+        record: record({
+          attachments: [{ ...readyImage, ready: undefined, progress: 30 }],
+        }),
+        user: sender,
+        showSenderIdentity: true,
+        onRetry,
+        onCancel,
+      })
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Maya Chen');
+    expect(
+      container?.querySelector('button[aria-label="View profile for Maya Chen"]')
+    ).not.toBeNull();
+
+    await draw(
+      createElement(PendingMessageRow, {
+        record: record({ inputState: 'sending', historyBackend: 'roost' }),
+        user: sender,
+        showSenderIdentity: true,
+        onRetry,
+        onCancel,
+      })
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Maya Chen');
+    expect(
+      container?.querySelector('button[aria-label="View profile for Maya Chen"]')
+    ).not.toBeNull();
+
+    await draw(
+      createElement(MessageRowView, {
+        sessionId,
+        message: { ...record().entry, status: 'seen' } as unknown as SessionHistoryParsed,
+        user: sender,
+        showSenderIdentity: true,
+      })
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Maya Chen');
+    expect(
+      container?.querySelector('button[aria-label="View profile for Maya Chen"]')
+    ).not.toBeNull();
+  });
+});
+
+// The write reaches the conversation view before the held send is removed; in
+// between, the turn must show once, as the history row, not also as a pending
+// row beneath it.
+describe('SessionPendingMessages', () => {
+  it('exposes keyed local rows and truthful sending state through failure, retry, receipt and cancel', async () => {
+    await initI18n('en');
+    const first = Promise.withResolvers<void>();
+    const retry = Promise.withResolvers<void>();
+    let attempt = 0;
+    const pendingSends = createPendingSessionSends({
+      prepare: async (send) => send,
+      write: async () => {
+        attempt += 1;
+        await (attempt === 1 ? first.promise : retry.promise);
+      },
+      deliver: async () => {},
+    });
+    const store = createStore();
+    store.set(runtimeAtom, { workspaceId: 'pending-row-workspace', pendingSends } as never);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    function Surface() {
+      const model = useSessionPendingMessages({ sessionId });
+      return (
+        <>
+          <output data-sending={String(model.isSending)} />
+          <div data-local>
+            {model.localUserMessages.map((row) => (
+              <div key={row.id} data-input={row.id}>
+                {row.content}
+              </div>
+            ))}
+          </div>
+          <div data-held>{model.trailingContent}</div>
+        </>
+      );
+    }
+    try {
+      await act(async () => {
+        root.render(
+          <Provider store={store}>
+            <Surface />
+          </Provider>
+        );
+        pendingSends.enqueue(record({ inputState: 'saving', historyBackend: 'roost' }));
+      });
+      expect(container.querySelector('output')?.dataset.sending).toBe('true');
+      expect(container.querySelectorAll('[data-input="pending-turn"]')).toHaveLength(1);
+      expect(container.querySelector('[data-held]')?.textContent).toBe('');
+      expect(container.querySelector('[title="Delivered"]')).toBeNull();
+      await act(async () => first.reject(new Error('owner unavailable')));
+      expect(container.querySelector('output')?.dataset.sending).toBe('false');
+      expect(container.textContent).toContain('owner unavailable');
+      await act(async () => pendingSends.retry('pending-turn'));
+      expect(container.querySelector('output')?.dataset.sending).toBe('true');
+      expect(container.textContent).not.toContain('owner unavailable');
+      await act(async () => {
+        store.set(
+          rpcDeliveredTurnsAtom,
+          addRpcDeliveredTurn(
+            store.get(rpcDeliveredTurnsAtom),
+            getRpcDeliveredTurnKey(sessionId, 'pending-turn')
+          )
+        );
+      });
+      expect(container.querySelector('output')?.dataset.sending).toBe('false');
+      expect(container.querySelector('[title="Delivered"]')).not.toBeNull();
+      await act(async () => {
+        const canceled = pendingSends.cancel('pending-turn');
+        retry.resolve();
+        await canceled;
+      });
+      expect(container.querySelector('[data-local]')?.textContent).toBe('');
+      expect(pendingSends.getSnapshot()).toEqual([]);
+    } finally {
+      first.resolve();
+      retry.resolve();
+      await act(async () => root.unmount());
+      container.remove();
+      pendingSends.dispose();
+    }
+  });
+
+  it('keeps the local body until history is hydrated, then hands off once', async () => {
+    await initI18n('en');
+    URL.createObjectURL = () => 'blob:pending-row';
+    URL.revokeObjectURL = () => {};
+    const historyIds = new Set<string>();
+    let hydrated = false;
+    const listeners = new Set<() => void>();
+    const history = {
+      indexOf: (id: string) => (historyIds.has(id) ? 0 : -1),
+      turn: () => (hydrated ? record().entry : undefined),
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const writing = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<void>();
+    const pendingSends = createPendingSessionSends({
+      prepare: async (send) => ({
+        entry: send.entry,
+        queue: send.queue,
+        attachments: send.attachments.map((attachment) => ({ ...attachment, ...readyImage })),
+      }),
+      write: async (send) => {
+        historyIds.add(send.id);
+        for (const listener of listeners) listener();
+        writing.resolve();
+        await finishWrite.promise;
+      },
+      deliver: async () => {},
+    });
+    const store = createStore();
+    store.set(runtimeAtom, {
+      workspaceId: 'pending-row-workspace',
+      workspaceSlug: 'pending-row-workspace',
+      pendingSends,
+    } as never);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(SessionPendingMessages, { sessionId, history })
+        )
+      );
+    });
+
+    const held = record({
+      attachments: [{ ...readyImage, ready: undefined, progress: 0 }],
+    });
+    await act(async () => {
+      pendingSends.enqueue(held);
+      await writing.promise;
+    });
+    expect(pendingSends.has(held.id)).toBe(true);
+    expect(container.textContent).toContain('Take a look at these.');
+    await act(async () => {
+      hydrated = true;
+      for (const listener of listeners) listener();
+    });
+    expect(container.textContent).toBe('');
+
+    await act(async () => {
+      finishWrite.resolve();
+    });
+    expect(pendingSends.has(held.id)).toBe(false);
+    expect(container.textContent).toBe('');
+
+    await act(async () => root.unmount());
+    container.remove();
+    pendingSends.dispose();
+  });
+});

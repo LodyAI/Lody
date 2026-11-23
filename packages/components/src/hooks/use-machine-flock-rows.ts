@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   getMachineFlockDocId,
+  machineFlockKeys,
   readMachineFlockRowsFromFlock,
+  serializeMachineFlockKey,
+  type AcpCapabilityCacheEntry,
+  type AgentConfigId,
   type MachineFlockEvent,
   type MachineFlockRowFamily,
   type MachineFlockRowMap,
@@ -15,14 +19,47 @@ import {
   setMachineFlockRowsForMachineAtom,
 } from '@/atoms/machine-flock';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { deferredPostHog } from '@/lib/deferred-posthog';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { readinessBinding } from '@/lib/room-readiness';
-import {
-  flockVersionTokensEqual,
-  readFlockVersionToken,
-  type FlockVersionToken,
-} from '@/lib/flock-version';
 
 type MachineFlockDocHandle = Awaited<ReturnType<WorkspaceRuntime['repo']['openFlockDoc']>>;
+type MachineFlock = MachineFlockDocHandle['flock'];
+
+/**
+ * A Machine Flock's change stamp: a process-unique number that changes on
+ * every change event. Every import and local write emits an event (Machine
+ * Flocks have no auto-debounce), so an unchanged stamp means unchanged rows. It
+ * replaces exporting and encoding the full version vector (~5ms per switch) for
+ * the "is the materialized projection current" check. Stamps come from one
+ * global sequence, so a reopened Flock instance can never repeat an old stamp.
+ */
+type MachineFlockVersion = number;
+
+let machineFlockChangeSequence = 0;
+const MACHINE_FLOCK_CHANGE_STAMPS = new WeakMap<object, { stamp: MachineFlockVersion }>();
+
+/**
+ * Starts counting a Flock's changes; held for the Flock's lifetime (handles are
+ * cached per runtime). Registered when the handle opens, before any consumer
+ * subscribes, so every later listener sees the stamp already advanced.
+ */
+function trackMachineFlockChanges(flock: MachineFlock): void {
+  if (MACHINE_FLOCK_CHANGE_STAMPS.has(flock)) return;
+  const subscribe = (flock as Partial<Pick<MachineFlock, 'subscribe'>>).subscribe;
+  if (typeof subscribe !== 'function') return;
+  const entry = { stamp: ++machineFlockChangeSequence };
+  MACHINE_FLOCK_CHANGE_STAMPS.set(flock, entry);
+  subscribe.call(flock, () => {
+    entry.stamp = ++machineFlockChangeSequence;
+  });
+}
+
+/** The Flock's current change stamp, or null when its changes cannot be observed. */
+function readMachineFlockVersion(flock: MachineFlock): MachineFlockVersion | null {
+  trackMachineFlockChanges(flock);
+  return MACHINE_FLOCK_CHANGE_STAMPS.get(flock)?.stamp ?? null;
+}
 type MachineFlockRoomSubscription = Awaited<ReturnType<MachineFlockDocHandle['joinRoom']>>;
 
 const EMPTY_MACHINE_FLOCK_ROWS = Object.freeze({}) as MachineFlockRowMap;
@@ -42,7 +79,7 @@ type MachineFlockRowsSnapshot = {
   mode?: 'replace' | 'merge';
   preserveExistingOnEmpty?: boolean;
   syncedRemote?: boolean;
-  version?: FlockVersionToken | null;
+  version?: MachineFlockVersion | null;
 };
 
 type UseMachineFlockRowsOptions = {
@@ -111,7 +148,7 @@ const MACHINE_FLOCK_MATERIALIZED_VERSIONS = new WeakMap<
     string,
     {
       readonly runtime: WorkspaceRuntime;
-      readonly versionsByFamily: Map<string, FlockVersionToken>;
+      readonly versionsByFamily: Map<string, MachineFlockVersion>;
     }
   >
 >();
@@ -121,12 +158,13 @@ function hasMaterializedMachineFlockVersion(
   runtime: WorkspaceRuntime,
   cacheKey: string,
   familiesKey: string,
-  version: FlockVersionToken | null
+  version: MachineFlockVersion | null
 ): boolean {
   const entry = MACHINE_FLOCK_MATERIALIZED_VERSIONS.get(store)?.get(cacheKey);
   return (
     entry?.runtime === runtime &&
-    flockVersionTokensEqual(entry.versionsByFamily.get(familiesKey), version)
+    version !== null &&
+    entry.versionsByFamily.get(familiesKey) === version
   );
 }
 
@@ -135,7 +173,7 @@ function markMaterializedMachineFlockVersion(
   runtime: WorkspaceRuntime,
   cacheKey: string,
   familiesKey: string,
-  version: FlockVersionToken
+  version: MachineFlockVersion
 ): void {
   let byCacheKey = MACHINE_FLOCK_MATERIALIZED_VERSIONS.get(store);
   if (!byCacheKey) {
@@ -154,9 +192,9 @@ function advanceMaterializedMachineFlockVersions(
   store: MachineFlockRowsStore,
   runtime: WorkspaceRuntime,
   cacheKey: string,
-  version: FlockVersionToken | null
+  version: MachineFlockVersion | null
 ): void {
-  if (!version) return;
+  if (version === null) return;
   const entry = MACHINE_FLOCK_MATERIALIZED_VERSIONS.get(store)?.get(cacheKey);
   if (!entry || entry.runtime !== runtime) return;
   for (const familiesKey of entry.versionsByFamily.keys()) {
@@ -179,6 +217,67 @@ const SHARED_MACHINE_FLOCK_EVENTS = new WeakMap<
 >();
 const EMPTY_MACHINE_IDS = new Set<MachineId>();
 let machineFlockRowsPerfMeasureSeq = 0;
+
+export const MACHINE_FLOCK_REMOTE_SYNC_RETRY_BASE_DELAY_MS = 1_000;
+export const MACHINE_FLOCK_REMOTE_SYNC_RETRY_MAX_DELAY_MS = 60_000;
+
+export function getMachineFlockRemoteSyncRetryDelayMs(failureCount: number): number {
+  return Math.min(
+    MACHINE_FLOCK_REMOTE_SYNC_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, failureCount - 1),
+    MACHINE_FLOCK_REMOTE_SYNC_RETRY_MAX_DELAY_MS
+  );
+}
+
+// One report per machine until a remote sync succeeds again. Every mounted
+// consumer retries on its own backoff; without this a machine whose stream
+// keeps failing would report once per consumer per retry.
+const REPORTED_MACHINE_FLOCK_REMOTE_SYNC_FAILURES = new Set<string>();
+
+function readErrorHttpStatus(error: unknown): number | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const { status, statusCode } = error as { status?: unknown; statusCode?: unknown };
+  const value = typeof status === 'number' ? status : statusCode;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function reportMachineFlockRemoteSyncFailure(args: {
+  cacheKey: string;
+  workspaceId: string;
+  machineId: MachineId;
+  familiesKey: string;
+  failureCount: number;
+  retryDelayMs: number;
+  error: unknown;
+}): void {
+  const firstReport = !REPORTED_MACHINE_FLOCK_REMOTE_SYNC_FAILURES.has(args.cacheKey);
+  const log = firstReport ? console.warn : console.debug;
+  log('[machine-flock] remote sync failed; keeping cached rows and retrying', {
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+    failureCount: args.failureCount,
+    retryDelayMs: args.retryDelayMs,
+    error: args.error,
+  });
+  if (!firstReport) return;
+  REPORTED_MACHINE_FLOCK_REMOTE_SYNC_FAILURES.add(args.cacheKey);
+  try {
+    // Only low-cardinality fields: the raw error message can carry stream URLs.
+    capturePostHogEvent(deferredPostHog, 'machine_flock/remote_sync_failed', {
+      workspace_id: args.workspaceId,
+      machine_id: args.machineId,
+      families: args.familiesKey ? args.familiesKey.split('\0') : [],
+      error_type: args.error instanceof Error ? args.error.name || 'Error' : typeof args.error,
+      http_status: readErrorHttpStatus(args.error),
+      online: typeof navigator === 'undefined' ? null : navigator.onLine,
+    });
+  } catch {
+    // Analytics is side-effect-only: must never throw into product code.
+  }
+}
+
+function clearMachineFlockRemoteSyncFailure(cacheKey: string): void {
+  REPORTED_MACHINE_FLOCK_REMOTE_SYNC_FAILURES.delete(cacheKey);
+}
 
 function getPerformanceNow(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -431,7 +530,7 @@ function acquireMachineFlockEvents(
         const events = (batch as { events?: MachineFlockEvent[] }).events ?? [];
         if (events.length === 0) return;
         const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, machineId);
-        const version = readFlockVersionToken(handle.flock);
+        const version = readMachineFlockVersion(handle.flock);
         for (const activeStore of refCountsByStore.keys()) {
           activeStore.set(applyMachineFlockRowEventsForMachineAtom, {
             workspaceId: runtime.workspaceId,
@@ -516,7 +615,10 @@ async function openMachineFlockDoc(
   if (!handlePromise) {
     handlePromise = measureMachineFlockRowsAsync('machine-flock:open-doc', () =>
       runtime.repo.openFlockDoc(getMachineFlockDocId(runtime.workspaceId, machineId))
-    );
+    ).then((handle) => {
+      trackMachineFlockChanges(handle.flock);
+      return handle;
+    });
     handlesByMachineId.set(machineId, handlePromise);
   }
 
@@ -556,14 +658,20 @@ function readMachineFlockRowsSnapshot(
 export async function resyncMachineFlockRows(
   runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'> | null | undefined,
   machineId: MachineId | string | null | undefined,
-  options: { requireRemoteSync?: boolean } = {}
+  options: {
+    requireRemoteSync?: boolean;
+    refreshedCapability?: {
+      configId: AgentConfigId;
+      value: AcpCapabilityCacheEntry;
+    };
+  } = {}
 ): Promise<void> {
   const normalizedMachineId = normalizeMachineId(machineId);
   if (!runtime || !normalizedMachineId) return;
   const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, normalizedMachineId);
   const handle = await openMachineFlockDoc(runtime, normalizedMachineId);
   const syncResult = await syncMachineFlockRowsOnce(cacheKey, handle, { force: true });
-  const version = readFlockVersionToken(handle.flock);
+  const version = readMachineFlockVersion(handle.flock);
   notifyMachineFlockRowsCache(cacheKey, {
     rows: (readOptions) => readMachineFlockRowsSnapshot(handle, readOptions, 'resync'),
     mode: 'merge',
@@ -571,6 +679,18 @@ export async function resyncMachineFlockRows(
     syncedRemote: syncResult.syncedRemote,
     version,
   });
+  if (options.refreshedCapability) {
+    const key = machineFlockKeys.acpCapability(options.refreshedCapability.configId);
+    notifyMachineFlockRowsCache(cacheKey, {
+      rows: {
+        [serializeMachineFlockKey(key)]: {
+          key,
+          value: options.refreshedCapability.value,
+        },
+      },
+      mode: 'merge',
+    });
+  }
   if (options.requireRemoteSync && !syncResult.syncedRemote) {
     throw new Error(`Failed to sync Machine Flock rows for ${normalizedMachineId}`);
   }
@@ -587,7 +707,7 @@ export function useMachineFlockRows(
   );
   const rowsByMachineId = useMachineFlockRowsByMachineIds(machineIds, options);
   return normalizedMachineId
-    ? rowsByMachineId.get(normalizedMachineId) ?? EMPTY_MACHINE_FLOCK_ROWS
+    ? (rowsByMachineId.get(normalizedMachineId) ?? EMPTY_MACHINE_FLOCK_ROWS)
     : EMPTY_MACHINE_FLOCK_ROWS;
 }
 
@@ -746,7 +866,7 @@ export function useMachineFlockRowsByMachineIdsState(
       const publishSnapshot = (snapshot: MachineFlockRowsSnapshot): void => {
         if (!isCurrent()) return;
         if (
-          snapshot.version &&
+          typeof snapshot.version === 'number' &&
           hasMaterializedMachineFlockVersion(
             machineFlockRowsStore,
             runtime,
@@ -767,7 +887,7 @@ export function useMachineFlockRowsByMachineIdsState(
           mode: snapshot.mode,
           preserveExistingOnEmpty: snapshot.preserveExistingOnEmpty,
         });
-        if (snapshot.version) {
+        if (typeof snapshot.version === 'number') {
           markMaterializedMachineFlockVersion(
             machineFlockRowsStore,
             runtime,
@@ -787,7 +907,7 @@ export function useMachineFlockRowsByMachineIdsState(
         const handle = await openMachineFlockDoc(runtime, machineId);
         if (!isCurrent()) return;
 
-        const localVersion = readFlockVersionToken(handle.flock);
+        const localVersion = readMachineFlockVersion(handle.flock);
         if (
           readLocal &&
           !hasMaterializedMachineFlockVersion(
@@ -809,7 +929,7 @@ export function useMachineFlockRowsByMachineIdsState(
         // cannot land between the snapshot and the live tail.
         if (!isCurrent()) return;
         if (readLocal) {
-          if (localVersion) {
+          if (localVersion !== null) {
             markMaterializedMachineFlockVersion(
               machineFlockRowsStore,
               runtime,
@@ -827,11 +947,13 @@ export function useMachineFlockRowsByMachineIdsState(
             clearTimeout(remoteSyncTimer);
           }
         });
+        let remoteSyncFailureCount = 0;
         const runRemoteSync = (): void => {
           remoteSyncTimer = null;
           if (!isCurrent()) return;
+          let roomLease: MachineFlockRoomLease | null = null;
           void (async () => {
-            const roomLease = acquireMachineFlockRoom(
+            roomLease = acquireMachineFlockRoom(
               runtime,
               machineId,
               remoteSyncOwner,
@@ -851,7 +973,7 @@ export function useMachineFlockRowsByMachineIdsState(
             // readiness is the selected binding's first sync.
             await roomLease.firstSyncedWithRemote;
             if (!isCurrent()) return;
-            const remoteVersion = readFlockVersionToken(handle.flock);
+            const remoteVersion = readMachineFlockVersion(handle.flock);
             if (
               !hasMaterializedMachineFlockVersion(
                 machineFlockRowsStore,
@@ -866,7 +988,7 @@ export function useMachineFlockRowsByMachineIdsState(
                 mode: 'merge',
                 preserveExistingOnEmpty: true,
               });
-              if (remoteVersion) {
+              if (remoteVersion !== null) {
                 markMaterializedMachineFlockVersion(
                   machineFlockRowsStore,
                   runtime,
@@ -877,7 +999,32 @@ export function useMachineFlockRowsByMachineIdsState(
               }
             }
             markRemoteSynced();
-          })().catch(() => undefined);
+            remoteSyncFailureCount = 0;
+            clearMachineFlockRemoteSyncFailure(cacheKey);
+          })().catch((error: unknown) => {
+            if (!isCurrent()) return;
+            // A failed join or first sync never settles again on its own, and
+            // the effect skips an unchanged task, so without a retry here the
+            // machine would keep only its cached rows until a remount.
+            // Drop this attempt's lease now so a dead room is not kept alive
+            // (and reused) until the retry fires.
+            if (roomLease) {
+              task.cleanupFns.delete(roomLease.release);
+              roomLease.release();
+            }
+            remoteSyncFailureCount += 1;
+            const retryDelayMs = getMachineFlockRemoteSyncRetryDelayMs(remoteSyncFailureCount);
+            reportMachineFlockRemoteSyncFailure({
+              cacheKey,
+              workspaceId: runtime.workspaceId,
+              machineId,
+              familiesKey,
+              failureCount: remoteSyncFailureCount,
+              retryDelayMs,
+              error,
+            });
+            remoteSyncTimer = setTimeout(runRemoteSync, retryDelayMs);
+          });
         };
         if (remoteSyncDelayMs > 0) {
           remoteSyncTimer = setTimeout(runRemoteSync, remoteSyncDelayMs);

@@ -11,7 +11,7 @@ import {
 import { animate, motion, useMotionValue, useTransform } from 'framer-motion';
 import { useDrag } from '@use-gesture/react';
 import { useTranslation } from 'react-i18next';
-import { Archive, ArchiveRestore, Pin, PinOff, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, CircleCheck, Clock, Pin, PinOff, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
@@ -220,9 +220,7 @@ export function MobileSwipeableRow({
        pin at fixed width with archive growing past it — drawer ends
        up wider than the revealed area and the pin gets clipped under
        the row content. */
-  const pinWidth = useTransform(x, (value) =>
-    -value >= AUTO_ARCHIVE_AT ? 0 : ACTION_WIDTH
-  );
+  const pinWidth = useTransform(x, (value) => (-value >= AUTO_ARCHIVE_AT ? 0 : ACTION_WIDTH));
   const pinOpacity = useTransform(x, (value) => (-value >= AUTO_ARCHIVE_AT ? 0 : 1));
   const archiveWidth = useTransform(x, (value) => {
     const dragged = -value;
@@ -472,6 +470,213 @@ export function MobileSwipeableRow({
         )}
       >
         <div {...bindDrag()} onClickCapture={handleCaptureClick}>
+          {children}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+/** Status view rows: leading pin, trailing status actions (README#status-grouping). */
+export type MobileStatusSwipeActionId = 'settle' | 'later' | 'archive';
+
+export type MobileStatusSwipeRowProps = {
+  children: ReactNode;
+  /** Leading swipe: pin / unpin. Omit when the row cannot be pinned. */
+  isPinned?: boolean;
+  onTogglePin?: () => void;
+  /** Trailing actions, edge first. Ids map to the shared localized labels. */
+  trailing: readonly { id: MobileStatusSwipeActionId; onSelect: () => void }[];
+  liftAboveEdgeSwipeZone?: boolean;
+  /** True while the list's long press has lifted this row for a drag. */
+  isLocked?: () => boolean;
+  className?: string;
+};
+
+const STATUS_FULL_SWIPE_AT = 220;
+
+export function MobileStatusSwipeRow({
+  children,
+  isPinned = false,
+  onTogglePin,
+  trailing,
+  liftAboveEdgeSwipeZone = false,
+  isLocked,
+  className,
+}: MobileStatusSwipeRowProps) {
+  const { t } = useTranslation();
+  const x = useMotionValue(0);
+  const [side, setSide] = useState<'none' | 'leading' | 'trailing'>('none');
+  const [fullSwipe, setFullSwipe] = useState(false);
+  const rowId = useId();
+  const registry = useContext(SwipeableRowContext);
+  const trailingWidth = ACTION_WIDTH * trailing.length;
+  const leadingWidth = onTogglePin ? ACTION_WIDTH : 0;
+
+  useEffect(
+    () =>
+      x.on('change', (value) => {
+        setFullSwipe(Math.abs(value) >= STATUS_FULL_SWIPE_AT);
+      }),
+    [x]
+  );
+  useEffect(() => {
+    if (!registry) return undefined;
+    return registry.register(rowId, () => {
+      setSide('none');
+      void animate(x, 0, SPRING);
+    });
+  }, [registry, rowId, x]);
+
+  const close = () => {
+    setSide('none');
+    void animate(x, 0, SPRING);
+  };
+  const run = (action: () => void) => {
+    close();
+    action();
+  };
+  const edgeTrailing = trailing[0];
+
+  const bindDrag = useDrag(
+    ({ first, active, movement: [movementX, movementY], last, cancel, event }) => {
+      if ((first && Math.abs(movementY) > Math.abs(movementX)) || isLocked?.()) {
+        cancel();
+        if (side === 'none') x.set(0);
+        return;
+      }
+      if (first) registry?.notifyActive(rowId);
+      const base = side === 'trailing' ? -trailingWidth : side === 'leading' ? leadingWidth : 0;
+      const raw = base + movementX;
+      const next = raw > 0 ? (leadingWidth > 0 ? raw : 0) : trailingWidth > 0 ? raw : 0;
+      if (active) {
+        x.set(next);
+        if (Math.abs(movementX) > 8) event.preventDefault();
+        return;
+      }
+      if (!last) return;
+      if (next <= -STATUS_FULL_SWIPE_AT && edgeTrailing) return run(edgeTrailing.onSelect);
+      if (next >= STATUS_FULL_SWIPE_AT && onTogglePin) return run(onTogglePin);
+      if (next <= -trailingWidth * 0.4 && trailingWidth > 0) {
+        setSide('trailing');
+        void animate(x, -trailingWidth, SPRING);
+      } else if (next >= leadingWidth * 0.4 && leadingWidth > 0) {
+        setSide('leading');
+        void animate(x, leadingWidth, SPRING);
+      } else close();
+    },
+    { filterTaps: true, pointer: { touch: true }, eventOptions: { passive: false } }
+  );
+
+  const labelOf = (id: MobileStatusSwipeActionId) =>
+    id === 'settle'
+      ? t('chat.mobileHome.swipeActions.settle', 'Settle')
+      : id === 'later'
+        ? t('chat.mobileHome.swipeActions.later', 'Later')
+        : t('chat.mobileHome.swipeActions.archive', 'Archive');
+  const iconOf = (id: MobileStatusSwipeActionId) =>
+    id === 'settle' ? CircleCheck : id === 'later' ? Clock : Archive;
+  const toneOf = (id: MobileStatusSwipeActionId) =>
+    id === 'archive'
+      ? 'bg-destructive text-destructive-foreground'
+      : id === 'later'
+        ? 'bg-amber-500 text-white'
+        : 'bg-emerald-600 text-white';
+  const pinLabel = isPinned
+    ? t('chat.mobileHome.swipeActions.unpin', 'Unpin')
+    : t('chat.mobileHome.swipeActions.pin', 'Pin');
+  const leadingOpacity = useTransform(x, (value) => (value > 1 ? 1 : 0));
+  const trailingOpacity = useTransform(x, (value) => (value < -1 ? 1 : 0));
+  const edgeWidth = useTransform(x, (value) =>
+    -value >= STATUS_FULL_SWIPE_AT ? -value : ACTION_WIDTH
+  );
+  const innerWidth = useTransform(x, (value) =>
+    -value >= STATUS_FULL_SWIPE_AT ? 0 : ACTION_WIDTH
+  );
+  const pinWidth = useTransform(x, (value) => Math.max(ACTION_WIDTH, value));
+
+  return (
+    <div
+      className={cn('relative overflow-hidden bg-background', className)}
+      style={{ touchAction: 'pan-y' }}
+      data-status-swipe-row=""
+    >
+      {onTogglePin ? (
+        <motion.div
+          style={{ opacity: leadingOpacity }}
+          aria-hidden={side !== 'leading'}
+          className="pointer-events-none absolute inset-y-0 left-0 z-0 flex"
+        >
+          <motion.button
+            type="button"
+            data-status-swipe-action=""
+            aria-label={pinLabel}
+            title={pinLabel}
+            onClick={() => run(onTogglePin)}
+            style={{ width: pinWidth }}
+            className={cn(
+              'flex shrink-0 flex-col items-center justify-center gap-1 bg-primary text-primary-foreground',
+              side === 'leading' && 'pointer-events-auto',
+              fullSwipe && 'items-end pe-5'
+            )}
+          >
+            {isPinned ? (
+              <PinOff className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+            ) : (
+              <Pin className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+            )}
+            <span className="text-[0.72rem] font-medium leading-none">{pinLabel}</span>
+          </motion.button>
+        </motion.div>
+      ) : null}
+      {trailing.length > 0 ? (
+        <motion.div
+          style={{ opacity: trailingOpacity }}
+          aria-hidden={side !== 'trailing'}
+          className="pointer-events-none absolute inset-y-0 right-0 z-0 flex flex-row-reverse"
+        >
+          {trailing.map((action, index) => {
+            const Icon = iconOf(action.id);
+            const label = labelOf(action.id);
+            return (
+              <motion.button
+                key={action.id}
+                type="button"
+                data-status-swipe-action=""
+                aria-label={label}
+                title={label}
+                onClick={() => run(action.onSelect)}
+                style={{ width: index === 0 ? edgeWidth : innerWidth }}
+                className={cn(
+                  'flex shrink-0 flex-col items-center justify-center gap-1 overflow-hidden',
+                  toneOf(action.id),
+                  side === 'trailing' && 'pointer-events-auto',
+                  index === 0 && fullSwipe && 'items-start ps-5'
+                )}
+              >
+                <Icon className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+                <span className="text-[0.72rem] font-medium leading-none">{label}</span>
+              </motion.button>
+            );
+          })}
+        </motion.div>
+      ) : null}
+      <motion.div
+        style={{ x }}
+        className={cn(
+          'relative w-full bg-background shadow-[0_1px_0_0_hsl(var(--background)),0_-1px_0_0_hsl(var(--background))]',
+          liftAboveEdgeSwipeZone ? 'z-30' : 'z-10'
+        )}
+      >
+        <div
+          {...bindDrag()}
+          onClickCapture={(event) => {
+            if (side === 'none') return;
+            event.preventDefault();
+            event.stopPropagation();
+            close();
+          }}
+        >
           {children}
         </div>
       </motion.div>

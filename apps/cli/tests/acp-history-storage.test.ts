@@ -1,13 +1,26 @@
+import { updateTestHistory } from './history-port-fixture';
 import { describe, expect, it } from 'vitest';
 
 import { LoroRepo } from 'loro-repo';
 import { v4 as uuidv4 } from 'uuid';
 
-import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/shared';
+import type {
+  AcpSessionNotification,
+  MessageContent,
+  SessionHistoryInput,
+  SessionId,
+} from '@lody/shared';
+import type { LodySubagentEvent, LodySubagentSnapshot } from 'acp-extension-core';
+import { AgentClient } from '../src/agent/agent-client';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 
 import { SessionDocument } from '../src/lib/loro/doc';
-import { appendAutonomousACPNotifications } from '../src/lib/acp/history';
+import {
+  appendAutonomousACPNotifications,
+  appendACPNotificationsToAssistantEntry,
+  type AcpAgentEditEvidence,
+  type AcpStandardDiffBlockEvidence,
+} from '../src/lib/acp/history';
 import type { Logger } from '../src/utils/logger';
 import terminalUpdates from './fixtures/acp/terminal-notifications.json';
 import e2eUpdates from './fixtures/acp/e2e-notifications.json';
@@ -48,6 +61,357 @@ const createTestLogger = (warnings: string[]): Logger => ({
 });
 
 describe('session history storage (integration)', () => {
+  it('keeps child edit tools independent across batches and excludes permission mirrors from edit evidence', async () => {
+    const repo = await LoroRepo.create({});
+    const doc = new SessionDocument(repo, uuidv4() as SessionId);
+    await doc.initOffline();
+    const editsSeen: AcpAgentEditEvidence[] = [];
+    const ownedEdits: Array<{ owner: string | undefined; paths: string[] }> = [];
+    const ownedDiffs: Array<{ owner: string | undefined; paths: string[] }> = [];
+    const callbacks = {
+      editCallback: (edits: readonly AcpAgentEditEvidence[], owner?: string) => {
+        editsSeen.push(...edits);
+        ownedEdits.push({ owner, paths: edits.map((edit) => edit.path) });
+      },
+      standardDiffCallback: (diffs: readonly AcpStandardDiffBlockEvidence[], owner?: string) => {
+        ownedDiffs.push({ owner, paths: diffs.map((diff) => diff.path) });
+      },
+    };
+    const snapshot: LodySubagentSnapshot = {
+      state: 'running',
+      parentRunId: null,
+      support: { stream: ['tool'], progress: false, outputRead: 'none', cancel: false },
+    };
+    const child = (
+      runId: string,
+      payload:
+        | { type: 'snapshot'; snapshot: LodySubagentSnapshot }
+        | { type: 'output'; update: Extract<LodySubagentEvent, { type: 'output' }>['update'] }
+    ): AcpSessionNotification => ({
+      sessionId: 'root-acp',
+      update: {
+        sessionUpdate: 'subagent_event',
+        event: { version: 1, sessionId: 'root-acp', runId, ...payload },
+      },
+    });
+    const diffA = {
+      type: 'diff' as const,
+      path: '/synthetic/a.ts',
+      oldText: 'before A',
+      newText: 'after A',
+    };
+    const diffB = {
+      type: 'diff' as const,
+      path: '/synthetic/b.ts',
+      oldText: 'before B',
+      newText: 'after B',
+    };
+    try {
+      await updateTestHistory(doc, () => [
+        {
+          id: 'parent-turn',
+          role: 'assistant',
+          items: [],
+          timestamp: '2026-09-26T00:00:00.000Z',
+          fileDiff: [],
+        },
+      ]);
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          child('run-a', { type: 'snapshot', snapshot }),
+          child('run-b', { type: 'snapshot', snapshot }),
+          child('run-a', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'shared-native-id',
+              title: 'Edit A',
+              kind: 'edit',
+              status: 'in_progress',
+              content: [diffA],
+            },
+          }),
+          child('run-b', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'shared-native-id',
+              title: 'Edit B',
+              kind: 'edit',
+              status: 'in_progress',
+              content: [diffB],
+            },
+          }),
+        ],
+        'parent-turn',
+        callbacks
+      );
+      expect(editsSeen).toEqual([]);
+      await updateTestHistory(doc, (history) => [
+        ...history,
+        {
+          id: 'later-turn',
+          role: 'assistant',
+          items: [],
+          timestamp: '2026-09-26T00:00:01.000Z',
+          fileDiff: [],
+        },
+      ]);
+      // Terminal updates omit the diff/kind: each run must recover only its own
+      // earlier evidence. The root consent mirror must not publish it again.
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          child('run-a', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-native-id',
+              status: 'completed',
+            },
+          }),
+          {
+            sessionId: 'root-acp',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'permission-mirror-a',
+              status: 'completed',
+              kind: 'edit',
+              content: [diffA],
+              _meta: { lody: { subagentRunId: 'run-a' } },
+            },
+          },
+        ],
+        'later-turn',
+        callbacks
+      );
+      const intermediate = await doc.sessionData.history.readAll();
+      const intermediateTasks = intermediate
+        .flatMap(parseContents)
+        .filter((item) => item.type === 'subagent_task');
+      expect(
+        intermediateTasks.map((item) => ({ id: item.taskId, items: item.run?.items }))
+      ).toMatchObject([
+        {
+          id: 'run-a',
+          items: [{ type: 'tool_call', status: 'completed', locations: [{ path: diffA.path }] }],
+        },
+        {
+          id: 'run-b',
+          items: [{ type: 'tool_call', status: 'in_progress', locations: [{ path: diffB.path }] }],
+        },
+      ]);
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          child('run-b', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-native-id',
+              status: 'completed',
+            },
+          }),
+          child('orphan', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'orphan-edit',
+              title: 'Unowned edit',
+              kind: 'edit',
+              status: 'completed',
+              content: [{ ...diffA, path: '/synthetic/orphan.ts' }],
+            },
+          }),
+        ],
+        'later-turn',
+        callbacks
+      );
+      const history = await doc.sessionData.history.readAll();
+      const tasks = history.flatMap(parseContents).filter((item) => item.type === 'subagent_task');
+      expect(tasks.map((item) => ({ id: item.taskId, items: item.run?.items }))).toMatchObject([
+        {
+          id: 'run-a',
+          items: [
+            {
+              type: 'tool_call',
+              toolCallId: 'shared-native-id',
+              status: 'completed',
+              title: 'Edit A',
+              locations: [{ path: diffA.path }],
+            },
+          ],
+        },
+        {
+          id: 'run-b',
+          items: [
+            {
+              type: 'tool_call',
+              toolCallId: 'shared-native-id',
+              status: 'completed',
+              title: 'Edit B',
+              locations: [{ path: diffB.path }],
+            },
+          ],
+        },
+      ]);
+      expect(JSON.stringify(history)).not.toContain(diffA.oldText);
+      expect(JSON.stringify(history)).not.toContain(diffB.newText);
+      expect(editsSeen).toEqual([
+        {
+          path: diffA.path,
+          changeType: 'update',
+          contentOldText: diffA.oldText,
+          contentNewText: diffA.newText,
+        },
+        {
+          path: diffB.path,
+          changeType: 'update',
+          contentOldText: diffB.oldText,
+          contentNewText: diffB.newText,
+        },
+      ]);
+      expect(ownedEdits).toEqual([
+        { owner: 'parent-turn', paths: [diffA.path] },
+        { owner: 'parent-turn', paths: [diffB.path] },
+      ]);
+      expect(ownedDiffs).toEqual([
+        { owner: 'parent-turn', paths: [diffA.path] },
+        { owner: 'parent-turn', paths: [diffB.path] },
+        { owner: 'parent-turn', paths: [diffA.path] },
+        { owner: 'parent-turn', paths: [diffB.path] },
+      ]);
+      expect(history[0]?.items?.filter((item) => item.type === 'subagent_task')).toHaveLength(2);
+      expect(history[1]?.items?.filter((item) => item.type === 'subagent_task')).toEqual([]);
+    } finally {
+      await repo.destroy();
+    }
+  });
+  it('persists negotiated child output through ingress and filtering without polluting the root', async () => {
+    const repo = await LoroRepo.create({});
+    const doc = new SessionDocument(repo, uuidv4() as SessionId);
+    await doc.initOffline();
+    const warnings: string[] = [];
+    const queued: AcpSessionNotification[] = [];
+    const client = new AgentClient({
+      sessionId: doc.sessionId,
+      logger: createTestLogger(warnings),
+      terminalManager: {} as never,
+      onUpdateMessage: (event) => queued.push(event),
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+    });
+    Object.assign(client, {
+      acpSessionId: 'root-acp',
+      lodyExtensionCapabilities: { subagentEvents: { version: 1 } },
+    });
+    const snapshot: LodySubagentSnapshot = {
+      state: 'running',
+      parentRunId: null,
+      name: 'Explorer',
+      support: {
+        stream: ['text', 'thought', 'tool'],
+        progress: true,
+        outputRead: 'none',
+        cancel: false,
+      },
+    };
+    const send = (event: LodySubagentEvent) =>
+      client.extNotification?.('_lody/subagents/event', event);
+    const base = { version: 1 as const, sessionId: 'root-acp', runId: 'run-1' };
+    const flush = async (owner: string) => {
+      await appendACPNotificationsToAssistantEntry(doc, queued.splice(0), owner);
+    };
+    try {
+      await updateTestHistory(doc, () => [
+        {
+          id: 'parent-turn',
+          role: 'assistant',
+          items: [],
+          timestamp: '2026-09-26T00:00:00.000Z',
+          fileDiff: [],
+        },
+      ]);
+      await send({ ...base, type: 'snapshot', snapshot });
+      await send({
+        ...base,
+        type: 'output',
+        nativeTurnId: 'child-turn',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Inspecting ' },
+        },
+      });
+      await flush('parent-turn');
+      await updateTestHistory(doc, (history) => [
+        ...history,
+        {
+          id: 'later-turn',
+          role: 'assistant',
+          items: [],
+          timestamp: '2026-09-26T00:00:01.000Z',
+          fileDiff: [],
+        },
+      ]);
+      await send({
+        ...base,
+        type: 'output',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'files' },
+        },
+        nativeTurnId: 'child-turn',
+      });
+      await send({
+        ...base,
+        type: 'progress',
+        progress: { lastToolName: 'Read', toolCallCount: 1 },
+      });
+      await send({
+        ...base,
+        sessionId: 'foreign',
+        type: 'output',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'wrong session' },
+        },
+      });
+      await client.extNotification?.('_lody/subagents/event', {
+        ...base,
+        type: 'output',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 42 } },
+      });
+      await send({ ...base, type: 'snapshot', snapshot: { ...snapshot, state: 'completed' } });
+      await send({
+        ...base,
+        type: 'output',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'late output' },
+        },
+      });
+      await flush('later-turn');
+      const history = await doc.sessionData.history.readAll();
+      expect(history[1]?.items).toEqual([]);
+      expect(history[0]?.acpTurnId).toBeUndefined();
+      expect(history[0]?.items).toEqual([
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'run-1',
+          run: expect.objectContaining({
+            snapshot: expect.objectContaining({ state: 'completed' }),
+            progress: { lastToolName: 'Read', toolCallCount: 1 },
+            items: [expect.objectContaining({ type: 'text', text: 'Inspecting files' })],
+          }),
+        }),
+      ]);
+      Object.assign(client, { lodyExtensionCapabilities: {} });
+      await send({ ...base, runId: 'unnegotiated', type: 'snapshot', snapshot });
+      expect(queued).toEqual([]);
+    } finally {
+      await repo.destroy();
+    }
+  });
   it('allows undefined optional history fields without pre-stripping', async () => {
     const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;
@@ -71,7 +435,7 @@ describe('session history storage (integration)', () => {
       locations: [{ path: '/tmp/file.txt' }],
     } as unknown as MessageContent;
 
-    await doc.updateHistory((history) => [
+    await updateTestHistory(doc, (history) => [
       ...history,
       {
         id: 'assistant-1',
@@ -81,7 +445,7 @@ describe('session history storage (integration)', () => {
         fileDiff: [],
       },
     ]);
-    await doc.updateHistory((history) => {
+    await updateTestHistory(doc, (history) => {
       const existing = findToolCall(history, 'call_with_undefined');
       if (existing) {
         existing.title = undefined;
@@ -96,7 +460,7 @@ describe('session history storage (integration)', () => {
       return history;
     });
 
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
     const toolCall = findToolCall(history, 'call_with_undefined');
     expect(toolCall).not.toBeNull();
     expect(toolCall?.locations).toBeUndefined();
@@ -115,7 +479,7 @@ describe('session history storage (integration)', () => {
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();
     await appendAutonomousACPNotifications(doc, terminalUpdates as SessionNotification[]);
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
     expect(history).toMatchObject([
       {
         id: expect.any(String),
@@ -147,6 +511,102 @@ describe('session history storage (integration)', () => {
     expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(2500);
   });
 
+  describe('running tool snapshots do not accumulate in the document', () => {
+    // A 32 KiB window over a build log whose start moves every update, as a
+    // carriage-return progress screen or tail window does. The prefix/suffix
+    // text diff cannot reuse it, so each stored snapshot would stay in the oplog.
+    // Deterministic pseudo-random lines keep snapshot compression from hiding that.
+    const screen = (step: number) => {
+      let seed = step + 1;
+      const word = () => {
+        seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+        return seed.toString(36);
+      };
+      return Array.from(
+        { length: 512 },
+        (_, line) => `[${step}:${line}] cc ${word()} ${word()} ${word()} ${word()}\r`
+      )
+        .join('\n')
+        .padEnd(32 * 1024, '.')
+        .slice(0, 32 * 1024);
+    };
+    const textContent = (text: string) => [
+      { type: 'content' as const, content: { type: 'text' as const, text } },
+    ];
+    const run = async (kind: 'execute' | 'other', completion: Record<string, unknown>) => {
+      const repo = await LoroRepo.create({});
+      const doc = new SessionDocument(repo, uuidv4() as SessionId);
+      await doc.initOffline();
+      const toolCallId = `running-${kind}`;
+      const updates: SessionNotification[] = [
+        {
+          sessionId: 'agent',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId,
+            title: 'make build-pro',
+            kind,
+            status: 'in_progress',
+          },
+        },
+        ...Array.from({ length: 60 }, (_, step) => ({
+          sessionId: 'agent',
+          update: {
+            sessionUpdate: 'tool_call_update' as const,
+            toolCallId,
+            status: 'in_progress' as const,
+            content: textContent(screen(step)),
+          },
+        })),
+        {
+          sessionId: 'agent',
+          update: { sessionUpdate: 'tool_call_update', toolCallId, ...completion },
+        },
+      ];
+      try {
+        for (const update of updates) await appendAutonomousACPNotifications(doc, update);
+        return {
+          tool: findToolCall(await doc.sessionData.history.readAll(), toolCallId),
+          snapshotBytes: doc.handle?.doc.export({ mode: 'snapshot' }).length ?? Infinity,
+        };
+      } finally {
+        await repo.destroy();
+      }
+    };
+
+    it('keeps only the bounded tail of unfenced execute output', async () => {
+      const { tool, snapshotBytes } = await run('execute', { status: 'completed' });
+      const output = tool?.content?.find((block) => block.type === 'terminal_output');
+      expect(tool?.status).toBe('completed');
+      expect(output?.type === 'terminal_output' && screen(59).endsWith(output.output)).toBe(true);
+      expect(output?.type === 'terminal_output' && output.output.length).toBeLessThanOrEqual(1024);
+      expect(snapshotBytes).toBeLessThan(16 * 1024);
+    });
+
+    it('bounds a failed execute call the same way', async () => {
+      const { tool, snapshotBytes } = await run('execute', { status: 'failed' });
+      expect(tool?.status).toBe('failed');
+      expect(tool?.content?.some((block) => block.type === 'terminal_output')).toBe(true);
+      expect(snapshotBytes).toBeLessThan(16 * 1024);
+    });
+
+    it('stores the last snapshot of another tool once it outgrows the running budget', async () => {
+      const { tool, snapshotBytes } = await run('other', { status: 'completed' });
+      expect(tool?.status).toBe('completed');
+      expect(tool?.content).toEqual(textContent(screen(59)));
+      expect(snapshotBytes).toBeLessThan(256 * 1024);
+    });
+
+    it('lets the completion content of another tool supersede deferred snapshots', async () => {
+      const { tool, snapshotBytes } = await run('other', {
+        status: 'completed',
+        content: textContent('done'),
+      });
+      expect(tool?.content).toEqual(textContent('done'));
+      expect(snapshotBytes).toBeLessThan(160 * 1024);
+    });
+  });
+
   it('should record notifications', async () => {
     const repo = await LoroRepo.create({});
     const sessionId = uuidv4() as SessionId;
@@ -155,7 +615,7 @@ describe('session history storage (integration)', () => {
     for (const u of e2eUpdates as SessionNotification[]) {
       await appendAutonomousACPNotifications(doc, u);
     }
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
     console.log(JSON.stringify(history, null, 2));
     console.log(JSON.stringify(history).length);
     expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(6500);
@@ -225,7 +685,7 @@ describe('session history storage (integration)', () => {
       }
 
       // Intermediate streaming output should not be persisted into the Loro history.
-      let history = await doc.getHistory();
+      let history = await doc.sessionData.history.readAll();
       const execToolBeforeComplete = findToolCall(history, execId);
       if (!execToolBeforeComplete) {
         throw new Error(`Expected tool_call ${execId} to exist`);
@@ -249,7 +709,7 @@ describe('session history storage (integration)', () => {
         }),
       ]);
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       const execTool = findToolCall(history, execId);
       if (!execTool) {
         throw new Error(`Expected tool_call ${execId} to exist`);
@@ -302,7 +762,7 @@ describe('session history storage (integration)', () => {
         }),
       ]);
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       const readTool = findToolCall(history, readId);
       if (!readTool) {
         throw new Error(`Expected tool_call ${readId} to exist`);
@@ -397,7 +857,7 @@ describe('session history storage (integration)', () => {
         { path: '/tmp/new-file.txt', changeType: 'add', fullNewText: 'created\n' },
       ]);
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       const editTool = findToolCall(history, editId);
       if (!editTool) {
         throw new Error(`Expected tool_call ${editId} to exist`);
@@ -425,7 +885,7 @@ describe('session history storage (integration)', () => {
     const doc = new SessionDocument(repo, sessionId);
     await doc.initOffline();
     await appendAutonomousACPNotifications(doc, kimiShellUpdates as SessionNotification[]);
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
 
     // First tool call: successful shell command
     const tool1 = findToolCall(history, 'kimi-session-sample/tool_shell_1');
@@ -541,8 +1001,299 @@ describe('session history storage (integration)', () => {
 
     await appendAutonomousACPNotifications(doc, [invalidNotification], { logger }, undefined);
 
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
     expect(history.length).toBe(0);
     expect(warnings.length).toBe(1);
+  });
+  it('compacts subagent_event execute terminal snapshots and isolates state from colliding root toolCallIds', async () => {
+    const repo = await LoroRepo.create({});
+    const doc = new SessionDocument(repo, uuidv4() as SessionId);
+    await doc.initOffline();
+
+    const snapshot: LodySubagentSnapshot = {
+      state: 'running',
+      parentRunId: null,
+      support: { stream: ['tool'], progress: false, outputRead: 'none', cancel: false },
+    };
+    const subagentUpdate = (
+      runId: string,
+      payload:
+        | { type: 'snapshot'; snapshot: LodySubagentSnapshot }
+        | { type: 'output'; update: Extract<LodySubagentEvent, { type: 'output' }>['update'] }
+    ): AcpSessionNotification => ({
+      sessionId: 'agent',
+      update: {
+        sessionUpdate: 'subagent_event',
+        event: { version: 1, sessionId: 'agent', runId, ...payload },
+      },
+    });
+    const screen = (step: number) => `sub-step-${step}:${'z'.repeat(64 * 1024)}`;
+
+    try {
+      await updateTestHistory(doc, () => [
+        {
+          id: 'parent-turn',
+          role: 'assistant',
+          items: [],
+          timestamp: '2026-09-26T00:00:00.000Z',
+          fileDiff: [],
+        },
+      ]);
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'shared-exec',
+              title: 'Root shell',
+              kind: 'execute',
+              status: 'in_progress',
+            },
+          },
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-exec',
+              status: 'in_progress',
+              content: [{ type: 'content', content: { type: 'text', text: 'ROOT_ONLY_OUTPUT' } }],
+            },
+          },
+          subagentUpdate('run-exec', { type: 'snapshot', snapshot }),
+          subagentUpdate('run-exec', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'shared-exec',
+              title: 'Child shell',
+              kind: 'execute',
+              status: 'in_progress',
+              content: [{ type: 'content', content: { type: 'text', text: screen(0) } }],
+            },
+          }),
+        ],
+        'parent-turn'
+      );
+
+      for (let step = 1; step < 30; step += 1) {
+        await appendACPNotificationsToAssistantEntry(
+          doc,
+          subagentUpdate('run-exec', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-exec',
+              status: 'in_progress',
+              content: [{ type: 'content', content: { type: 'text', text: screen(step) } }],
+            },
+          }),
+          'parent-turn'
+        );
+      }
+
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          subagentUpdate('run-exec', {
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-exec',
+              status: 'completed',
+              rawOutput: { exit_code: 0, output: `${screen(29)}\nSUBAGENT_FINAL` },
+            },
+          }),
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'shared-exec',
+              status: 'completed',
+            },
+          },
+        ],
+        'parent-turn'
+      );
+
+      const history = await doc.sessionData.history.readAll();
+      const rootTool = findToolCall(history, 'shared-exec');
+      const rootOutput = rootTool?.content?.find((block) => block.type === 'terminal_output');
+      expect(rootOutput?.type === 'terminal_output' && rootOutput.output).toBe('ROOT_ONLY_OUTPUT');
+
+      const subagentItem = history
+        .flatMap((entry) => parseContents(entry))
+        .find(
+          (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+            item.type === 'subagent_task' && item.taskId === 'run-exec'
+        );
+      const childTool = subagentItem?.run?.items.find(
+        (item): item is Extract<typeof item, { type: 'tool_call' }> =>
+          item.type === 'tool_call' && item.toolCallId === 'shared-exec'
+      );
+      const childOutput = childTool?.content?.find((block) => block.type === 'terminal_output');
+      expect(childTool?.status).toBe('completed');
+      expect(
+        childOutput?.type === 'terminal_output' && childOutput.output.endsWith('SUBAGENT_FINAL')
+      ).toBe(true);
+      expect(childOutput?.type === 'terminal_output' && childOutput.output).not.toContain(
+        'ROOT_ONLY_OUTPUT'
+      );
+      expect(
+        childOutput?.type === 'terminal_output' && childOutput.output.length
+      ).toBeLessThanOrEqual(1024);
+      expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(16 * 1024);
+    } finally {
+      await repo.destroy();
+    }
+  });
+
+  it('defers and caps oversized running other-kind content inside subagent_event and initial tool_call', async () => {
+    const repo = await LoroRepo.create({});
+    const doc = new SessionDocument(repo, uuidv4() as SessionId);
+    await doc.initOffline();
+
+    const snapshot: LodySubagentSnapshot = {
+      state: 'running',
+      parentRunId: null,
+      support: { stream: ['tool'], progress: false, outputRead: 'none', cancel: false },
+    };
+    const subagentUpdate = (
+      payload:
+        | { type: 'snapshot'; snapshot: LodySubagentSnapshot }
+        | { type: 'output'; update: Extract<LodySubagentEvent, { type: 'output' }>['update'] }
+    ): AcpSessionNotification => ({
+      sessionId: 'agent',
+      update: {
+        sessionUpdate: 'subagent_event',
+        event: { version: 1, sessionId: 'agent', runId: 'run-other', ...payload },
+      },
+    });
+    const hugeChunk = (label: string) => `${label}:${'m'.repeat(400 * 1024)}:end`;
+
+    try {
+      await updateTestHistory(doc, () => [
+        {
+          id: 'parent-turn',
+          role: 'assistant',
+          items: [],
+          timestamp: '2026-09-26T00:00:00.000Z',
+          fileDiff: [],
+        },
+      ]);
+      // Root initial tool_call carrying >256 KiB text while running.
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'root-initial-huge',
+              title: 'Huge initial',
+              kind: 'other',
+              status: 'in_progress',
+              content: [{ type: 'content', content: { type: 'text', text: hugeChunk('root') } }],
+            },
+          },
+          subagentUpdate({ type: 'snapshot', snapshot }),
+          subagentUpdate({
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'sub-other',
+              title: 'Sub other',
+              kind: 'other',
+              status: 'in_progress',
+            },
+          }),
+        ],
+        'parent-turn'
+      );
+
+      for (let i = 0; i < 15; i += 1) {
+        await appendACPNotificationsToAssistantEntry(
+          doc,
+          subagentUpdate({
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'sub-other',
+              status: 'in_progress',
+              content: [
+                { type: 'content', content: { type: 'text', text: hugeChunk(`sub-${i}`) } },
+                {
+                  type: 'content',
+                  content: { type: 'image', data: 'iVBOR', mimeType: 'image/png' },
+                },
+              ],
+            },
+          }),
+          'parent-turn'
+        );
+      }
+
+      await appendACPNotificationsToAssistantEntry(
+        doc,
+        [
+          {
+            sessionId: 'agent',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'root-initial-huge',
+              status: 'completed',
+            },
+          },
+          subagentUpdate({
+            type: 'output',
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'sub-other',
+              status: 'completed',
+            },
+          }),
+        ],
+        'parent-turn'
+      );
+
+      const history = await doc.sessionData.history.readAll();
+      const rootTool = findToolCall(history, 'root-initial-huge');
+      const rootBlock = rootTool?.content?.[0];
+      expect(rootBlock?.type).toBe('content');
+      if (
+        rootBlock?.type === 'content' &&
+        'content' in rootBlock &&
+        rootBlock.content.type === 'text'
+      ) {
+        expect(rootBlock.content.text).toContain('[truncated');
+        expect(Buffer.byteLength(rootBlock.content.text, 'utf8')).toBeLessThanOrEqual(256 * 1024);
+      }
+
+      const subagentItem = history
+        .flatMap((entry) => parseContents(entry))
+        .find(
+          (item): item is Extract<MessageContent, { type: 'subagent_task' }> =>
+            item.type === 'subagent_task' && item.taskId === 'run-other'
+        );
+      const subTool = subagentItem?.run?.items.find(
+        (item): item is Extract<typeof item, { type: 'tool_call' }> =>
+          item.type === 'tool_call' && item.toolCallId === 'sub-other'
+      );
+      expect(subTool?.content).toHaveLength(1);
+      const subBlock = subTool?.content?.[0];
+      if (
+        subBlock?.type === 'content' &&
+        'content' in subBlock &&
+        subBlock.content.type === 'text'
+      ) {
+        expect(subBlock.content.text.startsWith('sub-14:')).toBe(true);
+        expect(Buffer.byteLength(subBlock.content.text, 'utf8')).toBeLessThanOrEqual(256 * 1024);
+      }
+
+      expect(doc.handle?.doc.export({ mode: 'snapshot' }).length).toBeLessThan(600 * 1024);
+    } finally {
+      await repo.destroy();
+    }
   });
 });

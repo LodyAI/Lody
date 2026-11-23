@@ -5,6 +5,7 @@ import {
   getRegisteredGlobalSkillDirs,
   getRegisteredSkillDirs,
   getRegisteredSystemSkillDirs,
+  isRegisteredSkillAgentType,
   type AgentConfigCliType,
   type ProjectSkill,
   type ProjectSkillScope,
@@ -23,7 +24,7 @@ import {
 } from '@/components/mentions/mention-hydration';
 
 /**
- * Skill mentions, reachable directly through `$` and through the `@` category
+ * Skill mentions, reachable directly through `$` / `￥` / `¥` and through the `@` category
  * menu (phase 2 of docs/project-skills.md).
  *
  * Reuses the same discovery/SWR core as the Skills display tab via
@@ -38,6 +39,7 @@ import {
  * the provider-filtered skill path while the composer stays compact.
  */
 export const SKILL_MENTION_TRIGGER = '$';
+export const SKILL_MENTION_TRIGGER_ALIASES: readonly string[] = ['￥', '¥'];
 const SKILL_MENTION_PROMPT_PREFIX = '/';
 /** Label of the expanded `[Skill Path](...)` markdown link. The writer and the
    already-expanded detector both derive from this so they cannot drift. */
@@ -107,7 +109,7 @@ export function buildSkillMentionItems(
  *     the directories that provider uses (`allowedDirs`); null = show all.
  *  2. Dedupe by token — the same `$<token>` surfaced from multiple dirs appears
  *     once (the inserted text is identical either way).
- *  3. Term filter + rank — prefix > substring > path match.
+ *  3. Term filter + rank — prefix > substring > the skill's own folder.
  */
 export function selectSkillMentionCandidates(
   items: readonly SkillMentionItem[],
@@ -135,7 +137,7 @@ export function selectSkillMentionCandidates(
     .map((item) => {
       const token = item.token.toLowerCase();
       const name = item.skill.name.toLowerCase();
-      const path = item.skill.relativePath.toLowerCase();
+      const path = getSkillFolderPath(item).toLowerCase();
       let score = -1;
       if (token.startsWith(query) || name.startsWith(query)) {
         score = 0;
@@ -149,6 +151,20 @@ export function selectSkillMentionCandidates(
     .filter((entry) => entry.score >= 0)
     .sort((a, b) => a.score - b.score || a.item.token.localeCompare(b.item.token))
     .map((entry) => entry.item);
+}
+
+/**
+ * The part of a skill's path that is the skill's own: its folder under the
+ * skills directory, without the directory or `SKILL.md`. Matching the whole
+ * path matched the directory every skill shares — `sy` hit
+ * `~/.codex/skills/.system/…` and `skill` hit every path — so a term that named
+ * no skill still returned the whole list.
+ */
+function getSkillFolderPath(item: SkillMentionItem): string {
+  const path = item.skill.relativePath.replace(/\/SKILL\.md$/i, '');
+  const dir = item.dir.replace(/\/+$/, '');
+  if (dir && path.startsWith(`${dir}/`)) return path.slice(dir.length + 1);
+  return path.split('/').filter(Boolean).pop() ?? path;
 }
 
 function isSkillMentionDirAllowed(dir: string, allowedDirs: ReadonlySet<string>): boolean {
@@ -169,6 +185,11 @@ export function getAllowedSkillMentionDirs(
   if (!skillAgent?.cliType || !skillAgent.agentType) {
     return null;
   }
+  // Unregistered types have no known dirs; an empty whitelist would hide every
+  // skill, so they get none. A registered one keeps its whitelist when empty.
+  if (!isRegisteredSkillAgentType(skillAgent.agentType)) {
+    return null;
+  }
   const agent = { cliType: skillAgent.cliType, agentType: skillAgent.agentType };
   return new Set([
     ...getRegisteredSkillDirs([agent]),
@@ -177,7 +198,7 @@ export function getAllowedSkillMentionDirs(
   ]);
 }
 
-function getSkillMentionReferencePath(item: SkillMentionItem): string {
+export function getSkillMentionReferencePath(item: SkillMentionItem): string {
   // Home-scoped skills (global + system) expand to their absolute SKILL.md path;
   // project skills use the project-relative path.
   if (item.scope !== 'project') {
@@ -188,6 +209,11 @@ function getSkillMentionReferencePath(item: SkillMentionItem): string {
 
 function formatSkillPathMarkdownDestination(path: string): string {
   return path.replace(/\\/g, '\\\\').replace(/\)/g, '\\)');
+}
+
+/** Stable-target form, shared by ordinary skill mentions and frozen Shortcut semantics. */
+export function formatSkillMentionPrompt(token: string, path: string): string {
+  return `use ${SKILL_MENTION_PROMPT_PREFIX}${token} [${SKILL_MENTION_PATH_LABEL}](${formatSkillPathMarkdownDestination(path)})`;
 }
 
 function buildSkillMentionPathByToken(
@@ -263,7 +289,7 @@ export function buildSkillMentionRewrites(
     rewrites.push({
       start,
       end: tokenEnd,
-      replacement: `use ${SKILL_MENTION_PROMPT_PREFIX}${token} [${SKILL_MENTION_PATH_LABEL}](${formatSkillPathMarkdownDestination(path)})`,
+      replacement: formatSkillMentionPrompt(token, path),
       span: { kind: 'skill', label: `${SKILL_MENTION_TRIGGER}${token}`, target: token },
     });
     return true;
@@ -272,7 +298,7 @@ export function buildSkillMentionRewrites(
   return rewrites;
 }
 
-function hasProjectSkillSource(source: MentionProjectSource | undefined): boolean {
+export function hasProjectSkillSource(source: MentionProjectSource | undefined): boolean {
   if (source?.kind === 'local') {
     return Boolean(source.localProjectId && source.workspaceId && source.machineId);
   }
@@ -280,6 +306,13 @@ function hasProjectSkillSource(source: MentionProjectSource | undefined): boolea
     return Boolean(source.repoFullName);
   }
   if (source?.kind === 'provider') {
+    if (source.localProject) {
+      return Boolean(
+        source.localProject.localProjectId &&
+          source.localProject.workspaceId &&
+          source.localProject.machineId
+      );
+    }
     return Boolean(source.githubRepoFullName);
   }
   return false;
@@ -374,14 +407,19 @@ export function useMentionProjectSkills(
   globalMachineId?: string | null
 ) {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const kind = source?.kind;
-  const localWorkspaceId = source?.kind === 'local' ? source.workspaceId : undefined;
-  const machineId = source?.kind === 'local' ? source.machineId : undefined;
-  const localProjectId = source?.kind === 'local' ? source.localProjectId : undefined;
+  const localProject =
+    source?.kind === 'local'
+      ? source
+      : source?.kind === 'provider'
+        ? source.localProject
+        : undefined;
+  const localWorkspaceId = localProject?.workspaceId;
+  const machineId = localProject?.machineId;
+  const localProjectId = localProject?.localProjectId;
   const repoFullName =
     source?.kind === 'github'
       ? source.repoFullName
-      : source?.kind === 'provider'
+      : source?.kind === 'provider' && !source.localProject
         ? source.githubRepoFullName
         : undefined;
 
@@ -389,7 +427,7 @@ export function useMentionProjectSkills(
     if (!enabled) {
       return null;
     }
-    if (kind === 'local') {
+    if (localProject) {
       if (!localWorkspaceId || !machineId || !localProjectId) {
         return null;
       }
@@ -399,14 +437,14 @@ export function useMentionProjectSkills(
       return null;
     }
     return { kind: 'github', workspaceId, repoFullName };
-  }, [enabled, kind, localWorkspaceId, machineId, localProjectId, repoFullName, workspaceId]);
+  }, [enabled, localProject, localWorkspaceId, machineId, localProjectId, repoFullName, workspaceId]);
 
   const globalSkillsSource = React.useMemo<ProjectSkillsSource | null>(() => {
     if (!enabled) {
       return null;
     }
     // A local source's own scan already lists its machine's global skills.
-    if (kind === 'local') {
+    if (localProject) {
       return null;
     }
     const normalizedMachineId = globalMachineId?.trim();
@@ -414,7 +452,7 @@ export function useMentionProjectSkills(
       return null;
     }
     return { kind: 'global', workspaceId, machineId: normalizedMachineId };
-  }, [enabled, kind, globalMachineId, workspaceId]);
+  }, [enabled, localProject, globalMachineId, workspaceId]);
 
   const projectSkillState = useProjectSkills(skillsSource);
   const globalSkillState = useProjectSkills(globalSkillsSource);
@@ -436,10 +474,6 @@ export function useMentionProjectSkills(
   );
   return { skillState, skillItems, knownSkillTokens };
 }
-
-// ============================================================================
-// Hydrator
-// ============================================================================
 
 export function SkillMentionHydrator({
   text,

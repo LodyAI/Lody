@@ -1,3 +1,4 @@
+import { throwIfSendAborted } from './session-send-resources';
 import type { SessionFilePayload } from '@lody/shared';
 import { isElectronRenderer } from './electron';
 import { getIpcServices } from './electron-ipc-client';
@@ -38,17 +39,21 @@ export const sendSessionFileToLocalRuntime = async (args: {
   sessionId: string;
   machineId: string;
   file: File;
+  signal?: AbortSignal;
 }): Promise<SendSessionFileLocalOutcome | null> => {
+  throwIfSendAborted(args.signal);
   if (!getIpcServices()) {
     return null;
   }
   const bytes = await fileToArrayBuffer(args.file);
+  throwIfSendAborted(args.signal);
   const result = await getIpcServices()!.localProjects.sendSessionFileLocal({
     workspaceId: args.workspaceId,
     sessionId: args.sessionId,
     machineId: args.machineId,
     files: [{ fileName: args.file.name, bytes }],
   });
+  throwIfSendAborted(args.signal);
   if (!result.ok) {
     return { ok: false, error: result.error };
   }

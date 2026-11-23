@@ -1,0 +1,1417 @@
+// @vitest-environment jsdom
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { Provider, createStore } from 'jotai';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  getMachineRoomId,
+  type IosSimulatorCommand,
+  type IosSimulatorDevice,
+  type IosSimulatorPreview,
+  type IosSimulatorResponse,
+  type MachineId,
+  type MachineMeta,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
+
+import { runtimeAtom, userAtom, type WorkspaceRuntime } from '../src/atoms';
+import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
+import { localProbeResultAtom } from '../src/atoms/local-probe';
+import { lodyPresenceSyncStateAtom } from '../src/atoms/presence';
+import { writeTextToClipboard } from '../src/lib/clipboard';
+import { saveBytesAsFile } from '../src/lib/download-file';
+import { toast } from '../src/lib/toast';
+import { writeIosSimulatorSelectedDevice } from '../src/lib/ios-simulator/ios-simulator-model';
+import { clearAllDevicePreviewCaches } from '../src/components/sessions/ios-simulator/device-preview-cache';
+import { SessionDevicePreviewPanel } from '../src/components/sessions/ios-simulator/session-ios-simulator-panel';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string, values?: Record<string, string>) =>
+      (fallback ?? _key).replace(
+        /\{\{(\w+)\}\}/g,
+        (placeholder, key: string) => values?.[key] ?? placeholder
+      ),
+  }),
+}));
+
+vi.mock('../src/lib/clipboard', () => ({
+  writeTextToClipboard: vi.fn(async () => true),
+}));
+
+vi.mock('@/lib/toast', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock('../src/lib/download-file', () => ({
+  saveBytesAsFile: vi.fn(async () => ({ saved: true })),
+}));
+
+const MACHINE = 'mac-studio' as MachineId;
+const SESSION = { id: 'session-sim' as SessionId, machineId: MACHINE };
+const WORKSPACE = 'workspace-sim' as WorkspaceId;
+const VIEWER_ORIGIN = 'https://viewer.example';
+const VIEWER_URL = `${VIEWER_ORIGIN}/stream?capability=secret-capability`;
+const IOS_18 = 'com.apple.CoreSimulator.SimRuntime.iOS-18-2';
+
+const macMeta = (protocolCapabilities?: Record<string, number>): MachineMeta => ({
+  id: MACHINE,
+  name: 'Studio',
+  cliVersion: '9.9.9',
+  os: 'darwin',
+  sessions: [],
+  protocolCapabilities,
+});
+
+const device = (overrides: Partial<IosSimulatorDevice> & { udid: string }): IosSimulatorDevice => ({
+  name: overrides.udid,
+  runtime: IOS_18,
+  deviceType: 'com.apple.CoreSimulator.SimDeviceType.iPhone-16',
+  state: 'Shutdown',
+  available: true,
+  occupancy: 'available',
+  ...overrides,
+});
+
+const answer = (fields: Partial<IosSimulatorResponse> = {}): IosSimulatorResponse => ({
+  type: 'ios-simulator/control_response',
+  sessionId: SESSION.id,
+  success: true,
+  ...fields,
+});
+
+const preview = (fields: Partial<IosSimulatorPreview> & Pick<IosSimulatorPreview, 'phase'>) => ({
+  operationId: 'op-1',
+  udid: 'phone',
+  transport: 'remote' as const,
+  ...fields,
+});
+
+/**
+ * The one `ios-simulator/control` RPC, answered by the test. `list` and
+ * `status` answer from the current fields; `start` and `stop` from a queue the
+ * test fills, or stay pending until it does.
+ */
+function createFakeMachine(initial: {
+  devices: IosSimulatorDevice[];
+  preview?: IosSimulatorPreview;
+  list?: IosSimulatorResponse;
+}) {
+  const commands: IosSimulatorCommand[] = [];
+  const state = {
+    preview: initial.preview,
+    list: initial.list,
+  };
+  const pending: Array<(response: IosSimulatorResponse) => void> = [];
+  const requestIosSimulatorControl = async ({ command }: { command: IosSimulatorCommand }) => {
+    commands.push(command);
+    switch (command.action) {
+      case 'list':
+        return state.list ?? answer({ devices: initial.devices });
+      case 'status':
+        return answer({
+          preview:
+            !command.operationId || command.operationId === state.preview?.operationId
+              ? state.preview
+              : undefined,
+        });
+      default:
+        return new Promise<IosSimulatorResponse>((resolve) => pending.push(resolve));
+    }
+  };
+  return {
+    commands,
+    requestIosSimulatorControl,
+    setPreview: (next: IosSimulatorPreview | undefined) => {
+      state.preview = next;
+    },
+    /** Answers the oldest pending start/stop. */
+    answerNext: async (response: IosSimulatorResponse) => {
+      await act(async () => {
+        pending.shift()?.(response);
+        await Promise.resolve();
+      });
+      await flush();
+    },
+  };
+}
+
+const testDom = (
+  globalThis as unknown as {
+    jsdom: { reconfigure(options: { url: string }): void };
+  }
+).jsdom;
+const initialTestUrl = window.location.href;
+let root: Root | undefined;
+let container: HTMLDivElement | undefined;
+
+afterEach(() => {
+  act(() => root?.unmount());
+  root = undefined;
+  container?.remove();
+  container = undefined;
+  testDom.reconfigure({ url: initialTestUrl });
+  clearAllDevicePreviewCaches();
+  window.localStorage.clear();
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+async function renderPanel(options: {
+  machine: ReturnType<typeof createFakeMachine>;
+  platform?: 'ios' | 'android';
+  contentMode?: 'plaintext' | 'e2ee';
+  androidControl?: WorkspaceRuntime['requestAndroidEmulatorControl'];
+  meta?: MachineMeta;
+  presence?: 'synced' | 'idle';
+  localMachine?: boolean;
+  onAttachScreenshot?: (file: File) => boolean;
+  controlsLayout?: 'toolbar' | 'menu';
+}) {
+  const store = createStore();
+  store.set(userAtom, { id: 'user-1', name: 'Sim User', email: 'sim@example.com' } as never);
+  store.set(runtimeAtom, {
+    workspaceId: WORKSPACE,
+    workspaceSlug: 'sim',
+    contentMode: options.contentMode,
+    requestIosSimulatorControl: options.machine.requestIosSimulatorControl,
+    requestAndroidEmulatorControl: options.androidControl,
+  } as unknown as WorkspaceRuntime);
+  store.set(machineMetaCacheAtom, {
+    [getMachineRoomId(MACHINE)]: options.meta ?? macMeta({ iosSimulator: 1 }),
+  });
+  store.set(lodyPresenceSyncStateAtom, options.presence ?? 'idle');
+  if (options.localMachine) store.set(localProbeResultAtom, { machineId: MACHINE } as never);
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  const render = async (active: boolean) => {
+    await act(async () => {
+      root?.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(SessionDevicePreviewPanel, {
+            platform: options.platform,
+            session: SESSION,
+            active,
+            onAttachScreenshot: options.onAttachScreenshot,
+            controlsLayout: options.controlsLayout,
+          })
+        )
+      );
+    });
+    await flush();
+  };
+  await render(true);
+  return { render };
+}
+
+async function flush() {
+  for (let index = 0; index < 5; index += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+}
+
+const text = () => container?.textContent ?? '';
+
+function button(label: string): HTMLButtonElement {
+  const match = [...(container?.querySelectorAll('button') ?? [])].find(
+    (candidate) => candidate.textContent?.trim() === label
+  );
+  if (!match) throw new Error(`No button "${label}" in: ${text()}`);
+  return match as HTMLButtonElement;
+}
+
+async function click(label: string) {
+  await act(async () => {
+    button(label).click();
+  });
+  await flush();
+}
+
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+  await flush();
+}
+
+it.each([false, true])(
+  'encrypted Android previews are shown only for a local machine (local=%s)',
+  async (localMachine) => {
+    const machine = createFakeMachine({ devices: [] });
+    await renderPanel({
+      machine,
+      platform: 'android',
+      contentMode: 'e2ee',
+      localMachine,
+      meta: macMeta({ androidEmulator: 1 }),
+      androidControl: async ({ sessionId, command }) => ({
+        type: 'android-emulator/control_response',
+        sessionId,
+        success: true,
+        devices:
+          command.action === 'list'
+            ? [
+                {
+                  id: 'Pixel_A',
+                  name: 'Pixel A',
+                  runtime: 'Android',
+                  deviceType: 'AVD',
+                  state: 'Booted',
+                  available: true,
+                  occupancy: 'available',
+                },
+              ]
+            : undefined,
+      }),
+    });
+    if (localMachine) expect(text()).toContain('Pixel A');
+    else expect(container?.innerHTML).toBe('');
+  }
+);
+
+describe('SessionIosSimulatorPanel', () => {
+  it('discovers an agent replacement when reopening instead of querying the cached operation', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'phone' }), device({ udid: 'tablet', deviceType: 'iPad' })],
+    });
+    const { render } = await renderPanel({ machine });
+    await click('Start and preview');
+    await machine.answerNext(
+      answer({ preview: preview({ phase: 'ready', viewerUrl: VIEWER_URL }) })
+    );
+    expect(container?.querySelector('iframe')?.src).toBe(VIEWER_URL);
+    await render(false);
+    machine.setPreview(
+      preview({
+        operationId: 'agent-op',
+        udid: 'tablet',
+        phase: 'ready',
+        viewerUrl: `${VIEWER_ORIGIN}/replacement`,
+      })
+    );
+    await render(true);
+    expect(container?.querySelector('iframe')?.src).toBe(`${VIEWER_ORIGIN}/replacement`);
+    expect(machine.commands.at(-1)).toEqual({ action: 'status', operationId: undefined });
+  });
+
+  it('discovers an agent start through Refresh while the panel is already idle', async () => {
+    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })] });
+    await renderPanel({ machine });
+    machine.setPreview(preview({ operationId: 'agent-op', phase: 'ready', viewerUrl: VIEWER_URL }));
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('button[aria-label="Simulator"]')?.click();
+    });
+    await flush();
+    const refresh = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Refresh simulators"]'
+    );
+    expect(refresh).not.toBeNull();
+    await act(async () => {
+      refresh?.click();
+    });
+    await flush();
+    expect(container?.querySelector('iframe')?.src).toBe(VIEWER_URL);
+  });
+
+  it('asks for an update on a Mac whose Lody predates the protocol, without calling it', async () => {
+    const machine = createFakeMachine({ devices: [device({ udid: 'a' })] });
+    await renderPanel({ machine, meta: macMeta() });
+    expect(text()).toContain('Update Lody on Studio');
+    expect(machine.commands).toEqual([]);
+  });
+
+  it('says a remote Mac is offline, but keeps talking to this machine directly', async () => {
+    const offline = createFakeMachine({ devices: [device({ udid: 'a' })] });
+    await renderPanel({ machine: offline, presence: 'synced' });
+    expect(text()).toContain('Studio is offline');
+    expect(offline.commands).toEqual([]);
+    act(() => root?.unmount());
+    container?.remove();
+
+    const local = createFakeMachine({
+      devices: [device({ udid: 'phone', name: 'iPhone 16', state: 'Booted' })],
+    });
+    await renderPanel({ machine: local, presence: 'synced', localMachine: true });
+    expect(text()).not.toContain('offline');
+    expect(text()).toContain('iPhone 16');
+    expect(local.commands).toContainEqual({ action: 'list' });
+  });
+
+  it('greets the viewer at its exact origin and trusts only that frame', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+      preview: preview({ phase: 'ready', viewerUrl: VIEWER_URL, transport: 'local' }),
+    });
+    const { render } = await renderPanel({ machine });
+    const frame = container?.querySelector('iframe') as HTMLIFrameElement;
+    const posted: Array<[unknown, string]> = [];
+    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((
+      message: unknown,
+      origin: string
+    ) => posted.push([message, origin])) as never);
+
+    await act(async () => {
+      frame.dispatchEvent(new Event('load'));
+    });
+    expect(posted).toEqual([
+      [
+        {
+          type: 'lody:ios-simulator:init',
+          operationId: 'op-1',
+          visible: true,
+          rotateWithDevice: true,
+        },
+        VIEWER_ORIGIN,
+      ],
+    ]);
+
+    const dropped = {
+      type: 'lody:ios-simulator:state',
+      operationId: 'op-1',
+      state: 'disconnected',
+    };
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', { data: dropped, origin: VIEWER_ORIGIN, source: window })
+      );
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: dropped,
+          origin: 'https://wrong.example',
+          source: frame.contentWindow,
+        })
+      );
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { ...dropped, operationId: 'stale' },
+          origin: VIEWER_ORIGIN,
+          source: frame.contentWindow,
+        })
+      );
+    });
+    expect(text()).not.toContain('lost its connection');
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: dropped,
+          origin: VIEWER_ORIGIN,
+          source: frame.contentWindow,
+        })
+      );
+    });
+    await flush();
+    expect(text()).toContain('The viewer lost its connection.');
+
+    // Hiding the panel keeps the frame and keeps the stream connected (no disconnect on tab switch).
+    const postedBeforeHide = posted.length;
+    await render(false);
+    expect(container?.querySelector('iframe')).toBe(frame);
+    expect(posted.length).toBe(postedBeforeHide);
+
+    // Hiding the browser tab itself still tells the viewer to pause.
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(posted.at(-1)).toEqual([
+      { type: 'lody:ios-simulator:visibility', operationId: 'op-1', visible: false },
+      VIEWER_ORIGIN,
+    ]);
+  });
+
+  it('cancels a preparing preview by stopping its exact operation', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'phone', name: 'iPhone 16', state: 'Booted' })],
+      preview: preview({ phase: 'connecting', operationId: 'op-9' }),
+    });
+    await renderPanel({ machine });
+    expect(text()).toContain('Connecting the viewer');
+
+    await click('Cancel');
+    expect(machine.commands).toContainEqual({ action: 'stop', operationId: 'op-9' });
+    await machine.answerNext(
+      answer({ preview: preview({ phase: 'closed', operationId: 'op-9' }) })
+    );
+    expect(button('Preview').disabled).toBe(false);
+  });
+
+  it('never offers a preview of a device another Session controls', async () => {
+    const machine = createFakeMachine({
+      devices: [
+        device({ udid: 'free', name: 'iPhone 16', state: 'Booted' }),
+        device({
+          udid: 'taken',
+          name: 'iPhone 16 Pro',
+          state: 'Booted',
+          occupancy: 'other-session',
+        }),
+      ],
+    });
+    writeIosSimulatorSelectedDevice(
+      { accountId: 'user-1', workspaceId: WORKSPACE, machineId: MACHINE, sessionId: SESSION.id },
+      'taken'
+    );
+    await renderPanel({ machine });
+    expect(text()).toContain('Another session is using this simulator');
+    expect(() => button('Preview')).toThrow();
+    expect(() => button('Start and preview')).toThrow();
+  });
+
+  it('explains a Mac without Xcode and copies redacted diagnostics', async () => {
+    const machine = createFakeMachine({
+      devices: [],
+      list: answer({
+        success: false,
+        error: 'environment',
+        message: 'xcrun failed at /Users/alice/Library via https://relay.example/?token=abc',
+      }),
+    });
+    await renderPanel({ machine });
+    expect(text()).toContain('Xcode isn’t set up on Studio');
+    expect(text()).not.toContain('relay.example');
+    expect(text()).not.toContain('alice');
+
+    await click('Copy diagnostics');
+    const copied = vi.mocked(writeTextToClipboard).mock.calls.at(-1)?.[0] ?? '';
+    expect(copied).toContain('error=environment');
+    expect(copied).not.toContain('alice');
+    expect(copied).not.toContain('relay.example');
+  });
+});
+
+class TestPointerEvent extends MouseEvent {
+  readonly pointerType: string;
+  constructor(type: string, init: MouseEventInit & { pointerType?: string } = {}) {
+    super(type, init);
+    this.pointerType = init.pointerType ?? '';
+  }
+}
+
+const CONTROLS_META = macMeta({ iosSimulator: 1, iosSimulatorControls: 1 });
+const READY = preview({ phase: 'ready', viewerUrl: VIEWER_URL, transport: 'local' });
+
+const labelled = (label: string) =>
+  document.body.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+
+/** The full pointer sequence Base UI listens for, then the frames it defers to. */
+async function pointerClick(element: Element) {
+  await act(async () => {
+    const pointer = { bubbles: true, cancelable: true, pointerType: 'mouse', button: 0, detail: 1 };
+    element.dispatchEvent(new PointerEvent('pointermove', pointer));
+    element.dispatchEvent(new PointerEvent('pointerdown', pointer));
+    element.dispatchEvent(new MouseEvent('mousedown', pointer));
+    if (element instanceof HTMLElement) element.focus();
+    element.dispatchEvent(new PointerEvent('pointerup', pointer));
+    element.dispatchEvent(new MouseEvent('mouseup', pointer));
+    (element as HTMLElement).click();
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  });
+  await flush();
+}
+
+async function until<T>(find: () => T | null | undefined, what: string): Promise<T> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const found = find();
+    if (found) return found;
+    await pointerFrame();
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+async function pointerFrame() {
+  await act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  });
+}
+
+const menuItem = (label: string) =>
+  [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (item) => item.textContent?.trim() === label
+  );
+
+async function typeInto(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+async function connectControlViewer() {
+  const frame = container!.querySelector('iframe')!;
+  const requests: Array<{
+    type: string;
+    operationId: string;
+    requestId: string;
+    control: unknown;
+  }> = [];
+  vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(
+    (message: (typeof requests)[number]) => {
+      if (message.type === 'lody:ios-simulator:control') requests.push(message);
+    }
+  );
+  await act(async () => {
+    frame.dispatchEvent(new Event('load'));
+  });
+  const reply = async (
+    fields: Record<string, unknown> = {},
+    source: MessageEventSource | null = frame.contentWindow,
+    origin = VIEWER_ORIGIN
+  ) => {
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source,
+          origin,
+          data: {
+            ...requests.at(-1),
+            type: 'lody:ios-simulator:control-result',
+            success: true,
+            ...fields,
+          },
+        })
+      );
+    });
+    await flush();
+  };
+  return { frame, requests, reply };
+}
+
+describe('SessionIosSimulatorPanel controls', () => {
+  it('sends one keyboard toggle to the ready simulator without assuming its visibility', async () => {
+    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
+    await renderPanel({ machine, meta: macMeta({ iosSimulator: 1, iosSimulatorControls: 2 }) });
+    const viewer = await connectControlViewer();
+    const toggle = labelled('Show/hide simulator keyboard')!;
+    await act(async () => toggle.click());
+    expect(viewer.requests.map((r) => r.control)).toEqual([
+      { kind: 'button', button: 'software-keyboard' },
+    ]);
+    expect(toggle.disabled).toBe(true);
+    await viewer.reply({ success: false, error: 'unavailable' });
+    expect(toggle.disabled).toBe(false);
+    expect(toggle.hasAttribute('aria-pressed')).toBe(false);
+  });
+
+  it('turns the exterior only after the machine confirms a rotation', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+      preview: READY,
+    });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    const turns = () =>
+      container?.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns');
+    expect(turns()).toBe('0');
+
+    const viewer = await connectControlViewer();
+    await act(async () => labelled('Rotate left')?.click());
+    await flush();
+    await viewer.reply({ success: false, error: 'failed' });
+    expect(turns()).toBe('0');
+    expect(vi.mocked(toast.error)).toHaveBeenCalled();
+
+    await act(async () => labelled('Rotate left')?.click());
+    await flush();
+    expect(turns()).toBe('0');
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: viewer.frame.contentWindow,
+          origin: VIEWER_ORIGIN,
+          data: {
+            type: 'lody:ios-simulator:state',
+            operationId: 'op-1',
+            state: 'ready',
+            width: 2000,
+            height: 1200,
+            rotation: 270,
+          },
+        })
+      );
+    });
+    expect(turns()).toBe('3');
+    await viewer.reply();
+    expect(turns()).toBe('3');
+  });
+
+  it('ignores spoofed control replies, serializes presses and times out a lost reply', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    const viewer = await connectControlViewer();
+    await act(async () => labelled('Home')?.click());
+    expect(labelled('Home')?.disabled).toBe(true);
+    await viewer.reply({}, window);
+    await viewer.reply({}, viewer.frame.contentWindow, 'https://wrong.example');
+    await viewer.reply({ operationId: 'old-operation' });
+    await viewer.reply({ requestId: 'other-request' });
+    await act(async () => labelled('Shake')?.click());
+    expect(viewer.requests).toHaveLength(1);
+    expect(labelled('Home')?.disabled).toBe(true);
+    await viewer.reply();
+    expect(labelled('Home')?.disabled).toBe(false);
+    await act(async () => labelled('Home')?.click());
+    await advance(15_000);
+    expect(labelled('Home')?.disabled).toBe(false);
+    expect(vi.mocked(toast.error)).toHaveBeenCalledWith('The simulator didn’t respond. Try again.');
+  });
+
+  it('uses authenticated DeviceKit pixels and releases their object URL on unmount', async () => {
+    const create = vi.fn(() => 'blob:devicekit');
+    const revoke = vi.fn();
+    const OriginalURL = URL;
+    vi.stubGlobal(
+      'URL',
+      class extends OriginalURL {
+        static createObjectURL = create;
+        static revokeObjectURL = revoke;
+      }
+    );
+    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    const viewer = await connectControlViewer();
+    const png = new Uint8Array(24);
+    png.set([137, 80, 78, 71, 13, 10, 26, 10]);
+    png.set([73, 72, 68, 82], 12);
+    const bytes = new DataView(png.buffer);
+    bytes.setUint32(16, 440);
+    bytes.setUint32(20, 900);
+    const data = {
+      type: 'lody:ios-simulator:exterior',
+      operationId: 'op-1',
+      geometry: {
+        width: 440,
+        height: 900,
+        screen: { x: 20, y: 20, width: 400, height: 860, radius: 40 },
+        buttons: [],
+      },
+      png: png.buffer,
+    };
+    const receive = async (source: MessageEventSource | null, payload = data) =>
+      act(async () => {
+        window.dispatchEvent(
+          new MessageEvent('message', { origin: VIEWER_ORIGIN, source, data: payload })
+        );
+      });
+    await receive(window);
+    expect(create).not.toHaveBeenCalled();
+    await receive(viewer.frame.contentWindow, { ...data, operationId: 'wrong' });
+    expect(create).not.toHaveBeenCalled();
+    await receive(viewer.frame.contentWindow);
+    expect(container?.querySelector('img')?.getAttribute('src')).toBe('blob:devicekit');
+    await act(async () => root?.unmount());
+    root = undefined;
+    expect(revoke).toHaveBeenCalledWith('blob:devicekit');
+    vi.unstubAllGlobals();
+  });
+
+  it('disables what the device lacks and says once why a Mac cannot take controls', async () => {
+    const machine = createFakeMachine({
+      devices: [
+        device({
+          udid: 'phone',
+          name: 'iPhone 15',
+          deviceType: 'com.apple.CoreSimulator.SimDeviceType.iPhone-15',
+          state: 'Booted',
+          occupancy: 'this-session',
+        }),
+      ],
+      preview: READY,
+    });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    expect(labelled('Show/hide simulator keyboard')?.disabled).toBe(true);
+    expect(labelled('Action button')?.disabled).toBe(true);
+    expect(labelled('Volume up')?.disabled).toBe(false);
+    act(() => root?.unmount());
+    container?.remove();
+
+    const old = createFakeMachine({
+      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+      preview: READY,
+    });
+    await renderPanel({ machine: old, meta: macMeta({ iosSimulator: 1 }) });
+    expect(text()).toContain('Update Lody on Studio to use simulator controls');
+    expect(labelled('Home')).toBeNull();
+    expect(container?.querySelector<HTMLButtonElement>('[data-hardware-button="side"]')).toBeNull();
+    expect(
+      old.commands.every((command) => command.action === 'list' || command.action === 'status')
+    ).toBe(true);
+  });
+
+  it('opens a deep link only after it is submitted, and never an executable scheme', async () => {
+    vi.stubGlobal('PointerEvent', TestPointerEvent);
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+      preview: READY,
+    });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    const viewer = await connectControlViewer();
+    await pointerClick(labelled('Open URL or deep link…')!);
+    const input = await until(
+      () => document.body.querySelector<HTMLInputElement>('input[inputmode="url"]'),
+      'the URL field'
+    );
+    const submit = () =>
+      [...document.body.querySelectorAll<HTMLButtonElement>('button[type="submit"]')].find(
+        (candidate) => candidate.textContent?.trim() === 'Open'
+      )!;
+
+    await typeInto(input, 'javascript:alert(1)');
+    await act(async () => submit().click());
+    await flush();
+    expect(document.body.textContent).toContain('That kind of link can’t be opened');
+    expect(
+      machine.commands.every((command) => command.action === 'list' || command.action === 'status')
+    ).toBe(true);
+
+    await typeInto(input, 'myapp://orders/42');
+    await act(async () => submit().click());
+    await flush();
+    expect(viewer.requests).toEqual([
+      expect.objectContaining({
+        operationId: 'op-1',
+        control: { kind: 'open-url', url: 'myapp://orders/42' },
+      }),
+    ]);
+    await viewer.reply();
+    vi.unstubAllGlobals();
+  });
+
+  it.each(['attach', 'save-error'])(
+    'handles screenshot %s using only its own reply',
+    async (mode) => {
+      if (mode === 'save-error')
+        vi.mocked(saveBytesAsFile).mockRejectedValueOnce(new Error('Share failed'));
+      vi.stubGlobal('PointerEvent', TestPointerEvent);
+      const attached: File[] = [];
+      const machine = createFakeMachine({
+        devices: [
+          device({
+            udid: 'phone',
+            name: 'iPhone 16 Pro',
+            state: 'Booted',
+            occupancy: 'this-session',
+          }),
+        ],
+        preview: READY,
+      });
+      await renderPanel({
+        machine,
+        meta: CONTROLS_META,
+        onAttachScreenshot: (file) => {
+          attached.push(file);
+          return true;
+        },
+      });
+      const frame = container?.querySelector('iframe') as HTMLIFrameElement;
+      const posted: Array<{ type: string; requestId?: string }> = [];
+      vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((message: {
+        type: string;
+        requestId?: string;
+      }) => posted.push(message)) as never);
+      await act(async () => {
+        frame.dispatchEvent(new Event('load'));
+      });
+
+      await pointerClick(labelled('Screenshot')!);
+      await pointerClick(
+        await until(
+          () => menuItem(mode === 'attach' ? 'Attach screenshot to message' : 'Save screenshot'),
+          'the menu'
+        )
+      );
+      const request = posted.find((message) => message.type === 'lody:ios-simulator:capture');
+      expect(request).toMatchObject({ operationId: 'op-1' });
+
+      const png = new Uint8Array(16);
+      png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const reply = (requestId: string, source: MessageEventSource | null) =>
+        new MessageEvent('message', {
+          data: {
+            type: 'lody:ios-simulator:capture-result',
+            operationId: 'op-1',
+            requestId,
+            mimeType: 'image/png',
+            data: png.buffer,
+          },
+          origin: VIEWER_ORIGIN,
+          source,
+        });
+      await act(async () => {
+        window.dispatchEvent(reply('someone-else', frame.contentWindow));
+        window.dispatchEvent(reply(request!.requestId!, window));
+      });
+      await flush();
+      expect(attached).toEqual([]);
+
+      await act(async () => {
+        window.dispatchEvent(reply(request!.requestId!, frame.contentWindow));
+      });
+      await flush();
+      if (mode === 'attach') {
+        expect(attached).toHaveLength(1);
+        expect(attached[0]).toMatchObject({ type: 'image/png' });
+        expect(attached[0]?.name).toMatch(/^iPhone 16 Pro .+\.png$/);
+      } else {
+        expect(attached).toEqual([]);
+        expect(toast.error).toHaveBeenCalledWith('Could not download that file.');
+        expect(labelled('Screenshot')?.hasAttribute('disabled')).toBe(false);
+      }
+      // Attaching is not sending: nothing else reached the machine.
+      expect(
+        machine.commands.every(
+          (command) => command.action === 'list' || command.action === 'status'
+        )
+      ).toBe(true);
+      vi.unstubAllGlobals();
+    }
+  );
+});
+
+it.each(['null', 'file://'])(
+  'binds desktop origin %s to a fresh port on every iframe load',
+  async (origin) => {
+    if (origin === 'file://')
+      testDom.reconfigure({ url: 'file:///Applications/Lody.app/index.html' });
+    vi.stubGlobal('origin', origin);
+    class Port extends EventTarget {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      peer?: Port;
+      closed = false;
+      postMessage(data: unknown) {
+        if (this.closed || this.peer?.closed) return;
+        const event = new MessageEvent('message', { data });
+        this.peer?.onmessage?.(event);
+        this.peer?.dispatchEvent(event);
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+    vi.stubGlobal(
+      'MessageChannel',
+      class {
+        port1 = new Port();
+        port2 = new Port();
+        constructor() {
+          this.port1.peer = this.port2;
+          this.port2.peer = this.port1;
+        }
+      }
+    );
+    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
+    const panel = await renderPanel({ machine, meta: CONTROLS_META });
+    const frame = container!.querySelector('iframe')!;
+    const ports: Port[] = [];
+    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((
+      message: unknown,
+      target: string,
+      transfer: Port[]
+    ) => {
+      expect(target).toBe(VIEWER_ORIGIN);
+      expect(message).toMatchObject({ type: 'lody:ios-simulator:init', operationId: 'op-1' });
+      ports.push(transfer[0]!);
+    }) as never);
+    await act(async () => frame.dispatchEvent(new Event('load')));
+    const port = ports[0]!;
+    const ready = {
+      type: 'lody:ios-simulator:state',
+      operationId: 'op-1',
+      state: 'ready',
+      width: 2000,
+      height: 1200,
+      rotation: 90,
+    };
+    const turns = () =>
+      container?.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns');
+    await act(async () =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: frame.contentWindow,
+          origin: VIEWER_ORIGIN,
+          data: ready,
+        })
+      )
+    );
+    expect(turns()).toBe('0');
+    await act(async () => port.postMessage({ ...ready, operationId: 'wrong' }));
+    expect(turns()).toBe('0');
+    await act(async () => port.postMessage(ready));
+    expect(turns()).toBe('1');
+    const requests: Record<string, unknown>[] = [];
+    port.onmessage = (event) => requests.push(event.data);
+    await act(async () => labelled('Home')?.click());
+    expect(requests.at(-1)).toMatchObject({
+      type: 'lody:ios-simulator:control',
+      operationId: 'op-1',
+      control: { kind: 'button', button: 'home' },
+    });
+    const reply = { ...requests.at(-1), type: 'lody:ios-simulator:control-result', success: true };
+    await act(async () =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: frame.contentWindow,
+          origin: VIEWER_ORIGIN,
+          data: reply,
+        })
+      )
+    );
+    expect(labelled('Home')?.disabled).toBe(true);
+    await act(async () => port.postMessage(reply));
+    expect(labelled('Home')?.disabled).toBe(false);
+    await act(async () => labelled('Home')?.click());
+    await act(async () => frame.dispatchEvent(new Event('load')));
+    expect(port.peer?.closed).toBe(true);
+    expect(labelled('Home')?.disabled).toBe(false);
+    // Even an already-queued event on the old port cannot change the new viewer.
+    await act(async () =>
+      port.peer?.onmessage?.(new MessageEvent('message', { data: { ...ready, rotation: 270 } }))
+    );
+    expect(turns()).toBe('1');
+    const fresh = ports[1]!;
+    fresh.onmessage = (event) => requests.push(event.data);
+    const requestsBeforeHide = requests.length;
+    await panel.render(false);
+    expect(requests.length).toBe(requestsBeforeHide);
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(requests.at(-1)).toMatchObject({
+      type: 'lody:ios-simulator:visibility',
+      visible: false,
+    });
+    act(() => root?.unmount());
+    root = undefined;
+    expect(fresh.peer?.closed).toBe(true);
+  }
+);
+
+it('uses Android capability on Linux and renders configured AVDs without touching the iOS lifecycle', async () => {
+  const machine = createFakeMachine({ devices: [] });
+  await renderPanel({
+    machine,
+    platform: 'android',
+    localMachine: true,
+    meta: { ...macMeta({ androidEmulator: 1 }), os: 'linux' },
+    androidControl: async ({ command }) => ({
+      type: 'android-emulator/control_response',
+      sessionId: SESSION.id,
+      success: true,
+      devices:
+        command.action === 'list'
+          ? [
+              {
+                id: 'Pixel_A',
+                name: 'Pixel A',
+                runtime: 'Android',
+                deviceType: 'AVD',
+                state: 'Shutdown',
+                available: true,
+                occupancy: 'available',
+              },
+            ]
+          : undefined,
+    }),
+  });
+  expect(text()).toContain('Pixel A');
+  expect(text()).not.toContain('Xcode');
+  expect(machine.commands).toEqual([]);
+});
+
+it.each([
+  { supported: false, local: true },
+  { supported: true, local: true },
+  { supported: true, local: false },
+])(
+  'starts at the connection quality and allows switching ($supported, local=$local)',
+  async ({ supported, local }) => {
+    const machine = createFakeMachine({ devices: [] });
+    let started: unknown;
+    await renderPanel({
+      machine,
+      platform: 'android',
+      localMachine: local,
+      meta: macMeta({ androidEmulator: 1, ...(supported ? { androidEmulatorQuality: 1 } : {}) }),
+      androidControl: async ({ command }) => {
+        if (command.action === 'start') started = command;
+        return {
+          type: 'android-emulator/control_response',
+          sessionId: SESSION.id,
+          success: true,
+          devices:
+            command.action === 'list'
+              ? [
+                  {
+                    id: 'Pixel_A',
+                    name: 'Pixel A',
+                    runtime: 'Android',
+                    deviceType: 'AVD',
+                    state: 'Booted',
+                    available: true,
+                    occupancy: 'available',
+                  },
+                ]
+              : undefined,
+          preview:
+            command.action === 'start'
+              ? {
+                  operationId: 'android-op',
+                  id: 'Pixel_A',
+                  phase: 'ready',
+                  transport: 'local',
+                  viewerUrl: VIEWER_URL,
+                }
+              : undefined,
+        };
+      },
+    });
+    // Quality lives in the controls' More menu, never as its own row.
+    const openQualityMenu = async () => {
+      const more = container?.querySelector<HTMLButtonElement>(
+        'button[aria-label="More controls"]'
+      );
+      if (!more) return null;
+      await act(async () => {
+        more.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        more.click();
+      });
+      await flush();
+      return [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    };
+    expect(await openQualityMenu()).toBeNull();
+    await click('Preview');
+    expect(started).toEqual({
+      action: 'start',
+      id: 'Pixel_A',
+      ...(supported ? { quality: local ? 'clear' : 'balanced' } : {}),
+    });
+    expect(container?.querySelector('iframe')?.getAttribute('src')).toBe(VIEWER_URL);
+    expect(text()).not.toContain('Preview quality');
+    if (supported) {
+      const option = (await openQualityMenu())?.find((item) => item.textContent === 'Data saver');
+      expect(option).toBeDefined();
+      expect(document.body.textContent).toContain('Preview quality');
+      await act(async () => option?.click());
+      await flush();
+      expect(started).toEqual({ action: 'start', id: 'Pixel_A', quality: 'saver' });
+      await click('Stop preview');
+      expect(await openQualityMenu()).toBeNull();
+      await click('Preview');
+      expect(started).toEqual({
+        action: 'start',
+        id: 'Pixel_A',
+        quality: local ? 'clear' : 'balanced',
+      });
+    } else {
+      expect(await openQualityMenu()).toBeNull();
+    }
+  }
+);
+
+describe('SessionDevicePreviewPanel in-memory cache across conversation switches', () => {
+  const stubMoveBefore = () => {
+    const proto = HTMLElement.prototype as HTMLElement & {
+      moveBefore?: (node: Node, child: Node | null) => void;
+    };
+    const original = proto.moveBefore;
+    proto.moveBefore = function (node: Node, child: Node | null) {
+      this.insertBefore(node, child);
+    };
+    return () => {
+      if (original) proto.moveBefore = original;
+      else delete proto.moveBefore;
+    };
+  };
+
+  it.each(['ios', 'android'] as const)(
+    'keeps the live %s preview iframe and MessagePort alive across session switches until explicitly stopped',
+    async (platform) => {
+      testDom.reconfigure({ url: 'file:///app/index.html' });
+      const restoreMoveBefore = stubMoveBefore();
+      type Port = {
+        peer?: Port;
+        closed?: boolean;
+        onmessage: ((event: MessageEvent) => void) | null;
+        postMessage: (data: unknown) => void;
+        close: () => void;
+      };
+      const makePort = (): Port => ({
+        onmessage: null,
+        postMessage(data) {
+          this.peer?.onmessage?.(new MessageEvent('message', { data }));
+        },
+        close() {
+          this.closed = true;
+        },
+      });
+      vi.stubGlobal(
+        'MessageChannel',
+        class {
+          port1 = makePort();
+          port2 = makePort();
+          constructor() {
+            this.port1.peer = this.port2;
+            this.port2.peer = this.port1;
+          }
+        }
+      );
+
+      try {
+        const sessionA = { id: 'session-a' as SessionId, machineId: MACHINE };
+        const sessionB = { id: 'session-b' as SessionId, machineId: MACHINE };
+        let previewAActive = true;
+        const ports: Port[] = [];
+        const initCount = { value: 0 };
+
+        const store = createStore();
+        store.set(userAtom, { id: 'user-1', name: 'Sim User', email: 'sim@example.com' } as never);
+        store.set(machineMetaCacheAtom, {
+          [getMachineRoomId(MACHINE)]: macMeta({
+            iosSimulator: 1,
+            iosSimulatorControls: 2,
+            androidEmulator: 1,
+          }),
+        });
+        store.set(lodyPresenceSyncStateAtom, 'idle');
+
+        const makeIosControl: WorkspaceRuntime['requestIosSimulatorControl'] = async ({
+          sessionId,
+          command,
+        }) => {
+          if (command.action === 'stop' && sessionId === sessionA.id) {
+            previewAActive = false;
+            return { type: 'ios-simulator/control_response', sessionId, success: true };
+          }
+          if (command.action === 'list') {
+            return {
+              type: 'ios-simulator/control_response',
+              sessionId,
+              success: true,
+              devices: [device({ udid: 'phone', name: 'iPhone 16', state: 'Booted' })],
+            };
+          }
+          if (sessionId === sessionA.id && previewAActive) {
+            return {
+              type: 'ios-simulator/control_response',
+              sessionId,
+              success: true,
+              preview: preview({
+                operationId: 'op-a',
+                udid: 'phone',
+                phase: 'ready',
+                viewerUrl: VIEWER_URL,
+                transport: 'remote',
+              }),
+            };
+          }
+          return { type: 'ios-simulator/control_response', sessionId, success: true };
+        };
+
+        const makeAndroidControl: WorkspaceRuntime['requestAndroidEmulatorControl'] = async ({
+          sessionId,
+          command,
+        }) => {
+          if (command.action === 'stop' && sessionId === sessionA.id) {
+            previewAActive = false;
+            return { type: 'android-emulator/control_response', sessionId, success: true };
+          }
+          if (command.action === 'list') {
+            return {
+              type: 'android-emulator/control_response',
+              sessionId,
+              success: true,
+              devices: [
+                {
+                  id: 'Pixel_9',
+                  name: 'Pixel 9',
+                  runtime: 'Android',
+                  deviceType: 'AVD',
+                  state: 'Booted',
+                  available: true,
+                  occupancy: 'available',
+                },
+              ],
+            };
+          }
+          if (sessionId === sessionA.id && previewAActive) {
+            return {
+              type: 'android-emulator/control_response',
+              sessionId,
+              success: true,
+              preview: {
+                operationId: 'op-a',
+                id: 'Pixel_9',
+                phase: 'ready',
+                viewerUrl: VIEWER_URL,
+                transport: 'remote',
+              },
+            };
+          }
+          return { type: 'android-emulator/control_response', sessionId, success: true };
+        };
+
+        store.set(runtimeAtom, {
+          workspaceId: WORKSPACE,
+          workspaceSlug: 'sim',
+          requestIosSimulatorControl: makeIosControl,
+          requestAndroidEmulatorControl: makeAndroidControl,
+        } as unknown as WorkspaceRuntime);
+
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+
+        const renderSession = async (session: typeof sessionA) => {
+          await act(async () => {
+            root?.render(
+              createElement(
+                Provider,
+                { store },
+                createElement(SessionDevicePreviewPanel, {
+                  platform,
+                  session,
+                  active: true,
+                })
+              )
+            );
+          });
+          await flush();
+        };
+
+        // 1. Open Session A and complete viewer handshake
+        await renderSession(sessionA);
+        const frameA = container.querySelector('iframe') as HTMLIFrameElement;
+        expect(frameA).not.toBeNull();
+        vi.spyOn(frameA.contentWindow!, 'postMessage').mockImplementation(((
+          message: unknown,
+          _target: string,
+          transfer?: Port[]
+        ) => {
+          if ((message as { type?: string })?.type === 'lody:ios-simulator:init') {
+            initCount.value += 1;
+            if (transfer?.[0]) ports.push(transfer[0]);
+          }
+        }) as never);
+        await act(async () => frameA.dispatchEvent(new Event('load')));
+        const portA = ports[0]!;
+        expect(portA).toBeDefined();
+        await act(async () =>
+          portA.postMessage({
+            type: 'lody:ios-simulator:state',
+            operationId: 'op-a',
+            state: 'ready',
+            width: 1179,
+            height: 2556,
+            rotation: 90,
+          })
+        );
+        expect(
+          container
+            .querySelector('[data-testid="ios-simulator-device"]')
+            ?.getAttribute('data-turns')
+        ).toBe('1');
+
+        // 2. Switch to Session B — Session A iframe is parked alive, port stays open
+        await renderSession(sessionB);
+        expect(container.querySelector('iframe')).toBeNull();
+        expect(frameA.isConnected).toBe(true);
+        expect(portA.peer?.closed).not.toBe(true);
+
+        // 3. Switch back to Session A — exact same iframe & live MessagePort reattach with zero re-init
+        await renderSession(sessionA);
+        expect(container.querySelector('iframe')).toBe(frameA);
+        expect(initCount.value).toBe(1);
+        expect(portA.peer?.closed).not.toBe(true);
+        expect(
+          container
+            .querySelector('[data-testid="ios-simulator-device"]')
+            ?.getAttribute('data-turns')
+        ).toBe('1');
+
+        // 4. Explicit Stop preview destroys the cached iframe and closes the MessagePort
+        await click('Stop preview');
+        expect(container.querySelector('iframe')).toBeNull();
+        expect(frameA.isConnected).toBe(false);
+        expect(portA.peer?.closed).toBe(true);
+      } finally {
+        restoreMoveBefore();
+      }
+    }
+  );
+
+  it('offers split Stop preview options when machine advertises iosSimulatorShutdown and sends shutdownDevice only from menu', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'dev-1', name: 'iPhone 16', state: 'Booted' })],
+      preview: preview({
+        phase: 'ready',
+        udid: 'dev-1',
+        operationId: 'op-shutdown',
+        viewerUrl: VIEWER_URL,
+      }),
+    });
+    await renderPanel({
+      machine,
+      meta: macMeta({ iosSimulator: 1, iosSimulatorShutdown: 1 }),
+    });
+
+    const menuTrigger = container.querySelector<HTMLButtonElement>(
+      '[data-testid="device-preview-disconnect-button-menu"]'
+    );
+    expect(menuTrigger).not.toBeNull();
+
+    await act(async () => {
+      menuTrigger?.click();
+      await Promise.resolve();
+    });
+
+    const shutdownItem = [...document.querySelectorAll('[role="menuitem"]')].find((node) =>
+      node.textContent?.includes('Stop preview and shut down simulator')
+    ) as HTMLElement | undefined;
+    expect(shutdownItem).toBeDefined();
+
+    await act(async () => {
+      shutdownItem?.click();
+      await Promise.resolve();
+    });
+
+    expect(machine.commands).toContainEqual({
+      action: 'stop',
+      operationId: 'op-shutdown',
+      shutdownDevice: true,
+    });
+  });
+
+  it('omits shutdown menu when machine does not advertise iosSimulatorShutdown', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'dev-1', name: 'iPhone 16', state: 'Booted' })],
+      preview: preview({
+        phase: 'ready',
+        udid: 'dev-1',
+        operationId: 'op-legacy',
+        viewerUrl: VIEWER_URL,
+      }),
+    });
+    await renderPanel({
+      machine,
+      meta: macMeta({ iosSimulator: 1 }),
+    });
+
+    expect(
+      container.querySelector('[data-testid="device-preview-disconnect-button"]')
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="device-preview-disconnect-button-menu"]')
+    ).toBeNull();
+  });
+});

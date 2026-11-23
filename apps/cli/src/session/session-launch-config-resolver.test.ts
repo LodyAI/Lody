@@ -51,6 +51,7 @@ describe('resolveSessionLaunchConfig', () => {
         cliType: 'builtin',
         agentType: 'codex',
         env: { AGENT_ENV: '1' },
+        magpieGatewayUrl: 'http://127.0.0.1:3425',
         prompt: '',
       },
     });
@@ -58,7 +59,10 @@ describe('resolveSessionLaunchConfig', () => {
     expect(
       readMachineSessionLaunchSnapshotFromFlock({ flock, sessionId, sessionMeta: sessionMeta() })
         .resolution
-    ).toEqual({ source: 'agent-config', config: { env: { AGENT_ENV: '1' } } });
+    ).toEqual({
+      source: 'agent-config',
+      config: { env: { AGENT_ENV: '1' }, magpieGatewayUrl: 'http://127.0.0.1:3425' },
+    });
 
     flock.rows[0]!.value = {
       ...(flock.rows[0]!.value as object),
@@ -67,7 +71,10 @@ describe('resolveSessionLaunchConfig', () => {
     expect(
       readMachineSessionLaunchSnapshotFromFlock({ flock, sessionId, sessionMeta: sessionMeta() })
         .resolution
-    ).toEqual({ source: 'agent-config', config: { env: { AGENT_ENV: '2' } } });
+    ).toEqual({
+      source: 'agent-config',
+      config: { env: { AGENT_ENV: '2' }, magpieGatewayUrl: 'http://127.0.0.1:3425' },
+    });
   });
 
   it('reads session and agent launch fields from one targeted machine Flock open', async () => {

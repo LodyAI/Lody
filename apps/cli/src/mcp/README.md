@@ -1,0 +1,518 @@
+# MCP transport and orchestration background
+
+## Local authorization
+
+Workspace MCP definitions remain shared. Authentication values are local to the
+executing machine and account: `authentication/service.ts` owns OAuth attempts, refresh
+serialization, and session relay scopes; `authentication/io.ts` adapts the MCP SDK, browser
+callback and HTTP streams. The deprecated Promise facade connects the existing
+SessionManager and local Machine RPC to this native Effect service. Shutdown stops
+sessions before closing the service.
+
+The system credential store uses `@napi-rs/keyring` (Keychain, Credential Manager,
+or Linux Secret Service), with no plaintext fallback. Discovery checks an actual
+Bearer challenge and validates protected-resource and issuer metadata before
+reporting OAuth support. Authorization opens only after a user action, uses PKCE,
+and discards state/code/verifier on completion, cancellation or ten-minute expiry.
+Provider consent and secure-store availability remain provider/host dependent.
+
+Selected HTTP servers receive per-runtime loopback connections. Agents get a local
+capability rather than upstream credentials; Linux also verifies socket ownership.
+Unlike the built-in Lody MCP host, this relay preserves upstream GET/SSE streaming.
+It forwards only MCP protocol headers, rejects redirects, bounds requests/queues,
+and sanitizes failures. Session retirement and sign-out close these connections.
+Stdio credentials go only to the selected local process environment. A requester
+change retires an MCP-bearing Session before another user can reuse its processes.
+
+Manual token/header/env values are split before shared writes. Exact `${VAR}`
+references may remain shared and resolve only from the executing owner's environment.
+Legacy shared values are stripped on read, without silent credential import or a
+claim to erase old CRDT history. Existing shared credentials require explicit
+reconfiguration. Sign-out forgets the local authorization; provider-side consent
+revocation is not implemented. The [decision and validation limits](../../../../.agents/notes/implemented/architecture/2026-10-26-mcp-oauth-local-credentials.md)
+record synthetic coverage and unverified host/provider behavior.
+
+Binding rules remain in [AGENTS.md](AGENTS.md). This document explains interoperability
+and lifecycle decisions behind them; it does not introduce additional requirements.
+
+## Command help
+
+`lody_help({command: "lody_session_create"})` returns that command's complete
+description and input JSON Schema. `lody_help({})` lists command names and summaries.
+Help serves only bundled registrations; a command argument never selects files,
+URLs, machine state or another conversation. It executes no target command and
+changes no permissions.
+
+[Tool help registration](tool-help.ts) preserves the original validators and
+callbacks. Tool discovery publishes only the purpose summary and a slim input
+schema: every type, enum, bound and required list, plus the short phrase on each
+top-level argument. Prose on nested fields (batch items, work contexts, unions),
+`$schema`, and generated patterns already named by a `format` are left to help, which
+returns the full description and complete schema kept once per registration.
+Validation always uses the original schema.
+Each registration supplies an explicit purpose summary, independent of its display
+title. Agents see these summaries in the tool list before reading help, and
+`lody_help({})` uses the same summaries. The short purpose distinguishes commands
+such as creating versus continuing a conversation, inspecting status versus reading
+results, and cancelling a current turn versus cancelling an Operation.
+The same path covers Session/catalog, Schedule, automation, preview and upload
+tools. Skills keep their existing resource-loading path.
+
+Server instructions and the Lody prompt require reading successful command-specific
+help before execution; tool descriptions no longer repeat the rule, which cost about
+4 KB across the catalog (see [catalog size](#catalog-size)). The index alone does not satisfy this rule,
+and the agent must not run help and the command in parallel. Already-read full help
+may be reused while it remains in context; after compaction or loss, read it again.
+This is an agent instruction,
+not a persisted read-receipt or execution gate: stateless HTTP requests do not
+share read state, and help does not block an otherwise valid operation. Tests verify
+the MCP documentation/validation boundary; they do not prove model adherence.
+
+Invalid command arguments retain their original validation issues and include
+the exact `lody_help({command: "..."})` call to read before correction or retry.
+The SDK input adapter keeps the original JSON Schema and validator; the daemon
+registration applies the same reminder to direct-call validation failures.
+Explicit error results also retain their content and structured error/retry
+fields, with a separate help reminder appended. These hints neither retry a
+command nor turn a non-retryable failure into permission to retry.
+
+Command help also explains how to interpret replies: cancellation acknowledgement
+does not prove execution has exited, idle/finished is not a task-success verdict,
+and durable completion precedes its delivery into the requesting conversation.
+Session status, history and Operation help document observation quality, partial
+failures, truncation and pagination so agents can retrieve evidence without
+restarting work. These details stay in help rather than the discovery summaries.
+
+## Catalog size
+
+Every Lody-started Agent loads the whole `tools/list`; clients that do not defer MCP
+schemas (Gemini CLI, VS Code Copilot) pay for it on every turn, and tool selection
+degrades as the count grows. The catalog therefore keeps one tool per job, and
+low-frequency families are action tools
+([decision](../../../../.agents/notes/implemented/feature/2026-11-21-mcp-action-tools.md)):
+
+- Single and batch forms share a tool. `lody_session_create` and `lody_session_chat`
+  switch to batch mode when `items` or `defaults` is present; that mode validates with
+  the former batch schema, so single-only fields (attachments, quotes, resume, legacy
+  wait, top-level target fields) are rejected there and per-item results and error codes
+  are unchanged.
+- An action tool publishes only `action` and an open `arguments` object. Each action's
+  real schema validates `arguments` (issues keep their `arguments.*` path and the help
+  reminder), and `lody_help({command})` returns every action's description and schema,
+  `lody_help({command, action})` one of them. The families are `lody_session_manage`
+  (rename, archive, share, `pr_link`, `pr_unlink`, `pr_list`), `lody_schedule` (propose,
+  pause), `lody_agent_role` (create, update), `lody_operation` (get, batch, list) and
+  `lody_catalog` (machines, projects, mcp_servers, agent_configs, agent_roles, schedules).
+- Reads never share a tool with writes, so clients that auto-approve `readOnlyHint` tools
+  keep doing so: `lody_catalog`, `lody_operation` and `lody_help` are read-only, which is
+  why Role and Schedule reads live in the catalog and `lody_operation_cancel` stays apart.
+  `pr_list` is the one read inside a mutating tool, kept beside the link actions it
+  reports on. `lody_mcp_configure` stays separate as an execution and credential boundary.
+- A call that needs its own MCP request (`share` needs the abort signal and CLI account;
+  catalog `schedules` uses the schedule command client) runs in the receiving process via
+  `executeLocally`; the daemon rejects those calls over IPC. `pr_*` actions run in the
+  daemon on the calling Session only, through `lib/session-pr-links.ts` with source `agent`.
+- `lody_upload` takes `kind: images | files`; `lody_simulator_preview` takes `platform`.
+  iOS is offered only on macOS hosts, decided when the per-connection server is built,
+  so the list never changes during a session.
+
+Persisted Operation kinds (`session_create_many`, `session_chat_many`) are internal and
+did not change. Measured with an in-memory client against `buildLodyMcpServer()` on
+Linux: 40 tools and 51,355 bytes on 0f24fb82c; 30 tools and 35,596 bytes after the merges
+(#3022 as merged); 21 tools and 27,769 bytes with action tools. Dynamic tool lists (`tools/list_changed`) and
+a search/execute meta-tool were rejected: some clients ignore list changes, a changing list
+breaks prompt caches, and one execute tool loses per-tool permissions and read-only
+annotations. `lody-mcp-server.test.ts` guards the exact published names and the read-only set.
+
+## Skills over MCP
+
+The built-in `lody` server publishes the
+[Skills extension](https://skills.extensions.modelcontextprotocol.io/) from
+[one bundled catalog](skills/automations.ts). `skills/list` and `skills/get` return
+frontmatter and complete file manifests with SHA-256 digests and UTF-8 byte lengths.
+`resources/read` returns individual files. The App's modern HTTP handler advertises
+the extension through `server/discover`.
+
+| Boundary                       | Owner                                                 | Behavior                                                                          |
+| ------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Protocol discovery and content | [MCP registration](skills/server.ts)                  | Publishes skill entries and resources; server instructions point to the entry URI |
+| Manifest construction          | [Bundle construction](skills/catalog.ts)              | Parses SKILL.md frontmatter and hashes the exact resource bytes                   |
+| Automation workflow            | [Automations skill](skills/lody-automations/SKILL.md) | Routes conditions, settings and inspection to focused references                  |
+| Exact API parameters           | [Automation bundle](skills/automations.ts)            | Generates JSON Schema resources from the executing shared schemas                 |
+
+The MCP host discovers entries through `skills/list`, exposes names and descriptions
+in its native skill catalog, and uses its skill-loading path to verify and activate
+the selected content. `skills/get` resolves an entry given only its URI; a listed
+entry already contains its complete manifest. Supporting files load on demand via
+`resources/read`. Identity includes both the originating server and the resource URI.
+An ordinary resource read alone does not activate a skill.
+
+The [ACP startup owner](../agent/agent-client.ts) passes the built-in server through
+standard `mcpServers`, using the existing HTTP or stdio transport. The Agent owns
+its MCP connection and Skills extension consumption. ACP carries no additional skill
+metadata; Lody does not open a second client, install local snapshots, modify native
+plugin configuration or inject the guide into prompts.
+
+Automatic summary discovery requires an MCP host implementing the Skills extension.
+Supporting MCP tools or ACP alone does not establish that support. Hosts without the
+extension can see ordinary resources, but Lody does not label that as native skill
+activation. Protocol tests establish server interoperability, not native runtime
+support or model selection. With a synthetic stdio server advertising the extension,
+Codex 0.160.1 and Claude Agent SDK 0.3.293 connected and listed tools but did not
+request `skills/list` during initialization; the test skill did not appear in their
+native skill/command lists. In a Codex turn explicitly asking for the test skill,
+Codex listed and read its MCP resource and followed its instructions. This confirms
+resource access, not native skill activation. A Claude turn could not be tested
+because the SDK runtime was not logged in. HTTP transport, the full ACP path and
+other versions remain unverified. Native automatic discovery remains unconfirmed.
+
+Markdown and the existing runnable CI example are imported as raw text and embedded
+in both Vite production and esbuild development bundles. Generated schema resources
+are stable within that bundle. Discovery metadata is parsed from the skill's YAML
+frontmatter, rather than maintained separately. Supporting references
+use paths relative to the skill directory, including generated schema and example files.
+Unknown identities and paths fail rather than falling back to filesystem reads.
+The catalog is immutable for the process lifetime; a new CLI bundle publishes updates.
+
+## Stdio lifetime
+
+`commands/internal.ts` executes `serveStdioMcp` with the SDK/Node adapter in
+`stdio/lifecycle.ts`. Its scoped connection waits for stdin EOF/close, SDK transport
+close, SIGINT or SIGTERM. Input/output errors fail the command; malformed protocol
+messages retain the SDK's existing error behavior. Subscriptions are installed before
+connection, and partial startup is cleaned up before returning. Only after the command
+finishes may `index.ts` close the shared shell-cache/Presence application runtime.
+
+SDK 2.0.0 stdio `close()` synchronously detaches stream listeners and cancels SDK
+requests, without asynchronous I/O. Tool handler Promises still belong to their
+existing owners: SDK cancellation does not establish raw-work completion. This
+migration covers the stdio host, not HTTP, daemon or tool orchestration.
+See the [decision and verification](../../../../.agents/notes/implemented/bug-fix/2026-10-14-mcp-stdio-lifetime.md).
+
+## HTTP and loopback
+
+The built-in host starts with the daemon and uses module-scoped immutable tool
+schemas while creating fresh servers, transports and callbacks for each request.
+The [request memory decision](../../../../.agents/notes/implemented/architecture/2026-10-30-mcp-request-allocation.md)
+records the measurements and why subprocess/request isolation remains necessary.
+
+- The MCP HTTP host answers a strict HTTP client (Grok's Rust `rmcp`), which reports a
+  never-completing response as a transport failure, not an MCP error. Every request must
+  reach a terminated response: `GET /mcp` is answered with 405 rather than handed to the
+  SDK, which in stateless JSON mode opens an SSE stream it can never write to or close.
+- Agent child processes reach the host over loopback, so a proxy must never intercept it.
+  `@lody/shared/proxy-env` `withLoopbackNoProxy` is applied last when assembling agent env
+  (`session.ts` `buildShellEnv`, `acp-runner.ts`) and writes BOTH `NO_PROXY` and
+  `no_proxy`: clients disagree about a present-but-empty value, and Rust `reqwest` reads
+  the uppercase spelling first and treats an empty one as "bypass nothing". It does so
+  even when no proxy variable is present, because the agent can apply a proxy Lody never
+  sees (its own settings file or the OS proxy); such a proxy answers loopback requests
+  with an empty `HTTP 503` and the agent reports the built-in MCP as failed to start.
+- The host logs one line per request to `mcp-http-<date>.log` (method, status, duration,
+  session id; failures at warn, successes at debug). A status the agent reports that this
+  log never recorded came from something between them.
+
+## Operation identity
+
+- Session orchestration derives its human identity from the active execution runtime populated
+  by the dispatch payload, not from the daemon credential, Session owner, or observed history.
+  An absent active runtime fails closed; never reconstruct invocation identity from history.
+  Freeze the source Turn id and invoking user with every accepted Operation. Store the user
+  once as `requesterUserId` and the causal Turn as `sourceTurnId`. The
+  Operation's requester Session id already identifies the source Session, and a single-value
+  actor tag adds no information. Recovery uses the Operation's owner Machine plus current
+  authorization; it does not freeze the daemon account that originally accepted the Operation.
+  Every MCP Session path rejects a runtime invocation without userId.
+  Chat sender checks use the active Turn's frozen audience when it is known. Goal
+  turns therefore need no user history row to delegate. Unresolved senders retain
+  the exact-input history check; sender provenance never grants user authority.
+  This sender snapshot stays inside the daemon; legacy socket responses are unchanged.
+
+## Machine presence
+
+- Machine liveness is THREE-state. A fresh heartbeat is online whether or not the presence room is
+  joined; without a joined room (`getMachinePresenceView().synced`), a Machine lacking one is
+  UNKNOWN, never offline. An unanswered Machine RPC adds no evidence of absence, so
+  `session_status_many` reports `machine.state: unknown` and allows chat. Block a dispatch or report `MACHINE_OFFLINE`
+  only for a definite `offline`; an unknown Machine proceeds and fails against its own deadline,
+  and a surface reporting liveness carries the state, not a boolean. Collapsing unknown to offline
+  refused healthy Machines and silently emptied candidate lists during a cold start or reconnect
+  backoff. Contract: `specs/loro-ephemeral-presence-channel.md`; rationale:
+  [presence decides offline](../../../../.agents/notes/implemented/bug-fix/2026-10-27-mcp-chat-machine-probe-timeout.md).
+
+## Session placement guidance
+
+Single and batch create help tells agents to explicitly set
+`useCurrentSessionAsParent=false` for sidebar sub-conversations; batch calls can
+set it in `defaults`. Use `true` only for an explicitly requested Tab within the
+current conversation. This is caller guidance: runtime defaults remain unchanged,
+including same-machine Local Project Role creation choosing a Tab when the field
+and `workContext` are omitted. Both creation tools serve the same execution
+guide through help, with field descriptions on single-create inputs, batch defaults and batch
+items. The guide explains target/configuration precedence, omitted-context
+behavior, code bases, file visibility and context transfer before dispatch.
+
+| Selection                                                   | Directory and code effect                                                                                                                                                  |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useCurrentSessionAsParent=true`                            | A same-machine Tab shares the current workspace, including its existing worktree and uncommitted files. No `workContext` or nested Tab is allowed.                         |
+| `false`, `workContext.kind=local`, `worktree` omitted/false | Uses the registered project's original directory on the target machine. It does not select a session-owned worktree; an explicit branch can switch the original directory. |
+| `false`, `workContext.kind=local`, `worktree=true`          | Creates a separate worktree from the selected committed base; it does not copy uncommitted files.                                                                          |
+| `false`, `workContext.kind=github`                          | Creates a separate repository worktree on the target machine. Its preferred base is not the caller's current session branch; unavailable GitHub bases can fall back.       |
+| `false`, `workContext.kind=chat`                            | Uses a separate chat directory without a project.                                                                                                                          |
+
+Omitting `workContext` starts a plain chat for non-Role independent creation.
+Role creation has project-dependent defaults described by the tools: in particular,
+explicit `false` suppresses the same-machine Local Project shared-Tab inference.
+Choosing the same project is not equivalent to sharing the current worktree.
+
+For a caller already working in the original local project directory, an independent
+conversation on the same machine with the same `projectId` and `worktree:false`
+(or omitted) does share that directory, including its uncommitted files. Leave
+`branch` unset to keep the directory's current checkout; a Tab is not required.
+
+Agents can query `lody_session_create_options` to inspect `current.workContext`.
+For local projects, `worktree:true` reports the project/session worktree flag;
+absence means neither metadata field marks a worktree. GitHub contexts use a
+repository worktree; chat contexts have no project. The local `rootPath` is the
+registered original directory, not a session worktree path. This discovery result
+is not automatically injected into agent prompts.
+
+No creation mode copies the caller's transcript. Agent-origin input identifies
+its source Session, and `lody_session_history` can supply additional authorized
+context. The caller should provide a self-contained task; single-create attachments
+transfer selected files rather than mounting or synchronizing the caller workspace.
+See [session relations](../../../../specs/session-relations.md).
+
+## Operation acceptance
+
+- MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
+  Create/chat Commands require a caller-chosen Operation id, and Create persists the Operation
+  before its fallible availability step: a transient post-accept failure returns the active fixed
+  target for daemon replay, and `session_create({ operationId, resume: true })` recovers it without
+  the prompt. Completion is delivered automatically — no public wait tool — and legacy `wait=true`
+  is a temporary adapter new callers must not use.
+- Single create can outlast a client's tool timeout, and Agents then tend to retry under a fresh
+  id. While the original is active, an identical create from the same source Turn adopts it and
+  returns its snapshot with a `notice` instead of creating a second Session
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-10-21-mcp-create-fresh-id-retry.md)).
+
+## Machine catalog retry guidance
+
+- A retryable Machine catalog `SYNC_UNAVAILABLE` means freshness could not be confirmed
+  and the local catalog could not validate a selection. It does not prove that an id is
+  valid; a typo or inaccessible catalog may remain unresolved. Permanent transport/auth
+  failures and explicit validation errors retain their existing non-retryable classification.
+- Daemon-hosted Session and catalog reads, including `lody_session_create_options`,
+  `lody_session_list`, and `lody_session_status_many`, use the daemon replica. They do not
+  call Streams for the request. Background catalog sync stays with the daemon. Create
+  options return local machines, agent configs, projects, and the current work context
+  when those rows are present. The `current` field includes `agentRoleId` when the
+  Session has one. This field does not include the Role name or prompt prefix. While
+  the daemon baseline is not ready, an empty
+  agent-config catalog or a missing current or queried selection is retryable
+  `SYNC_UNAVAILABLE`, so absence is not reported as a definitive empty result. A ready
+  baseline may return an empty catalog. Role validation, explicit fresh-catalog discovery,
+  and Operation acceptance keep their existing freshness requirements. Authorization and
+  three-state presence are unchanged. Standalone CLI reads keep their own sync and
+  `--offline` contracts.
+- Without an active Operation handle, an Agent must wait at least 5 seconds between calls
+  and make at most **3 total attempts** (initial call plus 2 retries) for the same request.
+  Reuse the identical arguments and `operationId`; never mint ids to bypass this budget.
+  After the third failure, stop and report the catalog blocker so the user can check the
+  selection, access, and connectivity. This is caller guidance, not a server-enforced counter.
+- Chat can fail after acceptance. Retrying with the same id recovers the existing fixed
+  target rather than appending a second prompt. Once an active handle is returned, stop
+  resubmitting: the daemon owns recovery and completion arrives automatically. Existing
+  Operation status tools remain available for an intentional status check; do not poll in a loop.
+- The Agent call budget does not shorten an accepted Operation's deadline. Daemon
+  materialization retains its existing 1–30 second backoff until the Operation deadline
+  (24 hours by default, configurable up to 7 days), always rechecking the fixed target
+  Turn before writing.
+
+## Role dispatch
+
+- `session_create` and `session_create_many` resolve an explicit Agent Role id directly from
+  the workspace catalog; no driving-Turn mention authorization is required. Resolve its target,
+  Prompt prefix, revision, and concrete run config before Operation acceptance. Recovery uses
+  the frozen canonical Prompt and target dispatch config and never rereads the mutable catalog.
+  A Role may target any reachable Machine, whatever the requester's context; a Local Project
+  requester defaults to a child only for a same-Machine Role. `readDelegatedMachineAccess`
+  requires both the executing Machine owner and the driving human to be able to use the target
+  (owned, or shared plus shared project); never decide it from synced `MachineMeta.ownerUserId`
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-28-mcp-cross-machine-agent-role.md)).
+
+## Chat configuration
+
+- Chat follow-ups inherit omitted mode/model/options from the target's last model turn
+  (else its last matching turn). Explicit fields and category options
+  win; a model change drops old options. Validate effort/Fast against the final model:
+  probe mismatch cannot reject them, and missing per-model data defers to runtime. Drop
+  incompatible inherited selectors; fill builtin mode only when still empty.
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-17-chat-follow-up-inherits-target-run-config.md))
+
+MCP create/chat (including batches) accept optional `mcpServerIds`. Explicit `[]`
+selects none. Creation without ids resolves target-project defaults, or workspace
+defaults when the project has no preference; continuation without ids inherits the
+target conversation's selection. Acceptance records ids in the existing per-target
+Operation configuration, so materialization/recovery does not reread edited defaults.
+Batch item values override batch defaults, including an explicit empty selection;
+omitted values preserve the existing target-default behavior.
+Role pins do not override an explicit MCP selection. CLI create/chat expose the same
+choice as `--mcp-server-ids '<JSON array>'`. See the
+[project default Spec](../../../../specs/project-default-mcp.md).
+
+## Daemon routing
+
+- Session/catalog tools route through `session/call-tool` to the daemon's
+  existing repo in both compositions. `session-tool-router.ts` reuses SDK-parsed
+  MCP arguments and parses daemon inputs; `session-command-environment.ts` lends
+  the daemon replica (`runWithDaemonWorkspace`) and, on the local platform, also
+  scopes identity and host operations with AsyncLocalStorage. Require exact
+  workspace/machine scope and an active invoking Turn (the local user's on the
+  local platform); never open a second replica. Cloud keeps its authenticated command behavior and
+  remote recovery confirmation; only the replica changes. Schedule tools use the
+  daemon's schedule control, and cancel/archive run in-process rather than through
+  a child `lody` CLI. Calls keep a ten-minute IPC bound; legacy `wait: true` adds
+  its maximum wait. See
+  the [decision](../../../../.agents/notes/implemented/architecture/2026-10-16-daemon-hosted-mcp-workspace-commands.md).
+- A cloud daemon command takes its workspace description from the Fleet access
+  verdict (live subscription, else the cached bootstrap entry), not from listing
+  every workspace of the login; only confirmed revocation or token rejection denies.
+  See the [resolution decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-daemon-command-workspace-access.md).
+
+## Session archive
+
+`lody_session_manage` action `archive` accepts either `{"sessionId":"SESSION_ID"}` or
+`{"sessionIds":["SESSION_A","SESSION_B"]}`. Batch input contains 1-20 unique ids.
+Single input retains its existing response; batch input returns `items` in input
+order, each with `sessionId`, `ok`, and either `archivedChildSessionIds` or `error`.
+Each item uses the same daemon archive path, including contained child Tabs and
+excluding independently opened Sessions. Item failures do not undo successful
+archives or prevent later items from running. Repeating an archive is safe.
+
+## Bounded collaboration
+
+If A sends an Agent-authored input to B, B cannot issue a new `session_chat` back to
+A while that exact input drives its active turn. This is a per-turn sender restriction,
+not a parent/child relationship or a permanent restriction between conversations.
+Single and legacy chats return non-retryable `REVERSE_CHAT_FORBIDDEN` before accepting
+work. Mixed batches retain unrelated items; a batch containing only reverse targets
+is rejected without creating an Operation. Matching accepted retries retain their
+existing identity and do not append another prompt.
+
+The runtime selects the exact source input id; its history author supplies only the
+sender provenance, never human authorization. Missing input history blocks a new chat;
+legacy inputs without Agent sender metadata cannot be classified by this guard. A new
+human-authored turn does not inherit an earlier input's restriction. This small fix does
+not change completion scheduling or add a note tool or ancestor graph.
+
+The shared causal chain limit is 16 hops, including delegated target turns and
+completion continuations. A turn at the cap cannot start another Operation;
+the existing guard returns non-retryable `CHAIN_DEPTH_EXCEEDED` before acceptance.
+This is a depth limit, not a shared total-message or fan-out budget.
+
+MCP initialization instructions and all four create/chat tool descriptions tell
+agents to send only task-advancing messages, omit acknowledgments and courtesy
+replies, and use automatic completion delivery instead of manually sending the
+same result back. At the cap, report remaining work to the user without retrying
+or creating another session to evade the limit. These prompts guide behavior;
+the runtime guard enforces the depth bound.
+
+Completed work is persisted and batched at normal release or fresh human input; result
+arrival alone never wakes idle or paused sessions. `lody_operation` with a `batchId` reads
+a fixed, Session/user-bound batch without new work. Pages are bounded to 128 KiB; large
+individual members return ordered `member-json` fragments. This reader does not grant
+submission permission. Human recovery provenance comes from fixed UI/CLI producers,
+never model tool fields, role or userId.
+
+## Agent Role proposals
+
+`lody_agent_role` actions `create` and `update` publish a durable review card
+in the invoking conversation; neither writes the Role catalog. Both use the active
+Turn's human identity and the daemon Session tool route in both compositions. Save is a renderer
+catalog write by that user. Updating requires Role ownership and patches only name,
+description and promptPrefix against the latest row. There is no revision precondition:
+concurrent replicas use the existing Flock merge behavior. Deleted Roles are not recreated.
+New Roles are private, bind explicit machineId + agentConfigId, and use Agent defaults.
+
+Reuse requestId for retries. The same request returns the stored pending/saved/dismissed
+outcome; changed input under that id fails. The generated Role id lives in the card, so
+retrying a create confirmation does not create another Role. An upload failure does not
+roll back a locally durable save. Accepted Operations retain their frozen configurations.
+
+CLI uses the same tools and confirmation flow. It needs an active conversation via
+`--session` or `LODY_SESSION_ID`; `--workspace` selects the workspace when ambiguous.
+
+All writable fields can be passed directly:
+
+```sh
+lody agent-role create --name "Reviewer" --description "Review code" \
+  --prompt-prefix "Find actionable bugs" --machine-id MACHINE_ID --agent-config-id CONFIG_ID
+lody agent-role update ROLE_ID --name "Reviewer" --description "" \
+  --prompt-prefix "Focus on correctness"
+```
+
+Creation requires `--name`, `--machine-id`, and `--agent-config-id`; description and
+prompt prefix are optional. Updates accept `--name`, `--description`, and
+`--prompt-prefix`, and require at least one field. Omitted fields stay unchanged;
+`--description ""` and `--prompt-prefix ""` clear the corresponding text.
+For multiline instructions, the shell can supply `--prompt-prefix "$(cat reviewer.md)"`.
+
+JSON file input remains available, but cannot be combined with direct Role field
+options. Session, workspace, request-id, and output options work with either mode.
+
+```sh
+lody agent-role create --file role.json --request-id reviewer-create
+lody agent-role update ROLE_ID --file patch.json --request-id reviewer-update
+```
+
+A create file contains `name`, `machineId`, `agentConfigId`, and optional `description`
+and `promptPrefix`. An update file contains only the changed `name`, `description`,
+or `promptPrefix`; an empty string clears description/instructions. Neither accepts
+credentials, MCP selections, ownership, visibility, or run configuration. The command
+prints the requestId and pending result; it does not claim the Role was saved.
+
+`role.json`:
+
+```json
+{
+  "name": "Reviewer",
+  "machineId": "MACHINE_ID",
+  "agentConfigId": "CONFIG_ID",
+  "description": "Review code",
+  "promptPrefix": "Check correctness.\nReport actionable bugs."
+}
+```
+
+`patch.json`:
+
+```json
+{
+  "description": "",
+  "promptPrefix": "Focus on correctness.\nExplain each finding."
+}
+```
+
+Files must contain a single UTF-8 JSON object, using the camelCase keys shown above.
+The update file is the patch itself: do not wrap it in `patch`; pass the Role ID as the
+command argument. Pass retry IDs with `--request-id`. JSON strings use `\n` for line
+breaks; comments and trailing commas are not valid JSON.
+
+All field values are strings. Creation requires `name`, `machineId`, and `agentConfigId`.
+Updates require at least one supported field. Omitted update fields stay unchanged;
+`""` clears description or instructions, while `null` is rejected. Names must be nonempty,
+mention-compatible and at most 60 characters after trimming; descriptions allow up to
+140 Unicode code points; instructions allow up to 32,768 characters before trimming.
+Machine/config IDs must be nonempty and at most 128 characters after trimming.
+Unsupported fields are rejected.
+
+## Session management authority
+
+Single/batch rename and archive derive the requester from the active Turn, then
+require current machine/project editing access before metadata writes. The daemon
+owner and SessionMeta assignment cannot substitute for the driving human. Standalone
+CLI rename, archive, restore and delete use the same admission; archive/restore/delete
+preflight every contained target before writes or cleanup and recheck each write.
+These metadata operations do not require machine presence or start execution.
+`SESSION_MANAGEMENT_DENIED` is nonretryable. A session-only read grant permits history
+reading, not these management operations.

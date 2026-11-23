@@ -1,0 +1,144 @@
+# apps/cli/src/commands
+
+`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+
+Parent rules apply; see [Session rules](../session/AGENTS.md).
+
+## Process and daemon lifecycle
+
+- One-shot commands use `runOneShotCommand` for consistent exits/flush. Await
+  application disposal after fleet cleanup; cleanup failures exit nonzero.
+- Process entrypoints, command-owned boundaries, global process-error handlers, and generated
+  standalone shims may force exit after their own cleanup policy: `start.ts` owns startup, fatal,
+  and signal exits; `daemon-runner.ts` owns watchdog fatal and signal exits. Never force exit from
+  reusable libraries, session/agent internals, TUI/watch flows, or worker code — expose cleanup
+  and let the process boundary decide.
+- Remote restart/upgrade: attempt a bounded ACK; even on delivery failure, accepted
+  work asks `start.ts` to exit with the lifecycle code for watchdog restart/upgrade. See [ACK contract](../../../../specs/machine-lifecycle-ack.md).
+- Managed updates keep the fixed SEA service entry and its Host lease alive while
+  replacing versioned children. Verify SHA-256-checked artifacts and prepare them before
+  stopping the old Worker. A clean root exit is not descendant termination proof;
+  require the authenticated drain receipt and process containment. POSIX npm runners
+  relay an authorized, drained remote update to the managed service and keep or reclaim
+  the Host lease until it reports ready (`lib/managed-daemon-migration.ts`); older and
+  Windows npm installations need explicit migration. Never install global npm packages remotely.
+  The official installer reuses foreground authentication and initial readiness.
+  The installer stops an occupying Host only after owner consent; see the upgrade contract.
+  Autostart registration targets the next login/boot, never another concurrent Host;
+  preserve foreign definitions and report unavailable registration independently.
+  Never persist pairing credentials in download URLs or service definitions.
+  See [upgrade contract](../../../../specs/daemon-upgrade-installation.md).
+- `lody daemon start` resolves cloud authentication in the FOREGROUND process before spawning the
+  detached runner (`daemon-auth-preflight.ts`): validate the cached credential, and on a
+  missing/rejected one run the interactive device-authorization flow there. An unreachable backend
+  aborts instead of re-authenticating, and a non-TTY run aborts instead of blocking on a browser
+  link. `--skip-auth-check` is the opt-out; `--auth` keeps its non-interactive path.
+- The runner's fd 3 launch handshake reports success only after its supervised Worker reaches
+  `startupStage=ready`. An initial Worker exit returns bounded output and terminates the runner
+  instead of claiming success; retryable startup exits keep the handshake pending, and a timeout
+  terminates and awaits the exact spawned runner before reporting failure.
+- Cloud-mode `lody daemon status` reads the runtime probe's explicit `backend`
+  authorization/connection state and `connectedWorkspaces`; local mode omits that cloud-only
+  block. Aggregate `connectivity` is local runtime health and must not be presented as proof that
+  the cached CLI token was accepted.
+- Connection-age fields preserve one continuous non-connected interval across
+  connecting/disconnected transitions and clear only on connected. Keep them in the top-level
+  `connectionAges` v1 extension: older consumers reject unknown keys inside the strict
+  backend/workspace objects. Status reports a red connection error at 60 seconds.
+
+`runSessionCommand`: JSON/JSONL diagnostics go to stderr through setup, cleanup and exit.
+
+## Read commands and workspace sync
+
+- Session read commands (`session list/show/history/status`, `export`) sync Loro metadata/docs
+  before reading by default; sync failure is a command failure with an `--offline` hint.
+  `--offline` is the explicit local-cache path, never an automatic fallback. `lody sync` is the
+  explicit workspace sync command and excludes Code Collab file-index Flock docs.
+
+## Session observation
+
+Read the [observe Spec](../../../../specs/cli-session-observe.md).
+Use isolated read-only scopes, scalar reads and bounded opens; preserve status.
+Projection/release share terminal proof for metadata's latest/processing User.
+Workspace queues child removal/close outside child emit callbacks.
+Metadata idle/Presence loss is not completion; sequence is local.
+
+## `lody app`
+
+- `app.ts` registers the directory as a local project through the daemon (`local-project/add`,
+  idempotent — the id is a sha256 of the resolved root path), then opens the active installation
+  profile's deep link (`lody://chat/new?…` cloud, `lody-oss://chat/new?…` local). Link shape lives
+  in `../lib/desktop-deep-link.ts` and both sides pin the URL in unit tests.
+- INVARIANT: registration happens only in the CLI. The deep link carries ids, never a path, and
+  the app must never register a project from one — any web page can navigate the OS to either
+  registered protocol, so a path-carrying link would let a site hand agents an arbitrary
+  directory. An unknown project id just stays unselected.
+- `workspaceSlug` is present only when the daemon reported workspace candidates.
+- Daemon down is not a failure: the deterministic project id is computed locally and the app still
+  opens, with a warning that a brand-new directory was not registered.
+- Local-project control transport and the workspace picker are shared with `lody project`
+  (`../lib/local-project-control-client.ts`).
+
+## `lody review` (no-login HTML review)
+
+- `review.ts` involves no Lody login: it resolves `.review.md` against the local Git repo
+  read-only, and a render failure prints `error.message` with `process.exitCode = 1`.
+- The ~8 MB viewer is NOT bundled. `../lib/review-viewer.ts` fetches `standalone.html` at the EXACT
+  version the CLI was built against, verifies its sha256, and caches it under
+  `~/.lody/code-review-viewer/`. `LODY_REVIEW_VIEWER` overrides the source for offline/mirror use
+  and stays sha-verified. The pinned version and sha come from the bundled-at-build
+  `lody-code-review-viewer/manifest` import, and the release pipeline must publish the viewer at
+  the same version before the CLI. Keep the agent prompt embedded and lazy-imported.
+
+## Session create and dispatch (`session.ts`)
+
+- `--local-project … --worktree` sets `ProjectRef.useWorktree`; daemon startup consumes it in
+  `../session/session-execution-service.ts` and worktree creation happens in
+  `../session/session-manager.ts`.
+- Direct/worktree local create records the Git remote's GitHub repository, matching desktop.
+  Remote identity is not authorization: the PR reconciler uses authenticated GitHub reads,
+  never a product-cloud registry. Absent/unreadable remotes leave creation local.
+- Dispatch point-of-no-rollback (`createSessionResult` / `sendSessionChatResult`):
+  `writeDispatchPointer` commits `latestUserMsgId` and enables execution. One-shot CLI
+  processes and cross-machine targets must AWAIT `confirmDispatchSyncedBestEffort` before
+  transport teardown so writes do not strand in a closing transport; it must NEVER throw.
+  When `resolveDaemonTarget` confirms the resident daemon's own replica, flush locally
+  (`repo.flush()`) instead because the daemon keeps syncing that replica in the background
+  and executes the turn in-process. Cloud daemon Machine Flock reads skip remote confirmation
+  through `resolveDaemonTarget` but report unconfirmed freshness (`FlockSyncUnavailableError`
+  `local-replica-unconfirmed`), so absent local selections return retryable `SYNC_UNAVAILABLE`
+  rather than permanent absence. The durable pointer and SQLite Operation own delivery.
+  Create/chat may unwind only before dispatch (`if (!dispatched)`). Never roll back
+  a dispatched Session or introduce a hard-fail Streams acknowledgement.
+- MCP create combines semantic controls with `modeId`/`configOptionValues` via shared
+  `acp-run-config.ts`. Validate advertised ids/types/values without requiring permission
+  categories. Raw selectors override inherited scalars; reject legacy Plan/mode conflicts.
+  `validateSessionCreateOptions({ dispatchConfig })` validates before acceptance;
+  freeze each effective target config and use it for recovery, never mutable history.
+  Omitted MCP defaults use the daemon reader's one-second first-baseline wait; cold
+  fallback requires persisted remote workspace Flock history. Without it, validation
+  rejects retryably before Operation acceptance or Schedule create/edit persistence.
+  Explicit selections, including `[]`, bypass default resolution.
+- `--agent-role` uses shared `../lib/agent-role-create.ts`: clear manual target/run-config
+  flags with a stderr warning; freeze Role id/revision/snapshot. Preserve work context/parent.
+- Local daemon IPC sends the real control request once; do not restore a health preflight. Native
+  `LocalDaemonAvailabilityError` must be thrown outside the Effect runtime boundary so MCP can
+  preserve `DAEMON_NOT_RUNNING` versus retryable `DAEMON_BUSY`: a connection refusal means not
+  running, timeout/408/429/5xx means busy.
+- Renderer joins must not call `LoroDocumentManager.getOrCreateSessionDoc` or retain
+  cloud rooms. Use bounded raw-doc reconciliation in `../lib/loro/doc.ts`, cancel on
+  local leave/Session activation, and unload renderer-only docs after the last peer
+  leaves. Metadata/RPC activation owns persistent cloud joins; Flock bridging stays
+  paired to local join/leave.
+
+## Agent config output
+
+- `agent-config-output.ts` owns the allowlisted inspection DTO; never spread a stored
+  config into output. Default show emits only `envKeys`; raw values require show-only
+  `--show-secrets`. Mutations emit receipts. Assignment errors never echo input.
+
+## Command loading
+
+Keep root command summaries in `register.ts` aligned with the real commands. Registration
+must not import command implementations eagerly. Forward arguments unchanged to the selected
+implementation, which owns nested parsing and help.

@@ -65,7 +65,7 @@ const storySession = {
   agentType: 'codex',
 } as unknown as SessionMeta;
 
-function HtmlPreviewStory() {
+function HtmlPreviewStory({ mobile = false }: { mobile?: boolean }) {
   const provider = useMemo(
     () =>
       createFakeSessionFileProvider({
@@ -78,13 +78,17 @@ function HtmlPreviewStory() {
   );
 
   return (
-    <div className="flex h-[640px] w-[760px] flex-col overflow-hidden rounded-md border border-border bg-background">
+    <div
+      style={{ width: mobile ? 390 : 760, height: 640 }}
+      className="flex flex-col overflow-hidden rounded-md border border-border bg-background"
+    >
       <SessionFileContentView
         sessionId={storySession.id}
         session={storySession}
         filePath={HTML_FILE.path}
         fileId={HTML_FILE.fileId}
         fileProvider={provider}
+        defaultHtmlPreview={mobile}
       />
     </div>
   );
@@ -106,4 +110,9 @@ export const RenderedMode: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole('button', { name: /preview html/i }));
   },
+};
+
+export const MobilePreview: Story = {
+  args: { mobile: true },
+  parameters: { layout: 'fullscreen' },
 };

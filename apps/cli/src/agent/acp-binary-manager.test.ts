@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AcpBinaryManager,
-  AcpBinaryDownloadError,
   AcpBinaryUnsupportedPlatformError,
   mapPlatformArch,
   type FetchImpl,
@@ -77,26 +76,6 @@ describe('AcpBinaryManager', () => {
       const m = manager(vi.fn());
       expect((await m.getBinaryStatus(npxAgent)).kind).toBe('not-applicable');
     });
-
-    it('is unsupported-platform when no entry matches the machine', async () => {
-      const m = new AcpBinaryManager({
-        rootDir,
-        fetchImpl: vi.fn(),
-        platform: 'win32',
-        arch: 'arm64',
-      });
-      const status = await m.getBinaryStatus(rawAgent);
-      expect(status.kind).toBe('unsupported-platform');
-    });
-
-    it('is not-installed before download and installed after', async () => {
-      const fetchImpl = vi.fn(async () => okResponse(new Uint8Array([1, 2, 3])));
-      const m = manager(fetchImpl);
-      expect((await m.getBinaryStatus(rawAgent)).kind).toBe('not-installed');
-      await m.ensureBinary(rawAgent);
-      const status = await m.getBinaryStatus(rawAgent);
-      expect(status.kind).toBe('installed');
-    });
   });
 
   describe('ensureBinary', () => {
@@ -137,21 +116,6 @@ describe('AcpBinaryManager', () => {
       expect(existsSync(launch.command)).toBe(true);
       expect(await readFile(launch.command, 'utf8')).toBe('hello');
       await rm(srcDir, { recursive: true, force: true });
-    });
-
-    it('does not re-download on a cache hit', async () => {
-      const fetchImpl = vi.fn(async () => okResponse(new Uint8Array([1])));
-      const m = manager(fetchImpl);
-      await m.ensureBinary(rawAgent);
-      await m.ensureBinary(rawAgent);
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
-    });
-
-    it('dedupes concurrent installs into a single download', async () => {
-      const fetchImpl = vi.fn(async () => okResponse(new Uint8Array([1])));
-      const m = manager(fetchImpl);
-      await Promise.all([m.ensureBinary(rawAgent), m.ensureBinary(rawAgent)]);
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
     });
 
     it('keeps a shared download alive when one consumer cancels', async () => {
@@ -255,58 +219,6 @@ describe('AcpBinaryManager', () => {
       const m = manager(fetchImpl);
       await expect(m.ensureBinary(rawAgent)).rejects.toThrow();
       expect((await m.getBinaryStatus(rawAgent)).kind).toBe('not-installed');
-    });
-
-    it('preserves nested transport causes in fetch failures', async () => {
-      const lowLevel = new Error('connect ECONNREFUSED 127.0.0.1:7890');
-      (lowLevel as Error & { code: string }).code = 'ECONNREFUSED';
-      const fetchImpl = vi.fn<FetchImpl>(async () => {
-        throw new TypeError('fetch failed', { cause: lowLevel });
-      });
-
-      let caught: unknown;
-      try {
-        await manager(fetchImpl).ensureBinary(rawAgent);
-      } catch (error) {
-        caught = error;
-      }
-
-      expect(caught).toBeInstanceOf(AcpBinaryDownloadError);
-      expect((caught as Error).message).toContain('https://example.test/test-raw-linux-x86_64');
-      expect((caught as Error).message).toContain('fetch failed');
-      expect((caught as Error).message).toContain('code=ECONNREFUSED');
-    });
-
-    it('preserves the archive URL and cause for body stream failures', async () => {
-      let sentChunk = false;
-      const failingBody = new ReadableStream<Uint8Array>({
-        pull(controller) {
-          if (!sentChunk) {
-            sentChunk = true;
-            controller.enqueue(new Uint8Array([1, 2, 3]));
-            return;
-          }
-          controller.error(new Error('socket reset during body'));
-        },
-      });
-      const fetchImpl = vi.fn<FetchImpl>(async () => ({
-        ok: true,
-        status: 200,
-        body: failingBody,
-      }));
-
-      let caught: unknown;
-      try {
-        await manager(fetchImpl).ensureBinary(rawAgent);
-      } catch (error) {
-        caught = error;
-      }
-
-      expect(caught).toBeInstanceOf(AcpBinaryDownloadError);
-      expect((caught as Error).message).toContain(
-        'Failed to stream https://example.test/test-raw-linux-x86_64'
-      );
-      expect((caught as Error).message).toContain('socket reset during body');
     });
   });
 

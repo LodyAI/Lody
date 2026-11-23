@@ -1,7 +1,10 @@
-import { useLocation, useNavigate } from '@tanstack/react-router';
+import { Link as RouterLink, useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 
+import { isSitePageHref, SITE_URL, siteHref } from '../lib/site-url.mjs';
+import { OptionalEnhancement } from './optional-enhancement';
+import { DocsSearchDialog } from './docs-search-dialog';
 import { MarketingAtmosphereHost } from './marketing-atmosphere';
 
 type SiteLocale = 'en' | 'zh';
@@ -13,6 +16,8 @@ const locales = [
 
 const zhTranslations = {
   chooseLanguage: '选择语言',
+  search: '搜索文档',
+  searchNoResult: '没有找到相关内容',
   toc: '本页目录',
 };
 
@@ -38,6 +43,48 @@ function getLocalizedPath(pathname: string, targetLocale: string) {
   return cleanPath;
 }
 
+/**
+ * Paths `lody.ai` serves from the Lody web app instead of from this site. The
+ * client router matches none of them, so the Tanstack adapter Fumadocs installs
+ * by default would turn a link like `/login` into a client navigation that ends
+ * on the site's 404 page. The landing, pricing and download pages already reach
+ * the web app through hand-written anchors; this keeps Fumadocs-rendered links
+ * (docs Cards, MDX links) on the same real navigation.
+ */
+const APP_OWNED_PATHS = ['/login'];
+
+function isAppOwnedHref(href: string) {
+  const path = href.split(/[?#]/u)[0] ?? href;
+  return APP_OWNED_PATHS.some((owned) => path === owned || path.startsWith(`${owned}/`));
+}
+
+function SiteFrameworkLink({
+  href = '#',
+  prefetch = true,
+  ...props
+}: ComponentProps<'a'> & { prefetch?: boolean }) {
+  const router = useRouter();
+  if (isAppOwnedHref(href) || !isSitePageHref(href)) return <a href={href} {...props} />;
+
+  const normalizedHref = siteHref(href);
+  // Absolute hrefs keep the native navigation semantics of RouterLink's external branch.
+  if (!href.startsWith('/')) return <a href={normalizedHref} {...props} />;
+
+  const url = new URL(normalizedHref, SITE_URL);
+  // `to` is a pathname: trailingSlash must never process a query or fragment.
+  return (
+    <RouterLink
+      preload={prefetch ? 'intent' : false}
+      to={url.pathname as never}
+      search={router.options.parseSearch(url.search) as never}
+      hash={url.hash.slice(1)}
+      {...props}
+    />
+  );
+}
+
+const frameworkComponents = { Link: SiteFrameworkLink };
+
 export function SiteRootProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -46,7 +93,9 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
 
   return (
     <RootProvider
+      components={frameworkComponents}
       theme={{ defaultTheme: 'dark', disableTransitionOnChange: false }}
+      search={{ SearchDialog: DocsSearchDialog }}
       i18n={{
         locale,
         locales,
@@ -57,7 +106,9 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
       }}
     >
       {/* Shared WebGL field for price / download / changelog — one compile per session. */}
-      <MarketingAtmosphereHost />
+      <OptionalEnhancement>
+        <MarketingAtmosphereHost />
+      </OptionalEnhancement>
       {children}
     </RootProvider>
   );

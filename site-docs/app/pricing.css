@@ -489,67 +489,6 @@
   line-height: 1.55;
 }
 
-/* Promo banner: collapsible height when yearly early-bird is toggled. */
-.pricing-promo-slot {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  margin-top: 0;
-  transition:
-    grid-template-rows var(--pricing-toggle-duration) var(--pricing-spring),
-    opacity 280ms ease,
-    margin-top var(--pricing-toggle-duration) var(--pricing-spring);
-  pointer-events: none;
-}
-
-.pricing-promo-slot.is-open {
-  grid-template-rows: 1fr;
-  opacity: 1;
-  margin-top: 1rem;
-  pointer-events: auto;
-}
-
-.pricing-promo-slot-inner {
-  overflow: hidden;
-  min-height: 0;
-}
-
-.pricing-promo-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.55rem 0;
-  border: 0;
-  border-top: 1px solid hsl(var(--landing-border) / 0.7);
-  border-bottom: 1px solid hsl(var(--landing-border) / 0.7);
-  border-radius: 0;
-  background: transparent;
-  color: hsl(var(--landing-ink-muted));
-  font-size: 0.78rem;
-  font-weight: 500;
-  letter-spacing: 0;
-  line-height: 1.3;
-  transform: translateY(-4px);
-  transition: transform var(--pricing-toggle-duration) var(--pricing-spring);
-}
-
-.pricing-promo-slot.is-open .pricing-promo-banner {
-  transform: translateY(0);
-}
-
-.pricing-promo-banner strong {
-  flex: none;
-  color: hsl(var(--landing-ink));
-  font-family: inherit;
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-
 /* Price row */
 .pricing-price-row {
   position: relative;
@@ -607,52 +546,6 @@
   color: hsl(var(--landing-ink-muted));
   font-size: 0.84rem;
   font-weight: 600;
-}
-
-.pricing-price-reference-slot {
-  display: inline-grid;
-  grid-template-columns: 0fr;
-  align-self: center;
-  margin-left: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition:
-    grid-template-columns var(--pricing-toggle-duration) var(--pricing-spring),
-    opacity 260ms ease,
-    margin-left var(--pricing-toggle-duration) var(--pricing-spring);
-  pointer-events: none;
-}
-
-.pricing-price-reference-slot.is-open {
-  grid-template-columns: 1fr;
-  margin-left: 0.35rem;
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.pricing-price-reference {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.42rem;
-  min-width: 0;
-  overflow: hidden;
-  color: hsl(var(--landing-ink-muted) / 0.82);
-  font-family: Sora, Manrope, sans-serif;
-  font-size: 0.88rem;
-  font-weight: 650;
-  letter-spacing: 0;
-  white-space: nowrap;
-  transform: translateX(-4px);
-  transition: transform var(--pricing-toggle-duration) var(--pricing-spring);
-}
-
-.pricing-price-reference-slot.is-open .pricing-price-reference {
-  transform: translateX(0);
-}
-
-.pricing-price-reference s {
-  text-decoration-color: hsl(var(--landing-ink-muted) / 0.78);
-  text-decoration-thickness: 1.5px;
 }
 
 .pricing-price-note {

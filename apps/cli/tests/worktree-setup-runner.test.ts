@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,6 +31,65 @@ afterEach(async () => {
 });
 
 describe('worktree setup runner', () => {
+  it.each(['onStart', 'onStepStart', 'onStepEnd', 'onEnd'] as const)(
+    'keeps script results and recovers after %s recording fails or stalls',
+    async (eventName) => {
+      const workdir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-worktree-history-'));
+      tempDirs.push(workdir);
+      const shell = resolveWorktreeSetupShell();
+      const options = {
+        sessionId: 'history-failure' as SessionId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workdir,
+        branch: 'test-history',
+        logger: testLogger,
+        config: {
+          scripts: {
+            [shell]: shell === 'powershell' ? 'Add-Content count.txt x' : 'echo x >> count.txt',
+          },
+        },
+      };
+      const failedEvents = {
+        [eventName]: () => {
+          throw new Error('recording failed');
+        },
+      };
+      await runWorktreeSetup({ ...options, events: failedEvents });
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      vi.useFakeTimers();
+      try {
+        const running = runWorktreeSetup({
+          ...options,
+          events: {
+            [eventName]: () => {
+              entered.resolve();
+              return release.promise;
+            },
+          },
+        });
+        await entered.promise;
+        await vi.advanceTimersByTimeAsync(1_000);
+        await running;
+        release.resolve();
+      } finally {
+        release.resolve();
+        vi.useRealTimers();
+      }
+      await runWorktreeSetup(options);
+      expect(
+        (await fs.readFile(path.join(workdir, 'count.txt'), 'utf8')).trim().split(/\r?\n/)
+      ).toEqual(['x', 'x', 'x']);
+      await expect(
+        runWorktreeSetup({
+          ...options,
+          config: { scripts: { [shell]: 'exit 7' } },
+          events: failedEvents,
+        })
+      ).rejects.toThrow();
+    }
+  );
+
   it('runs script lines in one shell while emitting per-step output', async () => {
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-worktree-setup-'));
     tempDirs.push(workdir);
@@ -38,8 +97,8 @@ describe('worktree setup runner', () => {
     const shell = resolveWorktreeSetupShell();
     const script =
       shell === 'powershell'
-        ? "$env:LODY_TEST_VALUE = 'hello'\nWrite-Output $env:LODY_TEST_VALUE\n[Console]::Error.WriteLine('err')"
-        : 'export LODY_TEST_VALUE=hello\nprintf "$LODY_TEST_VALUE\\n"\nprintf \'err\\n\' >&2';
+        ? "$env:LODY_TEST_VALUE = 'hello'\nWrite-Output \"$($env:LODY_TEST_VALUE):$($env:LODY_AGENT_SESSION_ID)\"\n[Console]::Error.WriteLine('err')"
+        : 'export LODY_TEST_VALUE=hello\nprintf "%s:%s\\n" "$LODY_TEST_VALUE" "$LODY_AGENT_SESSION_ID"\nprintf \'err\\n\' >&2';
     const config: WorktreeSetupScriptConfig = {
       scripts: {
         [shell]: script,
@@ -59,7 +118,8 @@ describe('worktree setup runner', () => {
       branch: 'feature/worktree-setup-history',
       logger: testLogger,
       events: {
-        onStart: (event) => {
+        onStart(event) {
+          expect(this?.onEnd).toBeTypeOf('function');
           starts.push(event);
         },
         onStepStart: (event) => {
@@ -87,7 +147,7 @@ describe('worktree setup runner', () => {
         .filter((event) => event.stepIndex === 1)
         .map((event) => event.chunk)
         .join('')
-    ).toContain('hello');
+    ).toContain('hello:session-1');
     expect(
       outputs
         .filter((event) => event.stepIndex === 2)
@@ -140,4 +200,43 @@ describe('worktree setup runner', () => {
     expect(outputs).toHaveLength(0);
     expect(ends).toHaveLength(0);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'ends every process a failed script started, not just its shell',
+    async () => {
+      const workdir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-worktree-setup-'));
+      tempDirs.push(workdir);
+      const pidFile = path.join(workdir, 'background.pid');
+
+      // The first step leaves a background job in the shell's process group;
+      // the second fails, which must take that job down with the shell.
+      const failure = await runWorktreeSetup({
+        config: {
+          scripts: { bash: `sleep 600 &\necho $! > ${JSON.stringify(pidFile)}\nfalse` },
+        },
+        sessionId: 'session-1' as SessionId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workdir,
+        branch: 'feature/worktree-setup-failure',
+        logger: testLogger,
+      }).then(
+        () => undefined,
+        (error: unknown) => error
+      );
+
+      expect(failure).toBeInstanceOf(Error);
+      const backgroundPid = Number((await fs.readFile(pidFile, 'utf8')).trim());
+      expect(backgroundPid).toBeGreaterThan(0);
+      expect(isAlive(backgroundPid)).toBe(false);
+    }
+  );
 });
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}

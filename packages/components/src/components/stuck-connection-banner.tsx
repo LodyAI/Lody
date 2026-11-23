@@ -1,11 +1,17 @@
+import { useEffect, useRef, useState } from 'react';
 import { atom, useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform } from '@lody/platform/react';
 import { motion } from 'framer-motion';
-import { Loader2, X } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { X } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
-import { ClearCacheConfirmDialog, useClearCache } from './settings/clear-cache';
+import { useWorkspaceDataScopeState } from '@/hooks/use-workspace-data-scope-state';
+import { RecoveryPage, reportRecoveryShown } from './blocking-wait-placeholder';
+
+/** Names this wait in recovery reports and diagnostics. */
+export const STUCK_CONNECTION_RECOVERY_GATE = 'control_connection_loading';
 
 /**
  * Dismissal intentionally lives in a page-load-scoped atom, not storage: the
@@ -16,7 +22,7 @@ const stuckConnectionBannerDismissedAtom = atom(false);
 export type StuckConnectionBannerLabels = {
   title: string;
   description: string;
-  clearCache: string;
+  recover: string;
   dismissAriaLabel: string;
 };
 
@@ -28,18 +34,18 @@ export type StuckConnectionBannerLabels = {
  * safe area) rather than under the header: the bottom of a list is usually
  * empty space, while the top covers the rows the user came to read, and a
  * bottom sheet is both the platform-conventional place for a recoverable
- * status and within thumb reach. The description stays — without the "broken
- * local cache" link, "Clear cache" reads as an unrelated button next to a
- * connection problem — but the specifics of what gets deleted live in the
- * confirmation dialog the action opens, not here.
+ * status and within thumb reach. The action opens the same recovery page a
+ * long route wait shows (reload, clear cache, diagnostics, full reset): a
+ * connection stuck here is as often a sign-in or storage problem as a cache one,
+ * and a cache clear alone keeps the credential that may be the cause.
  */
 export function StuckConnectionBanner({
   labels,
-  onClearCache,
+  onRecover,
   onDismiss,
 }: {
   labels: StuckConnectionBannerLabels;
-  onClearCache: () => void;
+  onRecover: () => void;
   onDismiss: () => void;
 }) {
   return (
@@ -54,14 +60,11 @@ export function StuckConnectionBanner({
         className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/70 bg-card/95 px-3 py-2.5 shadow-lg backdrop-blur"
       >
         <div className="flex items-center gap-2">
-          <Loader2
-            className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
-            aria-hidden="true"
-          />
+          <Spinner className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{labels.title}</p>
           <Button
             variant="ghost"
-            size="icon"
+            icon
             className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground"
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
@@ -70,18 +73,17 @@ export function StuckConnectionBanner({
           </Button>
         </div>
         {/* Reason and action share one row: the action alone on its own row
-            left a wide empty gutter, and the reason is what makes "clear
-            cache" a sensible answer to a connection problem. */}
+            left a wide empty gutter. */}
         <div className="mt-1 flex items-center gap-2 pl-6">
           <p className="min-w-0 flex-1 text-xs leading-snug text-muted-foreground">
             {labels.description}
           </p>
           <Button
-            size="sm"
+            size="small"
             className="h-7 shrink-0 rounded-full px-3 text-xs"
-            onClick={onClearCache}
+            onClick={onRecover}
           >
-            {labels.clearCache}
+            {labels.recover}
           </Button>
         </div>
       </motion.div>
@@ -92,39 +94,65 @@ export function StuckConnectionBanner({
 /**
  * Mounted once in `MainLayout`. Renders nothing on the local-only platform
  * (no cloud connection to get stuck), before the hint threshold, or after the
- * user dismissed it for this page load. The clear action reuses the settings
- * "Clear cache" flow — confirmation dialog included — so both entry points
- * share one behavior and one copy.
+ * user dismissed it for this page load. Reaching the threshold reports once per
+ * page load like any other recovery offer, so a stuck connection names its
+ * scope blocker and failing request in `workspace/boot_wait_stuck`. The page
+ * closes on its own if the connection leaves `loading`.
  */
 export function StuckConnectionBannerContainer() {
   const { t } = useTranslation();
   const platform = usePlatform();
   const stuck = useStuckConnectionHint();
+  const observation = useWorkspaceDataScopeState();
   const [dismissed, setDismissed] = useAtom(stuckConnectionBannerDismissedAtom);
-  const { dialogOpen, setDialogOpen, isClearing, confirmClear } = useClearCache();
+  const [recoveryOpenedAt, setRecoveryOpenedAt] = useState<number | null>(null);
+  const eligible = platform.sync.mode !== 'local' && stuck;
+  const observationRef = useRef(observation);
+  observationRef.current = observation;
+  const reportedRef = useRef(false);
 
-  if (platform.sync.mode === 'local' || !stuck || dismissed) {
+  useEffect(() => {
+    if (!eligible || reportedRef.current) return;
+    reportedRef.current = true;
+    reportRecoveryShown(STUCK_CONNECTION_RECOVERY_GATE, observationRef.current, false);
+  }, [eligible]);
+
+  useEffect(() => {
+    if (!eligible) setRecoveryOpenedAt(null);
+  }, [eligible]);
+
+  if (!eligible) {
+    return null;
+  }
+
+  if (recoveryOpenedAt !== null) {
+    return (
+      <div className="fixed inset-0 z-50 overflow-y-auto bg-background">
+        <RecoveryPage
+          layout="window"
+          gate={STUCK_CONNECTION_RECOVERY_GATE}
+          failed={false}
+          observation={observation}
+          waitStartedAt={recoveryOpenedAt}
+        />
+      </div>
+    );
+  }
+
+  if (dismissed) {
     return null;
   }
 
   return (
-    <>
-      <StuckConnectionBanner
-        labels={{
-          title: t('connectionRecovery.title'),
-          description: t('connectionRecovery.description'),
-          clearCache: t('connectionRecovery.clearCache'),
-          dismissAriaLabel: t('connectionRecovery.dismiss'),
-        }}
-        onClearCache={() => setDialogOpen(true)}
-        onDismiss={() => setDismissed(true)}
-      />
-      <ClearCacheConfirmDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        isClearing={isClearing}
-        onConfirm={() => void confirmClear()}
-      />
-    </>
+    <StuckConnectionBanner
+      labels={{
+        title: t('connectionRecovery.title'),
+        description: t('connectionRecovery.description'),
+        recover: t('connectionRecovery.recover'),
+        dismissAriaLabel: t('connectionRecovery.dismiss'),
+      }}
+      onRecover={() => setRecoveryOpenedAt(Date.now())}
+      onDismiss={() => setDismissed(true)}
+    />
   );
 }

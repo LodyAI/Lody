@@ -1,13 +1,24 @@
+import { getPersonalGitHubAuthorizationUrl } from '@/components/settings/github-personal-authorization';
+import { Link } from '@tanstack/react-router';
+import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
+import {
+  useLegacyWorkspaceQuery,
+  useLegacyWorkspaceAction,
+} from '@/hooks/use-legacy-workspace-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useCloudAction, usePlatformCapability } from '@lody/platform/react';
+import { usePlatformCapability } from '@lody/platform/react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, ExternalLink, FolderPlus, Github, Loader2 } from 'lucide-react';
+import { Check, ExternalLink, FolderPlus, Github } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { duration, ease, focus, space, text } from '@lody/ui/tokens/scales.stylex';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
+import { withClassName } from '@/lib/stylex';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import type { DesktopOnboardingProjectSelection } from '@/atoms/onboarding';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
@@ -17,13 +28,104 @@ import {
   localProbeResultAtom,
 } from '@/atoms/local-probe';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
-import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { isElectronRenderer } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { openExternalUrl } from '@/lib/native-browser';
+import { Button } from '@lody/ui/button';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
+import { useOnboardingAnalytics } from '../onboarding-analytics';
+import { onboardingSurface as surface } from './surface';
+
+const RING = `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`;
+const LINE = `inset 0 1px 0 ${colors.separator}`;
+
+const styles = stylex.create({
+  actionGrid: {
+    display: 'grid',
+    gridTemplateColumns: { default: '1fr', '@media (min-width: 640px)': 'repeat(2, 1fr)' },
+    gap: space[3],
+  },
+  /** The group's name sits over its rows; no line under it. */
+  listHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    paddingInline: space[4],
+    paddingTop: '10px',
+    paddingBottom: space[1],
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 500,
+    color: colors.secondaryLabel,
+  },
+  listCount: { fontSize: text.captionSize, fontWeight: 400, color: colors.tertiaryLabel },
+  /**
+   * A project is a row of the card a person picks. The row carries its own
+   * rule, because its fill would cover a line drawn by the item under it, and
+   * the keyboard's ring is restated with it.
+   */
+  projectRow: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    minWidth: 0,
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: space[2],
+    borderWidth: 0,
+    borderStyle: 'none',
+    outlineStyle: 'none',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+    },
+    boxShadow: { default: 'none', ':focus-visible': RING },
+    color: colors.label,
+    fontFamily: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  projectRowRuled: { boxShadow: { default: LINE, ':focus-visible': `${RING}, ${LINE}` } },
+  projectRowSelected: {
+    backgroundColor: { default: colors.selectedFill, ':hover': colors.selectedFill },
+  },
+  actionCard: {
+    position: 'relative',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    gap: space[2],
+    paddingInline: space[4],
+    paddingBlock: space[4],
+    textAlign: 'start',
+  },
+  actionTrailing: {
+    position: 'absolute',
+    display: 'flex',
+    insetBlockStart: space[3],
+    insetInlineEnd: space[3],
+  },
+  actionGlyph: { color: colors.label },
+  actionText: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
+  actionTitle: {
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  actionDescription: {
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+});
 
 export interface ProjectsScreenLocalEntry {
   key: string;
@@ -55,11 +157,16 @@ export interface ProjectsScreenViewProps {
   localImportDisabledHint?: string;
   /** Whether the connect-GitHub action is enabled (workspace ready). */
   canConnectGitHub: boolean;
+  encryptedWorkspaceId?: string;
+  /** True while the GitHub repository list is still loading. */
+  loadingRepos: boolean;
   selectedProjectKey?: string | null;
   onSelectProject?: (selection: DesktopOnboardingProjectSelection) => void;
   onAddLocal: () => void;
   onConnectGitHub: () => void;
   onBack: () => void;
+  /** Leave onboarding project-less; the summary must say so honestly. */
+  onSkip: () => void;
   onComplete: (selection: DesktopOnboardingProjectSelection) => void;
 }
 
@@ -71,11 +178,14 @@ export function ProjectsScreenView({
   canImportLocal,
   localImportDisabledHint,
   canConnectGitHub,
+  loadingRepos,
+  encryptedWorkspaceId,
   selectedProjectKey,
   onSelectProject,
   onAddLocal,
   onConnectGitHub,
   onBack,
+  onSkip,
   onComplete,
 }: ProjectsScreenViewProps) {
   const { t } = useTranslation();
@@ -105,38 +215,43 @@ export function ProjectsScreenView({
       }}
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
-        <OnboardingNextButton
-          finish
-          onClick={() => {
-            const selectedLocal = local.find(
-              (entry) => `local:${entry.key}` === resolvedSelectedProjectKey
-            );
-            if (selectedLocal) {
-              onComplete({
-                kind: 'local',
-                machineId: selectedLocal.machineId,
-                localProjectId: selectedLocal.localProjectId,
-                name: selectedLocal.name,
-              });
-              return;
-            }
-            const selectedGitHub = github.find(
-              (entry) => `github:${entry.key}` === resolvedSelectedProjectKey
-            );
-            if (selectedGitHub) {
-              onComplete({
-                kind: 'github',
-                repoFullName: selectedGitHub.key,
-                name: selectedGitHub.name,
-              });
-            }
-          }}
-          disabled={!hasAnyProject || resolvedSelectedProjectKey === null}
-          label={t('common.next', 'Next')}
-        />
+        <div {...stylex.props(surface.actions)}>
+          <Button variant="ghost" size="large" onClick={onSkip}>
+            {t('onboarding.projects.skip', 'Skip for now')}
+          </Button>
+          <OnboardingNextButton
+            finish
+            onClick={() => {
+              const selectedLocal = local.find(
+                (entry) => `local:${entry.key}` === resolvedSelectedProjectKey
+              );
+              if (selectedLocal) {
+                onComplete({
+                  kind: 'local',
+                  machineId: selectedLocal.machineId,
+                  localProjectId: selectedLocal.localProjectId,
+                  name: selectedLocal.name,
+                });
+                return;
+              }
+              const selectedGitHub = github.find(
+                (entry) => `github:${entry.key}` === resolvedSelectedProjectKey
+              );
+              if (selectedGitHub) {
+                onComplete({
+                  kind: 'github',
+                  repoFullName: selectedGitHub.key,
+                  name: selectedGitHub.name,
+                });
+              }
+            }}
+            disabled={!hasAnyProject || resolvedSelectedProjectKey === null}
+            label={t('common.next', 'Next')}
+          />
+        </div>
       }
     >
-      <div className="flex flex-col gap-4">
+      <div {...stylex.props(surface.stackLoose)}>
         {hasAnyProject ? (
           <ExistingProjectList
             local={local}
@@ -146,15 +261,9 @@ export function ProjectsScreenView({
           />
         ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div {...stylex.props(styles.actionGrid)}>
           <ActionCard
-            icon={
-              importing ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <FolderPlus className="h-5 w-5" />
-              )
-            }
+            icon={importing ? <Spinner /> : <FolderPlus {...stylex.props(surface.icon20)} />}
             title={t('onboarding.projects.addLocalTitle', 'Add a local project')}
             description={t(
               'onboarding.projects.addLocalDescription',
@@ -173,27 +282,31 @@ export function ProjectsScreenView({
             onClick={onAddLocal}
           />
           <ActionCard
-            icon={
-              connectingGitHub ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <Github className="h-5 w-5" />
-              )
-            }
+            icon={connectingGitHub ? <Spinner /> : <Github {...stylex.props(surface.icon20)} />}
             title={t('onboarding.projects.connectGitHubTitle', 'Connect a GitHub repository')}
             description={t(
               'onboarding.projects.connectGitHubDescription',
               'Authorize Lody to access selected repos.'
             )}
-            trailing={<ExternalLink className="h-3.5 w-3.5 text-muted-foreground/70" />}
+            trailing={<ExternalLink {...stylex.props(surface.icon14, surface.iconMuted)} />}
             disabled={connectingGitHub || !canConnectGitHub}
             onClick={onConnectGitHub}
           />
         </div>
 
-        {!hasAnyProject ? (
-          <p className="text-center text-xs text-muted-foreground/80">
-            {t('onboarding.projects.needAtLeastOne', 'Add at least one project to finish setup.')}
+        {encryptedWorkspaceId ? (
+          <Link to="/workspace/e2ee/$workspaceId" params={{ workspaceId: encryptedWorkspaceId }}>
+            {t('e2ee.control.title')}
+          </Link>
+        ) : null}
+        {loadingRepos || !hasAnyProject ? (
+          <p {...stylex.props(surface.hint, surface.hintCentered)}>
+            {loadingRepos
+              ? t('onboarding.projects.loadingRepos', 'Loading your repositories…')
+              : t(
+                  'onboarding.projects.needAtLeastOne',
+                  'Add at least one project to finish setup.'
+                )}
           </p>
         ) : null}
       </div>
@@ -203,23 +316,32 @@ export function ProjectsScreenView({
 
 interface ProjectsScreenProps {
   onBack: () => void;
+  onSkip: () => void;
   onComplete: (selection: DesktopOnboardingProjectSelection) => void;
 }
 
-export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
+export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenProps) {
   const { t } = useTranslation();
+  const analytics = useOnboardingAnalytics();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const legacyStatus = useLegacyWorkspaceQueryStatus(workspaceId);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const localCliStarting = useAtomValue(localCliStartingAtom);
   const setLocalProbeResult = useSetAtom(localProbeResultAtom);
   const getConvexErrorMessage = useConvexErrorMessage();
-  const repos = useCloudQuery(
+  const repos = useLegacyWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   );
-  const createGitHubInstallState = useCloudAction(cloudOperations.github.createGitHubInstallState);
+  const personalOperationSettings = useLegacyWorkspaceQuery(
+    cloudOperations.github.getPersonalOperationSettings,
+    workspaceId ? { workspaceId } : 'skip'
+  );
+  const createGitHubInstallState = useLegacyWorkspaceAction(
+    cloudOperations.github.createGitHubInstallState
+  );
   const canUseGitHub = usePlatformCapability('githubIntegration');
 
   const { projects: localProjectIndex } = useVisibleLocalProjects();
@@ -283,6 +405,11 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
 
   const handleAddLocalProject = useCallback(() => {
     if (!canImportLocal || !selectLocalProjectDirectory) return;
+    const startedAtMs = analytics.now();
+    analytics.capture('onboarding/operation_started', {
+      step: 'projects',
+      operation: 'local_project_import',
+    });
     void (async () => {
       try {
         setImporting(true);
@@ -292,7 +419,15 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
           selectDirectory: selectLocalProjectDirectory,
           timeoutMessage: t('localProjects.add.timeout', 'The machine did not respond in time.'),
         });
-        if (!result) return;
+        if (!result) {
+          analytics.capture('onboarding/operation_succeeded', {
+            step: 'projects',
+            operation: 'local_project_import',
+            result: 'cancelled',
+            duration_ms: analytics.durationSince(startedAtMs),
+          });
+          return;
+        }
         setSelectedProject({
           kind: 'local',
           machineId: result.machineId,
@@ -307,17 +442,51 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
             homeDir: window.__LODY_PLATFORM__?.homeDir,
           });
         }
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'projects',
+          operation: 'local_project_import',
+          result: 'imported',
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
         console.error('Failed to import local project', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'projects',
+          operation: 'local_project_import',
+          failure_code: 'local_project_import_failed',
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(t('onboarding.projects.localImportFailed', 'Could not add the local project.'));
       } finally {
         setImporting(false);
       }
     })();
-  }, [canImportLocal, selectLocalProjectDirectory, runtime, setLocalProbeResult, t, workspaceId]);
+  }, [
+    analytics,
+    canImportLocal,
+    selectLocalProjectDirectory,
+    runtime,
+    setLocalProbeResult,
+    t,
+    workspaceId,
+  ]);
 
   const handleConnectGitHub = useCallback(() => {
-    if (workspaceId === null) return;
+    if (workspaceId === null || legacyStatus !== 'allowed') return;
+    if (personalOperationSettings === undefined) return;
+    if (personalOperationSettings?.authorization.state !== 'authorized') {
+      if (!workspaceSlug) return;
+      const url = new URL(getPersonalGitHubAuthorizationUrl(workspaceSlug));
+      url.searchParams.set('github_install_error', 'authorization_required');
+      void openExternalUrl(url.toString());
+      return;
+    }
+    const startedAtMs = analytics.now();
+    analytics.capture('onboarding/operation_started', {
+      step: 'projects',
+      operation: 'github_install',
+    });
     setConnectingGitHub(true);
     void (async () => {
       try {
@@ -330,11 +499,25 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
         });
         const installUrl = `https://github.com/apps/${githubAppName}/installations/new?state=${encodeURIComponent(state)}`;
         const opened = await openExternalUrl(installUrl);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'projects',
+          operation: 'github_install',
+          result: opened ? 'external_browser' : 'current_window',
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
         if (!opened) {
           // Final fallback: navigate the current window so the user is not stranded.
           window.location.assign(installUrl);
         }
       } catch (error) {
+        console.error('[onboarding] Failed to start GitHub installation:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'projects',
+          operation: 'github_install',
+          failure_code: 'github_install_failed',
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(
           t('settings.integrations.github.connectFailed', 'Failed to start GitHub installation'),
           {
@@ -348,7 +531,17 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
         setConnectingGitHub(false);
       }
     })();
-  }, [createGitHubInstallState, getConvexErrorMessage, isElectron, t, workspaceId, workspaceSlug]);
+  }, [
+    analytics,
+    personalOperationSettings,
+    createGitHubInstallState,
+    getConvexErrorMessage,
+    isElectron,
+    legacyStatus,
+    t,
+    workspaceId,
+    workspaceSlug,
+  ]);
 
   const local: ProjectsScreenLocalEntry[] = useMemo(
     () =>
@@ -382,7 +575,11 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
       connectingGitHub={connectingGitHub}
       canImportLocal={canImportLocal}
       localImportDisabledHint={localImportDisabledHint}
-      canConnectGitHub={canUseGitHub && workspaceId !== null}
+      canConnectGitHub={canUseGitHub && workspaceId !== null && legacyStatus === 'allowed'}
+      encryptedWorkspaceId={legacyStatus === 'blocked' && workspaceId ? workspaceId : undefined}
+      loadingRepos={
+        canUseGitHub && workspaceId !== null && legacyStatus !== 'blocked' && repos === undefined
+      }
       selectedProjectKey={
         selectedProject?.kind === 'local'
           ? `local:${selectedProject.machineId}:${selectedProject.localProjectId}`
@@ -394,6 +591,7 @@ export function ProjectsScreen({ onBack, onComplete }: ProjectsScreenProps) {
       onAddLocal={handleAddLocalProject}
       onConnectGitHub={handleConnectGitHub}
       onBack={onBack}
+      onSkip={onSkip}
       onComplete={onComplete}
     />
   );
@@ -422,10 +620,10 @@ function ExistingProjectList({
   );
 
   return (
-    <div className="rounded-lg border border-border/60 bg-card/40">
-      <div className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs font-medium tracking-wider text-muted-foreground/80">
+    <div {...stylex.props(surface.card)}>
+      <div {...stylex.props(styles.listHeader)}>
         <span>{t('onboarding.projects.connectedHeading', 'Connected')}</span>
-        <span className="text-[11px] tracking-normal normal-case text-muted-foreground/70">
+        <span {...stylex.props(styles.listCount)}>
           {t('onboarding.projects.connectedCount', '{{count}} project', {
             count: items.length,
             defaultValue_one: '{{count}} project',
@@ -438,55 +636,56 @@ function ExistingProjectList({
         the wheel from chaining to the page-level overlay scroll once the user
         hits an end inside the list.
       */}
-      <ul className="scrollbar-pro max-h-[260px] divide-y divide-border/50 overflow-y-auto overscroll-contain">
+      <ul {...withClassName(stylex.props(surface.list), 'scrollbar-pro')}>
         <AnimatePresence initial={false}>
-          {items.map((item) => (
-            <motion.li
-              key={`${item.kind}:${item.key}`}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-              className="px-2 py-1.5"
-            >
-              <button
-                type="button"
-                onClick={() =>
-                  onSelect(
-                    item.kind === 'local'
-                      ? {
-                          kind: 'local',
-                          machineId: item.machineId,
-                          localProjectId: item.localProjectId,
-                          name: item.name,
-                        }
-                      : { kind: 'github', repoFullName: item.key, name: item.name }
-                  )
-                }
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left',
-                  selectedProjectKey === `${item.kind}:${item.key}`
-                    ? 'bg-primary/10 ring-1 ring-primary/40'
-                    : 'hover:bg-muted/60'
-                )}
+          {items.map((item, index) => {
+            const selected = selectedProjectKey === `${item.kind}:${item.key}`;
+            return (
+              <motion.li
+                key={`${item.kind}:${item.key}`}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.2 }}
               >
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50">
-                  {item.kind === 'local' ? (
-                    <FolderPlus className="size-4 text-muted-foreground" />
-                  ) : (
-                    <Github className="size-4 text-muted-foreground" />
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSelect(
+                      item.kind === 'local'
+                        ? {
+                            kind: 'local',
+                            machineId: item.machineId,
+                            localProjectId: item.localProjectId,
+                            name: item.name,
+                          }
+                        : { kind: 'github', repoFullName: item.key, name: item.name }
+                    )
+                  }
+                  {...stylex.props(
+                    styles.projectRow,
+                    index > 0 && styles.projectRowRuled,
+                    selected && styles.projectRowSelected
                   )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-foreground">{item.name}</div>
-                  <div className="truncate text-xs text-muted-foreground">{item.detail}</div>
-                </div>
-                {selectedProjectKey === `${item.kind}:${item.key}` ? (
-                  <Check className="size-4 shrink-0 text-primary" />
-                ) : null}
-              </button>
-            </motion.li>
-          ))}
+                >
+                  <span {...stylex.props(surface.glyphBox, surface.glyphBoxSmall)}>
+                    {item.kind === 'local' ? (
+                      <FolderPlus {...stylex.props(surface.icon16)} />
+                    ) : (
+                      <Github {...stylex.props(surface.icon16)} />
+                    )}
+                  </span>
+                  <span {...stylex.props(surface.textColumn)}>
+                    <span {...stylex.props(surface.title)}>{item.name}</span>
+                    <span {...stylex.props(surface.detail)}>{item.detail}</span>
+                  </span>
+                  {selected ? (
+                    <Check {...stylex.props(surface.icon16, surface.iconAccent)} />
+                  ) : null}
+                </button>
+              </motion.li>
+            );
+          })}
         </AnimatePresence>
       </ul>
     </div>
@@ -513,27 +712,23 @@ function ActionCard({
   trailing,
 }: ActionCardProps) {
   return (
-    <motion.button
+    <button
       type="button"
-      whileHover={disabled ? undefined : { y: -2 }}
-      whileTap={disabled ? undefined : { scale: 0.98 }}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        'group relative flex w-full flex-col items-start gap-2 rounded-lg border bg-card/40 p-4 text-left transition-all',
-        'border-border/60 hover:border-primary/50 hover:bg-card/70',
-        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-        'disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border/60 disabled:hover:bg-card/40'
+      {...stylex.props(
+        surface.tile,
+        surface.tileColumn,
+        styles.actionCard,
+        disabled ? surface.tileDisabled : surface.tileHover
       )}
     >
-      {trailing ? <span className="absolute right-3 top-3">{trailing}</span> : null}
-      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted/60 text-foreground transition-colors group-hover:bg-primary/15 group-hover:text-primary">
-        {icon}
-      </div>
-      <div className="space-y-0.5">
-        <div className="text-sm font-medium text-foreground">{title}</div>
-        <div className="text-xs text-muted-foreground">{disabledHint ?? description}</div>
-      </div>
-    </motion.button>
+      {trailing ? <span {...stylex.props(styles.actionTrailing)}>{trailing}</span> : null}
+      <span {...stylex.props(surface.glyphBox, styles.actionGlyph)}>{icon}</span>
+      <span {...stylex.props(styles.actionText)}>
+        <span {...stylex.props(styles.actionTitle)}>{title}</span>
+        <span {...stylex.props(styles.actionDescription)}>{disabledHint ?? description}</span>
+      </span>
+    </button>
   );
 }

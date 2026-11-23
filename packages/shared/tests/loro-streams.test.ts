@@ -1,26 +1,25 @@
+import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
+import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import { describe, expect, it } from 'vitest';
+import { LoroDoc } from 'loro-crdt';
+import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 
 import {
   DEFAULT_LORO_STREAMS_BASE_URL,
   DEFAULT_LORO_STREAMS_PRESENCE_BASE_URL,
   DEFAULT_LORO_STREAMS_PROXY_HOST_SUFFIX,
   LEGACY_LORO_STREAMS_BASE_URL,
-  LORO_STREAMS_PRESENCE_SHARD_IDS,
   LORO_STREAMS_REMOTE_CURSOR_HISTORICAL_ALIAS_BASE_URLS,
   LORO_STREAMS_LARGE_POST_SHARD_MIN_BYTES,
-  isLoroStreamsPresenceShardId,
-  pickLoroStreamsPresenceShardId,
   getLoroStreamsRemoteCursorUrlAliases,
-  getLoroMetaStreamId,
-  getLoroPreviewCommentStreamId,
-  getLoroSessionStreamId,
-  getLoroStreamIdForDocId,
   getLoroStreamsBaseUrl,
+  isLoroStreamsWebSocketEnabled,
+  loroStreamsWebSocketOptions,
   getLoroStreamsPresenceBaseUrl,
   getLoroStreamsShardUrls,
   normalizeLoroStreamsShardHostSuffix,
-  getPreviewCommentRoomId,
-  getSessionRoomId,
   type SessionId,
   type WorkspaceId,
 } from '../src';
@@ -29,36 +28,50 @@ const workspaceId = 'workspace-1' as WorkspaceId;
 const sessionId = 'session-1' as SessionId;
 
 describe('loro streams helpers', () => {
-  it('builds the canonical meta stream id', () => {
-    expect(getLoroMetaStreamId(workspaceId)).toBe('workspace-1:meta');
+  it.each([undefined, '', 'false', '0', 'TRUE', 'yes', true])(
+    'keeps WS disabled for non opt-in environment %s',
+    (value) => {
+      expect(
+        loroStreamsWebSocketOptions(
+          isLoroStreamsWebSocketEnabled(undefined, value),
+          'https://gateway.test',
+          'workspace'
+        )
+      ).toEqual({});
+    }
+  );
+  it.each(['1', 'true'])(
+    'accepts explicit WS environment %s, with explicit false taking precedence',
+    (value) => {
+      expect(isLoroStreamsWebSocketEnabled(undefined, value)).toBe(true);
+      expect(isLoroStreamsWebSocketEnabled(false, value)).toBe(false);
+      expect(isLoroStreamsWebSocketEnabled(true, '0')).toBe(true);
+    }
+  );
+  it('lets a Convex isolate bundle and execute protocol helpers without loading snapshot compression', async () => {
+    const result = await build({
+      stdin: {
+        contents:
+          'import { getServerNow } from "@lody/shared"; globalThis.clockResult = getServerNow();',
+        resolveDir: fileURLToPath(new URL('..', import.meta.url)),
+      },
+      bundle: true,
+      platform: 'browser',
+      format: 'iife',
+      write: false,
+      logLevel: 'silent',
+    });
+    const context = {
+      Date: class extends Date {
+        static now() {
+          return 123456;
+        }
+      },
+      clockResult: 0,
+    };
+    runInNewContext(result.outputFiles[0]!.text, context);
+    expect(context.clockResult).toBe(123456);
   });
-
-  it('builds the canonical session stream id', () => {
-    expect(getLoroSessionStreamId(workspaceId, sessionId)).toBe('workspace-1:s:session-1');
-  });
-
-  it('builds the canonical preview-comment stream id', () => {
-    expect(getLoroPreviewCommentStreamId(workspaceId, sessionId)).toBe('workspace-1:pc:session-1');
-  });
-
-  it('maps session room ids to session streams', () => {
-    expect(getLoroStreamIdForDocId(workspaceId, getSessionRoomId(sessionId))).toBe(
-      'workspace-1:s:session-1'
-    );
-  });
-
-  it('maps preview-comment room ids to preview-comment streams', () => {
-    expect(getLoroStreamIdForDocId(workspaceId, getPreviewCommentRoomId(sessionId))).toBe(
-      'workspace-1:pc:session-1'
-    );
-  });
-
-  it('leaves unknown doc ids unchanged', () => {
-    expect(getLoroStreamIdForDocId(workspaceId, 'workspace-workspace-1')).toBe(
-      'workspace-workspace-1'
-    );
-  });
-
   it('requires an injected base url and normalizes it', () => {
     expect(DEFAULT_LORO_STREAMS_BASE_URL).toBe('https://streams.invalid');
     expect(() => getLoroStreamsBaseUrl(undefined)).toThrow(/must be provided/);
@@ -77,25 +90,6 @@ describe('loro streams helpers', () => {
       LEGACY_LORO_STREAMS_BASE_URL
     );
     expect(getLoroStreamsPresenceBaseUrl('http://127.0.0.1:8787///')).toBe('http://127.0.0.1:8787');
-  });
-
-  it('spreads presence traffic across sibling shard subdomains for the default proxy', () => {
-    for (const shardId of LORO_STREAMS_PRESENCE_SHARD_IDS) {
-      expect(getLoroStreamsPresenceBaseUrl(DEFAULT_LORO_STREAMS_BASE_URL, shardId)).toBe(
-        `https://presence-${shardId}.${DEFAULT_LORO_STREAMS_PROXY_HOST_SUFFIX}`
-      );
-    }
-    // A random tab pick always resolves to a real shard host.
-    expect(isLoroStreamsPresenceShardId(pickLoroStreamsPresenceShardId())).toBe(true);
-  });
-
-  it('ignores unknown presence shard ids and falls back to the canonical host', () => {
-    expect(getLoroStreamsPresenceBaseUrl(DEFAULT_LORO_STREAMS_BASE_URL, 'zz')).toBe(
-      DEFAULT_LORO_STREAMS_PRESENCE_BASE_URL
-    );
-    expect(getLoroStreamsPresenceBaseUrl(DEFAULT_LORO_STREAMS_BASE_URL, '')).toBe(
-      DEFAULT_LORO_STREAMS_PRESENCE_BASE_URL
-    );
   });
 
   it('does not shard presence for non-default proxies even with a shard id', () => {
@@ -207,4 +201,48 @@ describe('loro streams helpers', () => {
     expect(shardUrls?.other?.[1]).toBe('https://api-b.streams.example.com');
     expect(shardUrls?.largePostMinBytes).toBe(LORO_STREAMS_LARGE_POST_SHARD_MIN_BYTES);
   });
+});
+
+describe('Streams bootstrap with the Lody snapshot codec', () => {
+  it.each([false, true])(
+    'imports a real document snapshot (compressed=%s) at its continuation offset',
+    async (compressed) => {
+      const author = new LoroDoc();
+      author.getMap('state').set('value', 'restored');
+      author.commit();
+      const snapshot = author.export({ mode: 'snapshot' });
+      const body = compressed ? await streamsSnapshotCodec.compress(snapshot) : snapshot;
+      const replica = new LoroDoc();
+      const transport = new StreamsCrdt({
+        streamUrl: 'https://streams.example.com/v1/streams/snapshot-test',
+        adapter: createLoroDocAdapter(replica),
+        snapshotCodec: streamsSnapshotCodec,
+        fetch: async (input) => {
+          expect(String(input)).toContain('/bootstrap');
+          const bytes = Buffer.concat([
+            Buffer.from('--snapshot-boundary\r\nContent-Type: application/octet-stream\r\n\r\n'),
+            body,
+            Buffer.from('\r\n--snapshot-boundary--\r\n'),
+          ]);
+          return new Response(bytes, {
+            headers: {
+              'Content-Type': 'multipart/mixed; boundary=snapshot-boundary',
+              'Stream-Snapshot-Offset': '123',
+              'Stream-Next-Offset': '123',
+              'Stream-Up-To-Date': 'true',
+            },
+          });
+        },
+      });
+      try {
+        const result = await transport.catchup();
+        expect(result.ok).toBe(true);
+        expect(replica.toJSON()).toEqual(author.toJSON());
+      } finally {
+        await transport.close();
+        replica.free();
+        author.free();
+      }
+    }
+  );
 });

@@ -1,18 +1,24 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { describe, expect, it } from 'vitest';
 import {
   SessionStatusFactory,
+  getPendingUserTurnActivationId,
+  hasPendingUserTurnActivation,
   type MachineId,
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
 import {
   findNextDispatchableUserTurn,
-  getPendingUserTurnActivationId,
-  hasPendingUserTurnActivation,
   resolveSessionDispatchAction,
+  isImportFencedQueueItem,
   shouldWatchSession,
 } from './session-dispatch-logic';
 import { SessionExecutionService } from './session-execution-service';
+import { LoroDoc } from 'loro-crdt';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import { readDispatchHistory, readDispatchSelection } from './session-dispatch-history';
+import { isActivationAwaitingHistory } from './session-dispatch-logic';
 
 describe('shouldWatchSession', () => {
   const baseMeta = {
@@ -53,6 +59,35 @@ describe('shouldWatchSession', () => {
     expect(decide({ ...baseMeta, status: SessionStatusFactory.running() })).toBe(true);
   });
 
+  it('keeps a session open while a queue promotion receipt is incomplete', () => {
+    expect(
+      decide({
+        ...baseMeta,
+        queuePromotionLedger: {
+          'queue:turn-1': {
+            queueCid: 'cid-1',
+            userTurnId: 'turn-1',
+            state: 'activation_published',
+            updatedAt: 1,
+          },
+        },
+      })
+    ).toBe(true);
+    expect(
+      decide({
+        ...baseMeta,
+        queuePromotionLedger: {
+          'queue:turn-1': {
+            queueCid: 'cid-1',
+            userTurnId: 'turn-1',
+            state: 'queue_consumed',
+            updatedAt: 1,
+          },
+        },
+      })
+    ).toBe(false);
+  });
+
   it('suppresses only the exact activation whose history payload was missing', () => {
     const missingMeta = {
       ...baseMeta,
@@ -75,6 +110,35 @@ describe('shouldWatchSession', () => {
         latestUserMsgId: 'turn-new',
       })
     ).toBe('turn-new');
+  });
+
+  it('suppresses a settled activation and keeps the pointers intact', () => {
+    // `settleTerminalActivation` deliberately leaves both producer pointers in
+    // place, so every consumer must go through this predicate rather than
+    // comparing them directly.
+    const settledMeta = {
+      ...baseMeta,
+      latestUserMsgId: 'turn-a',
+      lastHandledUserMsgId: 'turn-b',
+      settledActivationUserMsgId: 'turn-a',
+    };
+    expect(settledMeta.latestUserMsgId).not.toBe(settledMeta.lastHandledUserMsgId);
+    expect(hasPendingUserTurnActivation(settledMeta)).toBe(false);
+    expect(decide(settledMeta)).toBe(false);
+    // A newer publication is unaffected by the retired id.
+    expect(getPendingUserTurnActivationId({ ...settledMeta, latestUserMsgId: 'turn-c' })).toBe(
+      'turn-c'
+    );
+    // And a settled processing slot does not mask a live latest pointer.
+    expect(
+      getPendingUserTurnActivationId({
+        ...baseMeta,
+        processingUserMsgId: 'turn-a',
+        latestUserMsgId: 'turn-c',
+        lastHandledUserMsgId: 'turn-a',
+        settledActivationUserMsgId: 'turn-a',
+      })
+    ).toBe('turn-c');
   });
 
   it('opens rooms for process-local RPC, access-retry, and cancel signals', () => {
@@ -195,6 +259,22 @@ describe('findNextDispatchableUserTurn missing-history acknowledgement', () => {
     expect(findNextDispatchableUserTurn([lateTurn], meta)).toBeNull();
   });
 
+  it('keeps every failed identity retired after another timeout or producer clears the legacy marker', () => {
+    const fresh = { ...lateTurn, id: 'fresh' };
+    const meta = {
+      ...baseMeta,
+      latestUserMsgId: fresh.id,
+      missingHistoryUserMsgIds: { [lateTurn.id]: true as const, second: true as const },
+    } as SessionMeta;
+    expect(
+      findNextDispatchableUserTurn([lateTurn, { ...lateTurn, id: 'second' }, fresh], meta)
+    ).toEqual(fresh);
+    expect(getPendingUserTurnActivationId(meta)).toBe(fresh.id);
+    expect(
+      getPendingUserTurnActivationId({ ...meta, latestUserMsgId: lateTurn.id })
+    ).toBeUndefined();
+  });
+
   it('keeps the marker-matched turn excluded while a different turn dispatches normally', () => {
     const newerTurn = {
       ...lateTurn,
@@ -213,10 +293,9 @@ describe('findNextDispatchableUserTurn missing-history acknowledgement', () => {
     expect(getPendingUserTurnActivationId(meta)).toBe(newerTurn.id);
   });
 
-  it('dispatches the exact turn once an explicit redelivery re-aims the pointer and clears the marker', () => {
-    // The deliver-now producer write: latestUserMsgId re-aimed at the old
-    // entry, marker cleared, and lastHandledUserMsgId already advanced past a
-    // different turn the user resent in between.
+  it('dispatches an unmarked legacy pending input', () => {
+    // Legacy snapshots without any retained negative acknowledgement remain
+    // readable. New producers never erase recovery evidence to publish input.
     const redeliveredMeta = {
       ...baseMeta,
       latestUserMsgId: lateTurn.id,
@@ -265,5 +344,216 @@ describe('SessionExecutionService history mutation ownership', () => {
     const releaseNextQueue = service.tryAcquireSessionRewriteConflictLease(sessionId);
     expect(releaseNextQueue).toBeTypeOf('function');
     releaseNextQueue?.();
+  });
+});
+
+describe('scalar dispatch observations', () => {
+  it('captures the selected Loro body before another writer can run after the read yields', async () => {
+    const doc = new LoroDoc();
+    const list = doc.getList('history');
+    list.insert(0, {
+      id: 'coherent-input',
+      role: 'user',
+      status: 'pending',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'before' }],
+    });
+    doc.commit();
+    const data = createLoroSessionData({
+      doc,
+      sessionId: 'coherent-session' as SessionId,
+      writer: createHistoryWriter(doc),
+    });
+    const selected = readDispatchSelection(data.history, [], (entries) => entries[0]?.id);
+    list.delete(0, 1);
+    list.insert(0, {
+      id: 'coherent-input',
+      role: 'user',
+      status: 'pending',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'after' }],
+    });
+    doc.commit();
+    expect((await selected).turn).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ type: 'text', text: 'before' }] },
+    });
+    expect(await data.history.readTurn('coherent-input')).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ type: 'text', text: 'after' }] },
+    });
+    expect(() =>
+      readDispatchSelection(
+        { ...data.history, readDirectory: async (...args) => data.history.readDirectory(...args) },
+        [],
+        () => undefined
+      )
+    ).toThrow('owning history backend');
+    data.dispose();
+  });
+
+  it('matches full-history decisions for legacy, prepared, steer and duplicate inputs using real Loro directories', async () => {
+    const statuses = [
+      undefined,
+      'prepared',
+      'pending',
+      'seen',
+      'processing',
+      'pending_apply',
+      'delivery_unknown',
+      'handled',
+      'failed',
+      'canceled',
+    ] as const;
+    const base = {
+      id: 'scalar-dispatch' as SessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-10-22T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: SessionStatusFactory.idle(),
+    } satisfies SessionMeta;
+    const metas: SessionMeta[] = [
+      base,
+      { ...base, latestUserMsgId: 'target' },
+      { ...base, processingUserMsgId: 'target' },
+      { ...base, latestUserMsgId: 'target', lastHandledUserMsgId: 'target' },
+      { ...base, latestUserMsgId: 'target', lastMissingHistoryUserMsgId: 'target' },
+      { ...base, steerTurnStatuses: { target: 'pending' } },
+    ];
+    for (const status of statuses)
+      for (const steer of [false, true]) {
+        const doc = new LoroDoc();
+        const list = doc.getList('history');
+        const user = {
+          role: 'user' as const,
+          timestamp: 'synthetic',
+          items: [{ type: 'text', text: 'body' }],
+        };
+        list.insert(0, {
+          ...user,
+          id: 'settled-prefix',
+          status: 'handled',
+          items: [{ type: 'text', text: 'unrelated'.repeat(8192) }],
+        });
+        list.insert(1, { ...user, id: 'target', status: 'handled', read: true });
+        list.insert(2, {
+          ...user,
+          id: 'target',
+          read: false,
+          ...(status === undefined ? {} : { status }),
+          ...(steer ? { inputConfig: { _lodyDeliveryKind: 'steer' } } : {}),
+        });
+        list.insert(3, { ...user, id: 'fallback', status: 'seen' });
+        list.insert(4, {
+          id: 'completed',
+          role: 'assistant',
+          timestamp: 'synthetic',
+          userTurnId: 'target',
+          endedAt: 42,
+          items: [],
+        });
+        doc.commit();
+        const data = createLoroSessionData({
+          doc,
+          sessionId: base.id,
+          writer: createHistoryWriter(doc),
+        });
+        const full = await data.history.readAll();
+        const forbidden = () => {
+          throw new Error('Dispatch must not read bodies');
+        };
+        const reader = {
+          ...data.history,
+          readAll: forbidden,
+          readAt: forbidden,
+          readTurn: forbidden,
+          readRange: forbidden,
+        };
+        for (const meta of metas) {
+          const ids = [
+            meta.latestUserMsgId,
+            meta.processingUserMsgId,
+            ...Object.keys(meta.steerTurnStatuses ?? {}),
+          ].filter((id): id is string => typeof id === 'string');
+          const scalar = await readDispatchHistory(reader, ids);
+          expect(findNextDispatchableUserTurn(scalar, meta)?.id).toBe(
+            findNextDispatchableUserTurn(full, meta)?.id
+          );
+          for (const id of ids)
+            expect(isActivationAwaitingHistory(scalar, id)).toBe(
+              isActivationAwaitingHistory(full, id)
+            );
+          expect(scalar.every((entry) => !('items' in entry) && !('plan' in entry))).toBe(true);
+          if (ids.includes('target') || scalar.some((entry) => entry.id === 'target'))
+            expect(scalar.filter((entry) => entry.id === 'target')).toHaveLength(2);
+        }
+        data.dispose();
+      }
+  });
+});
+
+describe('workspace import fences', () => {
+  const machineId = 'machine-1' as MachineId;
+  const meta = {
+    id: 'session-imported' as SessionId,
+    machineId,
+    createdAt: '2026-11-19T00:00:00.000Z',
+    userId: 'user-1',
+    cliType: 'builtin',
+    agentType: 'codex',
+    status: SessionStatusFactory.idle(),
+    latestUserMsgId: 'u-imported',
+    importFence: { workspaceId: 'ws_b', turnIds: ['u-imported'], queueItemIds: [] },
+  } satisfies SessionMeta;
+  const turn = (id: string) => ({
+    id,
+    role: 'user' as const,
+    timestamp: '2026-11-19T00:00:00.000Z',
+    items: [{ type: 'text' as const, text: id }],
+    status: 'pending' as const,
+  });
+  const snapshot = (history: ReturnType<typeof turn>[]) => ({
+    meta,
+    history,
+    hasActiveTurn: false,
+    hasBlockingPendingCreate: false,
+    hasReusableSession: false,
+    hasRewriteBarrier: false,
+  });
+
+  it('never runs input that arrived through an import into this workspace', () => {
+    expect(resolveSessionDispatchAction(snapshot([turn('u-imported')]), machineId, 'ws_b')).toEqual(
+      {
+        type: 'no-dispatchable-turn',
+      }
+    );
+  });
+
+  it('runs new input in the importing workspace and anything in other workspaces', () => {
+    expect(
+      resolveSessionDispatchAction(snapshot([turn('u-imported'), turn('u-new')]), machineId, 'ws_b')
+    ).toMatchObject({ type: 'dispatch', turn: { id: 'u-new' } });
+    expect(
+      resolveSessionDispatchAction(snapshot([turn('u-imported')]), machineId, 'ws_a')
+    ).toMatchObject({
+      type: 'dispatch',
+      turn: { id: 'u-imported' },
+    });
+  });
+});
+
+describe('isImportFencedQueueItem', () => {
+  const meta = {
+    importFence: { workspaceId: 'ws_b', turnIds: ['u-queued'], queueItemIds: ['cid:1@2:Map'] },
+  } as Pick<SessionMeta, 'importFence'>;
+  it('holds queued items and promotions that came from an import into this workspace', () => {
+    expect(isImportFencedQueueItem(meta, 'ws_b', { $cid: 'cid:1@2:Map' })).toBe(true);
+    expect(isImportFencedQueueItem(meta, 'ws_b', { $cid: 'other', userTurnId: 'u-queued' })).toBe(
+      true
+    );
+    expect(isImportFencedQueueItem(meta, 'ws_b', { $cid: 'new' })).toBe(false);
+    expect(isImportFencedQueueItem(meta, 'ws_a', { $cid: 'cid:1@2:Map' })).toBe(false);
   });
 });

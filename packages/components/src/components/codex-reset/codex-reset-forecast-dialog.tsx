@@ -1,15 +1,28 @@
-import { useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useCallback, type ReactNode } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
-import { ExternalLink, Loader2, TimerReset } from 'lucide-react';
-
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
-import { openExternalUrl } from '@/lib/native-browser';
-import { cn } from '@/lib/utils';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
+import { AlertTriangle, ExternalLink, TimerReset } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+  text as textStep,
+} from '@lody/ui/tokens/scales.stylex';
+import { Spinner } from '@lody/ui/spinner';
+
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { openExternalUrl } from '@/lib/native-browser';
+import {
+  type CodexScheduledReset,
   type CodexResetSource,
   type CodexResetStatus,
   type CodexResetWatch,
@@ -17,15 +30,201 @@ import {
 } from '@/lib/codex-reset-forecast';
 import type { CodexResetForecastState } from '@/lib/codex-reset-forecast-store';
 
-/**
- * One recessed field style for both themes. `muted` is nearly the panel color in a
- * dark theme, so a tint of the foreground plus a hairline is what actually reads.
- */
-const SUBTLE_FIELD = 'rounded-md border border-border/60 bg-foreground/[0.03]';
+const CODEX_RESETS_ATTRIBUTION_URL = 'https://codex-resets.com/?utm_source=lody';
+
+/** A block inside the panel is the region rung: a fill with no edge. */
+const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
+
+const styles = stylex.create({
+  title: { display: 'flex', alignItems: 'center', gap: space[2] },
+  titleMark: { flexShrink: 0, width: '16px', height: '16px', color: colors.secondaryLabel },
+  body: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    margin: 0,
+    paddingBlock: space[1],
+    fontSize: textStep.bodySize,
+    lineHeight: textStep.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  unavailable: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: '10px',
+    paddingBlock: space[1],
+  },
+  prose: {
+    margin: 0,
+    fontSize: textStep.bodySize,
+    lineHeight: textStep.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  /** A failed refresh under a forecast still on screen: a tint and a mark. */
+  notice: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    paddingInlineStart: space[3],
+    paddingInlineEnd: space[1.5],
+    paddingBlock: space[1.5],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.warning} 10%)`,
+  },
+  noticeMark: { flexShrink: 0, width: '14px', height: '14px', color: colors.warning },
+  noticeText: {
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    fontSize: textStep.footnoteSize,
+    lineHeight: textStep.footnoteLeading,
+    color: colors.label,
+  },
+  /** Fine print: the attribution under everything else. */
+  finePrint: {
+    display: 'block',
+    fontSize: textStep.footnoteSize,
+    lineHeight: 1.625,
+    color: colors.secondaryLabel,
+  },
+
+  stack: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  headline: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  headlineRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: space[3],
+  },
+  statement: {
+    margin: 0,
+    fontSize: textStep.headlineSize,
+    lineHeight: 1.25,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  chance: { display: 'flex', alignItems: 'baseline', gap: space[1.5], margin: 0 },
+  chanceValue: {
+    fontSize: '36px',
+    lineHeight: 1,
+    fontWeight: 600,
+    letterSpacing: '-0.025em',
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.label,
+  },
+  chanceLabel: { fontSize: textStep.bodySize, color: colors.secondaryLabel },
+  meter: {
+    width: '100%',
+    height: '6px',
+    overflow: 'hidden',
+    borderRadius: radius.full,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 15%)`,
+  },
+  meterFill: {
+    height: '100%',
+    borderRadius: radius.full,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 40%)`,
+  },
+  meterFillStrong: { backgroundColor: colors.warning },
+  meterWidth: (width: string) => ({ width }),
+  region: {
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: REGION,
+    paddingInline: space[3],
+  },
+  expiry: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: space[2],
+    rowGap: '2px',
+    paddingBlock: space[2],
+  },
+  expiryLabel: { fontSize: textStep.footnoteSize, color: colors.secondaryLabel },
+  expiryValue: {
+    fontSize: textStep.bodySize,
+    lineHeight: textStep.bodyLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  facts: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[1.5],
+    margin: 0,
+    fontSize: textStep.footnoteSize,
+    lineHeight: textStep.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+
+  none: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  noneText: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  hint: {
+    margin: 0,
+    fontSize: textStep.footnoteSize,
+    lineHeight: 1.625,
+    color: colors.secondaryLabel,
+  },
+  latestReset: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    paddingBlock: '10px',
+  },
+  caption: {
+    margin: 0,
+    fontSize: textStep.footnoteSize,
+    lineHeight: textStep.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+
+  source: { display: 'flex', flexDirection: 'column', gap: space[1.5], margin: 0 },
+  /** The quoted post, set off by the quotation mark a blockquote carries. */
+  quote: {
+    margin: 0,
+    paddingInlineStart: space[3],
+    borderInlineStartWidth: '2px',
+    borderInlineStartStyle: 'solid',
+    borderInlineStartColor: colors.separator,
+    fontSize: textStep.footnoteSize,
+    lineHeight: 1.625,
+    color: colors.secondaryLabel,
+  },
+
+  link: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    width: 'fit-content',
+    borderRadius: radius.mini,
+    fontSize: textStep.footnoteSize,
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    textDecorationLine: { default: 'none', ':hover': 'underline' },
+    textUnderlineOffset: '2px',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
+    outlineStyle: 'none',
+    transitionProperty: 'color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  /** In running prose the link is marked by its underline at rest. */
+  linkInline: {
+    verticalAlign: 'baseline',
+    textDecorationLine: { default: 'underline', ':hover': 'underline' },
+    textDecorationColor: `color-mix(in oklab, transparent, ${colors.secondaryLabel} 50%)`,
+  },
+  linkMark: { flexShrink: 0, width: '12px', height: '12px' },
+});
 
 export type CodexResetForecastDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+
   state: CodexResetForecastState;
   /** The still-valid forecast, already selected against `nowMs` by the caller. */
   watch: CodexResetWatch | null;
@@ -71,26 +270,30 @@ export function CodexResetForecastDialog({
   const hasNothingToShow = hasLoadError && state.data === null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-4 sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <TimerReset className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            {t('codexReset.title', 'Codex reset forecast')}
-          </DialogTitle>
-        </DialogHeader>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content>
+        <Dialog.Header>
+          <Dialog.Title>
+            <span {...stylex.props(styles.title)}>
+              <TimerReset {...stylex.props(styles.titleMark)} aria-hidden="true" />
+              {t('codexReset.title', 'Codex reset forecast')}
+            </span>
+          </Dialog.Title>
+        </Dialog.Header>
 
-        <div className="flex flex-col gap-4">
+        <div {...stylex.props(styles.body)}>
           {isInitialLoading ? (
-            <p className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            <p {...stylex.props(styles.loading)}>
+              <Spinner size="small" aria-hidden="true" />
               {t('codexReset.loading', 'Loading the latest forecast…')}
             </p>
+          ) : state.data?.scheduledReset ? (
+            <ScheduledReset reset={state.data.scheduledReset} relative={relative} nowMs={nowMs} />
           ) : watch ? (
             <ActiveForecast watch={watch} relative={relative} nowMs={nowMs} />
           ) : hasNothingToShow ? (
-            <div className="flex flex-col items-start gap-2.5 py-1">
-              <p className="text-sm text-muted-foreground">
+            <div {...stylex.props(styles.unavailable)}>
+              <p {...stylex.props(styles.prose)}>
                 {t('codexReset.unavailable', 'The reset forecast could not be loaded.')}
               </p>
               <RetryButton onRetry={onRetry} />
@@ -100,8 +303,9 @@ export function CodexResetForecastDialog({
           )}
 
           {hasLoadError && !hasNothingToShow ? (
-            <div className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2.5 py-1.5">
-              <p className="text-xs text-muted-foreground">
+            <div {...stylex.props(styles.notice)}>
+              <AlertTriangle {...stylex.props(styles.noticeMark)} aria-hidden="true" />
+              <p {...stylex.props(styles.noticeText)}>
                 {t('codexReset.refreshFailed', 'Could not refresh the forecast.')}
               </p>
               <RetryButton onRetry={onRetry} />
@@ -109,14 +313,19 @@ export function CodexResetForecastDialog({
           ) : null}
         </div>
 
-        <DialogDescription className="-mt-1 border-t border-border/60 pt-3 text-xs leading-relaxed text-muted-foreground">
-          {t(
-            'codexReset.disclaimer',
-            'Third-party forecast from codex-resets.com. For reference only.'
-          )}
-        </DialogDescription>
-      </DialogContent>
-    </Dialog>
+        <Dialog.Description>
+          <span {...stylex.props(styles.finePrint)}>
+            <Trans
+              i18nKey="codexReset.disclaimer"
+              defaults="Third-party forecast from <website>codex-resets.com</website>. For reference only."
+              components={{
+                website: <ExternalTextLink url={CODEX_RESETS_ATTRIBUTION_URL} inline />,
+              }}
+            />
+          </span>
+        </Dialog.Description>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -124,9 +333,47 @@ function RetryButton({ onRetry }: { onRetry: () => void }) {
   const { t } = useTranslation();
 
   return (
-    <Button variant="outline" size="sm" className="h-7 shrink-0 px-2 text-xs" onClick={onRetry}>
+    <Button variant="secondary" size="small" onClick={onRetry}>
       {t('codexReset.retry', 'Try again')}
     </Button>
+  );
+}
+
+function ScheduledReset({
+  reset,
+  relative,
+  nowMs,
+}: {
+  reset: CodexScheduledReset;
+  relative: (epochMs: number) => string;
+  nowMs: number;
+}) {
+  const { t, i18n } = useTranslation();
+  const scheduledForMs = reset.scheduledForMs;
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <p {...stylex.props(styles.statement)}>{t('codexReset.scheduled', 'Reset scheduled')}</p>
+      {scheduledForMs !== null && reset.scheduledForIso ? (
+        <div {...stylex.props(styles.region, styles.expiry)}>
+          <span {...stylex.props(styles.expiryLabel)}>
+            {t('codexReset.scheduledFor', 'Scheduled for')}
+          </span>
+          <time {...stylex.props(styles.expiryValue)} dateTime={reset.scheduledForIso}>
+            {formatCodexResetExpiry(scheduledForMs, nowMs, i18n.resolvedLanguage ?? i18n.language)}
+          </time>
+          <span {...stylex.props(styles.hint)}>
+            {scheduledForMs > nowMs
+              ? relative(scheduledForMs)
+              : t('codexReset.awaitingExecution', 'Awaiting confirmation of execution')}
+          </span>
+        </div>
+      ) : (
+        <p {...stylex.props(styles.hint)}>
+          {t('codexReset.scheduleUnknown', 'Time not yet specified')}
+        </p>
+      )}
+      <SourceBlock text={reset.text} source={reset.source} />
+    </div>
   );
 }
 
@@ -149,29 +396,24 @@ function ActiveForecast({
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <div {...stylex.props(styles.stack)}>
       {/* The probability is the headline; the level qualifies it from the side. */}
-      <div className="flex flex-col gap-2.5">
-        <div className="flex items-start justify-between gap-3">
+      <div {...stylex.props(styles.headline)}>
+        <div {...stylex.props(styles.headlineRow)}>
           {percent === null ? (
-            <p className="text-base font-medium leading-tight">
+            <p {...stylex.props(styles.statement)}>
               {t('codexReset.chanceUnknown', 'Reset watch in effect')}
             </p>
           ) : (
-            <p className="flex items-baseline gap-1.5">
-              <span className="text-[2.25rem] font-semibold leading-none tracking-tight tabular-nums">
-                {percent}%
-              </span>{' '}
-              <span className="text-sm text-muted-foreground">
+            <p {...stylex.props(styles.chance)}>
+              <span {...stylex.props(styles.chanceValue)}>{percent}%</span>{' '}
+              <span {...stylex.props(styles.chanceLabel)}>
                 {t('codexReset.chanceLabel', 'chance of a reset')}
               </span>
             </p>
           )}
           {watch.level ? (
-            <Badge
-              variant={watch.level === 'strong' ? 'warning' : 'secondary'}
-              className="shrink-0 font-normal"
-            >
+            <Badge tone={watch.level === 'strong' ? 'warning' : 'neutral'}>
               {watch.level === 'strong'
                 ? t('codexReset.levelStrong', 'Strong signal')
                 : t('codexReset.levelElevated', 'Elevated signal')}
@@ -180,16 +422,13 @@ function ActiveForecast({
         </div>
 
         {meterPercent === null ? null : (
-          <div
-            className="h-1.5 w-full overflow-hidden rounded-full bg-foreground/15"
-            aria-hidden="true"
-          >
+          <div {...stylex.props(styles.meter)} aria-hidden="true">
             <div
-              className={cn(
-                'h-full rounded-full',
-                watch.level === 'strong' ? 'bg-status-warning' : 'bg-foreground/40'
+              {...stylex.props(
+                styles.meterFill,
+                watch.level === 'strong' && styles.meterFillStrong,
+                styles.meterWidth(`${meterPercent}%`)
               )}
-              style={{ width: `${meterPercent}%` }}
             />
           </div>
         )}
@@ -197,20 +436,18 @@ function ActiveForecast({
 
       {/* `expires_at` is an absolute UTC instant. Intl converts it to a semantic
           time such as "Tomorrow 2:00 PM" in the browser/OS time zone. */}
-      <div
-        className={cn(SUBTLE_FIELD, 'flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-3 py-2')}
-      >
-        <span className="text-xs text-muted-foreground">
+      <div {...stylex.props(styles.region, styles.expiry)}>
+        <span {...stylex.props(styles.expiryLabel)}>
           {t('codexReset.window', 'Forecast valid until')}
         </span>
-        <time className="text-sm font-medium" dateTime={watch.expiresAtIso}>
+        <time {...stylex.props(styles.expiryValue)} dateTime={watch.expiresAtIso}>
           {localExpiry}
         </time>
       </div>
 
       <SourceBlock text={watch.text} source={watch.source} />
 
-      <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+      <p {...stylex.props(styles.facts)}>
         <span>
           {t('codexReset.observed', 'Observed')}{' '}
           <time dateTime={watch.observedAtIso}>{relative(watch.observedAtMs)}</time>
@@ -238,14 +475,14 @@ function NoForecast({
   const latestReset = status?.latestReset ?? null;
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <p className="text-base font-medium leading-tight">
+    <div {...stylex.props(styles.none)}>
+      <div {...stylex.props(styles.noneText)}>
+        <p {...stylex.props(styles.statement)}>
           {isExpired
             ? t('codexReset.expired', 'The last forecast has expired.')
             : t('codexReset.none', 'No reset forecast right now.')}
         </p>
-        <p className="text-xs leading-relaxed text-muted-foreground">
+        <p {...stylex.props(styles.hint)}>
           {t(
             'codexReset.noneHint',
             'A forecast appears only when there is a signal worth watching.'
@@ -253,8 +490,8 @@ function NoForecast({
         </p>
       </div>
       {latestReset ? (
-        <div className={cn(SUBTLE_FIELD, 'flex flex-col gap-2 px-3 py-2.5')}>
-          <p className="text-xs text-muted-foreground">
+        <div {...stylex.props(styles.region, styles.latestReset)}>
+          <p {...stylex.props(styles.caption)}>
             {t('codexReset.latestReset', 'Last reset announced')}{' '}
             <time dateTime={latestReset.announcedAtIso}>{relative(latestReset.announcedAtMs)}</time>
           </p>
@@ -272,20 +509,15 @@ function SourceBlock({ text, source }: { text: string; source: CodexResetSource 
   if (!trimmed && !source) return null;
 
   return (
-    <figure className="flex flex-col gap-1.5">
-      {trimmed ? (
-        <blockquote className="border-l-2 border-border pl-3 text-xs leading-relaxed text-muted-foreground">
-          {trimmed}
-        </blockquote>
-      ) : null}
+    <figure {...stylex.props(styles.source)}>
+      {trimmed ? <blockquote {...stylex.props(styles.quote)}>{trimmed}</blockquote> : null}
       {source ? (
         <figcaption>
-          <ExternalTextLink
-            url={source.url}
-            label={t('codexReset.viewSource', 'View the source post by @{{author}}', {
+          <ExternalTextLink url={source.url}>
+            {t('codexReset.viewSource', 'View the source post by @{{author}}', {
               author: source.author,
             })}
-          />
+          </ExternalTextLink>
         </figcaption>
       ) : null}
     </figure>
@@ -299,12 +531,13 @@ function SourceBlock({ text, source }: { text: string; source: CodexResetSource 
  */
 function ExternalTextLink({
   url,
-  label,
-  className,
+  children,
+  inline = false,
 }: {
   url: string;
-  label: string;
-  className?: string;
+  children?: ReactNode;
+  /** Inside running prose: underlined at rest, on the text's baseline. */
+  inline?: boolean;
 }) {
   return (
     <a
@@ -316,13 +549,10 @@ function ExternalTextLink({
         event.preventDefault();
         void openExternalUrl(url);
       }}
-      className={cn(
-        'inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:underline',
-        className
-      )}
+      {...stylex.props(styles.link, inline && styles.linkInline)}
     >
-      {label}
-      <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+      {children}
+      <ExternalLink {...stylex.props(styles.linkMark)} aria-hidden="true" />
     </a>
   );
 }

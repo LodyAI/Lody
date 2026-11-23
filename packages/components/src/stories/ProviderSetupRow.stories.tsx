@@ -102,3 +102,25 @@ export const VerificationFailed: Story = {
     },
   },
 };
+
+export const BubNotInstalled: Story = {
+  args: {
+    setup: {
+      ...baseSetup,
+      config: { ...baseSetup.config, agentType: 'bub', name: 'Bub' },
+      status: 'failed',
+      failureCode: 'runtime-unavailable',
+    },
+  },
+};
+
+export const DimcodeNotInstalled: Story = {
+  args: {
+    setup: {
+      ...baseSetup,
+      config: { ...baseSetup.config, agentType: 'dimcode', name: 'Dimcode' },
+      status: 'failed',
+      failureCode: 'runtime-unavailable',
+    },
+  },
+};

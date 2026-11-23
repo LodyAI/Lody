@@ -116,6 +116,16 @@ export function usePullToRefresh({
 
     function onTouchMove(event: TouchEvent) {
       if (startY == null || startX == null) return;
+      // A nested gesture (a lifted list row being dragged) owns this touch.
+      if (event.defaultPrevented) {
+        startX = null;
+        startY = null;
+        if (active) {
+          active = false;
+          setPull(0);
+        }
+        return;
+      }
       /* Only treat this as a pull when the scroll started at the
          very top. Otherwise it's a normal content scroll and we
          leave the native behavior alone. */

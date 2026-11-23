@@ -107,6 +107,22 @@ export function runTurnDiffStoreWorker(): void {
         } satisfies TurnDiffWorkerResponse);
         return;
       }
+      if (request.kind === 'snapshot-descriptor') {
+        port.postMessage({
+          id: request.id,
+          kind: request.kind,
+          result: store.getSnapshotDescriptor(request.input),
+        } satisfies TurnDiffWorkerResponse);
+        return;
+      }
+      if (request.kind === 'snapshot-bytes') {
+        port.postMessage({
+          id: request.id,
+          kind: request.kind,
+          result: store.getSnapshotBytes(request.input),
+        } satisfies TurnDiffWorkerResponse);
+        return;
+      }
       if (request.kind === 'earliest-old') {
         port.postMessage({
           id: request.id,

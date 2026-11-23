@@ -171,9 +171,16 @@ export function isMarkdownAgentFileHref(href: string | undefined): href is strin
   return parseMarkdownAgentFileHref(href) != null;
 }
 
+/** Remove only the navigation anchor, preserving the authored path spelling. */
+export function getMarkdownAgentFileCopyPath(href: string): string {
+  const target = parseMarkdownAgentFileHref(href);
+  return target ? href.trim().slice(0, target.filePath.length) : href;
+}
+
 export function normalizeMarkdownAgentFilePath(
   href: string,
-  localProjectRootPath?: string | null
+  localProjectRootPath?: string | null,
+  preserveWorktreePath = false
 ): string {
   const parsedTarget = parseMarkdownAgentFileHref(href);
   const normalizedHref = decodeMarkdownFilePath(
@@ -206,7 +213,7 @@ export function normalizeMarkdownAgentFilePath(
     }
   }
 
-  if (normalizedFilePath === normalizedHref) {
+  if (normalizedFilePath === normalizedHref && !preserveWorktreePath) {
     normalizedFilePath = normalizeWorktreePath(normalizedHref);
   }
 

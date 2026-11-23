@@ -1,27 +1,46 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ExternalLink, Github, Loader2, Mail } from 'lucide-react';
-import { usePostHog } from '@posthog/react';
-import { useAtomValue } from 'jotai';
+import { motion, useReducedMotion, type Variants } from 'framer-motion';
+import { ArrowLeft, ArrowRight, Github, Mail } from 'lucide-react';
+import { MajesticonsExternalLinkLine } from '@lody/ui';
+import * as stylex from '@stylexjs/stylex';
+import { Badge } from '@lody/ui/badge';
+import { Spinner } from '@lody/ui/spinner';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { usePostHog } from '@/lib/posthog-context';
+import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
-import { electronDeepLinkSignInInProgressAtom } from '@/atoms';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { PasswordInput } from '@/ui/password-input';
+import {
+  electronLoginErrorAtom,
+  electronLoginErrorDetailAtom,
+  electronLoginPhaseAtom,
+  nativeSignInInProgressAtom,
+} from '@/atoms';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { PasswordInput } from '@lody/ui/password-input';
 import { isDevEmailPasswordLoginEnabled } from '@lody/shared/electron-ipc';
 import { setLoginHintCookie } from '@/lib/login-hint-cookie';
+import { readLastLoginMethod, writeLastLoginMethod } from '@/lib/last-login-method';
+import { LoginDitherVisual } from '@/components/login-dither-visual';
+import { LoginExpandingRow, LoginViewSlot } from '@/components/login-view-slot';
 import { formatPasswordValidationFailure, validateNewPassword } from '@/lib/password-validation';
+import { BootShell } from '@/components/boot-shell';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
 import { useStableSession } from '@/hooks/useStableSession';
+import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
+import { hasUsableSessionUser } from '@/hooks/stable-session-state';
 import {
+  buildElectronRedirectUrl,
   buildElectronWebLoginCallbackUrl,
   clearElectronAuthorizationCode,
   type ElectronOAuthQuery,
   readElectronAuthorizationCode,
-  redirectToElectronWithAuthorizationCode,
+  redirectToElectronDeepLink,
 } from '@/lib/electron-oauth';
+import { signOutWithoutRedirect } from '@/lib/auth';
 import { useAuthClient } from '../providers/convex-provider';
 import {
   getAppCurrentPathWithSearch,
@@ -31,10 +50,13 @@ import {
 } from '@/lib/app-location';
 import { isSafeAuthRedirect } from '@/lib/auth-redirect';
 import { openExternalUrl } from '@/lib/native-browser';
+import { scheduleIdleTask } from '@/lib/idle-task';
+import { preloadMainLayout } from '@/components/preloaded-main-layout';
 import { runNativeOAuthSignIn } from '@/lib/native-oauth';
 import { syncNativeAuthSession } from '@/lib/native-auth-session-sync';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { isElectronRenderer as isElectronRendererRuntime } from '@/lib/electron';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 import { getAuthResponseError } from '@/lib/auth-response';
 import { buildEmailVerificationCallbackUrl } from '@/lib/email-verification-callback';
 import { buildEmailSignInInput } from '@/lib/email-sign-in';
@@ -47,7 +69,6 @@ import {
 } from '@/lib/posthog-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
 import { cn } from '@/lib/utils';
-import lodyLogo from '@/assets/lody-icon.png';
 
 const LEGAL_LINK_FALLBACK_ORIGIN = 'https://lody.ai';
 const ELECTRON_OAUTH_DEBUG_PREFIX = '[electron-oauth-debug]';
@@ -57,11 +78,20 @@ type EmailAuthMode = 'sign-in' | 'sign-up';
 type EmailAuthStatus = 'idle' | 'verification-sent' | 'unverified';
 type LoginView = 'oauth' | 'email';
 
-const PROVIDER_ICON_SIZE = 18;
-const PROVIDER_ICON_GAP = 8;
+const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
+const DARK = '@media (prefers-color-scheme: dark)';
 
-const VIEW_TRANSITION = { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const };
-
+// Entrance: the column's parts rise in one after another while the visual
+// develops, so the page does not arrive all at once.
+const ENTRANCE_EASE = [0.22, 1, 0.36, 1] as const;
+const ENTRANCE_STAGGER: Variants = {
+  hidden: {},
+  shown: { transition: { staggerChildren: 0.07, delayChildren: 0.15 } },
+};
+const ENTRANCE_ITEM: Variants = {
+  hidden: { opacity: 0, y: 10 },
+  shown: { opacity: 1, y: 0, transition: { duration: 0.5, ease: ENTRANCE_EASE } },
+};
 const normalizeBasePath = () => {
   const baseUrl = import.meta.env.BASE_URL || '/';
   return baseUrl === '/' || baseUrl === './' || baseUrl === '.' ? '' : baseUrl.replace(/\/$/, '');
@@ -101,6 +131,10 @@ const getElectronOAuthQuery = () => {
   const clientId = urlParams.get('client_id');
   const state = urlParams.get('state');
   const codeChallenge = urlParams.get('code_challenge');
+  const desktopChannel = urlParams.get('desktop_channel');
+  if (desktopChannel !== null && desktopChannel !== 'stable' && desktopChannel !== 'nightly') {
+    return undefined;
+  }
   if (clientId !== 'electron' || !state || !codeChallenge) {
     return undefined;
   }
@@ -109,6 +143,7 @@ const getElectronOAuthQuery = () => {
     client_id: clientId,
     state,
     code_challenge: codeChallenge,
+    ...(desktopChannel ? { desktop_channel: desktopChannel } : {}),
   };
   const codeChallengeMethod = urlParams.get('code_challenge_method');
   if (codeChallengeMethod) {
@@ -384,7 +419,7 @@ function BrowserRedirect({
     };
   }, [beforeNavigate, navigate, to]);
 
-  return null;
+  return <BootShell path={to} />;
 }
 
 function ProviderIcon({ className, children }: { className?: string; children: React.ReactNode }) {
@@ -480,35 +515,30 @@ const PROVIDER_CONFIG: {
   icon: React.ComponentType;
   labelKey: string;
   labelDefault: string;
-  variant: 'default' | 'outline';
 }[] = [
   {
     id: 'github',
     icon: GitHubIcon,
     labelKey: 'login.githubSignIn',
     labelDefault: 'Continue with GitHub',
-    variant: 'default',
   },
   {
     id: 'google',
     icon: GoogleIcon,
     labelKey: 'login.googleSignIn',
     labelDefault: 'Continue with Google',
-    variant: 'outline',
   },
   {
     id: 'apple',
     icon: AppleIcon,
     labelKey: 'login.appleSignIn',
     labelDefault: 'Continue with Apple',
-    variant: 'outline',
   },
   {
     id: 'discord',
     icon: DiscordIcon,
     labelKey: 'login.discordSignIn',
     labelDefault: 'Continue with Discord',
-    variant: 'outline',
   },
 ];
 
@@ -566,15 +596,46 @@ export function LoginPage({
   const [isEmailSubmitting, setIsEmailSubmitting] = useState(false);
   const [isResendingVerification, setIsResendingVerification] = useState(false);
   const [isOpeningElectronBrowser, setIsOpeningElectronBrowser] = useState(false);
-  // Set the instant the browser hands the auth token back via the `lody://auth/
-  // callback#token=…` deep link (detected centrally in DesktopDeepLinkRouter), so
-  // the desktop login shows a "signing in" spinner while better-auth exchanges
-  // the token for a session.
-  const isCompletingElectronSignIn = useAtomValue(electronDeepLinkSignInInProgressAtom);
-  const [providerContentWidth, setProviderContentWidth] = useState<number | null>(null);
-  const hasAutoElectronBridgeAttemptedRef = useRef(false);
-  const providerLabelMeasureRef = useRef<HTMLDivElement | null>(null);
+  // Browser-side desktop handoff (`/login?client_id=electron&…`). The page never
+  // bridges the browser session on its own: signing out of the desktop leaves
+  // this browser signed in as the previous account, so an automatic transfer
+  // would mint an authorization code for the account the user is trying to
+  // leave, with no way back. The user picks the account, then this holds the
+  // channel-specific auth callback URL that both the automatic navigation and
+  // the visible fallback link use.
+  const [electronHandoffUrl, setElectronHandoffUrl] = useState<string | null>(null);
+  const [isPreparingElectronHandoff, setIsPreparingElectronHandoff] = useState(false);
+  const [isSwitchingElectronAccount, setIsSwitchingElectronAccount] = useState(false);
+  // A sign-out that did not reach the server leaves this browser authenticated
+  // as the account the user asked to leave, and the session cookie is exactly
+  // what the next transfer would hand to the desktop app. Block the handoff
+  // until a switch succeeds (or the session goes away on its own) rather than
+  // silently offering the old account again.
+  const [hasFailedElectronAccountSwitch, setHasFailedElectronAccountSwitch] = useState(false);
+  // Bumped when the user chooses another account. A transfer started for the
+  // previous account can still be in flight (or its `better-auth.electron`
+  // cookie still set), and must not produce a handoff link afterwards.
+  const electronAccountGenerationRef = useRef(0);
+  const autoOpenedElectronHandoffRef = useRef<string | null>(null);
+  // Main owns the callback exchange; restored snapshots also recover progress
+  // when this renderer mounts after the browser has returned.
+  const electronLoginPhase = useAtomValue(electronLoginPhaseAtom);
+  const electronLoginError = useAtomValue(electronLoginErrorAtom);
+  const electronLoginErrorDetail = useAtomValue(electronLoginErrorDetailAtom);
+  const isCompletingElectronSignIn = electronLoginPhase === 'exchanging';
+  const setNativeSignInInProgress = useSetAtom(nativeSignInInProgressAtom);
+  const [lastLoginMethod] = useState(readLastLoginMethod);
+  const prefersReducedMotion = useReducedMotion();
+  const taglineRef = useRef<HTMLParagraphElement | null>(null);
+  // The page is outside the workspace layouts that pad for the iOS keyboard,
+  // so it lifts itself (`styles.page`) and keeps the focused field centred in
+  // the panel that is still visible.
+  const panelRef = useRef<HTMLElement | null>(null);
+  useKeyboardAwareScrollIntoView(panelRef);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const focusEmailInput = useCallback(() => {
+    emailInputRef.current?.focus({ preventScroll: true });
+  }, []);
   const loginViewedRef = useRef(false);
   const electronOAuthQuery = getElectronOAuthQuery();
   const isElectronOAuthFlow = electronOAuthQuery != null;
@@ -591,7 +652,21 @@ export function LoginPage({
   const privacyUrl = new URL(isChinese ? '/zh/privacy' : '/privacy', legalLinksOrigin).toString();
   const emailAuthCallbackURL = getEmailAuthCallbackURL(electronOAuthQuery);
   const isNativeApp = isNativeAppShell();
-  const { data: session, hasLocalToken, hasRawUser, isPending, isRetrying } = useStableSession();
+  const {
+    data: session,
+    hasLocalToken,
+    hasRawUser,
+    isPending,
+    isRetrying,
+    error: sessionError,
+    confirmedUnauthenticated,
+  } = useStableSession();
+  const canRedirectAuthenticatedUser = hasUsableSessionUser({
+    hasRawUser,
+    isRetrying,
+    hasError: sessionError !== null,
+    confirmedUnauthenticated,
+  });
   const loginSurface = isElectronOAuthFlow
     ? 'electron_browser_callback'
     : isNativeApp
@@ -603,12 +678,36 @@ export function LoginPage({
     getAppWindowSearchParams().get('expired') === '1'
       ? t('login.sessionExpired', 'Login expired. Please sign in again.')
       : '';
-  const effectiveError = error || expiredMessage;
+  const desktopLoginError =
+    isElectronRendererLogin && electronLoginError
+      ? t(`login.desktopErrors.${electronLoginError}`)
+      : '';
+  const effectiveError = error || desktopLoginError || expiredMessage;
+  // The category message says what to do; the detail is what support needs.
+  const effectiveErrorDetail =
+    !error && desktopLoginError && electronLoginErrorDetail
+      ? t('login.desktopErrors.detail', { detail: electronLoginErrorDetail })
+      : '';
   const isAnyLoading =
     loadingProvider !== null ||
     isEmailSubmitting ||
     isResendingVerification ||
-    isOpeningElectronBrowser;
+    isOpeningElectronBrowser ||
+    isPreparingElectronHandoff ||
+    isSwitchingElectronAccount;
+  // The browser page opened by the desktop app shows which account it would
+  // hand over before handing anything over.
+  const isElectronBrowserHandoff = isElectronOAuthFlow && canRedirectAuthenticatedUser;
+  const electronHandoffAccountLabel = (() => {
+    const user = session?.user as { email?: unknown; name?: unknown } | undefined;
+    if (typeof user?.email === 'string' && user.email.length > 0) {
+      return user.email;
+    }
+    if (typeof user?.name === 'string' && user.name.length > 0) {
+      return user.name;
+    }
+    return '';
+  })();
   const isButtonsDisabled = isAnyLoading || (hasLocalToken && (isPending || isRetrying));
   const providerCount = isElectronRendererLogin ? 1 : PROVIDER_CONFIG.length;
   const getProviderLabel = (provider: SocialProvider) => {
@@ -619,11 +718,22 @@ export function LoginPage({
       : t(config.labelKey, config.labelDefault);
   };
 
-  const githubLabel = getProviderLabel('github');
-  const googleLabel = getProviderLabel('google');
-  const appleLabel = getProviderLabel('apple');
-  const discordLabel = getProviderLabel('discord');
   const emailEntryLabel = t('login.continueWithEmail', 'Continue with email');
+
+  // Warm the workspace layout while this page waits on the user, so the
+  // post-sign-in route swap neither fetches nor suspends. `preloadMainLayout`,
+  // not a bare `import()`: it records the module, so `PreloadedMainLayout`
+  // mounts it directly instead of suspending into the boot shell for a commit.
+  // Idle-scheduled so it never competes with this page's own paint; a failure
+  // is swallowed because it is only a warm-up, and is not cached, so the real
+  // mount retries and surfaces its own error.
+  //
+  // The cost is explicit: on web and mobile this is a real network request that
+  // /login did not use to make, and a visitor who never signs in pays it too.
+  // It is deliberately NOT gated on a sign-in click — a social login navigates
+  // away immediately, so a fetch started at click time is usually discarded,
+  // and the whole point is to have the chunk before the redirect returns.
+  useEffect(() => scheduleIdleTask(() => void preloadMainLayout().catch(() => {})), []);
 
   useEffect(() => {
     if (loginViewedRef.current) {
@@ -656,7 +766,7 @@ export function LoginPage({
   // client signal; the authoritative value comes from better-auth (spec §3.5).
   const oauthSucceededFiredRef = useRef(false);
   useEffect(() => {
-    if (!hasRawUser || oauthSucceededFiredRef.current) {
+    if (!canRedirectAuthenticatedUser || oauthSucceededFiredRef.current) {
       return;
     }
     const pending = readAndClearPendingOAuth();
@@ -664,6 +774,7 @@ export function LoginPage({
       return;
     }
     oauthSucceededFiredRef.current = true;
+    writeLastLoginMethod(pending.provider);
     const sessionUser = session?.user;
     identifyPostHogUser(
       postHog,
@@ -677,41 +788,7 @@ export function LoginPage({
       is_new_user: inferIsNewUser(sessionUser),
       oauth_round_trip_ms: Date.now() - pending.started_at_ms,
     });
-  }, [hasRawUser, isElectronRenderer, postHog, session]);
-
-  useLayoutEffect(() => {
-    const labelContainer = providerLabelMeasureRef.current;
-    if (!labelContainer) {
-      return;
-    }
-
-    const labelElements = Array.from(
-      labelContainer.querySelectorAll<HTMLElement>('[data-provider-label]')
-    );
-    if (labelElements.length === 0) {
-      return;
-    }
-
-    const maxLabelWidth = Math.max(
-      ...labelElements.map((element) => Math.ceil(element.getBoundingClientRect().width))
-    );
-    const nextWidth = maxLabelWidth + PROVIDER_ICON_SIZE + PROVIDER_ICON_GAP;
-    setProviderContentWidth((currentWidth) =>
-      currentWidth === nextWidth ? currentWidth : nextWidth
-    );
-  }, [githubLabel, googleLabel, appleLabel, discordLabel, emailEntryLabel]);
-
-  useEffect(() => {
-    if (view !== 'email') {
-      return undefined;
-    }
-    // Defer focus until the slide-in transition has settled so the browser does
-    // not interrupt the framer-motion animation by scrolling the input into view.
-    const handle = window.setTimeout(() => {
-      emailInputRef.current?.focus();
-    }, 220);
-    return () => window.clearTimeout(handle);
-  }, [view]);
+  }, [canRedirectAuthenticatedUser, isElectronRenderer, postHog, session]);
 
   const handleEnterEmailView = useCallback(() => {
     setError('');
@@ -802,6 +879,11 @@ export function LoginPage({
       const normalizedEmail = trimmedEmail.toLowerCase();
       const emailAuthClient = authClient as AuthClientWithEmailPassword;
       setIsEmailSubmitting(true);
+      const shouldFenceNativeSignIn = isNativeApp && emailAuthMode === 'sign-in';
+      let keepNativeSignInFence = false;
+      if (shouldFenceNativeSignIn) {
+        setNativeSignInInProgress(true);
+      }
 
       try {
         if (emailAuthMode === 'sign-in') {
@@ -841,6 +923,7 @@ export function LoginPage({
             return;
           }
 
+          writeLastLoginMethod('email');
           capturePostHogEvent(postHog, 'auth/email_sign_in_succeeded', {
             login_surface: loginSurface,
             launch_mode: detectAppLaunchMode(isElectronRenderer),
@@ -858,10 +941,12 @@ export function LoginPage({
           }
           if (electronOAuthQuery) {
             replaceAppWindowLocation(emailAuthCallbackURL);
+            keepNativeSignInFence = true;
             return;
           }
           setLoginHintCookie(true);
           replaceLocation(getRedirectTarget());
+          keepNativeSignInFence = true;
           return;
         }
 
@@ -927,6 +1012,9 @@ export function LoginPage({
             : t('login.emailAuthFailed', 'Email authentication failed. Please try again.')
         );
       } finally {
+        if (shouldFenceNativeSignIn && !keepNativeSignInFence) {
+          setNativeSignInInProgress(false);
+        }
         setIsEmailSubmitting(false);
       }
     },
@@ -944,6 +1032,7 @@ export function LoginPage({
       postHog,
       replaceLocation,
       sendVerificationEmail,
+      setNativeSignInInProgress,
       t,
     ]
   );
@@ -1004,6 +1093,10 @@ export function LoginPage({
       });
       // Persist a marker so the post-redirect return can fire oauth_succeeded.
       writePendingOAuth({ provider, login_surface: loginSurface, started_at_ms: Date.now() });
+      let keepNativeSignInFence = false;
+      if (isNativeApp) {
+        setNativeSignInInProgress(true);
+      }
 
       try {
         if (electronOAuthQuery) {
@@ -1040,6 +1133,7 @@ export function LoginPage({
             // The session atom may not be hydrated yet, so identify by the user id
             // resolved from a fresh getSession() rather than the stale React state.
             readAndClearPendingOAuth();
+            writeLastLoginMethod(provider);
             const refreshedSession = await authClient.getSession().catch(() => null);
             const nativeUser =
               refreshedSession && typeof refreshedSession === 'object'
@@ -1059,6 +1153,7 @@ export function LoginPage({
             });
             setLoginHintCookie(true);
             replaceLocation(getRedirectTarget());
+            keepNativeSignInFence = true;
           }
           return;
         }
@@ -1079,6 +1174,9 @@ export function LoginPage({
         });
         console.error(`${provider} login error:`, err);
       } finally {
+        if (isNativeApp && !keepNativeSignInFence) {
+          setNativeSignInInProgress(false);
+        }
         setLoadingProvider(null);
       }
     },
@@ -1090,6 +1188,7 @@ export function LoginPage({
       loginSurface,
       postHog,
       replaceLocation,
+      setNativeSignInInProgress,
       t,
     ]
   );
@@ -1126,6 +1225,11 @@ export function LoginPage({
     if (!electronOAuthQuery) {
       return;
     }
+    if (hasFailedElectronAccountSwitch) {
+      // The last switch did not sign this browser out, so a transfer here would
+      // hand over the account the user tried to leave.
+      return;
+    }
 
     const transferUser = (authClient as AuthClientWithElectronTransfer).electron?.transferUser;
     if (typeof transferUser !== 'function') {
@@ -1138,8 +1242,16 @@ export function LoginPage({
       return;
     }
 
+    // Everything after the await belongs to the account signed in right now.
+    const generation = electronAccountGenerationRef.current;
+    const isCurrentAccount = () => electronAccountGenerationRef.current === generation;
+
     setError('');
-    setLoadingProvider('github');
+    setElectronHandoffUrl(null);
+    setIsPreparingElectronHandoff(true);
+    // Drop any authorization code left in the cookie by an earlier transfer, so
+    // the fallback read below can only pick up the code this call minted.
+    clearElectronAuthorizationCode();
     capturePostHogEvent(postHog, 'auth/electron_session_transfer_started', {
       login_surface: loginSurface,
       launch_mode: detectAppLaunchMode(isElectronRenderer),
@@ -1153,6 +1265,16 @@ export function LoginPage({
       });
       const authorizationCode =
         result?.data?.electron_authorization_code ?? readElectronAuthorizationCode();
+      clearElectronAuthorizationCode();
+      if (!isCurrentAccount()) {
+        logElectronOAuthDebug('login page discarded transferUser result after account switch');
+        capturePostHogEvent(postHog, 'auth/electron_session_transfer_discarded', {
+          login_surface: loginSurface,
+          launch_mode: detectAppLaunchMode(isElectronRenderer),
+          discard_reason: 'account_switched',
+        });
+        return;
+      }
       if (!authorizationCode) {
         throw new Error('Missing Electron authorization code');
       }
@@ -1160,13 +1282,22 @@ export function LoginPage({
       logElectronOAuthDebug('login page received electron authorization code from transferUser', {
         authorizationCodeLength: authorizationCode.length,
       });
-      clearElectronAuthorizationCode();
       capturePostHogEvent(postHog, 'auth/electron_session_transfer_succeeded', {
         login_surface: loginSurface,
         launch_mode: detectAppLaunchMode(isElectronRenderer),
       });
-      redirectToElectronWithAuthorizationCode(authorizationCode, electronOAuthQuery.state);
+      setElectronHandoffUrl(
+        buildElectronRedirectUrl(
+          authorizationCode,
+          electronOAuthQuery.state,
+          electronOAuthQuery.desktop_channel
+        )
+      );
     } catch (err) {
+      if (!isCurrentAccount()) {
+        logElectronOAuthDebug('login page ignored transferUser failure after account switch');
+        return;
+      }
       setError(t('login.loginFailed', 'Login failed. Please try again.'));
       capturePostHogEvent(postHog, 'auth/electron_session_transfer_failed', {
         login_surface: loginSurface,
@@ -1180,9 +1311,94 @@ export function LoginPage({
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setLoadingProvider(null);
+      if (isCurrentAccount()) {
+        setIsPreparingElectronHandoff(false);
+      }
     }
-  }, [authClient, electronOAuthQuery, isElectronRenderer, loginSurface, postHog, t]);
+  }, [
+    authClient,
+    electronOAuthQuery,
+    hasFailedElectronAccountSwitch,
+    isElectronRenderer,
+    loginSurface,
+    postHog,
+    t,
+  ]);
+
+  // Signing out here is the only way to hand the desktop app a different
+  // account, and runs only on this explicit choice. The URL keeps this attempt's
+  // `state`/`code_challenge`, so the desktop app's pending PKCE request still
+  // matches after the next sign-in.
+  const handleSwitchElectronAccount = useCallback(async () => {
+    electronAccountGenerationRef.current += 1;
+    autoOpenedElectronHandoffRef.current = null;
+    setElectronHandoffUrl(null);
+    setIsPreparingElectronHandoff(false);
+    setError('');
+    setHasFailedElectronAccountSwitch(false);
+    clearElectronAuthorizationCode();
+    setIsSwitchingElectronAccount(true);
+    capturePostHogEvent(postHog, 'auth/electron_switch_account_started', {
+      login_surface: loginSurface,
+      launch_mode: detectAppLaunchMode(isElectronRenderer),
+    });
+
+    // Only a confirmed sign-out releases the handoff: on failure this browser is
+    // still authenticated as the previous account, so say so and keep the
+    // transfer blocked until a retry succeeds.
+    const reportSwitchFailure = (reason: string, message?: string) => {
+      setHasFailedElectronAccountSwitch(true);
+      setError(
+        t(
+          'login.desktopHandoff.switchFailed',
+          'Could not sign out of this browser. It is still signed in as the account above — try again.'
+        )
+      );
+      capturePostHogEvent(postHog, 'auth/electron_switch_account_failed', {
+        login_surface: loginSurface,
+        launch_mode: detectAppLaunchMode(isElectronRenderer),
+        failure_reason: reason,
+        error_message: message,
+      });
+    };
+
+    try {
+      const outcome = await signOutWithoutRedirect(authClient);
+      if (!outcome.ok) {
+        reportSwitchFailure('sign_out_rejected', outcome.error.message);
+      }
+    } catch (err) {
+      // `signOutWithoutRedirect` reports failures rather than throwing; this
+      // covers a local-state clear that threw before the request was made.
+      reportSwitchFailure('sign_out_threw', err instanceof Error ? err.message : String(err));
+      console.error('Electron handoff account switch error:', err);
+    } finally {
+      setIsSwitchingElectronAccount(false);
+    }
+  }, [authClient, isElectronRenderer, loginSurface, postHog, t]);
+
+  // The third way out of the handoff: keep the session in this browser instead
+  // of transferring it to the desktop app. The bail-out is the same as an
+  // account switch — a transfer already in flight must not mint a handoff link
+  // (or its automatic `lody://` open) after the user chose the web — then the
+  // page's ordinary authenticated redirect carries the existing session into
+  // the app: the validated `redirect` target, or the app root.
+  const handleUseInWebBrowser = useCallback(async () => {
+    electronAccountGenerationRef.current += 1;
+    autoOpenedElectronHandoffRef.current = null;
+    setElectronHandoffUrl(null);
+    setIsPreparingElectronHandoff(false);
+    setError('');
+    clearElectronAuthorizationCode();
+    capturePostHogEvent(postHog, 'auth/electron_handoff_use_web', {
+      login_surface: loginSurface,
+      launch_mode: detectAppLaunchMode(isElectronRenderer),
+      device_class: detectAppDeviceClass(),
+    });
+    if (await prepareAuthenticatedRedirect()) {
+      replaceLocation(getRedirectTarget());
+    }
+  }, [isElectronRenderer, loginSurface, postHog, prepareAuthenticatedRedirect, replaceLocation]);
 
   const handleLegalLinkClick = useCallback(
     async (event: React.MouseEvent<HTMLAnchorElement>, url: string) => {
@@ -1196,30 +1412,23 @@ export function LoginPage({
     [isNativeApp]
   );
 
+  // Attempt the app-scheme navigation from an effect rather than inline in the
+  // transfer handler: the fallback link has to be painted before the attempt,
+  // because a browser that refuses the custom scheme gives no callback and the
+  // link is then the only way forward. Whether any given browser accepts this
+  // automatic attempt is not something this page can determine.
   useEffect(() => {
-    if (!isElectronOAuthFlow || !hasRawUser) {
+    if (!electronHandoffUrl) {
       return;
     }
-    if (hasAutoElectronBridgeAttemptedRef.current) {
+    if (autoOpenedElectronHandoffRef.current === electronHandoffUrl) {
       return;
     }
-    hasAutoElectronBridgeAttemptedRef.current = true;
-    void handleElectronSessionTransfer();
-  }, [handleElectronSessionTransfer, hasRawUser, isElectronOAuthFlow]);
+    autoOpenedElectronHandoffRef.current = electronHandoffUrl;
+    redirectToElectronDeepLink(electronHandoffUrl);
+  }, [electronHandoffUrl]);
 
-  if (isElectronOAuthFlow && hasRawUser && !error) {
-    return (
-      <LoadingPlaceholder
-        title={t('login.redirectingToDesktop', 'Redirecting to desktop app')}
-        description={t(
-          'login.desktopSessionTransfer',
-          'Using your current web session to continue desktop sign-in.'
-        )}
-      />
-    );
-  }
-
-  if (hasRawUser && !isElectronOAuthFlow) {
+  if (canRedirectAuthenticatedUser && !isElectronOAuthFlow) {
     return (
       <BrowserRedirect
         to={getRedirectTarget()}
@@ -1234,84 +1443,67 @@ export function LoginPage({
   if (isElectronRendererLogin && isCompletingElectronSignIn) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('login.completingSignIn', 'Signing you in...')}
         description={t('login.completingSignInDescription', 'Finishing sign-in from your browser.')}
       />
     );
   }
 
+  const lastUsedBadge = <Badge>{t('login.lastUsed', 'Last used')}</Badge>;
+
+  // One group of equal buttons: a provider is a choice, not a recommendation,
+  // so none is filled. The method this device last completed carries a badge.
   const renderOAuthPanel = () => (
-    <motion.div
-      key="oauth"
-      initial={{ opacity: 0, x: -12 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -12 }}
-      transition={VIEW_TRANSITION}
-      className="flex flex-col gap-2.5"
-    >
-      {PROVIDER_CONFIG.map((provider) => {
-        const Icon = provider.icon;
-        return (
-          <Button
-            key={provider.id}
-            onClick={() => {
-              void handleSocialLogin(provider.id);
-            }}
-            className="h-10 w-full"
-            disabled={isButtonsDisabled}
-            variant={provider.variant}
-          >
-            <SocialLoginButtonContent
-              icon={<Icon />}
-              label={getProviderLabel(provider.id)}
-              width={providerContentWidth}
-            />
-          </Button>
-        );
-      })}
+    <div {...stylex.props(styles.methods)}>
+      <div {...stylex.props(styles.providerGroup)}>
+        {PROVIDER_CONFIG.map((provider) => {
+          const Icon = provider.icon;
+          return (
+            <Button
+              key={provider.id}
+              variant="secondary"
+              size="large"
+              onClick={() => {
+                void handleSocialLogin(provider.id);
+              }}
+              disabled={isButtonsDisabled}
+            >
+              <span {...stylex.props(styles.methodContent)}>
+                <Icon />
+                <span {...stylex.props(styles.methodLabel)}>{getProviderLabel(provider.id)}</span>
+                {lastLoginMethod === provider.id ? lastUsedBadge : null}
+              </span>
+            </Button>
+          );
+        })}
+      </div>
 
       {canUseEmailPasswordLogin ? (
-        <>
-          <div className="my-1 flex items-center gap-3 text-[11px] uppercase tracking-[0.14em] text-muted-foreground/70">
-            <span className="h-px flex-1 bg-border/70" />
-            <span>{t('login.orContinueWith', 'or')}</span>
-            <span className="h-px flex-1 bg-border/70" />
-          </div>
-
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleEnterEmailView}
-            className="h-10 w-full"
-            disabled={isButtonsDisabled}
-          >
-            <SocialLoginButtonContent
-              icon={
-                <ProviderIcon>
-                  <Mail strokeWidth={1.75} />
-                </ProviderIcon>
-              }
-              label={emailEntryLabel}
-              width={providerContentWidth}
-            />
-          </Button>
-        </>
+        <Button
+          type="button"
+          variant="ghost"
+          size="large"
+          onClick={handleEnterEmailView}
+          disabled={isButtonsDisabled}
+        >
+          <span {...stylex.props(styles.methodContent)}>
+            <ProviderIcon>
+              <Mail strokeWidth={1.75} />
+            </ProviderIcon>
+            <span {...stylex.props(styles.methodLabel)}>{emailEntryLabel}</span>
+            {lastLoginMethod === 'email' ? lastUsedBadge : null}
+          </span>
+        </Button>
       ) : null}
-    </motion.div>
+    </div>
   );
 
   const renderVerificationSentPanel = () => (
-    <motion.div
-      key="verification-sent"
-      initial={{ opacity: 0, x: 12 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -12 }}
-      transition={VIEW_TRANSITION}
-      className="flex flex-col gap-5"
-    >
+    <div className="flex flex-col gap-5">
       <div className="flex flex-col items-center gap-3 pt-1 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-          <Mail className="size-6 text-primary" strokeWidth={1.75} aria-hidden="true" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+          <Mail className="size-6 text-foreground" strokeWidth={1.75} aria-hidden="true" />
         </div>
         <p className="text-sm leading-relaxed text-muted-foreground">
           <Trans
@@ -1356,7 +1548,7 @@ export function LoginPage({
           {t('login.backToSignIn', 'Back to sign-in options')}
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 
   const renderEmailFormPanel = () => {
@@ -1370,12 +1562,7 @@ export function LoginPage({
         : t('login.emailSignIn', 'Sign in with email');
 
     return (
-      <motion.form
-        key="email-form"
-        initial={{ opacity: 0, x: 12 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: -12 }}
-        transition={VIEW_TRANSITION}
+      <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           void handleEmailSubmit(event);
@@ -1384,43 +1571,32 @@ export function LoginPage({
         aria-describedby={effectiveError ? 'login-form-error' : undefined}
         aria-busy={isEmailSubmitting}
       >
-        <div className="flex flex-col gap-3">
-          <AnimatePresence initial={false}>
-            {isSignUp ? (
-              <motion.div
-                key="name-field"
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={VIEW_TRANSITION}
-                className="overflow-hidden"
-              >
-                <div className="grid gap-1.5 pb-3">
-                  <Label htmlFor="email-auth-name" className="text-xs font-medium">
-                    {t('login.nameLabel', 'Name')}
-                  </Label>
-                  <Input
-                    id="email-auth-name"
-                    autoComplete="name"
-                    value={emailName}
-                    required
-                    disabled={isButtonsDisabled}
-                    onChange={(event) => {
-                      setEmailName(event.target.value);
-                      setError('');
-                    }}
-                    placeholder={t('login.namePlaceholder', 'Jane Doe')}
-                    className="h-10"
-                  />
-                </div>
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
+        <div {...stylex.props(styles.fields)}>
+          <LoginExpandingRow open={isSignUp} reducedMotion={!!prefersReducedMotion}>
+            <div {...stylex.props(styles.nameField)}>
+              <UiField.Label htmlFor="email-auth-name" className="text-xs font-medium">
+                {t('login.nameLabel', 'Name')}
+              </UiField.Label>
+              <Input
+                id="email-auth-name"
+                autoComplete="name"
+                value={emailName}
+                required={isSignUp}
+                disabled={isButtonsDisabled || !isSignUp}
+                onChange={(event) => {
+                  setEmailName(event.target.value);
+                  setError('');
+                }}
+                placeholder={t('login.namePlaceholder', 'Jane Doe')}
+                className="h-10"
+              />
+            </div>
+          </LoginExpandingRow>
 
-          <div className="grid gap-1.5">
-            <Label htmlFor="email-auth-email" className="text-xs font-medium">
+          <div {...stylex.props(styles.emailField)}>
+            <UiField.Label htmlFor="email-auth-email" className="text-xs font-medium">
               {t('login.emailLabel', 'Email address')}
-            </Label>
+            </UiField.Label>
             <Input
               ref={emailInputRef}
               id="email-auth-email"
@@ -1439,53 +1615,62 @@ export function LoginPage({
             />
           </div>
 
-          <div className="grid gap-1.5">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="email-auth-password" className="text-xs font-medium">
-                {t('login.passwordLabel', 'Password')}
-              </Label>
+          <div {...stylex.props(styles.passwordField)}>
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between">
+                <UiField.Label htmlFor="email-auth-password" className="text-xs font-medium">
+                  {t('login.passwordLabel', 'Password')}
+                </UiField.Label>
+              </div>
+              <PasswordInput
+                id="email-auth-password"
+                autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                value={password}
+                required
+                disabled={isButtonsDisabled}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setError('');
+                }}
+                placeholder={
+                  isSignUp
+                    ? t('login.passwordSignUpPlaceholder', 'Letters and numbers, 8+ characters')
+                    : t('login.passwordPlaceholder', 'At least 8 characters')
+                }
+                className="h-10"
+                labels={{
+                  show: t('login.showPassword', 'Show password'),
+                  hide: t('login.hidePassword', 'Hide password'),
+                }}
+              />
             </div>
-            <PasswordInput
-              id="email-auth-password"
-              autoComplete={isSignUp ? 'new-password' : 'current-password'}
-              value={password}
-              required
-              disabled={isButtonsDisabled}
-              onChange={(event) => {
-                setPassword(event.target.value);
-                setError('');
-              }}
-              placeholder={
-                isSignUp
-                  ? t('login.passwordSignUpPlaceholder', 'Letters and numbers, 8+ characters')
-                  : t('login.passwordPlaceholder', 'At least 8 characters')
-              }
-              className="h-10"
-              showPasswordLabel={t('login.showPassword', 'Show password')}
-              hidePasswordLabel={t('login.hidePassword', 'Hide password')}
-            />
-            {!isSignUp ? (
-              <div className="flex justify-end">
+            <LoginExpandingRow open={!isSignUp} reducedMotion={!!prefersReducedMotion}>
+              <div className="flex justify-end pt-1.5">
                 <button
                   type="button"
                   onClick={handleForgotPassword}
-                  disabled={isButtonsDisabled}
+                  disabled={isButtonsDisabled || isSignUp}
                   className="text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
                 >
                   {t('login.forgotPassword', 'Forgot password?')}
                 </button>
               </div>
-            ) : null}
+            </LoginExpandingRow>
           </div>
 
-          <Button type="submit" className="mt-1 h-10 w-full" disabled={isButtonsDisabled}>
+          <Button
+            type="submit"
+            aria-label={submitLabel}
+            className="mt-1 h-10 w-full"
+            disabled={isButtonsDisabled}
+          >
             {isEmailSubmitting ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Spinner className="mr-2 h-4 w-4" />
                 {submitLabel}
               </>
             ) : (
-              <span className="flex items-center justify-center gap-2">
+              <span aria-hidden="true" className="flex items-center justify-center gap-2">
                 {submitLabel}
                 <ArrowRight className="size-4 opacity-80" strokeWidth={1.75} />
               </span>
@@ -1537,41 +1722,24 @@ export function LoginPage({
             )}
           </div>
         ) : null}
-      </motion.form>
+      </form>
     );
   };
 
-  const renderEmailPanel = () => (
-    <motion.div
-      key="email"
-      initial={{ opacity: 0, x: 12 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 12 }}
-      transition={VIEW_TRANSITION}
-    >
-      <AnimatePresence mode="wait" initial={false}>
-        {emailAuthStatus === 'verification-sent'
-          ? renderVerificationSentPanel()
-          : renderEmailFormPanel()}
-      </AnimatePresence>
-    </motion.div>
-  );
+  const renderEmailPanel = () =>
+    emailAuthStatus === 'verification-sent'
+      ? renderVerificationSentPanel()
+      : renderEmailFormPanel();
 
   const renderElectronRendererPanel = () => (
-    <motion.div
-      key="electron"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={VIEW_TRANSITION}
-      className="flex flex-col gap-3"
-    >
+    <div className="flex flex-col gap-3">
       <Button
         onClick={() => void handleElectronBrowserLogin()}
         className="h-10 w-full"
         disabled={isButtonsDisabled}
       >
         <SocialLoginButtonContent
-          icon={<ExternalLink />}
+          icon={<MajesticonsExternalLinkLine width={18} height={18} aria-hidden="true" />}
           label={
             isOpeningElectronBrowser
               ? t('login.openingBrowser', 'Opening browser...')
@@ -1581,15 +1749,17 @@ export function LoginPage({
         />
       </Button>
       <p className="text-center text-xs leading-5 text-muted-foreground">
-        {t(
-          'login.desktopBrowserHint',
-          'Your browser will return you to Lody Desktop after sign-in.'
-        )}
+        {electronLoginPhase === 'waiting'
+          ? t('login.desktopWaiting')
+          : t(
+              'login.desktopBrowserHint',
+              'Your browser will return you to Lody Desktop after sign-in.'
+            )}
       </p>
       {isDevElectronEmailPasswordLoginEnabled ? (
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           onClick={handleEnterEmailView}
           className="h-10 w-full"
           disabled={isButtonsDisabled}
@@ -1605,11 +1775,97 @@ export function LoginPage({
           />
         </Button>
       ) : null}
-    </motion.div>
+    </div>
+  );
+
+  const renderElectronBrowserHandoffPanel = () => (
+    <div className="flex flex-col gap-3">
+      {electronHandoffAccountLabel ? (
+        <div className="rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-center">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground/80">
+            {t('login.desktopHandoff.signedInAs', 'This browser is signed in as')}
+          </div>
+          <div
+            className="truncate text-sm font-medium text-foreground"
+            title={electronHandoffAccountLabel}
+          >
+            {electronHandoffAccountLabel}
+          </div>
+        </div>
+      ) : null}
+
+      {electronHandoffUrl ? (
+        <Button
+          render={<a href={electronHandoffUrl} data-electron-handoff-link />}
+          className="h-10 w-full"
+        >
+          {/* A real link: the automatic navigation may be refused, and this is
+              then the user's way to open the desktop app. */}
+          <SocialLoginButtonContent
+            icon={<MajesticonsExternalLinkLine width={18} height={18} aria-hidden="true" />}
+            label={t('login.desktopHandoff.openApp', 'Open Lody Desktop')}
+            width={null}
+          />
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          onClick={() => void handleElectronSessionTransfer()}
+          className="h-10 w-full"
+          disabled={isButtonsDisabled || hasFailedElectronAccountSwitch}
+        >
+          {isPreparingElectronHandoff ? (
+            <>
+              <Spinner className="mr-2 h-4 w-4" />
+              {t('login.desktopHandoff.preparing', 'Preparing desktop sign-in...')}
+            </>
+          ) : (
+            <SocialLoginButtonContent
+              icon={<ArrowRight />}
+              label={t('login.desktopHandoff.continue', 'Continue with this account')}
+              width={null}
+            />
+          )}
+        </Button>
+      )}
+
+      {/* Not gated on `isButtonsDisabled` either: during an in-flight transfer
+          this is the exit that cancels it. Disabled only while signing out,
+          when the session this path relies on is being torn down. */}
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => void handleUseInWebBrowser()}
+        className="h-10 w-full"
+        disabled={isSwitchingElectronAccount}
+      >
+        {t('login.desktopHandoff.useWeb', 'Continue in browser')}
+      </Button>
+
+      {/* Deliberately not gated on `isButtonsDisabled`: a transfer in flight for
+          the wrong account is exactly when the user needs this way out, and its
+          late result is discarded by the account generation. */}
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => void handleSwitchElectronAccount()}
+        className="h-10 w-full"
+        disabled={isSwitchingElectronAccount}
+      >
+        {isSwitchingElectronAccount
+          ? t('login.desktopHandoff.switching', 'Signing out of this browser...')
+          : t('login.desktopHandoff.switchAccount', 'Use a different account')}
+      </Button>
+    </div>
   );
 
   const isEmailVerificationSent = view === 'email' && emailAuthStatus === 'verification-sent';
   const headerTitle = (() => {
+    if (isElectronBrowserHandoff) {
+      return electronHandoffUrl
+        ? t('login.redirectingToDesktop', 'Redirecting to desktop app')
+        : t('login.desktopHandoff.title', 'Continue to Lody Desktop');
+    }
     if (view !== 'email' || (isElectronRendererLogin && !isDevElectronEmailPasswordLoginEnabled)) {
       return t('login.title');
     }
@@ -1622,6 +1878,17 @@ export function LoginPage({
     return t('login.emailViewTitle', 'Sign in with email');
   })();
   const headerDescription = (() => {
+    if (isElectronBrowserHandoff) {
+      return electronHandoffUrl
+        ? t(
+            'login.desktopHandoff.openHint',
+            'If the desktop app did not open, use the button below.'
+          )
+        : t(
+            'login.desktopSessionTransfer',
+            'Using your current web session to continue desktop sign-in.'
+          );
+    }
     if (isElectronRendererLogin && !isDevElectronEmailPasswordLoginEnabled) {
       return t(
         'login.desktopDescription',
@@ -1637,127 +1904,310 @@ export function LoginPage({
     return t('login.emailViewDescription', 'Use your email address and password to continue.');
   })();
 
+  const showElectronRendererPanel =
+    isElectronRendererLogin && !(isDevElectronEmailPasswordLoginEnabled && view === 'email');
+  const showBackButton = view === 'email' && canUseEmailPasswordLogin;
+  // On a phone the visual sits above the form; the email form needs the room
+  // (and the keyboard takes the rest), so the visual folds away there.
+  const isVisualFolded = view === 'email';
+  const entranceInitial = prefersReducedMotion ? false : 'hidden';
+
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-background p-4">
-      <motion.div
-        layout
-        transition={VIEW_TRANSITION}
-        className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)]"
+    <div {...stylex.props(styles.page)}>
+      <WindowDragStrip />
+      <section {...stylex.props(styles.visual, isVisualFolded && styles.visualFolded)}>
+        <LoginDitherVisual keepClearRef={taglineRef} />
+        {/* Temporarily hidden: bottom-left tagline, pending design feedback.
+        <motion.p
+          ref={taglineRef}
+          initial={entranceInitial}
+          animate="shown"
+          variants={ENTRANCE_TAGLINE}
+          {...stylex.props(styles.tagline)}
+        >
+          {t('login.tagline', 'A shared workspace for the coding agents your team already uses.')}
+        </motion.p>
+        */}
+      </section>
+
+      <motion.main
+        ref={panelRef}
+        initial={entranceInitial}
+        animate="shown"
+        variants={ENTRANCE_STAGGER}
+        {...stylex.props(styles.panel)}
       >
-        <AnimatePresence initial={false}>
-          {view === 'email' &&
-          (!isElectronRendererLogin || isDevElectronEmailPasswordLoginEnabled) ? (
-            <motion.button
-              key="back"
-              type="button"
-              aria-label={t('login.back', 'Back')}
-              onClick={handleExitEmailView}
-              disabled={isButtonsDisabled}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={VIEW_TRANSITION}
-              className={cn(
-                'absolute left-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors',
-                'hover:bg-hover hover:text-foreground',
-                'focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
-                'disabled:opacity-50'
-              )}
-            >
-              <ArrowLeft className="size-4" strokeWidth={1.75} />
-            </motion.button>
-          ) : null}
-        </AnimatePresence>
-
-        <div className="px-7 pb-6 pt-7">
-          <div className="flex flex-col items-center gap-3 pb-6 text-center">
-            <img src={lodyLogo} alt="Lody" className="h-12 w-12 object-contain" draggable={false} />
-            <div className="space-y-1">
-              <h1
-                id="login-title"
-                className="text-xl font-semibold leading-tight tracking-tight text-foreground"
+        <motion.div variants={ENTRANCE_ITEM} {...stylex.props(styles.body)}>
+          <div {...stylex.props(styles.scene)}>
+            <div {...stylex.props(styles.header)}>
+              <LoginExpandingRow open={showBackButton} reducedMotion={!!prefersReducedMotion}>
+                <div {...stylex.props(styles.back)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="small"
+                    onClick={handleExitEmailView}
+                    disabled={isButtonsDisabled}
+                  >
+                    <ArrowLeft size={14} strokeWidth={1.75} aria-hidden="true" />
+                    {t('login.back', 'Back')}
+                  </Button>
+                </div>
+              </LoginExpandingRow>
+              <LoginExpandingRow
+                open
+                reducedMotion={!!prefersReducedMotion}
+                contentKey={`${headerTitle}:${headerDescription}:${isEmailVerificationSent}`}
               >
-                {headerTitle}
-              </h1>
-              {isEmailVerificationSent ? null : (
-                <p className="text-sm text-muted-foreground">{headerDescription}</p>
-              )}
+                <h1 id="login-title" {...stylex.props(styles.title)}>
+                  {headerTitle}
+                </h1>
+                {isEmailVerificationSent ? null : (
+                  <p {...stylex.props(styles.description)}>{headerDescription}</p>
+                )}
+              </LoginExpandingRow>
             </div>
-          </div>
 
-          {!isElectronRendererLogin ? (
-            <div
-              ref={providerLabelMeasureRef}
-              aria-hidden="true"
-              className="pointer-events-none absolute left-0 top-0 -z-10 opacity-0"
-            >
-              <div className="flex flex-col gap-2 text-sm font-medium">
-                {PROVIDER_CONFIG.map((provider) => (
-                  <span key={provider.id} data-provider-label>
-                    {getProviderLabel(provider.id)}
-                  </span>
-                ))}
-                <span data-provider-label>{emailEntryLabel}</span>
-              </div>
-            </div>
-          ) : null}
-
-          <AnimatePresence initial={false} mode="wait">
             {effectiveError ? (
-              <motion.p
-                key={effectiveError}
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={VIEW_TRANSITION}
+              <p
                 id="login-form-error"
                 role="alert"
-                className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive"
+                className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
               >
                 {effectiveError}
-              </motion.p>
+                {effectiveErrorDetail ? (
+                  <span className="mt-1 block select-text break-all text-[11px] opacity-80">
+                    {effectiveErrorDetail}
+                  </span>
+                ) : null}
+              </p>
             ) : null}
-          </AnimatePresence>
 
-          <AnimatePresence mode="wait" initial={false}>
-            {isElectronRendererLogin &&
-            !(isDevElectronEmailPasswordLoginEnabled && view === 'email')
-              ? renderElectronRendererPanel()
-              : view === 'oauth'
-                ? renderOAuthPanel()
-                : renderEmailPanel()}
-          </AnimatePresence>
-
-          {view === 'email' && emailAuthStatus === 'verification-sent' ? null : (
-            <p className="mt-6 text-center text-[11px] leading-5 text-muted-foreground/80">
-              <Trans
-                i18nKey="login.legalNotice"
-                components={{
-                  br: <br />,
-                  terms: (
-                    <a
-                      href={termsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline underline-offset-4 hover:text-foreground"
-                      onClick={(event) => void handleLegalLinkClick(event, termsUrl)}
-                    />
-                  ),
-                  privacy: (
-                    <a
-                      href={privacyUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline underline-offset-4 hover:text-foreground"
-                      onClick={(event) => void handleLegalLinkClick(event, privacyUrl)}
-                    />
-                  ),
-                }}
+            {isElectronBrowserHandoff ? (
+              renderElectronBrowserHandoffPanel()
+            ) : (
+              <LoginViewSlot
+                active={view === 'email' && !showElectronRendererPanel ? 1 : 0}
+                reducedMotion={!!prefersReducedMotion}
+                onEntered={focusEmailInput}
+                panels={[
+                  isElectronRendererLogin ? renderElectronRendererPanel() : renderOAuthPanel(),
+                  canUseEmailPasswordLogin ? renderEmailPanel() : null,
+                ]}
               />
-            </p>
-          )}
-        </div>
-      </motion.div>
+            )}
+
+            {isEmailVerificationSent ? null : (
+              <p {...stylex.props(styles.legal)}>
+                <Trans
+                  i18nKey="login.legalNotice"
+                  components={{
+                    br: <br />,
+                    terms: (
+                      <a
+                        href={termsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(event) => void handleLegalLinkClick(event, termsUrl)}
+                        {...stylex.props(styles.legalLink)}
+                      />
+                    ),
+                    privacy: (
+                      <a
+                        href={privacyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(event) => void handleLegalLinkClick(event, privacyUrl)}
+                        {...stylex.props(styles.legalLink)}
+                      />
+                    ),
+                  }}
+                />
+              </p>
+            )}
+          </div>
+        </motion.div>
+      </motion.main>
     </div>
   );
 }
+
+const NARROW = '@media (max-width: 860px)';
+// A phone on its side, or a very short window: no room for a visual above the form.
+const NARROW_SHORT = '@media (max-width: 860px) and (max-height: 600px)';
+const SAFE_TOP = 'max(12px, env(safe-area-inset-top))';
+// The iOS shell overlays the keyboard (`resize: "none"`, viewport
+// `overlaps-content`), so `100dvh` never shrinks; reserving the keyboard height
+// shrinks the panel row instead. The keyboard already covers the home
+// indicator, so the two are not added.
+const SAFE_BOTTOM = 'max(12px, env(safe-area-inset-bottom), var(--native-keyboard-height, 0px))';
+
+const styles = stylex.create({
+  // The window holds two things: an inset visual surface and the sign-in
+  // column. On a narrow window they stack, the visual on top.
+  page: {
+    boxSizing: 'border-box',
+    display: 'grid',
+    gridTemplateColumns: { default: 'minmax(0, 1fr) minmax(360px, 440px)', [NARROW]: '1fr' },
+    gridTemplateRows: { default: '1fr', [NARROW]: 'auto minmax(0, 1fr)' },
+    width: '100%',
+    height: { default: '100vh', '@supports (height: 100dvh)': '100dvh' },
+    paddingTop: SAFE_TOP,
+    paddingBottom: SAFE_BOTTOM,
+    paddingInline: '12px',
+    backgroundColor: colors.background,
+    color: colors.label,
+  },
+  visual: {
+    position: 'relative',
+    display: { default: 'block', [NARROW_SHORT]: 'none' },
+    gridRow: { default: 'auto', [NARROW]: '1' },
+    minWidth: 0,
+    height: { default: 'auto', [NARROW]: 'clamp(200px, 42svh, 360px)' },
+    overflow: 'hidden',
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    // Paper and ink of the dither: a step off the page, and the page's ink.
+    // In dark mode the ink is mixed toward black so the jellyfish reads a
+    // touch dimmer than interface white. (The dither resolves this colour by
+    // painting it, which ignores alpha, so it must dim via colour, not opacity.)
+    backgroundColor: `color-mix(in oklab, ${colors.label} 5%, ${colors.background})`,
+    color: {
+      default: colors.label,
+      [DARK]: `color-mix(in oklab, ${colors.label} 88%, black)`,
+    },
+    transitionProperty: {
+      default: 'none',
+      [NARROW]: 'height, opacity',
+      [REDUCED_MOTION]: 'none',
+    },
+    transitionDuration: '320ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  // Only a stacked layout folds; side by side there is room for both.
+  visualFolded: {
+    height: { default: null, [NARROW]: '0px' },
+    opacity: { default: null, [NARROW]: 0 },
+  },
+  tagline: {
+    position: 'absolute',
+    insetInlineStart: { default: '40px', [NARROW]: '20px' },
+    bottom: { default: '36px', [NARROW]: '20px' },
+    maxWidth: { default: '460px', [NARROW]: 'calc(100% - 40px)' },
+    margin: 0,
+    fontFamily: 'var(--font-wordmark)',
+    fontSize: { default: '30px', [NARROW]: '22px' },
+    lineHeight: 1.15,
+    letterSpacing: '-0.01em',
+    color: colors.label,
+  },
+  // Keep the sign-in group at the bottom, within reach of a thumb when stacked.
+  panel: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    // Its own row when stacked, so a hidden visual leaves it the full height.
+    gridRow: { default: 'auto', [NARROW]: '2' },
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingTop: { default: '28px', [NARROW]: '24px' },
+    paddingBottom: { default: '36px', [NARROW]: '12px' },
+    paddingInlineStart: { default: '52px', [NARROW]: '20px' },
+    paddingInlineEnd: { default: '40px', [NARROW]: '20px' },
+  },
+  body: {
+    marginTop: 'auto',
+    width: '100%',
+    maxWidth: { default: '360px', [NARROW]: 'none' },
+  },
+  scene: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[6],
+  },
+  header: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'start',
+  },
+  fields: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  nameField: {
+    display: 'grid',
+    gap: space[1.5],
+    paddingBottom: space[3],
+  },
+  emailField: {
+    display: 'grid',
+    gap: space[1.5],
+    marginBottom: space[3],
+  },
+  passwordField: {
+    display: 'grid',
+    marginBottom: space[3],
+  },
+  back: {
+    marginInlineStart: '-10px',
+    paddingBottom: space[2],
+  },
+  title: {
+    margin: 0,
+    fontSize: '28px',
+    lineHeight: 1.2,
+    fontWeight: 600,
+    letterSpacing: '-0.025em',
+    color: colors.label,
+  },
+  description: {
+    margin: 0,
+    marginTop: space[2],
+    fontSize: '14px',
+    lineHeight: 1.5,
+    color: colors.secondaryLabel,
+  },
+  methods: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  providerGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  // Icon and label start at the button's edge so every row lines up, and the
+  // badge takes the far end.
+  methodContent: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    width: '100%',
+    minWidth: 0,
+  },
+  methodLabel: {
+    flexGrow: 1,
+    minWidth: 0,
+    // Ellipsis clips vertically too; the button's 1em line box cuts off descenders.
+    lineHeight: text.subheadlineLeading,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    textAlign: 'start',
+  },
+  legal: {
+    margin: 0,
+    paddingTop: '16px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    fontSize: '11px',
+    lineHeight: 1.6,
+    color: colors.tertiaryLabel,
+  },
+  legalLink: {
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    textDecoration: 'underline',
+    textUnderlineOffset: '3px',
+  },
+});

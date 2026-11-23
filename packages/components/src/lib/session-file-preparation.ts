@@ -1,0 +1,90 @@
+import { uploadProtectedAttachment } from './encrypted-session-attachment';
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
+import { type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
+import type { SessionFilePayload, SessionId, WorkspaceId } from '@lody/shared';
+import {
+  computeSha256Hex,
+  computeTextPreviewable,
+  uploadSessionFile,
+  type SessionFileUploadProgress,
+} from './session-file-upload';
+import { throwIfSendAborted, type SessionSendResources } from './session-send-resources';
+
+export class SessionFilePreparationAuthError extends Error {
+  constructor() {
+    super('Missing workspace or auth token');
+    this.name = 'SessionFilePreparationAuthError';
+  }
+}
+
+/** One transfer path for landing and continuation; UI only observes its result. */
+export function prepareSessionFile(
+  resources: SessionSendResources,
+  args: {
+    content: WorkspaceStreamsMode;
+    accountId?: string;
+    attachmentToken?: () => Promise<string>;
+    workspaceId: WorkspaceId;
+    sessionId: SessionId;
+    token: string | null;
+    file: File;
+    signal?: AbortSignal;
+    onProgress?: (progress: SessionFileUploadProgress) => void;
+  }
+): Promise<SessionFilePayload> {
+  return resources.run(async (signal) => {
+    throwIfSendAborted(signal);
+    requireWorkspaceFeature(args.content, 'attachments');
+    const progress = (value: SessionFileUploadProgress) => {
+      if (!signal.aborted) args.onProgress?.(value);
+    };
+    if (args.content.mode === 'protected') {
+      const { encryption, sha256 } = await uploadProtectedAttachment({
+        ...args,
+        kind: 'file',
+        signal,
+        onProgress: (percent) =>
+          progress({
+            phase: 'uploading',
+            percent,
+            loadedBytes: Math.round((args.file.size * percent) / 100),
+            totalBytes: args.file.size,
+          }),
+      });
+      const fileId = encryption.parts[0];
+      if (!fileId) throw new Error('Invalid encrypted attachment receipt');
+      return {
+        type: 'file',
+        fileId,
+        fileName: args.file.name,
+        mimeType: args.file.type || 'application/octet-stream',
+        sizeBytes: args.file.size,
+        sha256,
+        textPreview: await computeTextPreviewable(args.file),
+        transport: 'r2',
+        uploadedAt: Date.now(),
+        encryption,
+      };
+    }
+    if (!args.token) throw new SessionFilePreparationAuthError();
+    const [hash, preview] = await Promise.allSettled([
+      computeSha256Hex(args.file, { signal, onProgress: progress }),
+      computeTextPreviewable(args.file),
+    ]);
+    throwIfSendAborted(signal);
+    if (hash.status === 'rejected') throw hash.reason;
+    if (preview.status === 'rejected') throw preview.reason;
+    return await uploadSessionFile({
+      accountId: args.accountId,
+      content: args.content,
+      workspaceId: args.workspaceId,
+      sessionId: args.sessionId,
+      token: args.token,
+      file: args.file,
+      sha256: hash.value,
+      textPreview: preview.value,
+      signal,
+      onProgress: progress,
+    });
+  }, args.signal);
+}

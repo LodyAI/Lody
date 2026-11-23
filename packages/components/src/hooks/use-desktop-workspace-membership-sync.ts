@@ -4,7 +4,7 @@ import { useAuthClient } from '../providers/convex-provider';
 import { useCloudQuery } from '@lody/platform/react';
 
 /**
- * Refresh Electron's Better Auth organization cache when Convex observes a
+ * Refresh cloud clients' Better Auth organization cache when Convex observes a
  * cross-device membership change. The first value is only a baseline: the
  * organization store performs its own initial fetch.
  */
@@ -36,8 +36,12 @@ export function useDesktopWorkspaceMembershipSync(userId: string | null): void {
     }
 
     observedMembershipRef.current = { userId, fingerprint };
-    void authClient.updateSession().catch((error) => {
+    try {
+      // Better Auth's cross-domain action synchronously notifies the session store.
+      void authClient.updateSession();
+      authClient.$store.notify('$activeOrgSignal');
+    } catch (error) {
       console.warn('[Auth] Failed to refresh workspaces after membership change', error);
-    });
+    }
   }, [authClient, fingerprint, userId]);
 }

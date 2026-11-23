@@ -2,7 +2,114 @@
 
 Parent `AGENTS.md` files also apply.
 
+## Session turns have one read path and one write path
+
+A session document's `history` is the one piece of state that grows without
+bound, so the windowed path avoids mirroring it into memory as an array. Everything goes through
+`SessionDocStore`:
+
+- **Read** `store.history` — a `ConversationView`: `index(i)` for the always-present
+  per-turn row, `turn(i)` for a hydrated turn, `acquireRange` and its release handle to hold a
+  window. In React use `useSessionDoc().history`, `useConversationTail`,
+  `useTurnRange`, or `useSessionTurnFacts` for a whole-history fact.
+- **Write** domain commands through `store.sessionData` (`@lody/shared/session-data`):
+  `applyHistoryAction`, `appendTurn`, `replaceTurn` and
+  `respondPermission`. It is composed over the same doc and the
+  one shared writer; a rejected command surfaces as a failure, never a silent drop.
+- The composition owns one HistoryWriter; the UI store does not expose it.
+  Do not add a second writer or bypass `sessionData` for ordinary turn writes.
+
+`getState()` has no `history` key and `setState` receives a draft without one,
+so the ordinary spellings of a second path do not compile. What types cannot
+close is a deliberate escape — a cast that puts the key back, or reaching past
+the store into the raw `LoroDoc`. Do not bypass these boundaries. No component
+reads the raw history list; composition injects the shared reader.
+
+Full-history actions use the authoritative consistent full-read operation.
+Performance comparisons must use the current full-Mirror baseline.
+
+## Image previews
+
+Pending local images use only scoped host previews. Published `r2` images retain local-first previews and authenticated cloud fallback when unavailable. Follow [rendering](components/ai-gui/session-files-rendering.md) for image publication and cache behavior. Sends, schedules, and replay preserve image identity without capability preflights. Plaintext desktop sends prepare known matching targets locally; protected sends and schedules always use encrypted transfer for unprepared attachments.
+
+## Conversation exports
+
+Conversation Markdown/PNG exports use `usePlaintextCopy` before capture and
+repeat runtime admission and its source guard before output. Unknown cloud mode
+cannot authorize a copy; encrypted copies require a fresh explicit choice.
+Cancellation retains selection and cannot remove a user destination.
+[Ownership](hooks/README.md#explicit-plaintext-copies).
+
+## Lightweight hosted entries
+
+- `lib/client-build-info.ts` owns build provenance for About and reports. Bug report
+  diagnostics use `lib/client-diagnostics.ts`'s environment allowlist and a bounded
+  tail from `lib/client-log.ts`, distinct from remote machine logs.
+
+- Public/auth entry points that bypass the full product router import route-agnostic
+  surfaces. Keep host navigation behind callback props so those surfaces do not import
+  the route tree, `RuntimeProvider`, or workspace Flock document implementation. When
+  an auth transition selects the destination, the host owns both the non-redirecting
+  auth action and navigation so an auth helper cannot discard route-specific state.
+
+## Soft-keyboard viewport handling
+
+- Side drawers without snap points keep CSS sizing on native shells or explicit
+  `repositionInputs={true}`. `ui/drawer.tsx` disables Vaul's cached height there:
+  iOS surfaces own their native keyboard offset; other hosts use its live viewport
+  bottom inset. Never cache a focused drawer's height across folds/rotation or infer
+  keyboard visibility from focus. Preserve separate bottom-sheet handling.
+  `repositionInputs={false}` explicitly opts out of both Vaul repositioning and
+  this inset; callers using it own their keyboard layout.
+
+## Working session status
+
+- Session marks use `ui/working-status-mark.tsx`, mounted across the status change
+  and fed via `useWorkingHandOver` because unread arrives after presence.
+  `WorkingGrid` shares one viewport observer: only visible marks animate; returning
+  marks sample the shared clock. Animate only `transform`/`opacity` from
+  `startTime = 0`, never per-frame script or React state.
+  [Decision](../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
+
+## Keyboard navigation
+
+- Each independently navigable list owns one `FocusScope` and one
+  `useListKeyboardNavigation` call. Rows expose `data-scope-item` plus a stable
+  `data-id`; Up/Down (and J/K) move only in the active scope, while the shell's
+  single scope switcher uses Left/Right between visible leaf scopes. A local
+  control may keep a key by calling `preventDefault`; text inputs are never
+  intercepted. Nested parent scopes yield to their visible child scopes, and an
+  open dialog's scopes never switch focus into the background workspace. Scopes
+  handle their keys on the scope element itself: a dialog popup stops composite
+  keys (arrows, Home/End) before window listeners, so `FocusScope` moves its
+  registered list and the switcher on its own `onKeyDown`.
+
+## Zen layout
+
+- Zen preserves sidebar preferences when hiding/restoring a visible layout.
+  If all available sidebars are already closed, its toggle reveals them instead.
+  The mounted desktop Session owns `zenRightPanelAtom` and clears it on unmount.
+  Behavior: [Zen layout](../../../specs/zen-layout.md).
+- An explicit request to show either sidebar exits Zen and reveals that sidebar. Use
+  the shared layout-state actions for the navigation sidebar; every Session action
+  that opens a viewer, Files, Changes, PR, Browser, or Side Chat must clear Zen.
+- Drive hidden-panel work from effective visibility (`open && !zen`), not the stored
+  open bit. A Zen-hidden PR, Browser, viewer, or Side Chat must pause exactly like an
+  ordinarily collapsed right panel.
+
 ## Workspace transitions
+
+- Default to chat; never restore the last route; preserve deep links and window
+  targets. `BootNavigate` hints geometry; `PreloadedMainLayout` owns code fallback.
+  `BootShellBoundary` inside the route error boundary holds one shell through gates
+  until recovery or destination commits; animation never gates readiness. Boot and
+  real cards share frames. `DocumentStyle` owns updates; retire inline first-paint
+  styles only after live commit. Keep the hidden warm window's `/` neutral.
+
+- Dock counts derive from complete active metadata and the sidebar's child activity
+  summary. Publish absolute snapshots, including zero, on change and every 30 seconds;
+  focus/visibility restoration reconciles too. Keep the timer independent of count
+  changes and mount it only in the ready workspace's elected window.
 
 - Authenticated workspace switches keep `MainLayout` mounted: the sidebar and
   workspace identity are stable chrome, while the content pane shows a scoped
@@ -12,3 +119,30 @@ Parent `AGENTS.md` files also apply.
   and the mobile workspace stack do not start early. The workspace identity's
   syncing state follows that same scoped readiness, not the coarser connection
   state; an online transport does not imply that workspace data is ready.
+  A cold start (no workspace ready yet in this page) has no layout to keep: it
+  continues the boot shell, and only a real switch says "Switching workspace"
+  ([decision](../../../.agents/notes/implemented/bug-fix/2026-10-16-cold-start-workspace-wait.md)).
+
+## Billing data
+
+- After auth/workspace resolution, preload billing overview into the session-scoped
+  cache for latency only. A rejected preload stays inside its leaf and never reaches
+  the route error boundary. Permissions, quotas, destructive guards, and Stripe invoice
+  history remain live/on-demand.
+
+## ACP selectors
+
+- Effort ladders follow the selected model: its recorded options, then the adapter's
+  per-model declaration, then `modelReasoningEfforts` (`components/shared/acp-selector-options.ts`).
+  Never hard-code a provider's per-model tiers; cached efforts may belong to another model.
+
+## ACP authentication
+
+- Custom and Registry Provider authentication renders supported agent-driven method choices and
+  request-scoped URL plus text/secret/single-select form interactions. Form replies use the
+  encrypted authentication-input path; deprecated `env_var` and non-interactive terminal methods
+  do not become Provider-config credential forms. Authorization pages are HTTP(S) only. Bind every
+  progress event and reply to the exact machine/config/launch/env snapshot that started the request;
+  changing that target cancels the old request, and a late reply must not clear or report an error
+  over a newer interaction. Clear manual codes and form values on completion, cancellation, target
+  change, and failure; never seed a secret field from retained progress.

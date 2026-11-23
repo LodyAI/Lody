@@ -1,4 +1,6 @@
 import * as React from 'react';
+import { useAtomValue } from 'jotai';
+import { currentWorkspaceIdAtom } from '@/atoms';
 import {
   applyTextRewrites,
   MESSAGE_TEXT_SPAN_KINDS,
@@ -11,11 +13,15 @@ import {
   useSkillMentionRewrites,
   type SkillMentionAgent,
 } from '@/components/mentions/mention-skill-source';
-import { buildSessionMentionRewrites } from '@/components/mentions/mention-session-source';
 import {
-  buildAgentRoleMentionContext,
+  buildSessionMentionRewrites,
+  useSessionMentionItems,
+  type SessionMentionItem,
+} from '@/components/mentions/mention-session-source';
+import {
   buildAgentRoleMentionRewrites,
   useAgentRoleMentionItems,
+  type AgentRoleMentionItem,
 } from '@/components/mentions/mention-agent-role-source';
 import { buildPastedTextRewrites, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import type { Mention as MentionRange } from '@/ui/mention/index';
@@ -25,10 +31,13 @@ import type { Mention as MentionRange } from '@/ui/mention/index';
  *
  * Two things come out of it, from one pass:
  *
- * - the text the agent receives, with `$skill`, `@session:`, and pasted-text
+ * - the text the agent receives, with `$skill`, session mentions, and pasted-text
  *   placeholders swapped for their machine-readable forms
  * - the spans saying which region of that text each mention became, so the
  *   transcript can paint the user's own wording back over it
+ *
+ * Session mentions expand to `[@Title](lody://session/<id>)`; Lody MCP documents
+ * resolving that URI via `lody_session_history`.
  *
  * Every contributor describes its edits against the *original composer text*
  * and they are applied together. That is what removes the ordering coupling the
@@ -36,9 +45,8 @@ import type { Mention as MentionRange } from '@/ui/mention/index';
  * expand-sessions, each re-reading a string the previous one had already
  * resized. Now nothing depends on who runs first.
  *
- * Composed in one place on purpose: there are exactly two send paths (chat
- * landing and the session composer), and before this hook each of them wired
- * every expandable type by hand, so adding one meant editing both.
+ * Shared by chat landing, the session composer, and scheduled task authoring,
+ * so each surface uses the same transformations when it freezes agent-facing text.
  */
 export type MentionPromptExpansionInput = {
   source: MentionProjectSource | undefined;
@@ -77,6 +85,7 @@ const REWRITTEN_SPAN_KINDS = [
   'session',
   'agent_role',
   'pasted_text',
+  'message_quote',
 ] satisfies MessageTextSpanKind[];
 
 /** Kinds whose composer text is already what the agent should read. */
@@ -110,34 +119,79 @@ export function buildVerbatimMentionRewrites(
   return rewrites;
 }
 
+/**
+ * Compose every mention rewrite against the original composer text.
+ *
+ * Same order the send path uses. Callers that only need the agent-facing string
+ * run this through `applyTextRewrites`; the composer copy path feeds the
+ * expanding subset into `getExpandedClipboardTextForSelection`.
+ */
+export function buildMentionPromptRewrites({
+  text,
+  mentions = [],
+  pastedTextDrafts = [],
+  skillRewrites,
+  sessionItems,
+  agentRoleItems,
+  workspaceId,
+}: MentionPromptExpansionArgs & {
+  workspaceId?: string;
+  skillRewrites: (text: string) => TextRewrite[];
+  sessionItems: readonly Pick<SessionMentionItem, 'sessionId' | 'title'>[];
+  agentRoleItems: readonly AgentRoleMentionItem[];
+}): TextRewrite[] {
+  return [
+    ...buildPastedTextRewrites(pastedTextDrafts, text),
+    ...skillRewrites(text),
+    ...buildSessionMentionRewrites(text, mentions, { items: sessionItems, workspaceId }),
+    ...buildAgentRoleMentionRewrites(text, mentions, agentRoleItems),
+    ...buildVerbatimMentionRewrites(text, mentions),
+  ];
+}
+
+export type MentionPromptExpansion = {
+  /** Expand composer text the way the send path does. */
+  expand: (args: MentionPromptExpansionArgs) => ExpandedMentionPrompt;
+  /** Same rewrites `expand` would apply — used by composer copy. */
+  getRewrites: (args: MentionPromptExpansionArgs) => TextRewrite[];
+};
+
 export function useMentionPromptExpansion({
   source,
   skillAgent,
   promptValue,
-}: MentionPromptExpansionInput): (args: MentionPromptExpansionArgs) => ExpandedMentionPrompt {
+  /** Dropped from session-mention title lookup so a session cannot cite itself. */
+  currentSessionId,
+}: MentionPromptExpansionInput & {
+  currentSessionId?: string | null;
+}): MentionPromptExpansion {
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom) ?? undefined;
   const skillRewrites = useSkillMentionRewrites(source, skillAgent, promptValue);
-  const agentRoleContext = React.useMemo(
-    () =>
-      buildAgentRoleMentionContext({
-        mentionSource: source,
-        currentMachineId: skillAgent?.machineId,
-      }),
-    [skillAgent?.machineId, source]
-  );
   // Same owner as the composer menu, by module: both read the shared catalog
   // room, so the list the user picked from is the list this authorizes against.
-  const agentRoleItems = useAgentRoleMentionItems(agentRoleContext);
+  const agentRoleItems = useAgentRoleMentionItems();
+  const sessionItems = useSessionMentionItems(currentSessionId);
 
-  return React.useCallback(
-    ({ text, mentions = [], pastedTextDrafts = [] }: MentionPromptExpansionArgs) => ({
-      ...applyTextRewrites(text, [
-        ...buildPastedTextRewrites(pastedTextDrafts),
-        ...skillRewrites(text),
-        ...buildSessionMentionRewrites(text, mentions),
-        ...buildAgentRoleMentionRewrites(text, mentions, agentRoleItems),
-        ...buildVerbatimMentionRewrites(text, mentions),
-      ]),
-    }),
-    [agentRoleItems, skillRewrites]
+  const getRewrites = React.useCallback(
+    ({ text, mentions = [], pastedTextDrafts = [] }: MentionPromptExpansionArgs) =>
+      buildMentionPromptRewrites({
+        text,
+        mentions,
+        pastedTextDrafts,
+        skillRewrites,
+        sessionItems,
+        agentRoleItems,
+        workspaceId,
+      }),
+    [agentRoleItems, sessionItems, skillRewrites, workspaceId]
   );
+
+  const expand = React.useCallback(
+    (args: MentionPromptExpansionArgs) => ({
+      ...applyTextRewrites(args.text, getRewrites(args)),
+    }),
+    [getRewrites]
+  );
+
+  return React.useMemo(() => ({ expand, getRewrites }), [expand, getRewrites]);
 }

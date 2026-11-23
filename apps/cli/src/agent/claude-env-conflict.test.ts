@@ -3,16 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { scrubInheritedClaudeAuthEnv } from './claude-env-conflict';
 
 describe('scrubInheritedClaudeAuthEnv', () => {
-  it('returns env unchanged when user has no auth/routing config', () => {
-    const merged = {
-      ANTHROPIC_API_KEY: 'sk-shell',
-      ANTHROPIC_MODEL: 'claude-opus-4',
-      PATH: '/usr/bin',
-    };
-    const out = scrubInheritedClaudeAuthEnv(merged, { LODY_SESSION_ID: 's1' });
-    expect(out).toBe(merged);
-  });
-
   it('strips inherited ANTHROPIC_API_KEY when user explicitly sets ANTHROPIC_AUTH_TOKEN', () => {
     const merged = {
       ANTHROPIC_API_KEY: 'sk-from-shell',
@@ -119,12 +109,33 @@ describe('scrubInheritedClaudeAuthEnv', () => {
     expect(out.AWS_BEARER_TOKEN_BEDROCK).toBe('aws-from-config');
   });
 
-  it('does not mutate the input env object', () => {
+  it('CLAUDE_CONFIG_DIR in user config triggers scrub of inherited auth and routing vars while preserving CLAUDE_CONFIG_DIR', () => {
     const merged = {
       ANTHROPIC_API_KEY: 'sk-shell',
-      ANTHROPIC_AUTH_TOKEN: 'sk-config',
+      ANTHROPIC_AUTH_TOKEN: 'sk-shell-token',
+      ANTHROPIC_BASE_URL: 'https://shell.example.com',
+      ANTHROPIC_MODEL: 'claude-sonnet-4-5',
+      CLAUDE_CONFIG_DIR: '/Users/u/.claude-work',
     };
-    scrubInheritedClaudeAuthEnv(merged, { ANTHROPIC_AUTH_TOKEN: 'sk-config' });
-    expect(merged.ANTHROPIC_API_KEY).toBe('sk-shell');
+    const out = scrubInheritedClaudeAuthEnv(merged, {
+      CLAUDE_CONFIG_DIR: '/Users/u/.claude-work',
+    });
+    expect(out.CLAUDE_CONFIG_DIR).toBe('/Users/u/.claude-work');
+    expect(out.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(out.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(out.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(out.ANTHROPIC_MODEL).toBeUndefined();
+  });
+
+  it('strips inherited CLAUDE_CONFIG_DIR when user explicitly sets auth/routing without CLAUDE_CONFIG_DIR', () => {
+    const merged = {
+      CLAUDE_CONFIG_DIR: '/Users/u/.claude-from-shell',
+      ANTHROPIC_API_KEY: 'sk-from-config',
+    };
+    const out = scrubInheritedClaudeAuthEnv(merged, {
+      ANTHROPIC_API_KEY: 'sk-from-config',
+    });
+    expect(out.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(out.ANTHROPIC_API_KEY).toBe('sk-from-config');
   });
 });

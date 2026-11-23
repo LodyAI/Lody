@@ -1,0 +1,41 @@
+# Shared surface components
+
+Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
+`AGENTS.md` only.
+
+- `MenuOptionSearchList` places search above the results; only options scroll.
+  It stays content-sized within the host's cap. Never reserve
+  unfiltered dimensions or keep an old popup origin to prevent query-driven layout
+  changes; the desktop host must preserve its normal trigger-row anchor. Intent:
+  [composer submenu placement](../../../../../specs/composer-run-config-submenu-placement.md).
+- The live agent status (`AgentActivityRow` in `ai-gui/view.tsx`, and the collapsed
+  group label it hands the status to) shimmers via `.agent-shimmer`, which animates only
+  `transform`. Never switch it to a `background-position`/text-clip shimmer, canvas
+  loop, React animation state or timer: those repaint every frame while an agent
+  works. Keep the Storybook Playwright render budgets passing.
+- `ZoomableImageViewer` is the one image viewer, and it presents per
+  surface: full-bleed on touch, a lightbox on desktop (inset photo, translucent mask, a
+  top bar that clears the native window controls and centers its controls on their
+  line — the y=23 traffic-light row on macOS, the 36px caption strip on Windows).
+  Inset the photo with a transform
+  only — `react-photo-view` positions the box it sized itself, so a capped
+  `width`/`height` decenters it and padding erases a small image. Its portal sits at
+  `--z-image-viewer`, deliberately UNDER `--z-toast`, because the viewer's own copy/save
+  confirmations are toasts.
+- The shared image viewer is modal: trap focus, isolate the background, use named
+  native buttons, and restore the opener without replacing the image gesture engine.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-09-30-image-viewer-modal-focus.md).
+  A stationary touch hold opens its copy/save menu inside that boundary; never add a private
+  native clipboard bridge. [Decision](../../../../../.agents/notes/implemented/feature/2026-10-08-image-preview-touch-actions.md).
+- Desktop image preview copy/save (`lib/image-preview-export.ts`) is Electron-only and splits by
+  what each process can reach: main owns the native menu, clipboard, and save dialog;
+  the renderer owns the `blob:` bytes and sends them only after the user picks an
+  action. Copy re-encodes to PNG (the one format the system clipboard takes); save keeps
+  the original encoding. Without the preload bridge the right-click must fall through to
+  the browser's own menu.
+- Touch long-press observes the same photo engine without capturing or cancelling its
+  pan/pinch events. Cancel on movement, another touch, release, dismissal or image identity
+  change. Export the menu's exact image, never the gallery's later selection. The touch menu
+  stays inside the viewer's focus boundary and above its photo layer. Native Save/Share reuse
+  the file share sheet; completion is an OS handoff, not proof of an album save. Unsupported
+  bitmap clipboard/file sharing stays unavailable, never a URL/text substitute.

@@ -87,3 +87,13 @@ export const MissingLegacyStats: Story = {
     files: [{ filePath: 'src/legacy-import.ts' }, { filePath: 'src/partially-known.ts', add: 12 }],
   },
 };
+
+export const UncountedChanges: Story = {
+  args: {
+    files: [
+      { filePath: 'README.md', add: 0, del: 0 },
+      { filePath: 'assets/screenshot.png', add: 0, del: 0 },
+      { filePath: 'src/app.ts', add: 12, del: 3 },
+    ],
+  },
+};

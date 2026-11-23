@@ -1,5 +1,6 @@
 import { captureException, flushErrorReporting } from '@/instrument';
 import { getLogger, rootLogger, type Logger } from './logger';
+import { traceFatalErrorSync } from './process-exit-trace';
 
 const DEFAULT_FLUSH_TIMEOUT = 2000;
 const CLEANUP_TIMEOUT_MS = 5000;
@@ -17,6 +18,9 @@ export function registerProcessCleanup(fn: () => Promise<void>): void {
 export function unregisterProcessCleanup(): void {
   processCleanupFn = null;
 }
+
+const isBrokenPipeError = (error: unknown): boolean =>
+  error instanceof Error && 'code' in error && error.code === 'EPIPE';
 
 const normalizeError = (error: unknown) =>
   error instanceof Error ? error : new Error(String(error));
@@ -51,8 +55,23 @@ export const registerProcessErrorHandlers = () => {
   }
   handlersRegistered = true;
 
+  // Only the first uncaught exception runs the fatal path. When stdout/stderr
+  // is a pipe whose reader died (Electron main restarting), every console
+  // write emits another EPIPE `uncaughtException` on the next tick; handling
+  // each one re-logged and re-wrote, a nextTick chain that starved the cleanup
+  // timer so the process never exited and wrote gigabytes of daily log.
+  let fatalHandled = false;
+  let suppressedFatalCount = 0;
   process.on('uncaughtException', (error) => {
-    console.error('Uncaught exception in CLI:', error);
+    if (fatalHandled) {
+      suppressedFatalCount += 1;
+      return;
+    }
+    fatalHandled = true;
+    traceFatalErrorSync('uncaughtException', error);
+    if (!isBrokenPipeError(error)) {
+      console.error('Uncaught exception in CLI:', error);
+    }
     const cleanup = processCleanupFn
       ? Promise.race([
           processCleanupFn().catch(() => {}),
@@ -64,7 +83,15 @@ export const registerProcessErrorHandlers = () => {
         message: 'Uncaught exception in CLI',
         logger: rootLogger,
         fatal: true,
-      }).finally(() => process.exit(1));
+      }).finally(() => {
+        if (suppressedFatalCount > 0) {
+          traceFatalErrorSync(
+            'uncaughtException',
+            `suppressed ${suppressedFatalCount} further uncaught exception(s) during fatal shutdown`
+          );
+        }
+        process.exit(1);
+      });
     });
   });
 

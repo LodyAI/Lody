@@ -1,14 +1,17 @@
+import type { AcpCapabilityCacheEntry } from '@lody/shared';
 import {
   CODEX_SPARK_LIMIT_ID,
+  isSubscriptionQuotaEligible,
   normalizePersistedRateLimit,
   parseRateLimitEntryKey,
-  resolveAgentBrandId,
   type AgentConfigCliType,
+  type AgentConfigId,
   type AgentConfigMeta,
   type MachineViewMeta,
   type SessionContextWindowUsage,
 } from '@lody/shared';
 import { clamp } from './clamp';
+import type { TFunction } from 'i18next';
 
 export const FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 export const SEVEN_DAY_WINDOW_SECONDS = 7 * 24 * 60 * 60;
@@ -19,6 +22,7 @@ export type MachineRateLimitUsage = MachineRateLimits[string];
 export type AgentRateLimitEntry = {
   key: string;
   limits: MachineRateLimitUsage;
+  agentConfigId: AgentConfigId | null;
   cliType: string;
   limitId: string | null;
 };
@@ -32,6 +36,7 @@ export type ContextWindowUsageData = {
 };
 
 export type AgentRateLimitWindow = {
+  label?: string;
   usedPercent: number;
   remainingPercent: number;
   windowDurationSeconds: number | null;
@@ -56,6 +61,7 @@ export function getAgentRateLimitWindows(limits: MachineRateLimitUsage): AgentRa
     if (usedPercent === null) return [];
     return [
       {
+        ...(window.label?.trim() ? { label: window.label.trim() } : {}),
         usedPercent,
         remainingPercent: clampPercentage(100 - usedPercent),
         windowDurationSeconds:
@@ -79,6 +85,36 @@ export function formatRateLimitWindowShortLabel(windowDurationSeconds: number | 
   return `${windowDurationSeconds / 60}m`;
 }
 
+/** "5 hours", "Weekly", or the short `3d` form for any other window the provider reports. */
+export function formatRateLimitWindowDurationLabel(
+  windowDurationSeconds: number | null,
+  t: TFunction
+): string {
+  if (windowDurationSeconds === SEVEN_DAY_WINDOW_SECONDS) {
+    return t('sessions.usage.weekly', 'Weekly');
+  }
+  if (windowDurationSeconds === FIVE_HOUR_WINDOW_SECONDS) {
+    return t('sessions.usage.fiveHour', '5 hours');
+  }
+  if (windowDurationSeconds === null) {
+    return t('sessions.usage.limit', 'Usage');
+  }
+  return formatRateLimitWindowShortLabel(windowDurationSeconds);
+}
+
+export function formatAgentRateLimitWindowLabel(
+  window: AgentRateLimitWindow,
+  durationLabel: string,
+  t: TFunction
+): string {
+  return window.label
+    ? t('machines.rateLimits.namedWindow', '{{duration}} · {{label}}', {
+        duration: durationLabel,
+        label: window.label,
+      })
+    : durationLabel;
+}
+
 export function getContextWindowUsageData(
   usage: SessionContextWindowUsage | null | undefined
 ): ContextWindowUsageData | null {
@@ -99,28 +135,18 @@ export function getContextWindowUsageData(
 }
 
 export function canShowSubscriptionRateLimits({
+  capability,
   cliType,
   agentType,
   config,
 }: {
   cliType: AgentConfigCliType;
   agentType: string;
-  config?: Pick<AgentConfigMeta, 'brandId' | 'env'> | null;
+  config?: Pick<AgentConfigMeta, 'brandId' | 'env' | 'codexAuth' | 'magpieGatewayUrl'> | null;
+  capability?: AcpCapabilityCacheEntry['rateLimits'];
 }): boolean {
-  if (
-    cliType !== 'builtin' ||
-    (agentType !== 'claude' &&
-      agentType !== 'codex' &&
-      agentType !== 'grok' &&
-      agentType !== 'kimi')
-  ) {
-    return false;
-  }
-  if (!config) return true;
-
   return (
-    Object.keys(config.env).length === 0 &&
-    !resolveAgentBrandId({ brandId: config.brandId, env: config.env })
+    capability?.version === 1 && isSubscriptionQuotaEligible({ ...config, cliType, agentType })
   );
 }
 
@@ -138,27 +164,42 @@ const modelNamesMatch = (left: string, right: string): boolean => {
 
 export function getAgentRateLimitEntries(
   rateLimits: MachineRateLimits | null | undefined,
-  agentType: string
+  agentType: string,
+  agentConfigId?: AgentConfigId | null
 ): AgentRateLimitEntry[] {
   return Object.entries(rateLimits ?? {})
     .flatMap(([key, value]) => {
       const parsed = parseRateLimitEntryKey(key);
       const limits = normalizePersistedRateLimit(parsed.cliType, parsed.limitId, value);
-      return limits ? [{ key, limits, cliType: parsed.cliType, limitId: parsed.limitId }] : [];
+      return limits
+        ? [
+            {
+              key,
+              limits,
+              agentConfigId: parsed.agentConfigId,
+              cliType: parsed.cliType,
+              limitId: parsed.limitId,
+            },
+          ]
+        : [];
     })
-    .filter((entry) => entry.cliType === agentType);
+    .filter(
+      (entry) => entry.cliType === agentType && entry.agentConfigId === (agentConfigId ?? null)
+    );
 }
 
 export function resolveAgentRateLimitForModel({
   rateLimits,
   agentType,
+  agentConfigId,
   modelId,
 }: {
   rateLimits: MachineRateLimits | null | undefined;
   agentType: string;
+  agentConfigId?: AgentConfigId | null;
   modelId: string | null | undefined;
 }): AgentRateLimitEntry | null {
-  const entries = getAgentRateLimitEntries(rateLimits, agentType);
+  const entries = getAgentRateLimitEntries(rateLimits, agentType, agentConfigId);
   if (entries.length === 0) return null;
 
   const normalizedModelId = normalizeModelName(modelId);

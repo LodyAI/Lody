@@ -1,14 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import i18next from 'i18next';
-import { syncTime, createServerTimeFetcher } from '@lody/shared';
+import { startTimeSyncLegacy } from '@lody/shared';
 import { usePlatformCapability } from '@lody/platform/react';
 import { API_BASE_URL } from '../lib';
-import { commands, registerBuiltInCommands } from '../lib/commands';
+import { registerBuiltInCommands } from '../lib/commands';
+import { CommandShortcutHost } from '../lib/commands/shortcut-host';
+import { TodayCommandPlaceholder } from './today/today-command';
 import { rehydrateAvatarMemoryCacheFromPersistent } from '../lib/avatar-cache';
 import { languageAtom } from '../atoms/settings';
-import { maybeClearLodyCacheOnBoot } from '../lib/clear-local-cache';
+import { maybeClearLodyCacheOnBoot, readPendingLocalClearMode } from '../lib/clear-local-cache';
+import { installAppActivityTracking } from '../lib/app-activity-gap';
+import { installClientLog } from '../lib/client-log';
 import { getIpcServices } from '../lib/electron-ipc-client';
 import { useSetAtom } from 'jotai';
+import { installFocusModality } from '@lody/ui/focus-modality';
+import { installScrollbarPresence } from '@lody/ui/scrollbar-presence';
 import {
   detectBrowserLanguage,
   fallbackLanguage,
@@ -31,7 +37,14 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
   // safe to call once during render.
   useState(() => {
     registerBuiltInCommands();
+    if (typeof window !== 'undefined' && readPendingLocalClearMode() === null) {
+      void rehydrateAvatarMemoryCacheFromPersistent();
+    }
   });
+
+  // Before anything below can fail: the boot entry and the previous page's
+  // unclean exit belong at the head of this page's log.
+  useEffect(() => installClientLog(), []);
 
   useEffect(() => {
     const stored = readStoredLanguagePreference();
@@ -50,6 +63,10 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
     });
   }, [setLanguage]);
 
+  // Focus rings follow keyboard navigation, not whatever key was pressed last.
+  useEffect(() => installFocusModality(), []);
+  useEffect(() => installScrollbarPresence(), []);
+
   /* Run a pending "clear cache" / "clear all local data" request as early as
      possible. `RuntimeProvider` also awaits it (and shares the same one-shot
      promise, so the repo IndexedDB is never reopened mid-delete), but it only
@@ -57,8 +74,10 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
      sign-in, which is exactly when the crash screen's hard reset gets used —
      would otherwise carry the pending flag forever. */
   useEffect(() => {
-    void maybeClearLodyCacheOnBoot();
+    void maybeClearLodyCacheOnBoot().then(() => rehydrateAvatarMemoryCacheFromPersistent());
   }, []);
+
+  useEffect(() => installAppActivityTracking(), []);
 
   useEffect(() => {
     const syncLanguage = (language: string) => {
@@ -82,36 +101,23 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
   // kind while preserving the local-clock behavior of getServerNow().
   useEffect(() => {
     if (!hasCloudSync) {
-      return;
+      return undefined;
     }
-    syncTime(createServerTimeFetcher(`${API_BASE_URL}/api/time`)).catch(() => {
-      // Silently ignore time sync failures - operations will use local time
-    });
+    const calibration = startTimeSyncLegacy(`${API_BASE_URL}/api/time`);
+    return () => {
+      void calibration.stop().catch(() => {
+        console.warn('Failed to stop server time calibration');
+      });
+    };
   }, [hasCloudSync]);
 
-  // Attach the global command registry's capture-phase keydown listener once at app boot.
-  // (Built-in commands are registered during render above — before any descendant effect —
-  // not here.) Attaching after registration is fine: the listener reads bindings live.
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    commands.attach(window);
-    // No detach on unmount — AppInitializer is the app root and we want the listener
-    // to live as long as the renderer process.
-    return undefined;
-  }, []);
-
-  /* Pre-warm the in-memory avatar blob-URL map from the persistent
-     CacheStorage so the first `<UserAvatar>` mount after a refresh
-     can hit the cache synchronously. Without this, every fresh app
-     load shows the initials fallback briefly while the persisted
-     blob is rehydrated lazily — that's the "blank then load"
-     flicker users see on GitHub avatars. Fire-and-forget; if it
-     fails, callers fall back to the raw URL path. */
-  useEffect(() => {
-    void rehydrateAvatarMemoryCacheFromPersistent();
-  }, []);
-
-  return <>{children}</>;
+  return (
+    <>
+      <CommandShortcutHost />
+      <TodayCommandPlaceholder />
+      {children}
+    </>
+  );
 };
 
 export default AppInitializer;

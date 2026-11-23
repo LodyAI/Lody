@@ -1,21 +1,32 @@
-import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
+import { useRef, useState } from 'react';
+import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
+import { Kbd } from '@lody/ui/kbd';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+  commands,
+  composerScopedKeybindings,
+  formatKeyBinding,
+  getCommandKeybindings,
+  useCommand,
+  useCommands,
+} from '@/lib/commands';
+import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
+
+/**
+ * Desktop flyout and the mobile pushed panel. A real length, not
+ * `w-[min(20rem,calc(100vw-2rem))]`: that calc is invalid CSS (the minus needs
+ * spaces), so the declaration was dropped and the panel grew out to
+ * `--available-width` — a one-line description then stretched across the
+ * composer and the footnote landed on the model row.
+ */
+const MCP_PANEL_CLASS = 'w-80 max-w-[calc(100vw_-_2rem)]';
 
 /** Per-turn MCP selection, surfaced as a second level of the "+" menu. */
 export interface AttachmentAddMenuMcp {
@@ -33,14 +44,20 @@ export interface AttachmentAddMenuProps {
   isMobile: boolean;
   /** Smaller trigger for the landing composer variant. */
   isLanding?: boolean;
+  isSheet?: boolean;
   /** Disables the whole trigger (e.g. the prompt is disabled). */
   disabled?: boolean;
   /** Omit the callback to hide the attachment item entirely. The picker is
    * intentionally unfiltered; its owner routes the selected files by MIME. */
   onAddAttachment?: () => void;
   attachmentDisabled?: boolean;
+  onScheduleSend?: () => void;
+  scheduleDisabledReason?: string;
   /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
+  /** Register the `session.openAddMenu` command only while this surface owns
+   *  the composer's shortcuts (hidden retained panes pass `false`). */
+  commandsEnabled?: boolean;
 }
 
 /**
@@ -60,26 +77,57 @@ export interface AttachmentAddMenuProps {
 export function AttachmentAddMenu({
   isMobile,
   isLanding,
+  isSheet,
   disabled,
   onAddAttachment,
   attachmentDisabled,
+  onScheduleSend,
+  scheduleDisabledReason,
   mcp,
+  commandsEnabled = true,
 }: AttachmentAddMenuProps) {
+  const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
+  const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Mobile's pushed panel. Desktop uses a real submenu and stays on 'root'.
   const [view, setView] = useState<'root' | 'mcp'>('root');
+  // iOS dismisses the file picker as soon as the prompt regains focus (the
+  // keyboard returns instead), so choosing the picker skips the composer
+  // focus restore every other selection gets.
+  const filePickerOpenedRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const triggerLabel = t('sessions.addAttachmentMenu', 'Add attachment');
 
   const mcpServers = mcp?.servers ?? [];
   const hasMcp = mcpServers.length > 0;
-  if (!onAddAttachment && !hasMcp) {
+  const hasMenuContent = Boolean(onAddAttachment || hasMcp || onScheduleSend);
+
+  useCommands();
+  const openAddMenuKey = commands.getKeybindingsFor('session.openAddMenu')[0];
+
+  useCommand(
+    {
+      id: 'session.openAddMenu',
+      titleKey: 'commands.session.openAddMenu',
+      title: t('commands.session.openAddMenu', 'Open Composer + Menu'),
+      category: 'Session',
+      keybindings: composerScopedKeybindings(
+        getCommandKeybindings('session.openAddMenu'),
+        () => triggerRef.current
+      ),
+      when: () => hasMenuContent && !disabled,
+      run: () => setOpen(true),
+    },
+    commandsEnabled
+  );
+
+  if (!hasMenuContent) {
     return null;
   }
 
   const triggerSize = !isLanding && isMobile ? 'size-9' : 'size-7';
   const itemClass = cn('cursor-pointer', isMobile && 'gap-2.5 py-2.5 text-[15px]');
-  const iconClass = 'size-4 shrink-0 text-muted-foreground';
   const selectedCount = mcp
     ? mcp.selectedIds.filter((id) => mcpServers.some((server) => server.id === id)).length
     : 0;
@@ -88,46 +136,111 @@ export function AttachmentAddMenu({
       ? t('session.mcp.loadCount', { count: selectedCount })
       : t('session.mcp.loadNone');
 
+  const scheduleDisabled = Boolean(scheduleFeatureReason || scheduleDisabledReason);
+  const scheduleItem = onScheduleSend ? (
+    <Menu.Item
+      icon={Clock}
+      onClick={onScheduleSend}
+      disabled={scheduleDisabled}
+      className={itemClass}
+    >
+      {scheduleFeatureReason ? (
+        <WorkspaceFeatureReasonText reason={scheduleFeatureReason} />
+      ) : (
+        t('scheduledMessage.menu')
+      )}
+    </Menu.Item>
+  ) : null;
+
+  // A disabled menu row does not receive pointer events, so a `title` on it can
+  // never show. Keep the row disabled and put the hover target on a wrapper that
+  // owns the same box; the tooltip then explains the state without making the
+  // command clickable.
+  const scheduleEntry =
+    scheduleItem && scheduleDisabled && !scheduleFeatureReason ? (
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={0} render={<div />}>
+          {scheduleItem}
+        </Tooltip.Trigger>
+        <Tooltip.Content side="right">{scheduleDisabledReason}</Tooltip.Content>
+      </Tooltip.Root>
+    ) : (
+      scheduleItem
+    );
+
   return (
-    <DropdownMenu
+    <Menu.Root
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
+        if (nextOpen) filePickerOpenedRef.current = false;
         // Always reopen at the root level; a stale pushed panel would hide the
         // upload actions behind a back row.
         if (!nextOpen) setView('root');
       }}
     >
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={disabled}
-          aria-label={triggerLabel}
-          className={cn(
-            triggerSize,
-            // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-            // `bg-accent`/`bg-muted`) because those equal the background in the
-            // dark theme and paint nothing.
-            'rounded-full text-foreground transition-colors',
-            'hover:bg-hover hover:text-foreground',
-            'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-          )}
-        >
-          <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-5'} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          delay={500}
+          render={
+            <Menu.Trigger
+              ref={triggerRef}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon
+                  disabled={disabled}
+                  aria-label={triggerLabel}
+                  className={cn(
+                    triggerSize,
+                    isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
+                    // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+                    // `bg-accent`/`bg-muted`) because those equal the background in the
+                    // dark theme and paint nothing.
+                    'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+                  )}
+                >
+                  <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+                </Button>
+              }
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                icon
+                disabled={disabled}
+                aria-label={triggerLabel}
+                className={cn(
+                  triggerSize,
+                  isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
+                  // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+                  // `bg-accent`/`bg-muted`) because those equal the background in the
+                  // dark theme and paint nothing.
+                  'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+                )}
+              >
+                <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+              </Button>
+            </Menu.Trigger>
+          }
+        />
+        <Tooltip.Content side="top" className="flex items-center gap-1.5">
+          <span>{triggerLabel}</span>
+          {openAddMenuKey ? <Kbd>{formatKeyBinding(openAddMenuKey)}</Kbd> : null}
+        </Tooltip.Content>
+      </Tooltip.Root>
+      <Menu.Content
         align="start"
         side="top"
+        finalFocus={() => !filePickerOpenedRef.current}
         /* Size to the widest item (`w-max`) so short attachment labels don't
            leave a wide blank gutter; a small floor keeps it from
-           collapsing too narrow. The pushed MCP panel needs room for server
-           names, so it takes its own floor and ceiling. */
+           collapsing too narrow. The pushed MCP panel keeps a fixed width so
+           a long server description wraps instead of stretching the composer. */
         className={cn(
           view === 'mcp'
-            ? 'w-[min(20rem,calc(100vw-2rem))]'
+            ? MCP_PANEL_CLASS
             : cn('w-max', isMobile ? 'min-w-[160px]' : 'min-w-[140px]')
         )}
       >
@@ -135,64 +248,72 @@ export function AttachmentAddMenu({
           // Keyed so the panel swap replays the slide: the pushed level enters
           // from the right, the root returns from the left.
           <div key="mcp" className="animate-in fade-in-0 slide-in-from-right-2 duration-150">
-            <DropdownMenuItem
-              className={cn(itemClass, 'gap-2 font-medium')}
-              onSelect={(event) => {
-                event.preventDefault();
-                setView('root');
-              }}
+            <Menu.Item
+              className={cn(itemClass, 'font-medium')}
+              closeOnClick={false}
+              onClick={() => setView('root')}
+              icon={ChevronLeft}
             >
-              <ChevronLeft className={iconClass} />
               {t('session.mcp.title')}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            </Menu.Item>
+            <Menu.Separator />
             <McpServerItems mcp={mcp} isMobile={isMobile} />
           </div>
         ) : (
           <div key="root" className="animate-in fade-in-0 slide-in-from-left-2 duration-150">
             {onAddAttachment ? (
-              <DropdownMenuItem
-                onSelect={onAddAttachment}
-                disabled={attachmentDisabled}
+              <Menu.Item
+                onClick={() => {
+                  filePickerOpenedRef.current = true;
+                  onAddAttachment();
+                }}
+                disabled={attachmentDisabled || !!attachmentFeatureReason}
+                title={attachmentFeatureReason}
                 className={itemClass}
+                icon={Paperclip}
               >
-                <Paperclip className={iconClass} />
-                {triggerLabel}
-              </DropdownMenuItem>
+                {attachmentFeatureReason ? (
+                  <WorkspaceFeatureReasonText reason={attachmentFeatureReason} />
+                ) : (
+                  triggerLabel
+                )}
+              </Menu.Item>
             ) : null}
+            {scheduleEntry}
             {hasMcp && mcp ? (
               <>
-                {onAddAttachment ? <DropdownMenuSeparator /> : null}
+                {onAddAttachment ? <Menu.Separator /> : null}
                 {isMobile ? (
-                  <DropdownMenuItem
+                  <Menu.Item
                     className={itemClass}
                     disabled={mcp.disabled}
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      setView('mcp');
-                    }}
+                    closeOnClick={false}
+                    onClick={() => setView('mcp')}
+                    icon={Plug}
+                    endContent={<ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
                   >
-                    <Plug className={iconClass} />
-                    <span className="min-w-0 flex-1 truncate">{mcpLabel}</span>
-                    <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
-                  </DropdownMenuItem>
+                    {mcpLabel}
+                  </Menu.Item>
                 ) : (
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger className={itemClass} disabled={mcp.disabled}>
-                      <Plug className={iconClass} />
-                      <span className="min-w-0 flex-1 truncate">{mcpLabel}</span>
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-[min(20rem,calc(100vw-2rem))]">
+                  <Menu.Submenu>
+                    <Menu.SubmenuTrigger className={itemClass} disabled={mcp.disabled} icon={Plug}>
+                      {mcpLabel}
+                    </Menu.SubmenuTrigger>
+                    {/* `end` keeps the panel above the composer toolbar. The
+                        trigger is the last row of a menu that opens upward;
+                        `start` (the submenu default) hangs the description and
+                        the footnote down onto the model row. */}
+                    <Menu.Content align="end" sideOffset={8} className={MCP_PANEL_CLASS}>
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
+                    </Menu.Content>
+                  </Menu.Submenu>
                 )}
               </>
             ) : null}
           </div>
         )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
@@ -217,7 +338,7 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
           describeMcpConnection(server.connection) ??
           MCP_TRANSPORT_LABELS[server.transport];
         return (
-          <DropdownMenuCheckboxItem
+          <Menu.CheckboxItem
             key={server.id}
             checked={selected.has(server.id)}
             disabled={mcp.disabled}
@@ -225,27 +346,33 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
             // indicator is absolutely positioned from its static spot, so the row's
             // own alignment is what centers it against the two-line label.
             className={cn(isMobile && 'py-2.5')}
-            onSelect={(event) => event.preventDefault()}
+            closeOnClick={false}
             onCheckedChange={(checked) => toggle(server.id, checked === true)}
           >
-            <span className="flex min-w-0 flex-1 flex-col">
+            <span className="flex min-w-0 flex-1 flex-col whitespace-normal">
               <span className={cn('truncate', isMobile && 'text-[15px]')}>{server.name}</span>
               <span
                 className={cn(
-                  'truncate text-xs leading-snug text-muted-foreground',
+                  // The row label slot is nowrap. Override it so a sentence wraps
+                  // inside the panel instead of stretching the panel to the sentence.
+                  'line-clamp-2 whitespace-normal break-words text-xs leading-snug',
+                  'text-muted-foreground',
                   server.description ? undefined : 'font-mono'
                 )}
               >
                 {detail}
               </span>
             </span>
-          </DropdownMenuCheckboxItem>
+          </Menu.CheckboxItem>
         );
       })}
       {mcp.existingSession ? (
-        <p className="select-none px-2.5 pb-1.5 pt-2 text-[11px] leading-snug text-muted-foreground">
-          {t('session.mcp.nextStartHint')}
-        </p>
+        <>
+          <Menu.Separator />
+          <p className="select-none px-2.5 pb-1.5 pt-1.5 text-[11px] leading-snug text-muted-foreground">
+            {t('session.mcp.nextStartHint')}
+          </p>
+        </>
       ) : null}
     </>
   );

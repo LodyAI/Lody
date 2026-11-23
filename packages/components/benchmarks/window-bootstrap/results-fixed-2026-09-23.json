@@ -1,0 +1,314 @@
+{
+  "sourceHashes": {
+    "src/providers/local-window-bootstrap.ts": "0556558f092fb547c195f2a4c60975e332f843c72c71d77e859aa314c93bb3af",
+    "../../apps/electron/src/main/window-target.ts": "d111753a9140fb333177a11b239e9b77b929bf873c5ad314a08e7f8161fc9484",
+    "../../apps/electron/src/renderer/src/warm-window-reveal.ts": "455ca3efd07580d7c50a7d958ff41b728d99c16b1b1d48be239a628d785b8a72"
+  },
+  "environment": {
+    "electron": "39.5.1",
+    "chrome": "142.0.7444.265",
+    "cpu": "Apple M4 Max",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "repeats": 30,
+  "results": [
+    {
+      "entries": 100,
+      "bytes": 88831,
+      "scenario": "disk-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.4,
+            "p95Ms": 0.6
+          },
+          "readableMs": {
+            "medianMs": 4.2,
+            "p95Ms": 4.7
+          },
+          "syncReadyMs": {
+            "medianMs": 2.2,
+            "p95Ms": 2.5
+          }
+        },
+        "fixed": {
+          "acquiredMs": {
+            "medianMs": 0.6,
+            "p95Ms": 1.2
+          },
+          "readableMs": {
+            "medianMs": 4.5,
+            "p95Ms": 8.4
+          },
+          "syncReadyMs": {
+            "medianMs": 2.4,
+            "p95Ms": 2.9
+          }
+        }
+      }
+    },
+    {
+      "entries": 100,
+      "bytes": 88831,
+      "scenario": "peer-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.3
+          },
+          "readableMs": null,
+          "syncReadyMs": {
+            "medianMs": 0.3,
+            "p95Ms": 0.5
+          }
+        },
+        "fixed": {
+          "acquiredMs": {
+            "medianMs": 0.8,
+            "p95Ms": 1.1
+          },
+          "readableMs": {
+            "medianMs": 4.4,
+            "p95Ms": 6.4
+          },
+          "syncReadyMs": {
+            "medianMs": 2.5,
+            "p95Ms": 3.8
+          }
+        }
+      }
+    },
+    {
+      "entries": 100,
+      "bytes": 88831,
+      "scenario": "miss",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.1,
+            "p95Ms": 0.8
+          },
+          "readableMs": null,
+          "syncReadyMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.9
+          }
+        },
+        "fixed": {
+          "acquiredMs": {
+            "medianMs": 0.2,
+            "p95Ms": 2.8
+          },
+          "readableMs": null,
+          "syncReadyMs": {
+            "medianMs": 0.3,
+            "p95Ms": 2.8
+          }
+        }
+      }
+    },
+    {
+      "entries": 1000,
+      "bytes": 930931,
+      "scenario": "disk-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.7,
+            "p95Ms": 13
+          },
+          "readableMs": {
+            "medianMs": 16.15,
+            "p95Ms": 29
+          },
+          "syncReadyMs": {
+            "medianMs": 12.65,
+            "p95Ms": 25.3
+          }
+        },
+        "fixed": {
+          "acquiredMs": {
+            "medianMs": 0.75,
+            "p95Ms": 17.3
+          },
+          "readableMs": {
+            "medianMs": 16.4,
+            "p95Ms": 32.6
+          },
+          "syncReadyMs": {
+            "medianMs": 12.8,
+            "p95Ms": 29.1
+          }
+        }
+      }
+    },
+    {
+      "entries": 1000,
+      "bytes": 930931,
+      "scenario": "peer-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.3
+          },
+          "readableMs": null,
+          "syncReadyMs": {
+            "medianMs": 0.3,
+            "p95Ms": 0.5
+          }
+        },
+        "fixed": {
+          "acquiredMs": {
+            "medianMs": 2.05,
+            "p95Ms": 11.2
+          },
+          "readableMs": {
+            "medianMs": 17.5,
+            "p95Ms": 26.6
+          },
+          "syncReadyMs": {
+            "medianMs": 14.0,
+            "p95Ms": 23.1
+          }
+        }
+      }
+    },
+    {
+      "entries": 1000,
+      "bytes": 930931,
+      "scenario": "miss",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.1,
+            "p95Ms": 0.2
+          },
+          "readableMs": null,
+          "syncReadyMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.3
+          }
+        },
+        "fixed": {
+          "acquiredMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.3
+          },
+          "readableMs": null,
+          "syncReadyMs": {
+            "medianMs": 0.25,
+            "p95Ms": 0.4
+          }
+        }
+      }
+    },
+    {
+      "entries": 3000,
+      "bytes": 2822233,
+      "scenario": "disk-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.9,
+            "p95Ms": 33.4
+          },
+          "readableMs": {
+            "medianMs": 39.55,
+            "p95Ms": 71.6
+          },
+          "syncReadyMs": {
+            "medianMs": 33.8,
+            "p95Ms": 65.7
+          }
+        },
+        "fixed": {
+          "acquiredMs": {
+            "medianMs": 1.0,
+            "p95Ms": 21.7
+          },
+          "readableMs": {
+            "medianMs": 39.5,
+            "p95Ms": 60.7
+          },
+          "syncReadyMs": {
+            "medianMs": 33.55,
+            "p95Ms": 54.6
+          }
+        }
+      }
+    },
+    {
+      "entries": 3000,
+      "bytes": 2822233,
+      "scenario": "peer-hit",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.2,
+            "p95Ms": 32.1
+          },
+          "readableMs": null,
+          "syncReadyMs": {
+            "medianMs": 0.3,
+            "p95Ms": 32.3
+          }
+        },
+        "fixed": {
+          "acquiredMs": {
+            "medianMs": 3.9,
+            "p95Ms": 9
+          },
+          "readableMs": {
+            "medianMs": 41.8,
+            "p95Ms": 53.4
+          },
+          "syncReadyMs": {
+            "medianMs": 35.9,
+            "p95Ms": 45.3
+          }
+        }
+      }
+    },
+    {
+      "entries": 3000,
+      "bytes": 2822233,
+      "scenario": "miss",
+      "metrics": {
+        "before": {
+          "acquiredMs": {
+            "medianMs": 0.1,
+            "p95Ms": 0.3
+          },
+          "readableMs": null,
+          "syncReadyMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.3
+          }
+        },
+        "fixed": {
+          "acquiredMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.3
+          },
+          "readableMs": null,
+          "syncReadyMs": {
+            "medianMs": 0.2,
+            "p95Ms": 0.4
+          }
+        }
+      }
+    }
+  ],
+  "nativePresentation": {
+    "claimToShowMs": 152.39,
+    "visibleBeforeContent": false,
+    "firstShow": {
+      "ready": true,
+      "rows": 30
+    },
+    "scope": "Single synthetic presentation probe using production readiness helpers, not full application UI"
+  }
+}

@@ -1,11 +1,38 @@
+import { bindTestPresenceApplication } from './presence-application-fixture';
+import { resolveSessionMessageAuthor } from '../src/session/message-author';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { Effect } from 'effect';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createLocalCloudPort } from '@lody/platform';
-import type { WorkspaceId } from '@lody/shared';
+import {
+  AGENT_ROLE_VERSION,
+  getSessionRoomId,
+  getWorkspaceFlockDocId,
+  writeWorkspaceAgentRoleToFlock,
+  writeWorkspaceMcpServerToFlock,
+  type McpServerId,
+  deleteWorkspaceAgentRoleFromFlock,
+  type AgentRoleId,
+  type MachineId,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
+import {
+  createLocalSessionCommandEnvironment,
+  runWithSessionCommandEnvironment,
+} from '../src/lib/session-command-environment';
+import { executeDaemonSessionTool } from '../src/mcp/daemon-session-tools';
+import { buildLodyMcpServer, runWithMcpSessionContext } from '../src/mcp/lody-mcp-server';
+import { LocalControlHandler } from '../src/lib/local-control-handler';
+import {
+  getLodyOperationStorePath,
+  LodyOperationStore,
+} from '../src/orchestration/operation-store';
 
 import {
   applyLocalPlatformEnv,
@@ -22,6 +49,7 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
@@ -33,7 +61,10 @@ describe('local platform zero-cloud integration', () => {
   let cloudConnectionAttempts: number;
   let originalEnv: NodeJS.ProcessEnv;
 
+  let presenceApplication: ReturnType<typeof bindTestPresenceApplication>;
+
   beforeEach(async () => {
+    presenceApplication = bindTestPresenceApplication(createSilentLogger());
     originalEnv = { ...process.env };
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-zero-cloud-'));
     cloudConnectionAttempts = 0;
@@ -61,11 +92,436 @@ describe('local platform zero-cloud integration', () => {
   });
 
   afterEach(async () => {
+    await presenceApplication.closeLegacy();
     process.env = originalEnv;
     await new Promise<void>((resolve, reject) => {
       trapServer.close((error) => (error ? reject(error) : resolve()));
     });
     await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('creates a Role Session with the daemon repo, freezes its prompt and dispatches without cloud login', async () => {
+    applyLocalPlatformEnv();
+    const workspaceId = 'lw_role_test' as WorkspaceId;
+    const machineId = 'local-role-machine' as MachineId;
+    const userId = 'local:role-test';
+    const manager = await LoroDocumentManager.create(workspaceId, userId, createSilentLogger());
+    const dispatched: SessionId[] = [];
+    try {
+      await manager.registerMachine(machineId, {
+        id: machineId,
+        name: 'Local',
+        ownerUserId: userId,
+      });
+      const configId = await manager.createAgentConfig('custom', 'claude', machineId, 'Synthetic');
+      const sessionId = await manager.createSession(machineId, 'custom', 'claude');
+      await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), { agentConfigId: configId });
+      const catalog = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+      writeWorkspaceMcpServerToFlock(catalog.flock, {
+        id: 'synthetic-mcp' as McpServerId,
+        name: 'Synthetic MCP',
+        transport: 'stdio',
+        connection: { transport: 'stdio', command: 'synthetic-not-executed' },
+        enabledByDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      writeWorkspaceAgentRoleToFlock(catalog.flock, {
+        v: AGENT_ROLE_VERSION,
+        id: 'reviewer' as AgentRoleId,
+        ownerUserId: userId,
+        visibility: 'private',
+        name: 'Reviewer',
+        machineId,
+        agentConfigId: configId,
+        runConfig: {},
+        promptPrefix: 'Review carefully.',
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      await manager.repo.flush();
+      const environment = createLocalSessionCommandEnvironment({
+        manager,
+        workspaceId,
+        machineId,
+        machineName: 'Local',
+        userId,
+        host: {
+          readInvocation: (id) => ({
+            type: 'session/active-invocation-context',
+            active: true,
+            sessionId: id,
+            requesterUserId: userId,
+            sourceTurnId: 'source-turn',
+            inputConfig: {
+              cliType: 'custom',
+              agentType: 'claude',
+              modelId: 'source-model',
+              agentRoleId: 'planner' as AgentRoleId,
+              agentRoleRevision: 1,
+              agentRoleSnapshot: { id: 'planner', revision: 1, name: 'Planner', emoji: '🧭' },
+            },
+          }),
+          readLiveStatus: async (id) => ({
+            sessionId: id,
+            machineOnline: true,
+            fresh: true,
+            state: 'idle',
+          }),
+          readActiveTurnId: () => undefined,
+          steerSession: async () => {
+            throw new Error('Unexpected steer');
+          },
+          cancelSession: async () => ({ success: true }),
+          dispatchSession: async (id) => {
+            dispatched.push(id);
+          },
+        },
+      });
+      const context = {
+        machineId,
+        workspaceId,
+        sessionId,
+        localControlSocketPath: undefined,
+        workdir: tempDir,
+      };
+      const call = (name: string, args: unknown) =>
+        runWithSessionCommandEnvironment(environment, () =>
+          executeDaemonSessionTool(context, name, args)
+        );
+      const discovery = await call('lody_catalog', { action: 'agent_roles' });
+      expect(discovery.isError).not.toBe(true);
+      expect(discovery.content[0]?.text).toContain('reviewer');
+      const input = {
+        operationId: 'role-create',
+        agentRoleId: 'reviewer',
+        prompt: 'Check the change.',
+      };
+      const control = new LocalControlHandler({
+        machineId,
+        logger: createSilentLogger(),
+        dispatchSession: async () => {
+          throw new Error('Unexpected session control');
+        },
+        dispatchProject: async () => {
+          throw new Error('Unexpected project control');
+        },
+        dispatchMachineRpc: async (request) => {
+          if (request.method !== 'session/call-tool') throw new Error('Unexpected RPC');
+          return {
+            ok: true,
+            result: await runWithSessionCommandEnvironment(environment, () =>
+              executeDaemonSessionTool(
+                { ...context, sessionId: request.params.sessionId },
+                request.params.name,
+                request.params.arguments
+              )
+            ),
+          };
+        },
+      });
+      const socketPath =
+        process.platform === 'win32'
+          ? `\\\\.\\pipe\\lody-role-test-${process.pid}`
+          : path.join(tempDir, 'control.sock');
+      const socketServer = http.createServer((request, response) => {
+        void (async () => {
+          try {
+            const chunks: Buffer[] = [];
+            for await (const chunk of request) chunks.push(Buffer.from(chunk));
+            const result = await control.handle({
+              path: request.url ?? '',
+              rawBody: Buffer.concat(chunks).toString('utf8'),
+              requestId: 1,
+            });
+            response
+              .writeHead(result.status, { 'Content-Type': 'application/json' })
+              .end(JSON.stringify(result.payload));
+          } catch (error) {
+            response.writeHead(500).end(String(error));
+          }
+        })();
+      });
+      await new Promise<void>((resolve, reject) => {
+        socketServer.once('error', reject);
+        socketServer.listen(socketPath, resolve);
+      });
+      const mcpServer = buildLodyMcpServer();
+      const client = new Client({ name: 'local-role-test', version: '1' });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      let result;
+      try {
+        await mcpServer.connect(serverTransport);
+        await client.connect(clientTransport);
+        result = await runWithMcpSessionContext(
+          { ...context, localControlSocketPath: socketPath },
+          () => client.callTool({ name: 'lody_session_create', arguments: input })
+        );
+      } finally {
+        await client.close();
+        await mcpServer.close();
+        await new Promise<void>((resolve, reject) =>
+          socketServer.close((error) => (error ? reject(error) : resolve()))
+        );
+      }
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      expect(dispatched).toHaveLength(1);
+      const targetId = dispatched[0];
+      if (!targetId) throw new Error('Role Session was not dispatched');
+      const target = await manager.repo.getDocMeta(getSessionRoomId(targetId));
+      expect(target?.meta).toMatchObject({
+        agentRoleId: 'reviewer',
+        agentRoleRevision: 1,
+        openedBySessionId: sessionId,
+      });
+      const doc = await manager.getOrCreateSessionDoc(targetId);
+      const history = await doc.sessionData.history.readAll();
+      expect(history).toHaveLength(1);
+      expect(history[0]).toMatchObject({
+        userId,
+        author: {
+          kind: 'agent',
+          sessionId,
+          turnId: 'source-turn',
+          name: 'Synthetic',
+          model: { id: 'source-model' },
+          role: { id: 'planner', name: 'Planner', emoji: '🧭' },
+        },
+      });
+      expect(history[0]?.inputConfig?.modelId).not.toBe('source-model');
+      expect(history[0]?.inputConfig?.mcpServerIds).toEqual(['synthetic-mcp']);
+      expect(history[0]?.items).toEqual([{ type: 'text', text: 'Check the change.' }]);
+      expect(history[0]?.inputConfig?.prompt).toBe('Review carefully.\n\nCheck the change.');
+      expect(target?.meta.latestUserMsgId).toBe(history[0]?.id);
+      await call('lody_session_create', input);
+      expect(dispatched).toEqual([targetId]);
+      // An Agent that lost the first response retries the same work under a new id.
+      const freshIdRetry = await call('lody_session_create', {
+        ...input,
+        operationId: 'role-create-fresh-id',
+      });
+      expect(freshIdRetry.isError, JSON.stringify(freshIdRetry)).not.toBe(true);
+      expect(JSON.parse(String(freshIdRetry.content[0]?.text))).toMatchObject({
+        id: 'role-create',
+        state: 'active',
+        notice: expect.stringContaining('no new Session was created'),
+      });
+      expect(dispatched).toEqual([targetId]);
+      const store = new LodyOperationStore(getLodyOperationStorePath(machineId), undefined, {
+        maintenance: false,
+      });
+      try {
+        const operation = store.get(sessionId, 'role-create');
+        expect(operation.items[0]).toMatchObject({
+          inputDurable: true,
+          target: { sessionId: targetId },
+        });
+        expect(operation.canonicalCommand).toMatchObject({ agentRoleRevision: 1 });
+        expect(operation.frozenContinuationConfig.targetDispatchConfigs?.[0]?.mcpServerIds).toEqual(
+          ['synthetic-mcp']
+        );
+      } finally {
+        store.close();
+      }
+      const optOutCreate = await call('lody_session_create', {
+        ...input,
+        operationId: 'role-create-opt-out',
+        mcpServerIds: [],
+      });
+      expect(optOutCreate.isError, JSON.stringify(optOutCreate)).not.toBe(true);
+      const optOutTargetId = dispatched.at(-1);
+      if (!optOutTargetId || optOutTargetId === targetId)
+        throw new Error('Missing opt-out Session');
+      const optOutDoc = await manager.getOrCreateSessionDoc(optOutTargetId);
+      expect((await optOutDoc.sessionData.history.readAll())[0]?.inputConfig?.mcpServerIds).toEqual(
+        []
+      );
+      writeWorkspaceMcpServerToFlock(catalog.flock, {
+        id: 'synthetic-mcp' as McpServerId,
+        name: 'Synthetic MCP',
+        transport: 'stdio',
+        connection: { transport: 'stdio', command: 'synthetic-not-executed' },
+        enabledByDefault: false,
+        createdAt: 1,
+        updatedAt: 2,
+      });
+      const repeated = await call('lody_session_create', input);
+      expect(repeated.isError, JSON.stringify(repeated)).not.toBe(true);
+      expect((await doc.sessionData.history.readAll())[0]?.inputConfig?.mcpServerIds).toEqual([
+        'synthetic-mcp',
+      ]);
+      expect(dispatched).toEqual([targetId, optOutTargetId]);
+
+      const targetMeta = target?.meta as import('@lody/shared').SessionMeta;
+      const targetInput = history[0];
+      if (!targetInput) throw new Error('Missing target input');
+      deleteWorkspaceAgentRoleFromFlock(catalog.flock, 'reviewer' as AgentRoleId);
+      const targetAuthor = await resolveSessionMessageAuthor(
+        manager,
+        targetMeta,
+        targetInput.id,
+        targetInput.inputConfig,
+        undefined,
+        workspaceId
+      );
+      await doc.sessionData.commands.appendTurn({
+        id: `assistant:${targetInput.id}`,
+        role: 'assistant',
+        timestamp: targetInput.timestamp,
+        userTurnId: targetInput.id,
+        author: targetAuthor,
+        items: [{ type: 'text', text: 'Synthetic response' }],
+        finished: true,
+        fileDiff: [],
+      });
+      const fromTarget = {
+        ...environment,
+        host: {
+          ...environment.host,
+          readInvocation: (id: SessionId) => ({
+            type: 'session/active-invocation-context' as const,
+            active: true as const,
+            sessionId: id,
+            requesterUserId: userId,
+            sourceTurnId: targetInput.id,
+            inputConfig: targetInput.inputConfig ?? {},
+          }),
+        },
+      };
+      const reverse = await runWithSessionCommandEnvironment(fromTarget, () =>
+        executeDaemonSessionTool({ ...context, sessionId: targetId }, 'lody_session_chat', {
+          operationId: 'rejected-reverse',
+          sessionId,
+          prompt: 'Review completed.',
+        })
+      );
+      expect(reverse.isError).toBe(true);
+      expect(JSON.stringify(reverse)).toContain('REVERSE_CHAT_FORBIDDEN');
+      const humanTurnId = 'independent-human-turn';
+      await doc.sessionData.commands.appendTurn({
+        id: humanTurnId,
+        role: 'user',
+        userId,
+        author: { v: 1, kind: 'human', userId },
+        timestamp: targetInput.timestamp,
+        items: [{ type: 'text', text: 'Send my new follow-up.' }],
+        fileDiff: [],
+        status: 'processing',
+        inputConfig: targetInput.inputConfig,
+      });
+      const freshTarget = {
+        ...fromTarget,
+        host: {
+          ...fromTarget.host,
+          readInvocation: (id: SessionId) => ({
+            ...fromTarget.host.readInvocation(id),
+            sourceTurnId: humanTurnId,
+          }),
+        },
+      };
+      const chat = await runWithSessionCommandEnvironment(freshTarget, () =>
+        executeDaemonSessionTool({ ...context, sessionId: targetId }, 'lody_session_chat', {
+          operationId: 'reply-to-source',
+          sessionId,
+          prompt: 'Review completed.',
+        })
+      );
+      expect(chat.isError, JSON.stringify(chat)).not.toBe(true);
+      const sourceDoc = await manager.getOrCreateSessionDoc(sessionId);
+      const reply = (await sourceDoc.sessionData.history.readAll()).at(-1);
+      expect(reply).toMatchObject({
+        userId,
+        author: {
+          sessionId: targetId,
+          turnId: humanTurnId,
+          role: { id: 'reviewer', name: 'Reviewer' },
+        },
+      });
+
+      await sourceDoc.sessionData.commands.appendTurn({
+        id: 'source-turn',
+        role: 'user',
+        userId,
+        author: { v: 1, kind: 'human', userId },
+        timestamp: targetInput.timestamp,
+        items: [{ type: 'text', text: 'Continue the delegated review.' }],
+        fileDiff: [],
+        status: 'processing',
+        inputConfig: environment.host.readInvocation(sessionId).inputConfig,
+      });
+      const continued = await call('lody_session_chat', {
+        operationId: 'continue-with-selected-mcp',
+        sessionId: targetId,
+        prompt: 'Continue review.',
+      });
+      expect(continued.isError, JSON.stringify(continued)).not.toBe(true);
+      expect((await doc.sessionData.history.readAll()).at(-1)?.inputConfig?.mcpServerIds).toEqual([
+        'synthetic-mcp',
+      ]);
+      const optedOut = await call('lody_session_chat', {
+        operationId: 'continue-without-mcp',
+        sessionId: targetId,
+        prompt: 'Continue without tools.',
+        mcpServerIds: [],
+      });
+      expect(optedOut.isError, JSON.stringify(optedOut)).not.toBe(true);
+      expect((await doc.sessionData.history.readAll()).at(-1)?.inputConfig?.mcpServerIds).toEqual(
+        []
+      );
+      const batch = await call('lody_session_chat', {
+        operationId: 'batch-preserves-opt-out',
+        items: [{ sessionId: targetId, prompt: 'Still without tools.' }],
+      });
+      expect(batch.isError, JSON.stringify(batch)).not.toBe(true);
+      expect((await doc.sessionData.history.readAll()).at(-1)?.inputConfig?.mcpServerIds).toEqual(
+        []
+      );
+
+      const denied = await environment.checkMachineAccess({
+        workspaceId,
+        machineId: 'remote' as MachineId,
+        requesterUserId: userId,
+      });
+      expect(denied.allowed).toBe(false);
+      const deniedUser = await environment.checkMachineAccess({
+        workspaceId,
+        machineId,
+        requesterUserId: 'another-user',
+      });
+      expect(deniedUser.allowed).toBe(false);
+      await expect(
+        runWithSessionCommandEnvironment(environment, () =>
+          executeDaemonSessionTool(
+            { ...context, workspaceId: 'wrong-workspace' },
+            'lody_catalog',
+            { action: 'agent_roles' }
+          )
+        )
+      ).rejects.toThrow('scope mismatch');
+      await expect(
+        runWithSessionCommandEnvironment(
+          {
+            ...environment,
+            host: {
+              ...environment.host,
+              readInvocation: (id) => ({
+                type: 'session/active-invocation-context',
+                sessionId: id,
+                active: false,
+              }),
+            },
+          },
+          () => executeDaemonSessionTool(context, 'lody_session_create', input)
+        )
+      ).rejects.toThrow('active local user Turn');
+      await expect(call('lody_feedback', { feedback: 'not allowed' })).rejects.toThrow(
+        'Unsupported daemon Session tool'
+      );
+      expect(cloudConnectionAttempts).toBe(0);
+    } finally {
+      await manager.cleanUp({ fast: true, preserveSessionStatus: true });
+    }
   });
 
   it('bootstraps identity, workspace, and the local data plane without touching cloud endpoints', async () => {
@@ -103,7 +559,7 @@ describe('local platform zero-cloud integration', () => {
       {
         streamsTokens: cloudPort.streamsTokens,
         cloudBilling: cloudPort.billing,
-      },
+      }
     );
     try {
       expect(documentManager.isTransportConnected()).toBe(true);
@@ -112,7 +568,7 @@ describe('local platform zero-cloud integration', () => {
           workspaceId: workspace.id as WorkspaceId,
           requesterUserId: identity.userId,
           machineId: 'local-machine',
-        }),
+        })
       ).resolves.toEqual({ allowed: true });
     } finally {
       await documentManager.cleanUp({ fast: true, preserveSessionStatus: true });

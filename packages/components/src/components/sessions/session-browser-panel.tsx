@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Globe2, Loader2, ShieldAlert } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
   BrowserAddressError,
   formatPreviewTargetUrl,
   getServerNow,
-  getSessionPreviewLegacyFields,
+  machineSupportsPreviewStopProcess,
   parseBrowserAddress,
   type BrowserAddress,
   type ElectronPublicBrowserState,
@@ -15,6 +14,7 @@ import {
   type PreviewConnection,
   type PreviewTarget,
   type PreviewTargetApproval,
+  type SessionId,
   type SessionMeta,
   type SessionPreviewDocState,
   type SessionPreviewEndpoint,
@@ -23,35 +23,33 @@ import {
 
 import { activeWorkspaceRuntimeAtom, userAtom } from '@/atoms';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
-import { Button } from '@/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { toast } from 'sonner';
+import { machineOnlineStatusAtomFamily } from '@/atoms/presence';
+import { toast } from '@/lib/toast';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { isElectronRenderer } from '@/lib/electron';
 import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { hasUsableManagedPreviewUrl } from '@/lib/managed-preview-connection';
-import { buildManagedViewerUrl, samePreviewTargetOrigin } from '@/lib/session-browser-url';
-import { cn } from '@/lib/utils';
+import {
+  buildManagedViewerUrl,
+  buildManagedViewerUrlForLogicalUrl,
+  samePreviewTargetOrigin,
+} from '@/lib/session-browser-url';
 import { ManagedPreviewSurface } from './managed-preview-surface';
 import { PublicBrowserSurface } from './public-browser-surface';
 import {
-  clearSessionBrowserResumeState,
+  isCachedRemotePreviewValid,
   readSessionBrowserResumeState,
   rememberSessionBrowserResumeState,
+  rememberSessionRemotePreview,
+  resolveRemotePreviewExpiresAt,
   type SessionBrowserNavigationHistory,
 } from './session-browser-resume-state';
-import { clearManagedPreviewFrame } from './managed-preview-frame-cache';
-import { SessionBrowserToolbar } from './session-browser-toolbar';
+import {
+  clearManagedPreviewFrame,
+  getCachedManagedPreviewFrameUrl,
+} from './managed-preview-frame-cache';
+import { SessionBrowserPanelView, type ManagedNavigationPhase } from './session-browser-panel-view';
 
 type SessionBrowserPanelProps = {
   session: SessionMeta;
@@ -65,17 +63,11 @@ type SessionBrowserPanelProps = {
   onToggleVisualAnnotationInChat?: (reference: VisualAnnotationReferencePayload) => boolean | void;
 };
 
-type PendingManagedAction = {
-  kind: 'navigate' | 'share';
-  address: BrowserAddress & { engine: 'managed-preview'; target: PreviewTarget };
-  historyIndex?: number;
-};
-
 type EffectivePreviewState = {
   connection?: PreviewConnection;
 };
 
-type ManagedNavigationPhase = 'resolving-machine' | 'opening-local' | 'creating-tunnel';
+type PublicBrowserNavigationRequest = { id: number; url: string };
 
 const approvalFor = (
   address: BrowserAddress & { engine: 'managed-preview'; target: PreviewTarget },
@@ -83,7 +75,7 @@ const approvalFor = (
   source: PreviewTargetApproval['source']
 ): PreviewTargetApproval => ({
   source,
-  targetClass: address.targetClass === 'private-lan' ? 'private_lan' : 'loopback',
+  targetClass: 'loopback',
   target: address.target,
   confirmedByUserId: userId,
   confirmedAt: getServerNow(),
@@ -91,6 +83,189 @@ const approvalFor = (
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+const sameManagedCapabilityEndpoint = (leftUrl: string, rightUrl: string): boolean => {
+  try {
+    const left = new URL(leftUrl);
+    const right = new URL(rightUrl);
+    return (
+      left.origin === right.origin &&
+      left.searchParams.get('__lody_preview_token') ===
+        right.searchParams.get('__lody_preview_token') &&
+      left.searchParams.get('__lody_local_preview_token') ===
+        right.searchParams.get('__lody_local_preview_token')
+    );
+  } catch {
+    return false;
+  }
+};
+
+const resolveManagedViewerUrl = (
+  sessionId: SessionId,
+  baseViewerUrl: string,
+  target: PreviewTarget,
+  logicalUrl?: string
+): string => {
+  const cachedFrameUrl = getCachedManagedPreviewFrameUrl(sessionId);
+  if (cachedFrameUrl && sameManagedCapabilityEndpoint(cachedFrameUrl, baseViewerUrl)) {
+    return cachedFrameUrl;
+  }
+  if (logicalUrl) {
+    try {
+      return buildManagedViewerUrlForLogicalUrl(baseViewerUrl, logicalUrl);
+    } catch {
+      // Fall back to target-based builder if URL parsing fails.
+    }
+  }
+  return buildManagedViewerUrl(baseViewerUrl, target);
+};
+
+type InitialBrowserHydration = {
+  machinePlane: 'local' | 'cloud' | null;
+  remoteConnection: PreviewConnection | undefined;
+  remoteExpiresAt: number | null;
+  localEndpoint: SessionPreviewEndpoint | null;
+  currentAddress: BrowserAddress | null;
+  address: string;
+  viewerUrl: string | null;
+  history: SessionBrowserNavigationHistory;
+  resumeAddress: BrowserAddress | null;
+  shouldVerifyLocalEndpoint: boolean;
+};
+
+const hydrateInitialBrowserState = (
+  sessionId: SessionId,
+  suggestedAddress: string
+): InitialBrowserHydration => {
+  const resume = readSessionBrowserResumeState(sessionId);
+  const now = Date.now();
+  const electron = isElectronRenderer();
+  const machinePlane: 'local' | 'cloud' | null = electron ? (resume?.machinePlane ?? null) : 'cloud';
+  const cachedRemote = resume?.remotePreview;
+  const remoteValid = isCachedRemotePreviewValid(cachedRemote, now);
+  const remoteExpired = Boolean(cachedRemote && !remoteValid);
+  const remoteConnection: PreviewConnection | undefined = remoteValid
+    ? cachedRemote!.connection
+    : remoteExpired
+      ? {
+          ...cachedRemote!.connection,
+          status: 'closed',
+          closedReason: 'idle_timeout',
+          publicUrl: undefined,
+        }
+      : undefined;
+  const remoteExpiresAt = remoteValid ? cachedRemote!.expiresAt : null;
+  const history = resume?.history ?? { entries: [], index: -1 };
+  const savedAddress = resume?.currentAddress ?? null;
+
+  if (savedAddress?.engine === 'public-web') {
+    return {
+      machinePlane,
+      remoteConnection,
+      remoteExpiresAt,
+      localEndpoint: null,
+      currentAddress: savedAddress,
+      address: savedAddress.logicalUrl,
+      viewerUrl: null,
+      history,
+      resumeAddress: null,
+      shouldVerifyLocalEndpoint: false,
+    };
+  }
+
+  if (savedAddress?.engine === 'managed-preview' && savedAddress.target) {
+    const savedLocal = resume?.localEndpoint ?? null;
+    if (
+      electron &&
+      machinePlane === 'local' &&
+      savedLocal &&
+      samePreviewTargetOrigin(savedLocal.target, savedAddress.target)
+    ) {
+      return {
+        machinePlane,
+        remoteConnection,
+        remoteExpiresAt,
+        localEndpoint: savedLocal,
+        currentAddress: savedAddress,
+        address: savedAddress.logicalUrl,
+        viewerUrl: resolveManagedViewerUrl(
+          sessionId,
+          savedLocal.viewerUrl,
+          savedAddress.target,
+          savedAddress.logicalUrl
+        ),
+        history,
+        resumeAddress: null,
+        shouldVerifyLocalEndpoint: true,
+      };
+    }
+
+    if (
+      machinePlane !== 'local' &&
+      remoteValid &&
+      samePreviewTargetOrigin(cachedRemote!.connection.target, savedAddress.target)
+    ) {
+      return {
+        machinePlane,
+        remoteConnection,
+        remoteExpiresAt,
+        localEndpoint: null,
+        currentAddress: savedAddress,
+        address: savedAddress.logicalUrl,
+        viewerUrl: resolveManagedViewerUrl(
+          sessionId,
+          cachedRemote!.connection.publicUrl,
+          savedAddress.target,
+          savedAddress.logicalUrl
+        ),
+        history,
+        resumeAddress: null,
+        shouldVerifyLocalEndpoint: false,
+      };
+    }
+
+    if (machinePlane !== 'local' && remoteExpired) {
+      return {
+        machinePlane,
+        remoteConnection,
+        remoteExpiresAt: null,
+        localEndpoint: null,
+        currentAddress: savedAddress,
+        address: savedAddress.logicalUrl,
+        viewerUrl: null,
+        history,
+        resumeAddress: null,
+        shouldVerifyLocalEndpoint: false,
+      };
+    }
+
+    return {
+      machinePlane,
+      remoteConnection,
+      remoteExpiresAt,
+      localEndpoint: null,
+      currentAddress: null,
+      address: savedAddress.logicalUrl,
+      viewerUrl: null,
+      history,
+      resumeAddress: savedAddress,
+      shouldVerifyLocalEndpoint: false,
+    };
+  }
+
+  return {
+    machinePlane,
+    remoteConnection,
+    remoteExpiresAt,
+    localEndpoint: null,
+    currentAddress: null,
+    address: suggestedAddress,
+    viewerUrl: null,
+    history,
+    resumeAddress: null,
+    shouldVerifyLocalEndpoint: false,
+  };
+};
 
 export function SessionBrowserPanel(props: SessionBrowserPanelProps) {
   return <SessionBrowserPanelController key={props.session.id} {...props} />;
@@ -111,35 +286,55 @@ function SessionBrowserPanelController({
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const user = useAtomValue(userAtom);
   const sessionMachine = useAtomValue(getMachineMetaByIdAtomFamily(session.machineId));
+  const machineOnline = useAtomValue(machineOnlineStatusAtomFamily(session.machineId));
   const sessionDoc = useSessionDoc(session.id);
-  const legacyPreview = getSessionPreviewLegacyFields(session);
-  const effectivePreview = useMemo<EffectivePreviewState>(() => {
-    const preview = sessionDoc.doc.preview as SessionPreviewDocState | undefined;
-    return { connection: preview?.connection ?? legacyPreview.previewConnection };
-  }, [legacyPreview.previewConnection, sessionDoc.doc.preview]);
   const suggestedAddress = useMemo(() => {
     const preview = sessionDoc.doc.preview as SessionPreviewDocState | undefined;
-    const candidate = preview?.candidate ?? legacyPreview.previewCandidate;
+    const candidate = preview?.candidate;
     return candidate?.status === 'available' && candidate.target
       ? formatPreviewTargetUrl(candidate.target)
       : '';
-  }, [legacyPreview.previewCandidate, sessionDoc.doc.preview]);
+  }, [sessionDoc.doc.preview]);
   // Session meta carries only the candidate STATUS; its target lives in the
   // session doc `preview` state. The two planes sync independently, so a click
   // can land after the status is visible but before the doc write arrives.
   const metaCandidateAvailable = session.previewCandidate?.status === 'available';
 
-  const [address, setAddress] = useState(suggestedAddress);
-  const [currentAddress, setCurrentAddress] = useState<BrowserAddress | null>(null);
-  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
-  const [localEndpoint, setLocalEndpoint] = useState<SessionPreviewEndpoint | null>(null);
-  const localEndpointRef = useRef<SessionPreviewEndpoint | null>(null);
-  const [history, setHistory] = useState<SessionBrowserNavigationHistory>({
-    entries: [],
-    index: -1,
-  });
+  const [initialHydration] = useState(() =>
+    hydrateInitialBrowserState(session.id, suggestedAddress)
+  );
+  const [remoteConnection, setRemoteConnection] = useState<PreviewConnection | undefined>(
+    initialHydration.remoteConnection
+  );
+  const [remoteExpiresAt, setRemoteExpiresAt] = useState<number | null>(
+    initialHydration.remoteExpiresAt
+  );
+  const [checkingPreview, setCheckingPreview] = useState(true);
+  const [previewStatusError, setPreviewStatusError] = useState<string | null>(null);
+  const previewObservationEpoch = useRef(0);
+  const previewControlInFlight = useRef(false);
+  const effectivePreview: EffectivePreviewState = { connection: remoteConnection };
+
+  const [address, setAddress] = useState(initialHydration.address);
+  const [currentAddress, setCurrentAddress] = useState<BrowserAddress | null>(
+    initialHydration.currentAddress
+  );
+  const currentAddressRef = useRef(currentAddress);
+  currentAddressRef.current = currentAddress;
+  const [viewerUrl, setViewerUrl] = useState<string | null>(initialHydration.viewerUrl);
+  const viewerUrlRef = useRef(viewerUrl);
+  viewerUrlRef.current = viewerUrl;
+  const [localEndpoint, setLocalEndpoint] = useState<SessionPreviewEndpoint | null>(
+    initialHydration.localEndpoint
+  );
+  const localEndpointRef = useRef<SessionPreviewEndpoint | null>(initialHydration.localEndpoint);
+  const [history, setHistory] = useState<SessionBrowserNavigationHistory>(initialHydration.history);
   const [publicState, setPublicState] = useState<ElectronPublicBrowserState | null>(null);
-  const [publicNavigationRequestId, setPublicNavigationRequestId] = useState<number | null>(null);
+  // Native state may change the current address after a redirect or history
+  // movement. Keep the explicit renderer intent separate so that observation
+  // cannot be fed back into WebContentsView.loadURL.
+  const [publicNavigationRequest, setPublicNavigationRequest] =
+    useState<PublicBrowserNavigationRequest | null>(null);
   const [annotationEnabled, setAnnotationEnabled] = useState(false);
   const [annotationAvailable, setAnnotationAvailable] = useState(false);
   const [managedLoading, setManagedLoading] = useState(false);
@@ -155,42 +350,213 @@ function SessionBrowserPanelController({
   const [managedNavigationPhase, setManagedNavigationPhase] =
     useState<ManagedNavigationPhase | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<PendingManagedAction | null>(null);
-  const [createdShare, setCreatedShare] = useState<{
-    target: PreviewTarget;
-    publicUrl: string;
-  } | null>(null);
-  const [machinePlane, setMachinePlane] = useState<'local' | 'cloud' | null>(null);
-  const [resumeAddress, setResumeAddress] = useState<BrowserAddress | null>(null);
+  const [machinePlane, setMachinePlane] = useState<'local' | 'cloud' | null>(
+    initialHydration.machinePlane
+  );
+  const machinePlaneRef = useRef(machinePlane);
+  machinePlaneRef.current = machinePlane;
+  const [resumeAddress, setResumeAddress] = useState<BrowserAddress | null>(
+    initialHydration.resumeAddress
+  );
   const navigationSequenceRef = useRef(0);
+  const publicNavigationSequenceRef = useRef(0);
   const restoreAttemptKeyRef = useRef<string | null>(null);
   const handledCandidateNavigationRequestRef = useRef(0);
+  const pendingLocalVerifyRef = useRef(initialHydration.shouldVerifyLocalEndpoint);
 
   const isLocalDesktopSession = isElectronRenderer() && machinePlane === 'local';
+  const foregroundEndpointRef = useRef<string | undefined>(undefined);
+  foregroundEndpointRef.current =
+    !isLocalDesktopSession && currentAddress?.engine === 'managed-preview' && viewerUrl
+      ? remoteConnection?.endpointId
+      : undefined;
+  const previewDocumentRevision = (sessionDoc.doc.preview as SessionPreviewDocState | undefined)
+    ?.connection?.updatedAt;
+  // Persisted targets are navigation hints, never evidence that a capability is still live.
+  const persistedPreviewTarget = (sessionDoc.doc.preview as SessionPreviewDocState | undefined)
+    ?.connection?.target;
+  const statusTimeoutMessage = t(
+    'sessions.browser.errors.timeout',
+    'Remote preview request timed out.'
+  );
+
+  // When a cached local desktop endpoint was hydrated synchronously, confirm it
+  // in the background without blocking or unmounting the live frame.
+  useEffect(() => {
+    if (!pendingLocalVerifyRef.current || !active || !runtime || !user?.id) return undefined;
+    const current = currentAddressRef.current;
+    const cached = localEndpointRef.current;
+    if (!current || current.engine !== 'managed-preview' || !current.target || !cached) {
+      pendingLocalVerifyRef.current = false;
+      return undefined;
+    }
+    pendingLocalVerifyRef.current = false;
+    let cancelled = false;
+    const sequence = navigationSequenceRef.current;
+    void runtime
+      .requestSessionPreviewEndpointAcquire(session.machineId, session.id, user.id, current.target)
+      .then((response) => {
+        if (cancelled || sequence !== navigationSequenceRef.current) return;
+        if (
+          !response?.success ||
+          !response.endpoint ||
+          response.endpoint.kind !== 'local-proxy' ||
+          !samePreviewTargetOrigin(response.endpoint.target, current.target!) ||
+          response.endpoint.capabilities.visualAnnotation !== true
+        ) {
+          return;
+        }
+        const previous = localEndpointRef.current;
+        localEndpointRef.current = response.endpoint;
+        setLocalEndpoint(response.endpoint);
+        rememberSessionBrowserResumeState(session.id, {
+          localEndpoint: response.endpoint,
+          machinePlane: 'local',
+        });
+        if (previous && previous.endpointId !== response.endpoint.endpointId) {
+          void runtime.requestSessionPreviewEndpointRelease(
+            session.machineId,
+            session.id,
+            previous.endpointId
+          );
+        }
+        const currentViewer = viewerUrlRef.current;
+        if (
+          !currentViewer ||
+          !sameManagedCapabilityEndpoint(currentViewer, response.endpoint.viewerUrl)
+        ) {
+          setViewerUrl(
+            resolveManagedViewerUrl(
+              session.id,
+              response.endpoint.viewerUrl,
+              current.target!,
+              current.logicalUrl
+            )
+          );
+        }
+      })
+      .catch(() => {
+        // Keep the hydrated local frame visible if the background check fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active, runtime, session.id, session.machineId, user?.id]);
+
+  useEffect(() => {
+    if (!active || !runtime || !user?.id) return undefined;
+    let disposed = false;
+    let requestSequence = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = async (renew: boolean) => {
+      if (disposed || document.hidden) return;
+      if (previewControlInFlight.current) {
+        timer = setTimeout(() => void refresh(true), 60_000);
+        return;
+      }
+      const sequence = ++requestSequence;
+      const epoch = previewObservationEpoch.current;
+      if (!renew) setCheckingPreview(true);
+      try {
+        const response = await runtime.requestSessionPreviewStatus(
+          session.machineId,
+          session.id,
+          user.id,
+          {
+            renewEndpointId: renew ? foregroundEndpointRef.current : undefined,
+          }
+        );
+        if (disposed || sequence !== requestSequence || epoch !== previewObservationEpoch.current)
+          return;
+        if (!response?.success) throw new Error(response?.message ?? statusTimeoutMessage);
+        const connection = response.connection;
+        const publicUrl =
+          connection && hasUsableManagedPreviewUrl(connection) ? connection.publicUrl : undefined;
+        const nextExpiresAt =
+          connection && publicUrl
+            ? resolveRemotePreviewExpiresAt(connection, response.expiresAt)
+            : null;
+        setRemoteConnection(connection);
+        setRemoteExpiresAt(nextExpiresAt);
+        rememberSessionRemotePreview(session.id, connection, nextExpiresAt ?? response.expiresAt);
+        setPreviewStatusError(null);
+        const current = currentAddressRef.current;
+        if (!localEndpointRef.current && current?.engine === 'managed-preview') {
+          if (
+            current.target &&
+            connection &&
+            publicUrl &&
+            samePreviewTargetOrigin(connection.target, current.target)
+          ) {
+            const existingViewer = viewerUrlRef.current;
+            if (!existingViewer || !sameManagedCapabilityEndpoint(existingViewer, publicUrl)) {
+              setViewerUrl(
+                resolveManagedViewerUrl(session.id, publicUrl, current.target, current.logicalUrl)
+              );
+            }
+          } else {
+            setViewerUrl(null);
+          }
+        }
+      } catch (statusError) {
+        if (
+          !disposed &&
+          sequence === requestSequence &&
+          epoch === previewObservationEpoch.current
+        ) {
+          setPreviewStatusError(errorMessage(statusError));
+          // A control-plane timeout does not revoke the viewer capability.
+          // Keep the current page; only an authoritative endpoint state above
+          // may invalidate it. Returning to the panel must not reload it.
+        }
+      } finally {
+        if (!disposed && sequence === requestSequence) {
+          setCheckingPreview(false);
+          if (!document.hidden) timer = setTimeout(() => void refresh(true), 60_000);
+        }
+      }
+    };
+    const visibilityChanged = () => {
+      clearTimeout(timer);
+      requestSequence += 1;
+      if (!document.hidden) void refresh(false);
+    };
+    document.addEventListener('visibilitychange', visibilityChanged);
+    void refresh(false);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', visibilityChanged);
+    };
+  }, [
+    active,
+    runtime,
+    session.id,
+    session.machineId,
+    user?.id,
+    previewDocumentRevision,
+    statusTimeoutMessage,
+  ]);
+
   const activeShareUrl = useMemo(() => {
     const connection = effectivePreview.connection;
     if (
       currentAddress?.engine !== 'managed-preview' ||
       !currentAddress.target ||
       !samePreviewTargetOrigin(connection?.target, currentAddress.target) ||
-      !hasUsableManagedPreviewUrl(connection)
+      !hasUsableManagedPreviewUrl(connection) ||
+      (remoteExpiresAt !== null && remoteExpiresAt <= Date.now())
     ) {
-      if (
-        currentAddress?.target &&
-        createdShare &&
-        samePreviewTargetOrigin(createdShare.target, currentAddress.target)
-      ) {
-        return createdShare.publicUrl;
-      }
-      return localEndpoint?.shareUrl;
+      return undefined;
     }
     return connection.publicUrl;
-  }, [createdShare, currentAddress, effectivePreview.connection, localEndpoint?.shareUrl]);
+  }, [currentAddress, effectivePreview.connection, remoteExpiresAt]);
 
   const releaseLocalEndpoint = useCallback(async () => {
     const endpoint = localEndpointRef.current;
     localEndpointRef.current = null;
     setLocalEndpoint(null);
+    rememberSessionBrowserResumeState(session.id, { localEndpoint: undefined });
     if (!endpoint) return;
     if (!runtime) {
       console.error('Cannot release managed preview endpoint because the runtime is unavailable', {
@@ -224,40 +590,18 @@ function SessionBrowserPanelController({
   }, [currentAddress, session.id, viewerUrl]);
 
   useEffect(() => {
-    const resumeState = readSessionBrowserResumeState(session.id);
-    navigationSequenceRef.current += 1;
-    localEndpointRef.current = null;
-    restoreAttemptKeyRef.current = null;
-    handledCandidateNavigationRequestRef.current = 0;
-    setAddress(resumeState?.currentAddress.logicalUrl ?? '');
-    setCurrentAddress(null);
-    setViewerUrl(null);
-    setLocalEndpoint(null);
-    setHistory(resumeState?.history ?? { entries: [], index: -1 });
-    setPublicState(null);
-    setPublicNavigationRequestId(null);
-    setManagedState(null);
-    setManagedCommand(undefined);
-    setAnnotationEnabled(false);
-    setAnnotationAvailable(false);
-    setBusy(false);
-    setSharing(false);
-    setManagedNavigationPhase(null);
-    setError(null);
-    setPendingAction(null);
-    setCreatedShare(null);
-    setMachinePlane(null);
-    setResumeAddress(resumeState?.currentAddress ?? null);
-  }, [session.id]);
-
-  useEffect(() => {
     if (suggestedAddress && !address && !currentAddress) setAddress(suggestedAddress);
   }, [address, currentAddress, suggestedAddress]);
 
   useEffect(() => {
     if (!currentAddress) return;
-    rememberSessionBrowserResumeState(session.id, { currentAddress, history });
-  }, [currentAddress, history, session.id]);
+    rememberSessionBrowserResumeState(session.id, {
+      currentAddress,
+      history,
+      ...(machinePlane ? { machinePlane } : {}),
+      ...(localEndpoint ? { localEndpoint } : {}),
+    });
+  }, [currentAddress, history, localEndpoint, machinePlane, session.id]);
 
   // Only Electron can host a local plane; every other renderer is cloud-only.
   const resolveMachinePlane = useCallback(
@@ -271,12 +615,19 @@ function SessionBrowserPanelController({
   useEffect(() => {
     let cancelled = false;
     if (!runtime) {
-      setMachinePlane(null);
+      if (isElectronRenderer()) setMachinePlane(null);
+      return undefined;
+    }
+    if (!isElectronRenderer()) {
+      setMachinePlane('cloud');
       return undefined;
     }
     void resolveMachinePlane(runtime).then(
       (plane) => {
-        if (!cancelled) setMachinePlane(plane);
+        if (!cancelled) {
+          setMachinePlane(plane);
+          rememberSessionBrowserResumeState(session.id, { machinePlane: plane });
+        }
       },
       () => {
         if (!cancelled) setMachinePlane(null);
@@ -285,7 +636,7 @@ function SessionBrowserPanelController({
     return () => {
       cancelled = true;
     };
-  }, [resolveMachinePlane, runtime]);
+  }, [resolveMachinePlane, runtime, session.id]);
 
   const commitHistory = useCallback((logicalUrl: string, historyIndex?: number) => {
     setHistory((current) => {
@@ -324,7 +675,7 @@ function SessionBrowserPanelController({
     async (
       next: BrowserAddress & { engine: 'managed-preview'; target: PreviewTarget },
       source: PreviewTargetApproval['source'],
-      options: { historyIndex?: number; activateViewer?: boolean }
+      options: { historyIndex?: number; activateViewer?: boolean; restart?: boolean }
     ): Promise<{ publicUrl: string; viewerUrl: string } | null> => {
       if (!runtime || !user?.id) {
         setError(
@@ -335,24 +686,37 @@ function SessionBrowserPanelController({
         );
         return null;
       }
-      const connection = effectivePreview.connection;
-      const response = await runtime.requestSessionPreviewCreate(
-        session.machineId,
-        session.id,
-        user.id,
-        next.target,
-        approvalFor(next, user.id, source),
-        {
-          replaceExisting:
-            connection?.status === 'active' &&
-            !samePreviewTargetOrigin(connection.target, next.target),
-        }
-      );
+      previewObservationEpoch.current += 1;
+      previewControlInFlight.current = true;
+      setPreviewStatusError(null);
+      let response;
+      try {
+        response = await runtime.requestSessionPreviewCreate(
+          session.machineId,
+          session.id,
+          user.id,
+          next.target,
+          approvalFor(next, user.id, source),
+          {
+            restart: options.restart,
+          }
+        );
+      } finally {
+        previewControlInFlight.current = false;
+        previewObservationEpoch.current += 1;
+      }
       if (!response) {
         setError(t('sessions.browser.errors.timeout', 'Remote preview request timed out.'));
         return null;
       }
       if (!response.success) {
+        setRemoteConnection(response.connection);
+        setRemoteExpiresAt(null);
+        rememberSessionRemotePreview(session.id, response.connection);
+        setPreviewStatusError(
+          response.message ??
+            t('sessions.browser.errors.tunnelFailed', 'Remote preview could not be created.')
+        );
         setError(
           response.message ??
             t('sessions.browser.errors.tunnelFailed', 'Remote preview could not be created.')
@@ -371,22 +735,17 @@ function SessionBrowserPanelController({
         );
         return null;
       }
+      const nextExpiresAt = resolveRemotePreviewExpiresAt(response.connection);
       const nextViewerUrl = buildManagedViewerUrl(response.connection.publicUrl, next.target);
-      setCreatedShare({ target: next.target, publicUrl: response.connection.publicUrl });
+      setRemoteConnection(response.connection);
+      setRemoteExpiresAt(nextExpiresAt);
+      rememberSessionRemotePreview(session.id, response.connection, nextExpiresAt);
       if (options.activateViewer !== false) {
         commitOpenedAddress(next, nextViewerUrl, options.historyIndex);
       }
       return { publicUrl: response.connection.publicUrl, viewerUrl: nextViewerUrl };
     },
-    [
-      commitOpenedAddress,
-      effectivePreview.connection,
-      runtime,
-      session.id,
-      session.machineId,
-      t,
-      user?.id,
-    ]
+    [commitOpenedAddress, runtime, session.id, session.machineId, t, user?.id]
   );
 
   const openAddress = useCallback(
@@ -396,15 +755,36 @@ function SessionBrowserPanelController({
         approved?: boolean;
         historyIndex?: number;
         restore?: boolean;
+        /** The destination came from page content, not from the person. */
+        fromPageContent?: boolean;
       }
     ) => {
       const sequence = ++navigationSequenceRef.current;
       setError(null);
+      // A page inside Managed Preview is served by the agent machine, so a navigation
+      // request it posts up is agent-authored, not a user gesture. Public destinations
+      // are ordinary external links, and loopback still lands in the managed branch
+      // below where it needs its own approval — but a private-LAN address would open
+      // silently in the user's own browser, on the user's own network, which no page
+      // has any business asking for. Only the address bar can reach one.
+      if (options?.fromPageContent && next.targetClass === 'private-lan') {
+        setError(
+          t(
+            'sessions.browser.errors.pagePrivateNetworkBlocked',
+            'The page asked to open a private network address. Only you can enter one, from the address bar.'
+          )
+        );
+        return;
+      }
       if (next.engine === 'public-web') {
         await releaseLocalEndpoint();
         if (sequence !== navigationSequenceRef.current) return;
         commitOpenedAddress(next, null, options?.historyIndex);
-        setPublicNavigationRequestId((current) => (options?.restore ? null : (current ?? 0) + 1));
+        setPublicNavigationRequest(
+          options?.restore
+            ? null
+            : { id: ++publicNavigationSequenceRef.current, url: next.logicalUrl }
+        );
         return;
       }
       if (!next.target) {
@@ -424,52 +804,88 @@ function SessionBrowserPanelController({
         );
         return;
       }
-      setManagedNavigationPhase('resolving-machine');
+
       let resolvedPlane: 'local' | 'cloud';
-      try {
-        resolvedPlane = await resolveMachinePlane(runtime);
-      } catch (routeError) {
-        setError(
-          t(
-            'sessions.browser.errors.machineIdentityUnavailable',
-            'The desktop client could not resolve the session machine route: {{error}}',
-            { error: errorMessage(routeError) }
-          )
-        );
-        setManagedNavigationPhase(null);
-        return;
+      if (!isElectronRenderer()) {
+        resolvedPlane = 'cloud';
+      } else if (machinePlaneRef.current !== null) {
+        resolvedPlane = machinePlaneRef.current;
+      } else {
+        setManagedNavigationPhase('resolving-machine');
+        try {
+          resolvedPlane = await resolveMachinePlane(runtime);
+        } catch (routeError) {
+          setError(
+            t(
+              'sessions.browser.errors.machineIdentityUnavailable',
+              'The desktop client could not resolve the session machine route: {{error}}',
+              { error: errorMessage(routeError) }
+            )
+          );
+          setManagedNavigationPhase(null);
+          return;
+        }
+        if (sequence !== navigationSequenceRef.current) return;
+        setMachinePlane(resolvedPlane);
+        rememberSessionBrowserResumeState(session.id, { machinePlane: resolvedPlane });
       }
-      if (sequence !== navigationSequenceRef.current) return;
-      setMachinePlane(resolvedPlane);
+
       const useLocalEndpoint = isElectronRenderer() && resolvedPlane === 'local';
       const connection = effectivePreview.connection;
+      const remoteUnexpired = remoteExpiresAt === null || remoteExpiresAt > Date.now();
       if (
         !useLocalEndpoint &&
         hasUsableManagedPreviewUrl(connection) &&
+        remoteUnexpired &&
         samePreviewTargetOrigin(connection.target, managedAddress.target)
       ) {
         await releaseLocalEndpoint();
         if (sequence !== navigationSequenceRef.current) return;
-        const nextViewerUrl = buildManagedViewerUrl(connection.publicUrl, managedAddress.target);
-        setCreatedShare({
-          target: managedAddress.target,
-          publicUrl: connection.publicUrl,
-        });
+        const nextViewerUrl = options?.restore
+          ? resolveManagedViewerUrl(
+              session.id,
+              connection.publicUrl,
+              managedAddress.target,
+              managedAddress.logicalUrl
+            )
+          : buildManagedViewerUrl(connection.publicUrl, managedAddress.target);
+        commitOpenedAddress(managedAddress, nextViewerUrl, options?.historyIndex);
+        setManagedNavigationPhase(null);
+        return;
+      }
+      if (
+        useLocalEndpoint &&
+        localEndpointRef.current &&
+        samePreviewTargetOrigin(localEndpointRef.current.target, managedAddress.target)
+      ) {
+        const nextViewerUrl = options?.restore
+          ? resolveManagedViewerUrl(
+              session.id,
+              localEndpointRef.current.viewerUrl,
+              managedAddress.target,
+              managedAddress.logicalUrl
+            )
+          : buildManagedViewerUrlForLogicalUrl(
+              localEndpointRef.current.viewerUrl,
+              managedAddress.logicalUrl
+            );
         commitOpenedAddress(managedAddress, nextViewerUrl, options?.historyIndex);
         setManagedNavigationPhase(null);
         return;
       }
       if (!useLocalEndpoint && options?.restore) {
-        setAddress(managedAddress.logicalUrl);
+        commitOpenedAddress(managedAddress, null, options?.historyIndex);
         setManagedNavigationPhase(null);
         return;
       }
       if (!useLocalEndpoint && !options?.approved) {
-        setPendingAction({
-          kind: 'navigate',
-          address: managedAddress,
-          historyIndex: options?.historyIndex,
-        });
+        setAddress(managedAddress.logicalUrl);
+        setError(
+          t(
+            'sessions.browser.errors.pageTargetNeedsApproval',
+            'The page requested another local service. Press Enter to authorize that address.'
+          )
+        );
         setManagedNavigationPhase(null);
         return;
       }
@@ -480,6 +896,7 @@ function SessionBrowserPanelController({
         if (!useLocalEndpoint) {
           await releaseLocalEndpoint();
           if (sequence !== navigationSequenceRef.current) return;
+          commitOpenedAddress(managedAddress, null, options?.historyIndex);
           await createRemotePreview(managedAddress, 'browser_address', {
             historyIndex: options?.historyIndex,
           });
@@ -534,6 +951,10 @@ function SessionBrowserPanelController({
         }
         localEndpointRef.current = response.endpoint;
         setLocalEndpoint(response.endpoint);
+        rememberSessionBrowserResumeState(session.id, {
+          localEndpoint: response.endpoint,
+          machinePlane: 'local',
+        });
         if (previousEndpoint && previousEndpoint.endpointId !== response.endpoint.endpointId) {
           void runtime.requestSessionPreviewEndpointRelease(
             session.machineId,
@@ -561,6 +982,7 @@ function SessionBrowserPanelController({
       createRemotePreview,
       effectivePreview.connection,
       releaseLocalEndpoint,
+      remoteExpiresAt,
       resolveMachinePlane,
       runtime,
       session.id,
@@ -573,10 +995,10 @@ function SessionBrowserPanelController({
   useEffect(() => {
     if (
       !active ||
+      (!isLocalDesktopSession && checkingPreview) ||
       currentAddress ||
       busy ||
       managedNavigationPhase !== null ||
-      pendingAction !== null ||
       candidateNavigationRequestId > handledCandidateNavigationRequestRef.current
     ) {
       return;
@@ -585,10 +1007,11 @@ function SessionBrowserPanelController({
     let next = resumeAddress;
     let sourceKey = 'renderer';
     const connection = effectivePreview.connection;
-    if (!next && hasUsableManagedPreviewUrl(connection) && connection.target) {
+    const target = connection?.target ?? persistedPreviewTarget;
+    if (!next && target) {
       try {
-        next = parseBrowserAddress(formatPreviewTargetUrl(connection.target));
-        sourceKey = connection.tunnelId ?? connection.publicUrl;
+        next = parseBrowserAddress(formatPreviewTargetUrl(target));
+        sourceKey = connection?.endpointId ?? 'remote-preview';
       } catch (restoreError) {
         setError(errorMessage(restoreError));
         return;
@@ -604,26 +1027,80 @@ function SessionBrowserPanelController({
   }, [
     active,
     busy,
+    checkingPreview,
     candidateNavigationRequestId,
     currentAddress,
     effectivePreview.connection,
+    isLocalDesktopSession,
     managedNavigationPhase,
     openAddress,
-    pendingAction,
+    persistedPreviewTarget,
     resumeAddress,
     session.id,
+  ]);
+
+  const candidateCanReuseCachedLink = useMemo(() => {
+    if (!suggestedAddress) {
+      return (
+        !metaCandidateAvailable &&
+        currentAddress?.engine === 'managed-preview' &&
+        Boolean(viewerUrl)
+      );
+    }
+    try {
+      const candidate = parseBrowserAddress(suggestedAddress);
+      if (candidate.engine !== 'managed-preview' || !candidate.target) return false;
+      if (
+        currentAddress?.engine === 'managed-preview' &&
+        currentAddress.target &&
+        samePreviewTargetOrigin(currentAddress.target, candidate.target) &&
+        Boolean(viewerUrl)
+      ) {
+        return true;
+      }
+      if (
+        isLocalDesktopSession &&
+        localEndpoint &&
+        samePreviewTargetOrigin(localEndpoint.target, candidate.target)
+      ) {
+        return true;
+      }
+      if (
+        !isLocalDesktopSession &&
+        hasUsableManagedPreviewUrl(remoteConnection) &&
+        (remoteExpiresAt === null || remoteExpiresAt > Date.now()) &&
+        samePreviewTargetOrigin(remoteConnection.target, candidate.target)
+      ) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }, [
+    currentAddress,
+    isLocalDesktopSession,
+    localEndpoint,
+    metaCandidateAvailable,
+    remoteConnection,
+    remoteExpiresAt,
+    suggestedAddress,
+    viewerUrl,
   ]);
 
   useEffect(() => {
     if (
       !active ||
+      (!isLocalDesktopSession && !candidateCanReuseCachedLink && checkingPreview) ||
       candidateNavigationRequestId <= handledCandidateNavigationRequestRef.current ||
       busy ||
-      managedNavigationPhase !== null ||
-      pendingAction !== null
+      managedNavigationPhase !== null
     ) {
       return;
     }
+    // Wait for the initial status read to expose an already-prepared endpoint
+    // when no cached link exists yet; the create path's empty viewer state
+    // would discard the speculative frame.
     if (!suggestedAddress) {
       // Hold the request while a reported candidate is still on its way: meta
       // knows one exists, the doc has not delivered its target yet. Consuming it
@@ -639,6 +1116,18 @@ function SessionBrowserPanelController({
     onCandidateNavigationRequestHandled?.(candidateNavigationRequestId);
     try {
       const next = parseBrowserAddress(suggestedAddress);
+      // If the preview is already open on the candidate's origin, keep the user
+      // on their current page without triggering a reload or machine resolution.
+      if (
+        next.engine === 'managed-preview' &&
+        next.target &&
+        currentAddress?.engine === 'managed-preview' &&
+        currentAddress.target &&
+        samePreviewTargetOrigin(currentAddress.target, next.target) &&
+        viewerUrl
+      ) {
+        return;
+      }
       // Clicking Browser on an agent-reported candidate IS the approval for that
       // exact target, so a remote session opens straight through the tunnel it
       // needs instead of stopping on a confirmation. Only loopback candidates
@@ -651,15 +1140,19 @@ function SessionBrowserPanelController({
   }, [
     active,
     busy,
+    candidateCanReuseCachedLink,
     candidateNavigationRequestId,
+    checkingPreview,
+    currentAddress,
+    isLocalDesktopSession,
     managedNavigationPhase,
     metaCandidateAvailable,
     openAddress,
     onCandidateNavigationRequestHandled,
-    pendingAction,
     sessionDoc.ready,
     sessionDoc.synced,
     suggestedAddress,
+    viewerUrl,
   ]);
 
   const navigate = useCallback(() => {
@@ -674,7 +1167,7 @@ function SessionBrowserPanelController({
       );
       return;
     }
-    void openAddress(parsed);
+    void openAddress(parsed, { approved: true });
   }, [address, openAddress, t]);
 
   const navigateHistory = useCallback(
@@ -682,7 +1175,7 @@ function SessionBrowserPanelController({
       const entry = history.entries[index];
       if (!entry) return;
       try {
-        void openAddress(parseBrowserAddress(entry), { historyIndex: index });
+        void openAddress(parseBrowserAddress(entry), { historyIndex: index, approved: true });
       } catch (parseError) {
         setError(errorMessage(parseError));
       }
@@ -696,12 +1189,14 @@ function SessionBrowserPanelController({
       publicState?.canGoBack &&
       getPublicBrowserBridge()
     ) {
-      void getPublicBrowserBridge()?.back(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.back(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && managedState?.canGoBack) {
@@ -724,12 +1219,14 @@ function SessionBrowserPanelController({
       publicState?.canGoForward &&
       getPublicBrowserBridge()
     ) {
-      void getPublicBrowserBridge()?.forward(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.forward(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && managedState?.canGoForward) {
@@ -748,12 +1245,14 @@ function SessionBrowserPanelController({
 
   const handleReload = useCallback(() => {
     if (currentAddress?.engine === 'public-web' && getPublicBrowserBridge()) {
-      void getPublicBrowserBridge()?.reload(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.reload(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (viewerUrl) {
@@ -763,20 +1262,21 @@ function SessionBrowserPanelController({
     }
     if (currentAddress?.engine === 'managed-preview' && currentAddress.target) {
       // The endpoint is gone (released or never acquired): reloading means
-      // reopening the address. Loopback keeps its click-is-approval semantics;
-      // anything else goes back through the confirmation flow.
+      // reopening the address. The explicit click authorizes the loopback target.
       void openAddress(currentAddress, { approved: currentAddress.targetClass === 'loopback' });
     }
   }, [currentAddress, openAddress, session.id, viewerUrl]);
 
   const handleStop = useCallback(() => {
     if (currentAddress?.engine === 'public-web' && getPublicBrowserBridge()) {
-      void getPublicBrowserBridge()?.stop(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.stop(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && annotationAvailable) {
@@ -796,52 +1296,60 @@ function SessionBrowserPanelController({
     [t]
   );
 
-  const handleShare = useCallback(() => {
+  const handleShare = useCallback(async () => {
     if (!currentAddress) return;
-    if (currentAddress.engine === 'public-web') {
-      void copyUrl(currentAddress.logicalUrl);
+    if (currentAddress.engine === 'public-web') return copyUrl(currentAddress.logicalUrl);
+    if (!currentAddress.target) return;
+    // Reuse the cached unexpired share link immediately without waiting for a remote RPC.
+    if (activeShareUrl) {
+      await copyUrl(buildManagedViewerUrl(activeShareUrl, currentAddress.target));
       return;
     }
-    if (activeShareUrl && currentAddress.target) {
-      void copyUrl(buildManagedViewerUrl(activeShareUrl, currentAddress.target));
-      return;
-    }
-    if (!currentAddress.target) {
-      setError('Managed preview address did not include a target.');
-      return;
-    }
-    setPendingAction({
-      kind: 'share',
-      address: currentAddress as BrowserAddress & {
-        engine: 'managed-preview';
-        target: PreviewTarget;
-      },
-    });
-  }, [activeShareUrl, copyUrl, currentAddress]);
-
-  const confirmPendingAction = useCallback(async () => {
-    const pending = pendingAction;
-    setPendingAction(null);
-    if (!pending) return;
-    setSharing(pending.kind === 'share');
+    setSharing(true);
     setBusy(true);
     try {
-      if (pending.kind === 'navigate') {
-        await openAddress(pending.address, {
-          approved: true,
-          historyIndex: pending.historyIndex,
-        });
-        return;
-      }
-      const shared = await createRemotePreview(pending.address, 'share_action', {
-        activateViewer: !(isLocalDesktopSession && localEndpointRef.current),
-      });
+      const shared = await createRemotePreview(
+        { ...currentAddress, engine: 'managed-preview', target: currentAddress.target },
+        'share_action',
+        { activateViewer: !(isLocalDesktopSession && localEndpointRef.current) }
+      );
       if (shared) await copyUrl(shared.viewerUrl);
+    } catch (shareError) {
+      setError(errorMessage(shareError));
     } finally {
       setBusy(false);
       setSharing(false);
     }
-  }, [copyUrl, createRemotePreview, isLocalDesktopSession, openAddress, pendingAction]);
+  }, [activeShareUrl, copyUrl, createRemotePreview, currentAddress, isLocalDesktopSession]);
+
+  const restorePreview = useCallback(async () => {
+    if (currentAddress?.engine !== 'managed-preview' || !currentAddress.target) return;
+    setBusy(true);
+    try {
+      const restored = await createRemotePreview(
+        { ...currentAddress, engine: 'managed-preview', target: currentAddress.target },
+        'share_action',
+        { restart: true, activateViewer: !isLocalDesktopSession }
+      );
+      if (restored)
+        toast.success(
+          t(
+            'sessions.browser.connection.restored',
+            'Preview restored. The share link has changed.'
+          ),
+          {
+            action: {
+              label: t('sessions.browser.connection.copyNewLink', 'Copy new link'),
+              onClick: () => void copyUrl(restored.viewerUrl),
+            },
+          }
+        );
+    } catch (restoreError) {
+      setPreviewStatusError(errorMessage(restoreError));
+    } finally {
+      setBusy(false);
+    }
+  }, [copyUrl, createRemotePreview, currentAddress, isLocalDesktopSession, t]);
 
   const stopSharing = useCallback(async () => {
     if (!runtime || !user?.id) {
@@ -851,6 +1359,8 @@ function SessionBrowserPanelController({
       return;
     }
     setBusy(true);
+    previewObservationEpoch.current += 1;
+    previewControlInFlight.current = true;
     try {
       const response = await runtime.requestSessionPreviewRevoke(
         session.machineId,
@@ -864,22 +1374,92 @@ function SessionBrowserPanelController({
             t('sessions.browser.errors.revokeFailed', 'Sharing could not be stopped.')
         );
       } else if (localEndpoint) {
-        setCreatedShare(null);
+        setRemoteConnection(response.connection);
+        setRemoteExpiresAt(null);
+        rememberSessionRemotePreview(session.id, undefined);
         setLocalEndpoint({ ...localEndpoint, shareUrl: undefined });
         localEndpointRef.current = { ...localEndpoint, shareUrl: undefined };
       } else {
-        clearSessionBrowserResumeState(session.id);
+        setRemoteConnection(response.connection);
+        setRemoteExpiresAt(null);
+        rememberSessionRemotePreview(session.id, undefined);
         clearManagedPreviewFrame(session.id);
         setViewerUrl(null);
-        setCurrentAddress(null);
         setAnnotationEnabled(false);
         setAnnotationAvailable(false);
-        setCreatedShare(null);
       }
+    } catch (revokeError) {
+      setError(errorMessage(revokeError));
     } finally {
+      previewControlInFlight.current = false;
+      previewObservationEpoch.current += 1;
       setBusy(false);
     }
   }, [localEndpoint, runtime, session.id, session.machineId, t, user?.id]);
+
+  const stopLocalPreview = useCallback(async () => {
+    setBusy(true);
+    previewObservationEpoch.current += 1;
+    previewControlInFlight.current = true;
+    try {
+      await releaseLocalEndpoint();
+      clearManagedPreviewFrame(session.id);
+      setViewerUrl(null);
+      setAnnotationEnabled(false);
+      setAnnotationAvailable(false);
+    } catch (releaseError) {
+      setError(errorMessage(releaseError));
+    } finally {
+      previewControlInFlight.current = false;
+      previewObservationEpoch.current += 1;
+      setBusy(false);
+    }
+  }, [releaseLocalEndpoint, session.id]);
+
+  const stopPreviewAndProcess = useCallback(async () => {
+    if (!runtime || !user?.id) {
+      setError(
+        t('sessions.browser.errors.runtimeUnavailable', 'The session runtime is unavailable.')
+      );
+      return;
+    }
+    setBusy(true);
+    previewObservationEpoch.current += 1;
+    previewControlInFlight.current = true;
+    try {
+      // Send revoke with stopProcess BEFORE releasing the local endpoint so the
+      // CLI can resolve the authoritative loopback port from the active proxy.
+      const response = await runtime.requestSessionPreviewRevoke(
+        session.machineId,
+        session.id,
+        user.id,
+        { reason: 'user_revoked', stopProcess: true }
+      );
+      if (!response?.success) {
+        setError(
+          response?.message ??
+            t('sessions.browser.errors.stopProcessFailed', 'Preview server could not be stopped.')
+        );
+      } else {
+        setRemoteConnection(response.connection);
+        setRemoteExpiresAt(null);
+        rememberSessionRemotePreview(session.id, undefined);
+        localEndpointRef.current = null;
+        setLocalEndpoint(null);
+        rememberSessionBrowserResumeState(session.id, { localEndpoint: undefined });
+        clearManagedPreviewFrame(session.id);
+        setViewerUrl(null);
+        setAnnotationEnabled(false);
+        setAnnotationAvailable(false);
+      }
+    } catch (revokeError) {
+      setError(errorMessage(revokeError));
+    } finally {
+      previewControlInFlight.current = false;
+      previewObservationEpoch.current += 1;
+      setBusy(false);
+    }
+  }, [runtime, session.id, session.machineId, t, user?.id]);
 
   const handlePublicState = useCallback(
     (state: ElectronPublicBrowserState) => {
@@ -905,6 +1485,15 @@ function SessionBrowserPanelController({
     [commitHistory]
   );
 
+  const handlePublicNavigationRequestConsumed = useCallback(
+    (request: PublicBrowserNavigationRequest) => {
+      setPublicNavigationRequest((current) =>
+        current?.id === request.id && current.url === request.url ? null : current
+      );
+    },
+    []
+  );
+
   const handleManagedState = useCallback(
     (state: ManagedBrowserStateMessage['payload']) => {
       setManagedState(state);
@@ -928,7 +1517,7 @@ function SessionBrowserPanelController({
   const handleManagedNavigationRequest = useCallback(
     (url: string) => {
       try {
-        void openAddress(parseBrowserAddress(url));
+        void openAddress(parseBrowserAddress(url), { fromPageContent: true });
       } catch (navigationError) {
         setError(errorMessage(navigationError));
       }
@@ -938,7 +1527,14 @@ function SessionBrowserPanelController({
 
   const loading =
     currentAddress?.engine === 'public-web' ? publicState?.phase === 'loading' : managedLoading;
-  const navigationBusy = busy || managedNavigationPhase !== null;
+  // The initial status read and candidate document sync are part of opening
+  // the page too; do not show address-entry instructions while the click waits,
+  // unless a cached preview is already ready to show immediately.
+  const awaitingCandidateNavigation =
+    active &&
+    !candidateCanReuseCachedLink &&
+    candidateNavigationRequestId > handledCandidateNavigationRequestRef.current;
+  const navigationBusy = busy || managedNavigationPhase !== null || awaitingCandidateNavigation;
   const canGoBack =
     (currentAddress?.engine === 'public-web' && publicState?.canGoBack === true) ||
     (currentAddress?.engine === 'managed-preview' && managedState?.canGoBack === true) ||
@@ -947,77 +1543,94 @@ function SessionBrowserPanelController({
     (currentAddress?.engine === 'public-web' && publicState?.canGoForward === true) ||
     (currentAddress?.engine === 'managed-preview' && managedState?.canGoForward === true) ||
     (history.index >= 0 && history.index < history.entries.length - 1);
+  const remoteMachineName =
+    machinePlane === 'cloud' ? sessionMachine?.name?.trim() || session.machineId : undefined;
+  const hasShareUrl = currentAddress?.engine === 'managed-preview' && !!activeShareUrl;
+  const hasLocalPreview = currentAddress?.engine === 'managed-preview' && Boolean(localEndpoint);
+  const supportsStopProcess = machineSupportsPreviewStopProcess(sessionMachine);
+  const handleDisconnectOnly = hasShareUrl
+    ? () => void stopSharing()
+    : () => void stopLocalPreview();
+  const handleDisconnectAndStopProcess = supportsStopProcess
+    ? () => void stopPreviewAndProcess()
+    : undefined;
+  const previewUnavailableReason = session.isArchived
+    ? t(
+        'sessions.browser.connection.sessionEnded',
+        'This session is archived. Restore the session first.'
+      )
+    : user?.id !== session.userId
+      ? t(
+          'sessions.browser.connection.ownerRequired',
+          'Only the session owner can restore this preview.'
+        )
+      : machineOnline === 'offline'
+        ? t(
+            'sessions.browser.connection.machineOffline',
+            'The session machine is offline. Bring it online to restore preview.'
+          )
+        : undefined;
+  const previewStatusProps = {
+    local: isLocalDesktopSession,
+    connection: remoteConnection,
+    checking: checkingPreview,
+    unconfirmed: Boolean(previewStatusError && viewerUrl && !isLocalDesktopSession),
+    busy: navigationBusy,
+    unavailableReason: previewUnavailableReason,
+    error: previewStatusError,
+    remoteMachineName,
+    hasShareUrl,
+    onRestore: () => void restorePreview(),
+    onRegenerate: () => void restorePreview(),
+    onStopSharing: handleDisconnectOnly,
+    onStopAndKillProcess: handleDisconnectAndStopProcess,
+  };
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col bg-background', className)}>
-      <SessionBrowserToolbar
-        leadingSlot={leadingSlot}
-        focusAddress={active && currentAddress === null}
-        address={address}
-        remoteMachineName={
-          machinePlane === 'cloud' ? sessionMachine?.name?.trim() || session.machineId : undefined
-        }
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
-        loading={loading}
-        annotationEnabled={annotationEnabled}
-        annotationAvailable={annotationAvailable}
-        sharing={sharing}
-        shareAvailable={currentAddress !== null}
-        hasShareUrl={currentAddress?.engine === 'managed-preview' && !!activeShareUrl}
-        busy={navigationBusy}
-        onAddressChange={setAddress}
-        onRestoreAddress={() => setAddress(currentAddress?.logicalUrl ?? suggestedAddress)}
-        onNavigate={navigate}
-        onBack={handleBack}
-        onForward={handleForward}
-        onReload={handleReload}
-        onStop={handleStop}
-        onToggleAnnotation={() => setAnnotationEnabled((current) => !current)}
-        onShare={handleShare}
-        onStopSharing={() => void stopSharing()}
-      />
-      {error ? (
-        <div
-          role="alert"
-          className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive"
-        >
-          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words">{error}</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="ml-auto h-6 px-2"
-            onClick={() => setError(null)}
-          >
-            {t('common.dismiss', 'Dismiss')}
-          </Button>
-        </div>
-      ) : null}
-
-      {managedNavigationPhase ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex min-h-0 flex-1 items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
-        >
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          <span>
-            {managedNavigationPhase === 'resolving-machine'
-              ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
-              : managedNavigationPhase === 'creating-tunnel'
-                ? t('sessions.browser.creatingTunnel', 'Establishing a secure preview connection…')
-                : t('sessions.browser.openingLocal', 'Opening the local preview…')}
-          </span>
-        </div>
-      ) : currentAddress?.engine === 'public-web' ? (
+    <SessionBrowserPanelView
+      className={className}
+      tunnelDisclosure={runtime?.contentMode === 'e2ee' && !isLocalDesktopSession}
+      toolbar={{
+        leadingSlot: leadingSlot,
+        focusAddress: active && currentAddress === null && !navigationBusy,
+        address: address,
+        canGoBack: canGoBack,
+        canGoForward: canGoForward,
+        loading: loading,
+        annotationEnabled: annotationEnabled,
+        annotationAvailable: annotationAvailable,
+        sharing: sharing,
+        shareAvailable: currentAddress !== null,
+        hasShareUrl,
+        hasLocalPreview,
+        busy: navigationBusy,
+        onAddressChange: setAddress,
+        onRestoreAddress: () => setAddress(currentAddress?.logicalUrl ?? suggestedAddress),
+        onNavigate: navigate,
+        onBack: handleBack,
+        onForward: handleForward,
+        onReload: handleReload,
+        onStop: handleStop,
+        onToggleAnnotation: () => setAnnotationEnabled((current) => !current),
+        onShare: () => void handleShare(),
+        onStopSharing: handleDisconnectOnly,
+        onStopPreviewAndProcess: handleDisconnectAndStopProcess,
+      }}
+      previewStatus={currentAddress?.engine === 'managed-preview' ? previewStatusProps : undefined}
+      error={error}
+      onDismissError={() => setError(null)}
+      navigationPhase={
+        managedNavigationPhase ?? (awaitingCandidateNavigation ? 'resolving-machine' : null)
+      }
+      suggestedAddress={suggestedAddress}
+    >
+      {currentAddress?.engine === 'public-web' ? (
         <PublicBrowserSurface
           browserId={`session-browser-${session.id}`}
-          url={currentAddress.logicalUrl}
-          navigationRequestId={publicNavigationRequestId}
-          active={active && !error && pendingAction === null}
+          navigationRequest={publicNavigationRequest}
+          active={active && !error}
           onStateChange={handlePublicState}
+          onNavigationRequestConsumed={handlePublicNavigationRequestConsumed}
         />
       ) : currentAddress?.engine === 'managed-preview' && viewerUrl ? (
         <ManagedPreviewSurface
@@ -1035,57 +1648,7 @@ function SessionBrowserPanelController({
           onAddVisualAnnotationToChat={onAddVisualAnnotationToChat}
           onToggleVisualAnnotationInChat={onToggleVisualAnnotationInChat}
         />
-      ) : (
-        // An empty Browser is ambiguous on its own: the user cannot tell whether
-        // the agent never reported a dev server, or the panel is broken. Say which.
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-background px-6 text-center">
-          <Globe2 className="h-7 w-7 text-muted-foreground/60" aria-hidden />
-          <p className="max-w-xs text-xs text-muted-foreground">
-            {suggestedAddress
-              ? t('sessions.browser.emptyWithCandidate', 'Press Enter to open {{url}}', {
-                  url: suggestedAddress,
-                })
-              : t(
-                  'sessions.browser.emptyNoCandidate',
-                  'No preview address reported yet. Enter a URL above, or ask the agent to report its dev server.'
-                )}
-          </p>
-        </div>
-      )}
-
-      <AlertDialog
-        open={pendingAction !== null}
-        onOpenChange={(open) => {
-          if (!open && !busy) setPendingAction(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pendingAction?.kind === 'share'
-                ? t('sessions.browser.confirmShareTitle', 'Create a shareable preview?')
-                : t('sessions.browser.confirmRemoteTitle', 'Open a remote preview?')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(
-                'sessions.browser.confirmRemoteDescription',
-                'This creates an authenticated tunnel to {{target}} on the machine running this conversation.',
-                {
-                  target: pendingAction?.address.target
-                    ? formatPreviewTargetUrl(pendingAction.address.target)
-                    : '',
-                }
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction disabled={busy} onClick={() => void confirmPendingAction()}>
-              {t('common.confirm', 'Confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+      ) : null}
+    </SessionBrowserPanelView>
   );
 }

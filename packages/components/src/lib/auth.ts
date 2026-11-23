@@ -1,4 +1,6 @@
+import { logoutPush } from './push-notifications';
 import { createAuthClient } from 'better-auth/react';
+import { withSessionGatedOrganizationQueries } from './organization-session-queries';
 import { organizationClient } from 'better-auth/client/plugins';
 import { convexClient, crossDomainClient } from '@convex-dev/better-auth/client/plugins';
 import {
@@ -6,34 +8,56 @@ import {
   clearStoredAuthToken,
   writeStoredAuthToken,
 } from './auth-bootstrap';
+import { getAuthResponseError, type AuthResponseError } from './auth-response';
 import { deferredPostHog } from './deferred-posthog';
 import { registerAuthClient } from './auth-client-singleton';
 import { replaceAppWindowLocation } from './app-location';
-import { clearLastAppRoutePath } from './last-app-route';
 import { setLoginHintCookie } from './login-hint-cookie';
 import { clearPreferredWorkspaceSlug } from './workspace';
 
 type BetterAuthClientOptions = NonNullable<Parameters<typeof createAuthClient>[0]>;
 type BetterAuthClientPlugin = NonNullable<BetterAuthClientOptions['plugins']>[number];
 
-type CreateLodyAuthClientOptions = {
-  additionalPlugins?: BetterAuthClientPlugin[];
+type CreateLodyAuthClientOptions<Plugins extends BetterAuthClientPlugin[]> = {
+  additionalPlugins?: Plugins;
   disableDefaultFetchPlugins?: boolean;
 };
 
-export const createLodyAuthClient = (options: CreateLodyAuthClientOptions = {}) => {
+const createBaseLodyAuthClient = <const Plugins extends BetterAuthClientPlugin[] = []>(
+  options: CreateLodyAuthClientOptions<Plugins> = {}
+) => {
   const additionalPlugins = options.additionalPlugins ?? [];
 
   const client = createAuthClient({
     baseURL: import.meta.env.VITE_CONVEX_SITE_URL,
-    plugins: [organizationClient(), convexClient(), crossDomainClient(), ...additionalPlugins],
+    plugins: [
+      organizationClient(),
+      convexClient(),
+      crossDomainClient(),
+      ...additionalPlugins,
+    ] as const,
     disableDefaultFetchPlugins: options.disableDefaultFetchPlugins || false,
   });
-  registerAuthClient(client);
   return client;
 };
 
-export type LodyAuthClient = ReturnType<typeof createLodyAuthClient>;
+export const createLodyAuthClient = <const Plugins extends BetterAuthClientPlugin[] = []>(
+  options: CreateLodyAuthClientOptions<Plugins> = {}
+) => {
+  const base = createBaseLodyAuthClient(options);
+  // Better Auth cannot reduce conditional plugin types for generic extra plugins.
+  // The wrapper replaces base methods only; preserve the concrete plugin API.
+  const client = withSessionGatedOrganizationQueries(
+    base as unknown as LodyAuthClient,
+    subscribeLocalAuthStateCleared
+  ) as unknown as typeof base;
+  // The singleton needs only the base client. Better Auth cannot reduce its
+  // conditional plugin types until the caller supplies the concrete extra plugins.
+  registerAuthClient(client as unknown as LodyAuthClient);
+  return client;
+};
+
+export type LodyAuthClient = ReturnType<typeof createBaseLodyAuthClient<[]>>;
 
 const AUTH_SESSION_INTENT_GENERATIONS = new WeakMap<object, number>();
 
@@ -44,10 +68,19 @@ const invalidateAuthSessionIntent = (authClient: LodyAuthClient): void => {
   AUTH_SESSION_INTENT_GENERATIONS.set(authClient, getAuthSessionIntentGeneration(authClient) + 1);
 };
 
+const localAuthStateClearedListeners = new Set<() => void>();
+
+/** App-store owners subscribe for logout intent, before async auth state catches up. */
+export function subscribeLocalAuthStateCleared(listener: () => void): () => void {
+  localAuthStateClearedListeners.add(listener);
+  return () => {
+    localAuthStateClearedListeners.delete(listener);
+  };
+}
+
 export const clearLocalAuthState = () => {
   clearStoredAuthToken();
   clearAuthBootstrapSnapshot();
-  clearLastAppRoutePath();
   clearPreferredWorkspaceSlug();
   if (typeof window !== 'undefined') {
     try {
@@ -57,23 +90,54 @@ export const clearLocalAuthState = () => {
     }
   }
   setLoginHintCookie(false);
+  for (const listener of localAuthStateClearedListeners) listener();
 };
 
 export const persistAuthToken = (token: string) => {
   writeStoredAuthToken(token);
 };
 
-export const signOutWithoutRedirect = async (authClient: LodyAuthClient) => {
+/**
+ * Whether the server actually ended the session. Local state is cleared either
+ * way (see the fence below), so a caller that must not keep acting on the
+ * previous identity — the desktop handoff's "use a different account", where the
+ * session cookie is exactly what the next transfer would hand over — has to be
+ * able to tell a failed sign-out from a successful one. Better Auth reports
+ * transport failures by throwing and API failures in `response.error`; both
+ * arrive here as `ok: false`.
+ */
+export type SignOutOutcome = { ok: true } | { ok: false; error: AuthResponseError };
+
+export const signOutWithoutRedirect = async (
+  authClient: LodyAuthClient
+): Promise<SignOutOutcome> => {
   // Fence token requests at logout intent, before Better Auth's async sign-out
   // updates useSession(). Otherwise a token request that completes in that
   // network window can still authenticate Convex as the previous user.
+  const pushCleanup = logoutPush();
   invalidateAuthSessionIntent(authClient);
+  // Revoke local owners synchronously; provider cleanup must not delay logout intent.
   clearLocalAuthState();
+  try {
+    await pushCleanup;
+  } catch {
+    console.warn('Push cleanup failed during sign out');
+  }
 
   try {
-    await authClient.signOut();
+    const response = await authClient.signOut();
+    const responseError = getAuthResponseError(response);
+    if (responseError) {
+      console.error('Sign out error:', responseError);
+      return { ok: false, error: responseError };
+    }
+    return { ok: true };
   } catch (error) {
     console.error('Sign out error:', error);
+    return {
+      ok: false,
+      error: { message: error instanceof Error ? error.message : String(error) },
+    };
   }
 };
 

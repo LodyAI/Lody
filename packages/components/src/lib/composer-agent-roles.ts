@@ -1,10 +1,19 @@
-import type {
-  AgentConfigMeta,
-  AgentRole,
-  AgentRoleAvailability,
-  AgentRoleId,
-  AgentRoleUnavailableReason,
-  MachineId,
+import {
+  bindAgentRoleTarget,
+  getAcpCapabilityCacheKey,
+  LODY_PLAN_MODE_CONFIG_ID,
+  ACP_COLLABORATION_MODE_CONFIG_ID,
+  ACP_COLLABORATION_MODE_PLAN_VALUE,
+  ACP_COLLABORATION_MODE_DEFAULT_VALUE,
+  type AgentConfigMeta,
+  type AgentRole,
+  type AgentRoleAvailability,
+  type AgentRoleId,
+  type AgentRoleUnavailableReason,
+  type AgentRoleAvailabilityContext,
+  type MachineId,
+  type MachineViewMeta,
+  selectAgentRoleCapability,
 } from '@lody/shared';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
 import type { AgentSelection } from '@/components/shared/agent-selector';
@@ -17,10 +26,12 @@ import type { AgentSelection } from '@/components/shared/agent-selector';
  * is the whole relationship between the two tabs, and it is why the rules here
  * are about identity rather than repair: picking a Role must set exactly what
  * the Role says, and the composer must stop naming the Role the moment the
- * running configuration is no longer the Role's.
+ * running configuration is no longer the Role's, except for independent Plan
+ * toggles, which are per-turn overrides of the Role's initial value.
  */
 
 export type ComposerAgentRoleItem = {
+  /** Bound to the composer's machine: its inline target is that machine's. */
   role: AgentRole;
   availability: AgentRoleAvailability;
   /**
@@ -34,6 +45,83 @@ export type ComposerAgentRoleItem = {
   >;
 };
 
+export type SessionTurnAgentRoleSelection =
+  | {
+      agentRoleId: AgentRoleId;
+      memory?: import('@lody/shared').MemoryBinding;
+      agentRoleRevision: number;
+      agentRoleSnapshot?: import('@lody/shared').AgentRoleSnapshot;
+    }
+  | null
+  | undefined;
+
+export type ComposerRunConfigOverrides = {
+  modeIdOverride?: string | null;
+  modelIdOverride?: string | null;
+  configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
+};
+
+/**
+ * Resolve the Role metadata for a programmatic Turn (retry, Goal, PR action,
+ * etc.). Undefined means inherit; null remains an explicit None selection.
+ */
+export function resolveProgrammaticTurnAgentRole({
+  requested,
+  composer,
+  durableRoleId,
+  durableRoleRevision,
+  durableMemory,
+}: {
+  requested?: SessionTurnAgentRoleSelection;
+  composer?: SessionTurnAgentRoleSelection;
+  durableRoleId?: AgentRoleId | null;
+  durableMemory?: import('@lody/shared').MemoryBinding;
+  durableRoleRevision?: number;
+}): SessionTurnAgentRoleSelection {
+  if (requested !== undefined) return requested;
+  if (composer !== undefined) return composer;
+  if (durableRoleId === null) return null;
+  return durableRoleId && typeof durableRoleRevision === 'number'
+    ? { agentRoleId: durableRoleId, agentRoleRevision: durableRoleRevision, memory: durableMemory }
+    : undefined;
+}
+
+/**
+ * Revalidate an inherited Role against the actual run config a programmatic
+ * Turn will freeze. Independent Plan toggles preserve the Role; changes to
+ * pinned model, permission, or other options still detach it.
+ *
+ * A catalog-pending Role may still be carried when the run config is untouched.
+ * Once an override exists we must be able to verify the current Role row, or
+ * conservatively freeze explicit None.
+ */
+export function resolveTurnAgentRoleForRunConfig({
+  turnSelection,
+  role,
+  current,
+  overrides,
+}: {
+  turnSelection: SessionTurnAgentRoleSelection;
+  role: AgentRole | undefined;
+  current: ComposerRunConfigValues;
+  overrides?: ComposerRunConfigOverrides;
+}): SessionTurnAgentRoleSelection {
+  if (turnSelection === null || turnSelection === undefined) return turnSelection;
+  const hasOverride =
+    overrides?.modeIdOverride !== undefined ||
+    overrides?.modelIdOverride !== undefined ||
+    overrides?.configOptionValuesOverride !== undefined;
+  if (!hasOverride) return turnSelection;
+  if (!role || role.id !== turnSelection.agentRoleId) return null;
+
+  const effective: ComposerRunConfigValues = {
+    modeId: overrides?.modeIdOverride !== undefined ? overrides.modeIdOverride : current.modeId,
+    modelId: overrides?.modelIdOverride !== undefined ? overrides.modelIdOverride : current.modelId,
+    configOptionValues: overrides?.configOptionValuesOverride ?? current.configOptionValues,
+  };
+  return isAgentRoleRunConfigApplied(role, effective) ? turnSelection : null;
+}
+
 /**
  * The Roles the composer offers for the machine the chat will start on.
  *
@@ -41,6 +129,10 @@ export type ComposerAgentRoleItem = {
  * `machineId + agentConfigId` bind a Role exactly: offering a Role from another
  * machine could only either move the chat off the selected machine or fall back
  * to a different config, and a Role never falls back.
+ *
+ * A Role that runs on several machines is offered with THIS machine's target
+ * (`bindAgentRoleTarget`), so everything downstream reads the binding the
+ * chat will actually run.
  *
  * Unavailable Roles stay listed. Seeing that a Role exists and why it cannot run
  * is what lets someone fix it; dropping the row makes a broken Role look
@@ -60,7 +152,10 @@ export function buildComposerAgentRoleItems({
   if (!machineId) return [];
   const configById = new Map(agentConfigs.map((config) => [config.id, config]));
   return roles
-    .filter((role) => role.machineId === machineId)
+    .flatMap((role) => {
+      const bound = bindAgentRoleTarget(role, machineId);
+      return bound ? [bound] : [];
+    })
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
     .map((role) => ({
       role,
@@ -131,11 +226,29 @@ export function resolvePendingAgentRoleSelection({
  * `machine_offline` Role as a missing config.
  */
 export const AGENT_ROLE_UNAVAILABLE_REASON_KEYS = {
+  memory_unsupported: 'settings.memory.unsupported',
   machine_unknown: 'settings.agentRoles.unavailable.machineUnknown',
   machine_offline: 'settings.agentRoles.unavailable.machineOffline',
   agent_config_missing: 'settings.agentRoles.unavailable.agentConfigMissing',
   agent_config_machine_mismatch: 'settings.agentRoles.unavailable.agentConfigMismatch',
+  model_unavailable: 'settings.agentRoles.unavailable.modelUnavailable',
+  mode_unavailable: 'settings.agentRoles.unavailable.modeUnavailable',
 } as const satisfies Record<AgentRoleUnavailableReason, string>;
+
+/** Each Role judged against the capabilities of its own machine and agent. */
+export const createAgentRoleCapabilityResolver = (
+  agentConfigs: readonly AgentConfigMeta[],
+  machines: ReadonlyMap<MachineId, Pick<MachineViewMeta, 'acpCapabilities'>>
+): NonNullable<AgentRoleAvailabilityContext['runConfigCapability']> => {
+  const configById = new Map(agentConfigs.map((config) => [config.id, config]));
+  return (role) => {
+    const config = configById.get(role.agentConfigId);
+    const capabilities = machines.get(role.machineId)?.acpCapabilities;
+    return config
+      ? selectAgentRoleCapability(capabilities?.[getAcpCapabilityCacheKey(config.id)], config)
+      : undefined;
+  };
+};
 
 export type ComposerRunConfigValues = {
   modeId: string | null;
@@ -151,7 +264,9 @@ export type ComposerRunConfigSelection = ComposerRunConfigValues & {
  * Whether every value this Role PINS is what the composer is set to.
  *
  * Only the pinned values are compared: a Role deliberately leaves the rest on
- * the agent's default, so an unpinned option is not a difference.
+ * the agent's default, so an unpinned option is not a difference. Independent
+ * Plan values seed selection but may be toggled without detaching the Role.
+ * Missing/invalid values still fail matching; permission-based Plan is unchanged.
  *
  * This is the half that does NOT involve the agent, because the two surfaces
  * disagree about the agent on purpose — see `isComposerAgentRoleApplied`.
@@ -164,7 +279,24 @@ export function isAgentRoleRunConfigApplied(
   if (modeId && selection.modeId !== modeId) return false;
   if (modelId && selection.modelId !== modelId) return false;
   for (const [configId, value] of Object.entries(configOptionValues ?? {})) {
-    if (selection.configOptionValues[configId] !== value) return false;
+    const selectedValue = selection.configOptionValues[configId];
+    if (
+      configId === LODY_PLAN_MODE_CONFIG_ID &&
+      typeof value === 'boolean' &&
+      typeof selectedValue === 'boolean'
+    ) {
+      continue;
+    }
+    if (
+      configId === ACP_COLLABORATION_MODE_CONFIG_ID &&
+      (value === ACP_COLLABORATION_MODE_PLAN_VALUE ||
+        value === ACP_COLLABORATION_MODE_DEFAULT_VALUE) &&
+      (selectedValue === ACP_COLLABORATION_MODE_PLAN_VALUE ||
+        selectedValue === ACP_COLLABORATION_MODE_DEFAULT_VALUE)
+    ) {
+      continue;
+    }
+    if (selectedValue !== value) return false;
   }
   return true;
 }
@@ -192,16 +324,16 @@ export function isComposerAgentRoleApplied(
 }
 
 /**
- * The Roles an EXISTING session may reuse: those bound to an agent of the same
- * type.
+ * The Roles an EXISTING session may reuse: those bound to its exact machine
+ * and Agent Config (the model-provider binding shown in the composer).
  *
  * A live session's agent is fixed — its machine, its config, its whole
  * runtime — so a Role cannot be executed there the way the landing executes
  * one. What DOES transfer is the run configuration: model, reasoning, and
- * permission options are published per `cliType:agentType`, so a Role authored
- * against another config of the same TYPE pins values this session's agent
- * understands. That is the whole offer here, and it is why availability is not
- * consulted: nothing is going to that Role's machine.
+ * permission options. Keeping the offer on the exact binding avoids presenting
+ * a Role whose provider credentials, capability set, or machine availability do
+ * not describe the running Session. Unavailable Roles remain visible and
+ * disabled with their real reason, just like the new-chat menu.
  *
  * The Role's instruction is NOT part of it. A Role's prompt prefix belongs to
  * the FIRST turn of a session it creates; replaying it into an ongoing
@@ -209,23 +341,26 @@ export function isComposerAgentRoleApplied(
  */
 export function selectSessionAgentRoles({
   roles,
-  agentType,
+  machineId,
+  agentConfigId,
   agentConfigs,
+  resolveAvailability,
 }: {
   roles: readonly AgentRole[];
-  /** The running session's agent type; roles bound to another type are dropped. */
-  agentType: string | null | undefined;
+  /** Existing Sessions stay on this exact machine and provider binding. */
+  machineId: MachineId | null | undefined;
+  agentConfigId: AgentConfigMeta['id'] | null | undefined;
   agentConfigs: readonly AgentConfigMeta[];
+  resolveAvailability: (role: AgentRole) => AgentRoleAvailability;
 }): ComposerAgentRoleItem[] {
-  if (!agentType) return [];
+  if (!machineId || !agentConfigId) return [];
   const configById = new Map(agentConfigs.map((config) => [config.id, config]));
   return roles
     .flatMap((role) => {
-      const agentConfig = configById.get(role.agentConfigId);
-      if (agentConfig?.agentType !== agentType) return [];
-      // Availability describes whether the Role could RUN on its own machine,
-      // which is not what is being asked of it here.
-      return [{ role, availability: { kind: 'available' } as const, agentConfig }];
+      const bound = bindAgentRoleTarget(role, machineId);
+      if (!bound || bound.agentConfigId !== agentConfigId) return [];
+      const agentConfig = configById.get(bound.agentConfigId);
+      return [{ role: bound, availability: resolveAvailability(bound), agentConfig }];
     })
     .sort((left, right) => left.role.name.localeCompare(right.role.name));
 }

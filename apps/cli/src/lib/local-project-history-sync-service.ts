@@ -1,9 +1,29 @@
-import { createHash } from 'crypto';
+import {
+  hashText,
+  hashHistoryEntryV2,
+  hashHistoryForStoredVersion,
+  resolveImportHashVersion,
+  resolveImportedTurnHashes,
+  storedBaselineHashes,
+  areStringArraysEqual,
+  decideHistoryRefresh,
+  decideHistoryConflictResolution,
+  HASH_VERSION,
+  type HistoryConflictResolutionDecision,
+  type HistoryImportInput,
+} from '@lody/shared/session-data';
+import { SYNC_CONFIRMATION_TIMEOUT_MS } from '@/lib/loro/timeout-utils';
+export { decideHistoryRefresh, decideHistoryConflictResolution } from '@lody/shared/session-data';
+export type {
+  HistoryRefreshDecision,
+  HistoryConflictResolutionDecision,
+} from '@lody/shared/session-data';
 import { v4 as uuidV4 } from 'uuid';
 import type { SessionInfo } from '@agentclientprotocol/sdk';
 
 import {
   type ACPSessionId,
+  type AgentConfigMeta,
   type ExternalAcpHistorySyncMeta,
   getMachineRoomId,
   type LocalProjectHistoryCatalogItem,
@@ -14,12 +34,15 @@ import {
   type LocalProjectHistoryProvider,
   type LocalProjectId,
   type MachineId,
+  type SessionAcpRuntimeConfigPatch,
   type SessionHistoryInput,
   type SessionMeta,
   type WorkspaceId,
   buildHistoryReplayImport,
   getExternalAcpHistoryImportKey,
   getLocalProjectHistoryProviderKey,
+  getLocalProjectHistoryCatalogKey,
+  matchesHistoryProviderBinding,
   getServerNow,
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -28,14 +51,20 @@ import {
   isSessionHistoryPendingForDispatch,
   sanitizeLodyInternalInstructions,
   SessionStatusFactory,
-  type MessageContent,
+  NEW_SESSION_HISTORY_BACKEND,
   type ProjectRef,
   type SessionId,
 } from '@lody/shared';
 
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
-import { readMachineLocalProjects, upsertMachineLocalProject } from '@/lib/local-project-meta';
+import { createSessionBackend, type SessionBackend } from '@/session/session-backend';
 import {
+  readMachineLocalProjects,
+  upsertMachineLocalProject,
+  withMachineCatalogWriteLock,
+} from '@/lib/local-project-meta';
+import {
+  type HistoryProviderLaunch,
   listHistorySessionsForLocalProject,
   loadHistorySessionReplay,
   MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS,
@@ -44,39 +73,6 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
 const syncLeases = new Set<string>();
-
-// In-process serializer for machineRoomId-scoped catalog writes. History rows
-// are stored in machine Flock localProject entries, but each provider still does
-// a read-modify-write for its nested catalog. Two concurrent providers operating
-// on the same machine could otherwise clobber each other's history fields.
-//
-// Per-process only; cross-process races on the same machineRoomId remain
-// possible but require simultaneous CLI processes for the same machine, which
-// is not the normal mode of operation.
-const machineCatalogWriteChains = new Map<string, Promise<unknown>>();
-
-async function withMachineCatalogWriteLock<T>(
-  machineRoomId: string,
-  fn: () => Promise<T>
-): Promise<T> {
-  const prev = machineCatalogWriteChains.get(machineRoomId);
-  const current = (async () => {
-    if (prev) {
-      await prev.catch(() => {
-        // swallow prior errors — they belong to other callers, not us
-      });
-    }
-    return fn();
-  })();
-  machineCatalogWriteChains.set(machineRoomId, current);
-  try {
-    return await current;
-  } finally {
-    if (machineCatalogWriteChains.get(machineRoomId) === current) {
-      machineCatalogWriteChains.delete(machineRoomId);
-    }
-  }
-}
 
 type ExistingHistorySession = {
   sessionId: SessionId;
@@ -88,6 +84,9 @@ export type MaterializedReplay = {
   turnHashes: string[];
   replayDigest: string;
   droppedNotifications: number;
+  /** Canonical-hash version `turnHashes`/`replayDigest` were computed with. */
+  hashVersion: number;
+  runtimeConfig?: SessionAcpRuntimeConfigPatch;
 };
 
 type HistoryCatalogSnapshot = {
@@ -95,26 +94,7 @@ type HistoryCatalogSnapshot = {
   existingByImportKey: Map<string, ExistingHistorySession>;
 };
 
-export type HistoryRefreshDecision =
-  | { status: 'skipped'; reason: 'digest_match' | 'empty_suffix'; appendFromIndex?: number }
-  | { status: 'refreshed'; reason: 'prefix_append'; appendFromIndex: number }
-  | {
-      status: 'conflicted';
-      reason: 'prefix_mismatch' | 'local_history_has_untracked_suffix';
-    };
-
-export type HistoryConflictResolutionDecision =
-  | { status: 'replace' }
-  | { status: 'already_resolved' }
-  | {
-      status: 'blocked';
-      reason:
-        | 'source_replay_empty'
-        | 'source_replay_dropped_notifications'
-        | 'source_replay_behind_import_cursor'
-        | 'session_has_pending_local_turn'
-        | 'not_sync_conflict';
-    };
+class HistoryRefreshConflict extends Error {}
 
 function emptySummary(): LocalProjectHistorySyncSummary {
   return {
@@ -128,38 +108,8 @@ function emptySummary(): LocalProjectHistorySyncSummary {
   };
 }
 
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableJson(item)).join(',')}]`;
-  }
-  const record = value as Record<string, unknown>;
-  const entries = Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`);
-  return `{${entries.join(',')}}`;
-}
-
-function hashText(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function normalizeHistoryEntryForHash(entry: SessionHistoryInput): unknown {
-  return {
-    role: entry.role,
-    items: (entry.items ?? []) as unknown as MessageContent[],
-    plan: entry.plan ?? [],
-  };
-}
-
-function hashHistoryEntry(entry: SessionHistoryInput): string {
-  return hashText(stableJson(normalizeHistoryEntryForHash(entry)));
-}
-
-function materializeReplay(args: {
+// Exported only for unit tests; do not call from outside this module.
+export function materializeReplay(args: {
   provider: LocalProjectHistoryProvider;
   acpSessionId: ACPSessionId;
   replayNotifications: Parameters<typeof buildHistoryReplayImport>[0];
@@ -176,7 +126,10 @@ function materializeReplay(args: {
     createId: () => `${providerKey}:${args.acpSessionId}:tmp:${tempId++}`,
     mode: 'imported_snapshot',
   });
-  const turnHashes = replay.history.map(hashHistoryEntry);
+  // New imports hash the canonical v2 item form: a sealed tool_call skeleton and the
+  // full call it came from hash identically, and tool-payload-only source drift does
+  // not by itself trigger a refresh.
+  const turnHashes = replay.history.map(hashHistoryEntryV2);
   const history = replay.history.map((entry, index) => ({
     ...entry,
     id: `${providerKey}:${args.acpSessionId}:turn:${index}:${turnHashes[index]!.slice(0, 16)}`,
@@ -187,136 +140,49 @@ function materializeReplay(args: {
     turnHashes,
     replayDigest: hashText(turnHashes.join('\n')),
     droppedNotifications: replay.droppedNotifications,
+    hashVersion: HASH_VERSION,
   };
 }
 
-function isPrefix(prefix: readonly string[], value: readonly string[]): boolean {
-  if (prefix.length > value.length) {
-    return false;
-  }
-  for (let index = 0; index < prefix.length; index += 1) {
-    if (prefix[index] !== value[index]) {
-      return false;
+/** The document rejects the imported runtime selection once a Lody turn is newer. */
+async function applyBoundHistoryImport(
+  backend: Pick<SessionBackend, 'applyHistoryImport' | 'applyAcpRuntimeConfigPatch'>,
+  input: HistoryImportInput & { replay: MaterializedReplay }
+): Promise<number> {
+  const result = await backend.applyHistoryImport(input);
+  if (result.status === 'accepted') {
+    const { history, runtimeConfig } = input.replay;
+    const lastUserTurn = [...history].reverse().find((entry) => entry.role === 'user');
+    if (runtimeConfig && lastUserTurn) {
+      await backend.applyAcpRuntimeConfigPatch(lastUserTurn.id, runtimeConfig);
     }
+    return result.appended;
   }
-  return true;
-}
-
-function resolveImportedTurnHashes(
-  externalHistory: ExternalAcpHistorySyncMeta,
-  importedTurnHashes?: readonly string[]
-): readonly string[] {
-  return importedTurnHashes ?? externalHistory.importedTurnHashes ?? [];
-}
-
-export function decideHistoryRefresh(args: {
-  externalHistory: ExternalAcpHistorySyncMeta;
-  importedTurnHashes?: readonly string[];
-  replayDigest: string;
-  turnHashes: readonly string[];
-  currentHistoryHashes?: readonly string[];
-}): HistoryRefreshDecision {
-  if (args.replayDigest === args.externalHistory.replayDigest) {
-    return { status: 'skipped', reason: 'digest_match' };
+  if (result.status === 'rejected') {
+    if (
+      result.reason.code === 'prefix_mismatch' ||
+      result.reason.code === 'local_history_has_untracked_suffix'
+    )
+      throw new HistoryRefreshConflict(result.reason.code);
+    throw new Error(`History import was rejected before commit: ${result.reason.code}`);
   }
-
-  const importedTurnHashes = resolveImportedTurnHashes(
-    args.externalHistory,
-    args.importedTurnHashes
-  );
-  if (!isPrefix(importedTurnHashes, args.turnHashes)) {
-    return { status: 'conflicted', reason: 'prefix_mismatch' };
-  }
-
-  if (args.currentHistoryHashes) {
-    if (!isPrefix(args.currentHistoryHashes, args.turnHashes)) {
-      return { status: 'conflicted', reason: 'local_history_has_untracked_suffix' };
-    }
-    const appendFromIndex = args.currentHistoryHashes.length;
-    return args.turnHashes.length > appendFromIndex
-      ? { status: 'refreshed', reason: 'prefix_append', appendFromIndex }
-      : { status: 'skipped', reason: 'empty_suffix', appendFromIndex };
-  }
-
-  const appendFromIndex = args.externalHistory.importedTurnCount;
-  return args.turnHashes.length > appendFromIndex
-    ? { status: 'refreshed', reason: 'prefix_append', appendFromIndex }
-    : { status: 'skipped', reason: 'empty_suffix', appendFromIndex };
-}
-
-function areStringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && isPrefix(left, right);
+  throw new Error('History import outcome is unknown', { cause: result.cause });
 }
 
 async function readSessionImportedTurnHashes(
   sessionDoc: SessionDocument,
   externalHistory: ExternalAcpHistorySyncMeta
-): Promise<readonly string[]> {
+): Promise<{ importedTurnHashes: readonly string[]; importedTurnHashVersion: number }> {
   const cursor = await sessionDoc.getExternalHistoryCursor();
-  return resolveImportedTurnHashes(externalHistory, cursor?.importedTurnHashes);
-}
-
-async function writeSessionImportedTurnHashes(
-  sessionDoc: SessionDocument,
-  turnHashes: readonly string[]
-): Promise<void> {
-  const current = await sessionDoc.getExternalHistoryCursor();
-  if (areStringArraysEqual(current?.importedTurnHashes ?? [], turnHashes)) {
-    return;
-  }
-  await sessionDoc.setExternalHistoryCursor({
-    importedTurnHashes: [...turnHashes],
-  });
+  return {
+    importedTurnHashes: resolveImportedTurnHashes(externalHistory, cursor?.importedTurnHashes),
+    // The version belongs to whichever holder supplied the effective hashes.
+    importedTurnHashVersion: resolveImportHashVersion(externalHistory, cursor),
+  };
 }
 
 function hasPendingDispatchHistory(history: readonly SessionHistoryInput[]): boolean {
   return history.some((entry) => isSessionHistoryPendingForDispatch(entry));
-}
-
-export function decideHistoryConflictResolution(args: {
-  externalHistory: ExternalAcpHistorySyncMeta;
-  importedTurnHashes?: readonly string[];
-  materialized: Pick<
-    MaterializedReplay,
-    'history' | 'turnHashes' | 'replayDigest' | 'droppedNotifications'
-  >;
-  currentHistoryHashes: readonly string[];
-  currentHistoryHasPendingDispatch: boolean;
-}): HistoryConflictResolutionDecision {
-  if (args.currentHistoryHasPendingDispatch) {
-    return { status: 'blocked', reason: 'session_has_pending_local_turn' };
-  }
-
-  const importedTurnHashes = resolveImportedTurnHashes(
-    args.externalHistory,
-    args.importedTurnHashes
-  );
-  const alreadyResolved =
-    args.externalHistory.status !== 'sync_conflict' &&
-    (areStringArraysEqual(args.currentHistoryHashes, importedTurnHashes) ||
-      (args.externalHistory.replayDigest === args.materialized.replayDigest &&
-        areStringArraysEqual(args.currentHistoryHashes, args.materialized.turnHashes)));
-  if (alreadyResolved) {
-    return { status: 'already_resolved' };
-  }
-
-  if (args.externalHistory.status !== 'sync_conflict') {
-    return { status: 'blocked', reason: 'not_sync_conflict' };
-  }
-
-  if (args.materialized.droppedNotifications > 0) {
-    return { status: 'blocked', reason: 'source_replay_dropped_notifications' };
-  }
-
-  if (args.materialized.history.length === 0) {
-    return { status: 'blocked', reason: 'source_replay_empty' };
-  }
-
-  if (args.materialized.turnHashes.length < importedTurnHashes.length) {
-    return { status: 'blocked', reason: 'source_replay_behind_import_cursor' };
-  }
-
-  return { status: 'replace' };
 }
 
 function formatHistoryConflictResolutionBlocker(
@@ -389,6 +255,7 @@ export function buildExistingHistorySessionIndex(
   });
   for (const entry of sortedMetas) {
     if (entry.meta.machineId !== machineId) continue;
+    if (!matchesHistoryProviderBinding(entry.meta.agentConfigId, provider)) continue;
     if (entry.meta.cliType !== provider.cliType) continue;
     if (entry.meta.agentType !== provider.agentType) continue;
     if (entry.meta.project?.kind !== 'local') continue;
@@ -423,24 +290,6 @@ export function buildExistingHistorySessionIndex(
   return index;
 }
 
-function getProviderLabel(provider: LocalProjectHistoryProvider): string {
-  return getLocalProjectHistoryProviderKey(provider);
-}
-
-function getHistoryImportKey(args: {
-  machineId: MachineId;
-  localProjectId: LocalProjectId;
-  provider: LocalProjectHistoryProvider;
-  acpSessionId: string;
-}): string {
-  return getExternalAcpHistoryImportKey({
-    machineId: args.machineId,
-    localProjectId: args.localProjectId,
-    provider: args.provider,
-    sourceAcpSessionId: args.acpSessionId,
-  });
-}
-
 const MAX_IMPORTED_SESSION_TITLE_CHARS = 80;
 
 function resolveSessionTitle(info: SessionInfo, provider: LocalProjectHistoryProvider): string {
@@ -448,7 +297,7 @@ function resolveSessionTitle(info: SessionInfo, provider: LocalProjectHistoryPro
   // which can carry Lody-appended instruction tails.
   const cleaned = info.title?.trim() ? sanitizeLodyInternalInstructions(info.title) : '';
   const title = cleaned.replace(/\s+/g, ' ').trim().slice(0, MAX_IMPORTED_SESSION_TITLE_CHARS);
-  return title || `${getProviderLabel(provider)} session`;
+  return title || `${getLocalProjectHistoryProviderKey(provider)} session`;
 }
 
 function parseUpdatedAtMs(updatedAt: string | undefined): number {
@@ -536,6 +385,8 @@ function buildExternalHistoryMeta(args: {
     sourceAcpSessionId: args.sourceAcpSessionId,
     sourceUpdatedAt: args.sourceUpdatedAt ?? undefined,
     replayDigest: args.materialized.replayDigest,
+    // Versions the digest only. The doc cursor versions its own importedTurnHashes.
+    hashVersion: args.materialized.hashVersion,
     importedTurnCount: args.materialized.turnHashes.length,
     lastSyncAt: getServerNow(),
     status: args.status ?? 'synced',
@@ -561,6 +412,90 @@ export class LocalProjectHistorySyncService {
     this.providerKey = getLocalProjectHistoryProviderKey(provider);
   }
 
+  private agentConfigLookup?: Promise<AgentConfigMeta | undefined>;
+
+  private selectedAgentConfig(): Promise<AgentConfigMeta | undefined> {
+    return (this.agentConfigLookup ??= this.resolveImportAgentConfig());
+  }
+
+  private async resolveImportAgentConfig(): Promise<AgentConfigMeta | undefined> {
+    if (!this.provider.agentConfigId) {
+      return this.manager.findSoleAgentConfig(
+        this.provider.cliType,
+        this.provider.agentType,
+        this.context.machineId
+      );
+    }
+    const config = await this.manager.getAgentConfigById(
+      this.provider.agentConfigId,
+      this.context.machineId
+    );
+    if (
+      !config ||
+      config.id !== this.provider.agentConfigId ||
+      config.machineId !== this.context.machineId ||
+      config.cliType !== this.provider.cliType ||
+      config.agentType !== this.provider.agentType
+    ) {
+      throw new Error(
+        'The selected history Provider is unavailable or does not match this machine and agent.'
+      );
+    }
+    return config;
+  }
+
+  /** Same rule as continuing the session: its bound Provider, else the default launch. */
+  private async sessionAgentConfig(meta: SessionMeta): Promise<AgentConfigMeta | null> {
+    if (!meta.agentConfigId) return null;
+    const config = await this.manager.getAgentConfigById(
+      meta.agentConfigId,
+      this.context.machineId
+    );
+    if (!config)
+      throw new Error(
+        'The session’s bound provider is unavailable; history replay cannot use another account'
+      );
+    return config;
+  }
+
+  private async launchProvider(
+    config: AgentConfigMeta | null | undefined
+  ): Promise<HistoryProviderLaunch> {
+    return config
+      ? {
+          ...this.provider,
+          agentConfigId: config.id,
+          magpieGatewayUrl: config.magpieGatewayUrl,
+          customAcp: config.customAcp,
+          runtimeOverrides: config.runtimeOverrides,
+          env: config.env,
+          codexProfile: config.codexAuth
+            ? await getCodexProfileStore().resolve(this.context.workspaceId, config)
+            : undefined,
+        }
+      : this.provider;
+  }
+
+  private async loadReplay(
+    rootPath: string,
+    acpSessionId: ACPSessionId,
+    config: AgentConfigMeta | null | undefined
+  ): Promise<MaterializedReplay> {
+    const { notifications, runtimeConfig } = await loadHistorySessionReplay({
+      provider: await this.launchProvider(config),
+      rootPath,
+      acpSessionId,
+      logger: this.logger,
+    });
+    const replay = materializeReplay({
+      provider: this.provider,
+      acpSessionId,
+      replayNotifications: notifications,
+      userId: this.context.userId,
+    });
+    return { ...replay, runtimeConfig };
+  }
+
   async syncLocalProject(args: {
     localProjectId: LocalProjectId;
     rootPath: string;
@@ -569,9 +504,7 @@ export class LocalProjectHistorySyncService {
       `${this.providerKey}:${this.context.workspaceId}:` +
       `${this.context.machineId}:${args.localProjectId}`;
     if (syncLeases.has(leaseKey)) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} history sync is already running for this local project`
-      );
+      throw new Error(`${this.providerKey} history sync is already running for this local project`);
     }
     syncLeases.add(leaseKey);
     try {
@@ -602,9 +535,7 @@ export class LocalProjectHistorySyncService {
       `${this.providerKey}:${this.context.workspaceId}:` +
       `${this.context.machineId}:${args.localProjectId}`;
     if (syncLeases.has(leaseKey)) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} history sync is already running for this local project`
-      );
+      throw new Error(`${this.providerKey} history sync is already running for this local project`);
     }
     syncLeases.add(leaseKey);
     try {
@@ -624,9 +555,7 @@ export class LocalProjectHistorySyncService {
       `${this.providerKey}:${this.context.workspaceId}:` +
       `${this.context.machineId}:${args.localProjectId}`;
     if (syncLeases.has(leaseKey)) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} history sync is already running for this local project`
-      );
+      throw new Error(`${this.providerKey} history sync is already running for this local project`);
     }
     syncLeases.add(leaseKey);
     try {
@@ -656,33 +585,24 @@ export class LocalProjectHistorySyncService {
       const info = infoByAcpSessionId.get(selectedId);
       try {
         if (!info) {
-          throw new Error(
-            `${getProviderLabel(this.provider)} session was not found in the local project catalog`
-          );
+          throw new Error(`${this.providerKey} session was not found in the local project catalog`);
         }
 
-        const importKey = getHistoryImportKey({
+        const importKey = getExternalAcpHistoryImportKey({
           machineId: this.context.machineId,
           localProjectId: args.localProjectId,
           provider: this.provider,
-          acpSessionId: selectedId,
+          sourceAcpSessionId: selectedId,
         });
         const existing =
           (await this.findExistingHistorySession(args.localProjectId, selectedId)) ??
           snapshot.existingByImportKey.get(importKey);
         if (!existing) {
-          const replayNotifications = await loadHistorySessionReplay({
-            provider: this.provider,
-            rootPath: args.rootPath,
+          const materialized = await this.loadReplay(
+            args.rootPath,
             acpSessionId,
-            logger: this.logger,
-          });
-          const materialized = materializeReplay({
-            provider: this.provider,
-            acpSessionId,
-            replayNotifications,
-            userId: this.context.userId,
-          });
+            await this.selectedAgentConfig()
+          );
           const importedSession = await this.importNewSession({
             info,
             acpSessionId,
@@ -709,9 +629,7 @@ export class LocalProjectHistorySyncService {
           message: formatErrorMessage(error),
         });
         this.logger.warn(
-          `[${this.providerKey}-history-sync] Failed to import ${getProviderLabel(
-            this.provider
-          )} session ${acpSessionId}: ${formatErrorMessage(error)}`
+          `[${this.providerKey}-history-sync] Failed to import ${this.providerKey} session ${acpSessionId}: ${formatErrorMessage(error)}`
         );
       }
     }
@@ -736,16 +654,14 @@ export class LocalProjectHistorySyncService {
     });
     const info = snapshot.sessions.find((session) => session.sessionId === args.acpSessionId);
     if (!info) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} session was not found in the local project catalog`
-      );
+      throw new Error(`${this.providerKey} session was not found in the local project catalog`);
     }
 
-    const importKey = getHistoryImportKey({
+    const importKey = getExternalAcpHistoryImportKey({
       machineId: this.context.machineId,
       localProjectId: args.localProjectId,
       provider: this.provider,
-      acpSessionId: args.acpSessionId,
+      sourceAcpSessionId: args.acpSessionId,
     });
     const finishResolved = async (
       meta: SessionMeta
@@ -782,7 +698,8 @@ export class LocalProjectHistorySyncService {
     }
 
     const sessionDoc = await this.manager.getOrCreateSessionDoc(args.sessionId);
-    const currentHistoryBeforeReplay = await sessionDoc.getHistory();
+    const backend = await createSessionBackend(sessionDoc, meta);
+    const currentHistoryBeforeReplay = await backend.readHistory();
     if (hasPendingDispatchHistory(currentHistoryBeforeReplay)) {
       throw new Error(
         'Cannot replace history while the imported session has a pending local turn.'
@@ -793,12 +710,16 @@ export class LocalProjectHistorySyncService {
       throw new Error('Imported session metadata no longer matches the selected ACP history.');
     }
     if (existingExternalHistory.status !== 'sync_conflict') {
-      const importedTurnHashes = await readSessionImportedTurnHashes(
+      const cursor = await sessionDoc.getExternalHistoryCursor();
+      const { importedTurnHashes, importedTurnHashVersion } = await readSessionImportedTurnHashes(
         sessionDoc,
         existingExternalHistory
       );
       if (
-        areStringArraysEqual(currentHistoryBeforeReplay.map(hashHistoryEntry), importedTurnHashes)
+        areStringArraysEqual(
+          hashHistoryForStoredVersion(currentHistoryBeforeReplay, importedTurnHashVersion),
+          storedBaselineHashes(cursor, importedTurnHashes)
+        )
       ) {
         return finishResolved(meta);
       }
@@ -811,18 +732,11 @@ export class LocalProjectHistorySyncService {
     }
 
     const acpSessionId = args.acpSessionId as unknown as ACPSessionId;
-    const replayNotifications = await loadHistorySessionReplay({
-      provider: this.provider,
-      rootPath: args.rootPath,
+    const materialized = await this.loadReplay(
+      args.rootPath,
       acpSessionId,
-      logger: this.logger,
-    });
-    const materialized = materializeReplay({
-      provider: this.provider,
-      acpSessionId,
-      replayNotifications,
-      userId: this.context.userId,
-    });
+      await this.sessionAgentConfig(meta)
+    );
 
     const latestRecord = await this.manager.repo.getDocMeta(roomId);
     if (!latestRecord?.meta || isLoroRepoDocDeleted(latestRecord)) {
@@ -840,16 +754,22 @@ export class LocalProjectHistorySyncService {
       throw new Error('Imported session metadata no longer matches the selected ACP history.');
     }
 
-    const latestImportedTurnHashes = await readSessionImportedTurnHashes(
-      sessionDoc,
-      latestExternalHistory
-    );
-    const latestHistory = await sessionDoc.getHistory();
+    const {
+      importedTurnHashes: latestImportedTurnHashes,
+      importedTurnHashVersion: latestImportedTurnHashVersion,
+    } = await readSessionImportedTurnHashes(sessionDoc, latestExternalHistory);
+    const latestCursor = await sessionDoc.getExternalHistoryCursor();
+    const latestHistory = await backend.readHistory();
     const decision = decideHistoryConflictResolution({
       externalHistory: latestExternalHistory,
       importedTurnHashes: latestImportedTurnHashes,
+      importedTurnHashVersion: latestImportedTurnHashVersion,
       materialized,
-      currentHistoryHashes: latestHistory.map(hashHistoryEntry),
+      currentHistoryHashes: hashHistoryForStoredVersion(
+        latestHistory,
+        latestImportedTurnHashVersion
+      ),
+      storedHistoryHashes: storedBaselineHashes(latestCursor, latestImportedTurnHashes),
       currentHistoryHasPendingDispatch: hasPendingDispatchHistory(latestHistory),
     });
     if (decision.status === 'blocked') {
@@ -867,31 +787,18 @@ export class LocalProjectHistorySyncService {
     });
     const lastMessageAt = resolveSourceUpdatedAtMs(info, getServerNow());
 
-    await sessionDoc.updateHistory((history) => {
-      const writeTimeDecision = decideHistoryConflictResolution({
-        externalHistory: latestExternalHistory,
-        importedTurnHashes: latestImportedTurnHashes,
-        materialized,
-        currentHistoryHashes: history.map(hashHistoryEntry),
-        currentHistoryHasPendingDispatch: hasPendingDispatchHistory(history),
-      });
-      if (writeTimeDecision.status !== 'replace') {
-        const message =
-          writeTimeDecision.status === 'blocked'
-            ? formatHistoryConflictResolutionBlocker(writeTimeDecision)
-            : 'History conflict was already resolved before replacement.';
-        throw new Error(message);
-      }
-      return materialized.history;
+    await applyBoundHistoryImport(backend, {
+      mode: 'resolve-conflict',
+      replay: materialized,
+      externalHistory: latestExternalHistory,
     });
-    await writeSessionImportedTurnHashes(sessionDoc, materialized.turnHashes);
     await this.manager.repo.upsertDocMeta(roomId, {
       origin: 'external-acp',
       lastMessageAt,
       externalHistory: nextExternalHistory,
     } satisfies Partial<SessionMeta>);
 
-    const synced = await sessionDoc.waitUntilSynced();
+    const synced = await backend.waitUntilSynced({ timeoutMs: SYNC_CONFIRMATION_TIMEOUT_MS });
     if (!synced) {
       throw new Error(
         `Replaced history for ${args.sessionId} did not confirm sync before timeout.`
@@ -911,8 +818,9 @@ export class LocalProjectHistorySyncService {
     rootPath: string;
     requiredSessionIds?: readonly string[];
   }): Promise<HistoryCatalogSnapshot> {
+    const agentConfig = await this.selectedAgentConfig();
     const catalog = await listHistorySessionsForLocalProject({
-      provider: this.provider,
+      provider: await this.launchProvider(agentConfig),
       rootPath: args.rootPath,
       logger: this.logger,
       requiredSessionIds: args.requiredSessionIds,
@@ -925,6 +833,21 @@ export class LocalProjectHistorySyncService {
       this.provider,
       args.localProjectId
     );
+    if (agentConfig) {
+      // Bind only sessions this Provider lists, so continuing through it can find them.
+      const listed = new Set<string>(catalog.sessions.map((session) => session.sessionId));
+      for (const [key, existing] of existingByImportKey) {
+        const sourceId = existing.meta.externalHistory?.sourceAcpSessionId;
+        if (existing.meta.agentConfigId || !sourceId || !listed.has(sourceId)) continue;
+        await this.manager.repo.upsertDocMeta(getSessionRoomId(existing.sessionId), {
+          agentConfigId: agentConfig.id,
+        } satisfies Partial<SessionMeta>);
+        existingByImportKey.set(key, {
+          ...existing,
+          meta: { ...existing.meta, agentConfigId: agentConfig.id },
+        });
+      }
+    }
 
     return { sessions: catalog.sessions, existingByImportKey };
   }
@@ -933,11 +856,11 @@ export class LocalProjectHistorySyncService {
     localProjectId: LocalProjectId,
     acpSessionId: string
   ): Promise<ExistingHistorySession | undefined> {
-    const importKey = getHistoryImportKey({
+    const importKey = getExternalAcpHistoryImportKey({
       machineId: this.context.machineId,
       localProjectId,
       provider: this.provider,
-      acpSessionId,
+      sourceAcpSessionId: acpSessionId,
     });
     const sessionMetas = await listWorkspaceSessionMetas(this.manager);
     return buildExistingHistorySessionIndex(
@@ -954,6 +877,7 @@ export class LocalProjectHistorySyncService {
     acpSessionId: string
   ): boolean {
     if (meta.machineId !== this.context.machineId) return false;
+    if (!matchesHistoryProviderBinding(meta.agentConfigId, this.provider)) return false;
     if (meta.cliType !== this.provider.cliType) return false;
     if (meta.agentType !== this.provider.agentType) return false;
     if (meta.project?.kind !== 'local') return false;
@@ -979,11 +903,11 @@ export class LocalProjectHistorySyncService {
           this.provider,
           info,
           args.existingByImportKey.get(
-            getHistoryImportKey({
+            getExternalAcpHistoryImportKey({
               machineId: this.context.machineId,
               localProjectId: args.localProjectId,
               provider: this.provider,
-              acpSessionId: info.sessionId,
+              sourceAcpSessionId: info.sessionId,
             })
           )
         )
@@ -1018,7 +942,7 @@ export class LocalProjectHistorySyncService {
           ...previous,
           history: {
             ...(previous.history ?? {}),
-            [this.providerKey]: {
+            [getLocalProjectHistoryCatalogKey(this.provider)]: {
               lastListedAt,
               sessions: Object.fromEntries(sessions.map((item) => [item.acpSessionId, item])),
             },
@@ -1042,6 +966,7 @@ export class LocalProjectHistorySyncService {
     const roomId = getSessionRoomId(sessionId);
     const nowMs = getServerNow();
     const lastMessageAt = resolveSourceUpdatedAtMs(args.info, nowMs);
+    const agentConfig = await this.selectedAgentConfig();
     const meta: SessionMeta = {
       id: sessionId,
       machineId: this.context.machineId,
@@ -1052,6 +977,8 @@ export class LocalProjectHistorySyncService {
       origin: 'external-acp',
       cliType: this.provider.cliType,
       agentType: this.provider.agentType,
+      historyBackend: NEW_SESSION_HISTORY_BACKEND,
+      ...(agentConfig ? { agentConfigId: agentConfig.id } : {}),
       project: args.project,
       title: resolveSessionTitle(args.info, this.provider),
       // Imported titles are placeholders derived from provider data; allow the title
@@ -1067,11 +994,29 @@ export class LocalProjectHistorySyncService {
     };
 
     try {
-      const sessionDoc = await this.manager.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistory(() => args.materialized.history);
-      await writeSessionImportedTurnHashes(sessionDoc, args.materialized.turnHashes);
+      // Persist the backend discriminator before opening the document or
+      // accepting imported history. A crash between those operations must not
+      // leave a history-bearing session whose next opener defaults to Loro.
+      await this.manager.repo.upsertDocMeta(roomId, {
+        ...meta,
+        status: SessionStatusFactory.initializing(),
+        // The shell is discoverable for retry, but must not look like a
+        // completed import if the process dies before history is committed.
+        externalHistory: {
+          ...meta.externalHistory!,
+          status: 'metadata_only',
+        },
+      });
+      const sessionDoc = await this.manager.getOrCreateSessionDoc(sessionId, {
+        historyBackend: meta.historyBackend,
+      });
+      const backend = await createSessionBackend(sessionDoc, meta);
+      await applyBoundHistoryImport(backend, {
+        mode: 'initialize',
+        replay: args.materialized,
+      });
       await this.manager.repo.upsertDocMeta(roomId, meta);
-      const synced = await sessionDoc.waitUntilSynced();
+      const synced = await backend.waitUntilSynced();
       if (!synced) {
         this.logger.warn(
           `[${this.providerKey}-history-sync] Imported history for ${sessionId} did not ` +
@@ -1123,72 +1068,28 @@ export class LocalProjectHistorySyncService {
       return 'skipped';
     }
 
-    const replayNotifications = await loadHistorySessionReplay({
-      provider: this.provider,
-      rootPath: args.rootPath,
-      acpSessionId: args.acpSessionId,
-      logger: this.logger,
-    });
-    const materialized = materializeReplay({
-      provider: this.provider,
-      acpSessionId: args.acpSessionId,
-      replayNotifications,
-      userId: this.context.userId,
-    });
+    const materialized = await this.loadReplay(
+      args.rootPath,
+      args.acpSessionId,
+      await this.sessionAgentConfig(args.existing.meta)
+    );
     const sessionDoc = await this.manager.getOrCreateSessionDoc(args.existing.sessionId);
-    const importedTurnHashes = await readSessionImportedTurnHashes(sessionDoc, externalHistory);
-
-    const replayDecision = decideHistoryRefresh({
-      externalHistory,
-      importedTurnHashes,
-      replayDigest: materialized.replayDigest,
-      turnHashes: materialized.turnHashes,
-    });
-
-    if (replayDecision.reason === 'digest_match') {
-      await writeSessionImportedTurnHashes(sessionDoc, materialized.turnHashes);
-      await this.manager.repo.upsertDocMeta(getSessionRoomId(args.existing.sessionId), {
-        origin: 'external-acp',
-        externalHistory: buildExternalHistoryMeta({
-          provider: this.provider,
-          sourceAcpSessionId: args.acpSessionId,
-          sourceUpdatedAt: args.info.updatedAt,
-          materialized,
-        }),
-      } satisfies Partial<SessionMeta>);
-      return 'skipped';
-    }
-
-    if (replayDecision.status === 'conflicted') {
-      await this.markConflict(
-        args.existing.sessionId,
-        args.info,
-        materialized,
-        replayDecision.reason
-      );
-      return 'conflicted';
-    }
-
-    const currentHistory = await sessionDoc.getHistory();
-    const appendDecision = decideHistoryRefresh({
-      externalHistory,
-      importedTurnHashes,
-      replayDigest: materialized.replayDigest,
-      turnHashes: materialized.turnHashes,
-      currentHistoryHashes: currentHistory.map(hashHistoryEntry),
-    });
-    if (appendDecision.status === 'conflicted') {
-      await this.markConflict(
-        args.existing.sessionId,
-        args.info,
-        materialized,
-        appendDecision.reason
-      );
+    const backend = await createSessionBackend(sessionDoc, args.existing.meta);
+    let appended = 0;
+    try {
+      appended = await applyBoundHistoryImport(backend, {
+        mode: 'refresh',
+        replay: materialized,
+        externalHistory,
+      });
+    } catch (error) {
+      if (!(error instanceof HistoryRefreshConflict)) throw error;
+      await this.markConflict(args.existing.sessionId, args.info, materialized, error.message);
       // Wait for the conflict marker to reach Streams before unloading the doc
       // handle. If we unload too early, the conflict state can remain
       // local-cache only and the user sees an "imported" session while other
       // clients keep seeing the stale state.
-      const synced = await sessionDoc.waitUntilSynced();
+      const synced = await backend.waitUntilSynced();
       if (!synced) {
         this.logger.debug(
           `[${this.providerKey}-history-sync] Conflict marker for ${
@@ -1200,9 +1101,6 @@ export class LocalProjectHistorySyncService {
       return 'conflicted';
     }
 
-    const suffix = materialized.history.slice(appendDecision.appendFromIndex);
-    await sessionDoc.updateHistory((history) => [...history, ...suffix]);
-    await writeSessionImportedTurnHashes(sessionDoc, materialized.turnHashes);
     await this.manager.repo.upsertDocMeta(getSessionRoomId(args.existing.sessionId), {
       origin: 'external-acp',
       lastMessageAt: resolveSourceUpdatedAtMs(args.info, getServerNow()),
@@ -1217,7 +1115,7 @@ export class LocalProjectHistorySyncService {
     // unloading. Otherwise the new turns may live only in this process's local
     // cache, and a refresh from another client will see the prior cursor and
     // think the import never happened.
-    const synced = await sessionDoc.waitUntilSynced();
+    const synced = await backend.waitUntilSynced();
     if (!synced) {
       this.logger.debug(
         `[${this.providerKey}-history-sync] Appended history for ${
@@ -1227,9 +1125,7 @@ export class LocalProjectHistorySyncService {
       );
     }
     await this.manager.cleanSessionDoc(args.existing.sessionId, { preserveStatus: true });
-    return externalHistory.status === 'metadata_only' || suffix.length > 0
-      ? 'refreshed'
-      : 'skipped';
+    return externalHistory.status === 'metadata_only' || appended > 0 ? 'refreshed' : 'skipped';
   }
 
   private async markConflict(
@@ -1251,3 +1147,4 @@ export class LocalProjectHistorySyncService {
     } satisfies Partial<SessionMeta>);
   }
 }
+import { getCodexProfileStore } from '@/agent/codex-profile-store';

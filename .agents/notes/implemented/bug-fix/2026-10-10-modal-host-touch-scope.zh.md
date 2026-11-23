@@ -1,0 +1,26 @@
+# 将所有模态弹窗留在旧抽屉的交互范围内
+
+Status: implemented
+Date: 2026-10-10
+Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1404
+
+[English](2026-10-10-modal-host-touch-scope.md)
+
+## 摘要
+
+移动端 Vaul 抽屉内打开的 Dialog 仍挂载到 body，继承其指针禁用状态，并脱离抽屉的焦点和滚动范围。此前只修复了菜单和移动端 diff。现在使用独立的模态容器上下文，将旧抽屉已有的禁止拖拽宿主传递给 Dialog、AlertDialog 和 Drawer。普通浮层容器不会改变模态弹窗的定位；设备特有的滚动行为仍需真机验证。
+
+## 决策与证据
+
+此前的 [移动端 diff 修复](2026-10-03-mobile-diff-portal-scope.zh.md) 没有让所有模态弹窗继承最近的普通浮层容器，这是正确的：居中面板的 transform 会改变 fixed 定位。本次通过独立的 `ModalContainerProvider` 推广交互范围修复。仅旧抽屉提供该宿主；Base UI 面板继续提供自己的普通浮层容器，不覆盖模态宿主。显式 `container` 仍优先，包括 Base UI 的 null／不挂载行为。独立弹窗仍默认挂载到 body。
+
+只修改 pointer events 会让外层焦点陷阱和滚动锁继续将可见弹窗视为外部内容。复用已有无盒宿主还能避免弹窗手势触发 Vaul 拖拽，且不增加布局子项。使用通用 Dialog 适配器的文件预览自动获得修复，不改动文件路由或加载。
+
+## 验证
+
+六个回归用例在原实现上失败、修复后通过：Dialog、AlertDialog 和 Drawer，各覆盖初始打开和稍后打开。现有抽屉测试检查包含关系、实际指针事件样式、焦点保留，以及只关闭内层弹窗。UI 测试额外检查普通浮层宿主相互独立和显式容器覆盖。这些组件测试不能模拟原生触摸命中。
+
+使用真实抽屉封装和 UI 基元的 390×844 手机浏览器夹具，三类弹窗均通过 Chromium 触摸滑动（仅预览内容滚动）、点击、输入和重新打开检查。WebKit 通过点击、输入、命中检查和重新打开；WebKit 原生滑动及 iOS／Android 真机仍未验证。夹具提供最小布局并排除应用服务，不代表完整文件预览流程。
+
+UI 测试 300 项、抽屉测试 22 项通过。UI 类型检查、改动文件 lint、全仓格式化通过。全仓 check 和 components 类型检查受复用安装的依赖／API 不匹配阻塞，包括 Effect 和 ACP 导出。文档检查报告 82 项缺少子模块链接的现有错误，均不涉及改动文件；未注册受 SHA 保护的文档主题。

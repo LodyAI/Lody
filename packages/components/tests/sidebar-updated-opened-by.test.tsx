@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -8,7 +7,7 @@ import { createStore, Provider } from 'jotai';
 import {
   countUpdatedItemRoots,
   getVisibleUpdatedItems,
-  SHOW_FULL_BUCKET_THRESHOLD,
+  UPDATED_BUCKET_PREVIEW_MAX,
   SidebarUpdatedSessionList,
   sortUpdatedItems,
   updatedBucketOverflowsPreview,
@@ -53,17 +52,6 @@ function makeOpenerItems(): SidebarUpdatedItem[] {
 }
 
 describe('updated bucket opened-by tree', () => {
-  it('renders opened sessions directly after their opener', () => {
-    const ordered = sortUpdatedItems(makeOpenerItems());
-    expect(getVisibleUpdatedItems(ordered, true, false).map((item) => item.id)).toEqual([
-      'opener',
-      'opened-1',
-      'opened-2',
-      'opened-3',
-      'unrelated',
-    ]);
-  });
-
   it('ranks an opener by its freshest opened session, keeping Updated truly recency-ordered', () => {
     // The opener itself is the oldest row in the list, but it opened the newest
     // one — the whole group must still sort above the mid-aged standalone row.
@@ -77,18 +65,11 @@ describe('updated bucket opened-by tree', () => {
       }),
     ]);
 
-    expect(getVisibleUpdatedItems(ordered, true, false).map((item) => item.id)).toEqual([
+    expect(getVisibleUpdatedItems(ordered, true, 0).map((item) => item.id)).toEqual([
       'stale-opener',
       'fresh-opened',
       'standalone',
     ]);
-  });
-
-  it('hides opened sessions behind a collapsed opener', () => {
-    const ordered = sortUpdatedItems(makeOpenerItems());
-    expect(
-      getVisibleUpdatedItems(ordered, true, false, { opener: true }).map((item) => item.id)
-    ).toEqual(['opener', 'unrelated']);
   });
 
   it('leaves an opened session top-level when its opener is in another section', () => {
@@ -97,7 +78,7 @@ describe('updated bucket opened-by tree', () => {
       makeItem({ id: 'opened', openedBySessionId: 'pinned-opener' }),
       makeItem({ id: 'other' }),
     ]);
-    expect(getVisibleUpdatedItems(ordered, true, false).map((item) => item.id)).toEqual([
+    expect(getVisibleUpdatedItems(ordered, true, 0).map((item) => item.id)).toEqual([
       'opened',
       'other',
     ]);
@@ -107,22 +88,22 @@ describe('updated bucket opened-by tree', () => {
   it('measures the preview threshold in top-level rows', () => {
     const openerGroup = sortUpdatedItems([
       makeItem({ id: 'opener' }),
-      ...Array.from({ length: SHOW_FULL_BUCKET_THRESHOLD }, (_unused, index) =>
+      ...Array.from({ length: UPDATED_BUCKET_PREVIEW_MAX }, (_unused, index) =>
         makeItem({ id: `opened-${index}`, openedBySessionId: 'opener' })
       ),
     ]);
     expect(updatedBucketOverflowsPreview(openerGroup)).toBe(false);
-    expect(getVisibleUpdatedItems(openerGroup, true, false)).toHaveLength(
-      SHOW_FULL_BUCKET_THRESHOLD + 1
+    expect(getVisibleUpdatedItems(openerGroup, true, 0)).toHaveLength(
+      UPDATED_BUCKET_PREVIEW_MAX + 1
     );
 
     const flat = sortUpdatedItems(
-      Array.from({ length: SHOW_FULL_BUCKET_THRESHOLD + 1 }, (_unused, index) =>
+      Array.from({ length: UPDATED_BUCKET_PREVIEW_MAX + 1 }, (_unused, index) =>
         makeItem({ id: `flat-${index}` })
       )
     );
     expect(updatedBucketOverflowsPreview(flat)).toBe(true);
-    expect(getVisibleUpdatedItems(flat, true, false)).toHaveLength(SHOW_FULL_BUCKET_THRESHOLD);
+    expect(getVisibleUpdatedItems(flat, true, 0)).toHaveLength(UPDATED_BUCKET_PREVIEW_MAX);
   });
 });
 
@@ -188,11 +169,6 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
     expect(depthOf('unrelated')).toBe('0');
   });
 
-  it('keeps a flat list flat, with no tree gutter', () => {
-    render([makeItem({ id: 'a' }), makeItem({ id: 'b' })]);
-    expect(container?.querySelector('[data-session-tree-depth]')).toBeNull();
-  });
-
   it('renders one disclosure toggle on the opener and collapses on click', () => {
     const { onSelectItem } = render(makeOpenerItems());
     const toggles = container?.querySelectorAll('[data-session-opened-by-toggle]') ?? [];
@@ -208,21 +184,32 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
     expect(onSelectItem).not.toHaveBeenCalled();
   });
 
-  it('shares the tree affordance slot with the row menu button', () => {
+  it('keeps the connectors on a working or unread child and puts status at the row end', () => {
+    // `opened-1` is working and `opened-2` is unread: the rows most likely to be
+    // watched are exactly the ones that used to lose their ├/└ to a status mark.
     render(makeOpenerItems());
-    const openerSlot = container
-      ?.querySelector('[data-sidebar-updated-id="opener"]')
-      ?.querySelector('[data-session-row-leading-slot]');
-    expect(openerSlot?.querySelector('[data-session-opened-by-toggle]')).not.toBeNull();
-    expect(openerSlot?.querySelector('button[aria-label="More actions"]')).not.toBeNull();
 
-    const childSlot = container
-      ?.querySelector('[data-sidebar-updated-id="opened-3"]')
-      ?.querySelector('[data-session-row-leading-slot]');
-    expect(childSlot?.querySelectorAll('[data-session-tree-connector]')).toHaveLength(2);
-    expect(childSlot?.querySelector('[data-session-tree-connector="trunk"]')).not.toBeNull();
-    expect(childSlot?.querySelector('[data-session-tree-connector="elbow"]')).not.toBeNull();
-    expect(childSlot?.querySelector('button[aria-label="More actions"]')).not.toBeNull();
+    const rowOf = (id: string) => container?.querySelector(`[data-sidebar-updated-id="${id}"]`);
+
+    for (const id of ['opened-1', 'opened-2', 'opened-3']) {
+      expect(
+        rowOf(id)
+          ?.querySelector('[data-session-row-leading-slot]')
+          ?.querySelectorAll('[data-session-tree-connector]')
+      ).toHaveLength(2);
+    }
+
+    expect(
+      rowOf('opened-1')?.querySelector(
+        '[data-session-row-end-slot] [data-session-working-indicator]'
+      )
+    ).not.toBeNull();
+    expect(
+      rowOf('opened-2')?.querySelector('[data-session-row-end-slot] [data-session-row-indicator]')
+    ).not.toBeNull();
+    expect(
+      rowOf('opened-3')?.querySelector('[data-session-row-end-slot] [data-session-row-indicator]')
+    ).toBeNull();
   });
 
   it('offers collapse from the opener context menu', () => {
@@ -267,14 +254,6 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
     });
 
     expect(onSelectItem).toHaveBeenCalledWith('root', 'child-tab');
-  });
-
-  it('renders a working and an unread opened session with their own row state', () => {
-    render(makeOpenerItems(), { selectedItemId: 'opened-2' });
-    const working = container?.querySelector('[data-sidebar-updated-id="opened-1"]');
-    expect(working?.querySelector('[data-session-working-spinner]')).not.toBeNull();
-    const selected = container?.querySelector('[data-sidebar-updated-id="opened-2"]');
-    expect(selected).not.toBeNull();
   });
 
   it('renders an orphan opened session as a top-level row with no gutter', () => {

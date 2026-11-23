@@ -23,11 +23,8 @@ import {
 import { ChatLandingView } from '@/components/chat/chat-landing-view';
 import { ContextSwitch } from '@/components/chat/context-switch';
 import type { SessionContextType } from '@/components/chat/context-switch';
-import { getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
 import { OptionSelector } from '@/components/shared/option-selector';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
-
-// ─── Shared constants & helpers ─────────────────────────────────────────────
 
 const STORY_WORKSPACE_ID = 'workspace-storybook' as WorkspaceId;
 const STORY_MACHINE_ID = 'machine-storybook' as MachineId;
@@ -171,8 +168,6 @@ function ChatLandingContent() {
         onSelect={(option) => setSelectedMachine(option.value)}
         placeholder="Machine"
         placeholderIcon={Monitor}
-        tone="dark"
-        className={getSelectorTagClassName('dark')}
         contentClassName="w-56"
         renderTriggerValue={(option) => (
           <div className="flex min-w-0 items-center gap-1.5">
@@ -206,8 +201,6 @@ function ChatLandingContent() {
     </div>
   );
 }
-
-// ─── Desktop preview shell (simulated keyboard) ────────────────────────────
 
 /**
  * For desktop browsers: wraps content in a phone-shaped frame and simulates
@@ -279,8 +272,6 @@ function DesktopPreviewShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-// ─── Story config ───────────────────────────────────────────────────────────
 
 const meta = {
   title: 'Mobile/ViewportKeyboard',

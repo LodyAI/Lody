@@ -1,76 +1,131 @@
-import { describe, expect, it } from 'vitest';
-import { collectBootDiagnostics } from '../src/lib/boot-failure';
+/** @vitest-environment jsdom */
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  captureBootFailedBeacon,
+  collectBootDiagnostics,
+  renderBootFailure,
+} from '../src/lib/boot-failure';
 
-describe('collectBootDiagnostics', () => {
-  it('formats an Error using its name + message', () => {
-    const diag = collectBootDiagnostics(new TypeError('foo is not a function'));
-    expect(diag.message).toBe('TypeError: foo is not a function');
-    expect(diag.copyableText.startsWith('TypeError: foo is not a function')).toBe(true);
+describe('renderBootFailure', () => {
+  let root: HTMLDivElement;
+  let writeText: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    root = document.createElement('div');
+    document.body.appendChild(root);
   });
 
-  it('passes string errors through verbatim', () => {
-    expect(collectBootDiagnostics('boom').message).toBe('boom');
+  afterEach(() => {
+    root.remove();
+    window.localStorage.clear();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it('handles null and undefined without throwing', () => {
-    expect(collectBootDiagnostics(null).message).toBe('Unknown error');
-    expect(collectBootDiagnostics(undefined).message).toBe('Unknown error');
-  });
+  function buttons(): HTMLButtonElement[] {
+    return Array.from(root.querySelectorAll('button'));
+  }
 
-  it('JSON-stringifies plain object errors', () => {
-    const diag = collectBootDiagnostics({ code: 'EBOOM', detail: 'broken' });
-    expect(diag.message).toContain('EBOOM');
-    expect(diag.message).toContain('broken');
-  });
+  function byText(text: string): HTMLButtonElement {
+    const found = buttons().find((button) => button.textContent === text);
+    if (!found) throw new Error(`No button "${text}": ${buttons().map((b) => b.textContent)}`);
+    return found;
+  }
 
-  it('falls back to String() when JSON.stringify throws (circular)', () => {
-    const circular: Record<string, unknown> = { name: 'cycle' };
-    circular.self = circular;
-    const diag = collectBootDiagnostics(circular);
-    // Either the stringify fallback or String(circular) — just confirm it didn't throw.
-    expect(typeof diag.message).toBe('string');
-    expect(diag.message.length).toBeGreaterThan(0);
-  });
-
-  it('includes the stack when the Error has one', () => {
-    const err = new Error('explode');
-    err.stack = 'Error: explode\n    at someFn (file.ts:1:1)\n    at other (file.ts:2:2)';
-    const diag = collectBootDiagnostics(err);
-    expect(diag.details).toContain('Stack:');
-    expect(diag.details).toContain('at someFn');
-    expect(diag.copyableText).toContain('at someFn');
-  });
-
-  it('appends every buildInfo entry to the details block', () => {
-    const diag = collectBootDiagnostics(new Error('x'), {
-      buildInfo: { Runtime: 'electron', Commit: 'abc123', BuildDate: '2026-05-28' },
+  it('replaces a half-committed tree with the error, the fix first and the build last', () => {
+    root.innerHTML = '<main>partial React tree</main>';
+    renderBootFailure(root, new Error("Unexpected 'stylex.create' call at runtime."), {
+      buildInfo: { Build: 'ff272419', BuildDate: '2026-09-25' },
     });
-    expect(diag.details).toContain('Runtime: electron');
-    expect(diag.details).toContain('Commit: abc123');
-    expect(diag.details).toContain('BuildDate: 2026-05-28');
-  });
 
-  it('round-trips the optional hint into the returned diagnostics', () => {
-    expect(collectBootDiagnostics(new Error('x'), { hint: 'try a reload' }).hint).toBe(
-      'try a reload'
+    expect(root.textContent).not.toContain('partial React tree');
+    expect(root.querySelector('h1')?.textContent).toBe("Lody didn't start this time");
+    expect(root.querySelector('pre')?.textContent).toBe(
+      "Error: Unexpected 'stylex.create' call at runtime."
     );
-    expect(collectBootDiagnostics(new Error('x')).hint).toBe('');
+    expect(buttons().map((button) => button.textContent)).toEqual([
+      'Reload',
+      'Copy error',
+      'Diagnostics',
+    ]);
+    expect(root.textContent).toContain('Build ff272419 · 2026-09-25');
   });
 
-  it('copyableText starts with the message and then has the details block', () => {
-    const diag = collectBootDiagnostics(new Error('hi'), {
-      buildInfo: { Foo: 'bar' },
+  it('names the cause and the likely fix only when a chunk failed to load', () => {
+    renderBootFailure(root, new TypeError('Failed to fetch dynamically imported module: /a.js'));
+    // Lody did start; the title says what actually failed.
+    expect(root.querySelector('h1')?.textContent).toBe("Part of Lody didn't load");
+    expect(root.textContent).toContain('reloading usually fixes this.');
+
+    root.innerHTML = '';
+    renderBootFailure(root, new Error('boom'));
+    expect(root.querySelector('h1')?.textContent).toBe("Lody didn't start this time");
+    expect(root.textContent).not.toContain('reloading usually fixes this.');
+  });
+
+  it('opens the diagnostics for selection when copying is blocked', async () => {
+    writeText.mockRejectedValue(new Error('denied'));
+    renderBootFailure(root, new Error('boom'));
+
+    byText('Copy error').click();
+    await vi.waitFor(() =>
+      expect(root.querySelector('[data-role="status"]')?.textContent).toContain('blocked')
+    );
+    expect(root.querySelector<HTMLPreElement>('#lody-boot-failure-diagnostics')!.hidden).toBe(
+      false
+    );
+    expect(buttons().some((button) => button.textContent === 'Copied')).toBe(false);
+  });
+
+  it('follows the stored language and palette, since neither i18n nor the theme has run', () => {
+    window.localStorage.setItem('lody-language', JSON.stringify('zh_CN'));
+    window.localStorage.setItem('vite-ui-theme', 'dark');
+    renderBootFailure(root, new Error('boom'), { surface: 'recovery' });
+
+    const page = root.querySelector<HTMLElement>('.lody-boot-failure')!;
+    expect(page.dataset.theme).toBe('dark');
+    expect(page.getAttribute('lang')).toBe('zh-CN');
+    expect(root.querySelector('h1')?.textContent).toBe('Lody 窗口停下来了');
+    expect(buttons()[0]?.textContent).toBe('重新加载');
+  });
+});
+
+describe('boot failure telemetry boundary', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+  it('uses fixed error types while preserving local diagnostics', async () => {
+    vi.stubEnv('VITE_LODY_PLATFORM', 'cloud');
+    vi.stubEnv('VITE_PUBLIC_POSTHOG_KEY', 'synthetic-key');
+    vi.stubEnv('VITE_PUBLIC_POSTHOG_HOST', 'http://127.0.0.1');
+    const bodies: Blob[] = [];
+    vi.stubGlobal('navigator', {
+      onLine: true,
+      sendBeacon: (_url: string, body: Blob) => {
+        bodies.push(body);
+        return true;
+      },
     });
-    // The message must appear before the details (the copy contract relied on
-    // by the recovery flow puts the headline error first for skimming).
-    const messageIdx = diag.copyableText.indexOf(diag.message);
-    const detailsIdx = diag.copyableText.indexOf('Foo: bar');
-    expect(messageIdx).toBe(0);
-    expect(detailsIdx).toBeGreaterThan(messageIdx);
-  });
-
-  it('records an ISO timestamp in the details block', () => {
-    const diag = collectBootDiagnostics(new Error('x'));
-    expect(diag.details).toMatch(/Time: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    const error = new Error('PRIVATE_MESSAGE');
+    error.name = 'PRIVATE_PATH';
+    captureBootFailedBeacon(error);
+    expect(bodies).toHaveLength(1);
+    const wire = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(bodies[0]!);
+    });
+    expect(wire).not.toContain('PRIVATE_');
+    expect(JSON.parse(wire).properties.error_type).toBe('Error');
+    expect(collectBootDiagnostics(error).message).toContain('PRIVATE_MESSAGE');
+    vi.stubEnv('VITE_LODY_PLATFORM', 'local');
+    captureBootFailedBeacon(error);
+    expect(bodies).toHaveLength(1);
   });
 });

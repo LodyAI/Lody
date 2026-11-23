@@ -102,7 +102,10 @@ export interface ReplayPromptResult {
 export interface BuildReplayPromptOptions {
   /** Session history entries (sorted by timestamp ascending) */
   history: SessionHistoryInput[];
-  /** History ID to exclude (typically the current user message) */
+  /**
+   * User-turn ID to exclude. Its deterministic assistant entry
+   * (`assistant:<id>`) is excluded with it.
+   */
   excludeTurnId?: string;
   /** Maximum characters for the prompt (default: 100,000) */
   maxChars?: number;
@@ -136,17 +139,10 @@ interface CollectedPath {
 export function redactSensitiveTokens(text: string): string {
   let output = text;
 
-  // GitHub tokens (classic + fine-grained)
   output = output.replace(/\bghp_[A-Za-z0-9]{20,}\b/g, 'ghp_***');
   output = output.replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, 'github_pat_***');
-
-  // Generic bearer tokens
   output = output.replace(/\bBearer\s+[A-Za-z0-9\-_.=]{20,}\b/gi, 'Bearer ***');
-
-  // OpenAI-style API keys
   output = output.replace(/\bsk-[A-Za-z0-9]{20,}\b/g, 'sk-***');
-
-  // Basic URL auth redaction: https://user:pass@host -> https://***@host
   output = output.replace(/(https?:\/\/)[^@\s]+@/gi, '$1***@');
 
   return output;
@@ -160,6 +156,21 @@ function tail(text: string, maxChars: number): string {
     return text;
   }
   return '...' + text.slice(-maxChars);
+}
+
+/**
+ * A replay excludes the current user turn and the assistant output it owns.
+ * Otherwise a re-dispatched turn can replay its own prior partial answer, and
+ * an empty assistant entry can make a history wait believe prior context has
+ * arrived.
+ */
+export function isReplayEntryExcluded(
+  entry: { readonly id?: unknown },
+  excludeTurnId?: string
+): boolean {
+  return (
+    !!excludeTurnId && (entry.id === excludeTurnId || entry.id === `assistant:${excludeTurnId}`)
+  );
 }
 
 /**
@@ -180,7 +191,6 @@ function extractTextFromItem(item: MessageContent, pass: GenerationPass): string
       return extractTextFromToolCall(item, pass);
 
     case 'plan':
-      // Summarize plan entries
       if (!item.entries?.length) return null;
       const planLines = item.entries.map((e) => `- [${e.status}] ${e.content}`);
       return `[Plan]\n${planLines.join('\n')}`;
@@ -190,7 +200,6 @@ function extractTextFromItem(item: MessageContent, pass: GenerationPass): string
     case 'available_commands':
     case 'system_notice':
     case 'worktree_script':
-      // Skip these in replay prompt
       return null;
 
     default:
@@ -207,14 +216,12 @@ function extractTextFromToolCall(
 ): string | null {
   const parts: string[] = [];
 
-  // Add title if available
   if (item.title) {
     parts.push(`[Tool: ${item.title}]`);
   } else if (item.kind) {
     parts.push(`[Tool: ${item.kind}]`);
   }
 
-  // Process content blocks - always iterate, let extractTextFromToolContent decide what to include
   if (item.content) {
     for (const block of item.content) {
       const blockText = extractTextFromToolContent(block, pass);
@@ -248,11 +255,9 @@ function extractTextFromToolContent(block: ToolCallContent, pass: GenerationPass
       return `[Command] ${cmdParts.join(' ')}`;
 
     case 'diff':
-      // Include file path info for diffs but not the full content
       return `[Diff: ${block.path}]`;
 
     case 'content':
-      // Standard tool content - extract text if available
       if ('content' in block && block.content && 'type' in block.content) {
         if (block.content.type === 'text' && 'text' in block.content) {
           return block.content.text;
@@ -281,7 +286,6 @@ function collectPathsFromToolCall(
     }
   }
 
-  // Also extract paths from diff content
   if (item.content) {
     for (const block of item.content) {
       if (block.type === 'diff' && block.path) {
@@ -305,17 +309,14 @@ function generatePrompt(
   const allPaths: CollectedPath[] = [];
   let messagesIncluded = 0;
 
-  // Add header
   lines.push('=== Previous Conversation Context ===');
   lines.push('');
 
   for (const entry of history) {
-    // Skip the current message if specified
-    if (excludeTurnId && entry.id === excludeTurnId) {
+    if (isReplayEntryExcluded(entry, excludeTurnId)) {
       continue;
     }
 
-    // Skip system messages in replay
     if (entry.role === 'system') {
       continue;
     }
@@ -325,13 +326,11 @@ function generatePrompt(
 
     if (entry.items) {
       for (const item of entry.items as MessageContent[]) {
-        // Collect paths from tool calls
         if (item.type === 'tool_call') {
           const paths = collectPathsFromToolCall(item);
           allPaths.push(...paths);
         }
 
-        // Extract text content
         const text = extractTextFromItem(item, pass);
         if (text) {
           entryParts.push(text);
@@ -347,11 +346,9 @@ function generatePrompt(
     }
   }
 
-  // Add files referenced section
   if (allPaths.length > 0) {
     const uniquePaths = new Map<string, 'read' | 'edit' | 'other'>();
     for (const p of allPaths) {
-      // Keep the "strongest" kind (edit > read > other)
       const existing = uniquePaths.get(p.path);
       if (!existing || p.kind === 'edit' || (p.kind === 'read' && existing === 'other')) {
         uniquePaths.set(p.path, p.kind);
@@ -393,21 +390,18 @@ function truncatePrompt(text: string, maxChars: number): { text: string; truncat
     return { text, truncated: false };
   }
 
-  // Find a good breaking point (after === End of Previous Context ===)
   const endMarker = '=== End of Previous Context ===';
   const endIndex = text.lastIndexOf(endMarker);
 
   if (endIndex === -1) {
-    // No marker found, just truncate from the start
     return {
       text: '... [Earlier context truncated] ...\n\n' + text.slice(-maxChars + 50),
       truncated: true,
     };
   }
 
-  // Keep the end marker and files section
   const suffix = text.slice(endIndex);
-  const budgetForContent = maxChars - suffix.length - 50; // 50 for truncation notice
+  const budgetForContent = maxChars - suffix.length - 50;
 
   if (budgetForContent <= 0) {
     return {
@@ -444,7 +438,6 @@ export function buildReplayPromptFromHistory(
     terminalTailChars = DEFAULT_TERMINAL_TAIL_CHARS,
   } = options;
 
-  // Pass A: Full content with terminal tail
   const passA: GenerationPass = {
     includeTerminal: true,
     includeThinking: true,
@@ -455,10 +448,9 @@ export function buildReplayPromptFromHistory(
   let terminalOmitted = false;
   let thinkingOmitted = false;
   let truncated = false;
-  let terminalTailApplied = true; // We always apply tail when including terminal
+  let terminalTailApplied = true;
 
   if (result.text.length <= maxChars) {
-    // Fits in Pass A
     return {
       promptText: result.text,
       stats: {
@@ -474,7 +466,6 @@ export function buildReplayPromptFromHistory(
     };
   }
 
-  // Pass B: Omit terminal output
   const passB: GenerationPass = {
     includeTerminal: false,
     includeThinking: true,
@@ -501,7 +492,6 @@ export function buildReplayPromptFromHistory(
     };
   }
 
-  // Pass C: Omit terminal and thinking
   const passC: GenerationPass = {
     includeTerminal: false,
     includeThinking: false,
@@ -550,6 +540,108 @@ export function buildReplayPromptFromHistory(
   };
 }
 
+/** Accumulate budget-sized A/B/C/D candidates and ordered unique file paths. */
+export function createReplayPromptBuilder(options: Omit<BuildReplayPromptOptions, 'history'> = {}) {
+  const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
+  const terminalTailChars = options.terminalTailChars ?? DEFAULT_TERMINAL_TAIL_CHARS;
+  const capacity = Number.isFinite(maxChars) ? Math.max(0, Math.ceil(maxChars)) : Infinity;
+  const candidates = [
+    { includeTerminal: true, includeThinking: true, terminalTailChars },
+    { includeTerminal: false, includeThinking: true, terminalTailChars },
+    { includeTerminal: false, includeThinking: false, terminalTailChars },
+  ].map((pass) => ({ pass, length: 0, head: '', tail: '', messages: 0 }));
+  type Candidate = (typeof candidates)[number];
+  const append = (candidate: Candidate, text: string) => {
+    candidate.length += text.length;
+    if (candidate.length <= capacity) candidate.head += text;
+    else candidate.head = '';
+    if (candidate === candidates[2])
+      candidate.tail =
+        capacity === Infinity
+          ? candidate.tail + text
+          : text.length >= capacity
+            ? text.slice(-capacity || text.length)
+            : (candidate.tail + text).slice(-capacity || text.length);
+  };
+  for (const candidate of candidates)
+    append(candidate, '=== Previous Conversation Context ===\n\n');
+  const paths = new Map<string, 'read' | 'edit' | 'other'>();
+  return {
+    add(entry: SessionHistoryInput): void {
+      if (isReplayEntryExcluded(entry, options.excludeTurnId) || entry.role === 'system') return;
+      for (const item of entry.items ?? [])
+        if (item.type === 'tool_call')
+          for (const path of collectPathsFromToolCall(item)) {
+            const prior = paths.get(path.path);
+            if (!prior || path.kind === 'edit' || (path.kind === 'read' && prior === 'other'))
+              paths.set(path.path, path.kind);
+          }
+      for (const candidate of candidates) {
+        let parts = 0;
+        for (const item of entry.items ?? []) {
+          const text = extractTextFromItem(item as MessageContent, candidate.pass);
+          if (!text) continue;
+          append(candidate, parts ? '\n\n' : entry.role === 'user' ? '[User]\n' : '[Assistant]\n');
+          append(candidate, text);
+          parts++;
+        }
+        if (parts) {
+          append(candidate, '\n\n');
+          candidate.messages++;
+        }
+      }
+    },
+    finish(): ReplayPromptResult {
+      let footer = '';
+      if (paths.size) {
+        footer = '=== Files Referenced ===\n';
+        for (const [kind, label] of [
+          ['read', 'Read'],
+          ['edit', 'Edit'],
+          ['other', 'Other'],
+        ] as const) {
+          const values = [...paths].filter(([, value]) => value === kind).map(([path]) => path);
+          if (values.length) footer += `${label}: ${values.join(', ')}\n`;
+        }
+        footer += '\n';
+      }
+      const end = '=== End of Previous Context ===\n';
+      for (const candidate of candidates) append(candidate, footer);
+      const index = candidates.findIndex((candidate) => candidate.length + end.length <= maxChars);
+      const chosen = candidates[index < 0 ? 2 : index]!;
+      let text = chosen.head + end,
+        truncated = false;
+      if (index < 0) {
+        truncated = true;
+        const budget = maxChars - end.length - 50;
+        text =
+          budget <= 0
+            ? '... [Context truncated due to length] ...\n\n' + end
+            : '... [Earlier context truncated] ...\n\n' + chosen.tail.slice(-budget) + end;
+      }
+      const terminalOmitted = index !== 0,
+        thinkingOmitted = index < 0 || index === 2;
+      return {
+        promptText: text,
+        stats: {
+          usedChars: text.length,
+          truncated,
+          terminalOmitted,
+          terminalTailApplied: !terminalOmitted,
+          thinkingOmitted,
+          pathsCount: paths.size,
+          messagesIncluded: chosen.messages,
+        },
+        noticeMeta: {
+          ...(truncated ? { truncated: true } : {}),
+          ...(terminalOmitted ? { terminalOmitted: true } : {}),
+          ...(thinkingOmitted ? { thinkingOmitted: true } : {}),
+        },
+      };
+    },
+  };
+}
+
 /**
  * Check if the last entry before the latest user message is already a resume notice.
  * This prevents duplicate notices when the user sends multiple messages in quick succession
@@ -559,7 +651,6 @@ export function hasRecentResumeNotice(
   history: SessionHistoryInput[],
   _lookbackCount = 5 // deprecated, kept for API compatibility
 ): boolean {
-  // Find the last user message index
   let lastUserIndex = -1;
   for (let i = history.length - 1; i >= 0; i--) {
     const entry = history[i];
@@ -569,7 +660,6 @@ export function hasRecentResumeNotice(
     }
   }
 
-  // Check if the entry immediately before the last user message is a resume notice
   if (lastUserIndex > 0) {
     const prevEntry = history[lastUserIndex - 1];
     if (prevEntry && prevEntry.role === 'system' && prevEntry.items) {

@@ -1,17 +1,58 @@
+import { ProductWindowIpcService } from '../product-window-ipc-service'
+import { assertProductWindowSender } from '../assert-sender'
+import {
+  isAppResourceLink,
+  parseSessionLink,
+  INSTALLATION_LINK_SCHEMES
+} from '@lody/shared/session-link'
+import { desktopInstallationProfile, mainPlatformKind } from '../../platform'
+import { getDesktopCallbackProtocol } from '../../desktop-channel'
+import { isDefaultLodyProtocolClient, setDefaultLodyProtocolClient } from '../../protocol-client'
+import { parseAppIconName } from '../../services/app-icon-core'
+import { productWindows } from '../../window-state'
+import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
+import { parseTodayWindowTarget } from '../../today-window-target'
+import { isTodayWindow, openTodayWindow } from '../../today-windows'
+import { openLinkInMainWindow } from '../../window'
+import { access } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
 import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
-import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
+import { getIpcContext, IpcMethod } from 'electron-ipc-decorator'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
   IPC_PUSH_CHANNELS,
-  LaunchLocalPathInputSchema,
+  PathLauncherRequestSchema,
+  PathLauncherProbeSchema,
   type NativeThemeSource,
   type RendererFatalErrorReport,
   type SetGlobalShortcutInput,
   type WindowBadgeInput
 } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
+import { parseDevbarControlInput } from '../../services/devbar/control'
+import { getDevbarConfig, getDevbarMetrics, setDevbarControl } from '../../services/devbar/service'
+import {
+  prepareWindow,
+  cancelPreparedWindow,
+  getWindowWarmupMetrics,
+  isWindowWarmupEnabled,
+  setWindowWarmupEnabled
+} from '../../window-warm-service'
 import { setMenuLanguage } from '../../menu'
-import { launchLocalPath } from '../../services/local-path-launcher-service'
+import { resolveOpenableLocalPath } from '../../services/local-file-open-policy'
+import { localFileActionError } from '../../services/local-file-action-error'
+import {
+  approvePathLauncher,
+  resolvePathLauncher,
+  hasPathLauncher,
+  launchLocalPath
+} from '../../services/local-path-launcher-service'
+import { takePendingRendererLocalClear } from '../../services/local-reset-service'
+import {
+  clearDesktopLocalResetRequest,
+  writeDesktopLocalResetRequest
+} from '@lody/shared/node/desktop-local-reset'
+import { quitAndRelaunch, type RelaunchQuitOutcome } from '../../relaunch-intent'
 import { parseWindowBadge } from '../../services/window-badge-service'
 import {
   findWindow,
@@ -19,8 +60,19 @@ import {
   persistRendererFatalError,
   requestRendererReload
 } from '../../renderer-recovery'
-import { applyResolvedWindowTheme, resolveNativeWindowTheme } from '../../window-theme'
+import {
+  applyResolvedWindowTheme,
+  isNativeWindowThemeSource,
+  resolveNativeWindowTheme
+} from '../../window-theme'
+import { writeStartupThemeSource } from '../../theme-settings'
 import { formatUnknownError, normalizeExternalHttpUrl } from '../../utils'
+import {
+  applyAutoLaunchSettings,
+  getAutoLaunchEnabled,
+  getHideWindowOnAutoLaunchEnabled,
+  setHideWindowOnAutoLaunchEnabled
+} from '../../auto-launch-settings'
 
 const autoLaunchSupported = process.platform === 'darwin' || process.platform === 'win32'
 
@@ -28,21 +80,22 @@ function getAutoLaunchStatus() {
   if (!autoLaunchSupported) {
     return {
       supported: false,
-      enabled: false
+      enabled: false,
+      hideWindowOnAutoLaunch: false
     }
   }
   try {
-    const settings = app.getLoginItemSettings()
+    const enabled = getAutoLaunchEnabled()
     return {
       supported: true,
-      enabled: Boolean(settings.openAtLogin),
-      openAtLogin: Boolean(settings.openAtLogin),
-      openAsHidden: Boolean(settings.openAsHidden)
+      enabled,
+      hideWindowOnAutoLaunch: getHideWindowOnAutoLaunchEnabled()
     }
   } catch (error) {
     return {
       supported: true,
       enabled: false,
+      hideWindowOnAutoLaunch: getHideWindowOnAutoLaunchEnabled(),
       error: error instanceof Error ? error.message : String(error)
     }
   }
@@ -78,8 +131,236 @@ export function installNativeThemeWatch(): void {
   }
 }
 
-export class AppIpc extends IpcService {
+function todayWindowSender(): BrowserWindow {
+  const { event } = getIpcContext()
+  assertProductWindowSender(event)
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (!isTodayWindow(window)) throw new Error('Not a Today window')
+  return window
+}
+
+export class AppIpc extends ProductWindowIpcService {
   static override readonly groupName = 'app'
+
+  @IpcMethod()
+  async getDefaultLinkHandler() {
+    assertProductWindowSender(getIpcContext().event)
+    return { isDefault: isDefaultLodyProtocolClient() }
+  }
+
+  @IpcMethod()
+  async setDefaultLinkHandler() {
+    assertProductWindowSender(getIpcContext().event)
+    const requested = setDefaultLodyProtocolClient()
+    return { requested, isDefault: isDefaultLodyProtocolClient() }
+  }
+
+  @IpcMethod()
+  async getLinkInstallations() {
+    assertProductWindowSender(getIpcContext().event)
+    return INSTALLATION_LINK_SCHEMES.flatMap((scheme) => {
+      if (scheme === getDesktopCallbackProtocol(desktopInstallationProfile)) return []
+      const name = app.getApplicationNameForProtocol(`${scheme}://session/probe`)
+      return name ? [{ scheme, name }] : []
+    })
+  }
+
+  @IpcMethod()
+  async openSessionInInstallation(raw: string, scheme: string) {
+    assertProductWindowSender(getIpcContext().event)
+    if (
+      !INSTALLATION_LINK_SCHEMES.includes(scheme) ||
+      typeof raw !== 'string' ||
+      !parseSessionLink(raw)?.workspaceId
+    ) {
+      throw new Error('Invalid installation link')
+    }
+    const target = new URL(raw)
+    target.protocol = `${scheme}:`
+    await shell.openExternal(target.href)
+  }
+
+  @IpcMethod()
+  async getAppIconState() {
+    assertProductWindowSender(getIpcContext().event)
+    return getIpcServiceDeps().appIconService.getState()
+  }
+
+  @IpcMethod()
+  async setAppIcon(raw: { name: string }) {
+    assertProductWindowSender(getIpcContext().event)
+    const name = parseAppIconName(raw?.name)
+    return getIpcServiceDeps().appIconService.setIcon(name)
+  }
+
+  @IpcMethod()
+  async openWindow(raw: WindowTarget) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    openSessionWindow(parseWindowTarget(raw))
+  }
+
+  @IpcMethod()
+  async openTodayWindow(raw: { workspace: string; member?: string; date?: string }) {
+    assertProductWindowSender(getIpcContext().event)
+    openTodayWindow(parseTodayWindowTarget(raw))
+  }
+
+  /** The Today window's pin: keep it above every other window. */
+  @IpcMethod()
+  async setTodayWindowAlwaysOnTop(enabled: boolean): Promise<boolean> {
+    const window = todayWindowSender()
+    if (typeof enabled !== 'boolean') throw new Error('Invalid always-on-top value')
+    window.setAlwaysOnTop(enabled)
+    return window.isAlwaysOnTop()
+  }
+
+  @IpcMethod()
+  async getTodayWindowAlwaysOnTop(): Promise<boolean> {
+    return todayWindowSender().isAlwaysOnTop()
+  }
+
+  /** A conversation opened from the Today window shows in the primary window. */
+  @IpcMethod()
+  async openSessionInMainWindow(raw: string) {
+    todayWindowSender()
+    if (typeof raw !== 'string' || !parseSessionLink(raw)?.workspaceId)
+      throw new Error('Invalid session link')
+    openLinkInMainWindow(raw)
+  }
+
+  @IpcMethod()
+  async prepareWindow(raw: WindowTarget, requestId: string): Promise<void> {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (typeof requestId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(requestId))
+      throw new Error('Invalid preparation request')
+    const source = BrowserWindow.fromWebContents(event.sender)
+    if (source) prepareWindow(source, parseWindowTarget(raw), requestId)
+  }
+
+  @IpcMethod()
+  async cancelPreparedWindow(requestId: string): Promise<void> {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (typeof requestId !== 'string' || requestId.length > 64)
+      throw new Error('Invalid preparation request')
+    cancelPreparedWindow(event.sender.id, requestId)
+  }
+
+  @IpcMethod()
+  async prepareCacheClear() {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    for (const window of productWindows) {
+      if (window.webContents !== event.sender) window.destroy()
+    }
+  }
+
+  /**
+   * Arms the same one-shot reset `lody app reset-cache` writes, then quits and
+   * relaunches, so the reset runs in a fresh process before any window loads (a
+   * renderer reload keeps a storage backend that already failed). Quit goes
+   * through the normal barrier: renderers may answer Stay, and the embedded CLI
+   * must confirm exit. When the app stays running, the request is withdrawn so it
+   * cannot fire at some later launch, and `cancelled` lets the caller recover.
+   */
+  @IpcMethod()
+  async relaunchIntoLocalReset(mode: unknown): Promise<RelaunchQuitOutcome> {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (mode !== 'cache' && mode !== 'hard') throw new Error('Invalid local reset mode')
+    await writeDesktopLocalResetRequest({ mode, platform: mainPlatformKind })
+    const outcome = await quitAndRelaunch()
+    if (outcome === 'cancelled') {
+      await clearDesktopLocalResetRequest({ platform: mainPlatformKind }).catch(
+        (error: unknown) => {
+          console.error('[Electron] Could not withdraw a cancelled local reset', error)
+        }
+      )
+    }
+    return outcome
+  }
+
+  /**
+   * Reports a cache clear armed from the CLI (`lody app reset-cache`) to the
+   * booting renderer, which owns the precise clear. One-shot: a later reload of
+   * the same window must not repeat it.
+   */
+  @IpcMethod()
+  async consumePendingLocalClear() {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    return takePendingRendererLocalClear()
+  }
+
+  @IpcMethod()
+  async getDevbarConfig() {
+    return getDevbarConfig()
+  }
+
+  @IpcMethod()
+  async setDevbarControl(raw: unknown) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const mainWindow = getIpcServiceDeps().getMainWindow()
+    if (!window || window !== mainWindow) {
+      return { ok: false as const, error: 'main_window_required' as const }
+    }
+
+    let input
+    try {
+      input = parseDevbarControlInput(raw)
+    } catch {
+      return { ok: false as const, error: 'invalid_input' as const }
+    }
+
+    const result = await setDevbarControl(input)
+    const reload = (enabled: boolean): void => {
+      setImmediate(() => {
+        if (window.isDestroyed()) return
+        void getIpcServiceDeps()
+          .reloadMainWindowForDevbar(window, enabled)
+          .catch((error) => {
+            console.error('[Devbar] Failed to switch renderer entry', error)
+          })
+      })
+    }
+    if (!result.ok) {
+      // A failed capability restart has already closed the previous Hub. Leave
+      // the dedicated renderer too, instead of showing a disconnected Devbar.
+      if (window.webContents.getURL().includes('/devbar.html')) reload(false)
+      return { ok: false as const, error: 'start_failed' as const, config: result.config }
+    }
+    reload(input.enabled)
+    return { ok: true as const, config: result.config }
+  }
+
+  @IpcMethod()
+  async getWindowWarmup() {
+    return { enabled: isWindowWarmupEnabled() }
+  }
+
+  @IpcMethod()
+  async setWindowWarmup(raw: unknown) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (typeof raw !== 'boolean') {
+      return { ok: false as const, error: 'invalid_input' as const }
+    }
+    // The spare pool never changes the renderer entry, so toggling it must not
+    // reload the window the way setDevbarControl does.
+    setWindowWarmupEnabled(raw)
+    return { ok: true as const, enabled: isWindowWarmupEnabled() }
+  }
+
+  @IpcMethod()
+  async getDevbarMetrics() {
+    const snapshot = getDevbarMetrics()
+    if (!snapshot) return null
+    return { ...snapshot, warmPool: getWindowWarmupMetrics(app.getAppMetrics()) }
+  }
 
   @IpcMethod()
   async getFullscreen() {
@@ -113,6 +394,31 @@ export class AppIpc extends IpcService {
   }
 
   @IpcMethod()
+  async restartOnboarding() {
+    const { event } = getIpcContext()
+    const { getMainWindow, restartOnboarding } = getIpcServiceDeps()
+    const mainWindow = getMainWindow()
+    if (
+      !mainWindow ||
+      mainWindow.isDestroyed() ||
+      event.sender !== mainWindow.webContents ||
+      event.senderFrame !== event.sender.mainFrame
+    ) {
+      return { ok: false as const, error: 'untrusted_sender' as const }
+    }
+    try {
+      restartOnboarding(mainWindow)
+      return { ok: true as const }
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: 'restart_failed' as const,
+        message: formatUnknownError(error)
+      }
+    }
+  }
+
+  @IpcMethod()
   async getAutoLaunchStatus() {
     return getAutoLaunchStatus()
   }
@@ -125,6 +431,7 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: 'invalid_enabled_flag'
       }
     }
@@ -133,19 +440,18 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: false,
         enabled: false,
+        hideWindowOnAutoLaunch: false,
         error: 'unsupported_platform'
       }
     }
     try {
-      app.setLoginItemSettings({
-        openAtLogin: enabledRaw,
-        openAsHidden: enabledRaw
-      })
+      applyAutoLaunchSettings(enabledRaw)
       const status = getAutoLaunchStatus()
       return {
         ok: true,
         supported: status.supported,
-        enabled: status.enabled
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch
       }
     } catch (error) {
       const status = getAutoLaunchStatus()
@@ -153,6 +459,56 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
+
+  @IpcMethod()
+  async setAutoLaunchHideWindow(enabledRaw: boolean) {
+    if (typeof enabledRaw !== 'boolean') {
+      const status = getAutoLaunchStatus()
+      return {
+        ok: false,
+        supported: status.supported,
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
+        error: 'invalid_enabled_flag'
+      }
+    }
+    if (!autoLaunchSupported) {
+      return {
+        ok: false,
+        supported: false,
+        enabled: false,
+        hideWindowOnAutoLaunch: false,
+        error: 'unsupported_platform'
+      }
+    }
+
+    const previous = getHideWindowOnAutoLaunchEnabled()
+    try {
+      setHideWindowOnAutoLaunchEnabled(enabledRaw)
+      const status = getAutoLaunchStatus()
+      return {
+        ok: true,
+        supported: status.supported,
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch
+      }
+    } catch (error) {
+      try {
+        setHideWindowOnAutoLaunchEnabled(previous)
+      } catch {
+        // Preserve the original failure for the renderer.
+      }
+      const status = getAutoLaunchStatus()
+      return {
+        ok: false,
+        supported: status.supported,
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: error instanceof Error ? error.message : String(error)
       }
     }
@@ -193,6 +549,12 @@ export class AppIpc extends IpcService {
 
   @IpcMethod()
   async openExternalUrl(urlRaw: string) {
+    if (typeof urlRaw === 'string' && isAppResourceLink(urlRaw)) {
+      const { event } = getIpcContext()
+      assertProductWindowSender(event)
+      event.sender.send('app.deepLink', urlRaw)
+      return { opened: true, url: urlRaw }
+    }
     const externalUrl = normalizeExternalHttpUrl(urlRaw)
     if (!externalUrl) {
       return { opened: false, error: 'invalid_url' }
@@ -206,12 +568,89 @@ export class AppIpc extends IpcService {
   }
 
   @IpcMethod()
+  async revealLocalPath(pathRaw: unknown) {
+    if (typeof pathRaw !== 'string') {
+      return { revealed: false as const, error: 'invalid_path' }
+    }
+    const targetPath = pathRaw.trim()
+    if (!targetPath || !isAbsolute(targetPath)) {
+      return { revealed: false as const, error: 'invalid_path' }
+    }
+    try {
+      await access(targetPath)
+    } catch (error) {
+      return { revealed: false as const, error: localFileActionError(error) }
+    }
+    shell.showItemInFolder(targetPath)
+    return { revealed: true as const }
+  }
+
+  // Hands a workspace file to the OS default handler — the same thing a
+  // double-click in Finder/Explorer does. Limit this to known documents and
+  // ordinary folders; unsupported types can still use `revealLocalPath`.
+  @IpcMethod()
+  async openLocalPath(pathRaw: unknown) {
+    if (typeof pathRaw !== 'string') {
+      return { opened: false as const, error: 'invalid_path' }
+    }
+    const targetPath = pathRaw.trim()
+    if (!targetPath || !isAbsolute(targetPath)) {
+      return { opened: false as const, error: 'invalid_path' }
+    }
+    let openPath: string | null
+    try {
+      openPath = await resolveOpenableLocalPath(targetPath)
+      if (!openPath) return { opened: false as const, error: 'unsupported_file_type' }
+    } catch (error) {
+      return { opened: false as const, error: localFileActionError(error) }
+    }
+    // `shell.openPath` resolves to '' on success and to the failure message
+    // otherwise; it never rejects.
+    const failure = await shell.openPath(openPath)
+    if (failure) {
+      return { opened: false as const, error: failure }
+    }
+    return { opened: true as const }
+  }
+
+  @IpcMethod()
   async launchLocalPath(payload: unknown) {
-    const parsed = LaunchLocalPathInputSchema.safeParse(payload)
+    const parsed = PathLauncherRequestSchema.safeParse(payload)
     if (!parsed.success) {
       return { launched: false as const, error: 'invalid_payload' }
     }
-    return await launchLocalPath(parsed.data)
+    const input = resolvePathLauncher(parsed.data)
+    return input
+      ? await launchLocalPath(input)
+      : { launched: false as const, error: 'unknown_launcher' }
+  }
+
+  @IpcMethod()
+  async approvePathLauncher(payload: unknown) {
+    const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)!
+    return approvePathLauncher(payload, owner)
+  }
+
+  @IpcMethod()
+  async probePathLaunchers(payload: unknown) {
+    const parsed = PathLauncherProbeSchema.safeParse(payload)
+    if (!parsed.success) {
+      return { availableIds: [] }
+    }
+    const availability = await Promise.all(
+      parsed.data.launchers.map(async (request) => {
+        const input = resolvePathLauncher(request)
+        return {
+          launcherId: request.launcherId,
+          available: input ? await hasPathLauncher(input) : false
+        }
+      })
+    )
+    return {
+      availableIds: availability
+        .filter(({ available }) => available)
+        .map(({ launcherId }) => launcherId)
+    }
   }
 
   @IpcMethod()
@@ -238,9 +677,23 @@ export class AppIpc extends IpcService {
 
   @IpcMethod()
   async setNativeTheme(source: NativeThemeSource) {
-    if (source === 'dark' || source === 'light' || source === 'system') {
+    if (isNativeWindowThemeSource(source)) {
       nativeTheme.themeSource = source
       syncNativeThemeWindows()
+    }
+  }
+
+  /**
+   * Records the theme the next launch should open in.
+   *
+   * Deliberately separate from `setNativeTheme`, which also follows a preview
+   * (hovering a theme in Settings) so the native chrome tracks what the user is
+   * looking at. Only a committed choice belongs on disk.
+   */
+  @IpcMethod()
+  async setStartupThemeSource(source: NativeThemeSource) {
+    if (isNativeWindowThemeSource(source)) {
+      writeStartupThemeSource(source)
     }
   }
 

@@ -1,0 +1,900 @@
+import { SESSION_DIRECTORY_INPUT_CONFIG_KEYS } from './domain';
+import { selectHistoryActionRows } from './history-selection';
+import type { SubagentRunItem } from '../ai';
+import { resolveLatestSessionGoalFromHistory, type SessionGoalMessage } from '../goal';
+import type { SessionSubagentRun } from './types';
+import { selectTurnOutput } from './read';
+import { applyHistoryAction, historyActionTarget } from './history-actions';
+import {
+  HistoryImportCursorSchema,
+  HistoryImportRefused,
+  planHistoryImport,
+  createImportCursor,
+  hashHistoryEntryForVersion,
+  resolveImportHashVersion,
+  resolveImportedTurnHashes,
+} from './history-import';
+import { isSessionHistoryPendingForDispatch } from '../schema';
+import {
+  isContainer,
+  type LoroDoc,
+  type LoroEventBatch,
+  type LoroList,
+  type LoroMap,
+  type LoroText,
+} from 'loro-crdt';
+import type { SessionId } from '../ids';
+import type { SessionHistory, SessionHistoryInput } from '../schema';
+import {
+  HistoryEntryWriteSchema,
+  HistoryWriteError,
+  parseHistoryWrite,
+} from '../history-write-schema';
+import { PermissionOutcomeSchema } from '../message-schemas';
+import {
+  SESSION_DIRECTORY_SCALAR_KEYS,
+  pickDirectoryInputConfig,
+  pickDirectoryScalars,
+} from './directory';
+import { createHistoryWriter, type HistoryWriter } from '../history-writer';
+import type { SessionSnapshotService } from './snapshot';
+import {
+  EditableTailRefusedError,
+  planEditableTailReplacement,
+  type EditableTailPlan,
+} from './planner';
+import type {
+  SessionEditableTailResult,
+  SessionImportResult,
+  SessionHistoryCommands,
+  SessionHistoryReader,
+  SessionModelSummaryReader,
+  SessionObservation,
+} from './types';
+import type { SessionDirectoryRow, SessionTurn, SessionTurnRead } from './domain';
+
+// Loro reads and shared HistoryWriter commands. Import and tail replacement
+// distinguish a validated pre-write refusal from an unknown commit outcome.
+
+const HISTORY_ROOT_KEY = 'history';
+
+export type LoroSessionDataOptions = {
+  sessionId: SessionId;
+  doc: LoroDoc;
+  /** Reuse the composition's single HistoryWriter; omit only for standalone adapters. */
+  writer?: HistoryWriter;
+  /**
+   * Control-plane cursor access for the composed history import: the adapter
+   * reads the current cursor and writes the new one inside the same synchronous
+   * block as the history write, so there is no await gap between them. The
+   * session entrypoint supplies the Mirror-backed accessors; tests may omit it
+   * (imports reject before writing without this accessor).
+   */
+  historyImportCursor?: {
+    readonly read: () => unknown;
+    readonly write: (cursor: unknown) => void;
+  };
+};
+
+export type LoroSessionData = ReturnType<typeof createLoroSessionData>;
+
+const asStoredTurn = (value: unknown): SessionTurn | undefined => {
+  if (isContainer(value)) {
+    if (value.kind() !== 'Map') return undefined;
+    const json = (value as LoroMap).toJSON();
+    return json && typeof json === 'object' ? (json as SessionTurn) : undefined;
+  }
+  // Legacy plain-JSON rows are still valid readable history.
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as SessionTurn;
+  return undefined;
+};
+
+/** Shallow identity of one raw slot: never reads the turn's body. */
+const readIdentity = (value: unknown): { turnId?: string } | undefined => {
+  if (isContainer(value)) {
+    if (value.kind() !== 'Map') return undefined;
+    const id = (value as LoroMap).get('id');
+    return { ...(typeof id === 'string' ? { turnId: id } : {}) };
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const id = (value as { id?: unknown }).id;
+    return { ...(typeof id === 'string' ? { turnId: id } : {}) };
+  }
+  return undefined;
+};
+
+const readSlot = (list: LoroList, position: number): SessionTurnRead => {
+  if (position < 0 || position >= list.length) return { state: 'missing' };
+  const turn = asStoredTurn(list.get(position));
+  return turn ? { state: 'ready', turn } : { state: 'invalid' };
+};
+
+const readField = (value: unknown, key: string): unknown => {
+  if (isContainer(value)) return value.kind() === 'Map' ? (value as LoroMap).get(key) : undefined;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+};
+
+const readString = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  return isContainer(value) && value.kind() === 'Text' ? value.toString() : undefined;
+};
+
+const readLength = (value: unknown): number => {
+  if (Array.isArray(value)) return value.length;
+  return isContainer(value) && value.kind() === 'List' ? (value as LoroList).length : 0;
+};
+
+/** Project selected children without recursively decoding their bodies. */
+const projectMap = (
+  value: unknown,
+  projections: Record<string, (field: unknown) => unknown>
+): Record<string, unknown> => {
+  const raw =
+    isContainer(value) && value.kind() === 'Map'
+      ? (value as LoroMap).getShallowValue()
+      : value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(raw)) {
+    const field = readField(value, key);
+    const project = Object.prototype.hasOwnProperty.call(projections, key)
+      ? projections[key]
+      : undefined;
+    result[key] = project ? project(field) : isContainer(field) ? field.toJSON() : field;
+  }
+  return result;
+};
+
+const listValueAt = (value: unknown, index: number): unknown =>
+  Array.isArray(value)
+    ? value[index]
+    : isContainer(value) && value.kind() === 'List'
+      ? (value as LoroList).get(index)
+      : undefined;
+
+const displayTextTail = (value: unknown): string | undefined =>
+  typeof value === 'string'
+    ? value.slice(-512)
+    : isContainer(value) && value.kind() === 'Text'
+      ? (value as LoroText).slice(
+          Math.max(0, (value as LoroText).length - 512),
+          (value as LoroText).length
+        )
+      : undefined;
+
+/** Read only the latest-action preview, never the child transcript or tool content. */
+const latestRunStep = (items: unknown): SubagentRunItem[] => {
+  for (let index = readLength(items) - 1; index >= 0; index--) {
+    const item = listValueAt(items, index);
+    const type = readString(readField(item, 'type'));
+    if (type === 'tool_call')
+      return [
+        {
+          type,
+          toolCallId: readString(readField(item, 'toolCallId')) ?? '',
+          status: (readString(readField(item, 'status')) ?? 'pending') as Extract<
+            SubagentRunItem,
+            { type: 'tool_call' }
+          >['status'],
+          title: displayTextTail(readField(item, 'title')),
+          toolName: displayTextTail(readField(item, 'toolName')),
+        },
+      ];
+    if (type === 'thought') return [{ type, text: '' }];
+    if (type === 'plan') return [{ type, entries: [] }];
+    if (type === 'text') {
+      const tail = displayTextTail(readField(item, 'text')) ?? '';
+      if (tail.trim()) return [{ type, text: tail }];
+    }
+  }
+  return [];
+};
+
+const displayTurn = (
+  value: unknown,
+  readItems: (items: unknown) => unknown[]
+): SessionTurn | undefined => {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    (isContainer(value) && value.kind() !== 'Map')
+  )
+    return undefined;
+  const turn = projectMap(value, { items: readItems });
+  return turn as unknown as SessionTurn;
+};
+
+export function createLoroSessionData(options: LoroSessionDataOptions) {
+  const { sessionId, doc } = options;
+  const writer = options.writer ?? createHistoryWriter(doc);
+  const list = doc.getList(HISTORY_ROOT_KEY);
+  // Weak, bounded projections reuse unchanged output without retaining evicted bodies.
+  const displayItems = new Map<string, WeakRef<object>>();
+  const displayLists = new Map<
+    string,
+    { value: WeakRef<unknown[]>; dirty: Set<number>; appended: number }
+  >();
+  const clearDisplayCache = () => {
+    displayItems.clear();
+    displayLists.clear();
+  };
+  let displayOpCount = doc.opCount();
+  const readDisplayItem = (item: unknown): unknown => {
+    if (readString(readField(item, 'type')) === 'subagent_task')
+      return projectMap(item, {
+        run: (run) => (run == null ? run : projectMap(run, { items: latestRunStep })),
+      });
+    if (!isContainer(item)) return item;
+    const cached = displayItems.get(item.id)?.deref();
+    if (cached) return cached;
+    const value: unknown = item.toJSON();
+    if (value !== null && typeof value === 'object') {
+      if (displayItems.has(item.id) || displayItems.size < 2048)
+        displayItems.set(item.id, new WeakRef(value));
+    }
+    return value;
+  };
+  const readDisplayItems = (items: unknown): unknown[] => {
+    const key = isContainer(items) && items.kind() === 'List' ? items.id : undefined;
+    const entry = key === undefined ? undefined : displayLists.get(key);
+    const previous = entry?.value.deref();
+    if (previous && entry && previous.length + entry.appended === readLength(items)) {
+      if (entry.dirty.size === 0 && entry.appended === 0) return previous;
+      const next = previous.slice();
+      for (const index of entry.dirty) next[index] = readDisplayItem(listValueAt(items, index));
+      entry.dirty.clear();
+      entry.appended = 0;
+      entry.value = new WeakRef(next);
+      return next;
+    }
+    const next = Array.from({ length: readLength(items) }, (_, index) =>
+      readDisplayItem(listValueAt(items, index))
+    );
+    if (key !== undefined) {
+      if (!displayLists.has(key) && displayLists.size >= 64)
+        displayLists.delete(displayLists.keys().next().value!);
+      displayLists.set(key, { value: new WeakRef(next), dirty: new Set(), appended: 0 });
+    }
+    return next;
+  };
+
+  const issuesOf = (error: HistoryWriteError) => error.issues;
+  /**
+   * Shallow send config source for a user turn: small collections only, never
+   * the body. The container crossings here are cheap; the projection is not.
+   */
+  const metadataScalars = (map: LoroMap, names: readonly string[]): Record<string, unknown> => {
+    const source: Record<string, unknown> = {};
+    for (const name of names) {
+      const value = map.get(name);
+      if (value !== undefined)
+        source[name] = isContainer(value)
+          ? value.kind() === 'Text'
+            ? value.toString()
+            : value.kind() === 'List'
+              ? []
+              : {}
+          : value;
+    }
+    return source;
+  };
+  const shallowInputConfigSource = (map: LoroMap): unknown => {
+    const config = map.get('inputConfig');
+    if (!isContainer(config)) {
+      if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
+      const source = config as Record<string, unknown>;
+      return Object.fromEntries(
+        SESSION_DIRECTORY_INPUT_CONFIG_KEYS.filter((key) => source[key] !== undefined).map(
+          (key) => [key, source[key]]
+        )
+      );
+    }
+    if (config.kind() !== 'Map') return undefined;
+    const configMap = config as LoroMap;
+    const value = metadataScalars(configMap, SESSION_DIRECTORY_INPUT_CONFIG_KEYS);
+    for (const key of [
+      'agentRoleSnapshot',
+      'memory',
+      'mcpServerIds',
+      'configOptionValues',
+    ] as const) {
+      if (value[key] === undefined) continue;
+      const field = configMap.get(key);
+      value[key] = isContainer(field) ? field.toJSON() : field;
+    }
+    return value;
+  };
+
+  /**
+   * Attach the row's send configuration as a deferred, memoized projection.
+   *
+   * `pickDirectoryInputConfig` runs a schema parse. A directory read covers
+   * every user turn in the conversation, while its consumers resolve sticky
+   * configuration from the newest turn or two — so opening a long session paid
+   * thousands of parses to answer a question about its tail.
+   */
+  const withDeferredInputConfig = <T extends object>(row: T, source: unknown): T => {
+    let projected: unknown;
+    let done = false;
+    Object.defineProperty(row, 'inputConfig', {
+      enumerable: true,
+      configurable: true,
+      get: () => {
+        if (!done) {
+          done = true;
+          projected = pickDirectoryInputConfig(source);
+        }
+        return projected;
+      },
+    });
+    return row;
+  };
+
+  const readDirectoryRow = (position: number): SessionDirectoryRow => {
+    const value = list.get(position);
+    if (isContainer(value)) {
+      if (value.kind() !== 'Map') return { position, state: 'invalid' };
+      const map = value as LoroMap;
+      const scalars = pickDirectoryScalars(metadataScalars(map, SESSION_DIRECTORY_SCALAR_KEYS));
+      if (!scalars) return { position, state: 'invalid' };
+      const row: SessionDirectoryRow = {
+        metadataVersion: 1,
+        position,
+        state: 'ready',
+        turnId: scalars.id,
+        scalars,
+      };
+      const userId = readString(map.get('userId'));
+      if (userId !== undefined) Object.assign(row, { userId });
+      const scheduleRun = map.get('scheduleRun');
+      if (scheduleRun !== undefined)
+        Object.assign(row, {
+          scheduleRun: isContainer(scheduleRun) ? scheduleRun.toJSON() : scheduleRun,
+        });
+      // Send config is present for user turns but projected on first read;
+      // counts are deliberately omitted here (one container crossing each) and
+      // arrive with a summary or a hydration read.
+      return scalars.role === 'user'
+        ? withDeferredInputConfig(row, shallowInputConfigSource(map))
+        : row;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      const scalars = pickDirectoryScalars(record);
+      if (!scalars) return { position, state: 'invalid' };
+      const itemCount = Array.isArray(record.items) ? record.items.length : undefined;
+      const planCount = Array.isArray(record.plan) ? record.plan.length : undefined;
+      const row: SessionDirectoryRow = {
+        metadataVersion: 1,
+        position,
+        state: 'ready',
+        turnId: scalars.id,
+        scalars,
+        ...(typeof record.userId === 'string' ? { userId: record.userId } : {}),
+        ...(record.scheduleRun !== undefined ? { scheduleRun: record.scheduleRun } : {}),
+        ...(itemCount !== undefined ? { itemCount } : {}),
+        ...(planCount !== undefined ? { planCount } : {}),
+      };
+      return scalars.role === 'user' ? withDeferredInputConfig(row, record.inputConfig) : row;
+    }
+    return { position, state: 'invalid' };
+  };
+
+  const directory = (from: number, to: number): readonly SessionDirectoryRow[] => {
+    const lo = Math.max(0, Math.min(from, list.length));
+    const hi = Math.max(lo, Math.min(to, list.length));
+    const rows: SessionDirectoryRow[] = [];
+    for (let position = lo; position < hi; position += 1) {
+      rows.push(readDirectoryRow(position));
+    }
+    return rows;
+  };
+
+  const isTurnIdentityEdit = (event: LoroEventBatch['events'][number]) =>
+    event.path[0] === HISTORY_ROOT_KEY &&
+    event.path.length === 2 &&
+    event.diff.type === 'map' &&
+    Object.hasOwn(event.diff.updated, 'id');
+
+  /**
+   * What a batch touched, for a consumer that re-reads only the affected turns.
+   *
+   * Structural list edits report `[structuralFrom, length)` because later
+   * positions shifted. In-place turn ID edits are structural for the same
+   * reason: a consumer still keyed by the old ID cannot resolve the new (or
+   * missing) one.
+   *
+   * A content batch reports the EXACT positions it touched, never the span
+   * between the lowest and highest of them. One synced batch routinely carries
+   * an early turn's status write alongside the streaming tail; reporting the
+   * span made the display cache re-read every row and re-materialize every
+   * hydrated body between the two.
+   */
+  const changeScopeOf = (
+    batch: LoroEventBatch
+  ):
+    | { structural: true; from: number; to: number }
+    | { structural: false; positions: readonly number[] }
+    | undefined => {
+    const positions = new Set<number>();
+    let wholeDirectory = false;
+    let structuralFrom = Number.POSITIVE_INFINITY;
+    let structural = false;
+    for (const event of batch.events) {
+      if (event.target === list.id && event.diff.type === 'list') {
+        structural = true;
+        let cursor = 0;
+        for (const delta of event.diff.diff) {
+          if (delta.retain !== undefined) {
+            cursor += delta.retain;
+          } else if (delta.delete !== undefined) {
+            structuralFrom = Math.min(structuralFrom, cursor);
+          } else if (delta.insert !== undefined) {
+            structuralFrom = Math.min(structuralFrom, cursor);
+            cursor += delta.insert.length;
+          }
+        }
+        continue;
+      }
+      if (event.path[0] !== HISTORY_ROOT_KEY) continue;
+      const index = event.path[1];
+      if (typeof index === 'number') {
+        if (isTurnIdentityEdit(event)) {
+          structural = true;
+          structuralFrom = Math.min(structuralFrom, index);
+        }
+        positions.add(index);
+      } else {
+        // An edit that does not resolve to a slot: the whole directory is the
+        // only safe answer.
+        wholeDirectory = true;
+      }
+    }
+    if (structural) {
+      // A mixed batch can carry an earlier child edit (a content change) plus a
+      // list insert/delete. Keep the earlier content position too, so the
+      // consumer re-reads every affected identity, not just the shifted suffix.
+      let contentFrom = wholeDirectory ? 0 : Number.POSITIVE_INFINITY;
+      for (const position of positions) contentFrom = Math.min(contentFrom, position);
+      if (!Number.isFinite(contentFrom)) contentFrom = structuralFrom;
+      const lo = Number.isFinite(structuralFrom)
+        ? Math.min(structuralFrom, contentFrom)
+        : contentFrom;
+      return { structural: true, from: Math.max(0, Math.min(lo, list.length)), to: list.length };
+    }
+    if (wholeDirectory) {
+      return {
+        structural: false,
+        positions: Array.from({ length: list.length }, (_, index) => index),
+      };
+    }
+    if (positions.size === 0) return undefined;
+    const inRange = [...positions]
+      .filter((position) => position >= 0 && position < list.length)
+      .sort((left, right) => left - right);
+    return inRange.length > 0 ? { structural: false, positions: inRange } : undefined;
+  };
+
+  // One shallow identity scan per structural/identity change, never per body.
+  const positions = new Map<string, number>();
+  let identityDirty = true;
+  let indexedLength = -1;
+  let indexedOpCount = -1;
+  const unsubscribeIdentity = doc.subscribe((batch) => {
+    for (const event of batch.events) {
+      if (event.path[0] !== HISTORY_ROOT_KEY) continue;
+      // Container identity survives moves; positional child paths may not.
+      let changed = doc.getContainerById(event.target);
+      while (changed) {
+        displayItems.delete(changed.id);
+        changed = changed.parent();
+      }
+      if (event.path.length === 3 && event.path[2] === 'items' && event.diff.type === 'list') {
+        const cached = displayLists.get(event.target);
+        const previous = cached?.value.deref();
+        if (!cached || !previous) {
+          displayLists.delete(event.target);
+          continue;
+        }
+        const oldLength = previous.length + cached.appended;
+        let cursor = 0;
+        let appended = 0;
+        let appendOnly = true;
+        for (const delta of event.diff.diff) {
+          if (delta.retain !== undefined) cursor += delta.retain;
+          else if (delta.delete !== undefined) appendOnly = false;
+          else if (delta.insert !== undefined) {
+            if (cursor !== oldLength + appended) appendOnly = false;
+            appended += delta.insert.length;
+            cursor += delta.insert.length;
+          }
+        }
+        if (!appendOnly || cached.dirty.size + appended > 256) displayLists.delete(event.target);
+        else {
+          cached.appended += appended;
+          for (let i = oldLength; i < oldLength + appended; i++) cached.dirty.add(i);
+        }
+        continue;
+      }
+      if (event.path.length < 4) {
+        if (
+          event.path.length < 2 ||
+          event.path[2] === 'items' ||
+          (event.path.length === 2 &&
+            event.diff.type === 'map' &&
+            Object.hasOwn(event.diff.updated, 'items'))
+        )
+          displayLists.clear();
+        continue;
+      }
+      if (event.path[2] !== 'items') continue;
+      const turnPosition = event.path[1];
+      const itemPosition = event.path[3];
+      if (typeof turnPosition !== 'number' || typeof itemPosition !== 'number') {
+        displayLists.clear();
+        continue;
+      }
+      const items = readField(list.get(turnPosition), 'items');
+      if (isContainer(items)) {
+        const cached = displayLists.get(items.id);
+        if (cached) {
+          if (cached.dirty.size >= 256) displayLists.delete(items.id);
+          else cached.dirty.add(itemPosition);
+        }
+      }
+    }
+    displayOpCount = doc.opCount();
+    if (
+      batch.events.some(
+        (event) =>
+          (event.target === list.id && event.diff.type === 'list') || isTurnIdentityEdit(event)
+      )
+    )
+      identityDirty = true;
+  });
+  const ensureIdentityIndex = () => {
+    // opCount includes pending writes without restarting at commit; reuse until it changes.
+    if (!identityDirty && indexedLength === list.length) {
+      if (doc.getPendingTxnLength() === 0 || indexedOpCount === doc.opCount()) return;
+    }
+    positions.clear();
+    for (let i = 0; i < list.length; i++) {
+      const id = readIdentity(list.get(i))?.turnId;
+      if (id !== undefined) positions.set(id, i); // newest duplicate wins, like writer.locate
+    }
+    indexedLength = list.length;
+    indexedOpCount = doc.opCount();
+    identityDirty = false;
+  };
+
+  const history = {
+    readTurnOutput(userTurnId: string) {
+      return selectTurnOutput(
+        list.length,
+        userTurnId,
+        (index) => {
+          const value = list.get(index);
+          return pickDirectoryScalars(
+            isContainer(value) && value.kind() === 'Map'
+              ? (value as LoroMap).getShallowValue()
+              : value
+          );
+        },
+        (index) => {
+          const read = readSlot(list, index);
+          return read.state === 'ready'
+            ? (read.turn as import('./domain').SessionEntry)
+            : undefined;
+        }
+      );
+    },
+    count() {
+      return list.length;
+    },
+    readModelSummaryAt(position: number) {
+      if (position < 0 || position >= list.length) return undefined;
+      const value = list.get(position);
+      const model = readField(value, 'modelInfo');
+      return {
+        role: readString(readField(value, 'role')),
+        modelInfo: {
+          modelId: readString(readField(model, 'modelId')),
+          name: readString(readField(model, 'name')),
+        },
+        itemCount: readLength(readField(value, 'items')),
+        planCount: readLength(readField(value, 'plan')),
+      };
+    },
+    readAt(position: number) {
+      return readSlot(list, position);
+    },
+    readTurn(turnId: string): SessionTurnRead {
+      ensureIdentityIndex();
+      const position = positions.get(turnId);
+      return position === undefined ? { state: 'missing' } : readSlot(list, position);
+    },
+    readTurnForDisplay(turnId: string): SessionTurnRead {
+      // Pending writes must invalidate without committing the caller's transaction.
+      const opCount = doc.opCount();
+      if (opCount !== displayOpCount) {
+        clearDisplayCache();
+        displayOpCount = opCount;
+      }
+      ensureIdentityIndex();
+      const position = positions.get(turnId);
+      if (position === undefined) return { state: 'missing' };
+      const turn = displayTurn(list.get(position), readDisplayItems);
+      return turn ? { state: 'ready', turn } : { state: 'invalid' };
+    },
+    readSubagentRun(
+      turnId: string,
+      rootSessionId: string,
+      runId: string
+    ): SessionSubagentRun | undefined {
+      ensureIdentityIndex();
+      const position = positions.get(turnId);
+      if (position === undefined) return undefined;
+      const items = readField(list.get(position), 'items');
+      for (let index = 0; index < readLength(items); index++) {
+        const item = listValueAt(items, index);
+        if (
+          readString(readField(item, 'type')) !== 'subagent_task' ||
+          readString(readField(item, 'taskId')) !== runId
+        )
+          continue;
+        const run = readField(item, 'run');
+        if (readString(readField(run, 'sessionId')) !== rootSessionId) continue;
+        return (isContainer(run) ? run.toJSON() : run) as SessionSubagentRun;
+      }
+      return undefined;
+    },
+    readRange(from: number, to: number) {
+      const lo = Math.max(0, Math.min(from, list.length));
+      const hi = Math.max(lo, Math.min(to, list.length));
+      const out: SessionTurnRead[] = [];
+      for (let position = lo; position < hi; position += 1) out.push(readSlot(list, position));
+      return out;
+    },
+    readDirectory(from: number, to: number) {
+      return directory(from, to);
+    },
+    readAll() {
+      // One consistent detached read, never stitched pages.
+      return writer.readStored();
+    },
+    observe(listener: import('./types').SessionDataChangeListener) {
+      // Subscribe and snapshot synchronously, leaving no observation gap.
+      const unsubscribeDoc = doc.subscribe((batch) => {
+        const scope = changeScopeOf(batch);
+        // A batch that does not touch `history` (e.g. a control root) is not a
+        // history change; unrelated roots never invalidate the display cache.
+        if (!scope) return;
+        if (scope.structural) {
+          listener({ kind: 'structure', from: scope.from, to: scope.to });
+        } else {
+          const ids: string[] = [];
+          for (const position of scope.positions) {
+            const id = readIdentity(list.get(position))?.turnId;
+            if (id !== undefined) ids.push(id);
+          }
+          listener({ kind: 'changed', ids });
+        }
+      });
+      const initial = Promise.resolve(directory(0, list.length));
+      let active = true;
+      return {
+        initial,
+        unsubscribe() {
+          if (!active) return;
+          active = false;
+          unsubscribeDoc();
+        },
+      } satisfies SessionObservation;
+    },
+  } satisfies SessionHistoryReader & SessionModelSummaryReader;
+
+  const commands: SessionHistoryCommands = {
+    async applyHistoryAction(action) {
+      if (action.kind === 'operation-progress')
+        return { matched: writer.updateOperationProgress(action) };
+      let matched = action.kind === 'user-status' && action.requeueUndelivered === true;
+      const apply = (entries: SessionHistoryInput[]) => {
+        const result = applyHistoryAction(entries, action);
+        matched = result.matched;
+        return result.turns;
+      };
+      const target = historyActionTarget(action);
+      if (action.kind === 'user-status') writer.updateCopies(action.turnId, apply);
+      else if (target !== undefined)
+        writer.updateEntry(target, (entry) => apply([entry])[0] ?? entry);
+      else writer.updateSelected((rows) => selectHistoryActionRows(rows, action), apply);
+      return { matched };
+    },
+    async appendTurn(turn) {
+      writer.append(turn as unknown as SessionHistory);
+    },
+    async replaceTurn(turnId, turn) {
+      if (turn.id !== turnId) throw new HistoryWriteError([{ path: ['id'], code: 'immutable_id' }]);
+      const commit = writer.prepareReplace(turnId, turn as unknown as SessionHistory);
+      if (!commit) throw new HistoryWriteError([{ path: ['history'], code: 'not_found' }]);
+      commit();
+    },
+    async respondPermission(requestId, outcome, respondOptions) {
+      parseHistoryWrite(PermissionOutcomeSchema, outcome);
+      return writer.respondPermission(requestId, outcome, respondOptions);
+    },
+    async replaceEditableTail(input): Promise<SessionEditableTailResult> {
+      let plan: EditableTailPlan | undefined;
+      let restoreRange: () => void;
+      try {
+        // The shared planner runs inside the writer's conditional commit, so the
+        // eligibility/goal re-check and the write are one atomic step.
+        restoreRange = writer.updateSelectedWithRollback(
+          (rows) => {
+            let start = rows.length;
+            for (let i = rows.length - 1; i >= 0; i--)
+              if (rows[i]?.role === 'user') {
+                start = i;
+                break;
+              }
+            return rows.slice(start).map((_, offset) => start + offset);
+          },
+          (turns) => {
+            const next = planEditableTailReplacement(
+              turns as unknown as readonly SessionTurn[],
+              input
+            );
+            plan = next;
+            return next.turns as unknown as SessionHistoryInput[];
+          }
+        );
+      } catch (error) {
+        // A domain refusal proves nothing was written; a `HistoryWriteError` is a
+        // validated pre-write refusal. Both are safe to report as `rejected`.
+        if (error instanceof EditableTailRefusedError) {
+          return { status: 'rejected', reason: { code: error.code } };
+        }
+        if (error instanceof HistoryWriteError) {
+          return { status: 'rejected', reason: { code: 'invalid_input', issues: issuesOf(error) } };
+        }
+        return { status: 'indeterminate', cause: error };
+      }
+      const previousUserTurnId = plan?.previousUserTurnId;
+      return {
+        status: 'accepted',
+        // The writer's rule is still one synchronous conditional restore. It is
+        // exposed as awaitable so a caller cannot persist follow-up state before
+        // the compensation finished; a synchronous throw rejects the promise.
+        rollback: async () => {
+          restoreRange();
+        },
+        ...(previousUserTurnId !== undefined ? { previousUserTurnId } : {}),
+      };
+    },
+    async applyHistoryImport(input): Promise<SessionImportResult> {
+      if (!options.historyImportCursor)
+        return { status: 'rejected', reason: { code: 'unsupported' } };
+      let appended = 0;
+      let writing = false;
+      let historyWritten = false;
+      try {
+        const cursor = HistoryImportCursorSchema.optional().parse(
+          options.historyImportCursor.read()
+        );
+        const importedHashes =
+          input.mode === 'refresh'
+            ? resolveImportedTurnHashes(input.externalHistory, cursor?.importedTurnHashes)
+            : [];
+        // The projected suffix must be expressed in the stored cursor's own version:
+        // it is compared against stored-version hashes inside the planner.
+        const storedHashVersion =
+          input.mode === 'refresh'
+            ? resolveImportHashVersion(input.externalHistory, cursor)
+            : input.replay.hashVersion;
+        const projectedHashes = [
+          ...importedHashes,
+          ...input.replay.history
+            .slice(importedHashes.length)
+            .map((entry) =>
+              hashHistoryEntryForVersion(
+                parseHistoryWrite(HistoryEntryWriteSchema, entry),
+                storedHashVersion
+              )
+            ),
+        ];
+        writer.update((turns) => {
+          const plan = planHistoryImport(
+            input,
+            turns,
+            cursor,
+            projectedHashes,
+            turns.some(isSessionHistoryPendingForDispatch)
+          );
+          appended = plan.appended;
+          // Writer preflights authored changes before its first storage mutation.
+          writing = true;
+          return [...plan.turns] as SessionHistoryInput[];
+        });
+        historyWritten = true;
+        const nextCursor = createImportCursor(
+          input.replay.turnHashes,
+          writer.readStored(),
+          input.replay.hashVersion
+        );
+        options.historyImportCursor.write(nextCursor);
+        return { status: 'accepted', appended };
+      } catch (error) {
+        if (historyWritten) return { status: 'indeterminate', cause: error };
+        if (error instanceof HistoryImportRefused)
+          return { status: 'rejected', reason: { code: error.code } };
+        if (!historyWritten && error instanceof HistoryWriteError)
+          return { status: 'rejected', reason: { code: 'invalid_input', issues: issuesOf(error) } };
+        if (!writing) return { status: 'rejected', reason: { code: 'invalid_input' } };
+        return { status: 'indeterminate', cause: error };
+      }
+    },
+  };
+
+  // # Storage-owned snapshot service
+  const snapshots: SessionSnapshotService = {
+    async capture() {
+      return writer.capture();
+    },
+    async copyFrom(snapshot, selection) {
+      writer.copyFrom(snapshot, selection as unknown as SessionHistoryInput[]);
+    },
+  };
+
+  const dispose = () => {
+    unsubscribeIdentity();
+    clearDisplayCache();
+    positions.clear();
+    identityDirty = true;
+  };
+
+  const readLatestGoal = (): SessionGoalMessage | null => {
+    for (let position = list.length - 1; position >= 0; position -= 1) {
+      const items = readField(list.get(position), 'items');
+      for (let index = readLength(items) - 1; index >= 0; index -= 1) {
+        const item = listValueAt(items, index);
+        if (
+          readString(readField(item, 'type')) !== 'goal' ||
+          readString(readField(item, 'threadId')) === undefined ||
+          readString(readField(item, 'objective')) === undefined ||
+          readString(readField(item, 'status')) === undefined
+        )
+          continue;
+        const goal = resolveLatestSessionGoalFromHistory([
+          { items: [isContainer(item) ? item.toJSON() : item] },
+        ]);
+        if (goal) return structuredClone(goal);
+      }
+    }
+    return null;
+  };
+
+  const readLatestUserId = (): string | undefined => {
+    for (let position = list.length - 1; position >= 0; position--) {
+      const entry = list.get(position);
+      if (readString(readField(entry, 'role')) !== 'user') continue;
+      const userId = readString(readField(entry, 'userId'));
+      if (userId?.trim()) return userId;
+    }
+    return undefined;
+  };
+
+  return {
+    sessionId,
+    history,
+    commands,
+    writer,
+    snapshots,
+    readLatestGoal,
+    readLatestUserId,
+    dispose,
+  };
+}

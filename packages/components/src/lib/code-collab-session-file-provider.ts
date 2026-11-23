@@ -1,5 +1,20 @@
 import {
+  type CodeCollabOpenDiffManifestRequest,
+  type CodeCollabOpenDiffManifestResponse,
+  type CodeCollabReadBlobResponse,
+  type CodeCollabDiffBlobKey,
+  type CodeCollabDiffManifestEntry,
+  CODE_COLLAB_DIFF_BLOB_LIMITS,
+} from '@lody/shared';
+import { DiffBlobCache } from './diff-blob-cache';
+import i18next from 'i18next';
+import { readDiffBlob, manifestEntryToDiff, DiffBlobReadError } from './diff-blob-client';
+import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
+import { createLocalPagedFileSource } from './paged-file-source';
+import {
   CODE_COLLAB_V2_TEXT_LIMITS,
+  CODE_COLLAB_LIMITS,
+  type CodeCollabAllChangesScope,
   type CodeCollabFileSourceState,
   type CodeCollabRole,
   type CodeCollabV2AllChangesState,
@@ -20,6 +35,7 @@ import {
   type FilePreviewV3Digest,
   type FilePreviewV3ErrorCode,
   type FilePreviewV3Response,
+  type FileDiff,
   type SessionId,
 } from '@lody/shared';
 import { SaveTextConflictError, SaveTextTransientError } from './code-collab-save-errors';
@@ -27,6 +43,7 @@ import type {
   SessionFileAllChangesDiffEntry,
   SessionFileAllChangesDiffResult,
   SessionFileChangedFilesResult,
+  SessionFileChangeEntry,
   SessionFileDiffResult,
   SessionFileOpenResult,
   SessionFileProvider,
@@ -47,6 +64,17 @@ export type ParsedFileMetadataSnapshot = {
 
 export type CodeCollabSessionFileProviderRuntime = {
   readonly sessionId: SessionId;
+  diffBlobTransportOptions?(): Promise<{ supported: boolean; scope: string; persist: boolean }>;
+  openDiffManifest?(
+    request: Omit<CodeCollabOpenDiffManifestRequest, 'sessionId'>
+  ): Promise<CodeCollabOpenDiffManifestResponse | CodeCollabV2Error | null>;
+  readDiffBlob?(
+    key: CodeCollabDiffBlobKey,
+    offset: number,
+    length: number,
+    path: string
+  ): Promise<CodeCollabReadBlobResponse | CodeCollabV2Error | null>;
+  downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   /**
    * File Preview v3 — the read path behind `openFile`. Always resolves; a
    * transport failure arrives as `status: 'error'`.
@@ -54,7 +82,7 @@ export type CodeCollabSessionFileProviderRuntime = {
   previewFile(
     path: string,
     knownDigest?: FilePreviewV3Digest
-  ): Promise<FilePreviewV3Response | null>;
+  ): Promise<FilePreviewV3Response | LocalFilePreviewResource | null>;
   /** Retained for `saveText`'s digest bookkeeping and older provider callers. */
   openText(path: string): Promise<CodeCollabV2OpenTextOk | CodeCollabV2Error | null>;
   refreshText(
@@ -68,10 +96,12 @@ export type CodeCollabSessionFileProviderRuntime = {
     format?: CodeCollabV2TextFormat
   ): Promise<CodeCollabV2SaveTextResponse | CodeCollabV2Error | null>;
   openCurrentDiff(
-    path: string
+    path: string,
+    scope?: CodeCollabAllChangesScope
   ): Promise<CodeCollabV2OpenCurrentDiffResponse | CodeCollabV2Error | null>;
   openAllChangesDiff(
-    focusPath?: string
+    focusPath?: string,
+    scope?: CodeCollabAllChangesScope
   ): Promise<CodeCollabV2OpenAllChangesDiffResponse | CodeCollabV2Error | null>;
   openTurnDiff(
     path: string,
@@ -123,6 +153,7 @@ export type CodeCollabSessionFileProviderOptions = {
   readonly files?: readonly SessionFileProviderEntry[];
   readonly fileTree?: CodeCollabV2FileTreeState;
   readonly allChanges?: CodeCollabV2AllChangesState;
+  readonly generations?: Readonly<Record<string, string>>;
   readonly updatedAtMs?: number;
   readonly historicalTurnId?: string;
   readonly cache?: CodeCollabSessionFileProviderCache;
@@ -154,6 +185,7 @@ type SaveConflictCacheEntry = {
 };
 
 export type CodeCollabSessionFileProviderTextState = {
+  readonly diffBlobCache: DiffBlobCache;
   readonly openCache: CodeCollabSessionOpenTextCache;
   readonly conflictCache: Map<string, SaveConflictCacheEntry>;
   readonly textSubscribers: Map<string, Set<(text: string) => void>>;
@@ -223,6 +255,7 @@ export function createCodeCollabSessionFileProviderTextState(
   options: CodeCollabSessionFileProviderTextStateOptions = {}
 ): CodeCollabSessionFileProviderTextState {
   return {
+    diffBlobCache: new DiffBlobCache(),
     openCache: new CodeCollabSessionOpenTextCache(options.maxOpenTextCacheBytes),
     conflictCache: new Map<string, SaveConflictCacheEntry>(),
     textSubscribers: new Map<string, Set<(text: string) => void>>(),
@@ -261,13 +294,28 @@ function estimateOpenCacheEntryBytes(entry: CodeCollabSessionOpenTextCacheEntry)
 
 export class CodeCollabSessionFileProvider implements SessionFileProvider {
   readonly kind = 'code-collab';
+  // The first negotiated blob read needs a signal. If negotiation selects the
+  // legacy RPC, the hook retains its valid in-flight result even after abort.
+  private blobReadsSupported = true;
+  get supportsCancellableDiffReads(): boolean {
+    return (
+      Boolean(this.runtime?.openDiffManifest && this.runtime?.readDiffBlob) &&
+      this.blobReadsSupported
+    );
+  }
   readonly supportsHistoricalDiffs: boolean;
   private readonly runtime?: CodeCollabSessionFileProviderRuntime;
+  private readonly diffBlobCache: DiffBlobCache;
+  private readonly diffCacheEpoch: number;
+  private readonly diffManifestEntries = new Map<string, CodeCollabDiffManifestEntry>();
   private readonly role: CodeCollabRole;
   private readonly sourceState: CodeCollabFileSourceState;
   private readonly message?: string;
   private readonly files: readonly SessionFileProviderEntry[];
   private readonly allChanges: CodeCollabV2AllChangesState;
+  private branchChangeFiles?: readonly SessionFileChangeEntry[];
+  private branchChangesRequest = 0;
+  private readonly changedFileSubscribers = new Set<() => void>();
   private readonly openCache: CodeCollabSessionOpenTextCache;
   private readonly conflictCache: Map<string, SaveConflictCacheEntry>;
   private readonly textSubscribers: Map<string, Set<(text: string) => void>>;
@@ -284,6 +332,8 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
       codeCollabFileTreeToSessionFileEntries(options.fileTree ?? {}, this.sourceState);
     this.allChanges = options.allChanges ?? {};
     const textState = options.textState ?? createCodeCollabSessionFileProviderTextState();
+    this.diffBlobCache = textState.diffBlobCache;
+    this.diffCacheEpoch = this.diffBlobCache.epoch;
     this.openCache = textState.openCache;
     this.conflictCache = textState.conflictCache;
     this.textSubscribers = textState.textSubscribers;
@@ -332,6 +382,10 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
    * which is the only authority on what the file actually is. The machine
    * answers with a plain read; it never activates Code Collab for a preview.
    */
+  async downloadFile(path: string, signal?: AbortSignal): Promise<Uint8Array | null> {
+    return (await this.runtime?.downloadFile?.(path, signal)) ?? null;
+  }
+
   async openFile(
     pathOrFileId: string,
     _mode?: SessionFileProviderMode
@@ -354,12 +408,47 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     if (!response) {
       return unavailable(indexed, 'transient-io', 'File preview request timed out.');
     }
+    if (response.status === 'resolved-link') {
+      return unavailable(
+        indexed,
+        'transient-io',
+        'Expected file content, received link candidates.'
+      );
+    }
     if (response.status === 'error') {
       return unavailable(
         indexed,
         filePreviewErrorCodeToUnavailableReason(response.code),
         response.message ?? response.code
       );
+    }
+    if (response.status === 'resource') {
+      // Paged content must never seed save-text's full-document conflict cache.
+      for (const key of new Set([
+        path,
+        response.path,
+        ...(cached?.cacheKeys ?? []),
+        ...(this.openCache.get(response.path)?.cacheKeys ?? []),
+      ]))
+        this.openCache.delete(key);
+      return {
+        status: 'ready',
+        entry: {
+          ...indexed,
+          path: response.path,
+          fileId: response.path,
+          kind: response.kind,
+          sizeBytes: response.sizeBytes,
+          readonly: true,
+        },
+        snapshot:
+          response.kind === 'text'
+            ? {
+                kind: 'paged-text',
+                source: createLocalPagedFileSource(response.url, response.sizeBytes),
+              }
+            : { kind: 'binary', url: response.url },
+      };
     }
     if (response.status === 'unchanged') {
       return {
@@ -658,7 +747,15 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     this.conflictCache.delete(params.conflictId);
   }
 
-  async getDiff(pathOrFileId: string, turnId?: string): Promise<SessionFileDiffResult> {
+  async getDiff(
+    pathOrFileId: string,
+    turnId?: string,
+    _fileDiff?: FileDiff,
+    options?: {
+      readonly allChangesScope?: CodeCollabAllChangesScope;
+      readonly signal?: AbortSignal;
+    }
+  ): Promise<SessionFileDiffResult> {
     const path = this.resolvePath(pathOrFileId);
     if (!this.runtime) {
       return {
@@ -668,10 +765,40 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
         message: this.message ?? CODE_COLLAB_V2_UNAVAILABLE_MESSAGE,
       };
     }
+    if (this.runtime.openDiffManifest && this.runtime.readDiffBlob) {
+      let config:
+        | Awaited<
+            ReturnType<
+              NonNullable<CodeCollabSessionFileProviderRuntime['diffBlobTransportOptions']>
+            >
+          >
+        | undefined;
+      try {
+        config = await this.runtime.diffBlobTransportOptions?.();
+      } catch (error) {
+        return {
+          status: 'unavailable',
+          path,
+          reason: 'transient-io',
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+      this.blobReadsSupported = config?.supported === true;
+      if (config?.supported)
+        return await this.getBlobDiff(
+          path,
+          turnId,
+          options?.allChangesScope,
+          config,
+          options?.signal
+        );
+    }
     if (turnId) {
       return await this.getTurnDiff(path, turnId);
     }
-    const response = await this.runtime.openCurrentDiff(path);
+    const response = await (options?.allChangesScope === undefined
+      ? this.runtime.openCurrentDiff(path)
+      : this.runtime.openCurrentDiff(path, options.allChangesScope));
     if (!response) {
       return {
         status: 'unavailable',
@@ -702,6 +829,209 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
       oldSnapshot: await currentDiffSnapshotToFileWorkspaceSnapshot(response.oldSnapshot),
       newSnapshot: await currentDiffSnapshotToFileWorkspaceSnapshot(response.newSnapshot),
     };
+  }
+
+  private rememberDiffManifest(scope: string, entry: CodeCollabDiffManifestEntry): void {
+    if (this.diffCacheEpoch !== this.diffBlobCache.epoch) return;
+    const key = JSON.stringify([scope, entry.path]);
+    this.diffManifestEntries.delete(key);
+    this.diffManifestEntries.set(key, entry);
+    while (this.diffManifestEntries.size > 128) {
+      const oldest = this.diffManifestEntries.keys().next().value;
+      if (oldest === undefined) break;
+      this.diffManifestEntries.delete(oldest);
+    }
+  }
+
+  private async getBlobDiff(
+    path: string,
+    turnId: string | undefined,
+    scope: CodeCollabAllChangesScope | undefined,
+    config: { scope: string; persist: boolean },
+    signal?: AbortSignal
+  ): Promise<SessionFileDiffResult> {
+    const runtime = this.runtime;
+    if (!runtime?.openDiffManifest || !runtime.readDiffBlob)
+      throw new Error('Diff blob transport is unavailable.');
+    const entryKey = JSON.stringify([scope ?? 'branch', path]);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        signal?.throwIfAborted();
+        // A batch descriptor is consumed once. Later opens revalidate metadata;
+        // Flock generations cannot prove freshness after a host watch expires.
+        let entry = turnId === undefined ? this.diffManifestEntries.get(entryKey) : undefined;
+        this.diffManifestEntries.delete(entryKey);
+        if (!entry) {
+          const manifest = await runtime.openDiffManifest({
+            path,
+            ...(turnId === undefined ? {} : { turnId }),
+            ...(scope === undefined ? {} : { scope }),
+          });
+          signal?.throwIfAborted();
+          if (!manifest)
+            throw new DiffBlobReadError('transient_io', 'Diff manifest request timed out.');
+          if (manifest.status === 'error')
+            throw new DiffBlobReadError(manifest.code, manifest.message ?? 'Diff manifest failed.');
+          if (manifest.status === 'unavailable')
+            return {
+              status: 'unavailable',
+              path,
+              reason: 'metadata-only',
+              message: manifest.message ?? manifest.reason,
+            };
+          entry = manifest.entries[0];
+          if (!entry) return { status: 'unavailable', path, reason: 'metadata-only' };
+        }
+        const selected = entry;
+        return await manifestEntryToDiff(
+          entry,
+          async (blob, hydrationSignal) =>
+            await readDiffBlob({
+              blob,
+              cache: this.diffBlobCache,
+              signal: hydrationSignal ?? signal,
+              scope: config.scope,
+              persist: config.persist,
+              read: async (key, offset, length) =>
+                (await runtime.readDiffBlob?.(key, offset, length, selected.path)) ?? null,
+            }),
+          async (hydrationSignal) => {
+            this.diffManifestEntries.delete(entryKey);
+            const renewed = await runtime.openDiffManifest!({
+              path,
+              ...(turnId === undefined ? {} : { turnId }),
+              ...(scope === undefined ? {} : { scope }),
+            });
+            hydrationSignal?.throwIfAborted();
+            if (!renewed || renewed.status !== 'ok' || !renewed.entries[0])
+              throw new DiffBlobReadError(
+                renewed?.status === 'error' ? renewed.code : 'stale',
+                'Diff manifest could not be renewed.'
+              );
+            return renewed.entries[0];
+          }
+        );
+      } catch (error) {
+        this.diffManifestEntries.delete(entryKey);
+        if (
+          error instanceof DiffBlobReadError &&
+          ['stale', 'digest_mismatch'].includes(error.code) &&
+          attempt === 0
+        )
+          continue;
+        return {
+          status: 'unavailable',
+          path,
+          reason:
+            error instanceof DiffBlobReadError
+              ? errorCodeToUnavailableReason(error.code)
+              : 'transient-io',
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    return { status: 'unavailable', path, reason: 'transient-io' };
+  }
+
+  private async getBlobAllChanges(
+    focusPath: string | undefined,
+    scope: CodeCollabAllChangesScope | undefined,
+    signal?: AbortSignal
+  ): Promise<SessionFileAllChangesDiffResult> {
+    const runtime = this.runtime;
+    if (!runtime?.openDiffManifest) throw new Error('Diff manifest transport is unavailable.');
+    const scopeKey = scope ?? 'branch';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const entries: SessionFileAllChangesDiffEntry[] = [];
+        this.diffManifestEntries.clear();
+        let cursor: string | undefined;
+        let base: string | undefined;
+        const seen = new Set<string>();
+        do {
+          signal?.throwIfAborted();
+          const result = await runtime.openDiffManifest({
+            ...(focusPath === undefined ? {} : { focusPath }),
+            ...(scope === undefined ? {} : { scope }),
+            ...(cursor === undefined ? {} : { cursor }),
+          });
+          signal?.throwIfAborted();
+          if (!result)
+            throw new DiffBlobReadError('transient_io', 'Diff manifest request timed out.');
+          if (result.status === 'error')
+            throw new DiffBlobReadError(result.code, result.message ?? 'Diff manifest failed.');
+          if (result.status === 'unavailable')
+            return {
+              status: 'unavailable',
+              reason: 'metadata-only',
+              message: result.message ?? result.reason,
+              ...(result.reason === 'not_a_git_worktree' || result.reason === 'no_commits'
+                ? { scopeReason: result.reason }
+                : {}),
+            };
+          base = result.base;
+          for (const entry of result.entries) {
+            if (entry.status === 'not_changed' || entry.status === 'missing') continue;
+            if (entries.length >= CODE_COLLAB_LIMITS.maxSupportedFiles)
+              throw new DiffBlobReadError(
+                'too_large',
+                i18next.t('sessions.changes.tooManyFiles', 'Too many changed files to load.')
+              );
+            // Large files request their bounded patch only when opened.
+            if (
+              entry.hunks !== undefined ||
+              (entry.base?.rawBytes ?? 0) + (entry.head?.rawBytes ?? 0) <=
+                CODE_COLLAB_DIFF_BLOB_LIMITS.remoteHunkBytes
+            )
+              this.rememberDiffManifest(scopeKey, entry);
+            const indexedChange = this.allChanges[entry.path];
+            entries.push({
+              path: entry.path,
+              kind:
+                entry.head === null &&
+                (entry.base !== null || (indexedChange !== true && indexedChange?.del === true))
+                  ? 'deleted'
+                  : entry.status === 'binary'
+                    ? 'binary'
+                    : 'text',
+              ...(entry.add === undefined ? {} : { add: entry.add }),
+              ...(entry.del === undefined ? {} : { del: entry.del }),
+              diff:
+                entry.status === 'ok'
+                  ? {
+                      status: 'deferred',
+                      contentKey: JSON.stringify([
+                        entry.base?.key ?? null,
+                        entry.head?.key ?? null,
+                      ]),
+                    }
+                  : await manifestEntryToDiff(entry, async () => {
+                      throw new Error('Unexpected body read.');
+                    }),
+            });
+          }
+          cursor = result.nextCursor ?? undefined;
+          if (cursor) {
+            if (seen.has(cursor))
+              throw new DiffBlobReadError('stale', 'Diff manifest cursor did not advance.');
+            seen.add(cursor);
+          }
+        } while (cursor);
+        return { status: 'ready', entries, base: base ?? 'diff-store', truncated: false };
+      } catch (error) {
+        this.diffManifestEntries.clear();
+        if (error instanceof DiffBlobReadError && error.code === 'stale' && attempt === 0) continue;
+        return {
+          status: 'unavailable',
+          reason:
+            error instanceof DiffBlobReadError
+              ? errorCodeToUnavailableReason(error.code)
+              : 'transient-io',
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    return { status: 'unavailable', reason: 'transient-io' };
   }
 
   private async getTurnDiff(path: string, turnId: string): Promise<SessionFileDiffResult> {
@@ -747,6 +1077,7 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
   }
 
   async listChangedFiles(): Promise<SessionFileChangedFilesResult> {
+    if (this.branchChangeFiles) return { status: 'ready', files: this.branchChangeFiles };
     return {
       status: 'ready',
       files: Object.entries(this.allChanges)
@@ -771,7 +1102,69 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
     };
   }
 
-  async getAllChangesDiff(focusPath?: string): Promise<SessionFileAllChangesDiffResult> {
+  async refreshChangedFiles(signal?: AbortSignal): Promise<SessionFileChangedFilesResult> {
+    const result = await this.getAllChangesDiff(undefined, undefined, signal);
+    signal?.throwIfAborted();
+    if (result.status === 'unavailable') return result;
+    return this.listChangedFiles();
+  }
+
+  subscribeChangedFiles(listener: () => void): () => void {
+    this.changedFileSubscribers.add(listener);
+    return () => {
+      this.changedFileSubscribers.delete(listener);
+    };
+  }
+
+  private publishBranchChanges(
+    entries: readonly SessionFileAllChangesDiffEntry[],
+    request: number
+  ): void {
+    if (
+      (request !== this.branchChangesRequest && this.branchChangeFiles !== undefined) ||
+      this.diffCacheEpoch !== this.diffBlobCache.epoch
+    )
+      return;
+    const files = entries
+      .map((entry): SessionFileChangeEntry => ({
+        path: entry.path,
+        fileId: entry.path,
+        sourceState: this.sourceState,
+        kind:
+          entry.kind ??
+          (entry.diff.status === 'ready' &&
+          entry.diff.newSnapshot.kind === 'unavailable' &&
+          entry.diff.newSnapshot.reason === 'deleted'
+            ? 'deleted'
+            : 'text'),
+        ...(entry.add === undefined ? {} : { add: entry.add }),
+        ...(entry.del === undefined ? {} : { del: entry.del }),
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    // A repeated manifest must not cause a sidebar -> panel -> manifest feedback loop.
+    if (JSON.stringify(files) === JSON.stringify(this.branchChangeFiles)) return;
+    this.branchChangeFiles = files;
+    for (const listener of this.changedFileSubscribers) listener();
+  }
+
+  async getAllChangesDiff(
+    focusPath?: string,
+    scope?: CodeCollabAllChangesScope,
+    signal?: AbortSignal
+  ): Promise<SessionFileAllChangesDiffResult> {
+    const branchRequest =
+      scope === undefined || scope === 'branch' ? ++this.branchChangesRequest : undefined;
+    const result = await this.readAllChangesDiff(focusPath, scope, signal);
+    if (result.status === 'ready' && !signal?.aborted && branchRequest !== undefined)
+      this.publishBranchChanges(result.entries, branchRequest);
+    return result;
+  }
+
+  private async readAllChangesDiff(
+    focusPath?: string,
+    scope?: CodeCollabAllChangesScope,
+    signal?: AbortSignal
+  ): Promise<SessionFileAllChangesDiffResult> {
     if (!this.runtime) {
       return {
         status: 'unavailable',
@@ -779,7 +1172,29 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
         message: this.message ?? CODE_COLLAB_V2_UNAVAILABLE_MESSAGE,
       };
     }
-    const response = await this.runtime.openAllChangesDiff(focusPath);
+    if (this.runtime.openDiffManifest && this.runtime.readDiffBlob) {
+      let config:
+        | Awaited<
+            ReturnType<
+              NonNullable<CodeCollabSessionFileProviderRuntime['diffBlobTransportOptions']>
+            >
+          >
+        | undefined;
+      try {
+        config = await this.runtime.diffBlobTransportOptions?.();
+      } catch (error) {
+        return {
+          status: 'unavailable',
+          reason: 'transient-io',
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+      this.blobReadsSupported = config?.supported === true;
+      if (config?.supported) return await this.getBlobAllChanges(focusPath, scope, signal);
+    }
+    const response = await (scope === undefined
+      ? this.runtime.openAllChangesDiff(focusPath)
+      : this.runtime.openAllChangesDiff(focusPath, scope));
     if (!response) {
       return {
         status: 'unavailable',
@@ -798,6 +1213,9 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
       return {
         status: 'unavailable',
         reason: response.reason === 'transient_io' ? 'transient-io' : 'metadata-only',
+        ...(response.reason === 'not_a_git_worktree' || response.reason === 'no_commits'
+          ? { scopeReason: response.reason }
+          : {}),
         message: response.message ?? response.reason,
       };
     }
@@ -997,6 +1415,7 @@ function filePreviewErrorCodeToUnavailableReason(
     case 'path_not_allowed':
     case 'invalid_path':
       return 'permission-denied';
+    case 'unsupported_protocol':
     case 'session_not_found':
     case 'workspace_root_unavailable':
       return 'metadata-only';
@@ -1030,7 +1449,7 @@ async function decodeFilePreviewText(
 }
 
 function errorCodeToUnavailableReason(
-  code: CodeCollabV2Error['code']
+  code: string
 ): SessionFileOpenResult extends infer TResult
   ? TResult extends { status: 'unavailable'; reason: infer TReason }
     ? TReason
@@ -1066,6 +1485,8 @@ function currentDiffUnavailableReasonToContentReason(
   switch (reason) {
     case 'base_unavailable':
     case 'not_changed':
+    case 'not_a_git_worktree':
+    case 'no_commits':
       return 'metadata-only';
     case 'unsupported_binary':
       return 'unsupported-special';

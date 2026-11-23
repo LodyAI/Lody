@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Provider, createStore, type Store } from 'jotai';
+import { atom, Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitHubCheckRunsSummary, GitHubPullRequestDetails, WorkspaceId } from '@lody/shared';
 
@@ -16,14 +15,16 @@ const mocks = vi.hoisted(() => {
 
   return {
     markReadyForReview: vi.fn(),
+    mergePullRequest: vi.fn(),
     refresh: vi.fn(),
     toastError: vi.fn(),
     useGitHubPrDetails: vi.fn(),
+    useGitHubPrDiff: vi.fn(),
     ReadyForReviewStillDraftError,
   };
 });
 
-vi.mock('@posthog/react', () => ({
+vi.mock('@/lib/posthog-context', () => ({
   usePostHog: () => null,
 }));
 
@@ -33,13 +34,15 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: mocks.toastError,
   },
 }));
 
 vi.mock('@/lib/github-token', () => ({
+  isGitHubOperationTokenConnectionLostError: (error: unknown) =>
+    error instanceof Error && error.message === 'Connection lost while action was in flight',
   isGitHubUnauthorizedTokenError: (error: unknown) =>
     Boolean(
       error &&
@@ -50,6 +53,8 @@ vi.mock('@/lib/github-token', () => ({
 }));
 
 vi.mock('../src/lib/github-token', () => ({
+  isGitHubOperationTokenConnectionLostError: (error: unknown) =>
+    error instanceof Error && error.message === 'Connection lost while action was in flight',
   isGitHubUnauthorizedTokenError: (error: unknown) =>
     Boolean(
       error &&
@@ -69,8 +74,13 @@ vi.mock('../src/hooks/use-github-pr-details', () => ({
   useGitHubPrDetails: mocks.useGitHubPrDetails,
 }));
 
+vi.mock('@/hooks/use-github-pr-diff', () => ({
+  useGitHubPrDiff: mocks.useGitHubPrDiff,
+}));
+
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { PrTabContainer } from '../src/components/sessions/pr-tab-container';
+import { resolveConflictsActionAtomFamily } from '../src/components/sessions/session-pr-agent-action';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -108,8 +118,54 @@ const checkRuns: GitHubCheckRunsSummary = {
   runs: [],
 };
 
+const mergeablePullRequest: GitHubPullRequestDetails = {
+  ...pullRequest,
+  draft: false,
+  mergeable: true,
+  mergeableState: 'clean',
+};
+
+const conflictedPullRequest: GitHubPullRequestDetails = {
+  ...mergeablePullRequest,
+  mergeable: false,
+  mergeableState: 'dirty',
+};
+
+const dispatchedSessionAtom = atom<string | null>(null);
+
 function createAuthError(): Error {
   return new Error('Not authenticated. Please sign in.');
+}
+
+function createPrDetailsResult(pr: GitHubPullRequestDetails = pullRequest) {
+  return {
+    canWrite: true,
+    state: 'ready' as const,
+    data: {
+      pullRequest: pr,
+      reviewThreads: [],
+      reviews: [],
+      issueComments: [],
+      checkRuns,
+    },
+    error: null,
+
+    checksPermissionError: false,
+    isRevalidating: false,
+    refresh: mocks.refresh,
+    refreshCheckRuns: vi.fn().mockResolvedValue(null),
+    postComment: vi.fn(),
+    isPostingComment: false,
+    mergePullRequest: mocks.mergePullRequest,
+    isMerging: false,
+    setPullRequestState: vi.fn(),
+    isUpdatingState: false,
+    markReadyForReview: mocks.markReadyForReview,
+    isMarkingReady: false,
+    deleteBranch: vi.fn(),
+    isDeletingBranch: false,
+    branchExists: null,
+  };
 }
 
 async function flushPromises(): Promise<void> {
@@ -126,38 +182,26 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
 
   beforeEach(() => {
     mocks.markReadyForReview.mockReset();
+    mocks.mergePullRequest.mockReset();
     mocks.refresh.mockReset();
     mocks.toastError.mockReset();
     mocks.useGitHubPrDetails.mockReset();
+    mocks.useGitHubPrDiff.mockReset();
 
     store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
     mocks.refresh.mockResolvedValue(null);
-    mocks.useGitHubPrDetails.mockReturnValue({
-      state: 'ready',
-      data: {
-        pullRequest,
-        reviewThreads: [],
-        reviews: [],
-        issueComments: [],
-        checkRuns,
-      },
+    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult());
+    mocks.useGitHubPrDiff.mockReturnValue({
+      state: 'idle',
+      commits: [],
+      files: [],
+      range: null,
+      mergeBaseSha: null,
       error: null,
-      checksPermissionError: false,
-      isRevalidating: false,
-      refresh: mocks.refresh,
-      refreshCheckRuns: vi.fn().mockResolvedValue(null),
-      postComment: vi.fn(),
-      isPostingComment: false,
-      mergePullRequest: vi.fn(),
-      isMerging: false,
-      setPullRequestState: vi.fn(),
-      isUpdatingState: false,
-      markReadyForReview: mocks.markReadyForReview,
-      isMarkingReady: false,
-      deleteBranch: vi.fn(),
-      isDeletingBranch: false,
-      branchExists: null,
+      contentByPath: new Map(),
+      refresh: vi.fn().mockResolvedValue(undefined),
+      loadFile: vi.fn().mockResolvedValue(undefined),
     });
 
     container = document.createElement('div');
@@ -181,7 +225,7 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     await act(async () => {
       root?.render(
         <Provider store={store}>
-          <PrTabContainer repoFullName="loro-dev/lody" prNumber={42} />
+          <PrTabContainer repoFullName="loro-dev/lody" prNumber={42} actionSessionId={null} />
         </Provider>
       );
     });
@@ -197,37 +241,101 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     return button;
   }
 
-  it('refreshes once and retries without showing a toast on the first auth failure', async () => {
-    mocks.markReadyForReview
-      .mockRejectedValueOnce(createAuthError())
-      .mockResolvedValueOnce(undefined);
-    await renderContainer();
+  function getMergeButton(): HTMLButtonElement {
+    const button = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? []).find(
+      (node) => node.textContent?.includes('Merge')
+    );
+    if (!button) {
+      throw new Error('Expected merge button');
+    }
+    return button;
+  }
 
-    await act(async () => {
-      getReadyButton().click();
+  function getResolveConflictsButton(): HTMLButtonElement {
+    const button = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? []).find(
+      (node) => node.textContent?.includes('Resolve conflicts')
+    );
+    if (!button) {
+      throw new Error('Expected resolve-conflicts button');
+    }
+    return button;
+  }
+
+  it('shows public PR details without mutation controls or a comment composer', async () => {
+    mocks.useGitHubPrDetails.mockReturnValue({
+      ...createPrDetailsResult(mergeablePullRequest),
+      canWrite: false,
     });
-    await flushPromises();
-
-    expect(mocks.refresh).toHaveBeenCalledTimes(1);
-    expect(mocks.markReadyForReview).toHaveBeenCalledTimes(2);
-    expect(mocks.toastError).not.toHaveBeenCalled();
+    await renderContainer();
+    expect(container?.textContent).toContain(mergeablePullRequest.title);
+    expect(
+      Array.from(container?.querySelectorAll('button') ?? []).some(
+        (button) =>
+          /Merge|Close pull request|Ready for review|Delete branch/.test(
+            button.textContent ?? ''
+          ) && !button.disabled
+      )
+    ).toBe(false);
+    expect(container?.querySelector('textarea')).toBeNull();
   });
 
-  it('shows the ready-for-review toast when the retry still fails', async () => {
-    mocks.markReadyForReview
-      .mockRejectedValueOnce(createAuthError())
-      .mockRejectedValueOnce(new Error('still unauthorized'));
-    await renderContainer();
+  it('dispatches conflict resolution to the selected child while retaining the PR owner for queries', async () => {
+    store.set(resolveConflictsActionAtomFamily('root-session'), {
+      available: true,
+      pending: false,
+      run: () => store.set(dispatchedSessionAtom, 'root-session'),
+    });
+    store.set(resolveConflictsActionAtomFamily('child-session'), {
+      available: true,
+      pending: false,
+      run: () => store.set(dispatchedSessionAtom, 'child-session'),
+    });
+    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult(conflictedPullRequest));
 
     await act(async () => {
-      getReadyButton().click();
+      root?.render(
+        <Provider store={store}>
+          <PrTabContainer
+            repoFullName="loro-dev/lody"
+            prNumber={42}
+            sessionId="root-session"
+            actionSessionId="child-session"
+          />
+        </Provider>
+      );
     });
-    await flushPromises();
 
-    expect(mocks.refresh).toHaveBeenCalledTimes(1);
-    expect(mocks.markReadyForReview).toHaveBeenCalledTimes(2);
-    expect(mocks.toastError).toHaveBeenCalledWith('Failed to mark as ready for review', {
-      description: 'still unauthorized',
+    expect(mocks.useGitHubPrDetails.mock.calls.at(-1)?.[0].sessionId).toBe('root-session');
+    await act(async () => getResolveConflictsButton().click());
+    expect(store.get(dispatchedSessionAtom)).toBe('child-session');
+  });
+
+  it('does not expose or dispatch the root action without an execution target', async () => {
+    store.set(resolveConflictsActionAtomFamily('root-session'), {
+      available: true,
+      pending: false,
+      run: () => store.set(dispatchedSessionAtom, 'root-session'),
     });
+    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult(conflictedPullRequest));
+
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <PrTabContainer
+            repoFullName="loro-dev/lody"
+            prNumber={42}
+            sessionId="root-session"
+            actionSessionId={null}
+          />
+        </Provider>
+      );
+    });
+
+    expect(
+      Array.from(container?.querySelectorAll('button') ?? []).some((button) =>
+        button.textContent?.includes('Resolve conflicts')
+      )
+    ).toBe(false);
+    expect(store.get(dispatchedSessionAtom)).toBeNull();
   });
 });

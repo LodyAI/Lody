@@ -1,15 +1,19 @@
 import { EphemeralStore, type Value } from 'loro-crdt';
 import {
   LODY_PRESENCE_HEARTBEAT_MS,
+  MinimalLodyPresenceStateSchema,
   LODY_PRESENCE_TTL_MS,
+  getLodyDesktopForegroundPresenceKey,
   getLodySessionViewingPresenceKey,
   getServerNow,
   parseLodyPresenceStates,
   toLodyPresenceStreamUrl,
+  type LodyDesktopForegroundPresenceState,
   type LodyPresenceInstanceId,
   type LodyPresenceStateMap,
   type LodySessionViewingPresenceState,
   type LoroStreamsPresenceShardId,
+  type LoroStreamsWebSocketOptions,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -17,9 +21,22 @@ import {
   EphemeralRoomTransport,
   type EphemeralRoomAuthCallback,
   type EphemeralRoomBaseOptions,
+  type EphemeralRoomStartArgs,
   type EphemeralRoomStoreLike,
   type EphemeralRoomTransportLike,
 } from './ephemeral-room-transport';
+import type { RoomSyncState } from '@/lib/room-sync-state';
+
+/**
+ * How long a synced presence room's DISPLAY state survives an in-place
+ * reconnect. The Streams SDK reports `reconnecting` whenever its SSE read loop
+ * recycles (a routine server-side stream recycle qualifies), even though the
+ * retained store still holds the last applied snapshot. The raw state must keep
+ * driving recovery immediately; the UI must not blink every machine's "Offline"
+ * pill for the milliseconds a reconnect takes. A store-replacing restart and
+ * every terminal state bypass this window because the snapshot is gone/unknown.
+ */
+export const PRESENCE_SYNC_DISPLAY_GRACE_MS = 5_000;
 
 export type PresenceStoreLike = EphemeralRoomStoreLike & {
   set(key: string, value: Value): void;
@@ -42,16 +59,19 @@ export type WorkspacePresenceDebugGlobal = {
 
 export type WorkspacePresenceTransportOptions = EphemeralRoomBaseOptions & {
   onSnapshot?: (states: LodyPresenceStateMap) => void;
+  minimal?: boolean;
   createStore?: () => PresenceStoreLike;
   createTransport?: (args: {
     streamUrl: string;
     auth: PresenceAuthCallback;
     store: PresenceStoreLike;
+    webSocket?: LoroStreamsWebSocketOptions;
   }) => PresenceTransportLike;
 };
 
 export type WorkspacePresenceTransportStartOptions = {
   baseUrl: string;
+  webSocketEnabled?: boolean;
   auth: PresenceAuthCallback;
   shardHostSuffix?: string;
 };
@@ -65,7 +85,89 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
   private lastSnapshotAtMs: number | null = null;
   private readonly viewingInstanceId = createViewingInstanceId();
   private viewing: { sessionId: SessionId; userId: string; since: number } | null = null;
+  private desktopForegroundUserId: string | null = null;
   private viewingHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** UI-facing liveness state: the raw state, held through a brief in-place reconnect. */
+  private displaySyncState: RoomSyncState = 'idle';
+  private displayGraceTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly displaySyncStateListeners = new Set<(state: RoomSyncState) => void>();
+  /**
+   * `start()` replaces the store, so its state is unconfirmed until the new join
+   * bootstraps. Never let the display grace cover that: consumers keep the last
+   * delivered snapshot, but unlike an SSE recycle this room cannot speak for it.
+   */
+  private replacingStore = false;
+  /**
+   * A replacement store holds nothing but local writes until 'joined', and
+   * delivering it would tell every consumer that all machines vanished. The last
+   * delivered snapshot stands meanwhile; its entries still age out by `updatedAt`.
+   */
+  private awaitingJoinedSnapshot = false;
+  private consumersHoldSnapshot = false;
+  private retainSnapshotOnStop = false;
+
+  /**
+   * Presence health as the UI should read it. This equals the raw transport
+   * state except during a brief in-place reconnect, when the last synced state
+   * still describes the retained snapshot. Recovery and reconnect decisions
+   * must use {@link getSyncState} / {@link subscribeSyncState} instead.
+   */
+  getDisplaySyncState(): RoomSyncState {
+    return this.displaySyncState;
+  }
+
+  subscribeDisplaySyncState(listener: (state: RoomSyncState) => void): () => void {
+    this.displaySyncStateListeners.add(listener);
+    listener(this.displaySyncState);
+    return () => {
+      this.displaySyncStateListeners.delete(listener);
+    };
+  }
+
+  override start(args: EphemeralRoomStartArgs): void {
+    this.replacingStore = true;
+    this.awaitingJoinedSnapshot = this.consumersHoldSnapshot;
+    try {
+      super.start(args);
+    } finally {
+      this.replacingStore = false;
+    }
+  }
+
+  protected override setSyncState(next: RoomSyncState): void {
+    super.setSyncState(next);
+    this.advanceDisplaySyncState(next);
+  }
+
+  private advanceDisplaySyncState(next: RoomSyncState): void {
+    this.clearDisplayGrace();
+    const briefRecovery = next === 'connecting' || next === 'reconnecting';
+    if (this.displaySyncState === 'synced' && briefRecovery && !this.replacingStore) {
+      this.displayGraceTimer = setTimeout(() => {
+        this.displayGraceTimer = null;
+        // The raw state may have moved on without a status event; publish what
+        // it is now, and let a concurrent `synced` win (the snapshot is back).
+        const current = this.getSyncState();
+        if (current !== 'synced') this.publishDisplaySyncState(current);
+      }, PRESENCE_SYNC_DISPLAY_GRACE_MS);
+      return;
+    }
+    this.publishDisplaySyncState(next);
+  }
+
+  private publishDisplaySyncState(next: RoomSyncState): void {
+    if (this.displaySyncState === next) return;
+    this.displaySyncState = next;
+    for (const listener of Array.from(this.displaySyncStateListeners)) {
+      listener(next);
+    }
+  }
+
+  private clearDisplayGrace(): void {
+    if (this.displayGraceTimer === null) return;
+    clearTimeout(this.displayGraceTimer);
+    this.displayGraceTimer = null;
+  }
 
   shouldRestartOnExternalWake(nowMs: number = Date.now()): boolean {
     const syncState = this.getSyncState();
@@ -86,8 +188,23 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
       if (!this.viewing) return;
       const key = getLodySessionViewingPresenceKey(this.viewing.userId, this.viewingInstanceId);
       this.viewing = null;
-      this.stopViewingHeartbeat();
+      this.stopHeartbeatIfIdle();
       this.store?.delete(key);
+      return;
+    }
+    if (
+      this.options.minimal &&
+      !MinimalLodyPresenceStateSchema.safeParse({
+        kind: 'session-viewing',
+        sessionId: args.sessionId,
+        userId: args.userId,
+        instanceId: this.viewingInstanceId,
+        since: 0,
+        updatedAt: 0,
+      }).success
+    ) {
+      // An unchecked route must not publish text or keep heartbeating the previous session.
+      this.publishSessionViewing(null);
       return;
     }
     if (
@@ -108,7 +225,30 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
     };
     if (previousKey) this.store?.delete(previousKey);
     this.writeViewingEntry();
-    this.startViewingHeartbeat();
+    this.startHeartbeat();
+  }
+
+  /**
+   * Publish (or, with `null`, delete) this app instance's focused-desktop entry
+   * for the signed-in user. Callers own the Electron/focus/setting decision and
+   * must debounce focus flapping; repeated calls with the same user are no-ops.
+   * Like session-viewing, the entry is heartbeated while set, re-asserted on room
+   * start/join and deleted on teardown.
+   */
+  publishDesktopForeground(userId: string | null): void {
+    if (userId === this.desktopForegroundUserId) return;
+    const previousKey =
+      this.desktopForegroundUserId === null
+        ? null
+        : getLodyDesktopForegroundPresenceKey(this.desktopForegroundUserId, this.viewingInstanceId);
+    this.desktopForegroundUserId = userId;
+    if (previousKey) this.store?.delete(previousKey);
+    if (userId === null) {
+      this.stopHeartbeatIfIdle();
+      return;
+    }
+    this.writeDesktopForegroundEntry();
+    this.startHeartbeat();
   }
 
   protected createStore(): PresenceStoreLike {
@@ -119,6 +259,7 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
     streamUrl: string;
     auth: PresenceAuthCallback;
     store: PresenceStoreLike;
+    webSocket?: LoroStreamsWebSocketOptions;
   }): PresenceTransportLike {
     return this.options.createTransport?.(args) ?? super.createTransport(args);
   }
@@ -127,50 +268,105 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
     return toLodyPresenceStreamUrl(durableStreamUrl);
   }
 
+  /**
+   * `retainSnapshot` is for a stop that a restart follows immediately: consumers
+   * keep the last snapshot until the next room joins. Every other stop clears it.
+   */
+  override stop(options: { retainSnapshot?: boolean } = {}): Promise<void> {
+    this.retainSnapshotOnStop = options.retainSnapshot === true;
+    return super.stop();
+  }
+
   protected onStoreChange(store: PresenceStoreLike): void {
+    if (this.awaitingJoinedSnapshot) return;
     this.lastSnapshotAtMs = Date.now();
-    this.options.onSnapshot?.(parseLodyPresenceStates(store.getAllStates()));
+    this.consumersHoldSnapshot = true;
+    this.options.onSnapshot?.(
+      parseLodyPresenceStates(store.getAllStates(), { minimal: this.options.minimal })
+    );
   }
 
   protected override onRoomStarted(store: PresenceStoreLike): void {
     this.exposeDebugGlobal();
     // Fresh store per start: re-assert local state and restart its heartbeat.
-    this.writeViewingEntry();
-    this.startViewingHeartbeat();
+    this.writeLocalEntries();
+    this.startHeartbeat();
     this.onStoreChange(store);
   }
 
   protected override onJoined(store: PresenceStoreLike): void {
     // Local writes may have raced the join; re-assert once the room is live.
-    this.writeViewingEntry();
+    this.writeLocalEntries();
+    this.awaitingJoinedSnapshot = false;
     super.onJoined(store);
   }
 
   protected override onBeforeTeardown(): void {
-    this.stopViewingHeartbeat();
+    this.stopHeartbeat();
     if (this.viewing) {
       this.store?.delete(
         getLodySessionViewingPresenceKey(this.viewing.userId, this.viewingInstanceId)
+      );
+    }
+    if (this.desktopForegroundUserId !== null) {
+      this.store?.delete(
+        getLodyDesktopForegroundPresenceKey(this.desktopForegroundUserId, this.viewingInstanceId)
       );
     }
   }
 
   protected override onBeforeStop(): void {
     this.lastSnapshotAtMs = null;
-    this.options.onSnapshot?.({});
+    this.awaitingJoinedSnapshot = true;
+    if (!this.retainSnapshotOnStop) {
+      this.consumersHoldSnapshot = false;
+      this.options.onSnapshot?.({});
+    }
+    this.retainSnapshotOnStop = false;
   }
 
-  private startViewingHeartbeat(): void {
-    if (!this.viewing || this.viewingHeartbeatTimer) return;
+  /** One shared 30s timer refreshes every locally owned entry. */
+  private startHeartbeat(): void {
+    if (this.viewingHeartbeatTimer) return;
+    if (!this.viewing && this.desktopForegroundUserId === null) return;
     this.viewingHeartbeatTimer = setInterval(() => {
-      this.writeViewingEntry();
+      this.writeLocalEntries();
     }, LODY_PRESENCE_HEARTBEAT_MS);
   }
 
-  private stopViewingHeartbeat(): void {
+  private stopHeartbeatIfIdle(): void {
+    if (this.viewing || this.desktopForegroundUserId !== null) return;
+    this.stopHeartbeat();
+  }
+
+  private stopHeartbeat(): void {
     if (!this.viewingHeartbeatTimer) return;
     clearInterval(this.viewingHeartbeatTimer);
     this.viewingHeartbeatTimer = null;
+  }
+
+  private writeLocalEntries(): void {
+    this.writeViewingEntry();
+    this.writeDesktopForegroundEntry();
+  }
+
+  private writeDesktopForegroundEntry(): void {
+    if (!this.store || this.desktopForegroundUserId === null) return;
+    const state: LodyDesktopForegroundPresenceState = {
+      kind: 'desktop-foreground',
+      userId: this.desktopForegroundUserId,
+      instanceId: this.viewingInstanceId,
+      updatedAt: getServerNow(),
+    };
+    const minimal = this.options.minimal
+      ? MinimalLodyPresenceStateSchema.safeParse(state)
+      : undefined;
+    // An identity outside the encrypted allowlist publishes nothing (the Host then sends).
+    if (minimal && !minimal.success) return;
+    this.store.set(
+      getLodyDesktopForegroundPresenceKey(this.desktopForegroundUserId, this.viewingInstanceId),
+      (minimal?.data ?? state) as unknown as Value
+    );
   }
 
   private writeViewingEntry(): void {
@@ -183,9 +379,13 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
       since: this.viewing.since,
       updatedAt: getServerNow(),
     };
+    const minimal = this.options.minimal
+      ? MinimalLodyPresenceStateSchema.safeParse(state)
+      : undefined;
+    if (minimal && !minimal.success) return;
     this.store.set(
       getLodySessionViewingPresenceKey(this.viewing.userId, this.viewingInstanceId),
-      state as unknown as Value
+      (minimal?.data ?? state) as unknown as Value
     );
   }
 
@@ -213,13 +413,17 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
         return owner.store?.getAllStates() ?? {};
       },
       getParsedStates() {
-        return parseLodyPresenceStates(owner.store?.getAllStates() ?? {});
+        return parseLodyPresenceStates(owner.store?.getAllStates() ?? {}, {
+          minimal: owner.options.minimal,
+        });
       },
       subscribe(listener) {
         const store = owner.store;
         if (!store) return () => {};
         return store.subscribe(() => {
-          listener(parseLodyPresenceStates(store.getAllStates()));
+          listener(
+            parseLodyPresenceStates(store.getAllStates(), { minimal: owner.options.minimal })
+          );
         });
       },
     };

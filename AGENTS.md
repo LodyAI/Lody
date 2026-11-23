@@ -1,134 +1,155 @@
-# Repository guidelines
+# Repository rules
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-## Context maintenance
+## Where to read
 
-Read every `AGENTS.md` from the repository root to the file being changed.
-Record public contributor invariants in the narrowest relevant `AGENTS.md`.
-Internal context, plans, specifications, and task records stay in the private
-repository. Keep each `AGENTS.md` under 8 KiB and add a matching `CLAUDE.md`
-symlink for new scoped files.
+Read the ancestor and scoped `AGENTS.md` files for the paths you change, then
+the Specs, `.agents/docs/` pages, module READMEs, and the notes they link.
+Search notes before reversing a recorded decision. Triggers below also bind
+callers outside the owner's directory. [README.md](README.md#repository) lists
+directories and is not the rule source. Archives are history, not current authority.
+
+- Encrypted workspaces, account pairing, recovery, ledger identity, key delivery,
+  machine sharing, or execution during a backend outage: read
+  [platform E2EE](packages/platform/AGENTS.md#e2ee-workspace-control),
+  [e2ee-core](packages/e2ee-core/AGENTS.md), and the
+  [bootstrap guide](.agents/docs/e2ee-workspace-bootstrap.md). Personal-device
+  hosts also read [e2ee-client](packages/e2ee-client/AGENTS.md). Machine-service
+  policy also reads [e2ee-machine-sharing](packages/e2ee-machine-sharing/AGENTS.md).
+- Adding or changing Loro Streams stream IDs, buckets, or token scopes: read
+  [Loro Streams UserSpace](.agents/docs/loro-streams-user-space.md).
+- Session history, quotes, steer, queued input, delegation, or MCP/Role catalogs
+  and their UI: read [shared contracts](packages/shared/AGENTS.md). MCP tool
+  acceptance and replies also read [CLI MCP](apps/cli/src/mcp/AGENTS.md).
+- Automations, including external checks and cross-session control: read
+  [automations](apps/cli/src/automations/AGENTS.md).
+- Native iOS or Android: read [mobile](apps/mobile/AGENTS.md), then that platform's file.
+- Desktop composition, packaging, quit, or the embedded CLI: read
+  [electron](apps/electron/AGENTS.md).
+- Provider authentication, Lody Agent connections, or advertised ACP sign-in: read
+  [agent](apps/cli/src/agent/AGENTS.md) and
+  [Lody Agent setup](packages/components/src/components/settings/README.md#lody-agent-setup).
+- Code Collab diffs or content-addressed snapshots: read
+  [turn-diff-store](packages/turn-diff-store/AGENTS.md) and
+  [code-collab](apps/cli/src/lib/code-collab/AGENTS.md).
+- Composition, capability-gated settings, telemetry, or managed-runtime downloads:
+  read [platform contracts](packages/platform/AGENTS.md).
+
+## Context and documentation
+
+- A note you rely on that is stale, unlinked, or in the wrong lifecycle is fixed in
+  the same PR ([maintenance on read](.agents/notes/AGENTS.md#maintenance-on-read)).
+- Specs express intent, docs explain implementation, notes record decisions.
+  Distinguish bugs, stale docs, and unimplemented intent using code and evidence;
+  never change a Spec to justify a bug.
+- Before creating or editing a Spec, read [Spec rules](specs/AGENTS.md). Reserve
+  Specs for consequential decisions that need human review, and prefer an existing
+  Spec. Ordinary fixes need no new Spec.
+- Add or update an [Agent Note](.agents/notes/AGENTS.md#when-to-write) in the same
+  PR only for durable rationale. A fix that is merely done belongs in its PR and
+  test. Every new note runs the [supersession check](.agents/notes/AGENTS.md#supersession);
+  keep implemented notes' cited facts current, and report deferred notes for read-only work.
+- Update affected docs and READMEs. Run `pnpm run docs status` at start and
+  `pnpm run docs check` at finish, and review SHA-protected changes before confirming.
+  Checks and translations establish neither correctness nor approval. See
+  [document maintenance](.agents/README.md).
+- Keep PR docs compact: consolidate decisions, evidence and limits; avoid fix/run logs.
+  Follow [submission consolidation](.agents/AGENTS.md#documentation-at-submission).
+- Keep binding rules in the nearest `AGENTS.md` as complete sentences (new scopes
+  need a `CLAUDE.md` symlink); over a [word ceiling](.agents/README.md#word-ceilings),
+  relocate a topic or raise the ceiling with a reason, never compress into fragments.
+  Keep explanations and rationale in their owning docs/notes.
+
+## Effect reference
+
+For Effect work, use the [Effect skill](.agents/skills/effect-ts/SKILL.md) to select
+review, debug, feature/fix or migration mode, including its version-matched
+`effect/AGENTS.md` read. Explicit v3 migrations also use the
+[migration skill](.agents/skills/effect-v3-to-v4/SKILL.md).
+
+Lifecycle code is moving to native Effect v4. When a feature or fix touches an
+effectful module, assess a small native migration and prefer it in the same PR
+when it directly helps, real dependencies are ready, and the unit stays reviewable.
+Do not extend it into unfinished dependency chains. Pure computation stays ordinary.
+Scope, the sizing guide, and completion criteria are in the
+[selection guide](.agents/docs/cli-effect-ts.md#small-migrations-during-feature-and-fix-work).
+Update the [charter ledger](.agents/notes/proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger)
+when migration facts change.
 
 ## Repository boundary
 
-This is the standalone public source tree. It includes `apps/{cli,electron}`
-and the packages they consume. It intentionally excludes hosted backend
-implementations, deployment/operator configuration, billing operations,
-private service secrets, and the Web and mobile app sources.
+- Public source: `apps/{cli,electron,mobile}` and their packages. Exclude hosted backends,
+  operator/billing config, private secrets/records, and private Web app sources.
+  Never commit captured user/agent transcripts; fixtures must be synthetic.
+- Never depend on `@lody/convex`, private workspace packages, or generated backend
+  API declarations. Optional-cloud protocol names/DTOs belong in `packages/cloud-api`;
+  shared product code uses `packages/platform` capabilities and ports.
+- Native mobile clients keep independent builds and public cloud protocol clients;
+  they must not import private backend code.
+- Default desktop builds are local-only; product-cloud requests require explicit cloud composition.
+  Public managed-runtime downloads are the exception. Shared packages stay
+  platform-neutral; local telemetry is hard-disabled.
+- `packages/acp-extension-kimi` and `packages/acp-extension-pi` stay outside the root
+  pnpm graph as isolated submodules. Consume each only through its separately built,
+  checksummed managed runtime and the versioned ACP contract. Shared ACP extension
+  contracts belong in the public `LodyAI/acp-extension-core` submodule, consumed
+  through the root workspace; never duplicate them locally.
+- Before changing Magpie import or builtin Pi migration, read
+  [Magpie](specs/magpie-provider-import.md) and [builtin Pi](specs/builtin-pi.md).
+  Keep their confirmation, loopback, identity, and catalog constraints.
+- Viewer packaging/version changes must follow its [rules](packages/code-review-viewer/AGENTS.md).
+  Package-scope or cloud/local composition changes require `pnpm check:public-boundary`.
 
-- Never add a dependency on `@lody/convex`, a private workspace package, or a
-  generated backend API declaration.
-- Public optional-cloud protocol names/DTOs live in `packages/cloud-api`.
-- Shared product code uses `packages/platform` capabilities and ports.
-- Settings must represent real platform support: local hides cloud usage and
-  PR-driven auto-archive, and omits machine selection when `remoteMachines` is
-  absent. Gate entries and their background work through capabilities rather
-  than build-kind or environment checks.
-- Shared packages stay platform-neutral. The public Electron composition
-  selects `local` explicitly; private Web/mobile entries and cloud composition
-  roots may inject `cloud` without forking those shared packages.
-- The code-review-viewer build accepts `LODY_RELEASE_VERSION` for downstream
-  immutable packaging; without it, the public package version is authoritative.
-- The OSS desktop entry is local-only and must not make authenticated product-cloud requests;
-  public managed-runtime artifact downloads are the explicit exception.
-- An absent platform selector resolves to `local`; public build scripts must
-  not accept or discover staging/production deployment presets.
-- Local CLI, renderer, and Electron-main telemetry is hard-disabled even when
-  unrelated PostHog variables exist in the caller's shell.
-- Client workflows that require daemon support negotiate integer protocol versions through
-  `MachineMeta.protocolCapabilities`; never infer support from the CLI release version. Missing
-  capabilities mean legacy/unsupported. Advertised set and version checks share one binding in
-  `packages/shared/src/machine-protocol-capabilities.ts` so a key never travels without its version.
-- Managed runtime downloads default to the public R2-backed channel owned by
-  `packages/platform/src/runtime-artifacts.ts`; local and cloud assembly must use that
-  same constant. `LODY_RUNTIME_BASE_URL` is only an explicit mirror override.
-- `packages/acp-extension-kimi` is an isolated submodule workspace. Do not add it
-  to the root pnpm dependency graph; Lody consumes only its separately built,
-  checksummed managed-runtime artifact and versioned ACP extension contract.
-- `packages/acp-extension-core` is a public submodule workspace sourced from
-  `LodyAI/acp-extension-core`. Keep shared ACP extension contracts there and consume
-  them through the root pnpm workspace; do not duplicate those contracts locally.
-- Never commit captured user/agent transcripts; fixtures must be synthetic.
-- Workspace MCP has exactly two durable layers: catalog entries in the workspace Flock
-  document and selected ids in each user turn input config. Do not add machine bindings.
-  Preserve `mcpServerIds: []` as an explicit empty selection; dispatch must carry the
-  driving turn's selection into ACP startup rather than rereading session history.
-- Workspace catalog mutations (MCP servers and Agent Roles) are durable on the local
-  Flock write and shared by an explicit upload that follows it. Settings surfaces resolve
-  on durability and do not wait on or report that upload: the row already exists, the
-  joined room carries the document when a one-shot upload cannot, and a banner about it is
-  something the user can neither act on nor dismiss. What is forbidden is the opposite —
-  reporting a durable write as failed, or rolling one back, because the upload did not go
-  through. The CLI still reports its own sync result to the terminal.
-- Agent Roles are one `agentRole` row family in the same workspace Flock document, not a
-  private and a shared catalog: sharing is an ordinary update of `visibility` on the row.
-  A Role stores no secret — no API key, MCP selection, or memory — and
-  `isSensitiveAgentRoleConfigOptionKey` is applied on read as well as on write,
-  because a workspace row reaches every member's client. It DOES pin the permission
-  mode, as `runConfig.modeId` for legacy ACP modes or the agent's own `_permission`
-  option: permission is a run-config value the agent publishes, not a secret, and a
-  Role that left it out would not be the whole configuration it claims to be. So the
-  composer drops its separate permission button while such a Role is selected. A Role
-  may therefore pin a warning-tone mode (full access / skip permissions), which every
-  surface that hides the permission control must keep visibly marked; what stays out
-  of scope is a Role-level auto-approval POLICY. Settings and mention discovery use
-  `canReadAgentRole`/`canManageAgentRole`; MCP creation resolves an explicit Role id from
-  the workspace catalog without requiring a mention-scoped authorization record.
-- A Role never falls back. `machineId + agentConfigId` bind the execution site exactly;
-  when the machine, config, or a stored model/mode is unavailable the Role stays listed
-  with the precise reason and stops being mentionable. MCP creation resolves the current
-  workspace catalog row by `agentRoleId` before Operation acceptance; the canonical Prompt,
-  target, Role revision, and dispatch config are frozen into the accepted Operation so a
-  later edit or delete cannot change its recovery or retry. `SessionMeta.agentRoleId` /
-  `agentRoleRevision` record where a Session came from and are display-only.
+## Contributions and checks
 
-`pnpm check:public-boundary` is the executable repository boundary and must pass
-after changing package scope or cloud/local composition.
+- Identify once: Lody team if the user says so or GitHub login is `zxch3n`,
+  `Leeeon233`, or `wibus-wee`; otherwise community. Before planning a community
+  contribution, read [.github/AGENTS.md](.github/AGENTS.md) for size/assignment rules.
+  Read it before any PR/Issue work as well.
+- Use the Node range in `package.json` `engines` and the pnpm version in `packageManager`, with Node-API 10+. See the
+  [runtime security decision](.agents/notes/implemented/bug-fix/2026-10-22-node-security-runtime-floor.md).
+  `pnpm install` (nested checkouts skip it); standalone work uses a separate clone.
+  `pnpm start:local` starts the desktop; root `pnpm build` uses the same local composition.
+- Before commit: `pnpm check` and `pnpm format`. Root packages share `.oxfmtrc.json`;
+  ACP submodules stay independently formatted. If tests are skipped, report
+  type/build/static checks. Manifest changes update `pnpm-lock.yaml`.
+- Packages invoking Oxfmt declare it in their own devDependencies: an embedded
+  parent workspace does not install this repository's root package.
+- Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `test:`. AI commits
+  end with `Model: <runtime-model-id>`.
+- Tests use explicit signals, injected clocks, fake timers, and deterministic
+  fixtures; no real sleeps, wall-clock races, network, machine load, or scheduler
+  luck. Assert observable behavior, not mock call counts.
+- Lody lint, typecheck, formatting and test commands skip all nested ACP adapter submodules (`packages/acp-extension-*` below the public root). Their internal tests are maintained independently; retain Lody-owned integration and packaging checks.
 
-## Project map
+- Keep tests for concrete Lody product, domain, installation, compilation, packaging
+  or release behavior. Generic helper correctness is not sufficient. Delete shallow
+  tests in the changed scope: source-string or regex assertions, mock-call-only
+  checks, and duplicates that cannot catch a behavioral regression. Test the real
+  boundary and resulting state, including failures, and keep compile-failure contracts.
+  Extend the owning suite. Do not add a file per small fix, and do not drop behavioral
+  coverage to reduce counts.
+- Before changing teardown, retry, fencing or readiness, read
+  [failure containment](.agents/docs/failure-containment.md); preserve verified safe
+  reuse and bounded ownership while isolating independent work.
+- Keep edits traceable to the request and preserve unrelated work. Prefer explicit
+  contracts over hidden fallbacks; remove only unused code. Update the nearest
+  public `AGENTS.md` when an invariant or boundary changes.
+- Lody provides tools. Text it sends to agents (quick-action and synthetic prompts,
+  receipts, MCP descriptions and replies, skills, examples) carries the user's request
+  and facts the agent cannot discover. Never add workflow steps or review, verify,
+  re-check or commit instructions, or their negations, that the user did not ask for:
+  each delivery would steer or repeat agent work. Standing guidance the product owner
+  explicitly approves is the only exception, recorded in a note, one sentence per surface.
 
-- `apps/cli`: agent execution, local persistence, Machine RPC, Code Collab
-- `apps/electron`: desktop shell and bundled CLI lifecycle
-- `packages/components`: shared React product/workspace UI
-- `packages/platform`: provider and capability contracts plus local defaults
-- `packages/cloud-api`: public optional-cloud client contract
-- `packages/shared`: schemas, protocols, and cross-runtime utilities
-- `packages/loro-streams-rpc`: public Streams RPC protocol/client
-- `packages/acp-extension-core`: shared public ACP extension contracts
-- `packages/acp-extension-kimi`: independently built Kimi runtime source and Lody ACP extensions
-- `site-docs`: public documentation site
+## Code Review Rules
 
-## Checks and commits
+Report only P0/P1, security first. If the PR solves the linked Issue and no P0/P1
+remains, react 👍. Details: [.github/codex-review.md](.github/codex-review.md).
 
-Use Node.js 22+ and the pnpm version pinned in `package.json`.
-
-- Install dependencies with `pnpm install`.
-- When this checkout is embedded in a parent pnpm workspace, that parent owns
-  dependency installation. The public preinstall guard rejects a second nested
-  install because it would mix virtual-store identities. Use a separate clone
-  for standalone public development.
-- The canonical desktop command is `pnpm start:local`; it rebuilds both the
-  bundled CLI and local OSS renderer before launch. Root `pnpm build` builds
-  the same local desktop composition.
-- Before committing, normally run `pnpm check` and `pnpm format`.
-- If a user explicitly asks to skip tests, do not run test commands; report the
-  narrower type/build/static validation that was performed.
-- Commit subjects use Conventional Commit prefixes such as `feat:`, `fix:`,
-  `docs:`, `chore:`, and `test:`.
-- AI commits end with `Model: <runtime-model-id>`.
-
-## Test quality
-
-Tests must not depend on real sleeps, wall-clock races, network access, machine
-load, or scheduler luck. Use explicit signals, injected clocks, fake timers,
-and deterministic fixtures. Assert observable behavior at the lowest realistic
-boundary, not implementation details or mock call counts.
-
-## Editing discipline
-
-Keep changes traceable to the request. Preserve unrelated user work. Prefer a
-small explicit contract over hidden fallback behavior, and remove only code
-made unused by the current change. Update the nearest public `AGENTS.md`
-whenever an invariant or repository boundary changes. Do not copy internal
-design records into this repository.
+- P0: exploitable security, secret leak, auth/capability bypass, data loss, or a
+  broken public/cloud/local boundary.
+- P1: likely shipped breakage, including a failure-containment regression, or a
+  durable catalog/session contract violation.
+- Skip style, nits, P2+, extra tests, and duplication under 100 lines.

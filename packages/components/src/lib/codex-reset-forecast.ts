@@ -1,15 +1,15 @@
 import { z } from 'zod';
 
-import { canShowSubscriptionRateLimits } from './session-usage';
+import { resolveAgentBrandId } from '@lody/shared';
 import type { AgentConfigCliType, AgentConfigMeta } from '@lody/shared';
 
 /**
  * Client half of the Codex reset forecast surface.
  *
  * `codex-resets.com` is a third-party site that watches public posts and
- * publishes an AI-classified guess at when OpenAI will next reset Codex usage
- * limits. It is a forecast, never an OpenAI commitment, and the UI must keep
- * saying so. The endpoint is a public, unauthenticated, read-only GET.
+ * publishes AI-classified forecasts and scheduled reset announcements. Forecasts
+ * are not commitments; schedules remain pending until execution is reported.
+ * The UI keeps third-party attribution visible. The endpoint is a public, unauthenticated, read-only GET.
  *
  * Everything the UI reads is normalized here at the parse boundary, so no
  * component touches the wire's snake_case shape or an unvalidated URL.
@@ -47,7 +47,13 @@ export type CodexResetAnnouncement = {
   source: CodexResetSource | null;
 };
 
+export type CodexScheduledReset = CodexResetAnnouncement & {
+  scheduledForIso: string | null;
+  scheduledForMs: number | null;
+};
+
 export type CodexResetStatus = {
+  scheduledReset: CodexScheduledReset | null;
   watch: CodexResetWatch | null;
   latestReset: CodexResetAnnouncement | null;
 };
@@ -59,7 +65,7 @@ const sourceSchema = z.object({
   // Source attribution is ancillary. The endpoint occasionally omits the
   // author, which must not make the forecast status itself unusable.
   author: z.string().optional(),
-  url: z.string(),
+  url: z.string().optional(),
 });
 
 const watchSchema = z.object({
@@ -78,9 +84,15 @@ const resetSchema = z.object({
   source: sourceSchema.nullish(),
 });
 
+const scheduledResetSchema = resetSchema.extend({
+  status: z.literal('scheduled'),
+  scheduled_for: z.string().nullable(),
+});
+
 const statusResponseSchema = z.object({
   data: z.object({
     latest_reset: resetSchema.nullish(),
+    scheduled_reset: scheduledResetSchema.nullish(),
     active_watch: watchSchema.nullish(),
   }),
 });
@@ -231,7 +243,25 @@ export function parseCodexResetStatusResponse(value: unknown): CodexResetStatus 
     }
   }
 
-  return { watch, latestReset };
+  const rawScheduled = parsed.data.data.scheduled_reset;
+  let scheduledReset: CodexScheduledReset | null = null;
+  if (rawScheduled) {
+    const announcedAtMs = parseTimestamp(rawScheduled.announced_at);
+    const scheduledForMs =
+      rawScheduled.scheduled_for === null ? null : parseTimestamp(rawScheduled.scheduled_for);
+    if (announcedAtMs !== null) {
+      scheduledReset = {
+        announcedAtIso: new Date(announcedAtMs).toISOString(),
+        announcedAtMs,
+        scheduledForIso: scheduledForMs === null ? null : new Date(scheduledForMs).toISOString(),
+        scheduledForMs,
+        text: rawScheduled.text,
+        source: parseSource(rawScheduled.source),
+      };
+    }
+  }
+
+  return { watch, latestReset, scheduledReset };
 }
 
 /** The watch, but only while it is still in force at `nowMs`. */
@@ -253,8 +283,7 @@ export function isCodexResetWatchExpired(
 }
 
 /**
- * The forecast tracks OpenAI's own Codex subscription limits, so it is shown on
- * exactly the providers whose subscription usage Lody already reports: a
+ * The forecast tracks OpenAI's own Codex subscription limits, so it is shown only on a
  * built-in Codex provider with no custom key or third-party brand behind it.
  */
 export function canShowCodexResetForecast({
@@ -266,7 +295,13 @@ export function canShowCodexResetForecast({
   agentType: string;
   config?: Pick<AgentConfigMeta, 'brandId' | 'env'> | null;
 }): boolean {
-  return agentType === 'codex' && canShowSubscriptionRateLimits({ cliType, agentType, config });
+  return (
+    cliType === 'builtin' &&
+    agentType === 'codex' &&
+    (!config ||
+      (Object.keys(config.env).length === 0 &&
+        !resolveAgentBrandId({ brandId: config.brandId, env: config.env })))
+  );
 }
 
 export type CodexResetStatusFetchResult = {

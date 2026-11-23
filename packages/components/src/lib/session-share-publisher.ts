@@ -1,0 +1,169 @@
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
+import i18next from 'i18next';
+import {
+  assertEncryptedAttachmentReference,
+  SESSION_IMAGE_MAX_SIZE_BYTES,
+  getSessionFileDownloadApiPath,
+  getSessionImageDownloadApiPath,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
+import {
+  prepareSharePackage,
+  readShareResponseBytes,
+  SHARE_LIMITS,
+  ShareResourceId,
+  mapShareConcurrent,
+} from '@lody/shared/session-sharing';
+import type { WorkspaceRuntime, SessionDocStore } from '@/atoms/runtime';
+import { API_BASE_URL } from '@/lib';
+import { protectedAttachmentBytes } from './encrypted-session-attachment';
+
+/** App-only source adapter. Never import this module from the anonymous entry. */
+export async function captureSessionShare(options: {
+  runtime: WorkspaceRuntime;
+  sessions: readonly SessionMeta[];
+  rootSessionId: string;
+  token: string;
+  previousSourceIds?: readonly { sourceId: string; conversationId: string }[];
+  signal: AbortSignal;
+}) {
+  await options.runtime.waitForContentAdmission?.(options.signal);
+  options.signal.throwIfAborted();
+  requireWorkspaceFeature(
+    { mode: options.runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+    'sharing'
+  );
+  const stores: Array<{ store: SessionDocStore; releaseSync: () => void }> = [];
+  try {
+    const orderedStores = await mapShareConcurrent(
+      options.sessions,
+      async (session, _index, signal) => {
+        signal.throwIfAborted();
+        await options.runtime.prepareSessionTarget(session.id, session.machineId);
+        signal.throwIfAborted();
+        const store = await options.runtime.acquireSessionStore(session.id);
+        stores.push({ store, releaseSync: store.acquireSync() });
+        return store;
+      },
+      options.signal
+    );
+    // Hydrate every selected document before capturing any history. Capture below
+    // then detaches all histories synchronously in a single client event-loop turn.
+    await Promise.all(
+      stores.map(({ store }) =>
+        Promise.race([
+          store.firstSynced,
+          new Promise<never>((_, reject) => {
+            if (options.signal.aborted) reject(new Error('Share capture cancelled'));
+            else
+              options.signal.addEventListener(
+                'abort',
+                () => reject(new Error('Share capture cancelled')),
+                { once: true }
+              );
+          }),
+        ])
+      )
+    );
+    options.signal.throwIfAborted();
+    const histories = await Promise.all(
+      orderedStores.map((store) => store.sessionData.history.readAll())
+    );
+    options.signal.throwIfAborted();
+    const prepared = prepareSharePackage({
+      fileAttachmentOmissionText: i18next.t(
+        'sharing.fileAttachmentOmitted',
+        'File attachment not included in this share'
+      ),
+      rootSourceId: options.rootSessionId,
+      previousSourceIds: options.previousSourceIds,
+      capturedAt: new Date().toISOString(),
+      conversations: orderedStores.map((_, index) => {
+        const meta = options.sessions[index]!;
+        return {
+          sourceId: meta.id,
+          title: meta.title ?? '',
+          history: histories[index]!,
+          parentSourceId: meta.parentSessionId ?? undefined,
+          openedBySourceId: meta.openedBySessionId ?? undefined,
+          childSessionPlacement:
+            meta.childSessionPlacement === 'side-panel' ? 'side-panel' : undefined,
+        };
+      }),
+      signal: options.signal,
+      compressHistory: await import('@loro-dev/streams-crdt/zstd').then((m) => m.compress),
+      readAttachment: async ({ conversationSourceId, kind, reference }, signal) => {
+        if (kind === 'file' && reference.transport !== 'r2')
+          throw new Error('Upload local attachments before sharing');
+        const storageId = ShareResourceId.parse(
+          reference.storageSessionId ?? conversationSourceId
+        ) as SessionId;
+        const objectId = ShareResourceId.parse(reference[kind === 'image' ? 'imageId' : 'fileId']);
+        const path =
+          kind === 'image'
+            ? getSessionImageDownloadApiPath(options.runtime.workspaceId, storageId, objectId)
+            : getSessionFileDownloadApiPath(options.runtime.workspaceId, storageId, objectId);
+        try {
+          const maxBytes = kind === 'image' ? SHARE_LIMITS.imageBytes : SHARE_LIMITS.objectBytes;
+          if (options.runtime.contentMode === 'e2ee' || reference.encryption) {
+            const size =
+              reference.encryption &&
+              typeof reference.encryption === 'object' &&
+              !Array.isArray(reference.encryption)
+                ? reference.encryption.sizeBytes
+                : undefined;
+            const byteLimit =
+              kind === 'image' ? Math.min(maxBytes, SESSION_IMAGE_MAX_SIZE_BYTES) : maxBytes;
+            if (typeof size === 'number' && size > byteLimit)
+              throw new Error('Share object exceeds size limit');
+            const encryption = assertEncryptedAttachmentReference(
+              kind,
+              objectId,
+              reference.encryption
+            );
+            const bytes = await protectedAttachmentBytes({
+              workspaceId: options.runtime.workspaceId,
+              sessionId: storageId,
+              encryption,
+              attachmentToken: options.runtime.attachmentToken,
+              signal,
+              maxBytes: byteLimit,
+            });
+            return { bytes, mediaType: encryption.mimeType };
+          }
+          const response = await fetch(new URL(path, API_BASE_URL), {
+            headers: { Authorization: `Bearer ${options.token}` },
+            signal,
+            credentials: 'omit',
+            redirect: 'error',
+            cache: 'no-store',
+            referrerPolicy: 'no-referrer',
+          });
+          return {
+            bytes: await readShareResponseBytes(
+              response,
+              kind === 'image' ? SHARE_LIMITS.imageBytes : SHARE_LIMITS.objectBytes
+            ),
+            mediaType:
+              response.headers.get('Content-Type')?.split(';')[0]?.trim() ||
+              'application/octet-stream',
+          };
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (error instanceof Error && error.message === 'Share object exceeds size limit')
+            throw kind === 'image'
+              ? new Error('Share image exceeds size limit', { cause: error })
+              : error;
+          throw new Error('Share attachment unavailable', { cause: error });
+        }
+      },
+    });
+    return await prepared;
+  } finally {
+    for (const { store, releaseSync } of stores) {
+      releaseSync();
+      options.runtime.releaseSessionStoreRef(store.sessionId);
+    }
+  }
+}

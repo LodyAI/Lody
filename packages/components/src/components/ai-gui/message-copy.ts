@@ -5,9 +5,60 @@ import {
   type MessageTextSpan,
   type MessageTextSpanKind,
 } from '@lody/shared';
+import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
+import { restoreMessageQuoteDrafts, type PastedTextDraft } from '@/lib/pasted-text-draft';
 
 export const USER_TEXT_RENDER_LINE_LIMIT = 10;
 export const USER_TEXT_RENDER_CHAR_LIMIT = 900;
+
+/**
+ * Items that are never folded into a turn's work region: attachments the agent
+ * produced, the plan surfaces, the goal marker, and the "Exited Plan Mode"
+ * switch that closes a plan turn.
+ *
+ * ONE list, used for both questions it answers — "does this item fold?" and
+ * "is this item part of the tail that trails the answer?". They were two lists
+ * (the tail one held only `image_group` and `switch_mode`), so a turn ending in
+ * a `file` or a `proposed_plan` found no trailing tail, reported no visible
+ * answer text, and folded the answer itself into "Worked for …". Attachments
+ * now sort BELOW the plan, which puts a `file` last far more often, so the two
+ * lists have to agree.
+ */
+const isNeverCollapsedAssistantItem = (content: MessageContent | undefined): boolean =>
+  content?.type === 'image_group' ||
+  content?.type === 'image' ||
+  content?.type === 'file' ||
+  content?.type === 'plan' ||
+  content?.type === 'goal' ||
+  content?.type === 'proposed_plan' ||
+  // A warning/failure the stream folded back onto its emitting turn trails the
+  // answer the same way an attachment does. Left out, a turn that ends in one
+  // reports no visible answer and folds its own reply into "Worked for …".
+  content?.type === 'system_notice' ||
+  (content?.type === 'tool_call' && content.kind === 'switch_mode');
+
+/**
+ * The answer is the final contiguous run of text before the never-collapsed
+ * tail, not necessarily the last item. Every adjacent text block in that run
+ * stays visible; a non-text item is the boundary between work and the answer.
+ */
+const getFinalTextRunStart = (items: MessageContent[]): number => {
+  let index = items.length - 1;
+
+  while (index >= 0 && isNeverCollapsedAssistantItem(items[index])) {
+    index -= 1;
+  }
+
+  if (items[index]?.type !== 'text') {
+    return items.length;
+  }
+
+  while (index > 0 && items[index - 1]?.type === 'text') {
+    index -= 1;
+  }
+
+  return index;
+};
 
 export const shouldCollapseAssistantMessageItem = ({
   content,
@@ -21,43 +72,15 @@ export const shouldCollapseAssistantMessageItem = ({
   isTurnFinished: boolean;
 }): boolean => {
   const itemCount = items.length;
-  const visibleTextIndex = getTextIndexBeforeTrailingNeverCollapsedItems(items);
+  const visibleTextRunStart = getFinalTextRunStart(items);
 
   return (
     isTurnFinished &&
     itemCount > 1 &&
     index < itemCount - 1 &&
-    index !== visibleTextIndex &&
-    content.type !== 'image_group' &&
-    content.type !== 'file' &&
-    content.type !== 'plan' &&
-    content.type !== 'goal' &&
-    content.type !== 'proposed_plan' &&
-    !(content.type === 'tool_call' && content.kind === 'switch_mode')
+    !(content.type === 'text' && index >= visibleTextRunStart) &&
+    !isNeverCollapsedAssistantItem(content)
   );
-};
-
-/**
- * Items that are appended AFTER the assistant's answer and are themselves never
- * collapsed: generated images, and the "Exited Plan Mode" switch that closes a
- * plan turn. The answer before them is still the answer, so it must not be
- * demoted to process output just because it is no longer the last item.
- */
-const isTrailingNeverCollapsedItem = (content: MessageContent | undefined): boolean =>
-  content?.type === 'image_group' ||
-  (content?.type === 'tool_call' && content.kind === 'switch_mode');
-
-const getTextIndexBeforeTrailingNeverCollapsedItems = (items: MessageContent[]): number => {
-  let index = items.length - 1;
-  if (!isTrailingNeverCollapsedItem(items[index])) {
-    return -1;
-  }
-
-  while (index >= 0 && isTrailingNeverCollapsedItem(items[index])) {
-    index -= 1;
-  }
-
-  return items[index]?.type === 'text' ? index : -1;
 };
 
 // Copyable text = plain `text` answers plus `proposed_plan` markdown. The plan
@@ -74,17 +97,43 @@ export const getTextContentFromMessageItems = (items: MessageContent[]): string 
     .filter((text) => text.trim().length > 0)
     .join('\n\n');
 
+export function getMessageQuoteEditDraft(items: MessageContent[]): {
+  text: string;
+  drafts: PastedTextDraft[];
+} {
+  let text = '';
+  const drafts: PastedTextDraft[] = [];
+  for (const item of items) {
+    const value = getCopyableItemText(item);
+    if (!value.trim()) continue;
+    if (text) text += '\n\n';
+    const restored = restoreMessageQuoteDrafts(
+      value,
+      item.type === 'text' ? item.spans : undefined
+    );
+    drafts.push(
+      ...restored.drafts.map((draft) => ({
+        ...draft,
+        start: draft.start + text.length,
+        end: draft.end + text.length,
+      }))
+    );
+    text += restored.text;
+  }
+  return { text, drafts };
+}
+
 /**
  * Span kinds that are copied as what the user wrote, not as what the agent read.
  *
- * Only `agent_role`. Its rewritten region is an instruction addressed to the
- * agent ("use lody mcp to create a session with agent role[...]") that means
- * nothing outside this conversation, while the chip on screen says `@Reviewer` —
+ * Only `agent_role`. Its rewritten region is a reference addressed to the
+ * agent ("[Agent Role: … (agentRoleId: …)]") that means nothing outside this
+ * conversation, while the chip on screen says `@Reviewer` —
  * so copying the bubble has to produce the latter.
  *
  * The other kinds stay expanded on purpose: a pasted-text span IS the content
  * the user wants when they copy, and a skill or session mention expands to a
- * path or an id that remains meaningful pasted elsewhere.
+ * path or a `lody://session/` link that remains meaningful pasted elsewhere.
  */
 const COPY_AS_LABEL_SPAN_KINDS: ReadonlySet<MessageTextSpanKind> = new Set(['agent_role']);
 
@@ -118,13 +167,17 @@ export const collapseMentionSpansForCopy = (
  * received — a `@Reviewer` token with no committed mention range would be sent
  * verbatim as a word.
  */
-export const getCopyTextFromMessageItems = (items: MessageContent[]): string =>
+export const getCopyTextFromMessageItems = (
+  items: MessageContent[],
+  workspaceId?: string
+): string =>
   items
     .map((content) =>
       content.type === 'text'
         ? collapseMentionSpansForCopy(content.text, content.spans)
         : getCopyableItemText(content)
     )
+    .map((text) => normalizeSessionLinksForExport(text, workspaceId))
     .filter((text) => text.trim().length > 0)
     .join('\n\n');
 
@@ -222,19 +275,3 @@ const sliceUserTextRun = (
   }
   return { text, isTruncated: false, lineBreaks };
 };
-
-export const getVisibleAssistantTextContent = (
-  items: MessageContent[],
-  isTurnFinished: boolean
-): string =>
-  getTextContentFromMessageItems(
-    items.filter(
-      (content, index) =>
-        !shouldCollapseAssistantMessageItem({
-          content,
-          index,
-          items,
-          isTurnFinished,
-        })
-    )
-  );

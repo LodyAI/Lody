@@ -5,97 +5,110 @@ import type {
 } from '@lody/shared';
 import {
   getSessionPullRequestLegacyFields,
+  hasWorkspaceChanges,
+  resolveSessionPrimaryPullRequest,
+  resolveSessionPullRequestHistory,
+  type SessionPullRequestView,
   parseGitHubPullRequestUrl,
   resolveProjectGitHubRepo,
 } from '@lody/shared';
 
 export type SessionGitHubState = {
+  /** The session owning the PR, also used for server-side repository identity. */
+  sourceSessionId: SessionMeta['id'] | undefined;
   repoFullName: string;
+  /** Shared summary of the described PR; every surface reads the same view. */
+  latestPrView: SessionPullRequestView | null;
+  /** Every associated PR in the described scope: `latestPrView` first, then
+   *  older associations newest first. Never shrinks when a newer PR appears. */
+  pullRequestHistory: SessionPullRequestView[];
   latestPr: SessionPullRequestMeta | null;
   latestPrState: SessionPullRequestStateMeta | null;
   canShowGitHubActions: boolean;
   hasExistingPr: boolean;
   workspaceDirty: boolean;
   /**
-   * Whether the session has any changes to base a PR on — uncommitted
-   * (`workspaceDirty`) OR already committed (`diffStats.allChange > 0`). These
-   * two signals come from independent writers (post-turn `git status` vs the
-   * Code Collab file-index scanner), so together they survive one being stale
-   * and, unlike `workspaceDirty` alone, keep "Create PR" available after the
-   * agent auto-commits (clean tree, real commits, still no PR).
+   * Committed but not on the remote. Independent of `workspaceDirty`, which
+   * goes false the moment the agent commits while the PR head stays behind —
+   * together they answer "is the PR head the author's latest work?".
+   */
+  workspaceUnpushed: boolean;
+  /**
+   * Whether the session has changes to base a PR on. Workspace diff totals
+   * include committed and uncommitted changes against the workspace base.
+   * `workspaceDirty` also covers changes without text-line counts and remains
+   * independent of the asynchronously refreshed comparison summary.
    */
   hasChanges: boolean;
 };
 
-export const getLatestPullRequest = (
-  session: Pick<SessionMeta, 'pullRequests'> | null | undefined
-): SessionPullRequestMeta | null => {
-  const prList = session?.pullRequests ?? [];
-  if (!prList.length) {
-    return null;
-  }
-  if (!prList.some((pr) => getSessionPullRequestLegacyFields(pr).reportedAt)) {
-    return prList[prList.length - 1] ?? null;
-  }
-  return prList.toSorted((a, b) => comparePullRequestRecency(a, b))[0] ?? null;
-};
-
-const comparePullRequestRecency = (
-  left: SessionPullRequestMeta,
-  right: SessionPullRequestMeta
-): number => {
-  const leftReportedAt = getSessionPullRequestLegacyFields(left).reportedAt ?? '';
-  const rightReportedAt = getSessionPullRequestLegacyFields(right).reportedAt ?? '';
-  if (leftReportedAt || rightReportedAt) {
-    return rightReportedAt.localeCompare(leftReportedAt);
-  }
-  return 0;
-};
-
 export const getPullRequestNumber = (
   pr: SessionPullRequestMeta | null | undefined
-): number | null =>
-  typeof getSessionPullRequestLegacyFields(pr).number === 'number' &&
-  Number.isFinite(getSessionPullRequestLegacyFields(pr).number)
-    ? (getSessionPullRequestLegacyFields(pr).number ?? null)
-    : pr?.url
-      ? (parseGitHubPullRequestUrl(pr.url)?.prNumber ?? null)
-      : null;
+): number | null => {
+  const parsed = pr?.url ? parseGitHubPullRequestUrl(pr.url)?.prNumber : undefined;
+  if (parsed !== undefined) return parsed;
+  const legacy = getSessionPullRequestLegacyFields(pr).number;
+  return typeof legacy === 'number' && Number.isFinite(legacy) ? legacy : null;
+};
 
 export const getPullRequestRepoFullName = (
   pr: SessionPullRequestMeta | null | undefined
 ): string | null =>
-  getSessionPullRequestLegacyFields(pr).repository?.trim() ||
-  (pr?.url ? (parseGitHubPullRequestUrl(pr.url)?.repoFullName ?? null) : null);
+  (pr?.url ? parseGitHubPullRequestUrl(pr.url)?.repoFullName : undefined) ??
+  (getSessionPullRequestLegacyFields(pr).repository?.trim() || null);
 
 export const resolveWorkspaceOwnerSession = (
   session: SessionMeta | null | undefined,
   workspaceSession?: SessionMeta | null
 ): SessionMeta | null => workspaceSession ?? session ?? null;
 
+/**
+ * The GitHub context of a conversation.
+ *
+ * `activeRepository` lets a multi-repository conversation describe the
+ * repository the user selected instead of the legacy first-Member projection:
+ * pass a repository name to describe it, `null` to describe a Member with no
+ * GitHub remote (no PR or GitHub action), and omit it for the legacy default.
+ */
 export const getSessionGitHubState = (
   session: SessionMeta | null | undefined,
-  workspaceSession?: SessionMeta | null
+  workspaceSession?: SessionMeta | null,
+  activeRepository?: string | null
 ): SessionGitHubState => {
   const sourceSession = resolveWorkspaceOwnerSession(session, workspaceSession);
-  const repoFullName =
+  const legacyRepoFullName =
     (resolveProjectGitHubRepo(sourceSession?.project) ?? sourceSession?.repoFullName)?.trim() ?? '';
-  const latestPr = getLatestPullRequest(sourceSession);
-  const latestPrState = latestPr?.url
-    ? (sourceSession?.pullRequestState?.[latestPr.url] ?? null)
-    : null;
+  const repoFullName =
+    activeRepository === undefined ? legacyRepoFullName : (activeRepository?.trim() ?? '');
+  const describedRepository =
+    activeRepository === undefined && !sourceSession?.projectRun ? undefined : repoFullName || null;
+  const latestPrView = resolveSessionPrimaryPullRequest(sourceSession, describedRepository);
+  const pullRequestHistory = resolveSessionPullRequestHistory(sourceSession, describedRepository);
+  const latestPr = latestPrView?.pr ?? null;
+  const latestPrState = latestPrView?.state ?? null;
 
   const workspaceDirty = sourceSession?.workspaceDirty ?? false;
+  const workspaceUnpushed = sourceSession?.workspaceUnpushed ?? false;
   const allChange = sourceSession?.diffStats?.allChange;
-  const hasCommittedDiff = allChange ? allChange.add + allChange.del > 0 : false;
+  const hasWorkspaceDiff = hasWorkspaceChanges(allChange);
+  // A group total can be unknown while some Members have a complete comparison.
+  const memberHasWorkspaceDiff = sourceSession?.projectRun
+    ? Object.values(sourceSession.projectRun.members).some((member) =>
+        hasWorkspaceChanges(member.diff)
+      )
+    : false;
 
   return {
+    sourceSessionId: sourceSession?.id,
     repoFullName,
+    latestPrView,
+    pullRequestHistory,
     latestPr,
     latestPrState,
     canShowGitHubActions: !!repoFullName,
     hasExistingPr: !!repoFullName && !!latestPr,
     workspaceDirty,
-    hasChanges: workspaceDirty || hasCommittedDiff,
+    workspaceUnpushed,
+    hasChanges: workspaceDirty || hasWorkspaceDiff || memberHasWorkspaceDiff,
   };
 };

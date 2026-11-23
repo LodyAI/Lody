@@ -4,18 +4,17 @@ export type Runtime = 'web' | 'electron' | 'mobile';
 /**
  * A key binding spec.
  *
- * Key string syntax (subset of tinykeys, deliberately small):
- *   - Modifiers separated by `+`. Recognized modifiers: `$mod`, `Shift`, `Alt`, `Control`,
- *     `Meta` (case-insensitive). Aliases: `mod`, `cmd`, `command` → `$mod`; `option` → `Alt`;
- *     `ctrl` → `Control`.
- *   - `$mod` resolves to ⌘ on macOS and Ctrl elsewhere — the cross-platform "primary" modifier.
- *   - The non-modifier token at the end is the key. For letters, case-insensitive (use `b`, not `B`).
+ * Key string syntax follows `@tanstack/hotkeys` single-chord syntax:
+ *   - Modifiers separated by `+`. Recognized modifiers: `Mod`, `Shift`, `Alt`, `Control`,
+ *     `Meta` (case-insensitive). `CommandOrControl` aliases `Mod`; `cmd` / `command` alias
+ *     `Meta`; `option` aliases `Alt`; `ctrl` aliases `Control`.
+ *   - `Mod` resolves to ⌘ on macOS and Ctrl elsewhere — the cross-platform "primary" modifier.
+ *   - The non-modifier token at the end is the key. Letters are case-insensitive.
  *     For named keys, use the standard `KeyboardEvent.key` value (e.g. `Enter`, `Escape`, `ArrowUp`,
  *     `Slash`, `?`).
- *   - Examples: `$mod+b`, `$mod+Shift+p`, `Escape`, `?`.
+ *   - Examples: `Mod+b`, `Mod+Shift+p`, `Escape`, `?`.
  *
- * Chord sequences are intentionally NOT supported in v1. If a future need arises, add them here
- * and update the matcher in lockstep.
+ * Sequences are intentionally outside the command registry contract.
  */
 export type KeyBinding = {
   key: string;
@@ -23,6 +22,13 @@ export type KeyBinding = {
   platforms?: Platform[];
   /** Restrict this binding to specific runtimes. Undefined = all runtimes. */
   runtimes?: Runtime[];
+  /**
+   * The product surface a binding activates on (e.g. `composer`): the declarative
+   * projection of a `when` focus guard, so `COMMAND_SHORTCUTS` can statically reject
+   * bindings whose activation zones overlap. `when` stays the executable guard;
+   * a binding without a surface counts as everywhere.
+   */
+  surface?: 'composer';
   /**
    * Optional keyboard-only predicate. Programmatic command execution and user overrides do not
    * inherit this guard, so a restrictive default binding can coexist with a globally available
@@ -64,7 +70,7 @@ export type Command = {
    * Optional default key bindings. Strings are shorthand for `{ key }` with default options.
    * Multiple bindings invoke the same command (useful for platform alternatives).
    */
-  keybindings?: (string | KeyBinding)[];
+  keybindings?: ReadonlyArray<string | KeyBinding>;
   /**
    * Optional context predicate evaluated at execution time. If it returns false, the binding
    * does not fire and `execute()` returns false. Use `when` for static commands whose
@@ -103,7 +109,7 @@ export type KeyScope = {
   /** Active when focus is inside this element. */
   element: () => HTMLElement | null;
   /**
-   * Keys this scope claims, as binding strings (`$mod+b`). Omit to claim
+   * Keys this scope claims, as binding strings (`Mod+b`). Omit to claim
    * EVERYTHING except commands marked `allowInTextInput` — the right default
    * for a rich text editor, which owns far more keys than it is practical to
    * enumerate.

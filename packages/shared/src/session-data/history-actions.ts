@@ -1,0 +1,418 @@
+import { Immer, enablePatches, type Patch } from 'immer';
+import type { AgentHistoryMutationPath } from '../acp/history-apply';
+import { markAssistantTurnFinished } from './assistant-finalize';
+import { planOperationProgress, planOperationCompletion } from './operation-progress';
+import type { StoredLodyOperation } from '../session-orchestration';
+import type { OperationProgressStatus } from '../session-orchestration';
+import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
+import {
+  mergeToolCallWithPermission,
+  buildToolCallFromPermissionRequest,
+} from './permission-request';
+import type { MessageContent } from '../ai';
+import type { SessionEntry, SessionTurnStatus } from './domain';
+import {
+  addSessionTurnTokenUsage,
+  readSessionTurnTokenUsage,
+  type SessionTurnTokenUsage,
+} from './token-usage';
+
+export type HistoryAction =
+  | {
+      kind: 'assistant-file-diff';
+      turnId?: string;
+      change: { kind: 'set'; value: import('./domain').SessionFileDiff[] } | { kind: 'clear' };
+    }
+  | {
+      kind: 'operation-progress';
+      operation: StoredLodyOperation;
+      timestamp: string;
+      statuses?: readonly (readonly [string, OperationProgressStatus])[];
+    }
+  | { kind: 'operation-completion'; operation: StoredLodyOperation; turn: SessionEntry }
+  | {
+      kind: 'operation-batch-status';
+      turnId: string;
+      batchId: string;
+      status: 'prepared' | 'submitted' | 'unknown' | 'settled' | 'not_submitted';
+    }
+  | {
+      kind: 'upsert-goal';
+      goal: Extract<MessageContent, { type: 'goal' }>;
+      targetTurnId?: string;
+      fallback: SessionEntry;
+    }
+  | { kind: 'clear-goal'; threadId: string; updatedAt: number }
+  | { kind: 'permission-request'; requestId: string; request: RequestPermissionRequest }
+  | { kind: 'assistant-items'; turnId: string; mode: 'append' | 'replace'; items: MessageContent[] }
+  | {
+      kind: 'user-status';
+      turnId: string;
+      status: SessionTurnStatus;
+      cancellationReason?: 'user_stop' | 'machine_update';
+      requeueUndelivered?: boolean;
+      onlyPendingApply?: boolean;
+      /** Settle only input no execution has claimed: every copy is still pending or seen. */
+      onlyAwaitingStart?: boolean;
+      deliveredSteer?: boolean;
+      /** Execution-owned steer projection cannot regress a terminal or ordinary input. */
+      steerProjection?: boolean;
+    }
+  | {
+      kind: 'finish-assistant';
+      turnId?: string;
+      endedAt: number;
+      permissionWaitMs?: number;
+      force?: boolean;
+    }
+  | {
+      kind: 'assistant-token-usage';
+      turnId: string;
+      /** Adds to the stored total, so a reopened or late-reporting turn keeps summing. */
+      add: SessionTurnTokenUsage;
+    }
+  | { kind: 'upsert-turn'; turn: SessionEntry; beforeTurnId?: string; beforeLastUser?: boolean }
+  | { kind: 'remove-turn'; turnId: string }
+  | { kind: 'agent-warning'; turn: SessionEntry; message: string }
+  | {
+      kind: 'image-backfilled';
+      localImageId: string;
+      machineId: string;
+      image: import('../ai').SessionImagePayload;
+    }
+  | {
+      kind: 'file-backfilled';
+      fileId: string;
+      relayFileId: string;
+      encryption?: import('../encrypted-attachment').EncryptedAttachment;
+    };
+
+/** Which actions can be committed by reading exactly one body. */
+export function historyActionTarget(action: HistoryAction): string | undefined {
+  return action.kind === 'operation-batch-status' ||
+    action.kind === 'assistant-items' ||
+    action.kind === 'user-status' ||
+    action.kind === 'finish-assistant' ||
+    action.kind === 'assistant-file-diff' ||
+    action.kind === 'assistant-token-usage'
+    ? action.turnId
+    : undefined;
+}
+
+const REQUEUEABLE_USER_STATUSES: readonly (SessionTurnStatus | undefined)[] = [
+  'pending_apply',
+  'pending',
+  'seen',
+];
+const STEER_PROJECTABLE_USER_STATUSES: readonly (SessionTurnStatus | undefined)[] = [
+  'pending_apply',
+  'processing',
+];
+const userStatusRank = (status: SessionTurnStatus | undefined) =>
+  status === 'processing'
+    ? 1
+    : status === 'handled' ||
+        status === 'failed' ||
+        status === 'canceled' ||
+        status === 'delivery_unknown'
+      ? 2
+      : 0;
+
+/**
+ * Concurrent producers can store one user turn twice. The last copy decides the
+ * logical state, matching targeted reads; every eligible copy is kept in step.
+ */
+function applyUserStatus(
+  history: SessionEntry[],
+  action: Extract<HistoryAction, { kind: 'user-status' }>
+): boolean {
+  const copies = history.filter((t) => t.id === action.turnId && t.role === 'user');
+  const canonical = copies.at(-1);
+  if (!canonical) return action.requeueUndelivered === true;
+  const write = (entry: SessionEntry) => {
+    entry.status = action.status;
+    if (action.status === 'canceled' && action.cancellationReason)
+      entry.cancellationReason = action.cancellationReason;
+    entry.read = action.status !== 'pending' && action.status !== 'pending_apply';
+    if (action.deliveredSteer)
+      entry.inputConfig = { ...entry.inputConfig, _lodyDeliveryKind: 'steer' };
+  };
+  if (action.steerProjection) {
+    // A projection records a verdict; it never regresses a terminal or ordinary input.
+    if (!STEER_PROJECTABLE_USER_STATUSES.includes(canonical.status)) return false;
+    for (const copy of copies)
+      if (STEER_PROJECTABLE_USER_STATUSES.includes(copy.status)) write(copy);
+    return true;
+  }
+  if (action.onlyAwaitingStart) {
+    if (copies.some((copy) => copy.status !== 'pending' && copy.status !== 'seen')) return false;
+    for (const copy of copies) write(copy);
+    return true;
+  }
+  if (action.requeueUndelivered || action.onlyPendingApply) {
+    // Requeueing grants execution again: any copy that started or settled vetoes it.
+    if (copies.some((copy) => !REQUEUEABLE_USER_STATUSES.includes(copy.status))) return false;
+    if (action.onlyPendingApply && canonical.status !== 'pending_apply') return false;
+    for (const copy of copies) if (copy.status === 'pending_apply') write(copy);
+    return true;
+  }
+  write(canonical);
+  const rank = userStatusRank(action.status);
+  for (const copy of copies.slice(0, -1)) if (userStatusRank(copy.status) <= rank) write(copy);
+  return true;
+}
+
+/** Called on a private writer draft at commit time. */
+export function applyHistoryAction(
+  history: SessionEntry[],
+  action: HistoryAction
+): {
+  turns: SessionEntry[];
+  matched: boolean;
+} {
+  switch (action.kind) {
+    case 'assistant-file-diff': {
+      const entry = [...history]
+        .reverse()
+        .find((t) => t.role === 'assistant' && (!action.turnId || t.id === action.turnId));
+      if (!entry) return { turns: history, matched: false };
+      if (action.change.kind === 'clear') Reflect.deleteProperty(entry, 'fileDiff');
+      else entry.fileDiff = action.change.value;
+      return { turns: history, matched: true };
+    }
+
+    case 'operation-progress': {
+      const turns = planOperationProgress(
+        history,
+        action.operation,
+        action.timestamp,
+        action.statuses
+      );
+      return { turns, matched: turns !== history };
+    }
+    case 'operation-batch-status': {
+      let matched = false;
+      const turns = history.map((entry) => {
+        if (entry.id !== action.turnId || entry.role !== 'system') return entry;
+        const items = entry.items?.map((item) => {
+          if (
+            item.type !== 'operation_completion_batch' ||
+            item.batchId !== action.batchId ||
+            item.deliveryStatus === action.status
+          )
+            return item;
+          matched = true;
+          return { ...item, deliveryStatus: action.status };
+        });
+        return items === entry.items ? entry : { ...entry, items };
+      });
+      return { turns: matched ? turns : history, matched };
+    }
+    case 'operation-completion': {
+      const turns = planOperationCompletion(history, action.operation, action.turn);
+      return { turns, matched: turns !== history };
+    }
+    case 'upsert-goal': {
+      let replaced = false;
+      for (const entry of history)
+        entry.items = entry.items?.flatMap<MessageContent>((item) => {
+          if (item.type === 'goal' && item.threadId === action.goal.threadId) {
+            replaced = true;
+            return [action.goal];
+          }
+          return item.type === 'goal' && item.status === 'cleared' ? [] : [item];
+        });
+      if (!replaced) {
+        let target =
+          history.find((t) => t.id === action.targetTurnId && t.role === 'assistant') ??
+          [...history]
+            .reverse()
+            .find(
+              (t) => t.role === 'assistant' && t.finished !== true && typeof t.endedAt !== 'number'
+            );
+        if (!target) {
+          target = action.fallback;
+          history.push(target);
+        }
+        target.items = [...(target.items ?? []), action.goal];
+      }
+      return { turns: history, matched: true };
+    }
+    case 'clear-goal': {
+      let matched = false;
+      for (const entry of history)
+        for (const item of entry.items ?? [])
+          if (
+            item.type === 'goal' &&
+            item.threadId === action.threadId &&
+            item.status !== 'cleared'
+          ) {
+            item.status = 'cleared';
+            item.updatedAt = action.updatedAt;
+            matched = true;
+          }
+      return { turns: history, matched };
+    }
+    case 'permission-request': {
+      let ownerFound = false;
+      let matched = false;
+      for (const entry of history)
+        entry.items = entry.items?.map((item) => {
+          if (item.type !== 'tool_call' || item.toolCallId !== action.request.toolCall.toolCallId)
+            return item;
+          ownerFound = true;
+          if (entry.finished === true || typeof entry.endedAt === 'number') return item;
+          matched = true;
+          return mergeToolCallWithPermission(item, action.requestId, action.request);
+        });
+      const last = history.at(-1);
+      if (
+        !ownerFound &&
+        last?.role === 'assistant' &&
+        last.finished !== true &&
+        typeof last.endedAt !== 'number'
+      ) {
+        last.items = [
+          ...(last.items ?? []),
+          buildToolCallFromPermissionRequest(action.requestId, action.request),
+        ];
+        matched = true;
+      }
+      return { turns: history, matched };
+    }
+    case 'assistant-items': {
+      const entry = history.find((t) => t.id === action.turnId && t.role === 'assistant');
+      if (!entry) return { turns: history, matched: false };
+      entry.items =
+        action.mode === 'append' ? [...(entry.items ?? []), ...action.items] : action.items;
+      return { turns: history, matched: true };
+    }
+    case 'user-status':
+      return { turns: history, matched: applyUserStatus(history, action) };
+    case 'finish-assistant': {
+      const matched = history.some(
+        (t) => t.role === 'assistant' && (!action.turnId || t.id === action.turnId)
+      );
+      return { turns: markAssistantTurnFinished(history, action), matched };
+    }
+    case 'assistant-token-usage': {
+      const entry = history.find((t) => t.role === 'assistant' && t.id === action.turnId);
+      if (!entry) return { turns: history, matched: false };
+      entry.tokenUsage = addSessionTurnTokenUsage(
+        readSessionTurnTokenUsage(entry.tokenUsage),
+        action.add
+      );
+      return { turns: history, matched: true };
+    }
+    case 'remove-turn':
+      return {
+        turns: history.filter((t) => t.id !== action.turnId),
+        matched: history.some((t) => t.id === action.turnId),
+      };
+    case 'upsert-turn': {
+      const index = history.findIndex((t) => t.id === action.turn.id);
+      if (index >= 0) history[index] = action.turn;
+      else {
+        const before = action.beforeLastUser
+          ? history.map((t) => t.role).lastIndexOf('user')
+          : history.findIndex((t) => t.id === action.beforeTurnId);
+        history.splice(before >= 0 ? before : history.length, 0, action.turn);
+      }
+      return { turns: history, matched: true };
+    }
+    case 'agent-warning': {
+      if (
+        history.some((t) =>
+          t.items?.some(
+            (item) =>
+              item.type === 'system_notice' &&
+              item.name === 'agent_warning' &&
+              item.meta?.message === action.message
+          )
+        )
+      )
+        return { turns: history, matched: false };
+      return { turns: [...history, action.turn], matched: true };
+    }
+    case 'image-backfilled': {
+      let matched = false;
+      for (const entry of history)
+        for (const item of [...(entry.items ?? []), ...(entry.inputConfig?.inputBlocks ?? [])]) {
+          if (
+            item.type === 'image' &&
+            item.localImageId === action.localImageId &&
+            item.machineId === action.machineId &&
+            item.storageSessionId === action.image.storageSessionId &&
+            item.transport === 'local'
+          ) {
+            Object.assign(item, action.image);
+            matched = true;
+          }
+        }
+      return { turns: history, matched };
+    }
+    case 'file-backfilled': {
+      let matched = false;
+      for (const entry of history)
+        for (const item of entry.items ?? []) {
+          if (item.type === 'file' && item.fileId === action.fileId && item.transport === 'local') {
+            item.fileId = action.relayFileId;
+            if (action.encryption) item.encryption = action.encryption;
+            item.transport = 'r2';
+            delete item.machineId;
+            matched = true;
+          }
+        }
+      return { turns: history, matched };
+    }
+  }
+  const unreachable: never = action;
+  throw new Error('Unsupported history action', { cause: unreachable });
+}
+
+enablePatches();
+const actionImmer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
+/** Private write planning; the established mutating action semantics stay shared. */
+export function planHistoryAction(
+  history: SessionEntry[],
+  action: HistoryAction
+): {
+  turns: SessionEntry[];
+  matched: boolean;
+  changes: AgentHistoryMutationPath[];
+} {
+  const owned = structuredClone(action);
+  let matched = false,
+    patches: Patch[] = [];
+  const turns = actionImmer.produce(
+    history,
+    (draft) => {
+      const result = applyHistoryAction(draft as SessionEntry[], owned);
+      matched = result.matched;
+      if (result.turns === draft) return;
+      for (const [index, entry] of result.turns.entries()) {
+        const current = draft[index];
+        if (!current || current.id !== entry.id) {
+          draft[index] = entry;
+          continue;
+        }
+        for (const key of new Set([...Object.keys(current), ...Object.keys(entry)])) {
+          if (Reflect.get(current, key) === Reflect.get(entry, key)) continue;
+          if (Object.hasOwn(entry, key)) Reflect.set(current, key, Reflect.get(entry, key));
+          else Reflect.deleteProperty(current, key);
+        }
+      }
+      draft.length = result.turns.length;
+    },
+    (recorded) => {
+      patches = recorded;
+    }
+  );
+  const changes: AgentHistoryMutationPath[] = [];
+  for (const patch of patches) {
+    const index = patch.path[0];
+    const entry = typeof index === 'number' ? turns[index] : undefined;
+    if (entry) changes.push({ turnId: entry.id, path: patch.path.slice(1) });
+  }
+  return { turns, matched, changes };
+}

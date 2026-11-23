@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { Loro } from 'loro-crdt';
+import { Loro, LoroDoc, LoroList, LoroMap, LoroText } from 'loro-crdt';
 import { Mirror, schema } from 'loro-mirror';
 
-import { sessionDocSchema } from '../src/schema';
-import type { SessionId } from '../src/ai';
+import {
+  getLoroStreamIdForDocId,
+  getSessionIdFromRoomId,
+  isSessionDocRoomId,
+  type WorkspaceId,
+} from '../src';
+import { sessionDocSchema } from '../src/session-doc-schemas';
+import type { MessageQueueItem } from '../src/schema';
+import { createSessionControlPlaneMirror } from '../src/session-control-plane';
+import { createSessionMirror as createProductionSessionMirror } from '../src/session-mirror';
+
+import type { SessionId } from '../src/ids';
 
 /**
  * Session docs are shared between clients built against different schema
@@ -40,30 +50,92 @@ function createFutureDocSnapshot(): Uint8Array {
 }
 
 function createSessionMirror(doc: Loro) {
-  return new Mirror({
+  return createProductionSessionMirror({
     doc,
-    schema: sessionDocSchema,
-    ignoreUnknownProperties: true,
     initialState: { session: { id: sessionId }, history: [] },
   });
 }
 
+// Synthetic future peer: raw Loro writes model a type this reader was built
+// before. No cast makes that type part of the application's MessageContent.
+function createFutureHistoryDoc(kind: 'future' | 'future-object-text' | 'malformed-known') {
+  const doc = new Loro();
+  doc.setPeerId('100');
+  const mirror = createSessionMirror(doc);
+  mirror.dispose();
+  const turn = doc.getList('history').pushContainer(new LoroMap());
+  turn.set('id', 'future-turn');
+  turn.set('role', 'system');
+  turn.set('timestamp', '2026-01-01T00:00:00.000Z');
+  const items = turn.setContainer('items', new LoroList());
+  const future = items.pushContainer(new LoroMap());
+  future.set('type', kind === 'malformed-known' ? 'text' : 'future_operation_progress');
+  if (kind !== 'future') {
+    future.setContainer('text', new LoroMap()).set('futureValue', 42);
+  }
+  const payload = future.setContainer('payload', new LoroMap());
+  const label = payload.setContainer('label', new LoroText());
+  label.insert(0, 'created');
+  const text = items.pushContainer(new LoroMap());
+  text.set('type', 'text');
+  text.setContainer('text', new LoroText()).insert(0, 'before');
+  doc.commit();
+  return { doc, future, label };
+}
+
 describe('session doc forward compatibility', () => {
-  it('keeps writing after a newer peer adds an undeclared root key', () => {
+  it.each(
+    (['live import', 'snapshot reopen'] as const).flatMap((mode) =>
+      (['future', 'future-object-text', 'malformed-known'] as const).map((kind) => ({ mode, kind }))
+    )
+  )('keeps sending and editing around $kind history after $mode', ({ mode, kind }) => {
+    const peer = createFutureHistoryDoc(kind);
+    const snapshot = peer.doc.export({ mode: 'snapshot' });
     const doc = new Loro();
+    doc.setPeerId('200');
+    if (mode === 'snapshot reopen') doc.import(snapshot);
+    const beforeOpen = doc.version().toJSON();
     const mirror = createSessionMirror(doc);
+    if (mode === 'snapshot reopen') expect(doc.version().toJSON()).toEqual(beforeOpen);
+    if (mode === 'live import') doc.import(snapshot);
+    const version = doc.version().toJSON();
+    const original = doc.toJSON().history[0];
+    expect(mirror.getState().history[0]?.items?.[0]?.type).toBe(original.items[0].type);
+    expect(doc.version().toJSON()).toEqual(version);
 
-    // The crashing path in production: the mirror is already open when the
-    // newer peer's update arrives, so the unknown key enters state via events.
-    doc.import(createFutureDocSnapshot());
+    mirror.setState((state) => ({
+      ...state,
+      history: [
+        ...state.history,
+        {
+          id: 'new-user-turn',
+          role: 'user',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          items: [{ type: 'text', text: 'hello' }],
+        },
+      ],
+    }));
+    expect(doc.toJSON().history[0]).toEqual(original);
+    mirror.setState({ externalHistoryCursor: { importedTurnHashes: ['still-writable'] } });
+    mirror.setState((state) => {
+      state.history[0]!.items![1]!.text = 'after';
+    });
+    // Concurrent future-field edits must survive this reader's local writes.
+    peer.label.update('running');
+    peer.doc.commit();
+    doc.import(peer.doc.export({ mode: 'update', from: doc.version() }));
+    peer.doc.import(doc.export({ mode: 'update', from: peer.doc.version() }));
 
-    expect(() => {
-      mirror.setState((state) => {
-        state.session.title = 'renamed by the older client';
-      });
-    }).not.toThrow();
-
-    expect(doc.toJSON().futureFeature).toEqual({ id: 'op-1', state: 'preparing' });
+    expect(doc.toJSON()).toEqual(peer.doc.toJSON());
+    expect(doc.toJSON().history).toHaveLength(2);
+    expect(doc.toJSON().externalHistoryCursor.importedTurnHashes).toEqual(['still-writable']);
+    expect(doc.toJSON().history[0].items[1].text).toBe('after');
+    expect(doc.getContainerById(peer.future.id)?.toJSON()).toEqual({
+      ...original.items[0],
+      payload: { label: 'running' },
+    });
+    expect(doc.getContainerById(peer.label.id)?.toJSON()).toBe('running');
+    mirror.dispose();
   });
 
   it('preserves the undeclared root key through a full-state update', () => {
@@ -71,7 +143,10 @@ describe('session doc forward compatibility', () => {
     const mirror = createSessionMirror(doc);
     doc.import(createFutureDocSnapshot());
 
-    mirror.setState((state) => ({ ...state, session: { ...state.session, title: 'rebuilt' } }));
+    mirror.setState((state) => ({
+      ...state,
+      externalHistoryCursor: { importedTurnHashes: ['rebuilt'] },
+    }));
 
     expect(doc.toJSON().futureFeature).toEqual({ id: 'op-1', state: 'preparing' });
   });
@@ -87,9 +162,7 @@ describe('session doc forward compatibility', () => {
     newerDoc.import(snapshot);
     const newerMirror = new Mirror({ doc: newerDoc, schema: futureDocSchema });
 
-    olderMirror.setState((state) => {
-      state.session.title = 'edited by the older client';
-    });
+    olderMirror.setState({ externalHistoryCursor: { importedTurnHashes: ['older-client'] } });
     newerMirror.setState((state) => {
       state.futureFeature.state = 'failed';
     });
@@ -98,7 +171,85 @@ describe('session doc forward compatibility', () => {
     newerDoc.import(olderDoc.export({ mode: 'update', from: newerDoc.version() }));
 
     expect(newerMirror.getState().futureFeature).toEqual({ id: 'op-1', state: 'failed' });
-    expect(newerMirror.getState().session.title).toBe('edited by the older client');
+    expect(newerMirror.getState().externalHistoryCursor?.importedTurnHashes).toEqual([
+      'older-client',
+    ]);
     expect(olderDoc.toJSON().futureFeature).toEqual({ id: 'op-1', state: 'failed' });
+  });
+});
+
+it('preserves a terminal projection when a pre-notification client edits the session', () => {
+  const { notification: _notification, ...oldDefinition } = sessionDocSchema.definition;
+  const newer = new Loro();
+  const current = createSessionMirror(newer);
+  const notification = {
+    id: 'a42f1111-1111-4111-8111-111111111111',
+    recipientId: 'user',
+    turnId: 'turn',
+    outcome: 'failed',
+    createdAt: 100,
+  };
+  current.setState({ notification });
+  const older = new Loro();
+  older.import(newer.export({ mode: 'snapshot' }));
+  const oldMirror = new Mirror({
+    doc: older,
+    schema: schema(oldDefinition),
+    ignoreUnknownProperties: true,
+  });
+  oldMirror.setState((state) => ({
+    ...state,
+    externalHistoryCursor: { importedTurnHashes: ['legacy-write'] },
+  }));
+  newer.import(older.export({ mode: 'update', from: newer.version() }));
+  expect(current.getState().notification).toEqual(notification);
+  expect(current.getState().externalHistoryCursor?.importedTurnHashes).toEqual(['legacy-write']);
+  oldMirror.dispose();
+  current.dispose();
+});
+
+describe('Session room ids', () => {
+  it('keeps removed Session comment rooms out of the Session namespace', () => {
+    expect(isSessionDocRoomId('session-comment-abc')).toBe(false);
+    expect(getSessionIdFromRoomId('session-comment-abc')).toBeNull();
+    expect(getLoroStreamIdForDocId('workspace' as WorkspaceId, 'session-comment-abc')).toBe(
+      'session-comment-abc'
+    );
+  });
+});
+
+describe('createSessionControlPlaneMirror', () => {
+  const controlPlaneSessionId = 'session-control-plane-mirror' as SessionId;
+  const createMirror = () =>
+    createSessionControlPlaneMirror({
+      doc: new LoroDoc(),
+      initialState: { session: { id: controlPlaneSessionId } },
+    });
+  const queueItem = (task: string): MessageQueueItem =>
+    ({
+      task,
+      userId: 'user-1',
+      timestamp: '2026-09-09',
+      acpSessionConfig: { prompt: task, cliType: 'builtin', agentType: 'codex' },
+    }) as MessageQueueItem;
+
+  it('removing one queued message preserves the other message', () => {
+    const mirror = createMirror();
+    mirror.setState((draft) => {
+      draft.mq = [queueItem('first'), queueItem('second')];
+    });
+
+    const items = mirror.getState().mq ?? [];
+    expect(items).toHaveLength(2);
+
+    const removedCid = items[0]!.$cid;
+    mirror.setState((draft) => {
+      draft.mq = (draft.mq ?? []).filter((item) => item.$cid !== removedCid);
+    });
+
+    const remaining = mirror.getState().mq ?? [];
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.task).toBe('second');
+    mirror.dispose();
   });
 });

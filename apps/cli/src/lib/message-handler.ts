@@ -1,3 +1,91 @@
+import type { MachineStatusResponse } from '@lody/shared';
+import { readManagedOperation } from './managed-daemon-release';
+import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
+import type { SessionDirectoryListRequest } from '@lody/shared';
+import {
+  sessionHistoryWriteIntentDigest,
+  SessionHistoryReadResponseSchema,
+  SESSION_HISTORY_SUBSCRIPTION_LEASE_MS,
+  type SessionHistoryPublication,
+  type SessionHistorySubscription,
+  type SessionHistorySubscriptionRequest,
+  isContainedSession,
+  withAgentSessionDefaults,
+} from '@lody/shared';
+import { setTimeout as backfillWait } from 'node:timers/promises';
+import { publishRoostHistorySubscription } from '@/session/roost-history-subscription';
+import {
+  storeLocalSessionImage,
+  readLocalSessionImage,
+  readLocalSessionImageReceipt,
+  writeLocalSessionImageReceipt,
+  listLocalSessionImages,
+} from './session-file-blob-store';
+import {
+  prepareLocalAttachment,
+  resolveLocalAttachment,
+  downloadLocalAttachment,
+} from './session-local-attachments';
+import type {
+  SorbetCustomProvider,
+  SorbetCustomProviderEdit,
+  SorbetCustomProviderInput,
+} from '@lody/shared/local-machine-rpc';
+import { AndroidEmulatorService } from '@/android-emulator/service';
+import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
+import {
+  readEncryptedAttachment,
+  encryptedAttachmentPath,
+  type EncryptedAttachment,
+} from '@lody/shared';
+import type { EncryptedAgentExecution } from './e2ee/agent-execution';
+import { decideEncryptedDerivation } from './e2ee/derivation-limits';
+import { isScheduledMessageFile } from './schedules/scheduled-message-files';
+import {
+  getWorkspaceFlockDocId,
+  listWorkspaceProjects,
+  readWorkspaceFlockRowsFromFlock,
+} from '@lody/shared';
+import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
+import { SessionAutomationAuthority } from '@/session/session-automation-authority';
+import type { SessionFileRoot } from '@lody/shared';
+import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
+import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
+import { resolveSessionFilePath } from '@lody/shared';
+import { projectGroupDirectory } from '@/session/worktree/project-worktrees';
+import { archiveProjectGroup } from '@/session/worktree/project-worktree-archive';
+import {
+  resolveNotificationPresentation,
+  notificationReplyPreview,
+  type NotificationPresentation,
+} from '@lody/shared/notifications';
+import type { SessionActivePresencePhase } from './loro/session-active-presence';
+import { projectTurnAttention, type TerminalOutcome } from '@lody/shared/notifications';
+import { reportIfWasmFault } from './loro/wasm-runtime-health';
+import { turnNotificationAudience } from './notifications/turn-notification-audience';
+import { fileLocksLegacy } from '@/utils/file-lock';
+import { Effect } from 'effect';
+import { awaitSessionHistoryOwner } from '@/session/session-history-owner';
+import { ConcurrentQueue } from './concurrent-queue';
+import {
+  getSessionHistoryRpcRejection,
+  putSessionHistoryRpcRejection,
+} from '@/session/session-history-rpc-rejections';
+import {
+  SessionAttachmentTransfer,
+  type UploadableImageFile,
+  type UploadedSessionImage,
+  type ValidatedUploadFile,
+  type UploadedSessionFile,
+} from './session-attachment-transfer';
+import {
+  handleMemoryProviderRequest,
+  handleRelayedMemoryProviderRequest,
+} from './memory-providers';
+import { formatAgentSenderHeader, readMessageAuthor } from '@lody/shared';
+import { resolveSessionMessageAuthor } from '@/session/message-author';
+import { IosSimulatorService } from '@/ios-simulator/service';
+import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -5,19 +93,23 @@ import crypto from 'crypto';
 import { pathToFileURL } from 'url';
 
 import { v4 as uuidV4 } from 'uuid';
-import { z } from 'zod';
-import { Effect } from 'effect';
+import { describeRoostHistoryFailure } from '@/session/roost-history-diagnostics';
 import {
   createLoroStreamsJsonStreamClient,
   LoroStreamsMachineRpcServer,
+  LoroStreamsRpcHandlerError,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
   type LocalProjectGitStateRpcResponse,
+  type LocalProjectListBranchesRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
+  HistoryWriteError,
+  HistoryEntryWriteSchema,
+  parseHistoryWrite,
+  PermissionOutcomeSchema,
   MachineId,
   WorkspaceId,
-  SessionInputBlockSchema,
   SessionId,
   SessionImageUploadRequestValidated,
   SessionImageUploadResponse,
@@ -30,16 +122,14 @@ import {
   SessionCreateRequestValidated,
   SessionChatRequestValidated,
   SessionCancelRequestValidated,
-  CliType,
   AgentConfigCliType,
   type AgentConfigId,
-  type AgentWarningMeta,
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
   type TitleGenerationConfig,
-  isManagedBuiltinAgentType,
+  isBuiltinAgentType,
   sanitizeLodyInternalInstructions,
-  usesAcpProvidedSessionTitle,
+  acpOwnsSessionTitleGeneration,
   SessionCreateResponse,
   SessionChatResponse,
   SessionStatusFactory,
@@ -48,8 +138,8 @@ import {
   type MachineResourceInfo,
   SessionMeta,
   LocalProjectId,
-  type NeedToDeleteSessionQueueItem,
   getMachineRoomId,
+  getSessionIdFromRoomId,
   getSessionRoomId,
   type IssuePRMention,
   type SessionImageGroupContent,
@@ -60,12 +150,17 @@ import {
   getCodeCollabFileIndexSignalFlockDocId,
   type SessionContextWindowUsage,
   type SessionHistoryInput,
+  type SessionHistoryReadResponse,
+  type SessionHistoryReadQuery,
+  type SessionHistoryWriteOperation,
+  type SessionHistoryWriteResponse,
+  type PermissionOutcome,
   type SessionLegacyMetaFields,
   PERMISSION_REQUEST_TIMEOUT_MS,
   type ChatFailedCode,
   type ChatFailedReason,
   type ProjectRef,
-  type SessionPreparationCancelSpec,
+  getProjectRefBranch,
   resolveBaseBranchPreference,
   MachineStatusRequestValidated,
   MachinePingRequestValidated,
@@ -77,13 +172,19 @@ import {
   MachineAcpCapabilitiesRefreshResponse,
   type MachineAcpAuthenticateRequestValidated,
   type MachineAcpAuthenticateResponse,
-  SessionCodeCollabHostStartRequestValidated,
-  SessionCodeCollabHostStartResponse,
   type MachineAcpBinaryStatusRequestValidated,
   type MachineAcpBinaryInstallRequestValidated,
   type LocalProjectControlErrorCode,
   type LocalProjectControlRequest,
   type LocalProjectControlResponse,
+  E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+  E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+  E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
+  E2EE_SESSION_FORK_PROTOCOL_VERSION,
+  SORBET_CREDENTIALS_PROTOCOL_VERSION,
+  SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
   type LocalMachineRpcRequestValidated,
   type LocalMachineRpcResponse,
   type LocalMachineRpcResult,
@@ -93,36 +194,17 @@ import {
   sessionForkFailure,
   type SessionEditAndResendResponse,
   sessionEditAndResendFailure,
-  type SessionPreparationSpec,
-  type SessionPrepareCancelResponse,
-  type SessionPrepareResponse,
   type MachineLifecycleCapability,
   PreviewCandidateReportRequestValidated,
   SessionPreviewCreateRequestValidated,
   SessionPreviewRevokeRequestValidated,
   type SessionStatus,
-  buildSessionImageApiUrl,
-  getSessionImageDownloadApiPath,
-  getSessionImageUploadApiPath,
   buildSessionFileApiUrl,
-  buildSessionFileUploadMetadataHeaders,
   getSessionFileDownloadApiPath,
-  getSessionFileUploadApiPath,
-  getSessionFileMultipartCreateApiPath,
-  getSessionFileMultipartPartApiPath,
-  getSessionFileMultipartCompleteApiPath,
-  getSessionFilePartCount,
-  shouldUseSingleShotUpload,
-  isTextPreviewable,
   inputBlocksToHistoryItems,
   SESSION_FILE_MAX_COUNT,
-  SESSION_FILE_MAX_SIZE_BYTES,
-  SESSION_FILE_PART_SIZE_BYTES,
-  SESSION_FILE_PREVIEW_SNIFF_BYTES,
   type AcpConfigOptionSummary,
-  SESSION_IMAGE_ALLOWED_MIME_TYPES,
   SESSION_IMAGE_MAX_COUNT,
-  SESSION_IMAGE_MAX_SIZE_BYTES,
   isAskUserQuestionPermissionRequest,
   getAskUserQuestionPermissionDisplayTitle,
   parseAskUserQuestionPermissionMeta,
@@ -131,23 +213,21 @@ import {
   type MessageContent,
   type AcpSessionNotification,
   getServerNow,
+  hasFreshDesktopForegroundPresence,
+  type LodyPresenceStateMap,
   CODE_COLLAB_V2_TEXT_LIMITS,
   isSessionGoalActive,
-  resolveLatestSessionGoalFromHistory,
+  type SessionGoalAction,
+  type SessionGoalResponse,
   resolveProjectGitHubRepo,
-  type RepoId,
   deleteMachineFlockRowFromFlock,
   getMachineFlockDeleteLocalProjectEntries,
   getMachineFlockDocId,
-  getMachineFlockLocalProjects,
   machineFlockKeys,
-  machineDeleteCommandToQueueItem,
   parseMachineFlockKey,
   readMachineFlockRowsFromFlock,
-  serializeMachineFlockKey,
   writeMachineFlockRowToFlock,
   type MachineDeleteLocalProjectCommand,
-  type MachineDeleteSessionCommand,
   type MachineFlockEvent,
   type MachineFlockKey,
   type MachineFlockRow,
@@ -155,11 +235,9 @@ import {
   buildLiveActivityConversationItems,
   countLiveActivityConversationCandidates,
   countLiveActivityConversationStatuses,
-  findLiveActivityPermissionAlertCandidate,
   buildLodyConversationsLiveActivityId,
   LODY_CONVERSATIONS_LIVE_ACTIVITY_SCHEMA_VERSION,
   type LiveActivityConversationItem,
-  type LiveActivityPermissionAlert,
   type LiveActivityStatusCounts,
   getCodeCollabFileIndexFlockDocId,
   shouldBypassSessionQuota,
@@ -169,11 +247,19 @@ import {
   type AgentRunConfigSelection,
   type LodyOperationItemResult,
   type StoredLodyOperation,
-  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  hasPendingUserTurnActivation,
+  getDeviceTimeZone,
 } from '@lody/shared';
+import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
+import { getDefaultSessionWorkdir } from '../session/session';
 import { captureCli } from '@/lib/analytics/posthog';
-import { LoroDocumentManager, SessionDocument } from './loro/doc';
+import { LoroDocumentManager, SessionDocument, subscribeSessionChanges } from './loro/doc';
+import {
+  createSessionBackend,
+  readHistoryEntry,
+  type SessionBackend,
+} from '@/session/session-backend';
 import {
   type ContentBlock,
   RequestPermissionRequest,
@@ -183,12 +269,12 @@ import {
   publishCodeCollabFileIndexFlock,
   publishCodeCollabFileIndexSignalFlock,
 } from './code-collab/code-collab-flock-publish';
-import type { ModelInfo } from '@lody/shared';
+import type { ModelInfo, SessionActiveInvocationContextResult } from '@lody/shared';
 import type {
   CloudNotificationsPort,
   CloudPort,
   CloudUsagePort,
-  LoroStreamsTokenProvider,
+  LoroStreamsTokenProviderLegacy,
 } from '@lody/platform';
 import { Logger } from '@/utils/logger';
 import { ProviderSetupManager } from './provider-setup-manager';
@@ -199,13 +285,13 @@ import {
   type MachineProcessLifecycleAction,
   normalizeMachineUpgradeTargetVersion,
   verifyMachineLifecycleRequest,
-  writeDaemonUpgradeIntent,
+  withMachineEncryption,
 } from './machine-lifecycle';
 import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import { getCliHttpFetch } from '@/utils/http-transport';
 import { prepareCliStreamsGatewayBaseUrl } from './loro/streams-access';
-import { readTimeoutEnv, withTimeout } from './loro/timeout-utils';
+import { readTimeoutEnv, withTimeout, SYNC_CONFIRMATION_TIMEOUT_MS } from './loro/timeout-utils';
 import {
   copyIntoSessionFileBlobStore,
   getDraftSessionFileBlobMaxAgeMs,
@@ -213,14 +299,13 @@ import {
   getSessionFileBlobPath,
   listPendingLocalSessionFiles,
   markSessionFileBlobBackfilled,
-  readSessionFileBlobBackfillMarker,
+  readSessionFileBlobBackfillReceipt,
   removeSessionFileBlob,
   sessionFileBlobExists,
   writeSessionFileBlobBackfillMarker,
 } from '@/lib/session-file-blob-store';
 import {
   SESSION_FILE_BACKFILL_MAX_ATTEMPTS,
-  flipFileTransportToR2,
   sessionFileBackfillDelayMs,
 } from '@/lib/session-file-backfill';
 import {
@@ -229,10 +314,9 @@ import {
   buildAttachmentPromptText,
   buildUnavailableAttachmentPromptText,
   ensureAttachmentsGitExcluded,
-  resolveContainedUploadPath,
 } from '@/lib/session-file-attachments';
 import { deriveRepoIdFromGitHubRepo } from '@/utils/github';
-import { getLocalProjectGitStateAtRootPath } from '@lody/shared/node/local-project';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
@@ -241,7 +325,6 @@ import {
 } from '@/lib/notifications';
 import {
   appendACPNotificationsToAssistantEntry,
-  applyMessageContentsBatch,
   ensurePermissionRequestOnToolCall,
   updatePermissionOutcomeInHistory,
   findPermissionOutcomeInHistory,
@@ -249,31 +332,24 @@ import {
   clearThreadGoalFromHistory,
 } from '@/lib/acp/history';
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
+import { getAcpRuntimeConfigPatch, mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
-import type { AgentSessionWarning } from '@/agent/agent-client';
-import { ensureValidBranchName } from '@/agent/branch-name-generator';
+import type { AgentSessionWarning, NativeAgentWork } from '@/agent/agent-client';
+import { SessionActivePresenceControllerLegacy } from './loro/session-active-presence-legacy';
 import {
-  SessionActivePresenceController,
-  type SessionActivePresencePhase,
-} from './loro/session-active-presence';
-import {
-  resolveImageGenerationStatusWrite,
+  resolveImageGenerationPresencePhase,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
 import type { RepoWatchHandle } from 'loro-repo';
-import { resolveGitBranchName } from './git/resolve-git-branch-name';
 import {
   AgentClient,
   type AcpWriteTextFileEvidence,
   type ImageGenerationBeginEvent,
   type ImageGenerationEndEvent,
 } from 'src/agent/agent-client';
-import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
-import { getWorktreeManager } from '@/session/worktree/worktree-manager';
-import {
-  isManagedWorktreeBranchName,
-  renameBranchWithAvailableSuffix,
-} from '@/session/worktree/branch-name-allocation';
+import type { SessionUsageUpdate } from 'acp-extension-core';
+import { getWorktreeManager, WorktreeManager } from '@/session/worktree/worktree-manager';
+import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
@@ -282,6 +358,7 @@ import {
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
 import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import { resolveExpectedAcpCapabilitySourceVersion } from '@/agent/setting';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
 import {
@@ -297,11 +374,18 @@ import {
   SessionEditAndResendService,
   type SessionEditAndResendInput,
 } from '@/session/session-edit-and-resend-service';
+import { TARGET_CATCH_UP_TIMEOUT_MS } from '@/orchestration/coordinator-ports';
 import { LodyOperationCoordinator } from '@/orchestration/operation-coordinator';
+import {
+  createLocalSessionCommandEnvironment,
+  getSessionCommandEnvironment,
+  runWithDaemonWorkspace,
+  runWithSessionCommandEnvironment,
+  type DaemonWorkspaceAccess,
+} from './session-command-environment';
 import { getLodyOperationStorePath, LodyOperationStore } from '@/orchestration/operation-store';
 import {
   createSessionResult,
-  resolveTurnDispatchConfig,
   sendSessionChatResult,
   type CreateOptions,
   type ResolvedTurnDispatchConfig,
@@ -312,17 +396,12 @@ import {
   type AuthContext,
 } from '@/lib/command-runtime';
 import { makeSessionAccessPolicy } from '@/session/session-access-policy';
-import { AutoPromptRunner } from '@/session/auto-prompt-runner';
+import { WorkspaceGitService } from '@/session/workspace-git-service';
 import { TurnPostProcessingService } from '@/session/turn-post-processing-service';
 import {
   applyAcpSessionRunConfig,
   type AcpSessionRunConfig,
 } from '@/session/acp-session-config-applier';
-import {
-  readDiffStatsMetadata,
-  resolveCodeCollabAllChangesDiffStatsPatch,
-  resolveDiffStatsTarget,
-} from '@/session/session-diff-stats-target';
 import type { MachineAccessVerification } from '@/session/session-access-retry';
 import {
   CodeCollabV2Service,
@@ -330,7 +409,12 @@ import {
   type CodeCollabV2WorkspaceResolveOptions,
   type CodeCollabV2WorkspaceResolver,
 } from '@/lib/code-collab/code-collab-v2-service';
-import { FilePreviewService } from '@/lib/file-preview/file-preview-service';
+import {
+  FilePreviewService,
+  type FilePreviewLocalWorkspaceResolver,
+  type FilePreviewWorkspaceResolver,
+} from '@/lib/file-preview/file-preview-service';
+import { listSessionDirectory } from '@/lib/file-preview/session-directory-listing';
 import {
   CodeCollabV2DiffStore,
   type CodeCollabV2DiffStoreEvent,
@@ -347,27 +431,41 @@ import {
 } from '@/lib/code-collab/code-collab-v2-diff-evidence';
 import {
   readMachineLocalProjects,
+  reconcileMissingLocalProjectGitSummaries,
   removeMachineLocalProject,
+  isLocalProjectReferenced,
   resolveWorkspaceLocalProject,
   resolveWorkspaceLocalProjectRootPath,
   resolveWorkspaceLocalProjectRootPathWithRetry,
   resolveWorkspaceLocalProjectWithSyncOnMiss,
   isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
+  updateMachineLocalProjectGitSummaryFields,
   upsertMachineLocalProject,
+  readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
 import {
   isACPAgentRichContentNotification,
   materializeACPAgentRichContent,
 } from '@/lib/acp-agent-attachments';
-import { LocalProjectControlService } from '@/lib/local-project-control-service';
+import {
+  LocalProjectControlService,
+  LocalProjectCreateDirectoryError,
+} from '@/lib/local-project-control-service';
 import {
   makeLocalWorkspaceCatalog,
   type LocalCatalogAccessSnapshot,
   type LocalWorkspaceCatalogService,
 } from '@/lib/local-workspace-catalog';
 import { resolveSessionLiveStatus } from './session-live-status';
-import type { MemoryPressureEvictionResult } from './session-gc-manager';
+import type { SessionLiveActivity } from '@lody/shared/local-machine-rpc';
+import { truncateToolTitleForHistory } from '@lody/shared';
+import type { SessionWithdrawInputResponse } from '@lody/shared/local-machine-rpc';
+import {
+  combineGCSessionSources,
+  type MemoryPressureEvictionResult,
+  type SessionGCDeps,
+} from './session-gc-manager';
 import { PreviewService } from '@/preview/preview-service';
 import { LocalProjectHistorySyncService } from '@/lib/local-project-history-sync-service';
 import { precheckLocalProjectHistoryRequest } from '@/lib/local-project-history-precheck';
@@ -383,8 +481,16 @@ import {
   handleLocalProjectWorktreeConfigRequest,
   isLocalProjectWorktreeConfigRequest,
 } from '@/session/worktree/worktree-setup-config-store';
-import { readLegacySessionLaunchConfig } from '@/session/session-launch-config-resolver';
 import { resolveSessionWorktreeCleanupConfig } from '@/session/worktree/worktree-config-resolver';
+
+type SessionHistoryReadRequest = Extract<
+  LocalSessionControlRequestValidated,
+  { type: 'session/history-read' }
+>;
+type SessionHistoryWriteRequest = Extract<
+  LocalSessionControlRequestValidated,
+  { type: 'session/history-write' }
+>;
 
 type RepoDocMetaPatch = Parameters<LoroDocumentManager['repo']['upsertDocMeta']>[1];
 type LocalProjectFileRpcRequest = Extract<
@@ -392,6 +498,7 @@ type LocalProjectFileRpcRequest = Extract<
   {
     type:
       | 'local-project/list-files'
+      | 'local-project/search-files'
       | 'local-project/list-dir'
       | 'local-project/list-skills'
       | 'local-project/read-file';
@@ -408,6 +515,7 @@ type LocalProjectOwnerOnlyRpcRequest = Extract<
       | 'local-project/add'
       | 'local-project/prepare-add'
       | 'local-project/list-roots'
+      | 'local-project/create-directory'
       | 'local-project/browse-dir';
   }
 >;
@@ -421,6 +529,7 @@ function isLocalProjectFileRpcRequest(
 ): request is LocalProjectFileRpcRequest {
   return (
     request.type === 'local-project/list-files' ||
+    request.type === 'local-project/search-files' ||
     request.type === 'local-project/list-dir' ||
     request.type === 'local-project/list-skills' ||
     request.type === 'local-project/read-file'
@@ -440,6 +549,7 @@ function isLocalProjectOwnerOnlyRpcRequest(
     request.type === 'local-project/add' ||
     request.type === 'local-project/prepare-add' ||
     request.type === 'local-project/list-roots' ||
+    request.type === 'local-project/create-directory' ||
     request.type === 'local-project/browse-dir'
   );
 }
@@ -484,128 +594,59 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-type DeleteRequest = NeedToDeleteSessionQueueItem | MachineDeleteSessionCommand;
-type DeleteRequestRecord = Exclude<NeedToDeleteSessionQueueItem, boolean>;
 type MachineCommandSnapshot = {
   machineMeta: MachineLegacyMetaFields | undefined;
   machineFlockRows: MachineFlockRowMap;
-  archiveSessionIds: SessionId[];
-  deleteEntries: [SessionId, DeleteRequest][];
-  deleteSessionIds: Set<SessionId>;
   deleteLocalProjectEntries: [LocalProjectId, MachineDeleteLocalProjectCommand][];
 };
 
 function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
-  archive: boolean;
-  delete: boolean;
   deleteLocalProject: boolean;
   providerSetup: boolean;
+  localProject: boolean;
 } {
-  let archive = false;
-  let deleteCommand = false;
   let deleteLocalProject = false;
   let providerSetup = false;
+  let localProject = false;
   for (const event of events) {
     const parsed = parseMachineFlockKey(event.key);
-    if (parsed?.kind === 'archiveSessionCommand') {
-      archive = true;
-    }
-    if (parsed?.kind === 'deleteSessionCommand') {
-      archive = true;
-      deleteCommand = true;
-    }
     if (parsed?.kind === 'deleteLocalProjectCommand') {
       deleteLocalProject = true;
     }
-    if (parsed?.kind === 'providerSetup' || parsed?.kind === 'providerSetupCancellation') {
+    if (parsed?.kind === 'localProject') {
+      localProject = true;
+    }
+    if (
+      parsed?.kind === 'providerSetup' ||
+      parsed?.kind === 'providerSetupCancellation' ||
+      parsed?.kind === 'agentConfig'
+    ) {
       providerSetup = true;
     }
   }
-  return { archive, delete: deleteCommand, deleteLocalProject, providerSetup };
-}
-
-function getMachineFlockArchiveSessionIds(rows: MachineFlockRowMap): SessionId[] {
-  const sessionIds: SessionId[] = [];
-  for (const row of Object.values(rows)) {
-    const parsed = parseMachineFlockKey(row.key);
-    if (parsed?.kind === 'archiveSessionCommand') {
-      sessionIds.push(parsed.sessionId);
-    }
-  }
-  return sessionIds;
-}
-
-function getMachineFlockDeleteEntries(
-  rows: MachineFlockRowMap
-): [SessionId, MachineDeleteSessionCommand][] {
-  const entries: [SessionId, MachineDeleteSessionCommand][] = [];
-  for (const row of Object.values(rows)) {
-    const parsed = parseMachineFlockKey(row.key);
-    if (parsed?.kind === 'deleteSessionCommand') {
-      entries.push([parsed.sessionId, row.value as MachineDeleteSessionCommand]);
-    }
-  }
-  return entries;
-}
-
-function getMachineFlockDeleteCommand(
-  rows: MachineFlockRowMap,
-  sessionId: SessionId
-): MachineDeleteSessionCommand | undefined {
-  const key = machineFlockKeys.deleteSessionCommand(sessionId);
-  const row = rows[serializeMachineFlockKey(key)];
-  if (!row) {
-    return undefined;
-  }
-  const parsed = parseMachineFlockKey(row.key);
-  if (parsed?.kind !== 'deleteSessionCommand') {
-    return undefined;
-  }
-  return row.value as MachineDeleteSessionCommand;
+  return { deleteLocalProject, providerSetup, localProject };
 }
 
 function buildMachineCommandSnapshot(
   machineMeta: MachineLegacyMetaFields | undefined,
   machineFlockRows: MachineFlockRowMap
 ): MachineCommandSnapshot {
-  const needToArchiveSessions = machineMeta?.needToArchiveSessions ?? {};
-  const archiveSessionIds = Array.from(
-    new Set<SessionId>([
-      ...(Object.keys(needToArchiveSessions) as SessionId[]),
-      ...getMachineFlockArchiveSessionIds(machineFlockRows),
-    ])
-  );
-
-  const entriesBySessionId = new Map<SessionId, DeleteRequest>();
-  for (const [sessionId, request] of getMachineFlockDeleteEntries(machineFlockRows)) {
-    entriesBySessionId.set(sessionId, request);
-  }
-  for (const [sessionId, request] of Object.entries(machineMeta?.needToDeleteSessions ?? {}) as [
-    SessionId,
-    NeedToDeleteSessionQueueItem,
-  ][]) {
-    if (!entriesBySessionId.has(sessionId)) {
-      entriesBySessionId.set(sessionId, request);
-    }
-  }
-
-  const deleteEntries = Array.from(entriesBySessionId.entries());
   return {
     machineMeta,
     machineFlockRows,
-    archiveSessionIds,
-    deleteEntries,
-    deleteSessionIds: new Set(deleteEntries.map(([sessionId]) => sessionId)),
     deleteLocalProjectEntries: getMachineFlockDeleteLocalProjectEntries(machineFlockRows),
   };
 }
 
-type WorktreeCleanupTarget = {
-  repoId: RepoId;
-  source?: { kind: 'local-shared'; originalRootPath: string };
-  branchName?: string;
-  baseBranchName?: string;
-};
+/**
+ * Session archive and delete requests are no longer commands. Older clients
+ * still write them; a new daemon discards the rows so they stop accumulating.
+ * The Sessions they name are covered by the archived or deleted state those
+ * clients also wrote, which the worktree reconciler and lifecycle watcher use.
+ */
+const LEGACY_SESSION_COMMAND_FAMILIES = ['archiveSessionCommand', 'deleteSessionCommand'] as const;
+
+const WORKTREE_GC_INTERVAL_MS = 10 * 60_000;
 
 type LiveActivitySummary = {
   activityId: string;
@@ -613,7 +654,6 @@ type LiveActivitySummary = {
   statusCounts: LiveActivityStatusCounts;
   items: LiveActivityConversationItem[];
   updatedAt: number;
-  permissionAlert?: LiveActivityPermissionAlert;
 };
 
 function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
@@ -630,6 +670,57 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  sorbetCredentials?: {
+    list: (
+      configId: AgentConfigId,
+      signal?: AbortSignal
+    ) => Promise<Array<{ providerId: string; type: string }>>;
+    logout: (configId: AgentConfigId, providerId: string, signal?: AbortSignal) => Promise<void>;
+    listProviders: (
+      configId: AgentConfigId,
+      signal?: AbortSignal
+    ) => Promise<SorbetCustomProvider[]>;
+    createProvider: (
+      configId: AgentConfigId,
+      provider: SorbetCustomProviderInput,
+      signal?: AbortSignal
+    ) => Promise<SorbetCustomProvider>;
+    updateProvider: (
+      configId: AgentConfigId,
+      providerId: string,
+      provider: SorbetCustomProviderEdit,
+      signal?: AbortSignal
+    ) => Promise<SorbetCustomProvider>;
+    deleteProvider: (
+      configId: AgentConfigId,
+      providerId: string,
+      signal?: AbortSignal
+    ) => Promise<void>;
+    refreshProviders: (
+      configId: AgentConfigId,
+      providerId?: string,
+      signal?: AbortSignal
+    ) => Promise<void>;
+    listModels: (
+      configId: AgentConfigId,
+      providerId?: string,
+      signal?: AbortSignal
+    ) => Promise<
+      Array<{ selector: string; providerId: string; modelId: string; displayName: string }>
+    >;
+  };
+  remoteAutomation?: {
+    handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
+    control: (input: {
+      sessionId: string;
+      requesterUserId: string;
+      operation: import('@lody/shared/automations').RemoteAutomationOperation;
+      proof: import('@lody/shared/automations').RemoteAutomationProof;
+      responseKey: import('@lody/shared').RpcSecretPublicKey;
+    }) => Promise<import('@lody/shared/automations').RemoteAutomationRpcResult>;
+  };
+  encryptedWorkspace?: boolean;
+  encryptedExecution?: EncryptedAgentExecution;
   token: string;
   workspaceId: WorkspaceId;
   workspaceSlug?: string;
@@ -638,8 +729,21 @@ export interface MessageHandlerConfig {
   machineName: string;
   cliVersion: string;
   machineLifecycleCapability?: MachineLifecycleCapability;
+  /** Machine-wide: whether this daemon also hosts any encrypted workspace. */
+  hostsEncryptedWorkspace?: () => boolean;
+  prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   supportRegistryAgentTypes?: string[];
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  /**
+   * Presence snapshots of every workspace this daemon hosts, so a desktop focused
+   * on another hosted workspace also suppresses this workspace's mobile push.
+   * Absent: only this workspace's snapshot is read.
+   */
+  readHostedPresenceStates?: () => LodyPresenceStateMap[];
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
@@ -651,12 +755,17 @@ export interface MessageHandlerConfig {
    * retrying on a dead credential.
    */
   onFatalAuthFailure?: (error: Error) => void;
+  onInboxAvailabilityChange?: (message: string | undefined) => void;
   /**
    * Invoked after a machine lifecycle RPC has been ACKed to the caller. The
    * process boundary owns the actual exit/restart behavior.
    */
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  isMachineIdentityRestoreIdle?: () => boolean;
+  sealMachineIdentityRestore?: () => boolean;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
+  /** The fleet's access verdict for this workspace; cloud daemon commands resolve from it. */
+  readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
 }
 
@@ -674,36 +783,13 @@ type ConversationTurnGateContext = {
   deferACPUpdateTarget?: boolean;
 };
 
-type UploadableImageFile = {
-  absolutePath: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-  // Bytes are read inside the validation function while the file is open with
-  // O_NOFOLLOW. Carrying them to upload avoids a second `readFile` that would
-  // re-open the path and follow a symlink swapped in after validation (TOCTOU).
-  bytes: Buffer;
-};
-
-type UploadedSessionImage = NonNullable<SessionImageUploadResponse['images']>[number];
 type SessionImageUploadAttachTarget =
-  | { kind: 'active_turn'; turnId: string }
+  | { kind: 'active_turn'; turnId: string; turnEpoch?: number }
   | { kind: 'new_entry' }
   | { kind: 'unavailable'; statusType: string };
 type SessionImageUploadOptions = {
   attachTarget?: SessionImageUploadAttachTarget;
 };
-
-type ValidatedUploadFile = {
-  absolutePath: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-  sha256: string;
-  textPreview: boolean;
-};
-
-type UploadedSessionFile = SessionFilePayload & { downloadUrl: string };
 
 /**
  * Persist workspace-relative attachment provenance with one cross-platform
@@ -715,65 +801,6 @@ export function normalizeSessionFileSourcePath(
 ): string {
   return separator === '/' ? sourcePath : sourcePath.split(separator).join('/');
 }
-
-const SESSION_FILE_MAX_PART_RETRIES = 3;
-
-// Best-effort MIME type from a file extension for the agent-send path. The
-// server treats this as advisory only; preview gating re-sniffs content.
-const SESSION_FILE_MIME_TYPE_BY_EXTENSION: Record<string, string> = {
-  txt: 'text/plain',
-  text: 'text/plain',
-  log: 'text/plain',
-  md: 'text/markdown',
-  markdown: 'text/markdown',
-  json: 'application/json',
-  csv: 'text/csv',
-  tsv: 'text/tab-separated-values',
-  xml: 'application/xml',
-  html: 'text/html',
-  htm: 'text/html',
-  css: 'text/css',
-  js: 'text/javascript',
-  ts: 'text/plain',
-  yaml: 'application/yaml',
-  yml: 'application/yaml',
-  pdf: 'application/pdf',
-  zip: 'application/zip',
-  gz: 'application/gzip',
-  tar: 'application/x-tar',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-};
-
-const DEFAULT_SESSION_FILE_MIME_TYPE = 'application/octet-stream';
-
-// Backend multipart contract (backend/server/src/session-file-server.ts). Validated
-// at the trust boundary since these are HTTP responses (cli-type-safety rule).
-const MultipartCreateResponseSchema = z.object({
-  success: z.literal(true),
-  uploadId: z.string().min(1),
-  fileId: z.string().min(1),
-});
-const MultipartPartResponseSchema = z.object({
-  success: z.literal(true),
-  partNumber: z.number().int(),
-  etag: z.string().min(1),
-});
-
-const SESSION_IMAGE_MIME_TYPE_BY_EXTENSION: Record<
-  string,
-  (typeof SESSION_IMAGE_ALLOWED_MIME_TYPES)[number]
-> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-};
 
 // ACP ToolCallStatus values that represent a finished image generation.
 // `pending`/`in_progress` keep the captured turnId alive for retries; everything
@@ -808,6 +835,11 @@ function isImageGenerationTerminalStatus(status: string): boolean {
 export class MessageHandler {
   private sessionManager: SessionManager;
   private logger: Logger;
+  private acpInteractionOwner?: Promise<
+    ReturnType<typeof import('./e2ee/acp-interaction-owner').createAcpInteractionOwner>
+  >;
+  private acpInteractionStopping = false;
+
   private machineId: MachineId;
   private token: string;
   private userId: string;
@@ -817,29 +849,60 @@ export class MessageHandler {
   private cliVersion: string;
   private supportRegistryAgentTypes: string[];
   private closeSessionTerminals?: (sessionId: SessionId) => void;
+  private readHostedPresenceStates?: () => LodyPresenceStateMap[];
   private cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
   ) => Promise<void>;
   private onFatalAuthFailure?: (error: Error) => void;
   private onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
-  private readonly machineLifecycleCapability: MachineLifecycleCapability;
+  private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
+  private readonly baseMachineLifecycleCapability: MachineLifecycleCapability;
+  private readonly hostsEncryptedWorkspace?: () => boolean;
+  private get machineLifecycleCapability(): MachineLifecycleCapability {
+    return withMachineEncryption(
+      this.baseMachineLifecycleCapability,
+      this.hostsEncryptedWorkspace?.() ?? false
+    );
+  }
+  private readonly prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
+  private readonly isMachineIdentityRestoreIdle?: () => boolean;
+  private readonly sealMachineIdentityRestore?: () => boolean;
   private readonly store = new SessionTransientStore();
-  private sessionActivePresence!: SessionActivePresenceController;
+  private readonly historyOwnerAbort = new AbortController();
+  private readonly historySubscriptionAbort = new AbortController();
+  private readonly historySubscriptionReads = new ConcurrentQueue<string>(8);
+  private readonly historySubscriptions = new Map<string, AbortController>();
+  private readonly cancelledHistorySubscriptions = new Map<string, number>();
+  private sessionActivePresence!: SessionActivePresenceControllerLegacy;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
-  // Note: titleGenerationInFlight, archiveInFlight, deleteInFlight are self-cleaning
+  // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
   // and stay as independent tracking. All other per-session state lives in this.store.
-  private archiveWatchHandle: RepoWatchHandle | null = null;
+  private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
   private readonly archiveInFlight = new Set<SessionId>();
-  private deleteWatchHandle: RepoWatchHandle | null = null;
-  private readonly deleteInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
+  /**
+   * Latest output time and running tool title per Session, for on-demand live
+   * activity reads. One small entry per Session; never published.
+   */
+  private readonly liveActivityBySession = new Map<
+    SessionId,
+    { lastOutputAt: number; actionToolCallId?: string; actionTitle?: string }
+  >();
+  private readonly worktreeGc: WorktreeGarbageCollector;
+  private worktreeGcTimer: NodeJS.Timeout | null = null;
+  private detachWorktreeGcSyncListener: (() => void) | null = null;
   private readonly deleteLocalProjectInFlight = new Set<LocalProjectId>();
   private machineFlockCommandWatcher: MachineFlockCommandWatcher;
   // Desktop local-transport backfill: in-flight task keys (`${sessionId}:${fileId}`)
   // so a file is never backfilled by two concurrent workers (re-enqueue dedupe).
   private readonly sessionFileBackfillInFlight = new Set<string>();
   private sessionFileBackfillStopped = false;
+  private readonly localImageBackfills = new Map<string, Promise<void>>();
   // Backfill authorization window (S5/D10 撤权不上传): every enable opens a new
   // generation with a fresh AbortController; disable (offline/revoke) aborts
   // in-flight uploads and bumps the generation. A backfill task may only COMMIT
@@ -853,8 +916,10 @@ export class MessageHandler {
   }
   private hasShownHappyCodingMessage = false;
   private readonly cloudPort: CloudPort;
+  private readonly encryptedAttachments: boolean;
   private notificationService: CloudNotificationsPort | null;
   private usageTrackingService: CloudUsagePort | null;
+  private readonly turnTokenUsage = new TurnTokenUsageLedger();
   // Backstop bound on how long turn finalization waits for a cloud side
   // effect once it has been allowed to run (see runTurnCloudSideEffect —
   // known-offline skips entirely; this bound covers half-open networks the
@@ -871,9 +936,10 @@ export class MessageHandler {
   private static readonly CODE_COLLAB_EVIDENCE_MAX_AUTOMATIC_RETRIES = 5;
   private static readonly CODE_COLLAB_EVIDENCE_RETRY_BASE_DELAY_MS = 100;
   private static readonly CODE_COLLAB_EVIDENCE_RETRY_MAX_DELAY_MS = 1_600;
-  private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 400;
+  private static readonly CONTEXT_WINDOW_USAGE_THROTTLE_MS = 10_000;
   // Track permission wait time: requestId -> timestamp when permission was requested
   private readonly permissionRequestStartTimes = new Map<string, number>();
+  private readonly pendingPermissionRequests = new Map<SessionId, Set<string>>();
   private static readonly MACHINE_ACCESS_REGISTRATION_CACHE_TTL_MS = 20 * 60_000;
   private machineAccessRegistrationInFlight: Promise<void> | null = null;
   private machineAccessRegistrationExpiresAtMs = 0;
@@ -889,19 +955,52 @@ export class MessageHandler {
     pressureReason: null,
   });
   private executionService: SessionExecutionService;
+  /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
+  private readonly encryptedExecution?: EncryptedAgentExecution;
+  private readonly sorbetCredentials?: MessageHandlerConfig['sorbetCredentials'];
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
+  private iosSimulatorService: IosSimulatorService;
+  private androidEmulatorService: AndroidEmulatorService;
   private sessionDispatchWatcher: SessionDispatchWatcher;
   private sessionUserResolver: SessionUserResolver;
   private sessionForkService: SessionForkService;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
-  private autoPromptRunner: AutoPromptRunner;
   private turnPostProcessingService: TurnPostProcessingService;
   private localProjectControlService: LocalProjectControlService;
+  /** The session's own workspace (its worktree), shared by `file/preview` and `file/list-dir`. */
+  private readonly resolveFilePreviewWorkspace: FilePreviewWorkspaceResolver = async (
+    sessionId,
+    rootId
+  ) => {
+    const resolved = await this.resolveCodeCollabV2Workspace(sessionId, { rootId });
+    return resolved.ok
+      ? {
+          ok: true,
+          ownerSessionId: resolved.ownerSessionId,
+          workspaceRoot: resolved.workspaceRoot,
+          fileRoots: resolved.fileRoots,
+        }
+      : { ok: false, code: resolved.code, message: resolved.message };
+  };
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
-  private machineRpcTokenProvider: LoroStreamsTokenProvider | null = null;
+  private encryptedQueryServer: LoroStreamsMachineRpcServer | null = null;
+
+  async readEncryptedMachineRequest(
+    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+    context: {
+      requestId: string;
+      expiresAt: number;
+      signal: AbortSignal;
+      authority?: { isCurrent: () => boolean; signal: AbortSignal };
+    }
+  ) {
+    if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
+    return this.encryptedQueryServer.readFeatureQuery(request, context);
+  }
+  private machineRpcTokenProvider: LoroStreamsTokenProviderLegacy | null = null;
   private machineRpcGatewayBaseUrl: string | null = null;
   private machineRpcServerStartPromise: Promise<void> | null = null;
   private machineRpcServerRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -921,6 +1020,10 @@ export class MessageHandler {
   // File Preview v3. Separate from Code Collab on purpose: previewing a file must
   // not start a workspace watcher or publish a file index.
   private filePreviewService: FilePreviewService;
+  private encryptedFileReader?: FilePreviewService;
+  private encryptedCodeCollabReader?: CodeCollabV2Service;
+  private diffBlobReader!: CodeCollabV2Service;
+  private diffBlobStoreReader?: CodeCollabV2DiffStore;
 
   /**
    * Get a logger with session context. Caches loggers per session for efficiency.
@@ -941,7 +1044,17 @@ export class MessageHandler {
     this.store.get(sessionId).lastActivityMs = Date.now();
   }
 
-  private readonly preferredBaseBranch = (process.env.LODY_BASE_BRANCH || 'main').trim() || 'main';
+  /** Operator override only; Git diff bases otherwise use the repository default. */
+  private readonly configuredBaseBranch = process.env.LODY_BASE_BRANCH?.trim() || undefined;
+
+  private readonly preferredBaseBranch = this.configuredBaseBranch ?? 'main';
+
+  /** Unlike `resolveGitHubProjectBranch`, never assumes `main` for a missing base. */
+  private resolveDiffBaseBranch(meta: SessionMeta | undefined): string | undefined {
+    return (
+      meta?.baseBranch?.trim() || getProjectRefBranch(meta?.project) || this.configuredBaseBranch
+    );
+  }
 
   private resolveGitHubProjectBranch(
     meta: SessionMeta | undefined,
@@ -1051,8 +1164,10 @@ export class MessageHandler {
     sessionDoc: SessionDocument,
     turnId: string,
     modelInfo: ModelInfo | undefined,
-    userTurnId?: string
+    userTurnId?: string,
+    signal?: AbortSignal
   ): Promise<void> {
+    if (signal?.aborted) return;
     const span = startTraceSpan(this.logger, 'history.write_assistant_entry', {
       sessionId,
       turnId,
@@ -1060,51 +1175,56 @@ export class MessageHandler {
     });
     this.logger.debug(`[${sessionId}] Creating assistant entry for turn ${turnId}`);
     try {
-      await sessionDoc.updateHistory((history) => {
-        const existingEntry = history.find(
-          (entry) => entry.id === turnId && entry.role === 'assistant'
-        );
-        if (existingEntry) {
-          return history.map((entry) => {
-            if (entry.id !== turnId || entry.role !== 'assistant') {
-              return entry;
-            }
-            // Reopen a reused assistant entry for a live turn: clear the terminal
-            // footprint that `finalizeACPState` may have stamped on it. Assistant
-            // entry ids are deterministic (`assistant:<userTurnId>`), so when a turn
-            // is re-dispatched after the machine died/restarted mid-turn (durable
-            // pointer recovery), execution reuses THIS finalized entry and streams
-            // fresh output into it. Without this reset `finished`/`endedAt` stay true
-            // from the pre-death teardown finalize, and the web renderer folds the
-            // still-streaming turn into a "Worked for …" summary (and shared
-            // "active assistant entry" logic treats it as terminal). This branch only
-            // runs at genuine turn (re)start via `openAssistantEntry`, so resetting to
-            // the not-finished state here is correctly scoped. See
-            // apps/cli/src/session/AGENTS.md (assistant entry id reuse) and
-            // packages/components/src/components/ai-gui/AGENTS.md ("Worked for …").
-            return {
-              ...entry,
-              userTurnId: entry.userTurnId ?? userTurnId,
-              modelInfo: modelInfo ?? entry.modelInfo,
-              finished: false,
-              endedAt: undefined,
-              permissionWaitMs: undefined,
-            };
-          });
+      // Reopen a reused assistant entry for a live turn, or create it. Assistant
+      // entry ids are deterministic (`assistant:<userTurnId>`), so when a turn is
+      // re-dispatched after the machine died/restarted mid-turn (durable pointer
+      // recovery), execution reuses THIS finalized entry and streams fresh output
+      // into it. Without clearing `finished`/`endedAt`/`permissionWaitMs` they stay
+      // true from the pre-death teardown finalize, and the web renderer folds the
+      // still-streaming turn into a "Worked for …" summary (and shared "active
+      // assistant entry" logic treats it as terminal). This only runs at genuine
+      // turn (re)start via `openAssistantEntry`. See apps/cli/src/session/AGENTS.md
+      // (assistant entry id reuse) and packages/components/src/components/ai-gui/AGENTS.md
+      // ("Worked for …").
+      const backend = await this.getSessionBackend(sessionDoc);
+      const existing = await backend.history.readTurn(turnId);
+      let author = existing.state === 'ready' ? readMessageAuthor(existing.turn.author) : undefined;
+      if (!author && userTurnId) {
+        const input = await backend.history.readTurn(userTurnId);
+        if (signal?.aborted) {
+          span.end();
+          return;
         }
-
-        history.push({
-          id: turnId,
-          role: 'assistant',
-          userTurnId,
-          items: [] as unknown as SessionHistoryInput['items'],
-          timestamp: new Date(getServerNow()).toISOString(),
-          userId: undefined,
-          read: undefined,
-          modelInfo,
-          fileDiff: [],
-        });
-        return history;
+        if (input.state === 'ready' && input.turn.role === 'user') {
+          this.executionService.setTurnNotificationAudience(
+            sessionId,
+            userTurnId,
+            turnNotificationAudience(input.turn.author)
+          );
+        }
+        const meta = await sessionDoc.getMetaState();
+        if (meta)
+          author = await resolveSessionMessageAuthor(
+            this.workspaceDocument,
+            { ...meta, id: sessionId },
+            userTurnId,
+            input.state === 'ready'
+              ? normalizeSessionTurnInputConfig(input.turn.inputConfig)
+              : undefined,
+            modelInfo,
+            this.workspaceId
+          );
+      }
+      if (signal?.aborted) {
+        span.end();
+        return;
+      }
+      await backend.openAssistantTurn({
+        turnId,
+        ...(author ? { author } : {}),
+        ...(userTurnId !== undefined ? { userTurnId } : {}),
+        ...(modelInfo !== undefined ? { modelInfo } : {}),
+        timestamp: new Date(getServerNow()).toISOString(),
       });
       span.end();
       this.logger.debug(`[${sessionId}] Assistant entry created`);
@@ -1116,7 +1236,7 @@ export class MessageHandler {
 
   /**
    * Run a Lody-cloud side effect attached to a visible turn (usage flush,
-   * completion notification, Live Activity sync). Two-layer discipline —
+   * turn outcome notification, Live Activity sync). Two-layer discipline —
    * cloud work must never hold the turn's presence scope
    * (specs/local-first-two-plane.md):
    *
@@ -1175,28 +1295,72 @@ export class MessageHandler {
     });
   }
 
+  /**
+   * Attribute a usage delta to the assistant entry that owns ACP output now. A
+   * live turn's usage is written once at finalization; a late report (background
+   * work after the turn ended) is added to the finished entry immediately.
+   */
+  private recordTurnTokenUsage(
+    sessionId: SessionId,
+    update: SessionUsageUpdate
+  ): Promise<void> | undefined {
+    const usage = turnTokenUsageFromUpdate(update);
+    const target = usage && this.store.getCurrentACPUpdateTarget(sessionId);
+    if (!usage || !target) return undefined;
+    this.turnTokenUsage.add(sessionId, target.assistantEntryId, usage);
+    return target.source === 'finalized_turn'
+      ? this.flushTurnTokenUsage(sessionId, target.assistantEntryId)
+      : undefined;
+  }
+
+  private async getSessionBackend(sessionDoc: SessionDocument): Promise<SessionBackend> {
+    return createSessionBackend(sessionDoc);
+  }
+
+  private async flushTurnTokenUsage(sessionId: SessionId, assistantEntryId: string) {
+    const usage = this.turnTokenUsage.take(sessionId, assistantEntryId);
+    if (!usage) return;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      await backend.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: assistantEntryId,
+        add: usage,
+      });
+    } catch (error) {
+      this.logger.debug(
+        `[${sessionId}] Failed to record turn token usage: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
   private async handleUsageUpdate(
     sessionId: SessionId,
-    acpSessionId: ACPSessionId,
+    acpSessionId: string,
     update: SessionUsageUpdate
   ): Promise<void> {
     try {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const meta = await sessionDoc.getMetaState();
+      const backend = await this.getSessionBackend(sessionDoc);
+      const meta = await backend.getMetaState();
       if (!meta) return;
-      if (meta.cliType !== 'builtin' || !isManagedBuiltinAgentType(meta.agentType)) {
-        return;
-      }
-      const cliType = meta.agentType;
-      const latestAssistant = sessionDoc.getLatestAssistantHistory();
+      const cliType =
+        meta.cliType === 'custom'
+          ? 'custom'
+          : meta.cliType === 'builtin' && isBuiltinAgentType(meta.agentType)
+            ? meta.agentType
+            : null;
+      if (!cliType) return;
+      const latestAssistant = await backend.readLatestTurn('assistant');
 
       let userId = latestAssistant?.userId;
       if (!userId) {
-        const history = await sessionDoc.getHistory();
+        const history = await backend.readHistoryQuery();
         for (let i = history.length - 1; i >= 0; i--) {
           const entry = history[i];
           if (entry?.userId) {
-            userId = entry.userId;
+            userId = entry.userId as string;
             break;
           }
         }
@@ -1255,56 +1419,43 @@ export class MessageHandler {
     }
   }
 
-  private async flushCodexGeneratedImageUploads(sessionId: SessionId): Promise<void> {
-    for (;;) {
-      const state = this.store.get(sessionId);
-      if (state.imageGenerationUploads.size === 0) break;
-      await Promise.all([...state.imageGenerationUploads.values()]);
-    }
+  private async flushCodexGeneratedImageUploads(
+    sessionId: SessionId,
+    turnId?: string
+  ): Promise<void> {
+    const uploads = [...this.store.get(sessionId).imageGenerationUploads.values()];
+    if (uploads.length === 0) return;
+    await this.executionService.waitForImageUploads(sessionId, turnId, Promise.all(uploads));
   }
 
   private handleImageGenerationBegin(sessionId: SessionId, event: ImageGenerationBeginEvent): void {
-    const turnId = this.store.getTurnId(sessionId) ?? null;
+    const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
+    const target = currentTarget?.source === 'active_turn' ? currentTarget : null;
+    const turnId = target?.turnId;
     const state = this.store.get(sessionId);
-    state.imageGenerationTurnIds.set(event.callId, turnId);
+    state.imageGenerationTurnTargets.set(event.callId, target);
+    this.recordTurnEvent(sessionId, target?.turnEpoch);
     state.imageGenerationActiveCallIds.add(event.callId);
-    this.enqueueImageGenerationActivityStatusSync(sessionId);
+    this.syncImageGenerationActivityPresence(sessionId);
     this.logger.debug(
       `[${sessionId}] Codex image generation started (callId=${event.callId} turnId=${turnId ?? 'none'})`
     );
   }
 
-  private enqueueImageGenerationActivityStatusSync(sessionId: SessionId): void {
-    const state = this.store.get(sessionId);
-    const task = state.imageGenerationActivityStatusChain
-      .catch(() => undefined)
-      .then(async () => {
-        const currentState = this.store.get(sessionId);
-        const hasActiveImageGeneration = currentState.imageGenerationActiveCallIds.size > 0;
-        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        const status = (await sessionDoc.getMetaState())?.status;
-
-        // This chain rides on ACP events and can drain after the visible active
-        // scope ended; a working-status write is only sustainable while this
-        // session still has active presence.
-        const nextStatus = resolveImageGenerationStatusWrite({
-          hasActiveImageGeneration,
-          hasActivePresence: this.hasSessionActivePresence(sessionId),
-          status,
-        });
-        if (nextStatus) {
-          await sessionDoc.setStatus(nextStatus);
-          this.setSessionActivePresencePhase(
-            sessionId,
-            nextStatus.type === 'running' && nextStatus.activity === 'image_generation'
-              ? 'image_generation'
-              : 'thinking'
-          );
-        }
+  private syncImageGenerationActivityPresence(sessionId: SessionId): void {
+    try {
+      const state = this.store.get(sessionId);
+      // Presence-only and synchronous: image lifecycle events cannot leave a
+      // deferred status write that outlives the prompt. The phase owner dedupes
+      // unchanged activity and the resolver preserves finalizing/permission.
+      const nextPhase = resolveImageGenerationPresencePhase({
+        hasActiveImageGeneration: state.imageGenerationActiveCallIds.size > 0,
+        current: this.sessionActivePresence.getStatus(sessionId),
       });
-
-    state.imageGenerationActivityStatusChain = task;
-    void task.catch((error) => {
+      if (nextPhase) {
+        this.setSessionActivePresencePhase(sessionId, nextPhase);
+      }
+    } catch (error) {
       try {
         this.logger.debug(
           `[${sessionId}] Failed to sync Codex image generation activity: ${formatErrorMessage(
@@ -1312,9 +1463,9 @@ export class MessageHandler {
           )}`
         );
       } catch {
-        // Logging must never make the status chain fail recursively.
+        // Best-effort activity reporting must not interrupt image handling.
       }
-    });
+    }
   }
 
   private handleImageGenerationEnd(sessionId: SessionId, event: ImageGenerationEndEvent): void {
@@ -1322,7 +1473,7 @@ export class MessageHandler {
     const isTerminal = isImageGenerationTerminalStatus(event.status);
     if (isTerminal) {
       state.imageGenerationActiveCallIds.delete(event.callId);
-      this.enqueueImageGenerationActivityStatusSync(sessionId);
+      this.syncImageGenerationActivityPresence(sessionId);
     }
 
     if (state.imageGenerationUploadedCallIds.has(event.callId)) {
@@ -1338,14 +1489,20 @@ export class MessageHandler {
       return;
     }
 
-    const cachedTurnId = state.imageGenerationTurnIds.get(event.callId);
-    const capturedTurnId =
-      cachedTurnId !== undefined ? cachedTurnId : (this.store.getTurnId(sessionId) ?? null);
+    const cachedTarget = state.imageGenerationTurnTargets.get(event.callId);
+    const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
+    const target =
+      cachedTarget !== undefined
+        ? cachedTarget
+        : currentTarget?.source === 'active_turn'
+          ? currentTarget
+          : null;
+    this.recordTurnEvent(sessionId, target?.turnEpoch);
 
     const savedPath = this.resolveCodexGeneratedImagePath(sessionId, event.savedPath);
     if (!savedPath && !event.image) {
       if (isTerminal) {
-        state.imageGenerationTurnIds.delete(event.callId);
+        state.imageGenerationTurnTargets.delete(event.callId);
       }
       this.logger.debug(
         `[${sessionId}] Codex image generation has neither a usable savedPath nor inline image data (callId=${event.callId} status=${event.status} terminal=${isTerminal})`
@@ -1353,9 +1510,9 @@ export class MessageHandler {
       return;
     }
 
-    const attachTarget = capturedTurnId
-      ? ({ kind: 'active_turn', turnId: capturedTurnId } satisfies SessionImageUploadAttachTarget)
-      : undefined;
+    const attachTarget: SessionImageUploadAttachTarget = target
+      ? { kind: 'active_turn', turnId: target.turnId, turnEpoch: target.turnEpoch }
+      : { kind: 'new_entry' };
 
     const callId = event.callId;
     const uploadPromise = (async () => {
@@ -1391,14 +1548,14 @@ export class MessageHandler {
     })()
       .then(() => {
         state.imageGenerationUploadedCallIds.add(callId);
-        state.imageGenerationTurnIds.delete(callId);
+        state.imageGenerationTurnTargets.delete(callId);
       })
       .catch((error) => {
         this.logger.debug(
           `[${sessionId}] Failed to upload Codex generated image (callId=${callId} path=${savedPath ?? 'none'}): ${formatErrorMessage(error)}`
         );
         if (isTerminal) {
-          state.imageGenerationTurnIds.delete(callId);
+          state.imageGenerationTurnTargets.delete(callId);
         }
       })
       .finally(() => {
@@ -1432,6 +1589,11 @@ export class MessageHandler {
       notification,
       logger: this.logger,
       resolveSessionWorkspaceRoot: (sessionId) => this.resolveSessionWorkspaceRoot(sessionId),
+      resolveSessionFileRoots: async (sessionId) => {
+        const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
+        if (!resolved.ok) throw new Error('Session file roots are unavailable');
+        return resolved.fileRoots ?? [{ id: 'main', absolutePath: resolved.workspaceRoot }];
+      },
       validateSessionImageUploadPath: async (filePath) =>
         await this.validateSessionImageUploadPath(filePath),
       uploadSessionImageFile: async (uploadArgs) => await this.uploadSessionImageFile(uploadArgs),
@@ -1457,11 +1619,14 @@ export class MessageHandler {
       const appended = await this.appendAssistantImageGroupToActiveTurn({
         sessionDoc,
         turnId: initialTarget.turnId,
+        turnEpoch: initialTarget.turnEpoch,
         content,
       });
       if (appended) {
         historyEntryId = initialTarget.turnId;
       } else {
+        if (args.attachTarget)
+          throw new Error('Generated image owning turn is unavailable; dropping history write');
         const latestTarget = await this.resolveSessionImageUploadAttachTarget(
           args.sessionId,
           sessionDoc
@@ -1565,8 +1730,10 @@ export class MessageHandler {
   ): Promise<void> {
     try {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
       await upsertThreadGoalInHistory(sessionDoc, goal, {
         targetEntryId: this.store.getTurnId(sessionId),
+        backend,
       });
       await this.workspaceDocument.repo.upsertDocMeta(sessionDoc.roomId, {
         latestGoal: undefined,
@@ -1581,27 +1748,29 @@ export class MessageHandler {
   private async persistThreadGoalClear(sessionId: SessionId, threadId: string): Promise<void> {
     try {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const meta = await sessionDoc.getMetaState();
+      const backend = await this.getSessionBackend(sessionDoc);
+      const meta = await backend.getMetaState();
       const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
-      const current =
-        resolveLatestSessionGoalFromHistory(await sessionDoc.getHistory()) ??
-        legacyMeta?.latestGoal ??
-        null;
+      const current = (await backend.readLatestGoal()) ?? legacyMeta?.latestGoal ?? null;
       // Skip both the history sweep and the meta write when the snapshot is
       // already cleared — `clearThreadGoalFromHistory` would otherwise scan
       // every entry to find no work to do.
       if (current?.threadId === threadId && current.status === 'cleared') {
         return;
       }
-      await clearThreadGoalFromHistory(sessionDoc, threadId);
+      await clearThreadGoalFromHistory(sessionDoc, threadId, { backend });
       // Keep the cleared snapshot in history so the UI can render it without
       // carrying another copy in doc meta.
       if (current && current.threadId === threadId) {
-        await upsertThreadGoalInHistory(sessionDoc, {
-          ...current,
-          status: 'cleared',
-          updatedAt: getServerNow(),
-        });
+        await upsertThreadGoalInHistory(
+          sessionDoc,
+          {
+            ...current,
+            status: 'cleared',
+            updatedAt: getServerNow(),
+          },
+          { backend }
+        );
       }
       await this.workspaceDocument.repo.upsertDocMeta(sessionDoc.roomId, {
         latestGoal: undefined,
@@ -1618,9 +1787,15 @@ export class MessageHandler {
     usage: SessionContextWindowUsage
   ): Promise<void> {
     try {
+      // A final flush must land after an already-started intermediate write.
+      await Promise.all([...this.store.get(sessionId).pendingContextWindowHandlers]);
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.setContextWindowUsage(usage);
     } catch (error) {
+      const state = this.store.get(sessionId);
+      if (state.contextWindowUsageLastQueued === usage) {
+        state.contextWindowUsageLastQueued = null;
+      }
       this.logger.debug(
         `[${sessionId}] Failed to persist context window usage: ${formatErrorMessage(error)}`
       );
@@ -1631,21 +1806,61 @@ export class MessageHandler {
     sessionId: SessionId,
     usage: SessionContextWindowUsage
   ): void {
+    if (
+      !Number.isFinite(usage.size) ||
+      !Number.isFinite(usage.used) ||
+      usage.size < 0 ||
+      usage.used < 0
+    ) {
+      return;
+    }
     const state = this.store.get(sessionId);
     state.contextWindowUsageBuffer = usage;
     if (state.contextWindowUsageTimer) {
       return;
     }
-    state.contextWindowUsageTimer = setTimeout(() => {
+    const publish = () => {
       state.contextWindowUsageTimer = null;
       const latest = state.contextWindowUsageBuffer;
       if (!latest) {
         return;
       }
-      state.contextWindowUsageBuffer = null;
-      const promise = this.persistContextWindowUsage(sessionId, latest);
-      this.trackPendingContextWindowPersist(sessionId, promise);
-    }, MessageHandler.CONTEXT_WINDOW_USAGE_THROTTLE_MS);
+      const previous = state.contextWindowUsageLastQueued;
+      // Compare with the last published snapshot, so small deltas accumulate.
+      // Keep skipped values buffered for an exact boundary flush.
+      if (
+        previous &&
+        latest.size === previous.size &&
+        Math.abs(latest.used - previous.used) < Math.max(1024, latest.size * 0.01)
+      ) {
+        return;
+      }
+      this.queueContextWindowUsagePersist(sessionId, latest);
+    };
+    const delay = state.contextWindowUsageLastQueued
+      ? Math.max(
+          0,
+          MessageHandler.CONTEXT_WINDOW_USAGE_THROTTLE_MS -
+            (Date.now() - state.contextWindowUsageLastQueuedAt)
+        )
+      : 0;
+    if (delay === 0) {
+      publish();
+    } else {
+      state.contextWindowUsageTimer = setTimeout(publish, delay);
+    }
+  }
+
+  private queueContextWindowUsagePersist(
+    sessionId: SessionId,
+    usage: SessionContextWindowUsage
+  ): void {
+    const state = this.store.get(sessionId);
+    state.contextWindowUsageBuffer = null;
+    state.contextWindowUsageLastQueued = usage;
+    state.contextWindowUsageLastQueuedAt = Date.now();
+    const promise = this.persistContextWindowUsage(sessionId, usage);
+    this.trackPendingContextWindowPersist(sessionId, promise);
   }
 
   private async flushSessionContextWindowUsage(sessionId: SessionId): Promise<void> {
@@ -1657,9 +1872,7 @@ export class MessageHandler {
 
     const latest = state.contextWindowUsageBuffer;
     if (latest) {
-      state.contextWindowUsageBuffer = null;
-      const promise = this.persistContextWindowUsage(sessionId, latest);
-      this.trackPendingContextWindowPersist(sessionId, promise);
+      this.queueContextWindowUsagePersist(sessionId, latest);
     }
 
     for (;;) {
@@ -1702,9 +1915,35 @@ export class MessageHandler {
       fileDiff: [],
       items: [noticeItem],
     };
-    await sessionDoc.updateHistory((prevHistory) => {
-      return [...prevHistory, systemNotice];
-    });
+    const backend = await this.getSessionBackend(sessionDoc);
+    await backend.appendHistoryTurn(systemNotice);
+  }
+
+  /**
+   * Settings > Lody Agent stores per-machine session defaults on the Provider.
+   * A request that names a value keeps it; the defaults only fill what it left
+   * out, e.g. a session created from the CLI or MCP without a run config.
+   */
+  private async withProviderSessionDefaults(
+    config: AcpSessionRunConfig,
+    sessionDoc: SessionDocument
+  ): Promise<AcpSessionRunConfig> {
+    if (config.agentType !== 'sorbet') return config;
+    try {
+      const agentConfigId = (await sessionDoc.getMetaState())?.agentConfigId;
+      if (!agentConfigId) return config;
+      const provider = await this.workspaceDocument.getAgentConfigById(
+        agentConfigId,
+        this.machineId
+      );
+      return withAgentSessionDefaults(config, provider?.sessionDefaults);
+    } catch (error) {
+      // Defaults are a convenience: an unreadable Provider row must not stop the turn.
+      this.logger.debug(
+        `[${sessionDoc.sessionId}] Session defaults unavailable: ${formatErrorMessage(error)}`
+      );
+      return config;
+    }
   }
 
   private async applyAcpModeAndModel(
@@ -1713,13 +1952,44 @@ export class MessageHandler {
       acpSessionId: ACPSessionId | null;
       agentClient: AgentClient | null;
     },
-    config: AcpSessionRunConfig
+    config: AcpSessionRunConfig,
+    context: {
+      sessionDoc: SessionDocument;
+      basedOnUserTurnId?: string;
+      signal?: AbortSignal;
+    }
   ): Promise<void> {
-    const { warningSelections } = await applyAcpSessionRunConfig({
+    const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
       session,
-      config,
+      config: await this.withProviderSessionDefaults(config, context.sessionDoc),
       logger: this.logger,
+      signal: context.signal,
     });
+
+    if (runtimeConfigPatch && context.basedOnUserTurnId) {
+      const basedOnUserTurnId = context.basedOnUserTurnId;
+      const persistRuntimeConfig = async (): Promise<void> => {
+        await this.awaitTurnHistoryGate(session.sessionId);
+        if (context.signal?.aborted) return;
+        const backend = await this.getSessionBackend(context.sessionDoc);
+        // Read commands at write time: one advertised after the run config was applied found
+        // no snapshot for this ACP session yet, so this write is the one that must carry it.
+        const availableCommands = session.agentClient?.getAvailableCommandsForSession(
+          runtimeConfigPatch.acpSessionId
+        );
+        await backend.applyAcpRuntimeConfigPatch(
+          basedOnUserTurnId,
+          availableCommands === undefined
+            ? runtimeConfigPatch
+            : { ...runtimeConfigPatch, availableCommands }
+        );
+      };
+      void persistRuntimeConfig().catch((error) => {
+        this.logger.warn(
+          `[${session.sessionId}] Failed to persist ACP runtime config: ${formatErrorMessage(error)}`
+        );
+      });
+    }
 
     if (warningSelections.length > 0) {
       // Not awaited: this is reporting, and the prompt hot path must not block
@@ -1741,145 +2011,62 @@ export class MessageHandler {
     return serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
   }
 
-  private async validateSessionImageUploadPath(filePath: string): Promise<UploadableImageFile> {
-    const trimmed = filePath.trim();
-    if (!trimmed) {
-      throw new Error('Image path is empty');
-    }
-
-    const absolutePath = path.resolve(trimmed);
-    // O_NOFOLLOW makes the open() fail with ELOOP if the final path component is a
-    // symlink. We then fstat / read through the same fd, so an attacker who swaps
-    // the file after validation cannot redirect us at a different inode.
-    let handle: fs.promises.FileHandle;
-    try {
-      handle = await fs.promises.open(
-        absolutePath,
-        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-      );
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException | undefined)?.code;
-      if (code === 'ELOOP') {
-        throw new Error(`Image path must not be a symlink: ${filePath}`, { cause: error });
-      }
-      throw new Error(`Image file not found: ${filePath}`, { cause: error });
-    }
-
-    try {
-      const stat = await handle.stat();
-
-      if (!stat.isFile()) {
-        throw new Error(`Image path is not a file: ${filePath}`);
-      }
-
-      if (stat.size <= 0) {
-        throw new Error(`Image is empty: ${filePath}`);
-      }
-
-      if (stat.size > SESSION_IMAGE_MAX_SIZE_BYTES) {
-        throw new Error(
-          `Image must be <= ${Math.floor(SESSION_IMAGE_MAX_SIZE_BYTES / (1024 * 1024))}MB: ${filePath}`
-        );
-      }
-
-      const fileName = path.basename(absolutePath);
-      const extension = path.extname(fileName).slice(1).trim().toLowerCase();
-      const mimeType = SESSION_IMAGE_MIME_TYPE_BY_EXTENSION[extension];
-      if (!mimeType) {
-        throw new Error(`Unsupported image file extension: ${fileName}`);
-      }
-
-      const bytes = await handle.readFile();
-
-      return {
-        absolutePath,
-        fileName,
-        mimeType,
-        sizeBytes: stat.size,
-        bytes,
-      };
-    } finally {
-      await handle.close();
-    }
+  private attachmentTransfer(): SessionAttachmentTransfer {
+    return new SessionAttachmentTransfer(
+      this.token,
+      this.cloudPort.attachmentUpload?.serverBaseUrl,
+      this.encryptedAttachments
+        ? { token: () => this.workspaceDocument.getEncryptedAttachmentToken() }
+        : undefined
+    );
   }
 
-  private async uploadSessionImageFile(args: {
+  private validateSessionImageUploadPath(filePath: string) {
+    return this.attachmentTransfer().validateSessionImageUploadPath(filePath);
+  }
+
+  private uploadSessionImageFile(args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     file: UploadableImageFile;
+    signal?: AbortSignal;
   }): Promise<UploadedSessionImage> {
-    const serverBaseUrl = this.resolveServerBaseUrl();
-    const uploadUrl = buildSessionImageApiUrl(
-      serverBaseUrl,
-      getSessionImageUploadApiPath(args.workspaceId)
-    );
-
-    const formData = new FormData();
-    formData.set('sessionId', args.sessionId);
-    const fileBytes = new Uint8Array(args.file.bytes.byteLength);
-    fileBytes.set(args.file.bytes);
-    formData.set('file', new Blob([fileBytes], { type: args.file.mimeType }), args.file.fileName);
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      const detail = errorBody ? `: ${errorBody.slice(0, 200)}` : '';
-      throw new Error(`Failed to upload image (${response.status})${detail}`);
-    }
-
-    const responseBody = await response.json().catch(() => null);
-    const parsed = SessionInputBlockSchema.safeParse(
-      responseBody && typeof responseBody === 'object' && 'image' in responseBody
-        ? (responseBody as Record<string, unknown>).image
-        : undefined
-    );
-    if (!parsed.success || parsed.data.type !== 'image') {
-      throw new Error('Invalid image upload payload');
-    }
-
-    const downloadUrl = buildSessionImageApiUrl(
-      serverBaseUrl,
-      getSessionImageDownloadApiPath(args.workspaceId, args.sessionId, parsed.data.imageId)
-    );
-
-    return {
-      imageId: parsed.data.imageId,
-      mimeType: parsed.data.mimeType,
-      fileName: parsed.data.fileName,
-      sizeBytes: parsed.data.sizeBytes,
-      width: parsed.data.width,
-      height: parsed.data.height,
-      downloadUrl,
-    };
+    return this.attachmentTransfer().uploadSessionImageFile(args);
   }
 
   private async appendAssistantImageGroupToActiveTurn(args: {
     sessionDoc: SessionDocument;
     turnId: string;
     content: SessionImageGroupContent;
+    turnEpoch?: number;
   }): Promise<boolean> {
+    const sessionId = args.sessionDoc.sessionId;
+    const turn = this.store.has(sessionId) ? this.store.get(sessionId).turn : undefined;
+    const turnEpoch =
+      args.turnEpoch ??
+      (turn?.phase !== 'idle' && turn?.turnId === args.turnId ? turn.turnEpoch : undefined);
+    // A reused assistant id does not authorize an older image generation to write into it.
+    if (
+      args.turnEpoch !== undefined &&
+      turn?.phase !== 'idle' &&
+      turn?.turnId === args.turnId &&
+      turn.turnEpoch !== args.turnEpoch
+    )
+      return false;
     let appended = false;
-    await args.sessionDoc.updateHistory((history) => {
-      for (const entry of history) {
-        if (!entry || entry.id !== args.turnId || entry.role !== 'assistant') {
-          continue;
-        }
-
-        const items = Array.isArray(entry.items) ? [...entry.items] : [];
-        items.push(args.content as unknown as NonNullable<SessionHistoryInput['items']>[number]);
-        entry.items = items as SessionHistoryInput['items'];
-        appended = true;
-        break;
-      }
-      return history;
-    });
+    const backend = await this.getSessionBackend(args.sessionDoc);
+    await backend
+      .applyHistoryAction({
+        kind: 'assistant-items',
+        turnId: args.turnId,
+        mode: 'append',
+        items: [args.content],
+      })
+      .then((result) => {
+        appended = result.matched ?? false;
+      });
+    if (appended && args.content.images.length > 0)
+      this.recordTurnEvent(sessionId, turnEpoch, true);
     return appended;
   }
 
@@ -1892,21 +2079,19 @@ export class MessageHandler {
     await this.awaitTurnHistoryGate(args.sessionId);
     const entryId = `assistant-image-${uuidV4()}`;
     const modelInfo = this.sessionManager.getSession(args.sessionId)?.agentClient?.currentModel;
-    await args.sessionDoc.updateHistory((history) => {
-      history.push({
-        id: entryId,
-        role: 'assistant',
-        items: args.content
-          ? ([args.content] as unknown as SessionHistoryInput['items'])
-          : ([] as unknown as SessionHistoryInput['items']),
-        timestamp: new Date().toISOString(),
-        userId: undefined,
-        read: undefined,
-        modelInfo,
-        fileDiff: [],
-        finished: true,
-      });
-      return history;
+    const backend = await this.getSessionBackend(args.sessionDoc);
+    await backend.appendHistoryTurn({
+      id: entryId,
+      role: 'assistant',
+      items: args.content
+        ? ([args.content] as unknown as SessionHistoryInput['items'])
+        : ([] as unknown as SessionHistoryInput['items']),
+      timestamp: new Date().toISOString(),
+      userId: undefined,
+      read: undefined,
+      modelInfo,
+      fileDiff: [],
+      finished: true,
     });
     return entryId;
   }
@@ -1917,18 +2102,17 @@ export class MessageHandler {
     content: SessionImageGroupContent;
   }): Promise<boolean> {
     let replaced = false;
-    await args.sessionDoc.updateHistory((history) => {
-      for (const entry of history) {
-        if (!entry || entry.id !== args.entryId || entry.role !== 'assistant') {
-          continue;
-        }
-
-        entry.items = [args.content] as unknown as SessionHistoryInput['items'];
-        replaced = true;
-        break;
-      }
-      return history;
-    });
+    const backend = await this.getSessionBackend(args.sessionDoc);
+    await backend
+      .applyHistoryAction({
+        kind: 'assistant-items',
+        turnId: args.entryId,
+        mode: 'replace',
+        items: [args.content],
+      })
+      .then((result) => {
+        replaced = result.matched ?? false;
+      });
     return replaced;
   }
 
@@ -1937,16 +2121,12 @@ export class MessageHandler {
     entryId: string;
   }): Promise<boolean> {
     let removed = false;
-    await args.sessionDoc.updateHistory((history) => {
-      const nextHistory = history.filter((entry) => {
-        if (!entry || entry.id !== args.entryId) {
-          return true;
-        }
-        removed = true;
-        return false;
+    const backend = await this.getSessionBackend(args.sessionDoc);
+    await backend
+      .applyHistoryAction({ kind: 'remove-turn', turnId: args.entryId })
+      .then((result) => {
+        removed = result.matched ?? false;
       });
-      return nextHistory;
-    });
     return removed;
   }
 
@@ -1956,7 +2136,12 @@ export class MessageHandler {
   ): Promise<SessionImageUploadAttachTarget> {
     const turnId = this.store.getTurnId(sessionId);
     if (turnId) {
-      return { kind: 'active_turn', turnId };
+      const turn = this.store.get(sessionId).turn;
+      return {
+        kind: 'active_turn',
+        turnId,
+        ...(turn.phase !== 'idle' ? { turnEpoch: turn.turnEpoch } : {}),
+      };
     }
 
     const statusType = (await sessionDoc.getMetaState())?.status?.type;
@@ -1975,10 +2160,15 @@ export class MessageHandler {
     sessionId: SessionId;
     imageId: string;
     expectedMimeType: string;
+    encryption?: EncryptedAttachment;
   }): Promise<DownloadedSessionImagePromptBlock> {
+    // Encrypted workspaces never read plaintext relay objects with the account token.
+    if (this.encryptedAttachments && !args.encryption)
+      throw new Error('e2ee_attachment_unavailable');
     return await downloadSessionImageForPrompt({
       ...args,
       serverBaseUrl: this.resolveServerBaseUrl(),
+      attachmentToken: () => this.workspaceDocument.getEncryptedAttachmentToken(),
       token: this.token,
       logger: this.logger,
     });
@@ -2070,16 +2260,21 @@ export class MessageHandler {
       return [];
     }
 
+    const requiresLocalCopy = args.imageBlocks.some(
+      ({ inputBlock }) => inputBlock.localImageId && inputBlock.machineId === this.machineId
+    );
     let attachmentsDir: string | null;
     try {
       attachmentsDir = await this.ensureSessionAttachmentsDir(args.sessionId);
     } catch (error) {
+      if (requiresLocalCopy) throw error;
       this.logger.debug(
         `[${args.sessionId}] Failed to prepare image attachment directory: ${formatErrorMessage(error)}`
       );
       return [];
     }
     if (!attachmentsDir) {
+      if (requiresLocalCopy) throw new Error('Local image resource directory is unavailable');
       return [];
     }
 
@@ -2137,6 +2332,7 @@ export class MessageHandler {
           await fs.promises.rename(tempPath, destPath);
         } catch (error) {
           await fs.promises.unlink(tempPath).catch(() => undefined);
+          if (inputBlock.localImageId && inputBlock.machineId === this.machineId) throw error;
           this.logger.debug(
             `[${args.sessionId}] Failed to materialize image attachment ${inputBlock.imageId}: ${formatErrorMessage(error)}`
           );
@@ -2242,8 +2438,50 @@ export class MessageHandler {
     sessionId: SessionId;
     fileId: string;
     expectedSha256?: string;
+    encryption?: EncryptedAttachment;
     destPath: string;
   }): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'error'; message: string }> {
+    if (args.encryption) {
+      const tempPath = `${args.destPath}.${uuidV4()}.part`;
+      let handle: fs.promises.FileHandle | undefined;
+      try {
+        const token = await this.workspaceDocument.getEncryptedAttachmentToken();
+        const chunks = readEncryptedAttachment({
+          ...args,
+          encryption: args.encryption,
+          fetchPart: (fileId) =>
+            fetch(
+              buildSessionFileApiUrl(
+                this.resolveServerBaseUrl(),
+                encryptedAttachmentPath(
+                  getSessionFileDownloadApiPath(args.workspaceId, args.sessionId, fileId)
+                )
+              ),
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            ),
+        });
+        const hash = crypto.createHash('sha256');
+        handle = await fs.promises.open(tempPath, 'wx', 0o600);
+        for await (const bytes of chunks) {
+          hash.update(bytes);
+          await handle.writeFile(bytes);
+        }
+        await handle.close();
+        handle = undefined;
+        if (args.expectedSha256 && hash.digest('hex') !== args.expectedSha256)
+          throw new Error('Downloaded encrypted file failed sha256 verification');
+        await fs.promises.rename(tempPath, args.destPath);
+        return { ok: true };
+      } catch (error) {
+        await handle?.close().catch(() => {});
+        await fs.promises.unlink(tempPath).catch(() => {});
+        return { ok: false, reason: 'error', message: formatErrorMessage(error) };
+      }
+    }
+    if (this.encryptedAttachments)
+      return { ok: false, reason: 'error', message: 'e2ee_attachment_unavailable' };
     const serverBaseUrl = this.resolveServerBaseUrl();
     const fileUrl = buildSessionFileApiUrl(
       serverBaseUrl,
@@ -2422,6 +2660,7 @@ export class MessageHandler {
             sessionId: storageSessionId,
             fileId: block.fileId,
             expectedSha256: block.sha256,
+            encryption: block.encryption,
             destPath,
           });
           if (!result.ok) {
@@ -2469,13 +2708,45 @@ export class MessageHandler {
     return promptBlocks;
   }
 
+  /**
+   * Provenance header for an agent-authored input. Best effort: any read failure
+   * omits the header and the turn proceeds with its unchanged text.
+   */
+  private async readAgentSenderHeader(
+    sessionId: SessionId,
+    userTurnId: string | undefined
+  ): Promise<string | undefined> {
+    if (!userTurnId) return undefined;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      const input = await backend.history.readTurn(userTurnId);
+      if (input.state !== 'ready' || input.turn.role !== 'user') return undefined;
+      const author = readMessageAuthor(input.turn.author);
+      if (author?.kind !== 'agent') return undefined;
+      const source = await this.workspaceDocument.repo
+        .getDocMeta(getSessionRoomId(author.sessionId as SessionId))
+        .catch(() => undefined);
+      const title = (source?.meta as SessionMeta | undefined)?.title;
+      return formatAgentSenderHeader(author, title);
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Omitting sender provenance for ${userTurnId}: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   private async buildAcpPromptBlocks(args: {
+    requesterUserId?: string;
     workspaceId: WorkspaceId;
     sessionId: SessionId;
+    userTurnId?: string;
     inputBlocks: SessionInputBlock[];
     issuePRMentions?: IssuePRMention[];
     replayPromptText?: string;
   }): Promise<ContentBlock[]> {
+    const localAttachmentBlocks: ContentBlock[] = [];
     const textParts: string[] = [];
     const imageInputBlocks: Extract<SessionInputBlock, { type: 'image' }>[] = [];
     const fileInputBlocks: Extract<SessionInputBlock, { type: 'file' }>[] = [];
@@ -2483,6 +2754,28 @@ export class MessageHandler {
     const visualAnnotationRefTexts: string[] = [];
 
     for (const block of args.inputBlocks) {
+      if (block.type === 'local_attachment') {
+        if (this.encryptedAttachments || args.requesterUserId !== this.userId)
+          throw new Error('Local attachment paths require the machine owner');
+        const resolved = await resolveLocalAttachment(block, this.machineId);
+        if (block.kind === 'image') {
+          if (resolved.sizeBytes > 20 * 1024 * 1024)
+            throw new Error('Local image exceeds image input limit');
+          localAttachmentBlocks.push({
+            type: 'image',
+            mimeType: block.mimeType,
+            data: (await fs.promises.readFile(resolved.path)).toString('base64'),
+          });
+        }
+        localAttachmentBlocks.push({
+          type: 'resource_link',
+          uri: pathToFileURL(resolved.path).href,
+          name: block.fileName,
+          mimeType: block.mimeType,
+          size: resolved.sizeBytes,
+        });
+        continue;
+      }
       if (block.type === 'text') {
         const trimmed = block.text.trim();
         if (trimmed) {
@@ -2512,13 +2805,43 @@ export class MessageHandler {
     // Download prompt images in parallel so multi-image turns do not pay per-image RTT serially.
     const imagePromptAttachments = await Promise.all(
       imageInputBlocks.map(async (block) => {
+        if (block.localImageId && block.machineId === this.machineId) {
+          try {
+            if (this.encryptedAttachments || args.requesterUserId !== this.userId)
+              throw new Error('Local image paths require the machine owner');
+            const storageSessionId = block.storageSessionId ?? args.sessionId;
+            const local = await readLocalSessionImage(
+              this.localImageScope(storageSessionId),
+              block
+            );
+            this.enqueueLocalImageBackfill(storageSessionId, local.image);
+            const downloaded: DownloadedSessionImagePromptBlock = {
+              block: {
+                type: 'image',
+                mimeType: local.image.mimeType,
+                data: local.bytes.toString('base64'),
+              },
+              bytes: local.bytes,
+              mimeType: local.image.mimeType,
+              sizeBytes: local.bytes.length,
+            };
+            return { inputBlock: block, downloaded, localPath: local.path };
+          } catch (error) {
+            if (block.transport === 'local') throw error;
+            // Published images retain their ordinary cloud recovery path if the
+            // host snapshot is missing; pending-local images never fall through.
+          }
+        }
+        if (block.transport === 'local')
+          throw new Error('Image is pending upload on another machine');
         const downloaded = await this.fetchSessionImageForPrompt({
           workspaceId: args.workspaceId,
           sessionId: block.storageSessionId ?? args.sessionId,
           imageId: block.imageId,
           expectedMimeType: block.mimeType,
+          encryption: block.encryption,
         });
-        return { inputBlock: block, downloaded };
+        return { inputBlock: block, downloaded, localPath: undefined };
       })
     );
     const imageBlocks = imagePromptAttachments.map(({ downloaded }) => downloaded.block);
@@ -2526,10 +2849,28 @@ export class MessageHandler {
     // Keep ACP image blocks for visual context, and also expose the same bytes
     // through a baseline ACP resource_link so agents can read/re-upload the file
     // by path when they need to echo or transform it.
-    const imageAttachmentBlocks = await this.materializeSessionImageAttachments({
-      sessionId: args.sessionId,
-      imageBlocks: imagePromptAttachments,
-    });
+    const imageAttachmentBlocks: ContentBlock[] = [];
+    for (const attachment of imagePromptAttachments) {
+      if (attachment.localPath) {
+        imageAttachmentBlocks.push({
+          type: 'resource_link',
+          uri: pathToFileURL(attachment.localPath).href,
+          name: this.resolveSessionImageAttachmentFileName(
+            attachment.inputBlock,
+            attachment.downloaded.mimeType
+          ),
+          mimeType: attachment.downloaded.mimeType,
+          size: attachment.downloaded.sizeBytes,
+        });
+      } else {
+        imageAttachmentBlocks.push(
+          ...(await this.materializeSessionImageAttachments({
+            sessionId: args.sessionId,
+            imageBlocks: [attachment],
+          }))
+        );
+      }
+    }
 
     // Materialize human→agent file attachments under `<workspace>/.lody/attachments/`
     // and reference them with ACP resource links (never inline their contents).
@@ -2540,14 +2881,23 @@ export class MessageHandler {
     });
 
     // Build the full text prompt: comment references first, then user text
-    const allTextParts = [...commentRefTexts, ...visualAnnotationRefTexts, ...textParts];
+    const senderHeader = await this.readAgentSenderHeader(args.sessionId, args.userTurnId);
+    const allTextParts = [
+      ...(senderHeader ? [senderHeader] : []),
+      ...commentRefTexts,
+      ...visualAnnotationRefTexts,
+      ...textParts,
+    ];
     const textPrompt = appendIssuePrMentionsToPrompt(
       allTextParts.join('\n\n'),
       args.issuePRMentions
     ).trim();
 
     const hasCurrentRequestContent =
-      imageBlocks.length > 0 || fileAttachmentBlocks.length > 0 || textPrompt.length > 0;
+      localAttachmentBlocks.length > 0 ||
+      imageBlocks.length > 0 ||
+      fileAttachmentBlocks.length > 0 ||
+      textPrompt.length > 0;
     const replayText = args.replayPromptText?.trim() ?? '';
 
     const promptBlocks: ContentBlock[] = [];
@@ -2558,6 +2908,7 @@ export class MessageHandler {
       });
     }
 
+    promptBlocks.push(...localAttachmentBlocks);
     promptBlocks.push(...imageBlocks);
     promptBlocks.push(...imageAttachmentBlocks);
     promptBlocks.push(...fileAttachmentBlocks);
@@ -2576,10 +2927,59 @@ export class MessageHandler {
     return promptBlocks;
   }
 
-  private async getLocalProjectGitStateForRpc(args: {
-    localProjectId: LocalProjectId;
-    requestedByUserId: string;
-  }): Promise<LocalProjectGitStateRpcResponse> {
+  private async probeProjectLocalMember(localProjectId: LocalProjectId) {
+    try {
+      const rootPath = this.encryptedQueryServer
+        ? await this.resolveLocalProjectRootForRpc(localProjectId, 'project-member-probe')
+        : await resolveWorkspaceLocalProjectRootPath(
+            this.workspaceDocument.repo,
+            this.workspaceId,
+            this.machineId,
+            localProjectId
+          );
+      if (!rootPath) throw new Error('Project group member is unavailable');
+      return {
+        type: 'project/probe-local-member' as const,
+        ...(await worktreeGitLegacy.probeLocalProjectMember(rootPath)),
+      };
+    } catch {
+      throw new Error('Unable to probe project group member');
+    }
+  }
+
+  /** Encrypted roots must hash to the requested ID, so a tampered row cannot redirect Git. */
+  private async resolveLocalProjectRootForRpc(
+    localProjectId: LocalProjectId,
+    reason: string
+  ): Promise<string | null> {
+    if (!this.encryptedQueryServer)
+      return await resolveWorkspaceLocalProjectRootPathWithRetry(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        localProjectId,
+        {
+          requestSync: () =>
+            this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
+              reason,
+              timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
+            }),
+        }
+      );
+    const peeked = this.workspaceDocument.peekLocalProjectRootPath(this.machineId, localProjectId);
+    if (peeked === null) return null;
+    try {
+      return localProjectsLegacy.createLocalProjectId(peeked) === localProjectId ? peeked : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async getLocalProjectGitStateForRpc(
+    signed: { localProjectId: LocalProjectId; requestedByUserId: string },
+    executionRequesterUserId = signed.requestedByUserId
+  ): Promise<LocalProjectGitStateRpcResponse> {
+    const args = { ...signed, requestedByUserId: executionRequesterUserId };
     const failure = (error: string, message: string): LocalProjectGitStateRpcResponse => ({
       type: 'local-project/git-state_response',
       machineId: this.machineId,
@@ -2592,7 +2992,7 @@ export class MessageHandler {
 
     let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
     try {
-      access = await this.cloudPort.access.verifyMachineAccess({
+      access = await this.verifyRequesterMachineAccess({
         workspaceId: this.workspaceId,
         machineId: this.machineId,
         requesterUserId: args.requestedByUserId,
@@ -2606,25 +3006,32 @@ export class MessageHandler {
       return failure('access_denied', access.reason);
     }
 
-    const rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId,
+    const rootPath = await this.resolveLocalProjectRootForRpc(
       args.localProjectId,
-      {
-        requestSync: () =>
-          this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
-            reason: 'local-project-git-state-resolve',
-            timeoutMs: readTimeoutEnv('LODY_LOCAL_PROJECT_RESOLVE_SYNC_TIMEOUT_MS', 1_500),
-          }),
-      }
+      'local-project-git-state-resolve'
     );
     if (!rootPath) {
       return failure('local_project_not_found', `Local project not found: ${args.localProjectId}`);
     }
 
     try {
-      const state = await getLocalProjectGitStateAtRootPath(rootPath);
+      const state = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
+      if (!this.encryptedQueryServer)
+        void updateMachineLocalProjectGitSummaryFields(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          args.localProjectId,
+          state.git
+            ? {
+                git: true,
+                defaultBranch: state.defaultBranch,
+                currentBranch: state.currentBranch,
+                githubRepoFullName: state.githubRepoFullName,
+              }
+            : { git: false },
+          this.workspaceDocument
+        ).catch(() => undefined);
       return {
         type: 'local-project/git-state_response',
         machineId: this.machineId,
@@ -2637,6 +3044,114 @@ export class MessageHandler {
     } catch (error) {
       return failure('git_state_failed', formatErrorMessage(error));
     }
+  }
+
+  private async listLocalProjectBranchesForRpc(
+    signed: {
+      localProjectId: LocalProjectId;
+      requestedByUserId: string;
+      query?: string;
+      limit?: number;
+      cursor?: string;
+    },
+    executionRequesterUserId = signed.requestedByUserId
+  ): Promise<LocalProjectListBranchesRpcResponse> {
+    const args = { ...signed, requestedByUserId: executionRequesterUserId };
+    const failure = (error: string, message: string): LocalProjectListBranchesRpcResponse => ({
+      type: 'local-project/list-branches_response',
+      machineId: this.machineId,
+      workspaceId: this.workspaceId,
+      localProjectId: args.localProjectId,
+      success: false,
+      error,
+      message,
+    });
+
+    let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
+    try {
+      access = await this.verifyRequesterMachineAccess({
+        workspaceId: this.workspaceId,
+        machineId: this.machineId,
+        requesterUserId: args.requestedByUserId,
+        localProjectId: args.localProjectId,
+      });
+    } catch (error) {
+      return failure('access_check_failed', formatErrorMessage(error));
+    }
+
+    if (!access.allowed) {
+      return failure('access_denied', access.reason);
+    }
+
+    const isEncrypted = Boolean(this.encryptedQueryServer);
+    const rootPath = await this.resolveLocalProjectRootForRpc(
+      args.localProjectId,
+      'local-project-list-branches-resolve'
+    );
+    if (!rootPath) {
+      return failure('local_project_not_found', `Local project not found: ${args.localProjectId}`);
+    }
+
+    try {
+      const result = await localProjectsLegacy.listLocalProjectBranchesAtRootPath(rootPath, {
+        query: args.query,
+        limit: args.limit,
+        cursor: args.cursor,
+      });
+      if (!isEncrypted) {
+        void updateMachineLocalProjectGitSummaryFields(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          args.localProjectId,
+          result.git
+            ? {
+                git: true,
+                defaultBranch: result.defaultBranch,
+                currentBranch: result.currentBranch,
+              }
+            : { git: false },
+          this.workspaceDocument
+        ).catch(() => undefined);
+      }
+      return {
+        type: 'local-project/list-branches_response',
+        machineId: this.machineId,
+        workspaceId: this.workspaceId,
+        localProjectId: args.localProjectId,
+        success: true,
+        result,
+        observedAtMs: getServerNow(),
+      };
+    } catch (error) {
+      return failure('list_branches_failed', formatErrorMessage(error));
+    }
+  }
+
+  /** Encrypted machine access is decided here, from the verified ledger and sharing policy. */
+  private async verifyRequesterMachineAccess(
+    input: Parameters<CloudPort['access']['verifyMachineAccess']>[0]
+  ): ReturnType<CloudPort['access']['verifyMachineAccess']> {
+    const gate = this.encryptedExecution;
+    if (!gate) return await this.cloudPort.access.verifyMachineAccess(input);
+    return await Effect.runPromise(
+      gate.verifyRequesterAccess(input.requesterUserId, input.localProjectId)
+    );
+  }
+
+  /** See `DaemonWorkspace.checkEncryptedMachineAccess`. */
+  private async checkEncryptedMachineAccess(target: {
+    machineId: string;
+    requesterUserId: string;
+    localProjectId?: string;
+  }) {
+    const gate = this.encryptedExecution;
+    if (!gate) throw new Error('e2ee_access_unavailable');
+    return await Effect.runPromise(
+      target.machineId === this.machineId
+        ? gate.verifyRequesterAccess(target.requesterUserId, target.localProjectId)
+        : gate.verifyMachineTarget(target.requesterUserId, target.machineId)
+    );
   }
 
   private async verifyMachineAccess(args: {
@@ -2655,7 +3170,7 @@ export class MessageHandler {
       return { outcome: 'allowed' };
     }
     try {
-      const access = await this.cloudPort.access.verifyMachineAccess({
+      const access = await this.verifyRequesterMachineAccess({
         workspaceId: this.workspaceId,
         machineId: this.machineId,
         requesterUserId: args.requesterUserId,
@@ -2672,6 +3187,27 @@ export class MessageHandler {
     }
   }
 
+  private async verifyAutomationEditAccess(
+    sessionId: SessionId,
+    userId: string
+  ): Promise<'yes' | 'no' | 'unknown'> {
+    if (userId === this.userId) return 'yes';
+    let localProjectId: string | undefined;
+    try {
+      const meta = (await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId)))
+        ?.meta as SessionMeta | undefined;
+      if (meta?.project?.kind === 'local') localProjectId = meta.project.localProjectId;
+    } catch {
+      return 'unknown';
+    }
+    const access = await this.verifyMachineAccess({
+      sessionId,
+      requesterUserId: userId,
+      ...(localProjectId ? { localProjectId } : {}),
+    });
+    return access.outcome === 'allowed' ? 'yes' : access.outcome === 'denied' ? 'no' : 'unknown';
+  }
+
   private async verifySessionMachineAccess(
     sessionId: SessionId,
     requesterUserId: string
@@ -2685,55 +3221,61 @@ export class MessageHandler {
     });
   }
 
-  private async prepareSessionWithAccessCheck(
-    spec: SessionPreparationSpec
-  ): Promise<SessionPrepareResponse> {
-    const { sessionId } = spec;
-    const access = await this.verifyMachineAccess({
-      sessionId,
-      requesterUserId: spec.requestedByUserId,
-      ...(spec.project?.kind === 'local' ? { localProjectId: spec.project.localProjectId } : {}),
-    });
-    if (access.outcome !== 'allowed') {
-      return {
-        type: 'session/prepare_response',
-        preparationId: spec.preparationId,
-        sessionId,
-        accepted: false,
-        disposition: access.outcome === 'denied' ? 'not-owned' : 'error',
-        error: access.outcome === 'denied' ? access.reason : access.error,
-      };
-    }
-    return this.sessionManager.requestSessionPreparation(spec);
-  }
-
-  private async cancelSessionPreparationWithAccessCheck(
-    args: SessionPreparationCancelSpec
-  ): Promise<SessionPrepareCancelResponse> {
-    const { sessionId } = args;
-    const access = await this.verifyMachineAccess({
-      sessionId,
-      requesterUserId: args.requestedByUserId,
-    });
-    if (access.outcome !== 'allowed') {
-      return {
-        type: 'session/prepare-cancel_response',
-        preparationId: args.preparationId,
-        sessionId,
-        cancelled: false,
-        disposition: access.outcome === 'denied' ? 'not-owned' : 'error',
-        error: access.outcome === 'denied' ? access.reason : access.error,
-      };
-    }
-    return this.sessionManager.cancelSessionPreparation(args);
-  }
-
   // Single access choke point for prompt-handoff steer: both RPC arrival paths
   // (Loro Streams deps callback and local Machine RPC switch) route through here
   // so neither can bypass machine/local-project verification.
+  /**
+   * Best-effort withdrawal of a queued Agent input. Only the requesting Session's
+   * own input that is still pending is canceled, with the same not-yet-started
+   * guard dispatch respects; a dispatch already under way may still run it.
+   */
+  private async withdrawQueuedInput(args: {
+    sessionId: SessionId;
+    userTurnId: string;
+    requesterSessionId: SessionId;
+  }): Promise<SessionWithdrawInputResponse> {
+    const response = (
+      outcome: SessionWithdrawInputResponse['outcome'],
+      error?: string
+    ): SessionWithdrawInputResponse => ({
+      type: 'session/withdraw-input_response',
+      sessionId: args.sessionId,
+      userTurnId: args.userTurnId,
+      outcome,
+      ...(error ? { error } : {}),
+    });
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(args.sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      const input = await backend.history.readTurn(args.userTurnId);
+      if (input.state !== 'ready' || input.turn.role !== 'user') return response('not_found');
+      const author = readMessageAuthor(input.turn.author);
+      if (author?.kind !== 'agent' || author.sessionId !== args.requesterSessionId)
+        return response('not_owner');
+      // Idempotent for a retried withdrawal or replace: the input will not run.
+      if (input.turn.status === 'canceled') return response('already_withdrawn');
+      // Same guard as `onlyAwaitingStart`: pending or seen means no execution claimed it.
+      if (input.turn.status !== 'pending' && input.turn.status !== 'seen')
+        return response('already_started');
+      const result = await backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: args.userTurnId,
+        status: 'canceled',
+        onlyAwaitingStart: true,
+      });
+      if (!result.matched) return response('already_started');
+      this.sessionDispatchWatcher.discardRpcTurn(args.sessionId, args.userTurnId);
+      return response('withdrawn');
+    } catch (error) {
+      return response('error', formatErrorMessage(error));
+    }
+  }
+
   private async steerSessionWithAccessCheck(
-    args: Parameters<SessionExecutionService['steerSession']>[0]
+    signed: Parameters<SessionExecutionService['steerSession']>[0],
+    executionRequesterUserId = signed.userId
   ): ReturnType<SessionExecutionService['steerSession']> {
+    const args = { ...signed, userId: executionRequesterUserId };
     const access = await this.verifySessionMachineAccess(args.sessionId, args.userId);
     if (access.outcome !== 'allowed') {
       return {
@@ -2746,6 +3288,40 @@ export class MessageHandler {
       };
     }
     return await this.executionService.steerSession(args);
+  }
+
+  private async controlSessionGoalWithAccessCheck(
+    signed: {
+      sessionId: SessionId;
+      action: SessionGoalAction;
+      objective?: string;
+      userId: string;
+    },
+    executionRequesterUserId = signed.userId
+  ): Promise<SessionGoalResponse> {
+    const args = { ...signed, userId: executionRequesterUserId };
+    const access = await this.verifySessionMachineAccess(args.sessionId, args.userId);
+    if (access.outcome !== 'allowed') {
+      return {
+        type: 'session/goal_response',
+        sessionId: args.sessionId,
+        action: args.action,
+        accepted: false,
+        disposition: 'error',
+        error: `Goal access verification ${access.outcome}`,
+      };
+    }
+    // Goal turns commit with the requester's identity, exactly like the turns a
+    // user message would start.
+    const user = await this.sessionUserResolver.resolve(args.userId);
+    return await this.executionService.controlSessionGoal({
+      sessionId: args.sessionId,
+      action: args.action,
+      ...(args.objective ? { objective: args.objective } : {}),
+      userId: args.userId,
+      userName: user.name,
+      userEmail: user.email,
+    });
   }
 
   private async forkSessionWithAccessCheck(args: SessionForkSpec): Promise<SessionForkResponse> {
@@ -2797,11 +3373,11 @@ export class MessageHandler {
     }
     const command = selected as Record<string, unknown>;
     const prompt = typeof command.prompt === 'string' ? command.prompt : undefined;
-    if (!prompt) {
+    if (prompt === undefined || (!prompt && !operation.targetInputAttachments?.[index]?.length)) {
       throw new Error(`Operation ${operation.operationId} item ${index} has no prompt.`);
     }
 
-    const auth: AuthContext = {
+    const auth: AuthContext = getSessionCommandEnvironment()?.auth ?? {
       token: this.token,
       userId: this.userId,
       userName: this.userId,
@@ -2817,6 +3393,9 @@ export class MessageHandler {
       throw new Error(`Requester Session not found: ${operation.requesterSessionId}`);
     }
     const requester = requesterRecord.meta as SessionMeta;
+    const delegatedRequester = operation.frozenContinuationConfig.sourceTurnId
+      ? ({ userId: operation.requesterUserId, author: operation.author } as const)
+      : undefined;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
       const runConfig: AgentRunConfigSelection = {
@@ -2833,6 +3412,7 @@ export class MessageHandler {
       const dispatchConfig =
         frozenTargetDispatchConfig ??
         ({
+          mcpServerIds: [],
           frozenInheritedInputConfig: frozenInputConfig,
           inheritSessionDefaults: false,
           ...(hasAgentRunConfigSelection(runConfig) ? { runConfig } : {}),
@@ -2841,11 +3421,17 @@ export class MessageHandler {
         workspace: this.workspaceId,
         currentSessionId: operation.requesterSessionId,
         workspaceMetaPrewriteSatisfied: true,
-        requesterUserId: operation.requesterUserId,
-        sessionOwnerUserId: requester.userId,
+        ...(delegatedRequester
+          ? { delegatedRequester }
+          : {
+              requesterUserId: operation.requesterUserId,
+              sessionOwnerUserId: requester.userId,
+            }),
         defaultMachineId: requester.machineId,
         sessionId: item.target.sessionId,
+        inputAttachments: operation.targetInputAttachments?.[index],
         userTurnId: item.target.userTurnId,
+        agentRoleSnapshot: operation.targetRoleSnapshots?.[index] ?? undefined,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
       };
@@ -2854,6 +3440,11 @@ export class MessageHandler {
       if (typeof command.agentRoleId === 'string') options.agentRoleId = command.agentRoleId;
       if (typeof command.agentRoleRevision === 'number') {
         options.agentRoleRevision = command.agentRoleRevision;
+      }
+      // Operations accepted before the split stored a composed `prompt` and no
+      // prefix; replaying them unchanged keeps their execution text.
+      if (typeof command.agentRolePromptPrefix === 'string') {
+        options.agentRolePromptPrefix = command.agentRolePromptPrefix;
       }
       if (typeof command.useCurrentSessionAsParent === 'boolean') {
         options.useCurrentSessionAsParent = command.useCurrentSessionAsParent;
@@ -2869,14 +3460,10 @@ export class MessageHandler {
         }
         if (typeof context.branch === 'string') options.branch = context.branch;
       }
-      await createSessionResult(
-        auth,
-        workspace,
-        this.workspaceDocument,
-        prompt,
-        options,
-        dispatchConfig
-      );
+      await createSessionResult(auth, workspace, this.workspaceDocument, prompt, options, {
+        ...dispatchConfig,
+        mcpServerIds: dispatchConfig.mcpServerIds ?? [],
+      });
       return;
     }
 
@@ -2886,17 +3473,16 @@ export class MessageHandler {
       this.workspaceDocument,
       item.target.sessionId,
       prompt,
-      {
-        ...resolveTurnDispatchConfig({}),
-        taskToolsEnabled: operation.frozenContinuationConfig.inputConfig.taskToolsEnabled === true,
-      },
+      operation.frozenContinuationConfig.targetDispatchConfigs?.[index] ?? { mcpServerIds: [] },
       undefined,
-      operation.requesterUserId,
+      delegatedRequester ? undefined : operation.requesterUserId,
       {
         userTurnId: item.target.userTurnId,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
-      }
+      },
+      delegatedRequester,
+      { attachments: operation.targetInputAttachments?.[index] }
     );
   }
 
@@ -2907,6 +3493,8 @@ export class MessageHandler {
     config: MessageHandlerConfig
   ) {
     this.sessionManager = sessionManager;
+    this.sorbetCredentials = config.sorbetCredentials;
+    this.encryptedAttachments = config.encryptedWorkspace === true;
     // Create a child logger with workspace context for file logging
     this.logger = logger.child({
       workspaceName: config.workspaceSlug || config.workspaceId,
@@ -2918,24 +3506,37 @@ export class MessageHandler {
     this.machineName = config.machineName;
     this.cliVersion = config.cliVersion;
     this.machineId = config.machineId as MachineId;
-    this.sessionActivePresence = new SessionActivePresenceController(
+    this.sessionActivePresence = new SessionActivePresenceControllerLegacy(
       this.workspaceDocument,
       this.machineId,
       this.logger
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
+    this.readHostedPresenceStates = config.readHostedPresenceStates;
     this.cleanupLocalProjectWorktreeSetupIfUnreferenced =
       config.cleanupLocalProjectWorktreeSetupIfUnreferenced;
     this.onFatalAuthFailure = config.onFatalAuthFailure;
     this.localWorkspaceCatalog = config.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.onProcessLifecycleAction = config.onProcessLifecycleAction;
-    this.machineLifecycleCapability = config.machineLifecycleCapability ?? {
-      launchMode: 'foreground',
-      canRemoteRestart: false,
-      canRemoteUpgrade: false,
-      reason: 'not_daemon',
-    };
+    this.isMachineIdentityRestoreIdle = config.isMachineIdentityRestoreIdle;
+    this.sealMachineIdentityRestore = config.sealMachineIdentityRestore;
+    this.readWorkspaceAccess = config.readWorkspaceAccess;
+    this.prepareManagedUpgrade = config.prepareManagedUpgrade;
+    this.hostsEncryptedWorkspace = config.hostsEncryptedWorkspace;
+    this.baseMachineLifecycleCapability = config.encryptedWorkspace
+      ? {
+          launchMode: config.machineLifecycleCapability?.launchMode ?? 'unknown',
+          canRemoteRestart: false,
+          canRemoteUpgrade: false,
+          reason: 'unsupported_install',
+        }
+      : (config.machineLifecycleCapability ?? {
+          launchMode: 'foreground',
+          canRemoteRestart: false,
+          canRemoteUpgrade: false,
+          reason: 'not_daemon',
+        });
     this.logger.debug(
       `[machine-lifecycle] launchMode=${this.machineLifecycleCapability.launchMode} canRestart=${this.machineLifecycleCapability.canRemoteRestart} canUpgrade=${this.machineLifecycleCapability.canRemoteUpgrade}`
     );
@@ -2944,7 +3545,14 @@ export class MessageHandler {
     this.usageTrackingService = this.cloudPort.usage;
     this.localProjectControlService = new LocalProjectControlService(this.logger);
     this.codeCollabV2DiffStore = new CodeCollabV2DiffStore(this.workspaceId);
+    const workspaceGitService = new WorkspaceGitService({
+      logger: this.logger,
+      workspaceDocument: this.workspaceDocument,
+    });
     this.codeCollabV2Service = new CodeCollabV2Service({
+      observeWorkspaceGit: async ({ ownerSessionId, workspaceRoot }) => {
+        await workspaceGitService.syncLocalWorkspace(ownerSessionId, workspaceRoot);
+      },
       resolveWorkspace: this.resolveCodeCollabV2Workspace,
       diffStore: this.codeCollabV2DiffStore,
       workspaceId: this.workspaceId,
@@ -2954,17 +3562,18 @@ export class MessageHandler {
         const pathCount = Object.keys(state.fileIndex).length;
         const result = await publishCodeCollabFileIndexFlock({
           repo: this.workspaceDocument.repo,
+          signal: state.signal,
           flockDocId: getCodeCollabFileIndexFlockDocId(this.workspaceId, state.ownerSessionId),
           fileIndex: state.fileIndex,
           updatedAtMs: state.updatedAtMs,
           reconcileRemote: state.reconcileRemote,
+          resetDiffGenerations: state.resetDiffGenerations,
+          bumpDiffPaths: state.bumpDiffPaths,
         });
-        if (state.persistAllChangesDiffStats && state.allChangesDiffStats) {
+        state.signal?.throwIfAborted();
+        if (state.persistAllChangesDiffStats) {
           try {
-            await this.persistCodeCollabAllChangesDiffStats(
-              state.ownerSessionId,
-              state.allChangesDiffStats
-            );
+            await workspaceGitService.publishDiffStats(state);
           } catch (error) {
             this.logger.debug(
               `[code-collab-v2] Failed to persist All Changes diffStats ownerSessionId=${
@@ -2986,6 +3595,7 @@ export class MessageHandler {
         const publishStartedAtMs = Date.now();
         const result = await publishCodeCollabFileIndexSignalFlock({
           repo: this.workspaceDocument.repo,
+          signal: state.signal,
           flockDocId: getCodeCollabFileIndexSignalFlockDocId(
             this.workspaceId,
             state.ownerSessionId
@@ -3001,41 +3611,54 @@ export class MessageHandler {
         );
       },
     });
+    const canDownloadLargeFiles = async () => {
+      const entitlement = await this.cloudPort.billing?.getWorkspaceEntitlement(this.workspaceId);
+      return Boolean(
+        entitlement && !entitlement.checkoutPending && entitlement.effectivePlanTier !== 'free'
+      );
+    };
     this.filePreviewService = new FilePreviewService({
-      resolveWorkspace: async (sessionId) => {
-        const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
-        return resolved.ok
-          ? {
-              ok: true,
-              ownerSessionId: resolved.ownerSessionId,
-              workspaceRoot: resolved.workspaceRoot,
-            }
-          : { ok: false, code: resolved.code, message: resolved.message };
-      },
+      canDownloadLargeFiles,
+      onDiagnostic: (event) => this.logger.debug(`[file-preview] ${JSON.stringify(event)}`),
+      resolveLocalWorkspace: this.resolveLocalFilePreviewWorkspace,
+      resolveWorkspace: this.resolveFilePreviewWorkspace,
     });
+    this.diffBlobStoreReader = new CodeCollabV2DiffStore(this.workspaceId, { readOnly: true });
+    this.diffBlobReader = new CodeCollabV2Service({
+      diffStore: this.diffBlobStoreReader,
+      readOnly: true,
+      resolveWorkspace: this.resolveEncryptedCodeCollabV2Workspace,
+    });
+    if (config.encryptedWorkspace) {
+      this.encryptedCodeCollabReader = this.diffBlobReader;
+      this.encryptedFileReader = new FilePreviewService({
+        allowGitDiscovery: false,
+        canDownloadLargeFiles,
+        resolveWorkspace: (sessionId, rootId) =>
+          this.resolveEncryptedCodeCollabV2Workspace(sessionId, { rootId }),
+        resolveLocalWorkspace: (sessionId, rootId) =>
+          this.resolveEncryptedCodeCollabV2Workspace(sessionId, { rootId }),
+      });
+    }
     this.sessionManager.setRequestPermissionHandler((sessionId, requestId, request, agentClient) =>
-      this.handleAgentPermissionRequest(sessionId, requestId, request, agentClient?.currentModel)
+      this.handleAgentPermissionRequest(
+        sessionId,
+        requestId,
+        request,
+        agentClient?.currentModel,
+        agentClient
+      )
     );
-    this.autoPromptRunner = new AutoPromptRunner({
-      workspaceId: this.workspaceId,
-      beginConversationTurn: (sessionId, userTurnId) =>
-        this.beginConversationTurn(sessionId, userTurnId),
-      clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
-      buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
-      createAssistantEntryForTurn: async (sessionId, sessionDoc, turnId, modelInfo) =>
-        await this.createAssistantEntryForTurn(sessionId, sessionDoc, turnId, modelInfo),
-      finalizeACPState: async (sessionId) => await this.finalizeACPState(sessionId),
-      flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
-    });
     this.turnPostProcessingService = new TurnPostProcessingService({
       logger: this.logger,
       workspaceDocument: this.workspaceDocument,
       workspaceId: this.workspaceId,
-      preferredBaseBranch: this.preferredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
-      runAutoPrompt: async (ctx) => await this.autoPromptRunner.run(ctx),
     });
+    this.encryptedExecution = config.encryptedWorkspace ? config.encryptedExecution : undefined;
     this.executionService = new SessionExecutionService({
+      encryptedExecution: this.encryptedExecution,
+      encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       sessionManager: this.sessionManager,
       workspaceDocument: this.workspaceDocument,
@@ -3044,8 +3667,8 @@ export class MessageHandler {
       workspaceId: this.workspaceId,
       preferredBaseBranch: this.preferredBaseBranch,
       touchSession: (sessionId) => this.touchSession(sessionId),
-      startSessionActivePresence: (sessionId, phase) =>
-        this.startSessionActivePresence(sessionId, phase),
+      holdSessionActivePresence: (sessionId, phase) =>
+        this.sessionActivePresence.native.hold(sessionId, phase),
       clearSessionActivePresence: (sessionId) => this.clearSessionActivePresence(sessionId),
       setSessionActivePresencePhase: (sessionId, phase, detail) =>
         this.setSessionActivePresencePhase(sessionId, phase, detail),
@@ -3059,18 +3682,19 @@ export class MessageHandler {
         this.clearConversationTurnIfMatches(sessionId, turnId),
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
       clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
-      hasPromptOutputForTurn: (sessionId, turnId) => this.hasPromptOutputForTurn(sessionId, turnId),
-      observePromptOutputForTurn: (sessionId, turnId) =>
-        this.observePromptOutputForTurn(sessionId, turnId),
+      hasPromptEventsForTurn: (sessionId, turnId) => this.hasPromptEventsForTurn(sessionId, turnId),
+      observePromptContentForTurn: (sessionId, turnId) =>
+        this.observePromptContentForTurn(sessionId, turnId),
       buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
-      applyAcpModeAndModel: async (session, acpConfig) =>
+      applyAcpModeAndModel: async (session, acpConfig, context) =>
         await this.applyAcpModeAndModel(
           session as {
             sessionId: SessionId;
             acpSessionId: ACPSessionId | null;
             agentClient: AgentClient | null;
           },
-          acpConfig
+          acpConfig,
+          context
         ),
       createAssistantEntryForTurn: async (sessionId, sessionDoc, turnId, modelInfo, userTurnId) =>
         await this.createAssistantEntryForTurn(
@@ -3080,27 +3704,91 @@ export class MessageHandler {
           modelInfo,
           userTurnId
         ),
+      syncSessionBranchName: (sessionId, session, signal) =>
+        workspaceGitService.syncSession(sessionId, session, signal),
       turnFinalization: {
         finalizeACPState: async (sessionId, turnId) =>
           await this.finalizeACPState(sessionId, turnId),
-        persistCodeCollabTurnDiffs: async (sessionId, turnId) =>
-          await this.persistCodeCollabTurnDiffs(sessionId, turnId),
+        persistCodeCollabTurnDiffs: async (sessionId, turnId, signal) =>
+          await this.persistCodeCollabTurnDiffs(sessionId, turnId, signal),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
-        syncSessionBranchName: async (sessionId, session) =>
-          await this.turnPostProcessingService.syncSessionBranchName(sessionId, session),
-        updateSessionDiffStats: async (sessionId, session, options) =>
-          await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
-        refreshCodeCollabSharedState: async (sessionId) =>
-          await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId }),
+        refreshCodeCollabSharedState: async (sessionId, signal) => {
+          await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId, signal });
+        },
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),
-        autoCommitAndPushForPR: async (ctx) =>
-          await this.turnPostProcessingService.autoCommitAndPushForPR(ctx),
-        notifySessionCompleted: async (sessionId, userId, occurrenceId) =>
-          await this.notifySessionCompleted(sessionId, userId, occurrenceId),
+        syncWorkspaceGitState: async (sessionId, session, signal) =>
+          await this.turnPostProcessingService.syncWorkspaceGitState(sessionId, session, signal),
+        onTurnOutcome: async (fact) => {
+          if (this.deletedSessionIds.has(fact.sessionId)) return;
+          const attention = projectTurnAttention(fact);
+          if (!attention) return;
+          const { scope, source, outcome } = attention;
+          const presentation = await this.buildNotificationPresentation(
+            source.sessionId,
+            source.originTurnIds ?? [source.turnId],
+            fact.assistantTurnId
+          );
+          // Independent channels: a local projection failure cannot block mobile,
+          // and cloud latency/failure cannot prevent desktop publication.
+          const attempts = await Promise.allSettled([
+            (async () => {
+              const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(
+                source.sessionId
+              );
+              if (this.deletedSessionIds.has(source.sessionId)) return;
+              await sessionDoc.publishTerminalNotification({
+                id: crypto.randomUUID(),
+                recipientId: scope.recipientId,
+                turnId: source.turnId,
+                outcome,
+                presentation,
+                createdAt: getServerNow(),
+              });
+            })(),
+            this.notifyTurnOutcome(
+              source.sessionId,
+              scope.recipientId,
+              source.turnId,
+              outcome,
+              presentation
+            ),
+          ]);
+          for (const attempt of attempts) {
+            if (attempt.status === 'rejected')
+              this.logger.debug(
+                `[${source.sessionId}] Notification attempt failed: ${formatErrorMessage(attempt.reason)}`
+              );
+          }
+        },
       },
+      awaitTurnHistoryGate: (sessionId) => this.awaitTurnHistoryGate(sessionId),
       recordChatFailure: async (sessionDoc, reason, message, code) =>
         await this.recordChatFailure(sessionDoc, reason, message, code),
+      recordSessionStopFailure: async (sessionId, turnId, failure) =>
+        await this.recordAgentWarning(
+          sessionId,
+          {
+            message: failure.message,
+            source: {
+              cancel: 'sessionCancelFailed',
+              timeout: 'sessionStopTimedOut',
+              terminate: 'sessionTerminationFailed',
+            }[failure.phase],
+          },
+          { noticeId: `session-stop-failure-${turnId}-${failure.phase}` }
+        ),
+      recordNativeWorkInterrupted: async (sessionId, turnId) => {
+        if (this.deletedSessionIds.has(sessionId) || this.archiveInFlight.has(sessionId)) return;
+        await this.recordAgentWarning(
+          sessionId,
+          {
+            message: 'The agent process ended while it still reported background work.',
+            source: 'nativeWorkInterrupted',
+          },
+          { noticeId: `native-work-interrupted-${turnId}` }
+        );
+      },
       maybeGenerateAndStoreSessionTitle: async (
         sessionId,
         cliType,
@@ -3119,22 +3807,6 @@ export class MessageHandler {
           customAcp,
           runtimeOverrides
         ),
-      maybeRenameSessionBranchFromPrompt: async (
-        sessionId,
-        session,
-        cliType,
-        agentType,
-        prompt,
-        env
-      ) =>
-        await this.maybeRenameSessionBranchFromPrompt(
-          sessionId,
-          session,
-          cliType,
-          agentType,
-          prompt,
-          env
-        ),
       processMessageQueue: async (sessionId) => await this.processMessageQueue(sessionId),
       syncLiveActivitySummary: async (userId) => {
         await this.syncLiveActivitySummary(userId);
@@ -3150,6 +3822,8 @@ export class MessageHandler {
           runtimeOverrides,
           options
         ),
+      resolveAcpCapabilitySourceVersion: async (input) =>
+        await resolveExpectedAcpCapabilitySourceVersion(input),
       evictForMemoryPressure: async (excludeSessionId) =>
         await this.evictForMemoryPressureFn(excludeSessionId),
     });
@@ -3171,37 +3845,154 @@ export class MessageHandler {
         this.rescanMachineCommands(getMachineCommandEventImpact(events), authoritative),
       onReady: () => this.rescanMachineCommands(),
     });
+    this.worktreeGc = new WorktreeGarbageCollector({
+      reposDir: path.join(getLodyDataDir(), 'repos'),
+      chatsDir: path.join(getLodyDataDir(), 'chats'),
+      logger: this.logger,
+      // Local mode has no remote to lag behind; in cloud mode the first full
+      // metadata sync is what separates "deleted" from "not seen yet".
+      hasCompleteMetadata: () =>
+        this.cloudPort.kind === 'local' || this.workspaceDocument.hasCompletedInitialMetaSync(),
+      readOwnerState: (sessionId) => this.readWorktreeOwnerState(sessionId),
+      isRuntimeActive: (sessionId) =>
+        this.archiveInFlight.has(sessionId) || this.sessionManager.hasSession(sessionId),
+      runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
+      archiveProjectGroup: (input) =>
+        archiveProjectGroup({
+          ...input,
+          machineId: this.machineId,
+          workspaceDocument: this.workspaceDocument,
+          logger: this.logger,
+          resolveLocalRoot: (id) => this.sessionManager.resolveLocalProjectRootPath(id),
+          allowManagedClone: this.cloudPort.githubTokens !== null,
+          cleanup: (cleanupInput) => this.runArchivedWorktreeCleanupScript(cleanupInput),
+        }),
+      // Restore reattaches by `branchName`; a branch renamed in a terminal is
+      // only known to git, so the name archiving reports is written back.
+      recordArchivedBranch: async (sessionId, branchName) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+          branchName,
+        } as Partial<SessionMeta>);
+      },
+    });
     this.previewService = new PreviewService({
       logger: this.logger,
       workspaceDocument: this.workspaceDocument,
       machineId: this.machineId,
       workspaceId: this.workspaceId,
       userId: this.userId,
-      authToken: () => this.token,
-      remoteGatewayUrl: this.cloudPort.remotePreview?.gatewayBaseUrl ?? null,
+      runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl,
+      remotePreview: this.cloudPort.remotePreview,
     });
-    const streamsTokens = this.cloudPort.streamsTokens;
-    if (streamsTokens) {
+    const devicePreviewOptions = {
+      iceServers: this.cloudPort.remotePreview?.simulatorIceServers
+        ? async (sessionId: string) => {
+            const record = await this.workspaceDocument.repo.getDocMeta(
+              getSessionRoomId(sessionId as SessionId)
+            );
+            if (
+              !record?.meta ||
+              isLoroRepoDocDeleted(record) ||
+              record.meta.isArchived ||
+              record.meta.machineId !== this.machineId ||
+              typeof record.meta.userId !== 'string' ||
+              !record.meta.userId
+            )
+              throw new Error('Simulator session access denied.');
+            const provider = this.cloudPort.remotePreview?.simulatorIceServers;
+            if (!provider) throw new Error('Simulator relay is unavailable.');
+            return provider({
+              workspaceId: this.workspaceId,
+              machineId: this.machineId,
+              requesterUserId: record.meta.userId,
+              localProjectId:
+                typeof record.meta.localProjectId === 'string'
+                  ? record.meta.localProjectId
+                  : undefined,
+            });
+          }
+        : undefined,
+      workspaceId: this.workspaceId,
+      logger: this.logger,
+      runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl ?? '',
+      authorize: async (request: { sessionId: string; requestedByUserId: string }) => {
+        const record = await this.workspaceDocument.repo.getDocMeta(
+          getSessionRoomId(request.sessionId as SessionId)
+        );
+        if (
+          !record?.meta ||
+          isLoroRepoDocDeleted(record) ||
+          record.meta.isArchived ||
+          record.meta.machineId !== this.machineId ||
+          (!this.encryptedExecution && record.meta.userId !== request.requestedByUserId)
+        ) {
+          throw new Error('Simulator session access denied.');
+        }
+        const parentSessionId = record.meta.parentSessionId;
+        if (parentSessionId === undefined || parentSessionId === null) return request.sessionId;
+        if (typeof parentSessionId !== 'string' || !parentSessionId) {
+          throw new Error('Invalid simulator parent session.');
+        }
+        const parent = await this.workspaceDocument.repo.getDocMeta(
+          getSessionRoomId(parentSessionId as SessionId)
+        );
+        if (
+          !parent?.meta ||
+          isLoroRepoDocDeleted(parent) ||
+          parent.meta.isArchived ||
+          parent.meta.parentSessionId ||
+          parent.meta.machineId !== this.machineId ||
+          (!this.encryptedExecution && parent.meta.userId !== request.requestedByUserId)
+        ) {
+          throw new Error('Simulator parent session access denied.');
+        }
+        return parentSessionId;
+      },
+    };
+    this.iosSimulatorService = new IosSimulatorService({
+      ...devicePreviewOptions,
+      onAgentPreviewStarted: async (sessionId, operationId) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
+          iosSimulatorPreviewRequestId: operationId,
+        } satisfies Partial<SessionMeta>);
+      },
+    });
+    this.androidEmulatorService = new AndroidEmulatorService({
+      ...devicePreviewOptions,
+      onAgentPreviewStarted: async (sessionId, operationId) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
+          androidEmulatorPreviewRequestId: operationId,
+        } satisfies Partial<SessionMeta>);
+      },
+    });
+    const streamsTokens = config.encryptedWorkspace ? null : this.cloudPort.streamsTokens;
+    if (streamsTokens || config.encryptedWorkspace) {
       const cliHttpFetch = getCliHttpFetch({ logger: this.logger });
       const rpcConnectTimeoutMs = readTimeoutEnv('LODY_LORO_RPC_CONNECT_TIMEOUT_MS', 30_000);
       this.logger.debug(
         `[rpc-server:${this.machineId}] using Loro Streams RPC connect timeout ${rpcConnectTimeoutMs}ms`
       );
-      const streamsTokenProvider = streamsTokens.createTokenProvider({
+      const streamsTokenProvider = streamsTokens?.createTokenProviderLegacy({
         workspaceId: this.workspaceId,
       });
-      this.machineRpcTokenProvider = streamsTokenProvider;
-      const jsonStreamClient = createLoroStreamsJsonStreamClient({
-        bucketId: LORO_STREAMS_BUCKET_ID,
-        getToken: async () => await streamsTokenProvider.getToken(),
-        getBaseUrl: () =>
-          streamsTokenProvider.getGatewayBaseUrl() ?? this.machineRpcGatewayBaseUrl ?? undefined,
-        fetchImpl: cliHttpFetch,
-        timeout: {
-          connectTimeoutMs: rpcConnectTimeoutMs,
-        },
-      });
-      this.machineRpcServer = new LoroStreamsMachineRpcServer({
+      this.machineRpcTokenProvider = streamsTokenProvider ?? null;
+      const jsonStreamClient = streamsTokenProvider
+        ? createLoroStreamsJsonStreamClient({
+            bucketId: LORO_STREAMS_BUCKET_ID,
+            getToken: async () => await streamsTokenProvider.getToken(),
+            getBaseUrl: () =>
+              streamsTokenProvider.getGatewayBaseUrl() ??
+              this.machineRpcGatewayBaseUrl ??
+              undefined,
+            fetchImpl: cliHttpFetch,
+            timeout: {
+              connectTimeoutMs: rpcConnectTimeoutMs,
+            },
+          })
+        : undefined;
+      const fileReader = this.encryptedFileReader ?? this.filePreviewService;
+      const codeReader = this.encryptedCodeCollabReader ?? this.codeCollabV2Service;
+      const queryServer = new LoroStreamsMachineRpcServer({
         logger: this.logger,
         workspaceId: this.workspaceId,
         machineId: this.machineId,
@@ -3209,12 +4000,42 @@ export class MessageHandler {
         rpcVersion: LORO_STREAMS_RPC_VERSION,
         retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
         now: getServerNow,
-        getMachineStatus: async () =>
-          await this.executionService.getMachineStatus({
+        historyRequestRejections: {
+          get: (request) =>
+            Effect.runPromise(
+              getSessionHistoryRpcRejection(
+                path.join(getLodyDataDir(), 'session-history-rpc-rejections.sqlite3'),
+                request,
+                getServerNow()
+              )
+            ),
+          put: (request, rejection, retainUntil) =>
+            Effect.runPromise(
+              putSessionHistoryRpcRejection(
+                path.join(getLodyDataDir(), 'session-history-rpc-rejections.sqlite3'),
+                request,
+                rejection,
+                getServerNow(),
+                retainUntil
+              )
+            ),
+        },
+        getMachineStatus: async (args) =>
+          await this.readMachineStatus({
             type: 'machine/status',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
+            ...(args?.includeDisk ? { includeDisk: true as const } : {}),
+            ...(args?.includeDaemonUpdate ? { includeDaemonUpdate: true as const } : {}),
           }),
+        getPreviewControl: async () => ({
+          type: 'machine/preview-control_response',
+          machineId: this.machineId,
+          success: true,
+          runtimeNonce: this.previewService.controlAuthority.runtimeNonce,
+        }),
+        getAutomationControl: config.remoteAutomation?.handshake,
+        controlAutomation: config.remoteAutomation?.control,
         pingMachine: async ({ requestId }) =>
           await this.executionService.pingMachine({
             type: 'machine/ping',
@@ -3222,31 +4043,38 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             requestId,
           }),
-        restartMachine: async ({ requesterUserId, requestToken, requestId }) =>
+        restartMachine: async ({ requesterUserId, requestToken, requestId, restoreMachineId }) =>
           await this.prepareMachineRestart({
+            restoreMachineId,
             requesterUserId,
             requestToken,
             requestId,
           }),
-        upgradeMachine: async ({ requesterUserId, requestToken, requestId, targetVersion }) =>
+        upgradeMachine: async ({
+          requesterUserId,
+          requestToken,
+          requestId,
+          targetVersion,
+          upgrade,
+        }) =>
           await this.prepareMachineUpgrade({
             requesterUserId,
             requestToken,
             requestId,
             targetVersion,
+            upgrade,
           }),
-        onMachineLifecycleResponseAppended: ({ response }) => {
+        onMachineLifecycleResponseSettled: ({ response }) => {
           if (response.accepted) {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
         },
+        refreshMachineProviderRateLimits: async (configId) =>
+          this.executionService.refreshProviderRateLimits(configId),
         refreshMachineAcpCapabilities: async ({
           configId,
-          cliType,
-          agentType,
-          customAcp,
-          runtimeOverrides,
-          env,
+          force,
+          readModelOptions,
           onAcpBinaryProgress,
           signal,
         }) =>
@@ -3256,45 +4084,56 @@ export class MessageHandler {
               machineId: this.machineId,
               workspaceId: this.workspaceId,
               configId,
-              cliType,
-              agentType,
-              customAcp,
-              runtimeOverrides,
-              env,
+              force,
+              ...(readModelOptions ? { readModelOptions } : {}),
             },
             { onAcpBinaryProgress, signal }
           ),
-        authenticateMachineAcp: async ({
-          requestId,
-          action,
-          authenticationRequestId,
-          authorizationCode,
-          configId,
-          cliType,
-          agentType,
-          customAcp,
-          runtimeOverrides,
-          env,
-          onProgress,
-        }) =>
-          await this.authenticateMachineAcpAndResumeSetup(
-            {
-              type: 'machine/acp-authenticate',
-              machineId: this.machineId,
-              workspaceId: this.workspaceId,
-              requestId,
-              action,
-              authenticationRequestId,
-              authorizationCode,
-              configId,
-              cliType,
-              agentType,
-              customAcp,
-              runtimeOverrides,
-              env,
-            },
-            { onProgress }
-          ),
+        authenticateMachineAcp: async (args) => {
+          const common = {
+            type: 'machine/acp-authenticate' as const,
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+            requestId: args.requestId,
+          };
+          const message: MachineAcpAuthenticateRequestValidated = (() => {
+            switch (args.action) {
+              case 'start':
+                return {
+                  ...common,
+                  action: args.action,
+                  configId: args.configId,
+                  methodId: args.methodId,
+                };
+              case 'cancel':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                };
+              case 'submit-code':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                  authorizationCode: args.authorizationCode,
+                };
+              case 'submit-input':
+                return {
+                  ...common,
+                  action: args.action,
+                  authenticationRequestId: args.authenticationRequestId,
+                  interactionId: args.interactionId,
+                  authenticationInput: args.authenticationInput,
+                };
+              default:
+                throw new Error('Unsupported ACP authentication action');
+            }
+          })();
+          return await this.authenticateMachineAcpAndResumeSetup(message, {
+            onProgress: args.onProgress,
+          });
+        },
         getMachineAcpBinaryStatus: async ({ agentType }) =>
           await this.executionService.getMachineAcpBinaryStatus({
             type: 'machine/acp-binary-status',
@@ -3302,6 +4141,9 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             agentType,
           }),
+        memoryProvider: handleRelayedMemoryProviderRequest,
+        listMachinePiExtensions: async ({ configId }) =>
+          await this.executionService.listMachinePiExtensions(configId),
         installMachineAcpBinary: async ({ agentType, onAcpBinaryProgress }) =>
           await this.executionService.installMachineAcpBinary(
             {
@@ -3312,7 +4154,7 @@ export class MessageHandler {
             },
             { onAcpBinaryProgress }
           ),
-        submitBugReport: async ({ description, reporterUserId, requestToken }) => {
+        submitBugReport: async ({ description, reporterUserId, requestToken, clientLog }) => {
           if (!this.cloudPort.bugReports) {
             return {
               type: 'machine/bug-report_response' as const,
@@ -3328,16 +4170,23 @@ export class MessageHandler {
             reporterUserId,
             requestToken,
             machineUserId: this.userId,
+            ...(clientLog ? { clientLog } : {}),
           });
         },
-        cancelSession: async ({ sessionId, turnId }) => {
-          const result = await this.executionService.cancelSession({
-            type: 'session/cancel',
-            machineId: this.machineId,
-            workspaceId: this.workspaceId,
-            sessionId,
-            turnId,
-          });
+        cancelSession: async ({ sessionId, turnId, subagentTaskId, cancelId, pauseInbox }) => {
+          const result = await this.executionService.cancelSession(
+            {
+              type: 'session/cancel',
+              machineId: this.machineId,
+              workspaceId: this.workspaceId,
+              sessionId,
+              turnId,
+              subagentTaskId,
+              cancelId,
+              pauseInbox,
+            },
+            { pendingInput: 'preserve', prePromptSession: 'discard' }
+          );
           return {
             type: 'session/cancel_response' as const,
             sessionId,
@@ -3345,31 +4194,29 @@ export class MessageHandler {
             error: result.error,
           };
         },
-        getSessionLiveStatus: async ({ sessionId }) => {
-          const liveStatus = resolveSessionLiveStatus({
-            presence: this.sessionActivePresence.getStatus(sessionId),
-            execution: this.executionService.getExecutionSnapshot(sessionId),
-            hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
-          });
-          return {
-            type: 'session/live-status_response' as const,
-            machineId: this.machineId,
-            sessionId,
-            success: true,
-            ...liveStatus,
-            observedAtMs: getServerNow(),
-          };
-        },
+        getSessionLiveStatus: async ({ sessionId, includeActivity }) =>
+          await this.readSessionLiveStatus(sessionId, includeActivity === true),
+        withdrawSessionInput: async ({ userId, ...args }) =>
+          await this.withdrawSessionInputWithAccessCheck(args, userId),
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
+        controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
         forkSession: async (args) => await this.forkSessionWithAccessCheck(args),
         editAndResendSession: async (args) => await this.editAndResendSessionWithAccessCheck(args),
-        dispatchSessionTurn: async ({ sessionId, userTurnId, userId, timestamp, inputConfig }) => {
+        dispatchSessionTurn: async ({
+          sessionId,
+          userTurnId,
+          userId,
+          timestamp,
+          inputConfig,
+          inputOrigin,
+        }) => {
           const disposition = await this.sessionDispatchWatcher.offerRpcTurn({
             sessionId,
             userTurnId,
             userId,
             timestamp,
+            inputOrigin,
             inputConfig,
           });
           return {
@@ -3383,15 +4230,77 @@ export class MessageHandler {
             disposition,
           };
         },
-        prepareSession: async (spec) => await this.prepareSessionWithAccessCheck(spec),
-        cancelSessionPreparation: async (args) =>
-          await this.cancelSessionPreparationWithAccessCheck(args),
-        resolveCodeCollabOwnerSessionId: this.resolveCodeCollabV2OwnerSessionId,
-        previewFile: async (request) => await this.filePreviewService.previewFile(request),
-        openCodeCollabText: async (request) => await this.codeCollabV2Service.openText(request),
-        refreshCodeCollabText: async (request) =>
-          await this.codeCollabV2Service.refreshText(request),
+        resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
+        authorizeSessionHistoryRead: async ({ sessionId, readProof }) => {
+          if (!readProof || !this.cloudPort.access.verifySessionHistoryRead) return false;
+          const target = await this.resolveSessionHistoryAccessTarget(sessionId);
+          return await this.cloudPort.access.verifySessionHistoryRead({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            sessionId,
+            ...target,
+            requestToken: readProof,
+          });
+        },
+        authorizeSessionHistoryWrite: async ({
+          sessionId,
+          writeProof,
+          requestId,
+          operation,
+          payload,
+        }) => {
+          if (!writeProof || !this.cloudPort.access.verifySessionHistoryWrite) return null;
+          const target = await this.resolveSessionHistoryAccessTarget(sessionId);
+          return await this.cloudPort.access.verifySessionHistoryWrite({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            sessionId,
+            ...target,
+            requestToken: writeProof,
+            requestId,
+            intentDigest: await sessionHistoryWriteIntentDigest(requestId, operation, payload),
+          });
+        },
+        readSessionHistory: async ({ sessionId, query, signal }) =>
+          await this.readSessionHistoryForRpc(sessionId, query, signal),
+        subscribeSessionHistory: (args) => this.subscribeSessionHistory(args),
+        writeSessionHistory: async ({ sessionId, operation, payload }) =>
+          await this.writeSessionHistoryForRpc(sessionId, operation, payload),
+        resolveCodeCollabOwnerSessionId: config.encryptedWorkspace
+          ? this.resolveEncryptedCodeCollabOwnerSessionId
+          : this.resolveCodeCollabV2OwnerSessionId,
+        previewFile: async (request) => await fileReader.previewFile(request),
+        listSessionDirectory: async (request: SessionDirectoryListRequest) =>
+          await listSessionDirectory(
+            {
+              resolveWorkspace: config.encryptedWorkspace
+                ? (sessionId, rootId) =>
+                    this.resolveEncryptedCodeCollabV2Workspace(sessionId, { rootId })
+                : this.resolveFilePreviewWorkspace,
+              listDirectory: async (rootPath, relativePath, limit) =>
+                await this.localProjectControlService.listProjectDirectory(rootPath, relativePath, {
+                  limit,
+                }),
+            },
+            request
+          ),
+        downloadFileChunk: async (request) => {
+          if (
+            request.attachment?.machineId !== undefined &&
+            request.attachment.machineId !== this.machineId
+          )
+            return { status: 'error', code: 'invalid_path' };
+          return fileReader.downloadFileChunk(
+            request.attachment ? { ...request, path: request.attachment.path } : request
+          );
+        },
+        openCodeCollabText: async (request) => await codeReader.openText(request),
+        refreshCodeCollabText: async (request) => await codeReader.refreshText(request),
         saveCodeCollabText: async (request) => await this.codeCollabV2Service.saveText(request),
+        openCodeCollabDiffManifest: async (request, context) =>
+          await this.diffBlobReader.openDiffManifest(request, context),
+        readCodeCollabBlob: async (request, context) =>
+          await this.diffBlobReader.readBlob(request, context),
         openCodeCollabCurrentDiff: async (request) =>
           await this.codeCollabV2Service.openCurrentDiff(request),
         openCodeCollabAllChangesDiff: async (request) =>
@@ -3400,49 +4309,109 @@ export class MessageHandler {
           await this.codeCollabV2Service.openTurnDiff(request),
         initCodeCollabDirectory: async (request) =>
           await this.codeCollabV2Service.initDirectory(request),
-        getCodeCollabLspDefinition: async () => await this.codeCollabV2Service.lspDefinition(),
-        getCodeCollabLspReferences: async () => await this.codeCollabV2Service.lspReferences(),
-        createSessionPreview: async ({
-          sessionId,
-          requestedByUserId,
-          target,
-          approval,
-          replaceExisting,
-        }) =>
-          await this.previewService.createPreview({
+        getCodeCollabLspDefinition: async (request) => await codeReader.lspDefinition(request),
+        getCodeCollabLspReferences: async (request) => await codeReader.lspReferences(request),
+        controlIosSimulator: async ({ proof, responseKey, ...request }) =>
+          this.iosSimulatorService.control(request, true, () =>
+            this.previewService.authorizeRemoteControl(
+              request.sessionId as SessionId,
+              request.requestedByUserId,
+              { action: 'ios-simulator', command: request.command, responseKey },
+              proof
+            )
+          ),
+        controlAndroidEmulator: async ({ proof, responseKey, ...request }) =>
+          this.androidEmulatorService.control(request, true, () =>
+            this.previewService.authorizeRemoteControl(
+              request.sessionId as SessionId,
+              request.requestedByUserId,
+              { action: 'android-emulator', command: request.command, responseKey },
+              proof
+            )
+          ),
+        getSessionPreviewStatus: async ({ proof, ...request }) => {
+          await this.previewService.authorizeRemoteControl(
+            request.sessionId,
+            request.requestedByUserId,
+            { action: 'status', renewEndpointId: request.renewEndpointId },
+            proof
+          );
+          return this.previewService.getStatus({
+            ...request,
+            type: 'session/preview-status',
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+          });
+        },
+        createSessionPreview: async ({ proof, ...request }) => {
+          await this.previewService.authorizeRemoteControl(
+            request.sessionId,
+            request.requestedByUserId,
+            { action: 'create', target: request.target, restart: request.restart ?? false },
+            proof
+          );
+          return this.previewService.createPreview({
+            ...request,
             type: 'session/preview-create',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
-            sessionId,
-            requestedByUserId,
-            target,
-            approval,
-            replaceExisting,
-          }),
-        revokeSessionPreview: async ({ sessionId, requestedByUserId, reason }) =>
-          await this.previewService.revokePreview({
+          });
+        },
+        revokeSessionPreview: async ({ proof, ...request }) => {
+          await this.previewService.authorizeRemoteControl(
+            request.sessionId,
+            request.requestedByUserId,
+            { action: 'revoke', ...(request.stopProcess ? { stopProcess: true } : {}) },
+            proof
+          );
+          return this.previewService.revokePreview({
+            ...request,
             type: 'session/preview-revoke',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
-            sessionId,
-            requestedByUserId,
-            reason,
-          }),
+          });
+        },
+        probeLocalProjectMember: async ({ localProjectId, requestedByUserId }) => {
+          const access = await this.verifyRequesterMachineAccess({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            requesterUserId: requestedByUserId,
+            localProjectId,
+          });
+          if (!access.allowed) throw new Error('Project group member access denied');
+          return this.probeProjectLocalMember(localProjectId);
+        },
         getLocalProjectGitState: async ({ localProjectId, requestedByUserId }) =>
           await this.getLocalProjectGitStateForRpc({
             localProjectId,
             requestedByUserId,
           }),
+        listLocalProjectBranches: async ({
+          localProjectId,
+          requestedByUserId,
+          query,
+          limit,
+          cursor,
+        }) =>
+          await this.listLocalProjectBranchesForRpc({
+            localProjectId,
+            requestedByUserId,
+            query,
+            limit,
+            cursor,
+          }),
         dispatchLocalProjectControl: async (request) =>
           await this.dispatchLocalProjectControlViaRpc(request),
         onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
       });
+      if (config.encryptedWorkspace) this.encryptedQueryServer = queryServer;
+      else this.machineRpcServer = queryServer;
     } else {
       this.logger.debug('Streams RPC disabled: cloud Streams port unavailable');
     }
     // One resolver instance (and one profile cache) for both the dispatch
-    // watcher and the Operation coordinator: both need the requesting user's
-    // real commit identity, and both must go through the CLI-token query.
+    // watcher and the Operation coordinator. Owner turns use local Git identity;
+    // other requesters resolve their own profile through the CLI-token query.
     this.sessionUserResolver = new SessionUserResolver(
       this.logger,
       this.workspaceId,
@@ -3450,9 +4419,13 @@ export class MessageHandler {
         await this.cloudPort.access.resolveWorkspaceUser({
           workspaceId: this.workspaceId,
           userId,
-        })
+        }),
+      this.userId
     );
     this.sessionDispatchWatcher = new SessionDispatchWatcher({
+      reconcileLocalImages: (sessionId, doc, turnId) =>
+        this.reconcileLocalImageReceipts(sessionId, doc, { turnId }),
+      encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       machineId: this.machineId,
       workspaceId: this.workspaceId,
@@ -3460,10 +4433,23 @@ export class MessageHandler {
       userResolver: this.sessionUserResolver,
       workspaceDocument: this.workspaceDocument,
       executionService: this.executionService,
-      getPreparedSessionLaunchConfig: (input) =>
-        this.sessionManager.getPreparedSessionLaunchConfig(input),
       accessPolicy: makeSessionAccessPolicy(this.localWorkspaceCatalog),
       canUseMachine: async (args) => await this.verifyMachineAccess(args),
+      ...(this.encryptedExecution
+        ? {
+            resolveEncryptedRequester: async (intent: {
+              workspaceId: string;
+              sessionId: string;
+              userTurnId: string;
+              inputConfig?: unknown;
+            }) => await Effect.runPromise(this.encryptedExecution!.resolveRequester(intent)),
+            ...(this.encryptedExecution.subscribeEvidence
+              ? { subscribeExecutionEvidence: this.encryptedExecution.subscribeEvidence }
+              : {}),
+            retireEncryptedInput: async (intent: { sessionId: string; userTurnId: string }) =>
+              await Effect.runPromise(this.encryptedExecution!.retire(intent)),
+          }
+        : {}),
       // P5/D11 snapshot bookkeeping for the watcher's background owner
       // recheck. Only confirmed online verdicts reach this: an allow refreshes
       // the optimistic-allow snapshot (the sole writer of `verifiedAt`), a
@@ -3476,6 +4462,19 @@ export class MessageHandler {
         }
         await this.recordWorkspaceAccessSnapshot(null);
       },
+      // Members get a TTL-bounded cached allow refreshed by every confirmed
+      // backend allow and cleared by a definitive deny.
+      recordMemberAccessSnapshot: async ({ requesterUserId, localProjectId, verdict }) =>
+        await fileLocksLegacy.runPromise(
+          this.localWorkspaceCatalog.recordMemberAccessSnapshot({
+            workspaceId: this.workspaceId,
+            requesterUserId,
+            ...(localProjectId ? { localProjectId } : {}),
+            ownerUserId: this.userId,
+            machineId: this.machineId,
+            verifiedAt: verdict === 'allowed' ? new Date(getServerNow()).toISOString() : null,
+          })
+        ),
       recordChatFailure: async (sessionDoc, reason, message) =>
         await this.recordChatFailure(sessionDoc, reason, message),
       onStartupBootstrapComplete: () => {
@@ -3525,6 +4524,7 @@ export class MessageHandler {
       },
     });
     this.operationCoordinator = new LodyOperationCoordinator({
+      onAvailabilityChange: config.onInboxAvailabilityChange,
       workspaceId: this.workspaceId,
       machineId: this.machineId,
       userId: this.userId,
@@ -3533,16 +4533,29 @@ export class MessageHandler {
       dispatchWatcher: this.sessionDispatchWatcher,
       userResolver: this.sessionUserResolver,
       logger: this.logger,
+      confirmTargetReadable: async (docId, reason, targetMachineId) => {
+        if (this.cloudPort.kind === 'local' || targetMachineId === this.machineId) {
+          await this.workspaceDocument.repo.flush();
+          return;
+        }
+        await this.workspaceDocument.syncRemoteDocOrThrow(docId, {
+          reason,
+          timeoutMs: TARGET_CATCH_UP_TIMEOUT_MS,
+        });
+      },
       materializeTarget: async (operation, item, index) =>
-        await this.materializeOperationTarget(operation, item, index),
+        await this.withDaemonCommandScope(() =>
+          this.materializeOperationTarget(operation, item, index)
+        ),
     });
 
     this.setupSessionEventHandlers();
     // Machine registration is triggered by the runtime only after SessionManager is initialized.
     // This prevents dispatch from racing ahead of local session startup prerequisites.
-    this.setupArchiveWatcher();
-    this.setupDeleteWatcher();
+    this.setupSessionLifecycleWatchers();
+    this.startWorktreeGc();
     void this.machineFlockCommandWatcher.start();
+    void this.discardLegacySessionCommands();
   }
 
   /**
@@ -3576,7 +4589,31 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.encryptedAttachments
+            ? {
+                e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+                e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
+                e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+                e2eeRemoteControl: E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
+              }
+            : {}),
+          ...(this.sorbetCredentials
+            ? {
+                sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
+                sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                ...(this.encryptedAttachments
+                  ? {
+                      sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+                      sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                    }
+                  : {}),
+              }
+            : {}),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
+        timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
       });
@@ -3653,13 +4690,18 @@ export class MessageHandler {
       );
     });
 
-    this.sessionManager.on('onUsageUpdate', ({ sessionId, acpSessionId, usage }) => {
-      const promise = this.handleUsageUpdate(sessionId, acpSessionId, usage);
+    this.sessionManager.on('onUsageUpdate', ({ sessionId, acpSessionId, usage, accountingId }) => {
+      void this.recordTurnTokenUsage(sessionId, usage);
+      const promise = this.handleUsageUpdate(sessionId, accountingId ?? acpSessionId, usage);
       const usageState = this.store.get(sessionId);
       usageState.pendingUsageHandlers.add(promise);
       void promise.finally(() => {
         usageState.pendingUsageHandlers.delete(promise);
       });
+    });
+
+    this.sessionManager.on('onPromptSuggestion', (sessionId, suggestion) => {
+      this.workspaceDocument.publishPromptSuggestion(this.machineId, sessionId, suggestion);
     });
 
     this.sessionManager.on('onContextWindowUsageUpdate', (sessionId, usage) => {
@@ -3668,8 +4710,17 @@ export class MessageHandler {
 
     this.sessionManager.on(
       'onRateLimitUpdate',
-      (machineId: MachineId, cliType: CliType, limits: RateLimit) => {
-        void this.workspaceDocument.updateRateLimits(machineId, cliType, limits);
+      (
+        machineId: MachineId,
+        agentConfigId: AgentConfigId | undefined,
+        cliType: string,
+        snapshot: import('acp-extension-core').RateLimitsSnapshot,
+        binding: import('@/session/automation-observations').ProviderBinding | undefined
+      ) => {
+        if (agentConfigId)
+          this.executionService.noteProviderRateLimitsUpdate(agentConfigId, binding, snapshot);
+        for (const limits of snapshot.rateLimits)
+          void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
       }
     );
 
@@ -3683,6 +4734,10 @@ export class MessageHandler {
       this.enqueueSessionNoticeHistoryPersist(sessionId, () =>
         this.persistThreadGoalClear(sessionId, threadId)
       );
+    });
+
+    this.sessionManager.on('onNativeWorkChanged', (sessionId, work) => {
+      this.sessionActivePresence.native.setNativeWork(sessionId, work);
     });
 
     this.sessionManager.on('onSessionTitleUpdate', (sessionId, title) => {
@@ -3719,6 +4774,7 @@ export class MessageHandler {
 
     // Session exit: flush ACP updates before marking idle.
     this.sessionManager.on('exit', (exit) => {
+      this.executionService.forgetReleasedTurn(exit.sessionId);
       void (async () => {
         const sessionId = exit.sessionId;
         this.logger.debug(`[${sessionId}] Session exit event received (exitCode=${exit.exitCode})`);
@@ -3738,6 +4794,7 @@ export class MessageHandler {
     // Session termination can race with exit/error; always flush ACP updates first.
     // Skip if session was already cleaned by GC to avoid re-creating transient state.
     this.sessionManager.on('terminated', (event) => {
+      this.executionService.forgetReleasedTurn(event.sessionId);
       this.codeCollabV2Service.releaseWorkspaceWatchForOwner(event.sessionId);
       void (async () => {
         const sessionId = event.sessionId;
@@ -3780,9 +4837,20 @@ export class MessageHandler {
     impact?: ReturnType<typeof getMachineCommandEventImpact>,
     authoritative = true
   ): void {
-    if (!impact || impact.archive) void this.processArchiveRequests();
-    if (!impact || impact.delete) void this.processDeleteRequests();
     if (!impact || impact.deleteLocalProject) void this.processDeleteLocalProjectRequests();
+    if (!impact || impact.localProject) {
+      void reconcileMissingLocalProjectGitSummaries(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        this.workspaceDocument,
+        { verifyProjectIdentity: Boolean(this.encryptedQueryServer) }
+      ).catch((error: unknown) => {
+        this.logger.debug(
+          `[machine-flock] Failed to reconcile local project Git summaries (${this.getMachineFlockLogContext()}): ${formatErrorMessage(error)}`
+        );
+      });
+    }
     // A stale local setup row must not outrun a remote cancellation, so provider
     // setup drains only once the command room has established remote authority.
     if ((!impact || impact.providerSetup) && authoritative) {
@@ -3877,201 +4945,328 @@ export class MessageHandler {
     }
   }
 
-  private setupArchiveWatcher(): void {
-    if (this.archiveWatchHandle) {
+  /**
+   * Archive and delete are observed, not commanded. A Session doc whose
+   * `isArchived` flips to true has its runtime released here; a Session doc
+   * that becomes deleted gets the same release plus the deletion barrier. Disk
+   * follows separately through the worktree reconciler, which needs no event
+   * to be correct — events only make it prompt.
+   */
+  private setupSessionLifecycleWatchers(): void {
+    if (this.sessionLifecycleWatchHandles.length > 0) {
       return;
     }
-    const machineRoomId = getMachineRoomId(this.machineId);
-    this.archiveWatchHandle = this.workspaceDocument.repo.watch(
-      (event) => {
-        if (event.kind !== 'doc-metadata') return;
-        if (event.docId !== machineRoomId) return;
-        this.logger.debug(`[archive] Machine meta updated (docId=${machineRoomId})`);
-        void this.processArchiveRequests();
-      },
-      {
-        docIds: [machineRoomId],
-        kinds: ['doc-metadata'],
-        metadataFields: ['needToArchiveSessions'],
-      }
-    );
-    this.logger.debug(`[archive] Archive watcher registered (docId=${machineRoomId})`);
-    void this.processArchiveRequests();
+    const { repo } = this.workspaceDocument;
+    this.sessionLifecycleWatchHandles = [
+      repo.watch(
+        (event) => {
+          if (event.kind !== 'doc-metadata') return;
+          if (!getSessionIdFromRoomId(event.docId)) return;
+          if ((event.patch as Partial<SessionMeta>).collaborationStopped !== true) return;
+          void this.executionService.reconcileCollaborationStops().catch((error: unknown) => {
+            this.logger.warn(
+              `[session-collaboration] Stop reconciliation failed: ${formatErrorMessage(error)}`
+            );
+          });
+        },
+        { kinds: ['doc-metadata'], metadataFields: ['collaborationStopped'] }
+      ),
+      repo.watch(
+        (event) => {
+          if (event.kind !== 'doc-metadata') return;
+          const sessionId = getSessionIdFromRoomId(event.docId);
+          if (!sessionId) return;
+          if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;
+          // Revoke media before unrelated ACP/Browser cleanup can fail.
+          void this.iosSimulatorService.closeSession(sessionId);
+          void this.androidEmulatorService.closeSession(sessionId);
+          void this.handleSessionArchived(sessionId);
+        },
+        { kinds: ['doc-metadata'], metadataFields: ['isArchived'] }
+      ),
+      repo.watch(
+        (event) => {
+          if (event.kind !== 'doc-metadata') return;
+          const sessionId = getSessionIdFromRoomId(event.docId);
+          if (sessionId) void this.iosSimulatorService.closeSession(sessionId);
+          if (sessionId) void this.androidEmulatorService.closeSession(sessionId);
+        },
+        { kinds: ['doc-metadata'], metadataFields: ['userId', 'machineId'] }
+      ),
+      repo.watch(
+        (event) => {
+          if (event.kind !== 'doc-existence-changed') return;
+          if (event.to !== 'deleted') return;
+          const sessionId = getSessionIdFromRoomId(event.docId);
+          if (!sessionId) return;
+          void this.iosSimulatorService.closeSession(sessionId);
+          void this.androidEmulatorService.closeSession(sessionId);
+          void this.handleSessionDeleted(sessionId);
+        },
+        { kinds: ['doc-existence-changed'] }
+      ),
+    ];
+    this.logger.debug('[session-lifecycle] Archive and delete watchers registered');
   }
 
-  private async processArchiveRequests(): Promise<void> {
-    const snapshot = await this.readMachineCommandSnapshot();
-    const sessionIds = snapshot.archiveSessionIds;
-    if (sessionIds.length === 0) {
-      this.logger.debug('[archive] No pending archive requests');
+  private startWorktreeGc(): void {
+    if (this.worktreeGcTimer) {
       return;
     }
-
-    this.logger.debug(`[archive] Processing ${sessionIds.length} archive request(s)`);
-    for (const sessionId of sessionIds) {
-      if (snapshot.deleteSessionIds.has(sessionId)) {
+    this.worktreeGcTimer = setInterval(() => {
+      void this.worktreeGc.schedule();
+    }, WORKTREE_GC_INTERVAL_MS);
+    this.worktreeGcTimer.unref?.();
+    if (this.cloudPort.kind === 'local') {
+      void this.worktreeGc.schedule();
+      return;
+    }
+    // Every authoritative resync is a chance to catch Sessions archived or
+    // deleted while this daemon was offline; sweeps coalesce and are idempotent.
+    this.detachWorktreeGcSyncListener = this.workspaceDocument.onMetaRoomSynced(() => {
+      void this.worktreeGc.schedule();
+    });
+    void this.workspaceDocument
+      .waitForInitialMetaSync()
+      .then((completed) => {
+        if (completed) void this.worktreeGc.schedule();
+      })
+      .catch((error: unknown) => {
         this.logger.debug(
-          `[archive] Skipping archive for ${sessionId} (session is queued for deletion)`
+          `[worktree-gc] Initial sweep skipped; metadata sync failed: ${formatErrorMessage(error)}`
         );
-        await this.removeArchiveRequest(sessionId);
-        continue;
-      }
-      if (this.archiveInFlight.has(sessionId)) {
-        this.logger.debug(`[archive] Session ${sessionId} already in progress`);
-        continue;
-      }
-      this.archiveInFlight.add(sessionId);
-      try {
-        this.logger.debug(`[archive] Start archiving session ${sessionId}`);
-        await this.archiveSessionResources(sessionId);
-        await this.removeArchiveRequest(sessionId);
-        this.logger.debug(`[archive] Finished archiving session ${sessionId}`);
-      } catch (error) {
-        this.logger.error(`[${sessionId}] Failed to archive session: ${formatErrorMessage(error)}`);
-      } finally {
-        this.archiveInFlight.delete(sessionId);
-      }
-    }
-
-    void this.processDeleteLocalProjectRequests();
+      });
   }
 
-  private async archiveSessionResources(
+  private async readWorktreeOwnerState(sessionId: SessionId): Promise<WorktreeOwnerState> {
+    const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    if (!snapshot) {
+      return { kind: 'unknown' };
+    }
+    const meta = snapshot.meta as SessionMeta | undefined;
+    if (snapshot.deleted) {
+      return { kind: 'deleted', meta };
+    }
+    if (meta?.isArchived === true && !meta.parentSessionId) {
+      return { kind: 'archived', meta };
+    }
+    return { kind: 'active' };
+  }
+
+  private async runArchivedWorktreeCleanupScript(input: {
+    sessionId: SessionId;
+    meta: SessionMeta | undefined;
+    worktreePath: string;
+  }): Promise<void> {
+    const { sessionId, meta, worktreePath } = input;
+    if (!meta) {
+      // The Session doc is gone; there is nowhere to record the script run and
+      // no configuration to resolve it from.
+      return;
+    }
+    const config = await resolveSessionWorktreeCleanupConfig({
+      token: this.token,
+      workspaceId: this.workspaceId,
+      machineId: this.machineId,
+      sessionId,
+      sessionMeta: meta,
+      workspaceDocument: this.workspaceDocument,
+      logger: this.logger,
+    });
+    if (!config) {
+      return;
+    }
+    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    await runWorktreeCleanup({
+      config,
+      sessionId,
+      workspaceId: this.workspaceId,
+      workdir: worktreePath,
+      branch: meta.branchName?.trim() ?? '',
+      repoFullName: meta.project?.kind === 'local' ? undefined : meta.repoFullName,
+      localProjectId: meta.project?.kind === 'local' ? meta.project.localProjectId : undefined,
+      logger: this.logger,
+      events: createWorktreeScriptHistoryRecorder({
+        sessionDoc,
+        sessionId,
+        phase: 'cleanup',
+        logger: this.logger,
+        backend: await createSessionBackend(sessionDoc, meta),
+      }),
+    });
+  }
+
+  /**
+   * Session docs of every machine flow through the same watcher; only this
+   * machine's Sessions (or ones whose runtime this daemon still holds) get
+   * their runtime released here. Other machines release their own.
+   */
+  private async isSessionOwnedByThisMachine(sessionId: SessionId): Promise<boolean> {
+    if (this.sessionManager.hasSession(sessionId) || this.store.has(sessionId)) {
+      return true;
+    }
+    const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    return (snapshot?.meta as SessionMeta | undefined)?.machineId === this.machineId;
+  }
+
+  private async handleSessionArchived(sessionId: SessionId): Promise<void> {
+    if (this.archiveInFlight.has(sessionId)) {
+      return;
+    }
+    if (!(await this.isSessionOwnedByThisMachine(sessionId))) {
+      return;
+    }
+    this.archiveInFlight.add(sessionId);
+    try {
+      await this.releaseArchivedSessionRuntime(sessionId);
+    } catch (error) {
+      this.logger.error(
+        `[${sessionId}] Failed to release archived session runtime: ${formatErrorMessage(error)}`
+      );
+    } finally {
+      this.archiveInFlight.delete(sessionId);
+    }
+    void this.worktreeGc.schedule();
+  }
+
+  /**
+   * Everything archiving needs from the daemon except disk: presence,
+   * terminals, ACP state, preview tunnel, child Sessions, and the agent
+   * process. Idempotent, so repeated observations of the same archive are
+   * harmless.
+   */
+  private async releaseArchivedSessionRuntime(
     sessionId: SessionId,
-    options?: { preserveWorktree?: boolean }
+    options: { writeIdleStatus?: boolean } = {}
   ): Promise<void> {
-    this.logger.debug(`[${sessionId}] Archiving session resources`);
+    this.logger.debug(`[${sessionId}] Releasing archived session runtime`);
+    this.executionService.withdrawNativeWorkCompletion(sessionId);
 
     this.clearSessionActivePresence(sessionId);
     this.closeSessionTerminals?.(sessionId);
-    this.logger.debug(`[${sessionId}] Active presence cleared`);
 
-    await this.finalizeACPState(sessionId);
-    this.logger.debug(`[${sessionId}] ACP state finalized`);
-
-    await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
-    this.logger.debug(`[${sessionId}] Preview tunnel closed for archive`);
-
-    const sessionRoomId = getSessionRoomId(sessionId);
-    const [sessionMetaDoc, archiveMachineMetaDoc] = await Promise.all([
-      this.workspaceDocument.repo.getDocMeta(sessionRoomId),
-      this.workspaceDocument.repo.getDocMeta(getMachineRoomId(this.machineId)),
+    await Promise.all([
+      this.iosSimulatorService.closeSession(sessionId),
+      this.androidEmulatorService.closeSession(sessionId),
     ]);
-    const sessionMeta = sessionMetaDoc?.meta as SessionMeta | undefined;
-    const archiveMachineMeta = archiveMachineMetaDoc?.meta as MachineLegacyMetaFields | undefined;
-
+    await this.finalizeACPState(sessionId);
+    await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
     await this.terminateActiveChildSessions(sessionId, 'Parent session archived');
 
     if (this.sessionManager.hasSession(sessionId)) {
       this.logger.debug(`[${sessionId}] Terminating active session`);
-      await this.sessionManager.terminateSession(sessionId, true);
-    }
-
-    if (!options?.preserveWorktree) {
-      const cleanupTarget = this.resolveWorktreeCleanupTarget({
-        sessionMeta,
-        machineMeta: archiveMachineMeta,
-      });
-      if (cleanupTarget) {
-        const worktreeManager = getWorktreeManager(this.buildWorktreeManagerConfig(cleanupTarget));
-        const worktreePath = worktreeManager.getWorktreeHostPath(sessionId);
-        if (fs.existsSync(worktreePath)) {
-          const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-          await runWorktreeCleanup({
-            config: await resolveSessionWorktreeCleanupConfig({
-              token: this.token,
-              workspaceId: this.workspaceId,
-              machineId: this.machineId,
-              sessionId,
-              sessionMeta,
-              workspaceDocument: this.workspaceDocument,
-              logger: this.logger,
-            }),
-            sessionId,
-            workspaceId: this.workspaceId,
-            workdir: worktreePath,
-            branch: cleanupTarget.branchName ?? sessionMeta?.branchName?.trim() ?? '',
-            repoFullName:
-              sessionMeta?.project?.kind === 'local' ? undefined : sessionMeta?.repoFullName,
-            localProjectId:
-              sessionMeta?.project?.kind === 'local'
-                ? sessionMeta.project.localProjectId
-                : undefined,
-            logger: this.logger,
-            events: createWorktreeScriptHistoryRecorder({
-              sessionDoc,
-              sessionId,
-              phase: 'cleanup',
-              logger: this.logger,
-            }),
-          });
-        }
-        try {
-          const archiveResult = await worktreeManager.archiveWorktree(sessionId);
-          if (
-            archiveResult.branchName &&
-            archiveResult.branchName !== sessionMeta?.branchName?.trim()
-          ) {
-            await this.workspaceDocument.repo.upsertDocMeta(sessionRoomId, {
-              branchName: archiveResult.branchName,
-            } as Partial<SessionMeta>);
-          }
-        } catch (error) {
-          this.logger.debug(
-            `[${sessionId}] Failed to archive worktree: ${formatErrorMessage(error)}`
-          );
-        }
+      await this.terminateSessionForRelease(sessionId);
+      if (options.writeIdleStatus !== false) {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+          status: SessionStatusFactory.idle(),
+        } as Partial<SessionMeta>);
       }
     }
 
     await this.sessionManager.archiveSession(sessionId);
-    this.logger.debug(`[${sessionId}] Session doc cleaned`);
-
-    await this.workspaceDocument.repo.upsertDocMeta(sessionRoomId, {
-      isArchived: true,
-      status: SessionStatusFactory.idle(),
-    } as Partial<SessionMeta>);
-    this.logger.debug(`[${sessionId}] Session meta archived`);
-
-    // Clean up session-specific logger cache
     this.store.get(sessionId).logger = null;
+    this.logger.debug(`[${sessionId}] Archived session runtime released`);
   }
 
-  private async removeArchiveRequest(sessionId: SessionId): Promise<void> {
-    const machineRoomId = getMachineRoomId(this.machineId);
-    let removedFlockRow = false;
+  private async handleSessionDeleted(sessionId: SessionId): Promise<void> {
+    if (this.deletedSessionIds.has(sessionId)) {
+      return;
+    }
+    if (!(await this.isSessionOwnedByThisMachine(sessionId))) {
+      return;
+    }
+    this.logger.debug(`[${sessionId}] Session doc deleted; releasing runtime`);
     try {
-      removedFlockRow = await this.deleteMachineFlockCommandRow(
-        machineFlockKeys.archiveSessionCommand(sessionId)
-      );
+      // Never write into a deleted doc: the idle-status patch stays archive-only.
+      await this.releaseArchivedSessionRuntime(sessionId, { writeIdleStatus: false });
     } catch (error) {
-      this.logger.debug(
-        `[archive] Failed to remove archive Flock request (${sessionId}): ${formatErrorMessage(
-          error
-        )}`
+      this.logger.error(
+        `[${sessionId}] Failed to release deleted session runtime: ${formatErrorMessage(error)}`
       );
     }
 
-    const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
-    if (!machineMeta?.needToArchiveSessions?.[sessionId]) {
-      if (!removedFlockRow) {
-        this.logger.debug(`[archive] Archive request already cleared (${sessionId})`);
-      } else {
-        this.logger.debug(`[archive] Archive Flock request removed (${sessionId})`);
+    // Point of no return for the daemon's view of the doc: stop accepting late
+    // ACP output and drop any retained retry timer/buffer, otherwise a failed
+    // tail flush could write into a deleted document.
+    this.deletedSessionIds.add(sessionId);
+    await this.quiesceACPFlushForDeletion(sessionId);
+
+    try {
+      // Transient non-owner open: skip the open-time maintenance writes so this
+      // does not contend on the shared WAL store's write lock.
+      this.operationCoordinator.assertInboxAvailable();
+      const operationStore = new LodyOperationStore(
+        getLodyOperationStorePath(this.machineId),
+        undefined,
+        { maintenance: false }
+      );
+      try {
+        operationStore.deleteRequesterSession(sessionId);
+      } finally {
+        operationStore.close();
       }
-      return;
+    } catch (error) {
+      this.logger.debug(
+        `[${sessionId}] Failed to delete requester-private Operation data: ${formatErrorMessage(error)}`
+      );
     }
-    const nextQueue = { ...machineMeta.needToArchiveSessions };
-    delete nextQueue[sessionId];
-    await this.workspaceDocument.repo.upsertDocMeta(machineRoomId, {
-      needToArchiveSessions: nextQueue,
-    } as RepoDocMetaPatch);
-    if (removedFlockRow) {
-      this.logger.debug(`[archive] Archive request removed (${sessionId})`);
-    } else {
-      this.logger.debug(`[archive] Legacy archive request removed (${sessionId})`);
+
+    try {
+      await this.deleteMachineFlockCommandRow(machineFlockKeys.sessionLaunchConfig(sessionId));
+    } catch (error) {
+      this.logger.debug(
+        `[${sessionId}] Failed to remove legacy session launch config row: ${formatErrorMessage(error)}`
+      );
+    }
+
+    // Some best-effort deletion tails may consult transient session state for
+    // diagnostics. Re-assert the deletion barrier before returning so those
+    // reads cannot leave an empty state record behind.
+    this.store.deleteSession(sessionId);
+    void this.worktreeGc.schedule();
+  }
+
+  private async discardLegacySessionCommands(): Promise<void> {
+    try {
+      const handle = await this.workspaceDocument.repo.openFlockDoc(
+        this.getMachineFlockDocIdForMachine()
+      );
+      const rows = readMachineFlockRowsFromFlock(handle.flock, {
+        families: [...LEGACY_SESSION_COMMAND_FAMILIES],
+      });
+      let discarded = 0;
+      for (const row of Object.values(rows)) {
+        const kind = parseMachineFlockKey(row.key)?.kind;
+        if (kind !== 'archiveSessionCommand' && kind !== 'deleteSessionCommand') continue;
+        if (await this.deleteMachineFlockCommandRow(row.key)) discarded += 1;
+      }
+      const machineRoomId = getMachineRoomId(this.machineId);
+      const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
+        | MachineLegacyMetaFields
+        | undefined;
+      const legacyPatch: Record<string, unknown> = {};
+      if (Object.keys(machineMeta?.needToArchiveSessions ?? {}).length > 0) {
+        legacyPatch.needToArchiveSessions = {};
+      }
+      if (Object.keys(machineMeta?.needToDeleteSessions ?? {}).length > 0) {
+        legacyPatch.needToDeleteSessions = {};
+      }
+      if (Object.keys(legacyPatch).length > 0) {
+        await this.workspaceDocument.repo.upsertDocMeta(
+          machineRoomId,
+          legacyPatch as RepoDocMetaPatch
+        );
+        discarded += 1;
+      }
+      if (discarded > 0) {
+        this.logger.debug(
+          `[session-lifecycle] Discarded ${discarded} legacy archive/delete request record(s)`
+        );
+      }
+    } catch (error) {
+      this.logger.debug(
+        `[session-lifecycle] Failed to discard legacy session commands: ${formatErrorMessage(error)}`
+      );
     }
   }
 
@@ -4099,13 +5294,6 @@ export class MessageHandler {
     const localProjectEntries = snapshot.deleteLocalProjectEntries;
     if (localProjectEntries.length === 0) {
       this.logger.debug('[local-project] No pending delete requests');
-      return;
-    }
-
-    if (snapshot.archiveSessionIds.length > 0 || this.archiveInFlight.size > 0) {
-      this.logger.debug(
-        `[local-project] Deferring ${localProjectEntries.length} delete request(s) until archive requests finish`
-      );
       return;
     }
 
@@ -4167,15 +5355,18 @@ export class MessageHandler {
       ({ meta }) => meta.isArchived !== true && !meta.parentSessionId
     );
     const archivedRootSessionIds = new Set(rootSessions.map(({ meta }) => meta.id));
-    for (const { meta } of rootSessions) {
-      await this.archiveSessionResources(meta.id, { preserveWorktree: true });
+    for (const { roomId, meta } of rootSessions) {
+      await this.releaseArchivedSessionRuntime(meta.id);
+      await this.workspaceDocument.repo.upsertDocMeta(roomId, {
+        isArchived: true,
+        status: SessionStatusFactory.idle(),
+      } as Partial<SessionMeta>);
     }
 
     for (const { roomId, meta } of sessions) {
       if (archivedRootSessionIds.has(meta.id)) continue;
       if (this.sessionManager.hasSession(meta.id)) {
-        await this.archiveSessionResources(meta.id, { preserveWorktree: true });
-        continue;
+        await this.releaseArchivedSessionRuntime(meta.id);
       }
       if (meta.isArchived === true) continue;
       await this.workspaceDocument.repo.upsertDocMeta(roomId, {
@@ -4212,6 +5403,36 @@ export class MessageHandler {
       return undefined;
     }
 
+    if (existingProject) {
+      const catalogId = getWorkspaceFlockDocId(this.workspaceId);
+      // Borrow the daemon's retained catalog reader, including local-only readiness.
+      // A missing baseline is not an empty list of references.
+      if (
+        !(await this.workspaceDocument.catalogBaselineReady(
+          catalogId,
+          SYNC_CONFIRMATION_TIMEOUT_MS
+        ))
+      ) {
+        throw new Error('Project catalog is not ready');
+      }
+      const catalog = await this.workspaceDocument.repo.openFlockDoc(catalogId);
+      const projects = listWorkspaceProjects(readWorkspaceFlockRowsFromFlock(catalog.flock));
+      const sessions = (await listAliveSessionMetas(this.workspaceDocument)).map(
+        ({ meta }) => meta
+      );
+      if (isLocalProjectReferenced(existingProject, this.machineId, projects, sessions)) {
+        await upsertMachineLocalProject(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          existingProject,
+          undefined,
+          { sync: this.workspaceDocument, reason: 'local-project-unlink', standaloneVisible: false }
+        );
+        return undefined;
+      }
+    }
+
     await this.archiveLocalProjectSessions(localProjectId);
 
     let cleanupResult: MachineDeleteLocalProjectCommand['cleanupResult'];
@@ -4246,46 +5467,20 @@ export class MessageHandler {
     return cleanupResult;
   }
 
-  private toDeleteRequestRecord(request: DeleteRequest | undefined): DeleteRequestRecord {
-    if (!request || typeof request !== 'object') {
-      return {};
+  /**
+   * Archive and delete release the Session whether or not every process tree
+   * could be proven gone: the Session is not reused, so a survivor is an
+   * orphan to report, not a reason to leave the archive half done.
+   */
+  private async terminateSessionForRelease(sessionId: SessionId): Promise<void> {
+    this.executionService.withdrawNativeWorkCompletion(sessionId);
+    try {
+      await this.sessionManager.terminateSession(sessionId, true);
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Releasing the session although its processes could not all be terminated: ${formatErrorMessage(error)}`
+      );
     }
-    if ('v' in request) {
-      return machineDeleteCommandToQueueItem(request);
-    }
-    return request;
-  }
-
-  private async isDeleteRequestQueued(sessionId: SessionId): Promise<boolean> {
-    const snapshot = await this.readMachineCommandSnapshot();
-    return snapshot.deleteSessionIds.has(sessionId);
-  }
-
-  private async writeKeptWorktreePath(
-    sessionId: SessionId,
-    request: DeleteRequest | undefined,
-    keptWorktreePath: string
-  ): Promise<void> {
-    const machineFlockRows = await this.tryReadMachineFlockCommandRows();
-    const deleteKey = machineFlockKeys.deleteSessionCommand(sessionId);
-    const currentCommand = getMachineFlockDeleteCommand(machineFlockRows, sessionId);
-
-    const nextRecord = {
-      ...this.toDeleteRequestRecord(request),
-      ...(currentCommand ? this.toDeleteRequestRecord(currentCommand) : {}),
-      keptWorktreePath,
-    };
-    const { isWorktree, requestedAt, ...rest } = nextRecord;
-    const nextCommand: MachineDeleteSessionCommand = {
-      v: 1,
-      ...rest,
-      requestedAt: requestedAt ?? getServerNow(),
-      ...(isWorktree === true ? { isWorktree: true } : {}),
-    };
-    await this.writeMachineFlockRow({
-      key: deleteKey,
-      value: nextCommand,
-    });
   }
 
   private async terminateActiveChildSessions(
@@ -4304,361 +5499,86 @@ export class MessageHandler {
       childSessionIds.map(async (childSessionId) => {
         this.clearSessionActivePresence(childSessionId);
         this.closeSessionTerminals?.(childSessionId);
+        await Promise.all([
+          this.iosSimulatorService.closeSession(childSessionId),
+          this.androidEmulatorService.closeSession(childSessionId),
+        ]);
         await this.finalizeACPState(childSessionId);
         await this.previewService.closeSessionPreviewForCleanup(childSessionId, reason);
-        await this.sessionManager.terminateSession(childSessionId, true);
+        await this.terminateSessionForRelease(childSessionId);
         this.store.get(childSessionId).logger = null;
       })
     );
   }
 
-  private resolveWorktreeCleanupTarget(options: {
-    sessionMeta: SessionMeta | undefined;
-    request?: DeleteRequest;
-    machineMeta?: MachineLegacyMetaFields;
-    machineFlockRows?: MachineFlockRowMap;
-  }): WorktreeCleanupTarget | null {
-    const { sessionMeta, machineMeta } = options;
-    const localProjects = {
-      ...(machineMeta?.localProjects ?? {}),
-      ...getMachineFlockLocalProjects(options.machineFlockRows ?? ({} as MachineFlockRowMap)),
+  private recordLiveActivity(sessionId: SessionId, notification: AcpSessionNotification): void {
+    const previous = this.liveActivityBySession.get(sessionId);
+    const update = notification.update as {
+      sessionUpdate: string;
+      toolCallId?: string;
+      title?: string | null;
+      status?: string | null;
     };
-    const requestRecord = this.toDeleteRequestRecord(options.request);
-    const trimmed = (value: string | undefined): string | undefined => {
-      const v = value?.trim();
-      return v ? v : undefined;
-    };
-    const branchName = trimmed(requestRecord.branchName) ?? trimmed(sessionMeta?.branchName);
-    const baseBranchName =
-      trimmed(requestRecord.baseBranchName) ?? trimmed(sessionMeta?.baseBranch);
-    const requestLocalProjectId = trimmed(requestRecord.localProjectId);
-    const requestOriginalRootPath = trimmed(requestRecord.originalRootPath);
-    const requestHasLocalTarget =
-      requestLocalProjectId !== undefined || requestOriginalRootPath !== undefined;
-    const isLocalWorktree =
-      sessionMeta?.project?.kind === 'local'
-        ? sessionMeta.isWorktree === true || requestRecord.isWorktree === true
-        : requestHasLocalTarget && requestRecord.isWorktree === true;
-
-    if (isLocalWorktree) {
-      const localProjectId =
-        requestLocalProjectId ??
-        (sessionMeta?.project?.kind === 'local' ? sessionMeta.project.localProjectId : undefined);
-      const originalRootPath =
-        requestOriginalRootPath ||
-        (localProjectId ? localProjects[localProjectId as LocalProjectId]?.rootPath?.trim() : '');
-      if (!originalRootPath) {
-        return null;
-      }
-      return {
-        repoId: deriveRepoIdFromLocalProjectPath(originalRootPath),
-        source: { kind: 'local-shared', originalRootPath },
-        ...(branchName ? { branchName } : {}),
-        ...(baseBranchName ? { baseBranchName } : {}),
-      };
-    }
-
-    const repoFullName =
-      sessionMeta?.project?.kind === 'local'
-        ? undefined
-        : (trimmed(requestRecord.repoFullName) ?? trimmed(sessionMeta?.repoFullName));
-    if (!repoFullName) {
-      return null;
-    }
-
-    return {
-      repoId: deriveRepoIdFromGitHubRepo(repoFullName),
-      ...(branchName ? { branchName } : {}),
-      ...(baseBranchName ? { baseBranchName } : {}),
-    };
-  }
-
-  private buildWorktreeManagerConfig(target: WorktreeCleanupTarget): {
-    repoId: RepoId;
-    source?: WorktreeCleanupTarget['source'];
-    logger: Logger;
-  } {
-    return {
-      repoId: target.repoId,
-      ...(target.source ? { source: target.source } : {}),
-      logger: this.logger,
-    };
-  }
-
-  private setupDeleteWatcher(): void {
-    if (this.deleteWatchHandle) {
-      return;
-    }
-    const machineRoomId = getMachineRoomId(this.machineId);
-    this.deleteWatchHandle = this.workspaceDocument.repo.watch(
-      (event) => {
-        if (event.kind !== 'doc-metadata') return;
-        if (event.docId !== machineRoomId) return;
-        this.logger.debug(`[delete] Machine meta updated (docId=${machineRoomId})`);
-        void this.processDeleteRequests();
-      },
-      {
-        docIds: [machineRoomId],
-        kinds: ['doc-metadata'],
-        metadataFields: ['needToDeleteSessions'],
-      }
-    );
-    this.logger.debug(`[delete] Delete watcher registered (docId=${machineRoomId})`);
-    void this.processDeleteRequests();
-  }
-
-  private async processDeleteRequests(): Promise<void> {
-    const snapshot = await this.readMachineCommandSnapshot();
-    const entries = snapshot.deleteEntries;
-    if (entries.length === 0) {
-      this.logger.debug('[delete] No pending delete requests');
-      return;
-    }
-
-    this.logger.debug(`[delete] Processing ${entries.length} delete request(s)`);
-    for (const [sessionId, request] of entries) {
-      const keptWorktreePath =
-        typeof request === 'object' && request !== null
-          ? request.keptWorktreePath?.trim()
-          : undefined;
-      if (keptWorktreePath) {
-        this.logger.debug(
-          `[delete] Skipping retry for ${sessionId}; local worktree was preserved at ${keptWorktreePath}`
-        );
-        continue;
-      }
-      if (this.deleteInFlight.has(sessionId)) {
-        this.logger.debug(`[delete] Session ${sessionId} already in progress`);
-        continue;
-      }
-      this.deleteInFlight.add(sessionId);
-      try {
-        this.logger.debug(`[delete] Start deleting session ${sessionId}`);
-        const result = await this.deleteSessionResources(sessionId, request);
-        if (!result.keptWorktreePath) {
-          await this.removeDeleteRequest(sessionId);
-        }
-        this.logger.debug(`[delete] Finished deleting session ${sessionId}`);
-      } catch (error) {
-        this.logger.error(`[${sessionId}] Failed to delete session: ${formatErrorMessage(error)}`);
-      } finally {
-        this.deleteInFlight.delete(sessionId);
+    let actionToolCallId = previous?.actionToolCallId;
+    let actionTitle = previous?.actionTitle;
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+      const finished = update.status === 'completed' || update.status === 'failed';
+      if (finished && actionToolCallId === update.toolCallId) {
+        actionToolCallId = undefined;
+        actionTitle = undefined;
+      } else if (!finished && update.toolCallId && update.title) {
+        actionToolCallId = update.toolCallId;
+        actionTitle = Array.from(truncateToolTitleForHistory(update.title)).slice(0, 200).join('');
       }
     }
-  }
-
-  private async deleteSessionResources(
-    sessionId: SessionId,
-    request?: DeleteRequest
-  ): Promise<{ keptWorktreePath?: string }> {
-    this.logger.debug(`[${sessionId}] Deleting session resources permanently`);
-
-    const sessionRoomId = getSessionRoomId(sessionId);
-    const [commandSnapshot, sessionMetaDoc] = await Promise.all([
-      this.readMachineCommandSnapshot(),
-      this.workspaceDocument.repo.getDocMeta(sessionRoomId),
-    ]);
-    const sessionMeta = sessionMetaDoc?.meta as SessionMeta | undefined;
-    if (!commandSnapshot.deleteSessionIds.has(sessionId)) {
-      this.logger.debug(
-        `[${sessionId}] Skipping permanent deletion (delete request is no longer queued)`
-      );
-      return {};
-    }
-
-    if (sessionMeta?.isArchived === false) {
-      this.logger.debug(
-        `[${sessionId}] Skipping permanent deletion (session is not archived anymore)`
-      );
-      return {};
-    }
-
-    // First archive resources if not already done
-    await this.terminateActiveChildSessions(sessionId, 'Parent session deleted');
-
-    this.clearSessionActivePresence(sessionId);
-    this.closeSessionTerminals?.(sessionId);
-
-    await this.finalizeACPState(sessionId);
-
-    await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session deleted');
-    this.logger.debug(`[${sessionId}] Preview tunnel closed for deletion`);
-
-    if (this.sessionManager.hasSession(sessionId)) {
-      this.logger.debug(`[${sessionId}] Terminating active session`);
-      await this.sessionManager.terminateSession(sessionId, true);
-    }
-
-    if (!(await this.isDeleteRequestQueued(sessionId))) {
-      this.logger.debug(
-        `[${sessionId}] Skipping permanent deletion (delete request was cleared before worktree cleanup)`
-      );
-      return {};
-    }
-
-    const cleanupTarget = this.resolveWorktreeCleanupTarget({
-      sessionMeta,
-      request,
-      machineMeta: commandSnapshot.machineMeta,
-      machineFlockRows: commandSnapshot.machineFlockRows,
+    this.liveActivityBySession.set(sessionId, {
+      lastOutputAt: Date.now(),
+      ...(actionTitle ? { actionToolCallId, actionTitle } : {}),
     });
-
-    let keptWorktreePath: string | undefined;
-    if (cleanupTarget) {
-      const worktreeManager = getWorktreeManager(this.buildWorktreeManagerConfig(cleanupTarget));
-      try {
-        await worktreeManager.removeWorktree(
-          sessionId,
-          cleanupTarget.source === undefined,
-          cleanupTarget.branchName,
-          { baseBranchName: cleanupTarget.baseBranchName }
-        );
-      } catch (error) {
-        if (cleanupTarget.source) {
-          const keptPath = worktreeManager.getWorktreeHostPath(sessionId);
-          keptWorktreePath = keptPath;
-          await this.writeKeptWorktreePath(sessionId, request, keptPath);
-          this.logger.warn(
-            `[${sessionId}] Local worktree was kept because cleanup failed or it has uncommitted changes: ${keptPath} (${formatErrorMessage(error)})`
-          );
-        } else {
-          this.logger.debug(
-            `[${sessionId}] Failed to remove worktree: ${formatErrorMessage(error)}`
-          );
-        }
-      }
-    }
-
-    if (keptWorktreePath) {
-      return { keptWorktreePath };
-    }
-
-    if (!(await this.isDeleteRequestQueued(sessionId))) {
-      this.logger.debug(
-        `[${sessionId}] Skipping session doc deletion (delete request was cleared after worktree cleanup)`
-      );
-      return {};
-    }
-
-    // Clean up worktree and disk resources via session manager
-    await this.sessionManager.archiveSession(sessionId);
-    this.logger.debug(`[${sessionId}] Session doc cleaned`);
-
-    if (!(await this.isDeleteRequestQueued(sessionId))) {
-      this.logger.debug(
-        `[${sessionId}] Skipping session doc deletion (delete request was cleared after archive)`
-      );
-      return {};
-    }
-
-    // This is the point of no return for the session document. Stop accepting
-    // late ACP output and drop any retained retry timer/buffer before deleting
-    // the doc, otherwise a failed tail flush can recreate it afterwards.
-    this.deletedSessionIds.add(sessionId);
-    await this.quiesceACPFlushForDeletion(sessionId);
-
-    // Delete the session doc permanently
-    try {
-      await this.workspaceDocument.repo.deleteDoc(sessionRoomId);
-      this.logger.debug(`[${sessionId}] Session doc deleted`);
-    } catch (error) {
-      // The durable delete request must remain retryable. Rolling the barrier
-      // back lets the next attempt quiesce the session again; swallowing this
-      // error would acknowledge a deletion that never happened and reject all
-      // future output forever.
-      this.deletedSessionIds.delete(sessionId);
-      throw error;
-    }
-
-    try {
-      // Transient non-owner open: skip the open-time maintenance writes so this
-      // does not contend on the shared WAL store's write lock.
-      const operationStore = new LodyOperationStore(
-        getLodyOperationStorePath(this.machineId),
-        undefined,
-        { maintenance: false }
-      );
-      try {
-        operationStore.deleteRequesterSession(sessionId);
-      } finally {
-        operationStore.close();
-      }
-    } catch (error) {
-      this.logger.debug(
-        `[${sessionId}] Failed to delete requester-private Operation data: ${formatErrorMessage(error)}`
-      );
-    }
-
-    // Some best-effort deletion tails may consult transient session state for
-    // diagnostics. Re-assert the deletion barrier before returning so those
-    // reads cannot leave an empty state record behind.
-    this.store.deleteSession(sessionId);
-
-    return {};
   }
 
-  private async removeDeleteRequest(sessionId: SessionId): Promise<void> {
-    const machineRoomId = getMachineRoomId(this.machineId);
-    let removedFlockRow = false;
-    let removedLaunchConfigRow = false;
+  /**
+   * Best-effort activity of a busy Session from local state. Any failure omits
+   * it, so the caller keeps the ordinary live status.
+   */
+  private async readSessionLiveActivity(
+    sessionId: SessionId
+  ): Promise<SessionLiveActivity | undefined> {
+    const execution = this.executionService.getExecutionSnapshot(sessionId);
+    if (!execution.hasActiveTurn || !execution.activeTurnId) return undefined;
     try {
-      removedFlockRow = await this.deleteMachineFlockCommandRow(
-        machineFlockKeys.deleteSessionCommand(sessionId)
-      );
-    } catch (error) {
-      this.logger.debug(
-        `[delete] Failed to remove delete Flock request (${sessionId}): ${formatErrorMessage(
-          error
-        )}`
-      );
-    }
-    try {
-      removedLaunchConfigRow = await this.deleteMachineFlockCommandRow(
-        machineFlockKeys.sessionLaunchConfig(sessionId)
-      );
-    } catch (error) {
-      this.logger.debug(
-        `[delete] Failed to remove session launch config row (${sessionId}): ${formatErrorMessage(
-          error
-        )}`
-      );
-    }
-
-    const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
-    if (!machineMeta?.needToDeleteSessions?.[sessionId]) {
-      if (removedFlockRow || removedLaunchConfigRow) {
-        this.logger.debug(`[delete] Delete Flock request removed (${sessionId})`);
-      } else {
-        this.logger.debug(`[delete] Delete request already cleared (${sessionId})`);
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const history = (await this.getSessionBackend(sessionDoc)).history;
+      const total = await history.count();
+      let turnStartedAt: number | undefined;
+      let queuedInputs = 0;
+      // Shallow rows only: queued inputs follow the running turn, within a bounded tail.
+      const rows = await history.readDirectory(Math.max(0, total - 50), total);
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index]?.scalars;
+        if (!row) continue;
+        if (row.id === execution.activeTurnId) {
+          const started = Date.parse(row.timestamp);
+          if (Number.isFinite(started)) turnStartedAt = started;
+          break;
+        }
+        if (row.role === 'user' && (row.status === 'pending' || row.status === 'pending_apply'))
+          queuedInputs += 1;
       }
-      return;
-    }
-    const nextQueue = { ...machineMeta.needToDeleteSessions };
-    delete nextQueue[sessionId];
-    const nextWorkspacePaths = machineMeta.workspacePaths
-      ? { ...machineMeta.workspacePaths }
-      : null;
-    if (nextWorkspacePaths && sessionId in nextWorkspacePaths) {
-      delete nextWorkspacePaths[sessionId];
-    }
-    await this.workspaceDocument.repo.upsertDocMeta(machineRoomId, {
-      needToDeleteSessions: nextQueue,
-      ...(nextWorkspacePaths ? { workspacePaths: nextWorkspacePaths } : {}),
-    } as RepoDocMetaPatch);
-    if (removedFlockRow) {
-      this.logger.debug(`[delete] Delete request removed (${sessionId})`);
-    } else {
-      this.logger.debug(`[delete] Legacy delete request removed (${sessionId})`);
+      const tracked = this.liveActivityBySession.get(sessionId);
+      return {
+        ...(turnStartedAt !== undefined ? { turnStartedAt } : {}),
+        ...(tracked ? { lastOutputAt: tracked.lastOutputAt } : {}),
+        ...(tracked?.actionTitle ? { currentAction: tracked.actionTitle } : {}),
+        queuedInputs,
+      };
+    } catch (error) {
+      this.logger.debug(`[${sessionId}] Live activity unavailable: ${formatErrorMessage(error)}`);
+      return undefined;
     }
   }
 
   private enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void {
-    // Note: ACP notifications are internal agent events, NOT user activity.
-    // We intentionally do NOT call touchSession() here to avoid keeping sessions
-    // artificially alive. Only user-initiated actions (chat, image upload) reset
-    // the idle timer.
     if (this.deletedSessionIds.has(sessionId)) {
       this.logger.debug(
         `[${sessionId}] Dropping ACP update after permanent deletion reached its commit boundary`
@@ -4669,6 +5589,12 @@ export class MessageHandler {
       return;
     }
     const target = this.store.getCurrentACPUpdateTarget(sessionId);
+    if (target) this.recordLiveActivity(sessionId, update);
+    if (!target && update.update.sessionUpdate === 'available_commands_update') {
+      // Standard agents advertise commands right after session/new, before any assistant entry.
+      this.persistOutOfTurnAvailableCommands(sessionId, update);
+      return;
+    }
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -4677,6 +5603,14 @@ export class MessageHandler {
       return;
     }
     if (target.source === 'finalized_turn') {
+      // Output inside a turn never touches the session: the turn keeps it from
+      // GC. Output after the turn means the model was woken by a finished
+      // background task, a ScheduleWakeup or a cron, so the idle timer restarts
+      // from it. Only agents that report `sessionActivity` get this; the others
+      // keep the old rule that only user actions and turn ends count.
+      if (this.sessionManager.getSession(sessionId)?.agentClient?.reportsSessionActivity()) {
+        this.touchSession(sessionId);
+      }
       this.captureACPUpdateInvariant(
         'late_acp_update_routed_to_finalized_turn',
         sessionId,
@@ -4687,8 +5621,31 @@ export class MessageHandler {
         }
       );
     }
-    this.store.get(sessionId).acpUpdateBuffer.push({ notification: update, target });
+    const state = this.store.get(sessionId);
+    this.recordTurnEvent(sessionId, target.turnEpoch, this.isVisibleACPUpdate(update.update));
+    state.acpUpdateBuffer.push({
+      operationId: uuidV4(),
+      notification: update,
+      target,
+    });
     this.scheduleFlushACPUpdates(sessionId);
+  }
+
+  private persistOutOfTurnAvailableCommands(
+    sessionId: SessionId,
+    notification: AcpSessionNotification
+  ): void {
+    const patch = getAcpRuntimeConfigPatch(notification);
+    if (!patch) return;
+    void (async () => {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      await backend.applyAcpRuntimeConfigPatchToCurrentSnapshot(patch);
+    })().catch((error: unknown) => {
+      this.logger.debug(
+        `[${sessionId}] Failed to persist out-of-turn ACP commands: ${formatErrorMessage(error)}`
+      );
+    });
   }
 
   private clearScheduledACPFlush(sessionId: SessionId): void {
@@ -4984,65 +5941,6 @@ export class MessageHandler {
     return out;
   }
 
-  private summarizeSessionHistoryForDiagnostics(
-    history: SessionHistoryInput[]
-  ): Record<string, unknown> {
-    const historyItemTypes: Record<string, number> = {};
-    const systemNoticeMetaUndefinedKeys: Array<{ entryId: string; keys: string[] }> = [];
-    let historyItems = 0;
-
-    for (const entry of history) {
-      if (!entry || typeof entry !== 'object') continue;
-      const items = Array.isArray(entry.items) ? (entry.items as unknown[]) : [];
-      for (const item of items) {
-        historyItems += 1;
-        const type = (item as { type?: unknown } | undefined)?.type;
-        const typeKey = typeof type === 'string' ? type : 'unknown';
-        historyItemTypes[typeKey] = (historyItemTypes[typeKey] ?? 0) + 1;
-
-        if (typeKey === 'system_notice') {
-          const meta = (item as { meta?: unknown } | undefined)?.meta;
-          if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
-            const metaRecord = meta as Record<string, unknown>;
-            const keys = Object.keys(metaRecord);
-            const undefinedKeys = keys.filter((k) => metaRecord[k] === undefined);
-            if (undefinedKeys.length > 0 && systemNoticeMetaUndefinedKeys.length < 5) {
-              systemNoticeMetaUndefinedKeys.push({
-                entryId: entry.id,
-                keys: undefinedKeys.slice(0, 10),
-              });
-            }
-          }
-        }
-      }
-    }
-
-    const last = history.length > 0 ? history[history.length - 1] : undefined;
-    const lastItems = last && Array.isArray(last.items) ? (last.items as unknown[]) : [];
-    const lastItemTypes: Record<string, number> = {};
-    for (const item of lastItems) {
-      const type = (item as { type?: unknown } | undefined)?.type;
-      const typeKey = typeof type === 'string' ? type : 'unknown';
-      lastItemTypes[typeKey] = (lastItemTypes[typeKey] ?? 0) + 1;
-    }
-
-    return {
-      historyEntries: history.length,
-      historyItems,
-      historyItemTypes,
-      systemNoticeMetaUndefinedKeys,
-      lastEntry: last
-        ? {
-            id: last.id,
-            role: last.role,
-            timestamp: last.timestamp,
-            items: lastItems.length,
-            itemTypes: lastItemTypes,
-          }
-        : null,
-    };
-  }
-
   private async appendACPUpdatesToAssistantEntry(args: {
     sessionId: SessionId;
     sessionDoc: SessionDocument;
@@ -5051,36 +5949,60 @@ export class MessageHandler {
     turnId: string;
     targetSource: ACPUpdateTarget['source'];
     modelInfo?: ModelInfo;
-    // Counts notifications (in `args.updates` order) whose history writes
-    // committed. Text batches and rich-content uploads interleave inside one
+    // Counts consumed notifications (committed or explicitly rejected) in
+    // `args.updates` order. Text batches and rich-content uploads interleave inside one
     // call, so a mid-group failure leaves a persisted prefix; the caller must
     // only re-queue past this watermark or short text chunks (intentionally not
     // deduplicated) would duplicate on retry.
     progress?: { persistedNotifications: number };
   }): Promise<void> {
-    const persistNotifications = async (notifications: AcpSessionNotification[]) => {
-      if (notifications.length === 0) {
+    const persistNotifications = async (updates: BufferedACPUpdate[]) => {
+      if (updates.length === 0) {
         return;
       }
-      await appendACPNotificationsToAssistantEntry(
-        args.sessionDoc,
-        notifications,
-        args.assistantEntryId,
-        {
-          logger: this.logger,
-          editCallback: async (edits) => {
-            // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
-            // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
-            // them into the diff store (old text chained from the prior recorded state),
-            // keeping the turn-diff badge and its clickable content from the same source.
-            this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+      const notifications = updates.map(({ notification }) => notification);
+      const lateEvidenceOwners = new Set<string>();
+      try {
+        const backend = await this.getSessionBackend(args.sessionDoc);
+        await appendACPNotificationsToAssistantEntry(
+          args.sessionDoc,
+          notifications,
+          args.assistantEntryId,
+          {
+            logger: this.logger,
+            operationIds: updates.map(({ operationId }) => operationId),
+            editCallback: async (edits, assistantEntryId) => {
+              // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
+              // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
+              // them into the diff store (old text chained from the prior recorded state),
+              // keeping the turn-diff badge and its clickable content from the same source.
+              const ownerTurnId = assistantEntryId ?? args.turnId;
+              this.collectCodeCollabEditEvidence(args.sessionId, ownerTurnId, edits);
+              if (ownerTurnId !== args.turnId) lateEvidenceOwners.add(ownerTurnId);
+            },
+            standardDiffCallback: async (diffs, assistantEntryId) => {
+              const ownerTurnId = assistantEntryId ?? args.turnId;
+              await this.collectCodeCollabStandardDiffs(args.sessionId, ownerTurnId, diffs);
+              if (ownerTurnId !== args.turnId) lateEvidenceOwners.add(ownerTurnId);
+            },
+            backend,
           },
-          standardDiffCallback: async (diffs) => {
-            await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
-          },
-        },
-        args.modelInfo
-      );
+          args.modelInfo
+        );
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        // The writer rejects before committing history. Isolate deterministic
+        // poison inputs instead of retaining them ahead of every later chunk.
+        if (notifications.length > 1) {
+          for (const update of updates) await persistNotifications([update]);
+          return;
+        }
+        this.logger.error(
+          `[${args.sessionId}] Rejected ACP history notification: ${error.message}`
+        );
+        if (args.progress) args.progress.persistedNotifications += 1;
+        return;
+      }
       if (args.progress) {
         args.progress.persistedNotifications += notifications.length;
       }
@@ -5088,45 +6010,49 @@ export class MessageHandler {
       if (args.targetSource === 'finalized_turn') {
         await this.persistLateCodeCollabTurnDiffs(args.sessionId, args.turnId);
       }
+      for (const ownerTurnId of lateEvidenceOwners) {
+        await this.persistLateCodeCollabTurnDiffs(args.sessionId, ownerTurnId);
+      }
     };
 
-    const flushNotifications = async (notifications: AcpSessionNotification[]) => {
+    const flushNotifications = async (updates: BufferedACPUpdate[]) => {
       // Plan persistence has a second doc write (`setPlan`) after the history
       // batch. Keep plan and non-plan notifications at separate progress
       // boundaries, while retaining the existing coalescing semantics for
       // consecutive plan snapshots (only the latest snapshot is written).
-      let batch: AcpSessionNotification[] = [];
-      for (const notification of notifications) {
-        const isPlan = notification.update.sessionUpdate === 'plan';
-        const batchIsPlan = batch[0]?.update.sessionUpdate === 'plan';
+      let batch: BufferedACPUpdate[] = [];
+      for (const update of updates) {
+        const isPlan = update.notification.update.sessionUpdate === 'plan';
+        const batchIsPlan = batch[0]?.notification.update.sessionUpdate === 'plan';
         if (batch.length > 0 && isPlan !== batchIsPlan) {
           await persistNotifications(batch);
           batch = [];
         }
-        batch.push(notification);
+        batch.push(update);
       }
       await persistNotifications(batch);
     };
 
-    const appendContents = async (contents: MessageContent[]) => {
+    const appendContents = async (contents: MessageContent[], operationIds: readonly string[]) => {
       if (contents.length === 0) {
         return;
       }
-      await args.sessionDoc.updateHistory((history) =>
-        applyMessageContentsBatch(history, contents, {
-          targetAssistantEntryId: args.assistantEntryId,
-          createId: () => args.assistantEntryId,
-          now: () => new Date(getServerNow()).toISOString(),
-          model: args.modelInfo,
-        })
-      );
+      const backend = await this.getSessionBackend(args.sessionDoc);
+      await backend.applyAgentBatch({
+        contents,
+        operationIds,
+        targetAssistantEntryId: args.assistantEntryId,
+        createId: () => args.assistantEntryId,
+        now: () => new Date(getServerNow()).toISOString(),
+        ...(args.modelInfo ? { model: args.modelInfo } : {}),
+      });
     };
 
-    let pendingNotifications: AcpSessionNotification[] = [];
+    let pendingNotifications: BufferedACPUpdate[] = [];
     for (const update of args.updates) {
       const { notification } = update;
       if (!isACPAgentRichContentNotification(notification)) {
-        pendingNotifications.push(notification);
+        pendingNotifications.push(update);
         continue;
       }
 
@@ -5141,6 +6067,11 @@ export class MessageHandler {
           notification,
           logger: this.logger,
           resolveSessionWorkspaceRoot: (sessionId) => this.resolveSessionWorkspaceRoot(sessionId),
+          resolveSessionFileRoots: async (sessionId) => {
+            const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
+            if (!resolved.ok) throw new Error('Session file roots are unavailable');
+            return resolved.fileRoots ?? [{ id: 'main', absolutePath: resolved.workspaceRoot }];
+          },
           validateSessionImageUploadPath: async (filePath) =>
             await this.validateSessionImageUploadPath(filePath),
           uploadSessionImageFile: async (uploadArgs) =>
@@ -5151,7 +6082,16 @@ export class MessageHandler {
             await this.uploadValidatedSessionFile(uploadArgs),
         }));
       update.materializedContents = contents;
-      await appendContents(contents);
+      try {
+        await appendContents(contents, [update.operationId]);
+      } catch (error) {
+        if (!(error instanceof HistoryWriteError)) throw error;
+        this.logger.error(
+          `[${args.sessionId}] Rejected ACP rich-content history notification: ${error.message}`
+        );
+        if (args.progress) args.progress.persistedNotifications += 1;
+        continue;
+      }
       if (args.progress) {
         args.progress.persistedNotifications += 1;
       }
@@ -5176,13 +6116,20 @@ export class MessageHandler {
     state.acpFlushCountInTurn += 1;
     const notifications = queue.map((item) => item.notification);
     const groups = this.groupBufferedACPUpdates(queue);
-    const span = startTraceSpan(this.logger, 'acp.flush_updates_batch', {
-      sessionId,
-      turnId: this.store.getTurnId(sessionId),
-      updates: notifications.length,
-      groups: groups.length,
-      flushCount: state.acpFlushCountInTurn,
-    });
+    // One span per streamed-token batch: kept out of the default file sink, but
+    // still reported at debug when the flush fails or runs long.
+    const span = startTraceSpan(
+      this.logger,
+      'acp.flush_updates_batch',
+      {
+        sessionId,
+        turnId: this.store.getTurnId(sessionId),
+        updates: notifications.length,
+        groups: groups.length,
+        flushCount: state.acpFlushCountInTurn,
+      },
+      { hot: true }
+    );
 
     const session = this.sessionManager.getSession(sessionId);
     const modelInfo = session?.agentClient?.currentModel;
@@ -5198,9 +6145,20 @@ export class MessageHandler {
     let failedGroupPersisted = 0;
     try {
       sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
+          const runtimeConfigPatch = mergeAcpRuntimeConfigUpdates(
+            group.updates.map((update) => update.notification)
+          );
+          if (runtimeConfigPatch && group.target.userTurnId) {
+            await backend.applyAcpRuntimeConfigPatch(group.target.userTurnId, runtimeConfigPatch);
+          } else if (runtimeConfigPatch) {
+            this.logger.debug(
+              `[${sessionId}] Ignoring ACP runtime config update without a driving user turn`
+            );
+          }
           await this.appendACPUpdatesToAssistantEntry({
             sessionId,
             sessionDoc,
@@ -5248,10 +6206,12 @@ export class MessageHandler {
         `[${sessionId}] ACP model info: ${JSON.stringify(this.summarizeModelInfo(modelInfo))}`
       );
       try {
-        const history = sessionDoc ? await sessionDoc.getHistory() : undefined;
+        const history = sessionDoc
+          ? await (await this.getSessionBackend(sessionDoc)).readHistoryQuery()
+          : undefined;
         this.logger.error(
           `[${sessionId}] ACP history diagnostics: ${
-            history ? JSON.stringify(this.summarizeSessionHistoryForDiagnostics(history)) : 'no doc'
+            history ? JSON.stringify(summarizeHistoryQuery(history)) : 'no doc'
           }`
         );
       } catch (diagnosticError) {
@@ -5277,8 +6237,7 @@ export class MessageHandler {
       return;
     }
     const state = this.store.get(sessionId);
-    if (state.turn.phase !== 'idle') {
-      state.pendingUnread = true;
+    if (state.turn.phase !== 'idle' || this.hasSessionActivePresence(sessionId)) {
       return;
     }
     try {
@@ -5374,6 +6333,7 @@ export class MessageHandler {
     for (const diff of diffs) {
       const event = await pendingEventFromStandardDiffEvidence({
         workspaceRoot: resolved.workspaceRoot,
+        fileRoots: resolved.fileRoots,
         diff,
       });
       if (event) {
@@ -5435,14 +6395,16 @@ export class MessageHandler {
     workspaceRoot: string,
     ownerSessionId: SessionId,
     acpEvents: readonly CodeCollabV2PendingDiffStoreEvent[],
-    editEvidence: readonly AcpAgentEditEvidence[]
+    editEvidence: readonly AcpAgentEditEvidence[],
+    fileRoots?: readonly SessionFileRoot[],
+    signal?: AbortSignal
   ): Promise<CodeCollabV2PendingDiffStoreEvent[]> {
     if (editEvidence.length === 0) {
       return [];
     }
     const coveredRelativePaths = new Set<string>();
     for (const event of acpEvents) {
-      const resolved = resolveCodeCollabV2EvidencePath(workspaceRoot, event.path);
+      const resolved = resolveCodeCollabV2EvidencePath(workspaceRoot, event.path, fileRoots);
       if (resolved) {
         coveredRelativePaths.add(resolved.relativePath);
       }
@@ -5455,7 +6417,8 @@ export class MessageHandler {
     }
     const gapEvents: CodeCollabV2PendingDiffStoreEvent[] = [];
     for (const edit of latestEditByPath.values()) {
-      const resolved = resolveCodeCollabV2EvidencePath(workspaceRoot, edit.path);
+      signal?.throwIfAborted();
+      const resolved = resolveCodeCollabV2EvidencePath(workspaceRoot, edit.path, fileRoots);
       if (!resolved || coveredRelativePaths.has(resolved.relativePath)) {
         continue;
       }
@@ -5473,6 +6436,7 @@ export class MessageHandler {
       let event = hasDirectOldEvidence
         ? await pendingEventFromAgentEditEvidence({
             workspaceRoot,
+            fileRoots,
             edit: normalizedEdit,
             latestText,
           })
@@ -5483,12 +6447,15 @@ export class MessageHandler {
           path: resolved.relativePath,
           maxRawBytes: CODE_COLLAB_V2_TEXT_LIMITS.maxRawTextBytes,
         });
+        signal?.throwIfAborted();
         event = await pendingEventFromAgentEditEvidence({
           workspaceRoot,
+          fileRoots,
           edit: normalizedEdit,
           latestText,
         });
       }
+      signal?.throwIfAborted();
       if (!event) {
         const message = `Code Collab v2 edit evidence for ${edit.path} (${edit.changeType}) could not be converted into a turn diff event; missing pre-image or unreadable current file`;
         this.logger.error(
@@ -5509,9 +6476,12 @@ export class MessageHandler {
 
   private async persistCodeCollabTurnDiffsOnce(
     sessionId: SessionId,
-    turnId: string
+    turnId: string,
+    signal?: AbortSignal
   ): Promise<boolean> {
+    signal?.throwIfAborted();
     await this.flushCodeCollabEvidenceWrites(sessionId);
+    signal?.throwIfAborted();
     const key = this.codeCollabTurnDiffKey(sessionId, turnId);
     const acpEvents = this.codeCollabV2TurnDiffs.get(key) ?? [];
     this.codeCollabV2TurnDiffs.delete(key);
@@ -5531,22 +6501,29 @@ export class MessageHandler {
         );
         return false;
       }
+      signal?.throwIfAborted();
       const gapEvents = await this.buildCodeCollabEditGapEvents(
         resolved.workspaceRoot,
         resolved.ownerSessionId,
         acpEvents,
-        editEvidence
+        editEvidence,
+        resolved.fileRoots,
+        signal
       );
+      signal?.throwIfAborted();
       const mergedEvents = this.mergeCodeCollabTurnDiffEvents([...acpEvents, ...gapEvents]);
       if (mergedEvents.length === 0) {
         return false;
       }
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
       const recordedAtMs = getServerNow();
-      const turnStorageMetadata = sessionDoc.getAssistantHistoryEntryTurnStorageMetadata(turnId);
+      const turnStorageMetadata = await backend.getTurnStorageMetadata(turnId);
       const capturedAtMs = turnStorageMetadata?.capturedAtMs ?? recordedAtMs;
+      signal?.throwIfAborted();
       const fileDiff = await this.codeCollabV2DiffStore.recordTurnDiffs({
         workspaceRoot: resolved.workspaceRoot,
+        fileRoots: resolved.fileRoots,
         ownerSessionId: resolved.ownerSessionId,
         turnId,
         events: mergedEvents,
@@ -5559,7 +6536,15 @@ export class MessageHandler {
       if (fileDiff.length === 0) {
         return false;
       }
-      const updated = sessionDoc.setLatestAssistantHistoryFileDiff(fileDiff, turnId);
+      signal?.throwIfAborted();
+      const updated =
+        (
+          await backend.applyHistoryAction({
+            kind: 'assistant-file-diff',
+            change: { kind: 'set', value: fileDiff },
+            turnId,
+          })
+        ).matched ?? false;
       if (!updated) {
         this.logger.debug(
           `[${sessionId}] Code Collab v2 diff evidence persisted, but no assistant history entry matched turn ${turnId}`
@@ -5567,6 +6552,7 @@ export class MessageHandler {
       }
       return updated;
     } catch (error) {
+      if (signal?.aborted) return false;
       // A later finalized-turn update is a natural retry trigger. Put the
       // captured evidence back ahead of anything collected concurrently so a
       // transient workspace/SQLite/history failure cannot lose it.
@@ -5584,20 +6570,33 @@ export class MessageHandler {
     }
   }
 
-  private async persistCodeCollabTurnDiffs(sessionId: SessionId, turnId: string): Promise<boolean> {
+  private async persistCodeCollabTurnDiffs(
+    sessionId: SessionId,
+    turnId: string,
+    signal?: AbortSignal
+  ): Promise<boolean> {
     const key = this.codeCollabTurnDiffKey(sessionId, turnId);
+    const discard = () => {
+      this.codeCollabV2TurnDiffs.delete(key);
+      this.codeCollabV2TurnEdits.delete(key);
+      this.clearCodeCollabTurnRetry(sessionId, turnId);
+    };
+    signal?.addEventListener('abort', discard, { once: true });
+    if (signal?.aborted) discard();
     const previous = this.codeCollabV2TurnPersistChains.get(key) ?? Promise.resolve();
     let persisted = false;
     const next = previous
       .catch(() => {})
       .then(async () => {
-        persisted = await this.persistCodeCollabTurnDiffsOnce(sessionId, turnId);
+        signal?.throwIfAborted();
+        persisted = await this.persistCodeCollabTurnDiffsOnce(sessionId, turnId, signal);
       });
     this.codeCollabV2TurnPersistChains.set(key, next);
     try {
       await next;
       return persisted;
     } finally {
+      signal?.removeEventListener('abort', discard);
       if (this.codeCollabV2TurnPersistChains.get(key) === next) {
         this.codeCollabV2TurnPersistChains.delete(key);
       }
@@ -5757,10 +6756,15 @@ export class MessageHandler {
   }
 
   private async finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void> {
+    const finalizesCurrentTurn = !turnId || this.store.getTurnId(sessionId) === turnId;
+    const gateToFinalize =
+      finalizesCurrentTurn && this.store.has(sessionId)
+        ? this.store.get(sessionId).turnHistoryGate
+        : null;
     // Finalization marks the last assistant entry finished — that entry must
     // exist and be correctly ordered first, so wait for the turn history gate
     // (bounded; opens on user-turn sync or timeout).
-    if (!turnId || this.store.getTurnId(sessionId) === turnId) {
+    if (finalizesCurrentTurn) {
       await this.awaitTurnHistoryGate(sessionId);
     }
     // Capture timing data and turnId before clearing state
@@ -5769,39 +6773,42 @@ export class MessageHandler {
     const currentTarget = this.store.getCurrentACPUpdateTarget(sessionId);
     const finalizedTarget = !turnId || currentTarget?.turnId === turnId ? currentTarget : undefined;
     const permissionWaitMs = state.permissionWaitMs || undefined;
+    let historyFinalized = false;
     try {
       await this.flushSessionContextWindowUsage(sessionId);
       await this.flushACPUpdatesNow(sessionId);
       await this.flushThreadGoalHistoryPersists(sessionId);
-      await this.flushCodexGeneratedImageUploads(sessionId);
-      if (state.pendingUnread) {
-        state.pendingUnread = false;
-        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        await sessionDoc.setLastMessageAt();
-      }
+      await this.flushCodexGeneratedImageUploads(sessionId, turnId);
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistory((history) => {
-        for (let i = history.length - 1; i >= 0; i--) {
-          const entry = history[i];
-          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
-            entry.finished = true;
-            entry.endedAt = endedAt;
-            if (permissionWaitMs !== undefined) {
-              entry.permissionWaitMs = permissionWaitMs;
-            }
-            break;
-          }
-        }
-        return history;
+      const backend = await this.getSessionBackend(sessionDoc);
+      // A deadline may have released output while its metadata callback is still
+      // reading. Fence that callback before marking history finished, rather
+      // than waiting for clearTurnState after the finalization tail. The captured
+      // gate belongs to this finalization, never to a successor turn.
+      gateToFinalize?.dispose();
+      await backend.applyHistoryAction({
+        kind: 'finish-assistant',
+        turnId,
+        endedAt,
+        permissionWaitMs,
       });
-      await sessionDoc.waitUntilSynced();
+      historyFinalized = true;
+      if (finalizedTarget) {
+        await this.flushTurnTokenUsage(sessionId, finalizedTarget.assistantEntryId);
+      }
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
+      // Live execution must not publish a successful completion after failed history writes.
+      // No-turn teardown remains best effort and still drains independent sessions.
+      if (turnId && !historyFinalized) throw error;
     } finally {
       if (finalizedTarget) {
         this.store.rememberFinalizedTurnForLateACPUpdates(sessionId, finalizedTarget);
+        // Usage that arrived after the flush above but before this late-target
+        // switch is still pending for the entry; later reports flush on arrival.
+        void this.flushTurnTokenUsage(sessionId, finalizedTarget.assistantEntryId);
       }
       if (turnId) {
         this.clearConversationTurnIfMatches(sessionId, turnId);
@@ -5865,7 +6872,7 @@ export class MessageHandler {
   }
 
   private clearSessionActivePresence(sessionId: SessionId): void {
-    this.sessionActivePresence.clear(sessionId);
+    this.sessionActivePresence.clearUnleased(sessionId);
   }
 
   private createRuntimeDispatchContext(): MessageDispatchContext {
@@ -5914,7 +6921,7 @@ export class MessageHandler {
   private async recordWorkspaceAccessSnapshot(
     accessSnapshot: LocalCatalogAccessSnapshot | null
   ): Promise<void> {
-    await Effect.runPromise(
+    await fileLocksLegacy.runPromise(
       this.localWorkspaceCatalog.recordWorkspaceAccessSnapshot({
         workspaceId: this.workspaceId,
         accessSnapshot,
@@ -5954,15 +6961,21 @@ export class MessageHandler {
       logger: this.logger,
       sessionId,
       userTurnId,
-      readHistory: () => sessionDoc.getHistory(),
-      subscribeHistory: (listener) => sessionDoc.mirror?.subscribe(listener),
-      onBeforeOpen: async () => {
+      hasUserTurn: async (id) => {
+        const backend = await this.getSessionBackend(sessionDoc);
+        return (await backend.readHistoryQuery()).some(
+          (row) => row.id === id && row.role === 'user'
+        );
+      },
+      subscribeHistory: (listener) => subscribeSessionChanges(sessionDoc, listener),
+      onBeforeOpen: async (_reason, signal) => {
         await this.writeAssistantEntryForTurn(
           sessionId,
           sessionDoc,
           turnId,
           this.sessionManager.getSession(sessionId)?.agentClient?.currentModel,
-          userTurnId
+          userTurnId,
+          signal
         );
       },
     });
@@ -5979,6 +6992,9 @@ export class MessageHandler {
       return;
     }
     const turn = state.turn;
+    // Runs ahead of every ACP flush, so it is as hot as the flush span itself: a
+    // healthy open gate stays out of the default file sink, while a wait that
+    // fails or runs long still reports at debug.
     await traceAsync(
       this.logger,
       'history.turn_gate_wait',
@@ -5987,7 +7003,8 @@ export class MessageHandler {
         ...(turn.phase === 'idle' ? {} : { turnId: turn.turnId }),
         ...(turn.phase === 'idle' || !turn.userTurnId ? {} : { userTurnId: turn.userTurnId }),
       },
-      async () => await gate.waitUntilOpen()
+      async () => await gate.waitUntilOpen(),
+      { hot: true }
     );
   }
 
@@ -6068,7 +7085,31 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        protocolCapabilities: {
+          ...getHostMachineProtocolCapabilities(),
+          ...(this.encryptedAttachments
+            ? {
+                e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
+                e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
+                e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+                e2eeRemoteControl: E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
+              }
+            : {}),
+          ...(this.sorbetCredentials
+            ? {
+                sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
+                sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                ...(this.encryptedAttachments
+                  ? {
+                      sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+                      sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                    }
+                  : {}),
+              }
+            : {}),
+          ...(this.cloudPort.remoteAutomation ? { remoteAutomationControl: 1 } : {}),
+        },
+        timeZone: getDeviceTimeZone(process.env.TZ),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],
       });
@@ -6208,25 +7249,108 @@ export class MessageHandler {
 
     const project = meta.project;
     const ownerSessionId = (meta.parentSessionId ?? sessionId) as SessionId;
+    const groupMeta =
+      ownerSessionId === sessionId
+        ? meta
+        : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+    if (groupMeta?.projectRun) {
+      if (
+        groupMeta.isArchived ||
+        groupMeta.machineId !== this.machineId ||
+        meta.machineId !== this.machineId
+      )
+        return {
+          ok: false,
+          error: 'permission_denied',
+          message: 'Project group ownership is invalid.',
+        };
+      const workspaceRoot = path.join(
+        projectGroupDirectory(groupMeta.projectRun),
+        'worktrees',
+        ownerSessionId
+      );
+      if (!fs.existsSync(workspaceRoot))
+        return {
+          ok: false,
+          error: 'workspace_unavailable',
+          message: 'Project group workspace is unavailable.',
+        };
+      return { ok: true, workspaceRoot, ownerSessionId, source: 'project-group' };
+    }
     if (project?.kind === 'local') {
-      const workspaceRoot = await resolveWorkspaceLocalProjectRootPath(
+      const originalRootPath = await resolveWorkspaceLocalProjectRootPath(
         this.workspaceDocument.repo,
         this.workspaceId,
         this.machineId,
         project.localProjectId
       );
-      if (!workspaceRoot) {
+      if (!originalRootPath) {
         return {
           ok: false,
           error: 'workspace_unavailable',
           message: `Local project not found in workspace: ${project.localProjectId}`,
         };
       }
+      const isLocalWorktree = meta.isWorktree === true || project.useWorktree === true;
+      if (!isLocalWorktree) {
+        return {
+          ok: true,
+          workspaceRoot: originalRootPath,
+          source: `local-project:${project.localProjectId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
+      const worktreeManager = getWorktreeManager({
+        repoId: deriveRepoIdFromLocalProjectPath(originalRootPath),
+        source: { kind: 'local-shared', originalRootPath },
+        logger: this.logger,
+      });
+      if (worktreeManager.hasWorktree(ownerSessionId)) {
+        return {
+          ok: true,
+          workspaceRoot: worktreeManager.getWorktreeHostPath(ownerSessionId),
+          source: `local-worktree-existing:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
+      // Fork metadata is persisted before asynchronous worktree creation starts. Never fall
+      // back to originalRootPath here: it is the shared main checkout, so All Changes would
+      // show another checkout's edits. Wait for the session, then recheck the worktree manager.
+      this.logCodeCollabDebug(
+        `[${sessionId}] Code Collab v2 workspace resolution waiting for local worktree ownerSessionId=${ownerSessionId} project=${project.localProjectId}`
+      );
+      const waited = await waitForSessionWorkspaceRoot({
+        targetSessionId: ownerSessionId,
+        activeSource:
+          ownerSessionId === sessionId
+            ? 'active-session-after-wait'
+            : `active-parent-session:${ownerSessionId}`,
+        pendingSource:
+          ownerSessionId === sessionId
+            ? 'pending-session-after-wait'
+            : `pending-parent-session:${ownerSessionId}`,
+        timeoutMs: CODE_COLLAB_WORKSPACE_WAIT_TIMEOUT_MS,
+      });
+      if (waited) {
+        return waited.ok ? { ...waited, ...ownerSessionIdField(ownerSessionId) } : waited;
+      }
+
+      if (worktreeManager.hasWorktree(ownerSessionId)) {
+        return {
+          ok: true,
+          workspaceRoot: worktreeManager.getWorktreeHostPath(ownerSessionId),
+          source: `local-worktree-existing-after-wait:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+
       return {
-        ok: true,
-        workspaceRoot,
-        source: `local-project:${project.localProjectId}`,
-        ...ownerSessionIdField(ownerSessionId),
+        ok: false,
+        error: 'session_initializing',
+        message:
+          'Session workspace is still being prepared. Code Collab will start after the session is ready.',
       };
     }
 
@@ -6323,19 +7447,147 @@ export class MessageHandler {
       };
     }
 
+    // Ordinary chats keep their files after the runtime is evicted. Derive the
+    // same owner directory as Session.getWorkdir(), without creating it or
+    // restoring an agent just to read a file. Never mask an unresolved project.
+    if (!project && !meta.isWorktree) {
+      const ownerMeta =
+        ownerSessionId === sessionId
+          ? meta
+          : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+      if (!ownerMeta) {
+        return {
+          ok: false,
+          error: 'session_not_found',
+          message: 'Session metadata is not available.',
+        };
+      }
+      if (ownerMeta.isArchived) {
+        return { ok: false, error: 'session_archived', message: 'Session is archived.' };
+      }
+      if (meta.machineId !== this.machineId || ownerMeta.machineId !== this.machineId) {
+        return {
+          ok: false,
+          error: 'permission_denied',
+          message: 'Session workspace belongs to another machine.',
+        };
+      }
+      if (
+        !ownerMeta.project &&
+        !ownerMeta.repoFullName?.trim() &&
+        !ownerMeta.isWorktree &&
+        !ownerMeta.parentSessionId
+      ) {
+        const workspaceRoot = getDefaultSessionWorkdir(ownerSessionId);
+        if (!fs.statSync(workspaceRoot, { throwIfNoEntry: false })?.isDirectory()) {
+          return {
+            ok: false,
+            error: 'workspace_unavailable',
+            message: 'Session chat workspace directory is unavailable.',
+          };
+        }
+        return {
+          ok: true,
+          workspaceRoot,
+          source: `chat-workspace:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+    }
+
     return {
       ok: false,
       error: 'workspace_unavailable',
-      message: 'Session has no local project or GitHub repository workspace.',
+      message: 'Session workspace could not be resolved from its metadata.',
     };
   }
 
-  private readonly resolveCodeCollabV2Workspace: CodeCollabV2WorkspaceResolver = async (
+  /** Observe existing paths only. Ordinary Session getters may mkdir, and the
+   * live local-project resolver may create/subscribe a Flock or repair links. */
+  private async resolveEncryptedFileWorkspaceRoot(
+    sessionId: SessionId
+  ): Promise<CodeCollabWorkspaceRootResolution> {
+    const meta = await this.resolveCodeCollabOwnerSessionMeta(sessionId);
+    if (!meta)
+      return { ok: false, error: 'session_not_found', message: 'Session metadata is unavailable.' };
+    const ownerSessionId = meta.parentSessionId ?? sessionId;
+    const owner =
+      ownerSessionId === sessionId
+        ? meta
+        : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+    if (
+      !owner ||
+      meta.isArchived ||
+      owner.isArchived ||
+      owner.parentSessionId ||
+      meta.machineId !== this.machineId ||
+      owner.machineId !== this.machineId
+    )
+      return {
+        ok: false,
+        error: 'permission_denied',
+        message: 'Session file ownership is invalid.',
+      };
+
+    let workspaceRoot = this.sessionManager.getSession(ownerSessionId)?.peekHostWorkdir?.() ?? null;
+    if (!workspaceRoot) {
+      const project = owner.project;
+      if (owner.projectRun) {
+        workspaceRoot = path.join(
+          projectGroupDirectory(owner.projectRun),
+          'worktrees',
+          ownerSessionId
+        );
+      } else if (project?.kind === 'local') {
+        const root = this.workspaceDocument.peekLocalProjectRootPath(
+          this.machineId,
+          project.localProjectId
+        );
+        if (root)
+          workspaceRoot =
+            owner.isWorktree || project.useWorktree
+              ? new WorktreeManager({
+                  repoId: deriveRepoIdFromLocalProjectPath(root),
+                  logger: this.logger,
+                }).getWorktreeHostPath(ownerSessionId)
+              : root;
+      } else {
+        const repo = resolveProjectGitHubRepo(project) ?? owner.repoFullName?.trim();
+        if (repo)
+          workspaceRoot = new WorktreeManager({
+            repoId: deriveRepoIdFromGitHubRepo(repo),
+            logger: this.logger,
+          }).getWorktreeHostPath(ownerSessionId);
+        else if (!project && !owner.isWorktree)
+          workspaceRoot = getDefaultSessionWorkdir(ownerSessionId);
+      }
+    }
+    if (!workspaceRoot || !fs.statSync(workspaceRoot, { throwIfNoEntry: false })?.isDirectory())
+      return {
+        ok: false,
+        error: 'workspace_unavailable',
+        message: 'Session file workspace is unavailable.',
+      };
+    return { ok: true, ownerSessionId, workspaceRoot, source: 'encrypted-existing-files' };
+  }
+
+  private readonly resolveEncryptedCodeCollabV2Workspace: CodeCollabV2WorkspaceResolver = (
     sessionId,
-    options?: CodeCollabV2WorkspaceResolveOptions
-  ) => {
+    options
+  ) => this.resolveCodeCollabWorkspaceWithPolicy(sessionId, options, true);
+  private readonly resolveCodeCollabV2Workspace: CodeCollabV2WorkspaceResolver = (
+    sessionId,
+    options
+  ) => this.resolveCodeCollabWorkspaceWithPolicy(sessionId, options, false);
+  private readonly resolveCodeCollabWorkspaceWithPolicy = async (
+    sessionId: SessionId,
+    options: CodeCollabV2WorkspaceResolveOptions | undefined,
+    readOnly: boolean
+  ): ReturnType<CodeCollabV2WorkspaceResolver> => {
     try {
-      const resolved = await this.resolveCodeCollabWorkspaceRoot(sessionId);
+      const resolved = await (readOnly
+        ? this.resolveEncryptedFileWorkspaceRoot(sessionId)
+        : this.resolveCodeCollabWorkspaceRoot(sessionId));
       if (resolved.ok) {
         const ownerSessionId = resolved.ownerSessionId ?? sessionId;
         const ownerMeta = await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
@@ -6352,11 +7604,39 @@ export class MessageHandler {
             message: 'Code Collab write access is denied for this user.',
           };
         }
+        const fileRoots = await resolveProjectFileRoots(
+          resolved.workspaceRoot,
+          ownerMeta?.projectRun,
+          this.machineId,
+          (id) =>
+            readOnly
+              ? Promise.resolve(this.workspaceDocument.peekLocalProjectRootPath(this.machineId, id))
+              : this.sessionManager.resolveLocalProjectRootPath(id),
+          (id) => this.logger.debug(`Project group file root unavailable: ${id}`),
+          !readOnly
+        );
+        const rootId = options?.rootId ?? 'main';
+        const selected = fileRoots.find((root) => root.id === rootId);
+        if (!selected)
+          return {
+            ok: false,
+            code:
+              rootId.startsWith('member:') &&
+              ownerMeta?.projectRun?.members[
+                rootId.slice(7) as keyof typeof ownerMeta.projectRun.members
+              ]
+                ? 'workspace_root_unavailable'
+                : 'permission_denied',
+            message: 'Session file root is unavailable.',
+          };
+        const allChangesBaseBranch = this.resolveDiffBaseBranch(ownerMeta);
         return {
           ok: true,
           ownerSessionId,
-          workspaceRoot: resolved.workspaceRoot,
-          allChangesBaseBranch: this.resolveGitHubProjectBranch(ownerMeta),
+          workspaceRoot: selected.absolutePath,
+          fileRoots,
+          projectRun: rootId === 'main' ? ownerMeta?.projectRun : undefined,
+          ...(allChangesBaseBranch === undefined ? {} : { allChangesBaseBranch }),
         };
       }
       if (resolved.error === 'session_not_found') {
@@ -6366,7 +7646,7 @@ export class MessageHandler {
           message: resolved.message,
         };
       }
-      if (resolved.error === 'session_archived') {
+      if (resolved.error === 'session_archived' || resolved.error === 'permission_denied') {
         return {
           ok: false,
           code: 'permission_denied',
@@ -6385,6 +7665,65 @@ export class MessageHandler {
         message: formatErrorMessage(error),
       };
     }
+  };
+
+  private readonly resolveLocalFilePreviewWorkspace: FilePreviewLocalWorkspaceResolver = async (
+    sessionId,
+    rootId
+  ) => {
+    // Local IPC grants filesystem reads, but must retain the session/machine and
+    // child-owner checks without requiring a live agent or an existing directory.
+    const meta = await this.resolveCodeCollabOwnerSessionMeta(sessionId);
+    if (!meta)
+      return {
+        ok: false,
+        code: 'session_not_found',
+        message: 'Session metadata is not available.',
+      };
+    const ownerSessionId = meta.parentSessionId ?? sessionId;
+    const ownerMeta =
+      ownerSessionId === sessionId
+        ? meta
+        : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+    if (!ownerMeta)
+      return {
+        ok: false,
+        code: 'session_not_found',
+        message: 'Owner session metadata is not available.',
+      };
+    if (
+      meta.isArchived ||
+      ownerMeta.isArchived ||
+      meta.machineId !== this.machineId ||
+      ownerMeta.machineId !== this.machineId ||
+      ownerMeta.parentSessionId
+    ) {
+      return {
+        ok: false,
+        code: 'permission_denied',
+        message: 'Local file preview session ownership is invalid.',
+      };
+    }
+    const resolved = await this.resolveCodeCollabV2Workspace(sessionId, { rootId });
+    if (resolved.ok)
+      return {
+        ok: true,
+        ownerSessionId,
+        workspaceRoot: resolved.workspaceRoot,
+        fileRoots: resolved.fileRoots,
+      };
+    if (resolved.code === 'workspace_root_unavailable') {
+      return { ok: true, ownerSessionId, workspaceRoot: null };
+    }
+    return resolved;
+  };
+
+  private readonly resolveEncryptedCodeCollabOwnerSessionId = async (
+    sessionId: SessionId
+  ): Promise<SessionId> => {
+    const resolved = await this.resolveEncryptedCodeCollabV2Workspace(sessionId);
+    if (resolved.ok) return resolved.ownerSessionId;
+    throw new CodeCollabV2ServiceError(resolved.code, resolved.message);
   };
 
   private readonly resolveCodeCollabV2OwnerSessionId = async (
@@ -6411,24 +7750,6 @@ export class MessageHandler {
     return metaRecord.meta as SessionMeta;
   }
 
-  private async persistCodeCollabAllChangesDiffStats(
-    ownerSessionId: SessionId,
-    diffStats: NonNullable<SessionMeta['diffStats']>
-  ): Promise<void> {
-    const ownerRoomId = getSessionRoomId(ownerSessionId);
-    const metaRecord = await this.workspaceDocument.repo.getDocMeta(ownerRoomId);
-    if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) {
-      return;
-    }
-    const ownerMeta = readDiffStatsMetadata(metaRecord.meta);
-    const target = resolveDiffStatsTarget({ ownerRoomId, ownerMeta });
-    const patch = resolveCodeCollabAllChangesDiffStatsPatch({ target, ownerMeta, diffStats });
-    if (!patch) {
-      return;
-    }
-    await this.workspaceDocument.repo.upsertDocMeta(ownerRoomId, patch);
-  }
-
   private canWriteCodeCollabOwnerSession(args: {
     readonly requestedByUserId?: string;
     readonly ownerMeta?: SessionMeta;
@@ -6441,11 +7762,285 @@ export class MessageHandler {
     return requester === ownerUserId || requester === this.userId;
   }
 
+  /** See `DaemonWorkspace.classifyEncryptedDerivation`. Every failure is a refusal. */
+  private async classifyEncryptedDerivation(
+    origin: { sessionId: string; userTurnId: string },
+    target: { machineId: string; userTurnId: string }
+  ): Promise<
+    'owner' | { principal: 'owner' | 'member'; origin: { sessionId: string; userTurnId: string } }
+  > {
+    const gate = this.encryptedExecution;
+    if (!gate) throw new Error('e2ee_derivation_unavailable');
+    const sessionId = origin.sessionId as SessionId;
+    const active = this.executionService.getActiveInvocationContext(sessionId);
+    const live =
+      active?.sourceTurnId === origin.userTurnId
+        ? this.executionService.getEncryptedControlPrincipal(sessionId)?.kind
+        : undefined;
+    const resolved = await Effect.runPromise(gate.resolveDerivationOrigin(origin)).catch(
+      () => undefined
+    );
+    const principal = decideEncryptedDerivation({
+      live,
+      verified: resolved?.principal ?? 'denied',
+      targetMachineId: target.machineId,
+      machineId: this.machineId,
+    });
+    if (
+      live &&
+      this.executionService.getActiveInvocationContext(sessionId)?.sourceTurnId !==
+        origin.userTurnId
+    )
+      throw new Error('e2ee_derivation_denied');
+    // Only an authorized same-machine member request spends a write slot.
+    if (
+      principal === 'member' &&
+      !this.executionService.reserveEncryptedDerivation(
+        sessionId,
+        origin.userTurnId,
+        JSON.stringify([target.machineId, target.userTurnId])
+      )
+    )
+      throw new Error('e2ee_derivation_denied');
+    // Cross-machine Owner delegation keeps the existing machine-signed path.
+    // Its target cannot verify this machine's local derivation provenance.
+    if (principal === 'owner' && target.machineId !== this.machineId) return 'owner';
+    return resolved?.origin ? { principal, origin: resolved.origin } : 'owner';
+  }
+
+  private readActiveInvocation(sessionId: SessionId): SessionActiveInvocationContextResult {
+    const invocation = this.executionService.getActiveInvocationContext(sessionId);
+    return invocation
+      ? { type: 'session/active-invocation-context', sessionId, active: true, ...invocation }
+      : { type: 'session/active-invocation-context', sessionId, active: false };
+  }
+
+  /**
+   * Commands the daemon executes always borrow its workspace replica. Cloud keeps
+   * its authenticated command behavior; only the local platform adds the local host.
+   */
+  private withDaemonCommandScope<T>(run: () => T): T {
+    const localSessionHost: import('./session-command-environment').DaemonLocalSessionHost = {
+      readActiveTurnId: (sessionId) =>
+        this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
+      steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
+      dispatchSession: async (sessionId, input) => {
+        if (input?.inputOrigin === 'human')
+          await this.executionService.acceptInboxHumanInput({
+            sessionId,
+            inputId: input.inputId,
+            userId: input.userId,
+            config: input.config,
+          });
+        void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
+      },
+    };
+    if (this.cloudPort.kind !== 'local')
+      return runWithDaemonWorkspace(
+        {
+          workspaceId: this.workspaceId,
+          userId: this.userId,
+          machineId: this.machineId,
+          manager: this.workspaceDocument,
+          readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
+          host: localSessionHost,
+          wakeOperations: () => {
+            void this.operationCoordinator.wake('mcp-handoff');
+          },
+          ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
+          ...(this.encryptedExecution
+            ? {
+                classifyEncryptedDerivation: (origin, target) =>
+                  this.classifyEncryptedDerivation(origin, target),
+                checkEncryptedMachineAccess: (target) => this.checkEncryptedMachineAccess(target),
+              }
+            : {}),
+        },
+        run
+      );
+    return runWithSessionCommandEnvironment(
+      createLocalSessionCommandEnvironment({
+        manager: this.workspaceDocument,
+        workspaceId: this.workspaceId,
+        machineId: this.machineId,
+        machineName: this.machineName,
+        userId: this.userId,
+        host: {
+          readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
+          readLiveStatus: async (sessionId) => {
+            const live = resolveSessionLiveStatus({
+              presence: this.sessionActivePresence.getStatus(sessionId),
+              execution: this.executionService.getExecutionSnapshot(sessionId),
+              hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+            });
+            const activity = await this.readSessionLiveActivity(sessionId);
+            return {
+              sessionId,
+              machinePresence: 'online',
+              fresh: true,
+              state: live.state,
+              observedAt: getServerNow(),
+              ...(activity ? { activity } : {}),
+            };
+          },
+          cancelSession: async (sessionId, turnId) => {
+            const targetTurnId =
+              turnId ?? this.executionService.getExecutionSnapshot(sessionId).activeTurnId;
+            if (!targetTurnId) return { success: false, error: 'Session has no active turn' };
+            return this.executionService.cancelSession(
+              {
+                type: 'session/cancel',
+                machineId: this.machineId,
+                workspaceId: this.workspaceId,
+                sessionId,
+                turnId: targetTurnId,
+              },
+              { pendingInput: 'preserve', prePromptSession: 'discard', pauseInbox: false }
+            );
+          },
+          withdrawQueuedInput: async (args) => await this.withdrawQueuedInput(args),
+          ...localSessionHost,
+        },
+      }),
+      run
+    );
+  }
+
+  async handleEncryptedAcpInteraction(
+    request: Extract<LocalMachineRpcRequestValidated, { method: 'machine/acp-interaction' }>,
+    context: import('./e2ee/feature-rpc').EncryptedFeatureContext
+  ): Promise<LocalMachineRpcResponse> {
+    if (
+      !this.encryptedAttachments ||
+      request.workspaceId !== this.workspaceId ||
+      request.machineId !== this.machineId ||
+      this.acpInteractionStopping ||
+      context.signal.aborted ||
+      !context.authority ||
+      context.authority.signal.aborted ||
+      !context.authority.isCurrent()
+    )
+      throw new Error('e2ee_feature_unavailable');
+    if (!this.acpInteractionOwner) {
+      this.acpInteractionOwner = Promise.all([
+        import('./e2ee/acp-interaction-owner'),
+        import('@lody/loro-streams-rpc'),
+        import('@lody/shared'),
+      ]).then(
+        ([{ createAcpInteractionOwner }, { createRpcSecretRecipient, encryptRpcSecret }, shared]) =>
+          createAcpInteractionOwner({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            createRecipient: createRpcSecretRecipient,
+            encrypt: encryptRpcSecret,
+            start: ({ requestId, configId, kind, force, methodId, signal, onProgress }) => {
+              const common = { machineId: this.machineId, workspaceId: this.workspaceId };
+              if (kind === 'probe') {
+                return {
+                  result: this.executionService.refreshMachineAcpCapabilities(
+                    {
+                      ...common,
+                      type: 'machine/acp-capabilities-refresh',
+                      configId: configId as AgentConfigId,
+                      force,
+                    },
+                    { signal, onAcpBinaryProgress: onProgress }
+                  ),
+                  cancel: () => {},
+                };
+              }
+              return {
+                result: this.authenticateMachineAcpAndResumeSetup(
+                  {
+                    ...common,
+                    type: 'machine/acp-authenticate',
+                    action: 'start',
+                    requestId,
+                    configId: configId as AgentConfigId,
+                    methodId,
+                  },
+                  { onProgress, signal }
+                ),
+                cancel: async () => {
+                  await this.executionService.authenticateMachineAcp({
+                    ...common,
+                    type: 'machine/acp-authenticate',
+                    action: 'cancel',
+                    requestId,
+                    authenticationRequestId: requestId,
+                  });
+                },
+              };
+            },
+            submit: async ({ requestId, interactionId, input }) => {
+              let decoded: unknown;
+              try {
+                decoded = JSON.parse(input) as unknown;
+              } catch {
+                throw new Error('e2ee_acp_invalid_input');
+              }
+              if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded))
+                throw new Error('e2ee_acp_invalid_input');
+              const keys = Object.keys(decoded);
+              if (
+                !('action' in decoded) ||
+                (decoded.action === 'submit-code'
+                  ? keys.some((key) => key !== 'action' && key !== 'authorizationCode')
+                  : decoded.action === 'submit-input'
+                    ? keys.some((key) => key !== 'action' && key !== 'authenticationInput')
+                    : true)
+              )
+                throw new Error('e2ee_acp_invalid_input');
+              const message = shared.MachineAcpAuthenticateRequestSchema.safeParse({
+                ...decoded,
+                type: 'machine/acp-authenticate',
+                machineId: this.machineId,
+                workspaceId: this.workspaceId,
+                requestId,
+                authenticationRequestId: requestId,
+                ...('action' in decoded && decoded.action === 'submit-input'
+                  ? { interactionId }
+                  : {}),
+              });
+              if (
+                !message.success ||
+                (message.data.action !== 'submit-input' && message.data.action !== 'submit-code')
+              )
+                throw new Error('e2ee_acp_invalid_input');
+              const result = await this.executionService.authenticateMachineAcp({
+                ...message.data,
+                machineId: this.machineId,
+                workspaceId: this.workspaceId,
+              });
+              if (!result.success || result.disposition === 'not-running')
+                throw new Error('e2ee_acp_input_rejected');
+            },
+          })
+      );
+    }
+    const owner = await this.acpInteractionOwner;
+    if (this.acpInteractionStopping || context.signal.aborted)
+      throw new Error('e2ee_feature_unavailable');
+    try {
+      return { ok: true, result: await owner.handle(request.params, context) };
+    } catch {
+      return { ok: false, error: 'Encrypted ACP interaction failed.' };
+    }
+  }
+
+  private async downloadOwnerLocalAttachment(
+    request: import('@lody/shared').FileDownloadRequest
+  ): Promise<import('@lody/shared').FileDownloadResponse> {
+    if (this.encryptedAttachments) return { status: 'error', code: 'unsupported_protocol' };
+    return downloadLocalAttachment(request, this.machineId);
+  }
+
   async handleLocalMachineRpc(
-    request: LocalMachineRpcRequestValidated
+    request: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
     try {
-      const result = await this.dispatchLocalMachineRpc(request);
+      const result = await this.dispatchLocalMachineRpc(request, signal);
       return { ok: true, result };
     } catch (error) {
       if (isCodeCollabV2ServiceErrorForLocalRpc(error)) {
@@ -6455,8 +8050,69 @@ export class MessageHandler {
     }
   }
 
+  /** Native verified ingress. Never call this with an ordinary workspace RPC request. */
+  async offerEncryptedRpcTurn(
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck> {
+    const inputConfig = normalizeSessionTurnInputConfig(input.inputConfig);
+    if (!this.executionService || !inputConfig) throw new Error('e2ee_rpc_input');
+    const sessionId = input.sessionId as SessionId;
+    const disposition = await this.sessionDispatchWatcher.offerRpcTurn({
+      sessionId,
+      userTurnId: input.userTurnId,
+      userId: input.userId,
+      timestamp: input.timestamp,
+      inputConfig,
+    });
+    return {
+      type: 'session/dispatch-turn_response',
+      sessionId,
+      userTurnId: input.userTurnId,
+      accepted:
+        disposition === 'accepted' ||
+        disposition === 'duplicate' ||
+        disposition === 'already-terminal',
+      disposition,
+    };
+  }
+
+  private async readSessionLiveStatus(
+    sessionId: SessionId,
+    includeActivity = false
+  ): Promise<import('@lody/loro-streams-rpc').LoroSessionLiveStatusRpcResponse> {
+    const activity = includeActivity ? await this.readSessionLiveActivity(sessionId) : undefined;
+    const liveStatus = resolveSessionLiveStatus({
+      presence: this.sessionActivePresence.getStatus(sessionId),
+      execution: this.executionService.getExecutionSnapshot(sessionId),
+      hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+    });
+    return {
+      type: 'session/live-status_response' as const,
+      machineId: this.machineId,
+      sessionId,
+      success: true,
+      ...liveStatus,
+      observedAtMs: getServerNow(),
+      ...(activity ? { activity } : {}),
+    };
+  }
+
+  /** Encrypted: act as the turn's verified principal; a shared member controls only
+   * within that member's own rights for the turn's projects. */
+  private async agentDeviceControlAllowed(sessionId: SessionId): Promise<boolean> {
+    const gate = this.encryptedExecution;
+    if (!gate) return true;
+    const control = this.executionService.getEncryptedControlPrincipal(sessionId);
+    if (control?.kind === 'owner') return true;
+    if (control?.kind !== 'member') return false;
+    return await Effect.runPromise(
+      gate.authorizeAgentControl(control.requesterDevice, control.localProjectIds)
+    ).catch(() => false);
+  }
+
   private async dispatchLocalMachineRpc(
-    request: LocalMachineRpcRequestValidated
+    request: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResult> {
     const assertOwner = async (sessionId: SessionId): Promise<void> => {
       if (!request.ownerSessionId) {
@@ -6473,6 +8129,211 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'session/history-read':
+        return SessionHistoryReadResponseSchema.parse(
+          await this.readSessionHistoryForRpc(
+            request.params.sessionId,
+            request.params.query,
+            signal
+          )
+        );
+
+      case 'machine/acp-interaction':
+        throw new Error('e2ee_feature_unavailable');
+      case 'machine/status':
+        return this.executionService.getMachineStatus({
+          type: 'machine/status',
+          machineId: this.machineId,
+          workspaceId: this.workspaceId,
+          ...(request.params.includeDisk ? { includeDisk: true as const } : {}),
+        });
+      case 'machine/ping':
+        return this.executionService.pingMachine({
+          type: 'machine/ping',
+          machineId: this.machineId,
+          workspaceId: this.workspaceId,
+          ...request.params,
+        });
+      case 'machine/acp-binary-status':
+        return this.executionService.getMachineAcpBinaryStatus({
+          type: 'machine/acp-binary-status',
+          machineId: this.machineId,
+          workspaceId: this.workspaceId,
+          ...request.params,
+        });
+      case 'session/live-status':
+        return await this.readSessionLiveStatus(
+          request.params.sessionId as SessionId,
+          request.params.includeActivity === true
+        );
+      case 'file/download-chunk':
+        await assertOwner(request.params.sessionId as SessionId);
+        return request.params.attachment
+          ? this.downloadOwnerLocalAttachment(request.params)
+          : this.filePreviewService.downloadFileChunk(request.params);
+
+      case 'project/probe-local-member': {
+        if (
+          request.machineId !== this.machineId ||
+          request.workspaceId !== this.workspaceId ||
+          request.ownerSessionId
+        )
+          throw new Error('Project group probe scope mismatch');
+        return this.probeProjectLocalMember(request.params.localProjectId as LocalProjectId);
+      }
+      case 'local-project/list-branches': {
+        if (
+          request.machineId !== this.machineId ||
+          request.workspaceId !== this.workspaceId ||
+          request.ownerSessionId
+        )
+          throw new Error('Local project branch list scope mismatch');
+        return this.listLocalProjectBranchesForRpc({
+          localProjectId: request.params.localProjectId as LocalProjectId,
+          requestedByUserId: request.params.requestedByUserId,
+          query: request.params.query,
+          limit: request.params.limit,
+          cursor: request.params.cursor,
+        });
+      }
+      case 'sorbet/credentials-list':
+      case 'sorbet/credentials-logout':
+      case 'sorbet/providers-list':
+      case 'sorbet/providers-create':
+      case 'sorbet/providers-update':
+      case 'sorbet/providers-delete':
+      case 'sorbet/providers-refresh':
+      case 'sorbet/models-list': {
+        if (
+          request.workspaceId !== this.workspaceId ||
+          request.machineId !== this.machineId ||
+          request.ownerSessionId
+        )
+          throw new Error('Sorbet credentials scope mismatch');
+        const configId = request.params.configId as AgentConfigId;
+        const config = await this.workspaceDocument.getAgentConfigForMachineLaunch(
+          configId,
+          this.machineId
+        );
+        if (
+          !config ||
+          config.machineId !== this.machineId ||
+          config.cliType !== 'builtin' ||
+          config.agentType !== 'sorbet'
+        )
+          throw new Error('Sorbet credentials configuration unavailable');
+        if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
+        try {
+          const { SorbetCredentialsResultSchema, SorbetProvidersResultSchema } =
+            await import('@lody/shared/local-machine-rpc');
+          if (request.method === 'sorbet/credentials-list') {
+            return SorbetCredentialsResultSchema.parse({
+              type: 'sorbet/credentials-list',
+              credentials: await this.sorbetCredentials.list(configId, signal),
+            });
+          }
+          if (request.method === 'sorbet/credentials-logout') {
+            await this.sorbetCredentials.logout(configId, request.params.providerId, signal);
+            return { type: 'sorbet/credentials-logout' };
+          }
+          if (request.method === 'sorbet/providers-list') {
+            return SorbetProvidersResultSchema.parse({
+              type: 'sorbet/providers-list',
+              providers: await this.sorbetCredentials.listProviders(configId, signal),
+            });
+          }
+          if (request.method === 'sorbet/providers-create') {
+            return SorbetProvidersResultSchema.parse({
+              type: 'sorbet/providers-create',
+              provider: await this.sorbetCredentials.createProvider(
+                configId,
+                request.params.provider,
+                signal
+              ),
+            });
+          }
+          if (request.method === 'sorbet/providers-update') {
+            return SorbetProvidersResultSchema.parse({
+              type: 'sorbet/providers-update',
+              provider: await this.sorbetCredentials.updateProvider(
+                configId,
+                request.params.providerId,
+                request.params.provider,
+                signal
+              ),
+            });
+          }
+          if (request.method === 'sorbet/providers-delete') {
+            await this.sorbetCredentials.deleteProvider(
+              configId,
+              request.params.providerId,
+              signal
+            );
+            return { type: 'sorbet/providers-delete' };
+          }
+          if (request.method === 'sorbet/providers-refresh') {
+            await this.sorbetCredentials.refreshProviders(
+              configId,
+              request.params.providerId,
+              signal
+            );
+            return { type: 'sorbet/providers-refresh' };
+          }
+          return SorbetProvidersResultSchema.parse({
+            type: 'sorbet/models-list',
+            models: await this.sorbetCredentials.listModels(
+              configId,
+              request.params.providerId,
+              signal
+            ),
+          });
+        } catch {
+          throw new Error('Sorbet provider operation failed');
+        }
+      }
+      case 'mcp/list-tools':
+      case 'mcp/authentication': {
+        if (
+          request.workspaceId !== this.workspaceId ||
+          request.machineId !== this.machineId ||
+          request.ownerSessionId
+        )
+          throw new Error('MCP local authentication scope mismatch.');
+        return request.method === 'mcp/list-tools'
+          ? await this.sessionManager.mcpAuthentication.listTools(
+              request.params.server,
+              request.params.requesterUserId
+            )
+          : await this.sessionManager.mcpAuthentication.request(request);
+      }
+      case 'session/call-tool': {
+        const { sessionId, name, arguments: args } = request.params;
+        if (
+          request.workspaceId !== this.workspaceId ||
+          request.machineId !== this.machineId ||
+          request.ownerSessionId !== sessionId
+        )
+          throw new Error('Session tool scope mismatch');
+        const { executeDaemonSessionTool } = await import('@/mcp/daemon-session-tools');
+        const sourceWorkdir = this.resolveSessionWorkspaceRoot(sessionId);
+        if (!sourceWorkdir && args && typeof args === 'object' && 'attachments' in args)
+          throw new Error('Requester Session workspace is unavailable');
+
+        return this.withDaemonCommandScope(() =>
+          executeDaemonSessionTool(
+            {
+              machineId: this.machineId,
+              workspaceId: this.workspaceId,
+              sessionId,
+              localControlSocketPath: undefined,
+              assertOperationInboxAvailable: () => this.operationCoordinator.assertInboxAvailable(),
+              workdir: sourceWorkdir ?? process.cwd(),
+            },
+            name,
+            args
+          )
+        );
+      }
       case 'code-collab/get-file-index':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.getFileIndex(request.params);
@@ -6485,6 +8346,12 @@ export class MessageHandler {
       case 'code-collab/save-text':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.saveText(request.params);
+      case 'code-collab/open-diff-manifest':
+        await assertOwner(request.params.sessionId as SessionId);
+        return await this.diffBlobReader.openDiffManifest(request.params);
+      case 'code-collab/read-blob':
+        await assertOwner(request.params.sessionId as SessionId);
+        return await this.diffBlobReader.readBlob(request.params);
       case 'code-collab/open-current-diff':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.openCurrentDiff(request.params);
@@ -6499,26 +8366,52 @@ export class MessageHandler {
         return await this.codeCollabV2Service.initDirectory(request.params);
       case 'code-collab/lsp-definition':
         await assertOwner(request.params.sessionId as SessionId);
-        return await this.codeCollabV2Service.lspDefinition();
+        return await this.codeCollabV2Service.lspDefinition(request.params);
       case 'code-collab/lsp-references':
         await assertOwner(request.params.sessionId as SessionId);
-        return await this.codeCollabV2Service.lspReferences();
+        return await this.codeCollabV2Service.lspReferences(request.params);
       case 'file/preview':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.filePreviewService.previewFile(request.params);
-      case 'file/preview-local':
-        await assertOwner(request.params.sessionId as SessionId);
-        return await this.filePreviewService.previewFile(request.params, {
-          allowArbitraryPaths: true,
-        });
+      case 'file/resolve-local':
+        return await this.filePreviewService.resolveLocalFile(
+          request.params,
+          request.ownerSessionId
+        );
+      case 'session/get-active-invocation-context': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        if (!invocation) {
+          return {
+            type: 'session/active-invocation-context' as const,
+            sessionId,
+            active: false as const,
+          };
+        }
+        // Session tools consume sender in-process. Keep the legacy socket shape
+        // unchanged: older MCP processes parse this response with a strict schema.
+        const { sender: _sender, ...legacyInvocation } = invocation;
+        return {
+          type: 'session/active-invocation-context' as const,
+          sessionId,
+          active: true as const,
+          ...legacyInvocation,
+        };
+      }
       case 'session/cancel': {
-        const result = await this.executionService.cancelSession({
-          type: 'session/cancel',
-          machineId: request.machineId as MachineId,
-          workspaceId: request.workspaceId as WorkspaceId,
-          sessionId: request.params.sessionId,
-          turnId: request.params.turnId,
-        });
+        const result = await this.executionService.cancelSession(
+          {
+            type: 'session/cancel',
+            machineId: request.machineId as MachineId,
+            workspaceId: request.workspaceId as WorkspaceId,
+            sessionId: request.params.sessionId,
+            turnId: request.params.turnId,
+            subagentTaskId: request.params.subagentTaskId,
+            cancelId: request.params.cancelId,
+            pauseInbox: request.params.pauseInbox,
+          },
+          { pendingInput: 'preserve', prePromptSession: 'discard' }
+        );
         return {
           type: 'session/cancel_response' as const,
           sessionId: request.params.sessionId,
@@ -6546,6 +8439,7 @@ export class MessageHandler {
           userTurnId: request.params.userTurnId,
           userId: request.params.userId,
           timestamp: request.params.timestamp,
+          inputOrigin: request.params.inputOrigin,
           inputConfig,
         });
         return {
@@ -6559,10 +8453,44 @@ export class MessageHandler {
           disposition,
         };
       }
-      case 'session/prepare':
-        return await this.prepareSessionWithAccessCheck(request.params);
-      case 'session/prepare-cancel':
-        return await this.cancelSessionPreparationWithAccessCheck(request.params);
+      case 'ios-simulator/agent-control': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        if (!invocation?.requesterUserId || !(await this.agentDeviceControlAllowed(sessionId))) {
+          return {
+            type: 'ios-simulator/control_response' as const,
+            sessionId,
+            success: false,
+            error: 'denied' as const,
+          };
+        }
+        return this.iosSimulatorService.controlFromAgent({
+          sessionId,
+          requestedByUserId: invocation.requesterUserId,
+          command: request.params.command,
+        });
+      }
+      case 'ios-simulator/control':
+        return this.iosSimulatorService.control(request.params, false);
+      case 'android-emulator/agent-control': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        if (!invocation?.requesterUserId || !(await this.agentDeviceControlAllowed(sessionId))) {
+          return {
+            type: 'android-emulator/control_response' as const,
+            sessionId,
+            success: false,
+            error: 'denied' as const,
+          };
+        }
+        return this.androidEmulatorService.controlFromAgent({
+          sessionId,
+          requestedByUserId: invocation.requesterUserId,
+          command: request.params.command,
+        });
+      }
+      case 'android-emulator/control':
+        return this.androidEmulatorService.control(request.params, false);
       case 'session/preview-endpoint-acquire':
         return await this.previewService.acquireEndpoint({
           machineId: request.machineId as MachineId,
@@ -6570,6 +8498,27 @@ export class MessageHandler {
           sessionId: request.params.sessionId as SessionId,
           requestedByUserId: request.params.requestedByUserId,
           target: request.params.target,
+        });
+      case 'session/preview-create':
+        return this.previewService.createPreview({
+          ...request.params,
+          type: request.method,
+          machineId: request.machineId as MachineId,
+          workspaceId: request.workspaceId as WorkspaceId,
+        });
+      case 'session/preview-revoke':
+        return this.previewService.revokePreview({
+          ...request.params,
+          type: request.method,
+          machineId: request.machineId as MachineId,
+          workspaceId: request.workspaceId as WorkspaceId,
+        });
+      case 'session/preview-status':
+        return this.previewService.getStatus({
+          ...request.params,
+          type: request.method,
+          machineId: request.machineId as MachineId,
+          workspaceId: request.workspaceId as WorkspaceId,
         });
       case 'session/preview-endpoint-release':
         return await this.previewService.releaseEndpoint({
@@ -6584,8 +8533,33 @@ export class MessageHandler {
           sessionId: request.params.sessionId as SessionId,
         });
       }
+      case 'session/goal': {
+        return await this.controlSessionGoalWithAccessCheck({
+          ...request.params,
+          sessionId: request.params.sessionId as SessionId,
+        });
+      }
       case 'session/terminate':
         return await this.terminateAcpSession(request.params.sessionId as SessionId);
+      case 'machine/memory':
+        return await handleMemoryProviderRequest(request.params);
+      case 'machine/pi-extensions':
+        return await this.executionService.listMachinePiExtensions(
+          request.params.configId as AgentConfigId | undefined
+        );
+      case 'local-project/git-state':
+        if (request.ownerSessionId) throw new Error('Local project Git state scope mismatch');
+        return await this.getLocalProjectGitStateForRpc({
+          localProjectId: request.params.localProjectId as LocalProjectId,
+          requestedByUserId: request.params.requestedByUserId,
+        });
+      // Encrypted ingress serves these through `readEncryptedMachineRequest`.
+      case 'file/list-dir':
+      case 'session/withdraw-input':
+      case 'local-project/control':
+      case 'machine/acp-binary-install':
+      case 'machine/provider-rate-limits-refresh':
+        throw new Error('e2ee_feature_unavailable');
       case 'session/fork':
         return await this.forkSessionWithAccessCheck(request.params);
       case 'session/edit-and-resend': {
@@ -6626,24 +8600,6 @@ export class MessageHandler {
     }
   }
 
-  private async respondToLegacyCodeCollabHostStart(
-    message: SessionCodeCollabHostStartRequestValidated
-  ): Promise<SessionCodeCollabHostStartResponse> {
-    const sessionId = message.sessionId;
-    this.touchSession(sessionId);
-    this.logger.debug(
-      `[${sessionId}] Ignoring legacy Code Collab host-start request; v1 session-specific host has been removed.`
-    );
-    return {
-      type: 'session/code-collab-host-start_response',
-      sessionId,
-      success: false,
-      status: 'disabled',
-      error: 'unsupported',
-      message: 'Code Collab v1 session-specific host is no longer supported.',
-    };
-  }
-
   /**
    * Handles a validated local control message.
    */
@@ -6679,6 +8635,11 @@ export class MessageHandler {
       case 'machine/upgrade':
         await this.handleMachineUpgrade(message, context);
         break;
+      case 'machine/provider-rate-limits-refresh':
+        if (message.machineId !== this.machineId || message.workspaceId !== this.workspaceId)
+          return;
+        context.send(await this.executionService.refreshProviderRateLimits(message.configId));
+        break;
       case 'machine/acp-capabilities-refresh':
         await this.handleMachineAcpCapabilitiesRefresh(message, context);
         break;
@@ -6691,17 +8652,121 @@ export class MessageHandler {
       case 'machine/acp-binary-install':
         await this.handleMachineAcpBinaryInstall(message, context);
         break;
-      case 'session/code-collab-host-start':
-        await this.handleCodeCollabHostStart(message, context);
-        break;
       case 'session/image-upload':
         await this.handleSessionImageUpload(message, context);
         break;
       case 'session/file-upload':
         await this.handleSessionFileUpload(message, context);
         break;
+      case 'session/image-prepare-local': {
+        try {
+          if (
+            context.source !== 'local' ||
+            message.machineId !== this.machineId ||
+            message.workspaceId !== this.workspaceId ||
+            this.encryptedAttachments
+          )
+            throw new Error('Local image preparation is unavailable for this target');
+          const source =
+            'path' in message.source
+              ? message.source.path
+              : Buffer.from(message.source.base64, 'base64');
+          const image = await storeLocalSessionImage(
+            this.localImageScope(message.sessionId),
+            {
+              imageId: message.imageId,
+              localImageId: message.imageId,
+              transport: 'local',
+              machineId: this.machineId,
+              storageSessionId: message.sessionId,
+              mimeType: message.mimeType,
+              fileName: message.fileName,
+            },
+            source
+          );
+          this.enqueueLocalImageBackfill(message.sessionId, image);
+          context.send({
+            type: 'session/image-prepare-local_response',
+            sessionId: message.sessionId,
+            success: true,
+            image,
+          });
+        } catch (error) {
+          context.send({
+            type: 'session/image-prepare-local_response',
+            sessionId: message.sessionId,
+            success: false,
+            error: formatErrorMessage(error),
+          });
+        }
+        break;
+      }
+      case 'session/image-resolve-local': {
+        try {
+          if (
+            context.source !== 'local' ||
+            message.machineId !== this.machineId ||
+            message.workspaceId !== this.workspaceId ||
+            this.encryptedAttachments
+          )
+            throw new Error('Local image is unavailable for this target');
+          const local = await readLocalSessionImage(
+            this.localImageScope(message.image.storageSessionId ?? message.sessionId),
+            message.image
+          );
+          context.send({
+            type: 'session/image-resolve-local_response',
+            sessionId: message.sessionId,
+            success: true,
+            path: local.path,
+          });
+        } catch (error) {
+          context.send({
+            type: 'session/image-resolve-local_response',
+            sessionId: message.sessionId,
+            success: false,
+            error: formatErrorMessage(error),
+          });
+        }
+        break;
+      }
+      case 'session/attachment-prepare': {
+        try {
+          if (
+            context.source !== 'local' ||
+            message.machineId !== this.machineId ||
+            message.workspaceId !== this.workspaceId ||
+            this.encryptedAttachments
+          )
+            throw new Error('Local attachment preparation is unavailable for this target');
+          const attachment = await prepareLocalAttachment(message);
+          context.send({
+            type: 'session/attachment-prepare_response',
+            sessionId: message.sessionId,
+            success: true,
+            attachment,
+          });
+        } catch (error) {
+          context.send({
+            type: 'session/attachment-prepare_response',
+            sessionId: message.sessionId,
+            success: false,
+            error: formatErrorMessage(error),
+          });
+        }
+        break;
+      }
       case 'session/file-send-local':
         await this.handleSessionFileSendLocal(message, context);
+        break;
+      case 'session/history-read':
+        await this.handleSessionHistoryRead(message, context);
+        break;
+      case 'session/history-subscription':
+        await this.handleSessionHistorySubscription(message, context);
+        break;
+      case 'session/history-write':
+        await this.handleSessionHistoryWrite(message, context);
         break;
       case 'session/preview-candidate-report':
         await this.handlePreviewCandidateReport(message, context);
@@ -6712,15 +8777,654 @@ export class MessageHandler {
       case 'session/preview-revoke':
         await this.handlePreviewRevoke(message, context);
         break;
+      case 'session/preview-status':
+        context.send(await this.previewService.getStatus(message));
+        break;
     }
   }
 
-  private async handleCodeCollabHostStart(
-    message: SessionCodeCollabHostStartRequestValidated,
+  /** Synced ownership/containment is the accepted UI trust boundary, not a registry. */
+  /** Every local project this machine would run a session's work in (encrypted sharing). */
+  async resolveSessionExecutionScope(sessionId: SessionId): Promise<readonly string[]> {
+    return await this.executionService.encryptedSessionExecutionScope(sessionId);
+  }
+
+  /**
+   * Verified encrypted fork. `executionRequesterUserId` is the signer's execution identity
+   * (owner account or `e2ee-member:`); `spec.requestedByUserId` stays the display account.
+   */
+  private async withdrawSessionInputWithAccessCheck(
+    args: { sessionId: SessionId; userTurnId: string; requesterSessionId: SessionId },
+    requesterUserId: string
+  ): Promise<SessionWithdrawInputResponse> {
+    const access = await this.verifySessionMachineAccess(args.sessionId, requesterUserId);
+    if (access.outcome !== 'allowed')
+      return {
+        type: 'session/withdraw-input_response',
+        sessionId: args.sessionId,
+        userTurnId: args.userTurnId,
+        outcome: 'error',
+        error: `Withdraw access verification ${access.outcome}`,
+      };
+    return await this.withdrawQueuedInput(args);
+  }
+
+  /** Session and project work the encrypted receiver admitted for a verified signer. It
+   * runs as the signer's execution identity, passed beside the signed request. */
+  async handleEncryptedSessionWork(
+    request: LocalMachineRpcRequestValidated,
+    requester: { accountId: string; executionUserId: string }
+  ): Promise<LocalMachineRpcResponse> {
+    const params: object = request.params;
+    const named =
+      'userId' in params
+        ? params.userId
+        : 'requestedByUserId' in params
+          ? params.requestedByUserId
+          : requester.accountId;
+    if (named !== requester.accountId) throw new Error('e2ee_feature_requester');
+    const as = requester.executionUserId;
+    const run = async (): Promise<LocalMachineRpcResult> => {
+      switch (request.method) {
+        case 'session/cancel':
+        case 'session/terminate':
+          return await this.dispatchLocalMachineRpc(request);
+        case 'session/steer':
+          return await this.steerSessionWithAccessCheck(
+            { ...request.params, sessionId: request.params.sessionId as SessionId },
+            as
+          );
+        case 'session/goal':
+          return await this.controlSessionGoalWithAccessCheck(request.params, as);
+        case 'session/withdraw-input':
+          return await this.withdrawSessionInputWithAccessCheck(
+            {
+              sessionId: request.params.sessionId as SessionId,
+              userTurnId: request.params.userTurnId,
+              requesterSessionId: request.params.requesterSessionId as SessionId,
+            },
+            as
+          );
+        case 'local-project/list-branches':
+          return await this.listLocalProjectBranchesForRpc(
+            { ...request.params, localProjectId: request.params.localProjectId as LocalProjectId },
+            as
+          );
+        case 'local-project/git-state':
+          return await this.getLocalProjectGitStateForRpc(
+            { ...request.params, localProjectId: request.params.localProjectId as LocalProjectId },
+            as
+          );
+        case 'project/probe-local-member': {
+          const localProjectId = request.params.localProjectId as LocalProjectId;
+          const access = await this.verifyRequesterMachineAccess({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            requesterUserId: as,
+            localProjectId,
+          });
+          if (!access.allowed) throw new Error('Project group member access denied');
+          return await this.probeProjectLocalMember(localProjectId);
+        }
+        default:
+          throw new Error('e2ee_feature_method');
+      }
+    };
+    try {
+      return { ok: true, result: await run() };
+    } catch (error) {
+      return { ok: false, error: formatErrorMessage(error) };
+    }
+  }
+
+  async handleEncryptedSessionFork(
+    spec: SessionForkSpec,
+    executionRequesterUserId: string
+  ): Promise<LocalMachineRpcResponse> {
+    try {
+      const access = await this.verifySessionMachineAccess(
+        spec.sourceSessionId,
+        executionRequesterUserId
+      );
+      if (access.outcome !== 'allowed')
+        return {
+          ok: true,
+          result: sessionForkFailure(
+            spec,
+            'MACHINE_ACCESS_DENIED',
+            `Fork access verification ${access.outcome}.`
+          ),
+        };
+      return {
+        ok: true,
+        result: await this.sessionForkService.fork({ ...spec, executionRequesterUserId }),
+      };
+    } catch (error) {
+      return { ok: false, error: formatErrorMessage(error) };
+    }
+  }
+
+  async resolveSessionHistoryAccessTarget(sessionId: SessionId) {
+    await this.resolveSessionHistoryOwnerSessionId(sessionId);
+    const entry = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    if (!entry || entry.deleted || entry.meta.machineId !== this.machineId)
+      throw new Error('session_history_read_denied');
+    const child = { ...(entry.meta as SessionMeta), id: sessionId };
+    const parentId = typeof child.parentSessionId === 'string' ? child.parentSessionId : undefined;
+    const parent = parentId
+      ? await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(parentId as SessionId))
+      : undefined;
+    const root =
+      parent &&
+      !parent.deleted &&
+      isContainedSession(child, { ...(parent.meta as SessionMeta), id: parentId })
+        ? { ...(parent.meta as SessionMeta), id: parentId! }
+        : child;
+    const project = child.project as SessionMeta['project'];
+    return {
+      rootSessionId: root.id,
+      sessionOwnerUserId: typeof root.userId === 'string' ? root.userId : undefined,
+      localProjectId: project?.kind === 'local' ? project.localProjectId : undefined,
+    };
+  }
+
+  private readonly resolveSessionHistoryOwnerSessionId = async (
+    sessionId: SessionId,
+    options?: { signal?: AbortSignal }
+  ): Promise<SessionId> => {
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, this.historyOwnerAbort.signal])
+      : this.historyOwnerAbort.signal;
+    return await Effect.runPromise(
+      awaitSessionHistoryOwner(this.workspaceDocument.repo, sessionId, this.machineId, this.logger),
+      { signal }
+    );
+  };
+
+  private async subscribeSessionHistory(args: {
+    sessionId: SessionId;
+    subscriber: string;
+    subscription: SessionHistorySubscription;
+    signal?: AbortSignal;
+    admit?: () => Promise<void>;
+    publish: (publication: SessionHistoryPublication, signal: AbortSignal) => Promise<void>;
+  }): Promise<void> {
+    const { sessionId, subscriber, subscription } = args;
+    const key = JSON.stringify([subscriber, sessionId, subscription.id]);
+    if (subscription.action === 'close') {
+      const active = this.historySubscriptions.get(key);
+      if (active) active.abort();
+      // The reserved close lane can run ahead of an open whose admission is
+      // still pending. Keep that exact cancellation within the lease horizon.
+      const cancelled = this.cancelledHistorySubscriptions;
+      cancelled.delete(key);
+      cancelled.set(key, Date.now() + SESSION_HISTORY_SUBSCRIPTION_LEASE_MS);
+      if (cancelled.size > 128) cancelled.delete(cancelled.keys().next().value!);
+      return;
+    }
+    const cancelledUntil = this.cancelledHistorySubscriptions.get(key);
+    if (cancelledUntil !== undefined) {
+      if (cancelledUntil > Date.now()) return;
+      this.cancelledHistorySubscriptions.delete(key);
+    }
+    if (this.historySubscriptions.has(key) || this.historySubscriptions.size >= 128)
+      throw new LoroStreamsRpcHandlerError(
+        'rpc_request_capacity_exceeded',
+        'History subscription capacity exceeded.'
+      );
+
+    const controller = new AbortController();
+    const deadline = AbortSignal.timeout(SESSION_HISTORY_SUBSCRIPTION_LEASE_MS);
+    const signal = AbortSignal.any([
+      this.historyOwnerAbort.signal,
+      this.historySubscriptionAbort.signal,
+      controller.signal,
+      deadline,
+      ...(args.signal ? [args.signal] : []),
+    ]);
+    this.historySubscriptions.set(key, controller);
+    try {
+      signal.throwIfAborted();
+      await this.resolveSessionHistoryOwnerSessionId(sessionId, { signal });
+      this.touchSession(sessionId);
+      const doc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(doc);
+      const wait = backend.history.waitForChanges;
+      if (backend.kind !== 'roost' || !wait) throw new Error('History subscription unavailable');
+      await publishRoostHistorySubscription({
+        subscription,
+        signal,
+        read: (query) =>
+          this.historySubscriptionReads.enqueue(sessionId, async () => {
+            signal.throwIfAborted();
+            await args.admit?.();
+            signal.throwIfAborted();
+            return this.readSessionHistoryForRpc(sessionId, query, signal);
+          }),
+        waitForChange: (checkpoint) => wait(checkpoint, signal),
+        publish: (publication) => args.publish(publication, signal),
+      });
+    } catch (error) {
+      if (!signal.aborted) throw error;
+    } finally {
+      this.historySubscriptions.delete(key);
+    }
+  }
+
+  private async readSessionHistoryForRpc(
+    sessionId: SessionId,
+    query: SessionHistoryReadQuery & { inlineOnly?: true },
+    signal?: AbortSignal
+  ): Promise<SessionHistoryReadResponse> {
+    try {
+      await this.resolveSessionHistoryOwnerSessionId(sessionId, { signal });
+      this.touchSession(sessionId);
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      if (backend.kind !== 'roost') {
+        throw new Error(`Session ${sessionId} does not use Roost history.`);
+      }
+      const catchupSignal = signal
+        ? AbortSignal.any([signal, this.historyOwnerAbort.signal])
+        : this.historyOwnerAbort.signal;
+      if (query.kind === 'readChanges') {
+        if (!backend.readHistoryCatchup)
+          throw new Error('History incremental recovery is unavailable');
+        await backend.flushLocalWrites();
+        const response = await backend.readHistoryCatchup(query, catchupSignal);
+        if (!response) throw new Error('History incremental recovery is unavailable');
+        return response;
+      }
+      if ((query.kind === 'readRange' || query.kind === 'readTurn') && query.atCheckpoint) {
+        const retained = await backend.readHistoryCatchup?.(query, catchupSignal);
+        if (retained) return retained;
+      }
+      const history = backend.history;
+      if (
+        query.kind === 'readMetadata' ||
+        query.kind === 'readLatestGoal' ||
+        query.kind === 'readTranscript' ||
+        query.kind === 'readQuerySnapshot' ||
+        query.kind === 'readSelection' ||
+        query.kind === 'readReplayPrompt'
+      ) {
+        if (!backend.readHistoryInspection)
+          throw new Error('Owner history inspection is unavailable');
+        await backend.flushLocalWrites();
+        return await backend.readHistoryInspection(query);
+      }
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        // The read and its revision must straddle no unpublished history write.
+        // These are local durability barriers, never remote synchronization.
+        await backend.flushLocalWrites();
+        if (!history.getPublication) throw new Error('Native history publication is unavailable');
+        const before = await history.getPublication();
+        let result: unknown;
+        let pageTurns: SessionHistoryReadResponse['pageTurns'];
+        switch (query.kind) {
+          case 'count':
+            result = query.withCheckpoint
+              ? { count: await history.count(), checkpoint: before.checkpoint }
+              : await history.count();
+            break;
+          case 'readAt':
+            result = await history.readAt(query.position);
+            break;
+          case 'readTurn':
+            result = await history.readTurn(query.turnId);
+            break;
+          case 'inputAcceptance':
+            if (!backend.inputAcceptance) throw new Error('Input acceptance is unavailable');
+            result = await backend.inputAcceptance.lookup(
+              parseHistoryWrite(HistoryEntryWriteSchema, query.entry) as never
+            );
+            break;
+          case 'readRange':
+            result = await history.readRange(query.from, query.to);
+            break;
+          case 'readDirectory':
+            result = await history.readDirectory(query.from, query.to);
+            break;
+          case 'readQuery':
+            result = await backend.readHistoryQuery(query);
+            break;
+          case 'readLatestPage':
+            if (!history.readLatestDirectoryPage) {
+              throw new Error(
+                `Session ${sessionId} history backend does not support reverse pages.`
+              );
+            }
+            {
+              const page = await history.readLatestDirectoryPage(query.limit);
+              result =
+                query.withCheckpoint && history.getCheckpoint
+                  ? { ...page, checkpoint: await history.getCheckpoint() }
+                  : page;
+              pageTurns = (
+                await history.readRange(page.startPosition, page.startPosition + page.rows.length)
+              ).map((read) => {
+                if (read.state !== 'ready') throw new Error('History page body is unavailable');
+                return read.turn as SessionHistoryInput;
+              });
+            }
+            break;
+          case 'readOlderPage':
+            if (!history.readOlderDirectoryPage) {
+              throw new Error(
+                `Session ${sessionId} history backend does not support reverse pages.`
+              );
+            }
+            {
+              const page = await history.readOlderDirectoryPage(query.cursor, query.limit);
+              result =
+                query.withCheckpoint && history.getCheckpoint
+                  ? { ...page, checkpoint: await history.getCheckpoint() }
+                  : page;
+              pageTurns = (
+                await history.readRange(page.startPosition, page.startPosition + page.rows.length)
+              ).map((read) => {
+                if (read.state !== 'ready') throw new Error('History page body is unavailable');
+                return read.turn as SessionHistoryInput;
+              });
+            }
+            break;
+          case 'readAll':
+            result = await history.readAll();
+            break;
+          case 'readTurnOutput':
+            result = await history.readTurnOutput(query.userTurnId);
+            break;
+        }
+        await backend.flushLocalWrites();
+        const after = await history.getPublication();
+        if (
+          before.checkpoint !== after.checkpoint ||
+          before.historyRevision !== after.historyRevision
+        )
+          continue;
+        const protectedRead =
+          ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
+            query.withCheckpoint) ||
+          ((query.kind === 'readTurn' ||
+            query.kind === 'readRange' ||
+            query.kind === 'readQuery' ||
+            query.kind === 'readDirectory') &&
+            query.atCheckpoint);
+        if (protectedRead) {
+          if (!history.getCheckpoint) throw new Error('History checkpoints are unavailable');
+          const current = await history.getCheckpoint();
+          const expected =
+            query.kind === 'readTurn' ||
+            query.kind === 'readRange' ||
+            query.kind === 'readQuery' ||
+            query.kind === 'readDirectory'
+              ? query.atCheckpoint
+              : (result as { checkpoint?: string }).checkpoint;
+          if (current !== expected)
+            throw Object.assign(new Error('History checkpoint was superseded'), { code: 'stale' });
+        }
+        return {
+          type: 'session/history-read_response',
+          sessionId,
+          success: true,
+          result,
+          historyRevision: after.historyRevision,
+          historyCount: after.historyCount,
+          historyChange: after.historyChange,
+          ...(pageTurns ? { pageTurns } : {}),
+        };
+      }
+      throw Object.assign(new Error('History changed during the read; retry the observation'), {
+        code: 'stale',
+      });
+    } catch (error) {
+      const protectedRead =
+        query.kind === 'readChanges' ||
+        ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
+          query.withCheckpoint) ||
+        ((query.kind === 'readTurn' ||
+          query.kind === 'readRange' ||
+          query.kind === 'readQuery' ||
+          query.kind === 'readDirectory') &&
+          query.atCheckpoint);
+      if (
+        (protectedRead || query.kind === 'readSelection') &&
+        error instanceof Error &&
+        'code' in error &&
+        (error.code === 'stale' || error.code === 'superseded')
+      ) {
+        this.logger.trace(`[${sessionId}] History observation superseded operation=${query.kind}`);
+        return {
+          type: 'session/history-read_response',
+          sessionId,
+          success: false,
+          retryReason: 'superseded',
+          error: 'The history observation was superseded; retry it.',
+        };
+      }
+      const detail =
+        describeRoostHistoryFailure(error, {
+          stage: 'read',
+          sessionId,
+          operation: query.kind,
+        }) ?? formatErrorMessage(error);
+      this.logger.debug(`[${sessionId}] History read failed: ${detail}`);
+      return {
+        type: 'session/history-read_response',
+        sessionId,
+        success: false,
+        error: detail,
+      };
+    }
+  }
+
+  private async writeSessionHistoryForRpc(
+    sessionId: SessionId,
+    operation: SessionHistoryWriteOperation,
+    rawPayload: Record<string, unknown>
+  ): Promise<SessionHistoryWriteResponse> {
+    try {
+      await this.resolveSessionHistoryOwnerSessionId(sessionId);
+      this.touchSession(sessionId);
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
+      if (backend.kind !== 'roost') {
+        throw new Error(`Session ${sessionId} does not use Roost history.`);
+      }
+      const payload = rawPayload;
+      let result: unknown;
+      switch (operation) {
+        case 'accept_input_and_dispatch': {
+          if (!backend.inputAcceptance?.acceptAndDispatch)
+            throw new Error('Input dispatch is unavailable');
+          const receipt = await backend.inputAcceptance.acceptAndDispatch(
+            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never
+          );
+          result = receipt;
+          if (receipt.status === 'accepted' && receipt.active && !this.cleanedUp)
+            void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
+          break;
+        }
+        case 'accept_input':
+          if (!backend.inputAcceptance) throw new Error('Input acceptance is unavailable');
+          result = await backend.inputAcceptance.accept(
+            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never
+          );
+          break;
+        case 'append':
+          if (!('entry' in payload)) throw new Error('History append payload is missing entry');
+          await backend.appendHistoryTurn(
+            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as SessionHistoryInput
+          );
+          break;
+        case 'replace': {
+          if (typeof payload.turnId !== 'string' || !('entry' in payload)) {
+            throw new Error('History replace payload requires turnId and entry');
+          }
+          const replacement = parseHistoryWrite(
+            HistoryEntryWriteSchema,
+            payload.entry
+          ) as SessionHistoryInput;
+          if (replacement.id !== payload.turnId) {
+            throw new Error('History replace payload turnId does not match entry id');
+          }
+          const existing = await backend.readTurn(payload.turnId);
+          if (existing.state !== 'ready')
+            throw new Error(`History turn ${payload.turnId} was not found`);
+          result = await backend.applyHistoryAction({ kind: 'upsert-turn', turn: replacement });
+          break;
+        }
+        case 'respond_permission':
+          if (typeof payload.requestId !== 'string' || !('outcome' in payload)) {
+            throw new Error('Permission response payload requires requestId and outcome');
+          }
+          result = await backend.respondPermission(
+            payload.requestId,
+            parseHistoryWrite(PermissionOutcomeSchema, payload.outcome) as PermissionOutcome,
+            payload.options as { readonly turnId?: string } | undefined
+          );
+          break;
+        case 'apply_action':
+          if (!('action' in payload)) throw new Error('History action payload is missing action');
+          result = await backend.applyHistoryAction(payload.action as never);
+          break;
+        case 'replace_editable_tail':
+          if (!('input' in payload)) throw new Error('Editable-tail payload is missing input');
+          result = await backend.replaceEditableTail(payload.input as never);
+          break;
+        case 'apply_import':
+          if (!('input' in payload)) throw new Error('History import payload is missing input');
+          result = await backend.applyHistoryImport(payload.input as never);
+          break;
+        case 'copy_history': {
+          if (!Array.isArray(payload.history))
+            throw new Error('History copy payload is missing history');
+          const entries = payload.history.map(
+            (entry) => parseHistoryWrite(HistoryEntryWriteSchema, entry) as SessionHistoryInput
+          );
+          const existingIds = new Set((await backend.readHistoryQuery()).map((entry) => entry.id));
+          for (const entry of entries) {
+            if (existingIds.has(entry.id))
+              throw new Error(`History copy target already contains ${entry.id}`);
+            await backend.appendHistoryTurn(entry);
+            existingIds.add(entry.id);
+          }
+          result = { copied: entries.length };
+          break;
+        }
+      }
+      await this.reconcileLocalImageReceipts(sessionId, sessionDoc);
+      await backend.flushLocalWrites();
+      if (!backend.history.getPublication)
+        throw new Error('Native history publication is unavailable');
+      const historyCursor = await backend.history.getPublication();
+      return {
+        type: 'session/history-write_response',
+        sessionId,
+        operation,
+        success: true,
+        ...(result === undefined ? {} : { result }),
+        historyRevision: historyCursor.historyRevision,
+        historyCount: historyCursor.historyCount,
+        historyChange: historyCursor.historyChange,
+      };
+    } catch (error) {
+      const detail =
+        describeRoostHistoryFailure(error, {
+          stage: 'write',
+          sessionId,
+          operation,
+        }) ?? formatErrorMessage(error);
+      this.logger.debug(`[${sessionId}] History write failed (${operation}): ${detail}`);
+      return {
+        type: 'session/history-write_response',
+        sessionId,
+        operation,
+        success: false,
+        error: detail,
+      };
+    }
+  }
+
+  private async handleSessionHistoryRead(
+    message: SessionHistoryReadRequest,
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
-    const response = await this.respondToLegacyCodeCollabHostStart(message);
-    dispatchContext.send(response);
+    if (message.workspaceId !== this.workspaceId) {
+      dispatchContext.send({
+        type: 'session/history-read_response',
+        sessionId: message.sessionId,
+        success: false,
+        error: `Workspace mismatch for session ${message.sessionId}`,
+      });
+      return;
+    }
+    dispatchContext.send(await this.readSessionHistoryForRpc(message.sessionId, message.query));
+  }
+
+  private async handleSessionHistorySubscription(
+    message: SessionHistorySubscriptionRequest,
+    context: MessageDispatchContext
+  ): Promise<void> {
+    const { sessionId, subscription } = message;
+    const response = {
+      type: 'session/history-subscription_response' as const,
+      sessionId,
+      subscriptionId: subscription.id,
+    };
+    try {
+      if (message.workspaceId !== this.workspaceId || message.machineId !== this.machineId)
+        throw new Error('History subscription target mismatch');
+      if (this.encryptedAttachments) throw new Error('e2ee_history_backend_unavailable');
+      await this.subscribeSessionHistory({
+        sessionId,
+        subscriber: 'local',
+        subscription,
+        publish: async (publication) =>
+          context.send({ ...response, event: 'publication', publication }),
+      });
+      context.send({ ...response, event: 'closed' });
+    } catch (error) {
+      this.logger.debug(`History subscription closed: ${formatErrorMessage(error)}`);
+      context.send({ ...response, event: 'closed', error: 'History subscription unavailable' });
+    }
+  }
+
+  private async handleSessionHistoryWrite(
+    message: SessionHistoryWriteRequest,
+    dispatchContext: MessageDispatchContext
+  ): Promise<void> {
+    if (message.workspaceId !== this.workspaceId) {
+      dispatchContext.send({
+        type: 'session/history-write_response',
+        sessionId: message.sessionId,
+        operation: message.operation,
+        success: false,
+        error: `Workspace mismatch for session ${message.sessionId}`,
+      });
+      return;
+    }
+    if (
+      typeof message.payload !== 'object' ||
+      message.payload === null ||
+      Array.isArray(message.payload)
+    ) {
+      dispatchContext.send({
+        type: 'session/history-write_response',
+        sessionId: message.sessionId,
+        operation: message.operation,
+        success: false,
+        error: `Invalid payload for history operation ${message.operation}`,
+      });
+      return;
+    }
+    dispatchContext.send(
+      await this.writeSessionHistoryForRpc(
+        message.sessionId,
+        message.operation,
+        message.payload as Record<string, unknown>
+      )
+    );
   }
 
   private async handlePreviewCandidateReport(
@@ -6728,7 +9432,14 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
     this.touchSession(message.sessionId);
-    const response = await this.previewService.reportCandidate(message);
+    // An encrypted shared member's display account is not an identity to attribute.
+    const invokingUserId =
+      dispatchContext.source === 'local' &&
+      (!this.encryptedExecution ||
+        this.executionService.getEncryptedControlPrincipal(message.sessionId)?.kind === 'owner')
+        ? this.executionService.getActiveInvocationContext(message.sessionId)?.requesterUserId
+        : undefined;
+    const response = await this.previewService.reportCandidate(message, invokingUserId);
     dispatchContext.send(response);
   }
 
@@ -6891,6 +9602,7 @@ export class MessageHandler {
       const appended = await this.appendAssistantImageGroupToActiveTurn({
         sessionDoc,
         turnId: initialAttachTarget.turnId,
+        turnEpoch: initialAttachTarget.turnEpoch,
         content,
       });
 
@@ -6898,6 +9610,8 @@ export class MessageHandler {
         historyEntryId = initialAttachTarget.turnId;
         attachedTo = 'active_turn';
       } else {
+        if (options.attachTarget)
+          throw new Error('Generated image owning turn is unavailable; dropping history write');
         const latestAttachTarget = await this.resolveSessionImageUploadAttachTarget(
           sessionId,
           sessionDoc
@@ -6987,318 +9701,20 @@ export class MessageHandler {
    * symlink final component), reject non-files/empty/oversize, compute sha256
    * and text-previewability by streaming (bounded memory).
    */
-  private async validateSessionFileUploadPath(
+  private validateSessionFileUploadPath(
     filePath: string,
-    options?: {
-      /**
-       * Reject paths outside this root (realpath-canonicalized, parent-symlink
-       * safe). REQUIRED for the agent-facing MCP channel so the upload tool
-       * cannot bypass the agent's own out-of-workspace read approval gate.
-       * Omitted for the desktop local handoff, whose user-picked files are
-       * staged in tmpdir by the user's own Electron process.
-       */
-      containWithin?: string;
-    }
-  ): Promise<ValidatedUploadFile> {
-    const trimmed = filePath.trim();
-    if (!trimmed) {
-      throw new Error('File path is empty');
-    }
-    const absolutePath = options?.containWithin
-      ? await resolveContainedUploadPath(trimmed, options.containWithin)
-      : path.resolve(trimmed);
-
-    let handle: fs.promises.FileHandle;
-    try {
-      handle = await fs.promises.open(
-        absolutePath,
-        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-      );
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException | undefined)?.code;
-      if (code === 'ELOOP') {
-        throw new Error(`File path must not be a symlink: ${filePath}`, { cause: error });
-      }
-      throw new Error(`File not found: ${filePath}`, { cause: error });
-    }
-
-    try {
-      const stat = await handle.stat();
-      if (!stat.isFile()) {
-        throw new Error(`Path is not a file: ${filePath}`);
-      }
-      if (stat.size <= 0) {
-        throw new Error(`File is empty: ${filePath}`);
-      }
-      if (stat.size > SESSION_FILE_MAX_SIZE_BYTES) {
-        throw new Error(
-          `File must be <= ${Math.floor(SESSION_FILE_MAX_SIZE_BYTES / (1024 * 1024))}MB: ${filePath}`
-        );
-      }
-
-      const fileName = path.basename(absolutePath);
-      const extension = path.extname(fileName).slice(1).trim().toLowerCase();
-      const mimeType =
-        SESSION_FILE_MIME_TYPE_BY_EXTENSION[extension] ?? DEFAULT_SESSION_FILE_MIME_TYPE;
-
-      // Stream the file once: hash incrementally, capture the first 8 KB for the
-      // text-preview sniff. Avoids reading the whole (up to 100 MB) file into RAM.
-      const hash = crypto.createHash('sha256');
-      const sniffPrefix = Buffer.alloc(SESSION_FILE_PREVIEW_SNIFF_BYTES);
-      let sniffLength = 0;
-      const stream = handle.createReadStream({ autoClose: false });
-      for await (const chunk of stream) {
-        const buf = chunk as Buffer;
-        hash.update(buf);
-        if (sniffLength < SESSION_FILE_PREVIEW_SNIFF_BYTES) {
-          const take = Math.min(SESSION_FILE_PREVIEW_SNIFF_BYTES - sniffLength, buf.length);
-          buf.copy(sniffPrefix, sniffLength, 0, take);
-          sniffLength += take;
-        }
-      }
-
-      const sha256 = hash.digest('hex');
-      const textPreview = isTextPreviewable(
-        fileName,
-        mimeType,
-        sniffPrefix.subarray(0, sniffLength)
-      );
-
-      return {
-        absolutePath,
-        fileName,
-        mimeType,
-        sizeBytes: stat.size,
-        sha256,
-        textPreview,
-      };
-    } finally {
-      await handle.close();
-    }
+    options?: { containWithin?: string; fileRoots?: readonly SessionFileRoot[] }
+  ) {
+    return this.attachmentTransfer().validateSessionFileUploadPath(filePath, options);
   }
 
-  private buildSessionFileUploadHeaders(file: ValidatedUploadFile, sessionId: SessionId): Headers {
-    const headers = new Headers(
-      buildSessionFileUploadMetadataHeaders({
-        sessionId,
-        fileName: file.fileName,
-        mimeType: file.mimeType,
-        sha256: file.sha256,
-        sizeBytes: file.sizeBytes,
-        textPreview: file.textPreview,
-      })
-    );
-    headers.set('Authorization', `Bearer ${this.token}`);
-    return headers;
-  }
-
-  /** Parse the server's `{ success, file: SessionFilePayload }` upload response. */
-  private parseUploadedFileResponse(
-    body: unknown,
-    serverBaseUrl: string,
-    sessionId: SessionId,
-    workspaceId: WorkspaceId
-  ): UploadedSessionFile {
-    const parsed = SessionInputBlockSchema.safeParse(
-      body && typeof body === 'object' && 'file' in body
-        ? (body as Record<string, unknown>).file
-        : undefined
-    );
-    if (!parsed.success || parsed.data.type !== 'file') {
-      throw new Error('Invalid file upload payload');
-    }
-    const downloadUrl = buildSessionFileApiUrl(
-      serverBaseUrl,
-      getSessionFileDownloadApiPath(workspaceId, sessionId, parsed.data.fileId)
-    );
-    return { ...parsed.data, downloadUrl };
-  }
-
-  private async uploadSessionFileSingleShot(args: {
+  private uploadValidatedSessionFile(args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     file: ValidatedUploadFile;
     signal?: AbortSignal;
   }): Promise<UploadedSessionFile> {
-    const serverBaseUrl = this.resolveServerBaseUrl();
-    const uploadUrl = buildSessionFileApiUrl(
-      serverBaseUrl,
-      getSessionFileUploadApiPath(args.workspaceId)
-    );
-
-    const bytes = await fs.promises.readFile(args.file.absolutePath);
-    const headers = this.buildSessionFileUploadHeaders(args.file, args.sessionId);
-    headers.set('Content-Type', 'application/octet-stream');
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      headers,
-      body: bytes,
-      signal: args.signal,
-    });
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      const detail = errorBody ? `: ${errorBody.slice(0, 200)}` : '';
-      throw new Error(`Failed to upload file (${response.status})${detail}`);
-    }
-    const body = await response.json().catch(() => null);
-    return this.parseUploadedFileResponse(body, serverBaseUrl, args.sessionId, args.workspaceId);
-  }
-
-  private async uploadSessionFileMultipart(args: {
-    workspaceId: WorkspaceId;
-    sessionId: SessionId;
-    file: ValidatedUploadFile;
-    signal?: AbortSignal;
-  }): Promise<UploadedSessionFile> {
-    const serverBaseUrl = this.resolveServerBaseUrl();
-
-    // 1. create
-    const createUrl = buildSessionFileApiUrl(
-      serverBaseUrl,
-      getSessionFileMultipartCreateApiPath(args.workspaceId)
-    );
-    const createResponse = await fetch(createUrl, {
-      method: 'POST',
-      headers: this.buildSessionFileUploadHeaders(args.file, args.sessionId),
-      signal: args.signal,
-    });
-    if (!createResponse.ok) {
-      const errorBody = await createResponse.text().catch(() => '');
-      const detail = errorBody ? `: ${errorBody.slice(0, 200)}` : '';
-      throw new Error(`Failed to create multipart upload (${createResponse.status})${detail}`);
-    }
-    const createBody = MultipartCreateResponseSchema.safeParse(
-      await createResponse.json().catch(() => null)
-    );
-    if (!createBody.success) {
-      throw new Error('Invalid multipart create response');
-    }
-    const { uploadId, fileId } = createBody.data;
-
-    // 2. upload parts (1-based), retrying each part up to N times.
-    const partCount = getSessionFilePartCount(args.file.sizeBytes);
-    const completedParts: Array<{ partNumber: number; etag: string }> = [];
-    const handle = await fs.promises.open(args.file.absolutePath, 'r');
-    try {
-      for (let partNumber = 1; partNumber <= partCount; partNumber += 1) {
-        const offset = (partNumber - 1) * SESSION_FILE_PART_SIZE_BYTES;
-        const length = Math.min(SESSION_FILE_PART_SIZE_BYTES, args.file.sizeBytes - offset);
-        const partBuffer = Buffer.alloc(length);
-        // POSIX read may return fewer bytes than requested; loop until the
-        // part buffer is full (a zero-filled tail would only fail later at the
-        // server's sha256 verification, with a far less actionable error).
-        let filled = 0;
-        while (filled < length) {
-          const { bytesRead } = await handle.read(
-            partBuffer,
-            filled,
-            length - filled,
-            offset + filled
-          );
-          if (bytesRead <= 0) {
-            throw new Error(
-              `Short read for part ${partNumber}: got ${filled} of ${length} bytes (file changed during upload?)`
-            );
-          }
-          filled += bytesRead;
-        }
-
-        const partUrl = buildSessionFileApiUrl(
-          serverBaseUrl,
-          getSessionFileMultipartPartApiPath(args.workspaceId, uploadId, partNumber)
-        );
-        const partHeaders = new Headers();
-        partHeaders.set('Authorization', `Bearer ${this.token}`);
-        partHeaders.set('x-session-id', args.sessionId);
-        partHeaders.set('x-file-id', fileId);
-        partHeaders.set('x-file-part-size-bytes', String(length));
-        partHeaders.set('Content-Type', 'application/octet-stream');
-
-        let lastError: unknown = null;
-        let uploaded = false;
-        for (let attempt = 1; attempt <= SESSION_FILE_MAX_PART_RETRIES; attempt += 1) {
-          try {
-            const partResponse = await fetch(partUrl, {
-              method: 'PUT',
-              headers: partHeaders,
-              body: partBuffer,
-              signal: args.signal,
-            });
-            if (!partResponse.ok) {
-              const errorBody = await partResponse.text().catch(() => '');
-              throw new Error(
-                `part ${partNumber} failed (${partResponse.status})${errorBody ? `: ${errorBody.slice(0, 120)}` : ''}`
-              );
-            }
-            const partBody = MultipartPartResponseSchema.safeParse(
-              await partResponse.json().catch(() => null)
-            );
-            if (!partBody.success) {
-              throw new Error(`part ${partNumber} returned an invalid response`);
-            }
-            completedParts.push({ partNumber, etag: partBody.data.etag });
-            uploaded = true;
-            break;
-          } catch (error) {
-            lastError = error;
-            // An aborted upload (backfill revoke) can never succeed on retry.
-            if (args.signal?.aborted) {
-              break;
-            }
-          }
-        }
-        if (!uploaded) {
-          throw new Error(
-            `Failed to upload part ${partNumber} after ${SESSION_FILE_MAX_PART_RETRIES} attempts: ${formatErrorMessage(lastError)}`
-          );
-        }
-      }
-    } finally {
-      await handle.close();
-    }
-
-    // 3. complete
-    const completeUrl = buildSessionFileApiUrl(
-      serverBaseUrl,
-      getSessionFileMultipartCompleteApiPath(args.workspaceId, uploadId)
-    );
-    const completeHeaders = new Headers();
-    completeHeaders.set('Authorization', `Bearer ${this.token}`);
-    completeHeaders.set('x-session-id', args.sessionId);
-    completeHeaders.set('x-file-id', fileId);
-    completeHeaders.set('Content-Type', 'application/json');
-    const completeResponse = await fetch(completeUrl, {
-      method: 'POST',
-      headers: completeHeaders,
-      body: JSON.stringify({ parts: completedParts }),
-      signal: args.signal,
-    });
-    if (!completeResponse.ok) {
-      const errorBody = await completeResponse.text().catch(() => '');
-      const detail = errorBody ? `: ${errorBody.slice(0, 200)}` : '';
-      throw new Error(`Failed to complete multipart upload (${completeResponse.status})${detail}`);
-    }
-    const completeBody = await completeResponse.json().catch(() => null);
-    return this.parseUploadedFileResponse(
-      completeBody,
-      serverBaseUrl,
-      args.sessionId,
-      args.workspaceId
-    );
-  }
-
-  private async uploadValidatedSessionFile(args: {
-    workspaceId: WorkspaceId;
-    sessionId: SessionId;
-    file: ValidatedUploadFile;
-    /** Cancels the relay upload mid-flight (backfill revoke, S5/D10). */
-    signal?: AbortSignal;
-  }): Promise<UploadedSessionFile> {
-    if (shouldUseSingleShotUpload(args.file.sizeBytes)) {
-      return await this.uploadSessionFileSingleShot(args);
-    }
-    return await this.uploadSessionFileMultipart(args);
+    return this.attachmentTransfer().uploadValidatedSessionFile(args);
   }
 
   /** Append uploaded file blocks to an assistant turn's items (active turn). */
@@ -7311,18 +9727,12 @@ export class MessageHandler {
       args.files.map(({ downloadUrl: _downloadUrl, ...file }) => file)
     );
     let appended = false;
-    await args.sessionDoc.updateHistory((history) => {
-      for (const entry of history) {
-        if (!entry || entry.id !== args.turnId || entry.role !== 'assistant') {
-          continue;
-        }
-        const existing = Array.isArray(entry.items) ? [...entry.items] : [];
-        entry.items = [...existing, ...items] as SessionHistoryInput['items'];
-        appended = true;
-        break;
-      }
-      return history;
-    });
+    const backend = await this.getSessionBackend(args.sessionDoc);
+    await backend
+      .applyHistoryAction({ kind: 'assistant-items', turnId: args.turnId, mode: 'append', items })
+      .then((result) => {
+        appended = result.matched ?? false;
+      });
     return appended;
   }
 
@@ -7337,19 +9747,17 @@ export class MessageHandler {
     const items = args.files
       ? inputBlocksToHistoryItems(args.files.map(({ downloadUrl: _downloadUrl, ...file }) => file))
       : ([] as NonNullable<SessionHistoryInput['items']>);
-    await args.sessionDoc.updateHistory((history) => {
-      history.push({
-        id: entryId,
-        role: 'assistant',
-        items: items as SessionHistoryInput['items'],
-        timestamp: new Date().toISOString(),
-        userId: undefined,
-        read: undefined,
-        modelInfo,
-        fileDiff: [],
-        finished: true,
-      });
-      return history;
+    const backend = await this.getSessionBackend(args.sessionDoc);
+    await backend.appendHistoryTurn({
+      id: entryId,
+      role: 'assistant',
+      items: items as SessionHistoryInput['items'],
+      timestamp: new Date().toISOString(),
+      userId: undefined,
+      read: undefined,
+      modelInfo,
+      fileDiff: [],
+      finished: true,
     });
     return entryId;
   }
@@ -7415,7 +9823,7 @@ export class MessageHandler {
       return;
     }
 
-    // This channel is agent-facing (MCP lody_upload_files): paths MUST stay
+    // This channel is agent-facing (MCP lody_upload, kind=files): paths MUST stay
     // inside the session workspace, or the tool would let a prompt-injected
     // agent exfiltrate arbitrary host files past its own read-approval gate.
     const workspaceRoot = this.resolveSessionWorkspaceRoot(sessionId);
@@ -7429,13 +9837,15 @@ export class MessageHandler {
       return;
     }
 
+    const rootResolution = await this.resolveCodeCollabV2Workspace(sessionId);
+    const fileRoots = rootResolution.ok
+      ? (rootResolution.fileRoots ?? [{ id: 'main', absolutePath: workspaceRoot }])
+      : [];
     // Validate every path up front (existence/readable/size + sha256/textPreview).
     let validatedFiles: ValidatedUploadFile[];
     try {
       validatedFiles = await Promise.all(
-        message.paths.map((filePath) =>
-          this.validateSessionFileUploadPath(filePath, { containWithin: workspaceRoot })
-        )
+        message.paths.map((filePath) => this.validateSessionFileUploadPath(filePath, { fileRoots }))
       );
     } catch (error) {
       respond({
@@ -7449,7 +9859,7 @@ export class MessageHandler {
 
     const uploadedFiles: UploadedSessionFile[] = [];
     const failures: string[] = [];
-    const canonicalWorkspaceRoot = await fs.promises.realpath(workspaceRoot);
+
     for (const file of validatedFiles) {
       try {
         const uploaded = await this.uploadValidatedSessionFile({
@@ -7460,9 +9870,9 @@ export class MessageHandler {
         // Validation above canonicalized the path and proved containment. Keep
         // only the workspace-relative provenance in history so a local Lody
         // client can reopen the live artifact without publishing a host path.
-        const sourcePath = normalizeSessionFileSourcePath(
-          path.relative(canonicalWorkspaceRoot, file.absolutePath)
-        );
+        const source = resolveSessionFilePath(fileRoots, file.absolutePath);
+        if (!source) throw new Error('File is outside the session workspace');
+        const sourcePath = encodeSessionFilePath(source);
         uploadedFiles.push({ ...uploaded, sourcePath });
       } catch (error) {
         failures.push(`${file.fileName}: ${formatErrorMessage(error)}`);
@@ -7669,6 +10079,152 @@ export class MessageHandler {
    * Failures retry with exponential backoff up to a cap; past the cap the block
    * stays `local` (other devices keep showing pending) and the failure is logged.
    */
+  private localImageScope(sessionId: string) {
+    return {
+      workspaceId: this.workspaceId,
+      accountId: this.userId,
+      machineId: this.machineId,
+      sessionId,
+    };
+  }
+
+  private async promoteLocalImageReceipt(
+    doc: SessionDocument,
+    image: import('@lody/shared').SessionImagePayload,
+    backend: SessionBackend
+  ): Promise<void> {
+    await backend.applyHistoryAction({
+      kind: 'image-backfilled',
+      localImageId: image.localImageId!,
+      machineId: this.machineId,
+      image,
+    });
+    await doc.promoteLocalImageReferences(image);
+  }
+
+  private async reconcileLocalImageReceipts(
+    sessionId: SessionId,
+    doc: SessionDocument,
+    dispatch?: { turnId: string | undefined }
+  ): Promise<void> {
+    if (this.encryptedAttachments || this.sessionFileBackfillStopped) return;
+    const backend = await this.getSessionBackend(doc);
+    // Dispatch checks inspect only the activation target and current queue. Full
+    // shallow history reconciliation belongs to writes and upload completion.
+    const target = dispatch?.turnId ? await readHistoryEntry(backend, dispatch.turnId) : undefined;
+    const rows = dispatch ? (target ? [target] : []) : await backend.readHistoryQuery();
+    const queue = await doc.getMessageQueue();
+    const candidates = [
+      ...rows.flatMap((row) => [...(row.items ?? []), ...(row.inputConfig?.inputBlocks ?? [])]),
+      ...queue.flatMap(
+        (row) => normalizeSessionTurnInputConfig(row.acpSessionConfig)?.inputBlocks ?? []
+      ),
+    ];
+    const seen = new Set<string>();
+    for (const block of candidates) {
+      if (
+        block.type !== 'image' ||
+        block.transport !== 'local' ||
+        block.machineId !== this.machineId ||
+        typeof block.localImageId !== 'string' ||
+        typeof block.storageSessionId !== 'string'
+      )
+        continue;
+      const key = `${block.storageSessionId}:${block.localImageId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const receipt = await readLocalSessionImageReceipt(
+        this.localImageScope(block.storageSessionId),
+        block.localImageId
+      ).catch((error) => {
+        this.logger.warn(`[${sessionId}] Image receipt unavailable: ${formatErrorMessage(error)}`);
+        return null;
+      });
+      if (!receipt) continue;
+      if (this.sessionFileBackfillStopped) return;
+      await this.promoteLocalImageReceipt(doc, receipt, backend);
+    }
+  }
+
+  private enqueueLocalImageBackfill(
+    sessionId: SessionId,
+    image: import('@lody/shared').SessionImagePayload
+  ): void {
+    const signal = this.remoteBackfillAbort?.signal;
+    if (
+      this.sessionFileBackfillStopped ||
+      !signal ||
+      signal.aborted ||
+      !this.cloudPort.attachmentUpload ||
+      this.encryptedAttachments ||
+      !image.localImageId
+    )
+      return;
+    const key = `${sessionId}:${image.localImageId}`;
+    if (this.localImageBackfills.has(key)) return;
+    const generation = this.remoteBackfillGeneration;
+    const work = async () => {
+      for (let attempt = 1; !signal.aborted; attempt++) {
+        try {
+          this.throwIfBackfillSuperseded(generation);
+          const scope = this.localImageScope(sessionId);
+          let receipt = await readLocalSessionImageReceipt(scope, image.localImageId!);
+          if (!receipt) {
+            const local = await readLocalSessionImage(scope, image);
+            const uploaded = await this.uploadSessionImageFile({
+              workspaceId: this.workspaceId,
+              sessionId,
+              file: {
+                absolutePath: local.path,
+                bytes: local.bytes,
+                sizeBytes: local.bytes.length,
+                fileName: local.image.fileName ?? 'image',
+                mimeType: local.image.mimeType,
+              },
+              signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+            });
+            this.throwIfBackfillSuperseded(generation);
+            receipt = {
+              ...local.image,
+              imageId: uploaded.imageId,
+              transport: 'r2',
+              sizeBytes: local.bytes.length,
+              ...(uploaded.width ? { width: uploaded.width } : {}),
+              ...(uploaded.height ? { height: uploaded.height } : {}),
+            };
+            await writeLocalSessionImageReceipt(scope, receipt);
+          }
+          this.throwIfBackfillSuperseded(generation);
+          const doc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+          const backend = await this.getSessionBackend(doc);
+          this.throwIfBackfillSuperseded(generation);
+          await this.promoteLocalImageReceipt(doc, receipt, backend);
+          // The durable receipt is also consumed by later history/queue change checks.
+          void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
+          return;
+        } catch (error) {
+          if (signal.aborted) return;
+          this.logger.warn(`[${sessionId}] Image backfill deferred: ${formatErrorMessage(error)}`);
+          // Pending image work does not expire after a fixed attempt count. The
+          // owning bridge aborts both this wait and the actual network request.
+          await backfillWait(sessionFileBackfillDelayMs(attempt), undefined, {
+            signal,
+            ref: false,
+          }).catch(() => undefined);
+        }
+      }
+    };
+    const task = work().finally(() => {
+      this.localImageBackfills.delete(key);
+      if (generation !== this.remoteBackfillGeneration)
+        this.enqueueLocalImageBackfill(sessionId, image);
+    });
+    this.localImageBackfills.set(key, task);
+    void task.catch((error) =>
+      this.logger.warn(`Image backfill failed: ${formatErrorMessage(error)}`)
+    );
+  }
+
   private enqueueSessionFileBackfill(sessionId: SessionId, fileId: string): void {
     if (this.sessionFileBackfillStopped || !this.remoteBackfillEnabled) {
       return;
@@ -7731,7 +10287,16 @@ export class MessageHandler {
       throw new Error('remote backfill is disabled');
     }
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    const history = await sessionDoc.getHistory();
+    const backend = await this.getSessionBackend(sessionDoc);
+    const history = await backend.readHistorySelection((rows) =>
+      rows.flatMap((row, index) =>
+        row.items?.some(
+          (item) => item.type === 'file' && item.fileId === fileId && item.transport === 'local'
+        )
+          ? [index]
+          : []
+      )
+    );
 
     // Find the persisted block so we upload with its real metadata.
     let target: Extract<SessionInputBlock, { type: 'file' }> | null = null;
@@ -7756,7 +10321,11 @@ export class MessageHandler {
     // flip→mark window (R5.3): the flip rewrites the fileId, so after it the
     // local block is gone and a naive re-run would throw "not yet persisted"
     // forever, stranding the blob and its quota.
-    const markerRelayFileId = await readSessionFileBlobBackfillMarker(blobArgs);
+    const receipt = await readSessionFileBlobBackfillReceipt(blobArgs).catch((error) => {
+      if (this.encryptedAttachments) throw error;
+      return null;
+    });
+    const markerRelayFileId = receipt?.relayFileId;
 
     if (!target) {
       if (markerRelayFileId) {
@@ -7770,6 +10339,8 @@ export class MessageHandler {
       // so a staged-but-never-sent file cannot hold quota forever.
       const ageMs = await getSessionFileBlobAgeMs(blobArgs);
       if (ageMs !== null && ageMs > getDraftSessionFileBlobMaxAgeMs()) {
+        if (await isScheduledMessageFile({ repo: this.workspaceDocument.repo, ...blobArgs }))
+          return;
         await removeSessionFileBlob(blobArgs);
         this.logger.warn(
           `[${sessionId}] Reclaimed abandoned draft file blob ${fileId} (age ${Math.round(ageMs / 1000)}s)`
@@ -7784,6 +10355,9 @@ export class MessageHandler {
     // Reuse a prior upload recorded by the marker (crash before flip) instead of
     // re-uploading; otherwise upload now and record the relay key before flipping.
     let relayFileId = markerRelayFileId;
+    let encryption = receipt?.encryption;
+    if (relayFileId && this.encryptedAttachments && !encryption)
+      throw new Error('e2ee_attachment_receipt_unprotected');
     if (!relayFileId) {
       const uploaded = await this.uploadValidatedSessionFile({
         workspaceId: this.workspaceId,
@@ -7803,7 +10377,8 @@ export class MessageHandler {
       // sees a plain pending blob — never the "flip committed" R5.3 window.
       this.throwIfBackfillSuperseded(generation);
       relayFileId = uploaded.fileId;
-      await writeSessionFileBlobBackfillMarker({ ...blobArgs, relayFileId });
+      encryption = uploaded.encryption;
+      await writeSessionFileBlobBackfillMarker({ ...blobArgs, relayFileId, encryption });
     }
 
     // Last gate before the point of no return. Past the flip we always
@@ -7812,9 +10387,11 @@ export class MessageHandler {
     this.throwIfBackfillSuperseded(generation);
     // Flip transport local -> r2 and adopt the relay-store key (see
     // flipFileTransportToR2 for why fileId must change).
-    await sessionDoc.updateHistory((current) => {
-      const flipped = flipFileTransportToR2(current, fileId, relayFileId);
-      return flipped ?? current;
+    await backend.applyHistoryAction({
+      kind: 'file-backfilled',
+      fileId,
+      relayFileId,
+      ...(encryption ? { encryption } : {}),
     });
     await markSessionFileBlobBackfilled(blobArgs);
     this.logger.info(`[${sessionId}] Backfilled local file ${fileId} -> relay ${relayFileId}`);
@@ -7830,6 +10407,14 @@ export class MessageHandler {
   async scanAndBackfillLocalSessionFiles(): Promise<void> {
     if (this.sessionFileBackfillStopped || !this.remoteBackfillEnabled) {
       return;
+    }
+    if (!this.encryptedAttachments && this.cloudPort.attachmentUpload) {
+      try {
+        for (const pending of await listLocalSessionImages(this.localImageScope('_')))
+          this.enqueueLocalImageBackfill(pending.sessionId as SessionId, pending.image);
+      } catch (error) {
+        this.logger.warn(`Image backfill recovery failed: ${formatErrorMessage(error)}`);
+      }
     }
     let pending: Awaited<ReturnType<typeof listPendingLocalSessionFiles>>;
     try {
@@ -7852,10 +10437,14 @@ export class MessageHandler {
     this.remoteBackfillGeneration += 1;
     this.remoteBackfillAbort?.abort();
     this.remoteBackfillAbort = new AbortController();
+    this.iosSimulatorService.enableRemote();
+    this.androidEmulatorService.enableRemote();
     await this.scanAndBackfillLocalSessionFiles();
   }
 
   disableRemoteBackfill(): void {
+    this.iosSimulatorService?.revokeRemote();
+    this.androidEmulatorService?.revokeRemote();
     // Close the window: abort in-flight uploads and supersede every started
     // task so a resumed backfill cannot commit post-revoke (S5/D10).
     this.remoteBackfillGeneration += 1;
@@ -7883,13 +10472,16 @@ export class MessageHandler {
   async cancelActiveTurnsForRemoteRevocation(): Promise<void> {
     const activeTurns = this.executionService.getActiveTurnIds();
     for (const { sessionId, turnId } of activeTurns) {
-      await this.executionService.cancelSession({
-        type: 'session/cancel',
-        machineId: this.machineId,
-        workspaceId: this.workspaceId,
-        sessionId,
-        turnId,
-      });
+      await this.executionService.cancelSession(
+        {
+          type: 'session/cancel',
+          machineId: this.machineId,
+          workspaceId: this.workspaceId,
+          sessionId,
+          turnId,
+        },
+        { pendingInput: 'preserve', prePromptSession: 'discard', pauseInbox: false }
+      );
     }
   }
 
@@ -7947,7 +10539,10 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
     const { sessionId } = message;
-    const result = await this.executionService.cancelSession(message);
+    const result = await this.executionService.cancelSession(message, {
+      pendingInput: 'preserve',
+      prePromptSession: 'discard',
+    });
     dispatchContext.send({
       type: 'session/cancel_response',
       sessionId,
@@ -7960,11 +10555,41 @@ export class MessageHandler {
    * Handle machine status request.
    * Collects system resource info and container statuses.
    */
+  private async readMachineStatus(
+    message: MachineStatusRequestValidated
+  ): Promise<MachineStatusResponse> {
+    const response = await this.executionService.getMachineStatus(message);
+    if (!message.includeDaemonUpdate || this.encryptedAttachments) return response;
+    try {
+      const operation = await readManagedOperation();
+      if (!operation || operation.machineId !== this.machineId)
+        return { ...response, daemonUpdate: null };
+      const phase =
+        (operation.phase === 'applied' && this.cliVersion !== operation.targetVersion) ||
+        (operation.phase === 'rolled-back' && this.cliVersion !== operation.previousVersion)
+          ? 'unconfirmed'
+          : operation.phase;
+      return {
+        ...response,
+        daemonUpdate: {
+          requestId: operation.requestId,
+          serviceInstanceId: operation.serviceInstanceId,
+          phase,
+          targetVersion: operation.targetVersion,
+          previousVersion: operation.previousVersion,
+        },
+      };
+    } catch (error) {
+      this.logger.warn('Managed update outcome could not be read', error);
+      return response; // Secondary update diagnostics cannot fail machine health.
+    }
+  }
+
   private async handleMachineStatus(
     message: MachineStatusRequestValidated,
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
-    const response = await this.executionService.getMachineStatus(message);
+    const response = await this.readMachineStatus(message);
     dispatchContext.send(response);
   }
 
@@ -8042,6 +10667,7 @@ export class MessageHandler {
   }
 
   private async prepareMachineRestart(args: {
+    restoreMachineId?: string;
     requesterUserId: string;
     requestToken: string;
     requestId: string;
@@ -8068,11 +10694,26 @@ export class MessageHandler {
       );
     }
 
+    if (args.restoreMachineId && args.requesterUserId !== this.userId) {
+      return this.machineRestartFailure(
+        args.requestId,
+        'unauthorized',
+        'Only the signed-in daemon owner can restore its machine identity.'
+      );
+    }
+    if (args.restoreMachineId && !this.isMachineIdentityRestoreIdle?.()) {
+      return this.machineRestartFailure(
+        args.requestId,
+        'error',
+        'Stop all tasks on this daemon before restoring its identity.'
+      );
+    }
     const verified = await verifyMachineLifecycleRequest({
       token: this.token,
       workspaceId: this.workspaceId,
       machineId: this.machineId,
       action: 'restart',
+      restoreMachineId: args.restoreMachineId,
       requesterUserId: args.requesterUserId,
       requestId: args.requestId,
       requestToken: args.requestToken,
@@ -8086,6 +10727,41 @@ export class MessageHandler {
       );
     }
 
+    if (args.restoreMachineId) {
+      if (!this.isMachineIdentityRestoreIdle?.()) {
+        return this.machineRestartFailure(
+          args.requestId,
+          'error',
+          'Stop all tasks on this daemon before restoring its identity.'
+        );
+      }
+      const { prepareMachineIdentityRestore, cancelPreparedMachineIdentityRestore } =
+        await import('./machine-identity-restore');
+      const prepared = await prepareMachineIdentityRestore({
+        workspaceId: this.workspaceId,
+        sourceMachineId: this.machineId,
+        targetMachineId: args.restoreMachineId,
+        requestId: args.requestId,
+        requesterUserId: args.requesterUserId,
+      });
+      if (!prepared) {
+        return this.machineRestartFailure(
+          args.requestId,
+          'already_pending',
+          'This identity restore is already pending.'
+        );
+      }
+      // Recheck after disk I/O and synchronously close every workspace's intake.
+      // No task can enter between this acceptance and the bounded restart ACK.
+      if (!this.sealMachineIdentityRestore?.()) {
+        await cancelPreparedMachineIdentityRestore(args.requestId);
+        return this.machineRestartFailure(
+          args.requestId,
+          'error',
+          'The daemon started another task. Stop all tasks and retry recovery.'
+        );
+      }
+    }
     this.pendingProcessLifecycleAction = {
       action: 'restart',
       exitCode: EXIT_CODE_REMOTE_RESTART,
@@ -8107,7 +10783,14 @@ export class MessageHandler {
     requestToken: string;
     requestId: string;
     targetVersion?: string;
+    upgrade?: ManagedDaemonUpgradeOptions;
   }): Promise<MachineUpgradeResponse> {
+    if (args.requesterUserId !== this.userId)
+      return this.machineUpgradeFailure(
+        args.requestId,
+        'unauthorized',
+        'Only the machine owner can update this daemon.'
+      );
     let targetVersion: string;
     try {
       targetVersion = normalizeMachineUpgradeTargetVersion(args.targetVersion);
@@ -8153,6 +10836,7 @@ export class MessageHandler {
       requestId: args.requestId,
       requestToken: args.requestToken,
       targetVersion,
+      upgrade: args.upgrade,
     });
     if (!verified.ok) {
       this.logger.warn(`[machine-lifecycle] upgrade verification failed: ${verified.error}`);
@@ -8165,14 +10849,9 @@ export class MessageHandler {
     }
 
     try {
-      await writeDaemonUpgradeIntent({
-        action: 'upgrade',
-        requestId: args.requestId,
-        requesterUserId: args.requesterUserId,
-        targetVersion,
-        currentVersion: this.cliVersion,
-        requestedAtMs: getServerNow(),
-      });
+      if (!this.prepareManagedUpgrade)
+        throw new Error('Managed updater is unavailable; run the explicit daemon installer.');
+      targetVersion = await this.prepareManagedUpgrade(args.requestId, targetVersion, args.upgrade);
     } catch (error) {
       return this.machineUpgradeFailure(
         args.requestId,
@@ -8186,6 +10865,26 @@ export class MessageHandler {
       action: 'upgrade',
       exitCode: EXIT_CODE_REMOTE_UPGRADE,
       requestId: args.requestId,
+      switchPolicy: args.upgrade?.switchPolicy ?? 'when-idle',
+      expiresAtMs: verified.executionExpiresAtMs ?? Date.now() + 120000,
+      onAbandoned: () => {
+        if (this.pendingProcessLifecycleAction?.requestId === args.requestId)
+          this.pendingProcessLifecycleAction = null;
+      },
+      revalidate: async () =>
+        (
+          await verifyMachineLifecycleRequest({
+            token: this.token,
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            action: 'upgrade',
+            requesterUserId: args.requesterUserId,
+            requestId: args.requestId,
+            requestToken: verified.executionToken ?? args.requestToken,
+            upgrade: args.upgrade,
+            targetVersion: normalizeMachineUpgradeTargetVersion(args.targetVersion),
+          })
+        ).ok,
     };
     this.logger.info(
       `[machine-lifecycle] upgrade accepted for request ${args.requestId} target=${targetVersion}`
@@ -8207,9 +10906,10 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext = this.createRuntimeDispatchContext()
   ): Promise<void> {
     const response = await this.prepareMachineRestart(message);
-    dispatchContext.send(response);
-    if (response.accepted) {
-      this.triggerPendingProcessLifecycleAction(response.requestId);
+    try {
+      dispatchContext.send(response);
+    } finally {
+      if (response.accepted) this.triggerPendingProcessLifecycleAction(response.requestId);
     }
   }
 
@@ -8250,8 +10950,8 @@ export class MessageHandler {
   ): Promise<MachineAcpAuthenticateResponse> {
     const response = await this.executionService.authenticateMachineAcp(message, options);
     if (
+      !options.signal?.aborted &&
       message.action === 'start' &&
-      message.configId &&
       response.success &&
       response.disposition === 'authenticated'
     ) {
@@ -8349,8 +11049,10 @@ export class MessageHandler {
     sessionId: SessionId,
     requestId: string,
     request: RequestPermissionRequest,
-    model?: ModelInfo
+    model?: ModelInfo,
+    agentClient?: Pick<AgentClient, 'getAutomaticToolPermissionOutcome' | 'subscribeConfigOptions'>
   ): Promise<RequestPermissionResponse> {
+    const permissionTurnId = this.store.getTurnId(sessionId);
     const isAskUserQuestionRequest = isAskUserQuestionPermissionRequest(request);
     const askUserQuestionMeta = isAskUserQuestionRequest
       ? parseAskUserQuestionPermissionMeta(request._meta)
@@ -8411,33 +11113,46 @@ export class MessageHandler {
     };
 
     const doc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const backend = await this.getSessionBackend(doc);
     let sessionTitle: string | undefined;
     let metaUserId: string | undefined;
     let historyUserId: string | undefined;
     let permissionRequestPersisted = false;
 
     try {
+      // Notifications only enqueue on receipt. A permission request is a
+      // separate RPC and must not synthesize its tool row ahead of that queue:
+      // doing so splits an already-started text block at a batch boundary.
+      await this.awaitTurnHistoryGate(sessionId);
+      await this.flushSessionContextWindowUsage(sessionId);
+      await this.flushACPUpdatesNow(sessionId);
+      if (
+        this.deletedSessionIds.has(sessionId) ||
+        this.store.getTurnId(sessionId) !== permissionTurnId
+      ) {
+        throw new Error('Permission owner changed while draining ACP history');
+      }
+      const acpState = this.store.get(sessionId);
+      if (acpState.acpUpdateBuffer.length > 0 || acpState.acpFlushInFlight) {
+        // The bounded drain can return with failed writes still queued. Do not
+        // overtake them; use the existing unobservable-permission cancellation.
+        throw new Error('ACP history has not drained before permission persistence');
+      }
       permissionRequestPersisted = await ensurePermissionRequestOnToolCall(
         doc,
         requestId,
         request,
-        model
+        model,
+        backend
       );
       await doc.setLastMessageAt();
-      const meta = await doc.getMetaState();
+      const meta = await backend.getMetaState();
       sessionTitle = meta?.title;
       metaUserId = meta?.userId;
 
-      const history = await doc.getHistory();
-      for (let i = history.length - 1; i >= 0; i -= 1) {
-        const entry = history[i];
-        if (!entry || entry.role !== 'user') continue;
-        const userId = entry.userId;
-        if (typeof userId === 'string' && userId.trim()) {
-          historyUserId = userId;
-          break;
-        }
-      }
+      historyUserId = backend.readLatestUserId
+        ? await backend.readLatestUserId()
+        : await readLatestUserId(backend.history);
     } catch (error) {
       this.logger.error(
         `[${sessionId}] Failed to append permission request to history: ${formatErrorMessage(
@@ -8456,6 +11171,32 @@ export class MessageHandler {
       return { outcome: { outcome: 'cancelled' } };
     }
 
+    const automaticOutcome = isAskUserQuestionRequest
+      ? undefined
+      : agentClient?.getAutomaticToolPermissionOutcome(request, false);
+    if (automaticOutcome) {
+      try {
+        await updatePermissionOutcomeInHistory(
+          doc,
+          requestId,
+          automaticOutcome,
+          this.logger,
+          backend
+        );
+      } catch (error) {
+        this.logger.error(
+          `[${sessionId}] Failed to persist automatic permission outcome: ${formatErrorMessage(error)}`
+        );
+        return { outcome: { outcome: 'cancelled' } };
+      }
+      capturePermissionResolved('allow', { resolutionSource: 'run_config_auto_approve' });
+      return { outcome: automaticOutcome };
+    }
+
+    const pendingRequests = this.pendingPermissionRequests.get(sessionId) ?? new Set<string>();
+    pendingRequests.add(requestId);
+    this.pendingPermissionRequests.set(sessionId, pendingRequests);
+
     try {
       // The durable marker rides the same meta write as the status. Status is
       // repaired to idle by the heartbeat TTL; this is not, because an offline
@@ -8472,6 +11213,7 @@ export class MessageHandler {
       );
     }
 
+    let resolved = false;
     const permissionUserId = historyUserId ?? metaUserId ?? this.userId;
 
     const notificationService = this.notificationService;
@@ -8500,36 +11242,26 @@ export class MessageHandler {
     }
 
     if (notificationService) {
-      if (requestKind === 'permission') {
-        void (async () => {
-          const historySynced = await doc.waitUntilSynced();
-          if (!historySynced) {
-            this.logger.debug(
-              `[${sessionId}] Permission request history was not confirmed before Live Activity sync; sending notification fallback`
-            );
-            await notificationService.notifyPermissionRequested(notificationInput);
-            return;
-          }
-
-          const liveActivityResult = await this.syncLiveActivitySummary(permissionUserId, {
-            permissionAlert: true,
+      // Ordinary push owns the alert. Live Activity remains a silent projection;
+      // provider acceptance is not proof that the user saw a permission request.
+      void this.runTurnCloudSideEffect(sessionId, 'permission notification', async () => {
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        const presentation =
+          invocation && invocation.requesterUserId === permissionUserId
+            ? await this.buildNotificationPresentation(
+                sessionId,
+                invocation.notificationOriginTurnIds.length
+                  ? invocation.notificationOriginTurnIds
+                  : [invocation.sourceTurnId]
+              )
+            : undefined;
+        if (!resolved)
+          await notificationService.notifyPermissionRequested({
+            ...notificationInput,
+            presentation,
           });
-          if (liveActivityResult.sent && !liveActivityResult.ended) {
-            return;
-          }
-
-          await notificationService.notifyPermissionRequested(notificationInput);
-        })().catch((error: unknown) => {
-          this.logger.debug(
-            `[${sessionId}] Failed to send permission notification fallback: ${formatErrorMessage(
-              error
-            )}`
-          );
-        });
-      } else {
-        void notificationService.notifyPermissionRequested(notificationInput);
-        void this.syncLiveActivitySummary(permissionUserId);
-      }
+      });
+      void this.syncLiveActivitySummary(permissionUserId);
     }
 
     // Track when permission was requested for duration calculation
@@ -8537,12 +11269,15 @@ export class MessageHandler {
 
     // Subscribe to LoroDoc and wait for outcome
     return new Promise<RequestPermissionResponse>((resolve) => {
-      let resolved = false;
       let timedOutResolution = false;
       let unsubscribe: (() => void) | null = null;
+      let unsubscribeConfig: (() => void) | undefined;
       let timeoutId: NodeJS.Timeout | null = null;
+      let resolving = false;
 
       const cleanup = () => {
+        unsubscribeConfig?.();
+        unsubscribeConfig = undefined;
         if (unsubscribe) {
           unsubscribe();
           unsubscribe = null;
@@ -8555,10 +11290,40 @@ export class MessageHandler {
 
       const resolveWithOutcome = async (
         outcome: RequestPermissionResponse['outcome'],
-        resolutionSource: string = 'client'
+        resolutionSource: string = 'client',
+        persistOutcome = false
       ) => {
-        if (resolved) return;
+        if (resolved || resolving) return;
+        resolving = true;
+        let effectiveOutcome = outcome;
+
+        if (persistOutcome) {
+          try {
+            const applied = await updatePermissionOutcomeInHistory(
+              doc,
+              requestId,
+              outcome,
+              this.logger,
+              backend
+            );
+            if (!applied) {
+              // A user decision may have committed while the automatic path was
+              // awaiting its history read. The history writer is conditional;
+              // adopt the already-persisted outcome instead of returning the
+              // automatic result that lost the race.
+              const storedOutcome = await readStoredOutcome();
+              effectiveOutcome = storedOutcome ?? { outcome: 'cancelled' };
+            }
+          } catch (error) {
+            this.logger.error(
+              `[${sessionId}] Failed to persist automatic permission outcome: ${formatErrorMessage(error)}`
+            );
+            effectiveOutcome = { outcome: 'cancelled' };
+          }
+        }
+
         resolved = true;
+        resolving = false;
         cleanup();
 
         // Accumulate permission wait time for this session
@@ -8573,25 +11338,33 @@ export class MessageHandler {
           );
         }
 
-        // Single funnel for client answers, cancels, and timeouts, so clearing
-        // here cannot leave a stale "waiting on you" behind.
-        try {
-          await doc.clearAwaitingUser();
-        } catch (error) {
-          this.logger.debug(
-            `[${sessionId}] Failed to clear awaitingUserSince: ${formatErrorMessage(error)}`
-          );
+        // A drained tool must not clear a still-pending question's waiting state.
+        pendingRequests.delete(requestId);
+        if (pendingRequests.size === 0) {
+          this.pendingPermissionRequests.delete(sessionId);
+          try {
+            await doc.clearAwaitingUser();
+          } catch (error) {
+            this.logger.debug(
+              `[${sessionId}] Failed to clear awaitingUserSince: ${formatErrorMessage(error)}`
+            );
+          }
         }
 
-        this.logger.info(`Permission resolved for session ${sessionId}: ${outcome.outcome}`);
+        this.logger.info(
+          `Permission resolved for session ${sessionId}: ${effectiveOutcome.outcome}`
+        );
         this.logger.debug(
-          `[${sessionId}] Permission request ${requestId} resolved with outcome: ${outcome.outcome}`
+          `[${sessionId}] Permission request ${requestId} resolved with outcome: ${effectiveOutcome.outcome}`
         );
 
         if (!timedOutResolution) {
-          capturePermissionResolved(outcome.outcome === 'selected' ? 'allow' : 'cancelled', {
-            resolutionSource,
-          });
+          capturePermissionResolved(
+            effectiveOutcome.outcome === 'selected' ? 'allow' : 'cancelled',
+            {
+              resolutionSource,
+            }
+          );
         }
         if (notificationService) {
           void permissionInboxRecordPromise.then(async () => {
@@ -8620,6 +11393,7 @@ export class MessageHandler {
           // the visible active scope ended; only restore `running` while active
           // presence is still owned locally.
           if (
+            !this.pendingPermissionRequests.has(sessionId) &&
             shouldRestoreRunningAfterPermission({
               hasActivePresence: this.hasSessionActivePresence(sessionId),
               status: currentStatus,
@@ -8637,28 +11411,86 @@ export class MessageHandler {
           );
         }
 
-        resolve({ outcome });
+        resolve({ outcome: effectiveOutcome });
       };
 
-      // Check if outcome already exists (e.g., from a previous device)
-      const checkForOutcome = () => {
-        if (resolved || !doc.mirror) return;
-        const history = (doc.mirror.getState().history as SessionHistoryInput[]) ?? [];
-        const outcome = findPermissionOutcomeInHistory(history, requestId);
-        if (outcome) {
-          void resolveWithOutcome(outcome);
+      // Check if outcome already exists (e.g., from a previous device). Reads the
+      // exact assistant turn when its identity is available.
+      const readStoredOutcome = async (): Promise<
+        RequestPermissionResponse['outcome'] | undefined
+      > => {
+        const history = permissionTurnId
+          ? await backend
+              .readTurn(permissionTurnId)
+              .then((read) => (read.state === 'ready' ? [read.turn as SessionHistoryInput] : []))
+          : await backend.readHistorySelection((rows) => {
+              const first = rows.findIndex((row) =>
+                row.items?.some(
+                  (item) =>
+                    item.type === 'tool_call' &&
+                    (item.permissionRequest as { requestId?: unknown } | undefined)?.requestId ===
+                      requestId
+                )
+              );
+              return first < 0 ? [] : [first];
+            });
+        return findPermissionOutcomeInHistory(history, requestId);
+      };
+      let checkingHistory = false;
+      let historyCheckRequested = false;
+      const checkForOutcome = async () => {
+        if (resolved) return;
+        if (checkingHistory) {
+          historyCheckRequested = true;
+          return;
+        }
+        checkingHistory = true;
+        try {
+          do {
+            historyCheckRequested = false;
+            const outcome = await readStoredOutcome();
+            if (outcome) {
+              await resolveWithOutcome(outcome);
+              return;
+            }
+          } while (historyCheckRequested);
+        } catch (error) {
+          this.logger.debug(
+            `[${sessionId}] Failed to read permission outcome ${requestId}: ${formatErrorMessage(error)}`
+          );
+        } finally {
+          checkingHistory = false;
         }
       };
 
-      // Subscribe to history changes
-      if (doc.mirror) {
-        unsubscribe = doc.mirror.subscribe(() => {
-          checkForOutcome();
+      // Subscribe to control and history changes alike.
+      unsubscribe = subscribeSessionChanges(doc, () => {
+        void checkForOutcome();
+      });
+
+      const checkAutomaticOutcome = async (pending: boolean) => {
+        // A client decision already written to history wins over a later mode toggle.
+        await checkForOutcome();
+        if (resolved || isAskUserQuestionRequest) return;
+        const outcome = agentClient?.getAutomaticToolPermissionOutcome(request, pending);
+        if (outcome) await resolveWithOutcome(outcome, 'run_config_auto_approve', true);
+      };
+      if (agentClient && !isAskUserQuestionRequest) {
+        let wasAutomatic =
+          agentClient.getAutomaticToolPermissionOutcome(request, true) !== undefined;
+        unsubscribeConfig = agentClient.subscribeConfigOptions(() => {
+          const isAutomatic =
+            agentClient.getAutomaticToolPermissionOutcome(request, true) !== undefined;
+          const enabled = isAutomatic && !wasAutomatic;
+          wasAutomatic = isAutomatic;
+          // Unrelated config updates must not drain a request queued while YOLO was already on.
+          if (enabled) void checkAutomaticOutcome(true);
         });
       }
 
       // Check immediately in case outcome was already written
-      checkForOutcome();
+      // or the config changed while history/status/notifications were being prepared.
+      void checkAutomaticOutcome(false);
 
       // Setup timeout
       timeoutId = setTimeout(() => {
@@ -8687,7 +11519,8 @@ export class MessageHandler {
               doc,
               requestId,
               { outcome: 'cancelled' },
-              this.logger
+              this.logger,
+              backend
             );
           } catch (error) {
             this.logger.error(
@@ -8756,16 +11589,15 @@ export class MessageHandler {
   }
 
   /**
-   * Persists an agent-issued warning (e.g. Codex app-server `warning`/`configWarning`
-   * notifications, forwarded structured via ACP session_info_update `_meta`) as a
-   * system_notice history item. Kept out of agent text so it renders as a warning
-   * and never pollutes titles or replay prompts. Runs on the per-session notice
-   * queue; dedupe happens inside the atomic updateHistory call because some
-   * runtime warnings fire once per turn.
+   * Persists runtime and host-control warnings as system notices, keeping titles
+   * and replay prompts free of diagnostic text. Ordinary runtime warnings dedupe
+   * by message; a supplied notice identity upserts an exact turn/phase diagnostic
+   * so a later turn can still report the same error.
    */
   private async recordAgentWarning(
     sessionId: SessionId,
-    warning: AgentSessionWarning
+    warning: AgentSessionWarning,
+    options?: { noticeId: string }
   ): Promise<void> {
     try {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -8782,7 +11614,7 @@ export class MessageHandler {
         },
       };
       const systemNotice: SessionHistoryInput = {
-        id: `agent-warning-${uuidV4()}`,
+        id: options?.noticeId ?? `agent-warning-${uuidV4()}`,
         role: 'system',
         timestamp: new Date(getServerNow()).toISOString(),
         read: undefined,
@@ -8790,16 +11622,16 @@ export class MessageHandler {
         fileDiff: [],
         items: [noticeItem],
       };
-      await sessionDoc.updateHistory((prevHistory) => {
-        const alreadyRecorded = prevHistory.some((entry) =>
-          entry.items?.some(
-            (item) =>
-              item?.type === 'system_notice' &&
-              item.name === 'agent_warning' &&
-              (item.meta as AgentWarningMeta | undefined)?.message === warning.message
-          )
-        );
-        return alreadyRecorded ? prevHistory : [...prevHistory, systemNotice];
+      const backend = await this.getSessionBackend(sessionDoc);
+      if (options?.noticeId) {
+        // Stop failures are per turn: the same error on a later turn must remain visible.
+        await backend.applyHistoryAction({ kind: 'upsert-turn', turn: systemNotice });
+        return;
+      }
+      await backend.applyHistoryAction({
+        kind: 'agent-warning',
+        turn: systemNotice,
+        message: warning.message,
       });
     } catch (error) {
       this.logger.debug(
@@ -8818,8 +11650,9 @@ export class MessageHandler {
     runtimeOverrides?: BuiltinRuntimeOverrides,
     titleConfig?: TitleGenerationConfig
   ): Promise<void> {
-    // Builtin Claude publishes a generated session_info_update title.
-    if (usesAcpProvidedSessionTitle(cliType, agentType)) {
+    // Builtin Claude and Grok generate their own titles and publish them
+    // as session_info_update; the isolated agent would only duplicate that work.
+    if (acpOwnsSessionTitleGeneration(cliType, agentType, runtimeOverrides)) {
       return;
     }
     const existingGeneration = this.titleGenerationInFlight.get(sessionId);
@@ -8849,7 +11682,32 @@ export class MessageHandler {
       this.logger.debug(`[${sessionId}] Generating session title because title is missing`);
       const resolvedTitleConfig =
         titleConfig ?? (await this.resolveTitleConfig(sessionId, meta?.agentConfigId));
+      const provider = meta?.agentConfigId
+        ? await this.workspaceDocument.getAgentConfigById(meta.agentConfigId, this.machineId)
+        : null;
+      if (meta?.agentConfigId && !provider) return null;
+      const profileStore = getCodexProfileStore();
+      if (
+        provider &&
+        !provider.codexAuth &&
+        (await profileStore.isAccountBound({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          configId: provider.id,
+        }))
+      ) {
+        this.logger.debug(
+          `[${sessionId}] Skipping session title generation: Codex account reference is missing`
+        );
+        return null;
+      }
+      const codexProfile = provider?.codexAuth
+        ? await profileStore.resolve(this.workspaceId, provider)
+        : undefined;
       const title = await generateTitleIsolated({
+        agentConfigId: provider?.id,
+        magpieGatewayUrl: provider?.magpieGatewayUrl,
+        codexProfile: codexProfile ? { profile: codexProfile } : undefined,
         cliType,
         agentType,
         customAcp,
@@ -9021,6 +11879,24 @@ export class MessageHandler {
         };
       }
 
+      if (request.type === 'local-project/create-directory') {
+        if (request.workspaceId !== this.workspaceId) {
+          return this.toLocalProjectControlError(
+            requestType,
+            'workspace_not_found',
+            'Workspace mismatch.'
+          );
+        }
+        return {
+          ok: true,
+          type: request.type,
+          result: await this.localProjectControlService.createDirectory(
+            request.parentPath,
+            request.name
+          ),
+        };
+      }
+
       if (request.type === 'local-project/prepare-add') {
         if (request.workspaceId !== this.workspaceId) {
           return this.toLocalProjectControlError(
@@ -9051,6 +11927,13 @@ export class MessageHandler {
             name: existingProject?.name ?? preparedProject.name,
             rootPath: existingProject?.rootPath ?? preparedProject.rootPath,
             alreadyRegistered: existingProject !== null,
+            ...(request.inspect
+              ? {
+                  inspection: await worktreeGitLegacy.probeLocalProjectMember(
+                    preparedProject.rootPath
+                  ),
+                }
+              : {}),
           },
         };
       }
@@ -9075,7 +11958,7 @@ export class MessageHandler {
     } catch (error) {
       return this.toLocalProjectControlError(
         requestType,
-        'execution_failed',
+        error instanceof LocalProjectCreateDirectoryError ? error.code : 'execution_failed',
         formatErrorMessage(error)
       );
     }
@@ -9089,12 +11972,16 @@ export class MessageHandler {
       this.workspaceId,
       this.machineId
     );
-    return Object.fromEntries(
-      Object.entries(projects).map(([localProjectId, project]) => [
-        localProjectId as LocalProjectId,
-        project.rootPath,
-      ])
-    ) as Record<LocalProjectId, string>;
+    const rootPaths: Record<string, string> = {};
+    for (const [localProjectId, project] of Object.entries(projects)) {
+      // Legacy machine meta is not validated on read, so a row can omit rootPath.
+      const rootPath = (project as { rootPath?: unknown } | undefined)?.rootPath;
+      if (typeof rootPath !== 'string') continue;
+      const trimmed = rootPath.trim();
+      if (!trimmed) continue;
+      rootPaths[localProjectId] = trimmed;
+    }
+    return rootPaths as Record<LocalProjectId, string>;
   }
 
   private async upsertLocalProjectMetaInCurrentWorkspace(entry: {
@@ -9123,7 +12010,12 @@ export class MessageHandler {
         lastOpenedAtMs: nowMs,
       },
       nowMs,
-      { sync: this.workspaceDocument, reason: 'local-project-add' }
+      {
+        sync: this.workspaceDocument,
+        reason: 'local-project-add',
+        refreshGitHubRemote: true,
+        standaloneVisible: true,
+      }
     );
   }
 
@@ -9140,7 +12032,7 @@ export class MessageHandler {
   }): Promise<
     { ok: true; rootPath: string } | { ok: false; response: LocalProjectControlResponse }
   > {
-    const access = await this.cloudPort.access.verifyMachineAccess({
+    const access = await this.verifyRequesterMachineAccess({
       workspaceId: this.workspaceId,
       machineId: this.machineId,
       requesterUserId: args.requesterUserId,
@@ -9157,12 +12049,15 @@ export class MessageHandler {
       };
     }
 
-    const rootPath = await resolveWorkspaceLocalProjectRootPath(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId,
-      args.localProjectId
-    );
+    // Encrypted control acts only on a root that hashes to the requested project ID.
+    const rootPath = this.encryptedQueryServer
+      ? await this.resolveLocalProjectRootForRpc(args.localProjectId, 'local-project-control')
+      : await resolveWorkspaceLocalProjectRootPath(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          args.localProjectId
+        );
     if (!rootPath) {
       return {
         ok: false,
@@ -9260,6 +12155,17 @@ export class MessageHandler {
         };
       }
 
+      if (request.type === 'local-project/search-files') {
+        return {
+          ok: true,
+          type: 'local-project/search-files',
+          result: await this.localProjectControlService.searchProjectFiles(rootPath, {
+            query: request.query,
+            limit: request.limit,
+          }),
+        };
+      }
+
       if (request.type === 'local-project/list-dir') {
         return {
           ok: true,
@@ -9278,7 +12184,8 @@ export class MessageHandler {
           type: 'local-project/list-skills',
           result: await this.localProjectControlService.listProjectSkills(
             rootPath,
-            request.skillDirs
+            request.skillDirs,
+            { knownFingerprint: request.knownFingerprint }
           ),
         };
       }
@@ -9313,7 +12220,7 @@ export class MessageHandler {
     const { requesterUserId } = precheck;
 
     try {
-      const access = await this.cloudPort.access.verifyMachineAccess({
+      const access = await this.verifyRequesterMachineAccess({
         workspaceId: this.workspaceId,
         machineId: this.machineId,
         requesterUserId,
@@ -9329,7 +12236,9 @@ export class MessageHandler {
       return {
         ok: true,
         type: 'local-project/list-global-skills',
-        result: await this.localProjectControlService.listGlobalSkills(),
+        result: await this.localProjectControlService.listGlobalSkills({
+          knownFingerprint: request.knownFingerprint,
+        }),
       };
     } catch (error) {
       return this.toLocalProjectControlError(
@@ -9456,14 +12365,68 @@ export class MessageHandler {
 
   cancelPendingPermissionRequests(): void {
     this.permissionRequestStartTimes.clear();
+    this.pendingPermissionRequests.clear();
   }
 
   /**
-   * Flush pending ACP updates and tear down session resources.
+   * Release parked observers before the processor drains; shared writes keep their owner.
    */
+  cancelPendingHistorySubscriptions(): void {
+    this.historySubscriptionAbort.abort();
+    this.cancelledHistorySubscriptions.clear();
+  }
+
+  inspectClientLoss() {
+    const watcher = this.sessionDispatchWatcher.inspectClientLoss();
+    const execution = this.executionService.inspectClientLoss();
+    return {
+      watcherStopped: watcher.stopped,
+      watcherChecks: watcher.pending,
+      executionTurns: execution.turns,
+      executionBookkeeping: execution.bookkeeping,
+    };
+  }
+
+  /** Stop intake synchronously after the daemon-wide idle check wins. */
+  stopNewIdentityRestoreDispatch(): void {
+    this.executionService.stopNewIdentityRestoreExecutions();
+    this.sessionDispatchWatcher.stop();
+    void this.operationCoordinator
+      .stop()
+      .catch((cause) =>
+        this.logger.warn('Identity restore retains Inbox shutdown for cleanup', cause)
+      );
+  }
+
+  /** Flush pending ACP updates and tear down session resources. */
+  async prepareForShutdown(): Promise<void> {
+    this.acpInteractionStopping = true;
+    await (await this.acpInteractionOwner)?.close();
+    this.sessionDispatchWatcher.stop();
+    this.executionService.stopCompletionPublication();
+    void this.operationCoordinator
+      .recoverStop()
+      .catch((cause) => this.logger.warn('Inbox shutdown incomplete', cause));
+    await this.executionService.waitForInboxReleases();
+  }
+
   async cleanup(): Promise<void> {
+    this.acpInteractionStopping = true;
+    await (await this.acpInteractionOwner)?.close();
+    this.executionService.stopCompletionPublication();
+    const inboxShutdown = this.operationCoordinator.recoverStop();
+    void inboxShutdown.catch((cause) =>
+      this.logger.error('Inbox shutdown retains resources', cause)
+    );
+    this.cancelPendingHistorySubscriptions();
+    this.historyOwnerAbort.abort();
+    await Promise.all([
+      this.iosSimulatorService.closeAll(),
+      this.androidEmulatorService.closeAll(),
+    ]);
     this.logger.debug('Cleaning up message handler resources');
     this.cleanedUp = true;
+    this.sessionActivePresence.native.retire();
     this.cancelAllCodeCollabTurnRetryTimers();
     if (this.machineRpcServerRetryTimer) {
       clearTimeout(this.machineRpcServerRetryTimer);
@@ -9472,23 +12435,33 @@ export class MessageHandler {
     // Stop scheduling/retrying local-file backfill; in-flight uploads finish but
     // no new attempts start. Pending blobs are recovered on next startup scan.
     this.sessionFileBackfillStopped = true;
+    this.remoteBackfillAbort?.abort();
+    await Promise.allSettled(this.localImageBackfills.values());
     this.cancelPendingPermissionRequests();
     this.machineRpcServer?.stop();
-    this.operationCoordinator.stop();
+    this.encryptedQueryServer?.stop();
     this.sessionDispatchWatcher.stop();
+    this.diffBlobReader?.dispose();
     this.codeCollabV2Service.dispose();
-    this.archiveWatchHandle?.unsubscribe();
-    this.archiveWatchHandle = null;
-    this.deleteWatchHandle?.unsubscribe();
-    this.deleteWatchHandle = null;
+    for (const handle of this.sessionLifecycleWatchHandles) handle.unsubscribe();
+    this.sessionLifecycleWatchHandles = [];
+    if (this.worktreeGcTimer) {
+      clearInterval(this.worktreeGcTimer);
+      this.worktreeGcTimer = null;
+    }
+    this.detachWorktreeGcSyncListener?.();
+    this.detachWorktreeGcSyncListener = null;
     this.machineFlockCommandWatcher.stop();
     this.providerSetupManager.stop();
-    this.sessionActivePresence.clearAll();
     // Terminating sessions is the producer barrier: agent callbacks may still
     // enqueue their final ACP notifications while termination is in progress,
     // but none can arrive after this await. Keep the document manager open so
     // those callbacks can be flushed below.
     await this.sessionManager.cleanUp({ keepWorkspaceDocumentOpen: true });
+    // Turn finalizers can still write history/evidence after producers stop.
+    // Keep every store open until their leases and monitoring actually release.
+    await this.sessionActivePresence.close();
+    await inboxShutdown;
     await this.flushAllACPUpdates();
     // Wait for any in-flight flushes to complete
     const inFlightPromises = this.store
@@ -9497,183 +12470,104 @@ export class MessageHandler {
       .filter((p): p is Promise<void> => p !== null);
     await Promise.all(inFlightPromises);
     await this.drainCodeCollabTurnPersistenceForCleanup();
-    await this.codeCollabV2DiffStore.close();
-    await this.previewService.closeAllActiveTunnelsForCleanup('Message handler cleanup');
-    await this.sessionManager.cleanUp();
+    const cleanupErrors: unknown[] = [];
+    for (const close of [
+      async () => await this.diffBlobStoreReader?.close(),
+      async () => await this.codeCollabV2DiffStore.close(),
+      async () =>
+        await this.previewService.closeAllActiveTunnelsForCleanup('Message handler cleanup'),
+      async () => await this.sessionManager.cleanUp(),
+    ]) {
+      try {
+        await close();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (cleanupErrors.length)
+      throw new AggregateError(cleanupErrors, 'Message handler cleanup failed.');
   }
 
-  private async maybeRenameSessionBranchFromPrompt(
+  private async buildNotificationPresentation(
     sessionId: SessionId,
-    session: ISession,
-    cliType: AgentConfigCliType,
-    agentType: string,
-    taskPrompt: string,
-    env?: Record<string, string>,
-    titleConfig?: TitleGenerationConfig
-  ): Promise<void> {
-    const trimmedPrompt = taskPrompt.trim();
-    if (!trimmedPrompt) {
-      return;
-    }
-
-    let metaBranchName: string | null = null;
-    let metaCustomAcp: CustomAcpLaunchSpec | undefined;
-    let metaRuntimeOverrides: BuiltinRuntimeOverrides | undefined;
-    let metaAgentConfigId: AgentConfigId | undefined;
-    let reusableTitlePromise: Promise<string | null> | undefined;
+    originTurnIds: readonly string[],
+    assistantTurnId?: string
+  ): Promise<NotificationPresentation | undefined> {
+    // Read exact originating inputs and the completed assistant entry, never all history.
+    // Mixed/large batches fall back to the conversation name.
     try {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const meta = await sessionDoc.getMetaState();
-      metaBranchName = meta?.branchName?.trim() || null;
-      metaAgentConfigId = meta?.agentConfigId;
-      const generatedMetaTitle = meta?.titleSource === 'generated' ? meta.title?.trim() : '';
-      reusableTitlePromise = generatedMetaTitle
-        ? Promise.resolve(generatedMetaTitle)
-        : this.titleGenerationInFlight.get(sessionId);
-      const agentConfig = metaAgentConfigId
-        ? await this.workspaceDocument.getAgentConfigById(metaAgentConfigId)
-        : null;
-      const legacyLaunchConfig = await readLegacySessionLaunchConfig({
-        repo: this.workspaceDocument.repo,
-        workspaceId: this.workspaceId,
-        machineId: this.machineId,
-        sessionId,
-        sessionMeta: meta,
-        logger: this.logger,
-      });
-      metaCustomAcp = agentConfig?.customAcp ?? legacyLaunchConfig?.customAcp;
-      metaRuntimeOverrides = agentConfig?.runtimeOverrides ?? legacyLaunchConfig?.runtimeOverrides;
-      if (metaBranchName && !isManagedWorktreeBranchName(metaBranchName)) {
-        return;
+      if (!meta) return undefined;
+      const backend = await this.getSessionBackend(sessionDoc);
+      const inputs: { id: string; scheduleRun?: unknown }[] = [];
+      if (originTurnIds.length <= 32) {
+        for (const id of originTurnIds) {
+          const read = await backend.history.readTurn(id);
+          inputs.push(read.state === 'ready' ? read.turn : { id });
+        }
       }
-    } catch (error) {
-      this.logger.debug(
-        `[${sessionId}] Failed to read session meta before branch rename: ${formatErrorMessage(error)}`
-      );
-    }
-
-    const resolvedTitleConfig =
-      titleConfig ?? (await this.resolveTitleConfig(sessionId, metaAgentConfigId));
-    const branchName = await this.generateBranchNameWithTimeout(
-      cliType,
-      agentType,
-      trimmedPrompt,
-      env,
-      20_000,
-      resolvedTitleConfig,
-      metaCustomAcp,
-      metaRuntimeOverrides,
-      reusableTitlePromise
-    );
-    if (!branchName) {
-      this.logger.debug(`[${sessionId}] Skipping branch rename: name generation timed out`);
-      return;
-    }
-
-    const workdir = session.getWorkdir();
-    const currentBranch = await resolveGitBranchName(session.exec.bind(session), workdir);
-    if (!currentBranch || currentBranch === branchName) {
-      return;
-    }
-    if (!isManagedWorktreeBranchName(currentBranch)) {
-      this.logger.debug(
-        `[${sessionId}] Skipping branch rename: not on a managed worktree branch (currentBranch=${currentBranch})`
-      );
-      return;
-    }
-    if (metaBranchName && metaBranchName !== currentBranch) {
-      this.logger.debug(
-        `[${sessionId}] Skipping branch rename: branch changed before rename (metaBranchName=${metaBranchName} currentBranch=${currentBranch})`
-      );
-      return;
-    }
-
-    try {
-      const renamedBranch = await renameBranchWithAvailableSuffix({
-        exec: session.exec.bind(session),
-        workdir,
-        currentBranch,
-        desiredBranchName: branchName,
-        maxLength: 50,
-      });
-      if (!renamedBranch) {
-        this.logger.debug(
-          `[${sessionId}] Skipping branch rename: branch changed or git rejected the rename`
-        );
-        return;
+      let projectName: string | undefined;
+      if (meta.project?.kind === 'local') {
+        try {
+          projectName = (
+            await resolveWorkspaceLocalProject(
+              this.workspaceDocument.repo,
+              this.workspaceId,
+              meta.machineId,
+              meta.project.localProjectId
+            )
+          )?.name;
+        } catch {
+          /* The repository name remains a useful fallback. */
+        }
       }
-      await this.turnPostProcessingService.syncSessionBranchName(sessionId, session);
-    } catch (error) {
-      this.logger.debug(`[${sessionId}] Failed to rename branch: ${formatErrorMessage(error)}`);
+      const presentation = resolveNotificationPresentation(meta, inputs, projectName);
+      if (assistantTurnId) {
+        try {
+          const reply = await backend.history.readTurn(assistantTurnId);
+          if (reply.state === 'ready') {
+            presentation.replyPreview = notificationReplyPreview(reply.turn);
+          }
+        } catch {
+          // An unavailable reply must not discard the existing display context.
+        }
+      }
+      return presentation;
+    } catch {
+      return undefined;
     }
   }
 
-  private async generateBranchNameWithTimeout(
-    cliType: AgentConfigCliType,
-    agentType: string,
-    taskPrompt: string,
-    env: Record<string, string> | undefined,
-    timeoutMs: number,
-    titleConfig?: TitleGenerationConfig,
-    customAcp?: CustomAcpLaunchSpec,
-    runtimeOverrides?: BuiltinRuntimeOverrides,
-    reusableTitlePromise?: Promise<string | null>
-  ): Promise<string | null> {
-    let timeoutHandle: NodeJS.Timeout | null = null;
-    const timeoutPromise = new Promise<null>((resolve) => {
-      timeoutHandle = setTimeout(() => resolve(null), timeoutMs);
-    });
-
-    const namePromise = (async (): Promise<string> => {
-      const title = reusableTitlePromise
-        ? await reusableTitlePromise
-        : await generateTitleIsolated({
-            cliType,
-            agentType,
-            customAcp,
-            runtimeOverrides,
-            taskPrompt,
-            logger: this.logger,
-            env,
-            titleConfig,
-          });
-      const base = title ?? taskPrompt;
-      return ensureValidBranchName(base, 'task');
-    })();
-
-    try {
-      const result = await Promise.race([namePromise, timeoutPromise]);
-      return result ?? null;
-    } catch (error) {
-      this.logger.debug(
-        `[branch-name] Failed to generate branch name: ${formatErrorMessage(error)}`
-      );
-      return null;
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }
-  }
-
-  private async notifySessionCompleted(
+  private async notifyTurnOutcome(
     sessionId: SessionId,
     userId: string,
-    occurrenceId: string
+    occurrenceId: string,
+    outcome: TerminalOutcome,
+    presentation?: NotificationPresentation
   ): Promise<void> {
     if (!this.notificationService) {
       return;
     }
     const notificationService = this.notificationService;
-    await this.runTurnCloudSideEffect(sessionId, 'completion notification', async () => {
+    await this.runTurnCloudSideEffect(sessionId, 'turn outcome notification', async () => {
+      if (this.isRecipientAtFocusedDesktop(userId)) {
+        // The user is at a Lody desktop: the desktop channel is enough. Only the
+        // mobile push is skipped; the silent Live Activity summary stays current.
+        this.logger.debug(`[${sessionId}] Mobile push skipped: recipient desktop is focused`);
+        await this.syncLiveActivitySummary(userId);
+        return;
+      }
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const meta = await sessionDoc.getMetaState();
       const workspaceSlug = this.workspaceSlug?.trim() || this.workspaceId;
       await notificationService.notifySessionCompleted({
         sessionId,
         occurrenceId,
+        outcome,
+        presentation,
         sessionTitle: meta?.title,
-        pullRequests: meta?.pullRequests,
+        pullRequests: resolveSessionPullRequests(meta),
         workspaceId: this.workspaceId,
         workspaceSlug,
         userId,
@@ -9682,10 +12576,25 @@ export class MessageHandler {
     });
   }
 
-  private async buildLiveActivitySummary(
-    userId: string,
-    options: { permissionAlert?: boolean } = {}
-  ): Promise<LiveActivitySummary> {
+  /**
+   * True only on positive evidence: a fresh `desktop-foreground` presence entry for
+   * the recipient in a hosted workspace. Unjoined rooms, read failures and stale
+   * entries answer false, so the mobile push is sent as before.
+   */
+  private isRecipientAtFocusedDesktop(userId: string): boolean {
+    try {
+      const snapshots = this.readHostedPresenceStates?.() ?? [
+        this.workspaceDocument.getPresenceStates() ?? {},
+      ];
+      return hasFreshDesktopForegroundPresence(snapshots, userId, getServerNow());
+    } catch (error) {
+      reportIfWasmFault(error);
+      this.logger.debug(`Desktop foreground presence read failed: ${formatErrorMessage(error)}`);
+      return false;
+    }
+  }
+
+  private async buildLiveActivitySummary(userId: string): Promise<LiveActivitySummary> {
     const sessionMetas = (
       await Promise.all(
         [...this.workspaceDocument.sessions.values()].map(async (sessionDoc) => {
@@ -9710,14 +12619,6 @@ export class MessageHandler {
       },
       formatUpdatedAt: (updatedAt) => formatLiveActivityUpdatedAt(updatedAt, nowMs),
     });
-    const permissionAlertCandidate = options.permissionAlert
-      ? findLiveActivityPermissionAlertCandidate({
-          sessions: sessionMetas,
-          currentUserId: userId,
-          defaultTitle: 'New Task',
-        })
-      : null;
-
     const summary: LiveActivitySummary = {
       activityId: buildLodyConversationsLiveActivityId({
         workspaceId: this.workspaceId,
@@ -9735,25 +12636,16 @@ export class MessageHandler {
       items,
       updatedAt: nowMs,
     };
-    if (permissionAlertCandidate) {
-      summary.permissionAlert = {
-        title: 'Permission Required',
-        body: permissionAlertCandidate.sessionTitle,
-      };
-    }
     return summary;
   }
 
-  private async syncLiveActivitySummary(
-    userId: string,
-    options: { permissionAlert?: boolean } = {}
-  ): Promise<LiveActivitySummarySyncResult> {
+  private async syncLiveActivitySummary(userId: string): Promise<LiveActivitySummarySyncResult> {
     if (!this.notificationService) {
       return { sent: false, reason: 'notifications_disabled' };
     }
 
     try {
-      const summary = await this.buildLiveActivitySummary(userId, options);
+      const summary = await this.buildLiveActivitySummary(userId);
       return await this.notificationService.syncLiveActivitySummary({
         workspaceId: this.workspaceId,
         userId,
@@ -9776,10 +12668,6 @@ export class MessageHandler {
     void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
   }
 
-  // ============================================================================
-  // GC-related public methods
-  // ============================================================================
-
   /**
    * Check if a session has pending ACP updates that haven't been flushed yet.
    */
@@ -9788,33 +12676,75 @@ export class MessageHandler {
   }
 
   /**
-   * Conservative guard for prompt replay: any buffered or already-flushed ACP
-   * update means the adapter may have acted on the user prompt, so execution
+   * Conservative guard for prompt replay: any owned ACP or image lifecycle
+   * event means the adapter may have acted on the user prompt, so execution
    * recovery must stop and surface the failure instead of retrying.
    */
-  private hasPromptOutputForTurn(sessionId: SessionId, turnId: string): boolean {
-    if (!this.store.has(sessionId)) {
-      return false;
+  private hasPromptEventsForTurn(sessionId: SessionId, turnId: string): boolean {
+    if (!this.store.has(sessionId) || this.store.getTurnId(sessionId) !== turnId) {
+      return true;
     }
-    const state = this.store.get(sessionId);
-    const hasBufferedOutput = state.acpUpdateBuffer.some((item) => item.target.turnId === turnId);
-    const hasFlushedOutput =
-      state.acpFlushCountInTurn > 0 && this.store.getTurnId(sessionId) === turnId;
-    return hasBufferedOutput || hasFlushedOutput;
+    const { turn } = this.store.get(sessionId);
+    return turn.phase !== 'idle' && turn.hasPromptEvents;
   }
 
-  /**
-   * Same observation as `hasPromptOutputForTurn`, but it distinguishes "this turn
-   * emitted nothing" from "we cannot tell". The two callers need opposite
-   * conservative answers on a missing session: prompt replay must refuse to
-   * retry, while the no-output guard must not accuse a turn it could not observe.
-   * `undefined` means unobservable — the transient state is gone.
-   */
-  observePromptOutputForTurn(sessionId: SessionId, turnId: string): boolean | undefined {
-    if (!this.store.has(sessionId)) {
-      return undefined;
+  private recordTurnEvent(
+    sessionId: SessionId,
+    turnEpoch: number | undefined,
+    visible = false
+  ): void {
+    if (!this.store.has(sessionId)) return;
+    const state = this.store.get(sessionId);
+    if (
+      state.suppressAcpReplayUntilTurnStart ||
+      state.turn.phase === 'idle' ||
+      state.turn.turnEpoch !== turnEpoch
+    )
+      return;
+    state.turn.hasPromptEvents = true;
+    state.turn.hasVisibleOutput ||= visible;
+  }
+
+  /** Drain the existing image owner before observing content, while this epoch still owns the turn. */
+  async observePromptContentForTurn(
+    sessionId: SessionId,
+    turnId: string
+  ): Promise<boolean | undefined> {
+    if (!this.store.has(sessionId)) return undefined;
+    const state = this.store.get(sessionId);
+    const turn = state.turn;
+    if (turn.phase === 'idle' || turn.turnId !== turnId) return undefined;
+    await this.flushCodexGeneratedImageUploads(sessionId, turnId);
+    if (state.imageGenerationUploads.size > 0 && !turn.hasVisibleOutput) return undefined;
+    return state.turn.phase !== 'idle' && state.turn.turnEpoch === turn.turnEpoch
+      ? state.turn.hasVisibleOutput
+      : undefined;
+  }
+
+  private isVisibleACPUpdate(update: AcpSessionNotification['update']): boolean {
+    switch (update.sessionUpdate) {
+      case 'agent_message_chunk':
+        // Non-text assistant content is materialized as attachments by the flush pipeline.
+        return update.content.type !== 'text' || update.content.text.trim().length > 0;
+      case 'agent_thought_chunk':
+        return update.content.type === 'text' && update.content.text.trim().length > 0;
+      case 'tool_call':
+      case 'tool_call_update':
+        // Sparse updates also materialize tool rows, including tool-only turns.
+        return update.toolCallId.length > 0;
+      case 'plan_update':
+        // A proposed markdown answer differs from the checklist/status plan channel.
+        return update.plan.type === 'markdown' && update.plan.content.trim().length > 0;
+      case 'subagent_event':
+        if (update.event.type !== 'output') return false;
+        const child = update.event.update;
+        // Child rich chunks only mark outputIncomplete in the shared reducer.
+        if (child.sessionUpdate === 'agent_message_chunk' && child.content.type !== 'text')
+          return false;
+        return this.isVisibleACPUpdate(child);
+      default:
+        return false;
     }
-    return this.hasPromptOutputForTurn(sessionId, turnId);
   }
 
   /**
@@ -9829,11 +12759,10 @@ export class MessageHandler {
       return false;
     }
 
-    if (meta.processingUserMsgId) {
-      return true;
-    }
-
-    return Boolean(meta.latestUserMsgId && meta.latestUserMsgId !== meta.lastHandledUserMsgId);
+    // Same predicate the dispatch watcher uses: a retired activation leaves the
+    // pointers unequal on purpose, and a raw comparison would pin the session
+    // in memory forever.
+    return hasPendingUserTurnActivation(meta);
   }
 
   /**
@@ -9842,10 +12771,14 @@ export class MessageHandler {
    * ACP process would discard that resumable session state.
    */
   async hasActiveGoal(sessionId: SessionId): Promise<boolean> {
-    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    // Peek first: GC asks this of cached docs, and an open would count as an access.
+    const sessionDoc =
+      this.workspaceDocument.peekSessionDoc(sessionId) ??
+      (await this.workspaceDocument.getOrCreateSessionDoc(sessionId));
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
-    const historyGoal = resolveLatestSessionGoalFromHistory(await sessionDoc.getHistory());
+    const backend = await this.getSessionBackend(sessionDoc);
+    const historyGoal = await backend.readLatestGoal();
     return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
   }
 
@@ -9854,6 +12787,16 @@ export class MessageHandler {
    */
   isArchiveInFlight(sessionId: SessionId): boolean {
     return this.archiveInFlight.has(sessionId);
+  }
+
+  /**
+   * Work the native agent does outside Lody's turns (a background shell, or a
+   * model turn it started itself). GC must not stop such a session as idle.
+   */
+  getNativeWork(sessionId: SessionId): NativeAgentWork {
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session || session.hasLiveAgentProcess?.() === false) return null;
+    return session.agentClient?.getNativeWork() ?? null;
   }
 
   /**
@@ -9894,6 +12837,65 @@ export class MessageHandler {
     return this.store.sessionIds();
   }
 
+  /** GC candidates and idle clocks: tracked sessions plus every cached Session doc. */
+  getGCSessionSources(): Pick<SessionGCDeps, 'getSessionIds' | 'getSessionLastActivity'> {
+    return combineGCSessionSources(
+      {
+        sessionIds: () => this.store.sessionIds(),
+        has: (sessionId) => this.store.has(sessionId),
+        lastActivityMs: (sessionId) => this.getLastActivity(sessionId),
+      },
+      {
+        sessionIds: () => this.workspaceDocument.cachedSessionDocIds(),
+        lastActivityMs: (sessionId) =>
+          this.workspaceDocument.cachedSessionDocLastAccessMs(sessionId),
+      }
+    );
+  }
+
+  /** Host-local admission snapshot; durable pending input is checked by its caller. */
+  hasAutomationSessionWork(sessionId: SessionId): boolean {
+    return (
+      this.hasAutomationTurnWork(sessionId) ||
+      this.operationCoordinator.hasPendingWorkForRequester(sessionId)
+    );
+  }
+
+  /** Work that occupies this chat's own Turns; delegated Operations still running elsewhere do not. */
+  hasAutomationTurnWork(sessionId: SessionId): boolean {
+    const execution = this.executionService.getExecutionSnapshot(sessionId);
+    return (
+      execution.hasActiveTurn ||
+      execution.hasBlockingPendingCreate ||
+      execution.hasRewriteBarrier ||
+      this.operationCoordinator.hasTurnWorkForRequester(sessionId) ||
+      this.hasSessionActivePresence(sessionId) ||
+      this.sessionDispatchWatcher.hasPendingDispatch(sessionId)
+    );
+  }
+
+  private automationSessionAuthority: SessionAutomationAuthority | undefined;
+  getAutomationSessionAuthority(): SessionAutomationAuthority {
+    return (this.automationSessionAuthority ??= new SessionAutomationAuthority({
+      manager: this.workspaceDocument,
+      execution: this.executionService,
+      machineId: this.machineId,
+      hasOtherWork: (sessionId) =>
+        this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+        this.hasSessionActivePresence(sessionId) ||
+        this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+      hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
+      nativeActivity: (sessionId) => {
+        const session = this.sessionManager.getSession(sessionId);
+        if (!session || session.hasLiveAgentProcess?.() === false) return 'idle';
+        return session.agentClient ? session.agentClient.getNativeActivityObservation() : 'idle';
+      },
+      author: (sessionId) =>
+        this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,
+      canEdit: (sessionId, userId) => this.verifyAutomationEditAccess(sessionId, userId),
+    }));
+  }
+
   /**
    * Check if a session has an active turn (prompting or finalizing).
    */
@@ -9922,6 +12924,10 @@ export class MessageHandler {
     return this.sessionActivePresence.activeSessionCount();
   }
 
+  isIdentityRestoreExecutionIdle(): boolean {
+    return this.getActiveTurnCount() === 0 && this.executionService.isMachineIdentityRestoreIdle();
+  }
+
   private logCodeCollabDebug(message: string): void {
     this.logger.debug(message);
   }
@@ -9932,10 +12938,16 @@ export class MessageHandler {
    */
   async cleanSessionForGC(sessionId: SessionId): Promise<void> {
     this.logger.debug(`[GC] Cleaning session ${sessionId}`);
+    // Read before cleanup: later steps may create tracking state lazily.
+    const tracked = this.store.has(sessionId);
 
     // 1. Clear active presence
     this.clearSessionActivePresence(sessionId);
 
+    await Promise.all([
+      this.iosSimulatorService.closeSession(sessionId),
+      this.androidEmulatorService.closeSession(sessionId),
+    ]);
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session cleaned by GC');
 
     // 2. Terminate session process first — if later steps throw, the process
@@ -9944,8 +12956,11 @@ export class MessageHandler {
       await this.sessionManager.terminateSession(sessionId, true);
     }
 
-    // 3. Clean Loro documents (main memory savings)
-    await this.workspaceDocument.cleanSessionDoc(sessionId);
+    // 3. Clean Loro documents (main memory savings). A doc that is only cached
+    //    never ran a turn here, so its synced status is not this machine's to reset.
+    await this.workspaceDocument.cleanSessionDoc(sessionId, {
+      preserveStatus: !tracked,
+    });
 
     // 4. Drop transient tracking last — only after all cleanup succeeded,
     //    so getTrackedSessionIds() can still see it for retry if steps above throw.
@@ -9954,3 +12969,4 @@ export class MessageHandler {
     this.logger.debug(`[GC] Session ${sessionId} cleaned`);
   }
 }
+import { getCodexProfileStore } from '@/agent/codex-profile-store';

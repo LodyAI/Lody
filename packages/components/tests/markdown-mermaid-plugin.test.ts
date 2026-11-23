@@ -1,68 +1,102 @@
-import { describe, expect, it, vi } from 'vitest';
+// @vitest-environment jsdom
+import { describe, expect, it } from 'vitest';
 
-vi.mock('beautiful-mermaid', () => ({
-  renderMermaidSVGAsync: async (source: string) => {
-    if (!source.includes('A-->B')) {
-      throw new Error(`Invalid mermaid header: "${source.split('\n')[0]}"`);
-    }
-    return `<svg xmlns="http://www.w3.org/2000/svg" data-diagram="flowchart"></svg>`;
-  },
-}));
+import {
+  renderMarkdownMermaidSvg,
+  resolveMermaidColors,
+  withMermaidColors,
+} from '../src/components/ai-gui/markdown-mermaid';
 
-vi.mock('mermaid', () => {
-  throw new Error('mermaid.js must not load after the renderer unifies on beautiful-mermaid');
-});
+const rootSvgTag = (svg: string) => svg.slice(0, svg.indexOf('>') + 1);
 
-const { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } =
-  await import('../src/components/ai-gui/markdown-mermaid');
+describe('markdown mermaid rendering', () => {
+  it('renders a flowchart that takes its colors from the surrounding theme', async () => {
+    const svg = await renderMarkdownMermaidSvg(['graph TD', '  A[Start]-->B[Done]'].join('\n'));
+    const root = rootSvgTag(svg);
 
-describe('markdown mermaid plugin', () => {
-  it('renders a flowchart through beautiful-mermaid', async () => {
-    const plugin = createMarkdownMermaidPlugin();
-    const result = await plugin
-      .getMermaid(createMarkdownMermaidConfig('dark'))
-      .render('diagram-1', ['graph TD', '  A-->B'].join('\n'));
-
-    expect(result.svg).toContain('data-diagram="flowchart"');
+    expect(root).toContain('pele-flowchart');
+    expect(root).toContain('var(--pele-fg');
+    // No literal palette is baked in, so the block's theme variables apply.
+    expect(root).not.toMatch(/--pele-fg:/);
+    expect(svg).toContain('Start');
   });
 
-  it('keeps dark-mode mermaid colors readable', () => {
-    const lightConfig = createMarkdownMermaidConfig('light');
-    const darkConfig = createMarkdownMermaidConfig('dark');
+  it('renders diagram types the previous renderer showed as source', async () => {
+    const pie = await renderMarkdownMermaidSvg(
+      ['pie title Pets', '  "Dogs" : 40', '  "Cats" : 60'].join('\n')
+    );
+    const gantt = await renderMarkdownMermaidSvg(
+      ['gantt', '  title Plan', '  section Build', '  Ship :a1, 2026-01-01, 3d'].join('\n')
+    );
 
-    expect(lightConfig.theme).toBe('base');
-    expect(darkConfig.theme).toBe('base');
-    expect(darkConfig.darkMode).toBe(true);
-    expect(darkConfig.themeVariables).toMatchObject({
-      primaryTextColor: '#f8fafc',
-      lineColor: '#cbd5e1',
-      textColor: '#e2e8f0',
-    });
-    expect(darkConfig.themeVariables).not.toBe(lightConfig.themeVariables);
+    expect(rootSvgTag(pie)).toContain('pele-pie');
+    expect(pie.match(/class="pele-slice"/g)).toHaveLength(2);
+    expect(pie).toContain('var(--pele-series-1');
+    expect(rootSvgTag(gantt)).toContain('pele-gantt');
+    expect(gantt).toContain('Ship');
+  });
+
+  it('drops diagram links and remote images', async () => {
+    const svg = await renderMarkdownMermaidSvg(
+      [
+        'graph TD',
+        '  A-->B',
+        '  click A "https://example.com/track"',
+        '  C@{ img: "https://example.com/pixel.png", label: "C" }',
+      ].join('\n')
+    );
+
+    expect(svg).not.toContain('example.com');
   });
 
   it('falls back to a themed multi-line code block for unsupported diagram types', async () => {
-    const plugin = createMarkdownMermaidPlugin();
-    const result = await plugin
-      .getMermaid(createMarkdownMermaidConfig('dark'))
-      .render('diagram-2', ['pie title Pets', '  "Dogs" : 40', '  "Cats" : 60'].join('\n'));
+    const svg = await renderMarkdownMermaidSvg(
+      ['zenuml', '  title Order', '  Alice->Bob: hello'].join('\n')
+    );
 
-    expect(result.svg).not.toContain('Diagram unavailable');
+    expect(svg).not.toContain('Diagram unavailable');
     // One tspan per source line, so the fallback actually renders multi-line.
-    expect(result.svg.match(/<tspan/g)).toHaveLength(3);
-    expect(result.svg).toContain('pie title Pets');
-    // Dark theme surface/text colors, not the old light amber panel.
-    expect(result.svg).toContain('fill="#111827"');
-    expect(result.svg).toContain('fill="#e2e8f0"');
+    expect(svg.match(/<tspan/g)).toHaveLength(3);
+    expect(svg).toContain('zenuml');
+    expect(svg).toContain('fill="var(--pele-surface');
+    expect(svg).toContain('fill="var(--pele-fg');
+  });
+
+  it('falls back to the source listing on a syntax error', async () => {
+    const svg = await renderMarkdownMermaidSvg(['graph TD', '  A-->'].join('\n'));
+
+    expect(svg.match(/<tspan/g)).toHaveLength(2);
+    expect(svg).toContain('A--&gt;');
   });
 
   it('escapes markup in the fallback source listing', async () => {
-    const plugin = createMarkdownMermaidPlugin();
-    const result = await plugin
-      .getMermaid(createMarkdownMermaidConfig('light'))
-      .render('diagram-3', 'pie title <script>alert(1)</script>');
+    const svg = await renderMarkdownMermaidSvg('zenuml <script>alert(1)</script>');
 
-    expect(result.svg).not.toContain('<script>');
-    expect(result.svg).toContain('&lt;script&gt;');
+    expect(svg).not.toContain('<script>');
+    expect(svg).toContain('&lt;script&gt;');
+  });
+});
+
+describe('mermaid colors for copies that leave the block', () => {
+  const themedHost = () => {
+    const host = document.createElement('div');
+    host.style.setProperty('--pele-fg', 'rgb(1, 2, 3)');
+    host.style.setProperty('--pele-bg', 'rgb(250, 250, 250)');
+    document.body.append(host);
+    return host;
+  };
+
+  it('bakes the colors in effect into downloaded markup', async () => {
+    const host = themedHost();
+    const svg = await renderMarkdownMermaidSvg(['graph TD', '  A-->B'].join('\n'));
+
+    const file = withMermaidColors(svg, resolveMermaidColors(host));
+    const root = rootSvgTag(file);
+
+    expect(root).toContain('--pele-fg:rgb(1, 2, 3)');
+    expect(root).toContain('--pele-bg:rgb(250, 250, 250)');
+    // Pele's own declarations still follow, so they read the baked values.
+    expect(root).toContain('var(--pele-fg');
+    host.remove();
   });
 });

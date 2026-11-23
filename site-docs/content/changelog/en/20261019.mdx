@@ -1,0 +1,28 @@
+---
+title: '20261019'
+version: 0.107.0
+date: 2026-10-19
+description: Native outcome notifications, per-turn cost estimates, multi-machine Roles, Mermaid, and Linux ARM64, plus session stability and sync-engine fixes.
+---
+
+Version 0.107.0
+
+### ✨ New Features
+
+- Native outcome notifications when an Agent finishes, with copy closer to the current work context.
+- Per-turn cost estimates.
+- Run the same Agent Role on several machines; propose creating or updating Roles via MCP / CLI.
+- Render Mermaid diagrams in chat with Pele; Markdown previews can show embedded images.
+- “Open with Delta” launcher; connected Agent icons in machine settings.
+- Mobile Changes navigation aligned with desktop.
+- Linux ARM64 installers for both stable and Nightly.
+- Bug reports include client diagnostics / environment details for easier triage.
+
+### 🐛 Fixes & Improvements
+
+- More reliable sessions and Daemon: idle GC no longer reaps sessions whose agent is still working, temporary start failures can retry, and chat can continue after a stop.
+- Assorted sync-engine optimizations and fixes.
+- Preview local files without a running Daemon; Codex citations render as file cards, and bundled Codex history import is restored.
+- iOS 16.4+ runtime compatibility; Windows caption buttons no longer cover overlays.
+
+Thanks to Astro-Han, scbizu, and timonwong for contributing to this release!

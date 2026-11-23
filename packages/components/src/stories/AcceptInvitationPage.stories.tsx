@@ -82,3 +82,12 @@ export const ErrorState: Story = {
     errorMessage: 'Invitation not found or expired.',
   },
 };
+
+export const BillingBlocked: Story = {
+  globals: { locale: 'zh_CN' },
+  args: {
+    state: 'billing_blocked',
+    errorMessage:
+      '新增付费席位加入前，管理员需在账单设置中绑定可自动扣款的支付方式。已有成员不受影响。',
+  },
+};

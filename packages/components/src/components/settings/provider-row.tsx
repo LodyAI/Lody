@@ -1,7 +1,11 @@
+import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   type AgentConfigCliType,
@@ -10,71 +14,200 @@ import {
   type MachineViewMeta,
   parseRateLimitEntryKey,
 } from '@lody/shared';
-import { toast } from 'sonner';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
+import { Button } from '@lody/ui/button';
+import { AlertDialog } from '@/ui/dialog';
+import { withClassName } from '@/lib/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
+import type { AcpModelOptionsRefreshProgress } from '@/hooks/use-refresh-machine-acp-capabilities';
+import { formatModelOptionsProgressText } from './model-options-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
-import { CodexResetForecastChip } from '@/components/codex-reset/codex-reset-forecast-entry';
+import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
+import { formatLocalizedRelativeTime } from '@/lib/format-relative-time';
+import { Menu } from '@lody/ui/menu';
+import { ProviderUsageSummary } from './provider-usage-summary';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
   canShowSubscriptionRateLimits,
-  formatRateLimitWindowShortLabel,
   getAgentRateLimitEntries,
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
+
+/** Refreshes one Provider; `onModelOptionsProgress` names each model whose options are read. */
+export type ProviderRefreshHandler = (
+  config: AgentConfigMeta,
+  options?: { onModelOptionsProgress?: (progress: AcpModelOptionsRefreshProgress) => void }
+) => Promise<void>;
+
+const styles = stylex.create({
+  root: { minWidth: 0 },
+  row: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    alignItems: 'center',
+    minWidth: 0,
+    paddingInlineEnd: space[4],
+  },
+  main: { gridColumn: 1, gridRow: 1, gap: '10px', paddingInline: space[4], paddingBlock: space[2] },
+  // When quota follows on the next grid row, the main button's bottom padding
+  // becomes the inter-line gap instead of the row's edge — hand it to `usage`.
+  mainWithUsage: { paddingBlockEnd: 0 },
+  mainList: {
+    gridColumn: 1,
+    gridRow: 1,
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: space[3],
+  },
+  icon: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    color: colors.label,
+  },
+  iconList: { width: '32px', height: '32px' },
+  glyph: { width: '16px', height: '16px' },
+  glyphList: { width: '20px', height: '20px' },
+  body: { flexGrow: 1, minWidth: 0 },
+  // Quota is never worth the name it would squeeze: it takes the line under
+  // the identity, aligned with the name text, and wraps at full row width.
+  usage: {
+    gridColumn: '1 / -1',
+    gridRow: 2,
+    display: 'flex',
+    justifyContent: 'flex-start',
+    paddingInlineStart: '50px',
+    paddingTop: space[1],
+    paddingBottom: space[2],
+  },
+  usageList: { paddingInlineStart: '60px' },
+  trailing: {
+    gridColumn: 2,
+    gridRow: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  progress: {
+    paddingInlineStart: '50px',
+    paddingInlineEnd: space[4],
+    paddingBottom: space[2],
+    fontSize: uiText.captionSize,
+    color: colors.secondaryLabel,
+  },
+});
 
 export type ProviderRowProps = {
   config: AgentConfigMeta;
   machine: MachineViewMeta | undefined;
   onEdit: (config: AgentConfigMeta) => void;
   onDelete?: (config: AgentConfigMeta) => Promise<void>;
-  onRefresh?: (config: AgentConfigMeta) => Promise<void>;
+  onRefresh?: ProviderRefreshHandler;
+  /**
+   * Density: `card` is the compact line of the desktop provider card, `list`
+   * the roomier mobile one. Neither draws a surface: the list draws one card
+   * for all its providers and the rule between them.
+   */
+  variant?: 'card' | 'list';
+  /**
+   * How much the provider is used on its machine. A compact row states it on
+   * its second line, with the default model, so a short list still says what
+   * each provider is for and whether anyone reaches for it.
+   */
+  usage?: { conversations: number; lastUsedAt: number | null };
+  /** Layout only. */
+  className?: string;
 };
 
-/** One provider entry. Signing in again lives in the provider's detail dialog
- *  (`AgentConfigDialog`), not here: only some providers can sign in at all. */
-export function ProviderRow({ config, machine, onEdit, onDelete, onRefresh }: ProviderRowProps) {
+/** One provider entry, as a line of its machine's provider card. Signing in
+ *  again lives in the provider's detail dialog (`AgentConfigDialog`), not here:
+ *  only some providers can sign in at all. */
+export function ProviderRow({
+  config,
+  machine,
+  onEdit,
+  onDelete,
+  onRefresh,
+  variant = 'card',
+  usage,
+  className,
+}: ProviderRowProps) {
   const { t } = useTranslation();
   const { cliType, agentType } = config;
   const envCount = Object.keys(config.env || {}).length;
+  // The cached model capabilities shared with the composer. Quota refresh is separate.
+  const selector = useAcpSelectorOptions({
+    configId: config.id,
+    cliType,
+    agentType,
+    runtimeOverrides: config.runtimeOverrides,
+    machine,
+  });
+  // A model the runtime calls "default" names nothing, so the row leaves it out.
+  const defaultModel =
+    selector.defaultModelId && selector.defaultModelId.toLowerCase() !== 'default'
+      ? (selector.modelOptions.find((option) => option.value === selector.defaultModelId)?.label ??
+        null)
+      : null;
+  useProviderQuotaRefresh(
+    machine?.id,
+    config.id,
+    machine?.acpCapabilities?.[config.id]?.rateLimits?.query === true &&
+      canShowSubscriptionRateLimits({
+        cliType,
+        agentType,
+        config,
+        capability: machine?.acpCapabilities?.[config.id]?.rateLimits,
+      })
+  );
   const showRateLimits =
-    canShowSubscriptionRateLimits({ cliType, agentType, config }) &&
+    canShowSubscriptionRateLimits({
+      cliType,
+      agentType,
+      config,
+      capability: machine?.acpCapabilities?.[config.id]?.rateLimits,
+    }) &&
     !!machine?.raceLimits &&
-    Object.keys(machine.raceLimits).some(
-      (key) => parseRateLimitEntryKey(key).cliType === agentType
-    );
+    Object.keys(machine.raceLimits).some((key) => {
+      const parsed = parseRateLimitEntryKey(key);
+      return parsed.cliType === agentType && parsed.agentConfigId === config.id;
+    });
 
-  // Compact usage meters shown inline after the provider name.
+  // Reported subscription windows for this exact provider configuration.
   const rateLimitWindows = useMemo(() => {
     if (!showRateLimits || !machine?.raceLimits) return [];
-    for (const entry of getAgentRateLimitEntries(machine.raceLimits, agentType)) {
+    for (const entry of getAgentRateLimitEntries(machine.raceLimits, agentType, config.id)) {
       const windows = getAgentRateLimitWindows(entry.limits);
       if (windows.length > 0) return windows;
     }
     return [];
-  }, [showRateLimits, machine?.raceLimits, agentType]);
+  }, [showRateLimits, machine?.raceLimits, agentType, config.id]);
 
   // Codex-only: the third-party reset forecast for OpenAI's own usage limits.
   const showResetForecast = canShowCodexResetForecast({ cliType, agentType, config });
 
-  const typeBadge = cliType === 'builtin' ? null : cliType === 'custom' ? 'Custom' : 'Registry';
+  // What kind of provider this is, when it is not one Lody ships: a fact of the
+  // meta line, in words, not a pill on every row.
+  const kind =
+    cliType === 'builtin'
+      ? null
+      : cliType === 'custom'
+        ? t('settings.agent.dialog.group.custom', 'Custom')
+        : t('settings.agent.dialog.group.registry', 'ACP Provider');
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [modelProgress, setModelProgress] = useState<AcpModelOptionsRefreshProgress | null>(null);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const binaryProgress = useMachineAcpBinaryProgress(
     runtime,
@@ -102,7 +235,7 @@ export function ProviderRow({ config, machine, onEdit, onDelete, onRefresh }: Pr
     if (!onRefresh) return;
     try {
       setRefreshing(true);
-      await onRefresh(config);
+      await onRefresh(config, { onModelOptionsProgress: setModelProgress });
       toast.success(
         t('settings.agent.provider.refreshSuccess', 'Refreshed {{name}}', { name: config.name })
       );
@@ -115,169 +248,162 @@ export function ProviderRow({ config, machine, onEdit, onDelete, onRefresh }: Pr
       );
     } finally {
       setRefreshing(false);
+      setModelProgress(null);
     }
   };
 
+  const compact = variant === 'card';
+  const hasUsageSummary = rateLimitWindows.length > 0 || showResetForecast;
+  const facts = compact
+    ? [
+        kind,
+        defaultModel,
+        usage && usage.conversations > 0
+          ? t('settings.agent.provider.conversationCount', '{{count}} conversations', {
+              count: usage.conversations,
+            })
+          : null,
+        usage?.lastUsedAt != null
+          ? t('settings.agent.provider.lastUsed', 'Used {{ago}}', {
+              ago: formatLocalizedRelativeTime(usage.lastUsedAt, t),
+            })
+          : null,
+        envCount > 0 ? t('settings.agent.provider.envCount', { count: envCount }) : null,
+      ].filter((fact): fact is string => fact != null)
+    : [kind].filter((fact): fact is string => fact != null);
   return (
-    <div className="overflow-hidden rounded-lg bg-foreground/[0.04]">
-      <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
+    <div
+      data-testid="agent-provider"
+      data-agent-config-id={config.id}
+      data-machine-id={config.machineId}
+      {...withClassName(stylex.props(styles.root), className)}
+    >
+      <div {...stylex.props(styles.row, surface.pressableLine)}>
         <button
           type="button"
           onClick={() => onEdit(config)}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-1.5 text-left focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-          aria-label={t('agents.editConfig', 'Edit config')}
+          {...stylex.props(
+            catalog.rowMain,
+            compact ? styles.main : styles.mainList,
+            hasUsageSummary && styles.mainWithUsage
+          )}
+          aria-label={t('agents.editConfig', 'Edit Config')}
         >
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center text-foreground/80">
+          <div {...stylex.props(styles.icon, !compact && styles.iconList)}>
             <AgentIcon
               cliType={cliType}
               agentType={agentType}
               brandId={config.brandId}
               env={config.env}
-              className="h-4 w-4"
+              className={stylex.props(compact ? styles.glyph : styles.glyphList).className}
             />
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="min-w-0 truncate text-sm font-medium">{config.name}</span>
-              {typeBadge ? (
-                <Badge variant="secondary" className="text-[10px] capitalize">
-                  {typeBadge}
-                </Badge>
-              ) : null}
+          <div {...stylex.props(styles.body)}>
+            <div {...stylex.props(catalog.titleLine)}>
+              <span data-testid="agent-provider-name" {...stylex.props(catalog.name)}>
+                {config.name}
+              </span>
             </div>
+            {facts.length > 0 ? (
+              <span {...stylex.props(catalog.meta)}>
+                <span {...stylex.props(catalog.truncate)}>{facts.join(' · ')}</span>
+              </span>
+            ) : null}
           </div>
         </button>
-        <div className="flex shrink-0 items-center gap-2 py-1.5 pr-3 text-xs text-muted-foreground">
-          {/* Not mounted at all when ineligible, so a non-Codex row costs no
-              store subscription and no clock tick. */}
-          {showResetForecast ? <CodexResetForecastChip enabled /> : null}
-          {rateLimitWindows.length > 0 && (
-            <div className="hidden items-center gap-2.5 sm:flex">
-              {rateLimitWindows.map((window, index) => (
-                <RateLimitMeter
-                  key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                  label={formatRateLimitWindowShortLabel(window.windowDurationSeconds)}
-                  remainingPercent={window.remainingPercent}
-                />
-              ))}
-            </div>
-          )}
-          {envCount > 0 && (
+        {hasUsageSummary ? (
+          <div {...stylex.props(styles.usage, !compact && styles.usageList)}>
+            <ProviderUsageSummary
+              name={config.name}
+              windows={rateLimitWindows}
+              showResetForecast={showResetForecast}
+            />
+          </div>
+        ) : null}
+        <div {...stylex.props(styles.trailing)}>
+          {envCount > 0 && !compact ? (
             <span>{t('settings.agent.provider.envCount', { count: envCount })}</span>
-          )}
-          {refreshing && binaryProgressText ? (
-            <span className="max-w-[9rem] truncate whitespace-nowrap">{binaryProgressText}</span>
           ) : null}
-          {onRefresh && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              disabled={refreshing}
-              aria-label={t(
-                'agents.acpCapabilities.refreshModelsAndModes',
-                'Refresh models and modes'
-              )}
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleRefresh();
-              }}
-            >
-              {refreshing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-            </Button>
-          )}
-          {onDelete && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              aria-label={t('common.delete', 'Delete')}
-              onClick={(event) => {
-                event.stopPropagation();
-                setDeleteOpen(true);
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          )}
+          {onRefresh || onDelete ? (
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    icon
+                    disabled={refreshing}
+                    aria-label={t('settings.agent.provider.manage', 'Manage {{name}}', {
+                      name: config.name,
+                    })}
+                  >
+                    {refreshing ? (
+                      <Spinner size="small" />
+                    ) : (
+                      <MoreHorizontal {...stylex.props(catalog.icon)} />
+                    )}
+                  </Button>
+                }
+              />
+              <Menu.Content align="end" width="compact">
+                {onRefresh ? (
+                  <Menu.Item
+                    icon={RefreshCw}
+                    onClick={() => {
+                      void handleRefresh();
+                    }}
+                  >
+                    {t('agents.acpCapabilities.refreshModelsAndModes', 'Refresh models and modes')}
+                  </Menu.Item>
+                ) : null}
+                {onRefresh && onDelete ? <Menu.Separator /> : null}
+                {onDelete ? (
+                  <Menu.Item icon={Trash2} tone="destructive" onClick={() => setDeleteOpen(true)}>
+                    {t('common.delete', 'Delete')}
+                  </Menu.Item>
+                ) : null}
+              </Menu.Content>
+            </Menu.Root>
+          ) : null}
         </div>
       </div>
-      {/* Mobile keeps the usage meters on a second line under the name; desktop
-          shows them inline before the refresh button. */}
-      {rateLimitWindows.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 pb-2.5 pt-0.5 sm:hidden">
-          {rateLimitWindows.map((window, index) => (
-            <RateLimitMeter
-              key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-              label={formatRateLimitWindowShortLabel(window.windowDurationSeconds)}
-              remainingPercent={window.remainingPercent}
-            />
-          ))}
+      {refreshing && (modelProgress || binaryProgressText) ? (
+        <div role="status" {...stylex.props(styles.progress)}>
+          {modelProgress ? formatModelOptionsProgressText(t, modelProgress) : binaryProgressText}
         </div>
-      )}
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+      ) : null}
+      <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('agents.deleteConfigConfirm', 'Delete Configuration')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('agents.deleteConfigConfirmDescription', {
                 name: config.name,
                 defaultValue:
                   'Are you sure you want to delete "{{name}}"? This action cannot be undone.',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <Button
               disabled={deleting}
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 void handleDelete();
               }}
-              className={cn('bg-destructive text-destructive-foreground hover:bg-destructive/90')}
+              variant="destructive"
             >
-              {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {deleting && <Spinner size="small" />}
               {t('common.delete', 'Delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
-  );
-}
-
-function RateLimitMeter({
-  label,
-  remainingPercent,
-}: {
-  label: string;
-  remainingPercent: number | null;
-}) {
-  const pct = remainingPercent == null ? 0 : Math.min(100, Math.max(0, remainingPercent));
-  const percentText = remainingPercent == null ? '—' : `${Math.round(remainingPercent)}%`;
-  return (
-    <span
-      className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
-      title={`${label}: ${percentText}`}
-    >
-      <span className="font-medium">{label}</span>
-      <span className="relative h-1 w-10 overflow-hidden rounded-full bg-foreground/10">
-        <span
-          className="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/60"
-          style={{ width: `${pct}%` }}
-        />
-      </span>
-      <span className="font-mono tabular-nums">{percentText}</span>
-    </span>
   );
 }
 
@@ -318,11 +444,13 @@ export function labelForAgent(cliType: AgentConfigCliType, agentType: string): s
   if (cliType === 'builtin') {
     if (agentType === 'claude') return 'Claude';
     if (agentType === 'codex') return 'Codex';
+    if (agentType === 'antigravity') return 'Antigravity';
     return agentType;
   }
   if (cliType === 'custom') {
     return 'Custom';
   }
+  if (agentType === 'antigravity-acp') return 'Antigravity ACP (Legacy)';
   const registry = REGISTRY_ACP_AGENTS.find((a) => a.id === agentType);
   return registry?.name ?? agentType;
 }

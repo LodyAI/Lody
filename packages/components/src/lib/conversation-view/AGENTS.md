@@ -1,0 +1,98 @@
+# ConversationView
+
+`CLAUDE.md` is a symlink to this file. Parent guidelines apply.
+
+- Use the paired optional display/run reader for Loro: turn hydration retains only
+  child metadata/latest-step previews. A non-enumerable task `history` capability
+  reads one owned run only inside its mounted detail. `readAll` remains complete;
+  display turns are never export, copy or write inputs. Readers without the pair
+  retain complete turns. Keep existing content-epoch fencing for display reads.
+  Detail reads ignore late results after source changes/unmount and offer retry;
+  full runs live only in the mounted detail, never in a global cache.
+- The shipped implementation is `createConversationViewFromReader`. Its index
+  comes from directory reads; bodies are acquired by window. Loro imports its
+  document and reads an O(total) directory. Roost opens the latest active-branch
+  page and loads older pages at the viewport edge. Complete index/fact/search
+  consumers hold an `acquireDirectory` lease; saved-anchor restoration requests
+  that turn before accepting the first viewport report. Unloaded absolute slots are
+  sentinels, never messages, body-read targets, or proof of complete fact coverage.
+- Preserve the cursor of a retained older prefix during live append. Rebase a
+  stale branch cursor across the loaded window only; retries must not silently
+  fetch the unloaded prefix. Page membership and positions must agree before merge.
+- Outline summaries are lazy: opening builds the directory and retained tail only.
+  Hover reads the selected question and replies; released/evicted previews refresh
+  on demand after content edits. Business fact derivation is a separate consumer.
+- Cache identities and leases use turn ids, not positions. Release the ids
+  captured at acquisition. Async reads are accepted only while membership and
+  that turn's content epochs match. Retry invalidated reads while their lease
+  remains active; release/dispose cancels them.
+- View events are `structure` (affected positional range) or `changed` (explicit
+  turn ids). Every body edit includes its id even when evicted. Derivations drop
+  those cached facts before recomputing when evicted. A hydrated edit may reuse
+  the previous small fact only after synchronously deriving and comparing its
+  new semantic value. Empty `changed.ids` announces summary/cache bookkeeping;
+  `indexIds` names changed metadata independently of body invalidation.
+- Pending permission/question prompts use all hydrated bodies in their leased tail
+  window; an unrelated unloaded body must not hide an available request. Readers
+  that require contiguous history keep the contiguous prefix.
+- Only the reported ids invalidate a body: a directory row cannot tell whether a
+  body changed, and merging sparse targets into one span re-read the whole
+  conversation. Refresh those rows in contiguous runs; escalate to a structural
+  re-key if the length moved. A reported turn always takes the fresh index row;
+  `rowChanged` compares only what it can, and a deferred send configuration
+  cannot be diffed without forcing it. A turn nothing reported keeps its row
+  object — placeholder and Virtua caches key on that identity — so carry forward
+  the counts a directory refresh does not supply before comparing them.
+- A row's send configuration projects on first read and memoizes. Do not force
+  it while collecting sources; the resolver reads the newest turn or two.
+- Derivations retain small facts and weak identity hints, not evicted bodies.
+  Whole-directory business readers omit prose summaries and patch reported ids;
+  token deltas still refresh visible bodies and live outline summaries. Adjacent
+  reverse pages replace their sentinel slots, preserving retained rows and bodies.
+  Structure updates prune deleted ids and restart incomplete coverage. Search
+  refreshes membership/positions after structure changes. Directory leases and
+  retry timers stop on release/dispose; a page failure is never complete coverage.
+- Roost's renderer bridge retains a durable read projection scoped by account,
+  workspace, machine and session. Persist page bodies, positions and owner revision
+  together with an owner-issued checkpoint. Negotiate `sessionHistoryIncremental`
+  independently; verified catch-up patches only changed rows, including revision gaps.
+  Coherent checkpoint replies may advance behind newer hints; keep catching up.
+  Body-only edits retain directory cursor validity. An in-flight older page may
+  join the current cache head when adjacent changes prove that its positions
+  and turn IDs remained unchanged.
+  Independently negotiate `sessionHistorySubscription`. Active bridges receive
+  durable owner checkpoints and apply inline deltas only at an exact cached base.
+  Renewals resume at the cached checkpoint. A reader adopts each committed checkpoint
+  in its own view, including those another window wrote. A repeated local checkpoint
+  leaves bodies intact.
+  Unknown coverage stages a new snapshot while retaining the durable old one.
+  During replacement, display reads use the owner and hints still invalidate the
+  view; repeated supersessions back off. Publish only complete checkpoint coverage.
+  Committed cache changes must notify readers even if a newer hint requests catch-up.
+  Never persist commands or claim remote
+  acceptance from the cache. Cache-clear must include its database.
+- Send through the selected SessionData backend (the shared HistoryWriter for
+  Loro, the owner bridge for Roost), with no optimistic display overlay;
+  `readAll` is the authoritative export/hash read.
+  The array adapter serves static shared pages, not a runtime fallback.
+- Goal, permission, scheduling and diff consumers acquire the same fact table,
+  keyed and subscribed on the conversation's own view. The final consumer
+  release HOLDS the background scan and keeps the facts: deriving one needs the
+  turn's body, so discarding them re-materialized the conversation on the next
+  open. The table is collected with its view.
+- Retained hidden chat surfaces release optional fact/directory leases. Reacquisition
+  preserves unchanged facts and yields before history backfill; held edits invalidate
+  stale facts without deriving bodies. Body batches yield by elapsed work as well as
+  item/turn counts, retaining asynchronous read concurrency and epoch fencing.
+- `lastUpdateAt` stamps backend change notifications only, never opening,
+  hydration or paging. It stays in memory and never bumps `version`. Liveness UI
+  must not persist it or move `endedAt` while a turn streams, and must count it
+  only inside the current live-sync window, gated on presence.
+  [Decision](../../../../../.agents/notes/implemented/feature/2026-10-15-turn-timing-liveness.md).
+- Control-plane Mirror ignores history and does not enumerate its containers.
+  Queue identity must retain non-enumerable `$cid` through Immer, not a
+  `structuredClone` that drops it.
+- Regressions and the benchmark run the shipped reader. Exercise evicted
+  goal/file-diff edits, mixed structure/content batches, stale async reads and
+  lease release with explicit signals. Library measurements are not device
+  cold-open, frame-time or 3000-round memory acceptance.

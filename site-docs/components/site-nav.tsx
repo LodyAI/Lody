@@ -1,8 +1,10 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 import { useNavigate } from '@tanstack/react-router';
 import { useTheme } from 'fumadocs-ui/provider/base';
-import { type MouseEvent, useCallback, useEffect, useId, useState } from 'react';
+import { type MouseEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 
 type SiteNavLocale = 'en' | 'zh';
 
@@ -182,6 +184,12 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
   const t = copy[locale];
   const menuId = useId();
   const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    // Preserve a native disclosure opened before hydration completed.
+    setOpen(menuRef.current?.open ?? false);
+  }, []);
   const routeLink = useRouteLink();
 
   const navItems = [
@@ -221,34 +229,41 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
     <>
       <header className="site-nav" data-open={open}>
         <div className="site-nav__inner">
-          <a className="site-nav__brand" href={t.homeHref} onClick={routeLink(t.homeHref)}>
-            <img alt="Lody" src="/_docs-assets/logo-96.png" width={24} height={24} />
+          <SiteAnchor className="site-nav__brand" href={t.homeHref} onClick={routeLink(t.homeHref)}>
+            <img
+              alt="Lody"
+              decoding="async"
+              fetchPriority="high"
+              height={24}
+              src="/_docs-assets/logo-96.png"
+              width={24}
+            />
             <span>Lody</span>
-          </a>
+          </SiteAnchor>
           <div className="site-nav__right">
             <nav aria-label="Primary" className="site-nav__links">
               {navItems.map((item) => (
-                <a
+                <SiteAnchor
                   className="site-nav__link"
                   href={item.href}
                   key={item.href}
                   onClick={routeLink(item.href)}
                 >
                   {item.label}
-                </a>
+                </SiteAnchor>
               ))}
             </nav>
             <div className="site-nav__actions">
               <ThemeToggle />
-              <a
+              <SiteAnchor
                 className="site-nav__link site-nav__desktop"
                 href={languageHref}
                 onClick={routeLink(languageHref)}
               >
                 {t.language}
-              </a>
+              </SiteAnchor>
               <span aria-hidden="true" className="site-nav__divider site-nav__desktop" />
-              <a
+              <SiteAnchor
                 aria-label="Discord"
                 className="site-nav__link site-nav__social site-nav__desktop"
                 href={DISCORD_HREF}
@@ -256,51 +271,50 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
                 target="_blank"
               >
                 <DiscordIcon />
-              </a>
-              <button
-                aria-controls={menuId}
-                aria-expanded={open}
-                aria-label={t.menu}
-                className="site-nav__toggle"
-                onClick={() => setOpen((value) => !value)}
-                type="button"
+              </SiteAnchor>
+              <details
+                className="site-nav__mobile"
+                ref={menuRef}
+                open={open}
+                onToggle={(event) => setOpen(event.currentTarget.open)}
               >
-                {open ? <CloseIcon /> : <MenuIcon />}
-              </button>
+                <summary aria-controls={menuId} aria-label={t.menu} className="site-nav__toggle">
+                  {open ? <CloseIcon /> : <MenuIcon />}
+                </summary>
+                <div className="site-nav__menu" data-open={open} id={menuId}>
+                  <nav aria-label="Primary mobile" className="site-nav__menu-links">
+                    {navItems.map((item) => (
+                      <SiteAnchor
+                        className="site-nav__menu-link"
+                        href={item.href}
+                        key={item.href}
+                        onClick={routeLink(item.href, () => setOpen(false))}
+                      >
+                        {item.label}
+                      </SiteAnchor>
+                    ))}
+                  </nav>
+                  <div className="site-nav__menu-footer">
+                    <SiteAnchor
+                      className="site-nav__menu-secondary"
+                      href={languageHref}
+                      onClick={routeLink(languageHref, () => setOpen(false))}
+                    >
+                      {t.language}
+                    </SiteAnchor>
+                    <SiteAnchor
+                      aria-label="Discord"
+                      className="site-nav__menu-secondary site-nav__menu-social"
+                      href={DISCORD_HREF}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <DiscordIcon />
+                    </SiteAnchor>
+                  </div>
+                </div>
+              </details>
             </div>
-          </div>
-        </div>
-
-        <div className="site-nav__menu" data-open={open} id={menuId}>
-          <nav aria-label="Primary mobile" className="site-nav__menu-links">
-            {navItems.map((item) => (
-              <a
-                className="site-nav__menu-link"
-                href={item.href}
-                key={item.href}
-                onClick={routeLink(item.href, () => setOpen(false))}
-              >
-                {item.label}
-              </a>
-            ))}
-          </nav>
-          <div className="site-nav__menu-footer">
-            <a
-              className="site-nav__menu-secondary"
-              href={languageHref}
-              onClick={routeLink(languageHref, () => setOpen(false))}
-            >
-              {t.language}
-            </a>
-            <a
-              aria-label="Discord"
-              className="site-nav__menu-secondary site-nav__menu-social"
-              href={DISCORD_HREF}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <DiscordIcon />
-            </a>
           </div>
         </div>
       </header>

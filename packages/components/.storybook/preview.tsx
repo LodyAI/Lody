@@ -1,5 +1,5 @@
 import type { Preview } from '@storybook/react-vite';
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect } from 'react';
 import {
   Outlet,
   RouterContextProvider,
@@ -14,12 +14,24 @@ import {
   AuthenticatedConvexContext,
   type AuthenticatedConvexContextValue,
 } from '../src/hooks/use-authenticated-convex';
-import { ThemeProvider } from '../src/theme-provider';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { ThemeProvider, useTheme, type Theme } from '../src/theme-provider';
+import { Tooltip } from '@lody/ui/tooltip';
+import { installFocusModality } from '@lody/ui/focus-modality';
+import { installScrollbarPresence } from '@lody/ui/scrollbar-presence';
 import { I18nextProvider } from 'react-i18next';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { resources, defaultNS } from '../src/i18n';
+import { resources, defaultNS, ensureLanguageResources } from '../src/i18n';
+
+function StorybookThemeMode({ theme, children }: { theme: Theme; children: React.ReactNode }) {
+  const { previewTheme } = useTheme();
+
+  useLayoutEffect(() => {
+    previewTheme(theme);
+  }, [previewTheme, theme]);
+
+  return children;
+}
 
 function RouterOutlet() {
   return <Outlet />;
@@ -128,6 +140,10 @@ void i18next.use(initReactI18next).init({
   },
 });
 
+// The app installs this in AppInitializer; stories render outside it.
+installFocusModality();
+installScrollbarPresence();
+
 const preview: Preview = {
   decorators: [
     (Story, context) => {
@@ -135,7 +151,21 @@ const preview: Preview = {
       const locale = context.globals.locale || 'en';
 
       useEffect(() => {
-        void i18next.changeLanguage(locale);
+        /* zh_CN is lazy-loaded; switching before its bundle arrives falls
+           back to English (see `setAppLanguage`). */
+        let cancelled = false;
+        ensureLanguageResources(locale).then(
+          () => {
+            if (!cancelled) void i18next.changeLanguage(locale);
+          },
+          (error: unknown) => {
+            /* Surface the failed bundle instead of silently staying in English. */
+            console.error(`Storybook could not load the ${locale} locale bundle`, error);
+          }
+        );
+        return () => {
+          cancelled = true;
+        };
       }, [locale]);
 
       return (
@@ -148,11 +178,13 @@ const preview: Preview = {
                   defaultTheme={theme}
                   storageKey="storybook-theme"
                 >
-                  <TooltipProvider>
-                    <div className="h-full bg-background text-foreground">
-                      <Story />
-                    </div>
-                  </TooltipProvider>
+                  <StorybookThemeMode theme={theme}>
+                    <Tooltip.Provider>
+                      <div className="h-full bg-background text-foreground">
+                        <Story />
+                      </div>
+                    </Tooltip.Provider>
+                  </StorybookThemeMode>
                 </ThemeProvider>
               </I18nextProvider>
             </RouterContextProvider>

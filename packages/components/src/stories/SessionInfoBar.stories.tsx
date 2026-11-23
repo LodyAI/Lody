@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
-import { fn } from 'storybook/test';
+import { fn, userEvent, within } from 'storybook/test';
+import { useTranslation } from 'react-i18next';
 import {
   getServerNow,
   SESSION_GOAL_COMMANDS,
@@ -9,8 +10,17 @@ import {
   type SessionGoalCommand,
   type SessionGoalMessage,
   type SessionPullRequestMeta,
+  type SessionMeta,
+  type SessionPullRequestCiState,
 } from '@lody/shared';
-import { SessionInfoBar } from '@/components/sessions/session-info-bar';
+import { getSessionGitHubState } from '@/lib/session-github-state';
+import {
+  linkedPullRequestsMeta,
+  useStoryPullRequestLinks,
+} from './SessionPullRequestLinks.stories';
+import { resolveSessionInfoBarGitHubActionIds } from '@/components/sessions/session-info-action-state';
+import { SessionInfoBar, type SessionInfoBarProps } from '@/components/sessions/session-info-bar';
+import type { SessionMachineInfo } from '@/components/sessions/session-machine-info';
 import type { ContextChipAction, PrCiRun } from '@/components/sessions/session-info-chips';
 import type { SessionStatusStripState } from '@/components/sessions/session-status-strip';
 
@@ -96,28 +106,38 @@ const CI_RUNNING: PrCiRun[] = [
 
 function StoryHarness({
   status = null,
+  machine,
+  compactMachineInfo = false,
+  privateAccessStatus,
   goal = null,
   goalPending = null,
   scheduledTasks,
   prCiRuns,
+  prCiState,
   projectName = 'loro-dev/lody',
   branch = 'feat/presence-machine-online-session-status',
   workspaceLocation = null,
   pr = openPr,
+  prHistory,
+  prLinks,
   diffStat = { add: 128, del: 42 },
   width = 760,
   initialStage,
   withPreview = false,
+  simulatorPreview,
   actionLabels,
   mergeAction = false,
   syncing = false,
-  task = null,
 }: {
   status?: SessionStatusStripState | null;
+  machine?: SessionMachineInfo;
+  compactMachineInfo?: boolean;
+  privateAccessStatus?: SessionInfoBarProps['privateAccessStatus'];
   goal?: SessionGoalMessage | null;
   goalPending?: SessionGoalCommand | null;
   scheduledTasks?: PendingScheduledTask[];
   prCiRuns?: PrCiRun[];
+  prCiState?: SessionPullRequestCiState | null;
   projectName?: string | null;
   branch?: string | null;
   workspaceLocation?: {
@@ -125,38 +145,50 @@ function StoryHarness({
     path?: string | null;
   } | null;
   pr?: SessionPullRequestMeta | null;
-  diffStat?: { add: number; del: number } | null;
+  prHistory?: SessionInfoBarProps['prHistory'];
+  prLinks?: SessionInfoBarProps['prLinks'];
+  diffStat?: SessionInfoBarProps['diffStat'];
   width?: number;
-  initialStage?: 'status' | 'goal' | 'schedule' | 'task' | 'context';
-  task?: { taskId: string; title: string } | null;
+  initialStage?: 'status' | 'goal' | 'schedule' | 'context';
   withPreview?: boolean;
+  simulatorPreview?: 'ios' | 'android' | 'both';
   actionLabels?: string[];
   mergeAction?: boolean;
   syncing?: boolean;
 }) {
   const [currentGoal, setCurrentGoal] = useState(goal);
   const [mergeMethod, setMergeMethod] = useState<GitHubMergeMethod>('merge');
-  const contextActions: ContextChipAction[] | undefined = mergeAction
-    ? [
-        {
-          kind: 'merge',
-          id: 'merge',
-          method: mergeMethod,
-          onMerge: fn(),
-          onSelectMethod: setMergeMethod,
-        },
-      ]
-    : actionLabels?.map((label) => ({
-        id: label.toLowerCase().replaceAll(' ', '-'),
-        label,
-        onClick: fn(),
-      }));
+  // Priority order, highest first: `mergeAction` appends the merge control after
+  // any labelled actions, so a story can show it BOTH as the leading split button
+  // and demoted into the chevron behind a higher-priority Commit & Push.
+  const actions: ContextChipAction[] = [
+    ...(actionLabels ?? []).map((label) => ({
+      id: label.toLowerCase().replaceAll(' ', '-'),
+      label,
+      onClick: fn(),
+    })),
+    ...(mergeAction
+      ? [
+          {
+            kind: 'merge' as const,
+            id: 'merge' as const,
+            method: mergeMethod,
+            onMerge: fn(),
+            onSelectMethod: setMergeMethod,
+          },
+        ]
+      : []),
+  ];
+  const contextActions = actions.length > 0 ? actions : undefined;
   return (
     <div className="flex max-w-full flex-col" style={{ width }}>
       {/* Room above the bar so chip popovers (side=top) stay visible. */}
       <div className="h-72" />
       <SessionInfoBar
         status={status}
+        machine={machine}
+        compactMachineInfo={compactMachineInfo}
+        privateAccessStatus={privateAccessStatus}
         goal={currentGoal}
         goalCommands={SESSION_GOAL_COMMANDS}
         goalPendingCommand={goalPending}
@@ -164,18 +196,26 @@ function StoryHarness({
         onGoalDismiss={() => setCurrentGoal(null)}
         scheduledTasks={scheduledTasks}
         prCiRuns={prCiRuns}
+        prCiState={prCiState}
         onOpenPrCiRun={fn()}
-        task={task}
-        onOpenTask={fn()}
         initialStage={initialStage}
         projectName={projectName}
         branch={branch}
         workspaceLocation={workspaceLocation}
         pr={pr}
         onOpenPr={fn()}
+        prHistory={prHistory}
+        prLinks={prLinks}
+        onOpenHistoryPr={fn()}
         contextActions={contextActions}
         onOpenAllChanges={fn()}
         onOpenBrowser={withPreview ? fn() : undefined}
+        onOpenIosSimulator={
+          simulatorPreview === 'ios' || simulatorPreview === 'both' ? fn() : undefined
+        }
+        onOpenAndroidEmulator={
+          simulatorPreview === 'android' || simulatorPreview === 'both' ? fn() : undefined
+        }
         diffStat={diffStat}
         syncing={syncing}
       />
@@ -200,6 +240,127 @@ type Story = StoryObj<typeof meta>;
 
 export const ContextOnly: Story = { args: {} };
 
+/** Binary, empty-file and permission changes retain the workspace review entry. */
+export const ZeroLineChanges: Story = {
+  args: { pr: null, projectName: null, branch: null, diffStat: { add: 0, del: 0, files: 2 } },
+};
+
+export const ZeroLineChangesMobile: Story = {
+  args: { ...ZeroLineChanges.args, compactMachineInfo: true, width: 375 },
+};
+
+/** Mixed comparisons keep the ordinary text line summary. */
+export const MixedTextAndBinaryChanges: Story = {
+  args: { pr: null, diffStat: { add: 12, del: 3, files: 3 } },
+};
+
+const LOCAL_MACHINE: SessionMachineInfo = {
+  machineId: 'story-machine' as SessionMachineInfo['machineId'],
+  name: 'MacBook-Pro.local',
+  isOwn: true,
+  isCurrent: true,
+  onlineStatus: 'online',
+};
+
+export const MachineOnly: Story = {
+  args: {
+    machine: LOCAL_MACHINE,
+    projectName: null,
+    branch: null,
+    pr: null,
+    diffStat: null,
+  },
+};
+
+export const MachineWithContext: Story = { args: { machine: LOCAL_MACHINE } };
+
+export const MachineDetails: Story = {
+  args: { machine: { ...LOCAL_MACHINE, isOwn: false, ownerName: 'Maya Chen' } },
+  globals: { locale: 'en' },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      await within(canvasElement).findByRole('button', {
+        name: 'Machine details: MacBook-Pro.local',
+      })
+    );
+  },
+};
+
+export const MachineWithContextNarrow: Story = {
+  args: {
+    machine: { ...LOCAL_MACHINE, name: 'Maya-Engineering-MacBook-Pro.local' },
+    width: 420,
+    projectName: 'LodyAI/Lody',
+    branch: 'feat/machine-info',
+  },
+};
+
+/** Side-chat width: the machine keeps only its icon and nothing leaves the bar. */
+export const MachineWithPrSideChatWidth: Story = {
+  args: {
+    machine: { ...LOCAL_MACHINE, name: 'codex-happy' },
+    width: 260,
+    workspaceLocation: { kind: 'github-worktree', path: '/tmp/lody' },
+    projectName: null,
+    branch: null,
+    prCiRuns: CI_PASSING,
+    diffStat: { add: 10365, del: 2048 },
+    actionLabels: ['Commit & Push', 'Fix CI Errors'],
+  },
+};
+
+export const MachineUnknownStatus: Story = {
+  ...MachineOnly,
+  args: {
+    ...MachineOnly.args,
+    machine: { ...LOCAL_MACHINE, isOwn: false, onlineStatus: 'unknown' },
+  },
+};
+
+export const MobileMachineWithActions: Story = {
+  args: {
+    machine: LOCAL_MACHINE,
+    compactMachineInfo: true,
+    width: 375,
+    projectName: 'LodyAI/Lody',
+    branch: null,
+    pr: null,
+    goal: makeGoal(),
+    scheduledTasks: [makeWakeup(12 * 60_000)],
+    actionLabels: ['Create PR', 'Commit & Push'],
+  },
+};
+
+export const MobilePrivateMachineWithAction: Story = {
+  args: {
+    machine: LOCAL_MACHINE,
+    compactMachineInfo: true,
+    width: 375,
+    projectName: 'LodyAI/Lody',
+    branch: null,
+    pr: null,
+    privateAccessStatus: {
+      label: 'Private · Only you',
+      description: 'Only you can access this private session',
+      onAction: fn(),
+    },
+    actionLabels: ['Create PR'],
+  },
+};
+
+export const MobileMachineLongName: Story = {
+  args: {
+    ...MachineWithContextNarrow.args,
+    compactMachineInfo: true,
+    width: 375,
+    branch: null,
+  },
+};
+
+export const MobileMachineUnknownStatus: Story = {
+  args: { ...MachineUnknownStatus.args, compactMachineInfo: true, width: 375 },
+};
+
 export const ContextWithMachineOffline: Story = {
   args: { status: { kind: 'machine-offline', machineName: 'zx MacBook-Pro.local' } },
 };
@@ -209,6 +370,89 @@ export const ContextWithMachineRemoved: Story = {
 };
 
 export const NoPr: Story = { args: { pr: null } };
+
+/** A conversation that created several PRs: the marker shows the current one and lists all. */
+const prHistoryMeta = {
+  pullRequests: [
+    { url: 'https://github.com/loro-dev/lody/pull/2850', status: 'closed' },
+    { url: 'https://github.com/loro-dev/lody/pull/2871', status: 'merged' },
+    { url: 'https://github.com/loro-dev/lody/pull/2894', status: 'open' },
+  ],
+} as SessionMeta;
+export const PrHistory: Story = {
+  args: {
+    pr: prHistoryMeta.pullRequests![2],
+    prHistory: getSessionGitHubState(prHistoryMeta).pullRequestHistory,
+  },
+};
+
+/** Linked pull requests: the PR marker lists every PR the Session holds, with link and unlink. */
+function LinkedPullRequestsBar(props: Parameters<typeof StoryHarness>[0]) {
+  const links = useStoryPullRequestLinks(linkedPullRequestsMeta);
+  const state = getSessionGitHubState(linkedPullRequestsMeta);
+  return (
+    <StoryHarness
+      {...props}
+      projectName="LodyAI/Lody"
+      branch="session/68583a0c"
+      pr={state.latestPr}
+      prCiState={state.latestPrState?.s}
+      prLinks={links}
+    />
+  );
+}
+export const LinkedPullRequests: Story = {
+  render: (args) => <LinkedPullRequestsBar {...args} />,
+};
+export const LinkedPullRequestsDark: Story = {
+  ...LinkedPullRequests,
+  globals: { theme: 'dark' },
+};
+
+function ObservationHarness({ ownerMeta }: { ownerMeta: SessionMeta }) {
+  const { t } = useTranslation();
+  const state = getSessionGitHubState(ownerMeta);
+  const labels: Record<string, string> = {
+    'create-pr': t('sessions.createPr', 'Create PR'),
+    'create-draft-pr': t('sessions.createDraftPr', 'Create Draft PR'),
+    'commit-and-push': t('sessions.commitAndPush', 'Commit & Push'),
+  };
+  const actionIds = resolveSessionInfoBarGitHubActionIds({
+    ...state,
+    canMutatePr: false,
+    isAgentBusy: false,
+    prStatus: state.latestPr?.status,
+    prCiState: state.latestPrState?.s,
+    prMergeState: state.latestPrState?.m,
+  });
+  return (
+    <StoryHarness
+      projectName={state.repoFullName}
+      branch={ownerMeta.branchName}
+      pr={state.latestPr}
+      prCiState={state.latestPrState?.s}
+      diffStat={ownerMeta.diffStats?.allChange}
+      actionLabels={actionIds.map((id) => labels[id] ?? id)}
+    />
+  );
+}
+
+export const DiscoveredPrAssociationRejected: StoryObj<typeof ObservationHarness> = {
+  render: (args) => <ObservationHarness {...args} />,
+  args: {
+    ownerMeta: {
+      userId: 'synthetic-user',
+      project: { kind: 'local', localProjectId: 'local-1', githubRepoFullName: 'owner/repo' },
+      branchName: 'feat/x',
+      workspaceDirty: true,
+      diffStats: { allChange: { add: 12, del: 3 } },
+      pullRequests: [{ url: 'https://github.com/owner/repo/pull/55', status: 'draft' }],
+      pullRequestState: {
+        'https://github.com/owner/repo/pull/55': { t: 1720000000, s: 'f', m: 'c' },
+      },
+    } as unknown as SessionMeta,
+  },
+};
 
 const worktreeLocation = {
   kind: 'worktree' as const,
@@ -359,6 +603,19 @@ export const DraftReadyForReview: Story = {
     pr: draftPr,
     prCiRuns: CI_PASSING,
     actionLabels: ['Ready for review'],
+  },
+};
+
+/** Uncommitted work on a mergeable PR. Commit & Push outranks Merge, so the
+ *  split button is demoted to a plain chevron item that still merges with the
+ *  selected method — merging a stale PR head is exactly the mistake this ranking
+ *  exists to prevent. */
+export const DirtyWorktreeOutranksMerge: Story = {
+  name: 'Dirty worktree outranks Merge',
+  args: {
+    prCiRuns: CI_PASSING,
+    actionLabels: ['Commit & Push'],
+    mergeAction: true,
   },
 };
 
@@ -536,34 +793,19 @@ export const RecencyFocus: Story = {
   render: () => <PeekPlayground />,
 };
 
-/**
- * 会话属于某个任务时，簇里多一个 task chip——它是从工作现场回到任务的路。
- * 任务链接不是状态，所以保持中性色，不带语义色。
- */
-export const WithTask: Story = {
-  args: {
-    status: null,
-    task: { taskId: 't1', title: 'Refactor the auth flow' },
-    projectName: 'loro-dev/lody',
-    branch: 'feat/tasks',
+export const AndroidPreview: Story = {
+  args: { simulatorPreview: 'android' },
+};
+
+export const BothSimulatorPreviews: Story = {
+  args: { simulatorPreview: 'both' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: /iOS.*Android/ }));
   },
 };
 
-/** 任务标题还没同步过来时，chip 退化为"未命名任务"而不是空白。 */
-export const WithUntitledTask: Story = {
-  args: {
-    status: null,
-    task: { taskId: 't1', title: '' },
-    projectName: 'loro-dev/lody',
-  },
-};
-
-/** task chip 作为舞台项时给出打开任务的动作。 */
-export const TaskStaged: Story = {
-  args: {
-    status: null,
-    task: { taskId: 't1', title: 'Ship the PR poller fix' },
-    projectName: 'loro-dev/lody',
-    initialStage: 'task',
-  },
+export const MobileSimulatorPreviews: Story = {
+  ...BothSimulatorPreviews,
+  args: { simulatorPreview: 'both', compactMachineInfo: true, width: 360 },
 };

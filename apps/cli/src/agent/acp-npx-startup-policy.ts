@@ -1,3 +1,4 @@
+import { ACP_COLD_NPX_INIT_TIMEOUT_MS, ACP_NPX_STARTUP_MAX_ATTEMPTS } from '@lody/shared';
 import type { AcpStartupTimeoutOptions } from './agent-client';
 import { AcpTimeoutError } from './agent-client';
 import type { Logger } from '@/utils/logger';
@@ -14,7 +15,14 @@ import {
   type NpxCacheIo,
 } from './npx-cache';
 
-export const COLD_NPX_INIT_TIMEOUT_MS = 300_000;
+/**
+ * Re-exported so the client-side backstop in `@lody/shared/acp-startup-budget`
+ * and this startup path cannot drift into two different worst cases. The
+ * backstop has to cover every attempt this policy may make, not just one, so
+ * the attempt count is part of the same shared binding as the timeout.
+ */
+export const COLD_NPX_INIT_TIMEOUT_MS = ACP_COLD_NPX_INIT_TIMEOUT_MS;
+export const DEFAULT_NPX_STARTUP_MAX_ATTEMPTS = ACP_NPX_STARTUP_MAX_ATTEMPTS;
 
 export type NpxStartupAttemptInput = {
   attempt: number;
@@ -34,6 +42,8 @@ export type RunNpxStartupWithRecoveryOptions<T> = {
   startupTimeouts?: AcpStartupTimeoutOptions;
   coldInitTimeoutMs?: number;
   maxAttempts?: number;
+  /** Permit one offline retry beyond maxAttempts only after a proven safe startup failure. */
+  canRetryOfflineAfterFailure?: () => boolean;
   npxCacheIo?: NpxCacheIo;
   npxCacheRoots?: string[];
 };
@@ -99,15 +109,17 @@ export async function runNpxStartupWithRecovery<T>(
     });
   }
 
-  const maxAttempts = options.maxAttempts ?? 3;
+  const maxAttempts = options.maxAttempts ?? DEFAULT_NPX_STARTUP_MAX_ATTEMPTS;
   const coldInitTimeoutMs = options.coldInitTimeoutMs ?? COLD_NPX_INIT_TIMEOUT_MS;
   const npxCacheRoot = getConfiguredNpxCacheRoot(options.env);
   const roots = options.npxCacheRoots ?? (npxCacheRoot ? [npxCacheRoot] : undefined);
   const allowedRoots = options.npxCacheRoots ?? (npxCacheRoot ? [npxCacheRoot] : []);
   let refreshMetadataOnNextAttempt = false;
   let metadataRefreshAttempted = false;
+  let offlineFallback = false;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  const attemptLimit = maxAttempts + (options.canRetryOfflineAfterFailure ? 1 : 0);
+  for (let attempt = 1; attempt <= attemptLimit; attempt++) {
     let installState = inspectNpxInstallState(npxSpec.name, npxSpec.version, {
       env: options.env,
       roots,
@@ -135,9 +147,11 @@ export async function runNpxStartupWithRecovery<T>(
     const startupTimeouts = installWasCold
       ? withColdNpxInitTimeout(options.startupTimeouts, coldInitTimeoutMs)
       : options.startupTimeouts;
-    const attemptArgs = refreshMetadataOnNextAttempt
-      ? preferOnlineNpxArgs(options.args)
-      : options.args;
+    const attemptArgs = offlineFallback
+      ? ['--offline', ...options.args]
+      : refreshMetadataOnNextAttempt
+        ? preferOnlineNpxArgs(options.args)
+        : options.args;
     refreshMetadataOnNextAttempt = false;
 
     try {
@@ -147,11 +161,26 @@ export async function runNpxStartupWithRecovery<T>(
         startupTimeouts,
       });
     } catch (error) {
-      if (attempt >= maxAttempts) {
-        throw error;
-      }
-
       const hintText = describeStartupError(error, options.getStderrTail());
+      if (
+        !offlineFallback &&
+        (attempt < maxAttempts || options.canRetryOfflineAfterFailure?.() === true) &&
+        installState.kind === 'ready' &&
+        /^[A-Za-z][A-Za-z0-9._-]*$/.test(npxSpec.version) &&
+        !options.args.includes('--prefer-offline') &&
+        /\b(?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|FETCH_ERROR)\b/i.test(
+          hintText
+        )
+      ) {
+        offlineFallback = true;
+        await options.cleanupFailedAttempt?.();
+        options.logger.warn(
+          `${options.logPrefix} npm registry unavailable; retrying cached tag offline`
+        );
+        continue;
+      }
+      if (attempt >= maxAttempts) throw error;
+
       const shouldRefreshPackageMetadata =
         installWasCold &&
         !metadataRefreshAttempted &&
@@ -171,9 +200,8 @@ export async function runNpxStartupWithRecovery<T>(
         continue;
       }
 
-      const shouldPurgeLodyNpmCache =
-        isLikelyNpmCacheCorruption(hintText) || isColdNpxInitializeTimeout(error, installWasCold);
-      if (shouldPurgeLodyNpmCache) {
+      const hasNpmCacheCorruption = isLikelyNpmCacheCorruption(hintText);
+      if (hasNpmCacheCorruption || isColdNpxInitializeTimeout(error, installWasCold)) {
         const brokenPurged = purgeBrokenNpxCache({
           packageName: npxSpec.name,
           version: npxSpec.version,
@@ -184,7 +212,7 @@ export async function runNpxStartupWithRecovery<T>(
           io: options.npxCacheIo,
         });
         const lodyPurged =
-          brokenPurged.length === 0
+          hasNpmCacheCorruption && brokenPurged.length === 0
             ? purgeLodyNpmCache({ env: options.env, io: options.npxCacheIo })
             : [];
         await options.cleanupFailedAttempt?.();

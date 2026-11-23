@@ -27,8 +27,10 @@ const ResizablePanel = React.forwardRef<
 function ResizableHandle({
   withHandle,
   className,
+  children,
   ...props
 }: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & {
+  /** Registry grip. Ignored when `children` supplies the handle's own visual. */
   withHandle?: boolean;
 }) {
   return (
@@ -40,11 +42,12 @@ function ResizableHandle({
       )}
       {...props}
     >
-      {withHandle && (
-        <div className="bg-border z-10 flex h-4 w-3 items-center justify-center rounded-xs border">
-          <GripVerticalIcon className="size-2.5" />
-        </div>
-      )}
+      {children ??
+        (withHandle && (
+          <div className="bg-border z-10 flex h-4 w-3 items-center justify-center rounded-xs border">
+            <GripVerticalIcon className="size-2.5" />
+          </div>
+        ))}
     </ResizablePrimitive.PanelResizeHandle>
   );
 }

@@ -1,4 +1,6 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import {
   Area,
   AreaChart,
@@ -8,7 +10,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { Skeleton } from '@lody/ui/skeleton';
 
 export type StackedAreaSeriesValue = {
   id: string;
@@ -51,6 +54,14 @@ type UsageStackedAreaChartProps = {
    * stroke color (instead of relying on a swatch or ring).
    */
   tintSeriesLabel?: boolean;
+  /**
+   * Render a chart-shaped placeholder while the range data resolves. Only takes
+   * effect when there is no data to show yet — populated charts stay mounted
+   * during background refreshes so they never flash back into a skeleton.
+   */
+  loading?: boolean;
+  /** Accessible loading announcement; rendered visually hidden. */
+  loadingText?: string;
 };
 
 type UsagePerspectiveChartProps = {
@@ -77,6 +88,162 @@ const CHART_HEIGHT_DESKTOP = 224;
 const CHART_HEIGHT_MOBILE = 184;
 const AXIS_COLOR = 'hsl(var(--muted-foreground))';
 const GRID_COLOR = 'hsl(var(--border))';
+
+const darkTheme =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const styles = stylex.create({
+  card: {
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--card)) 60%, transparent)',
+  },
+  clippedCard: { overflow: 'hidden' },
+  emptyCard: { fontSize: '0.875rem', lineHeight: '1.25rem' },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minHeight: '40px',
+    paddingInline: space[3],
+    paddingBlock: space[1.5],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    backgroundColor: {
+      default: 'transparent',
+      [darkTheme]: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+    },
+  },
+  headerTitle: {
+    margin: 0,
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '0.75rem',
+    fontWeight: 400,
+    lineHeight: '1rem',
+  },
+  plotInset: { padding: space[4] },
+  emptyMessage: {
+    margin: 0,
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+  },
+  tooltip: {
+    minWidth: '180px',
+    maxWidth: '260px',
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border)) 80%, transparent)',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background)) 95%, transparent)',
+    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+    backdropFilter: 'blur(var(--blur-sm))',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+  },
+  tooltipLabel: { color: 'hsl(var(--foreground))', fontWeight: 400 },
+  tooltipTotal: {
+    marginBlockStart: space[1],
+    color: 'hsl(var(--muted-foreground))',
+    fontFamily: 'var(--font-mono)',
+  },
+  tooltipRows: { display: 'flex', flexDirection: 'column', gap: space[1], marginBlockStart: '6px' },
+  tooltipRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+  },
+  tooltipMarkerLabel: {
+    display: 'inline-flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: space[1.5],
+    color: 'hsl(var(--muted-foreground))',
+  },
+  truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  tooltipValue: { flexShrink: 0, color: 'hsl(var(--foreground))', fontFamily: 'var(--font-mono)' },
+  marker: { display: 'inline-block', flexShrink: 0, borderRadius: 'var(--radius-xs)' },
+  markerSmall: { width: space[2], height: space[2] },
+  markerMedium: { width: '10px', height: '10px' },
+  loadingSvg: { position: 'absolute', inset: 0, width: '100%', height: '100%' },
+  loadingPlot: {
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  loadingAxis: {
+    position: 'absolute',
+    insetInline: '56px',
+    bottom: space[1.5],
+    display: 'flex',
+    justifyContent: 'space-between',
+  },
+  legendFrame: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    paddingInline: space[4],
+    paddingTop: space[2],
+    paddingBottom: space[3],
+  },
+  loadingLegend: { display: 'flex', flexWrap: 'wrap', columnGap: space[3], rowGap: space[1.5] },
+  legend: { display: 'flex', flexWrap: 'wrap', columnGap: space[3], rowGap: space[1.5] },
+  legendItem: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+  },
+  legendLabel: {
+    maxWidth: '200px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 400,
+  },
+  mutedText: { color: 'hsl(var(--muted-foreground))' },
+  totalValue: {
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+    color: 'hsl(var(--foreground))',
+    fontFamily: 'var(--font-mono)',
+  },
+  perspectivePlot: {
+    position: 'relative',
+    height: { default: '238px', '@media (min-width: 640px)': '272px' },
+    overflow: 'hidden',
+    backgroundColor: 'hsl(var(--muted) / 0.2)',
+  },
+  perspectiveCanvas: {
+    position: 'absolute',
+    insetBlockStart: space[2],
+    insetInline: { default: space[3], '@media (min-width: 640px)': '20px' },
+    height: '250px',
+    transform: 'perspective(700px) rotateY(-30deg) scale(0.9)',
+    transformOrigin: '50% 50%',
+  },
+  perspectiveSvg: { width: '100%', height: '100%' },
+  markerColor: (color: string) => ({ backgroundColor: color }),
+  seriesColor: (color: string) => ({ color }),
+  visuallyHidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+});
 
 function formatPerspectiveAxisValue(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
@@ -169,11 +336,11 @@ function prepareChart(buckets: StackedAreaBucket[], maxSeries: number): Prepared
 function DefaultSeriesMarker({ color, size = 'sm' }: { color: string; size?: 'sm' | 'md' }) {
   return (
     <span
-      className={cn(
-        'inline-block shrink-0 rounded-xs',
-        size === 'sm' ? 'h-2 w-2' : 'h-2.5 w-2.5'
+      {...stylex.props(
+        styles.marker,
+        size === 'sm' ? styles.markerSmall : styles.markerMedium,
+        styles.markerColor(color)
       )}
-      style={{ backgroundColor: color }}
     />
   );
 }
@@ -217,13 +384,13 @@ function UsageTooltip({
   const total = rows.reduce((sum, row) => sum + row.value, 0);
 
   return (
-    <div className="min-w-[180px] max-w-[260px] rounded-md border border-border/80 bg-background/95 px-3 py-2 text-xs shadow-md backdrop-blur-sm">
-      <div className="font-medium text-foreground">{label}</div>
-      <div className="mt-1 font-mono text-muted-foreground">{tooltipValueFormatter(total)}</div>
-      <div className="mt-1.5 space-y-1">
+    <div {...stylex.props(styles.tooltip)}>
+      <div {...stylex.props(styles.tooltipLabel)}>{label}</div>
+      <div {...stylex.props(styles.tooltipTotal)}>{tooltipValueFormatter(total)}</div>
+      <div {...stylex.props(styles.tooltipRows)}>
         {rows.slice(0, 6).map((row) => (
-          <div key={row.id} className="flex min-w-0 items-center justify-between gap-3">
-            <span className="inline-flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          <div key={row.id} {...stylex.props(styles.tooltipRow)}>
+            <span {...stylex.props(styles.tooltipMarkerLabel)}>
               {renderSeriesMarker ? (
                 renderSeriesMarker({
                   id: row.id,
@@ -235,19 +402,74 @@ function UsageTooltip({
                 <DefaultSeriesMarker color={row.color} size="sm" />
               )}
               <span
-                className="min-w-0 truncate whitespace-nowrap"
-                style={tintSeriesLabel ? { color: row.color } : undefined}
+                {...stylex.props(styles.truncate, tintSeriesLabel && styles.seriesColor(row.color))}
               >
                 {row.label}
               </span>
             </span>
-            <span className="shrink-0 font-mono text-foreground">
-              {tooltipValueFormatter(row.value)}
-            </span>
+            <span {...stylex.props(styles.tooltipValue)}>{tooltipValueFormatter(row.value)}</span>
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+const LEGEND_PLACEHOLDER_WIDTHS = [112, 96, 128, 88, 104];
+
+function ChartLoadingPlaceholder({ chartHeight }: { chartHeight: number }) {
+  return (
+    <>
+      <div {...stylex.props(styles.plotInset)}>
+        {/* Same footprint as the real chart: a full-height plot with layered
+           area silhouettes, gridlines, and axis tick placeholders. */}
+        <Skeleton
+          shape="block"
+          width="100%"
+          height={chartHeight}
+          {...withClassName(stylex.props(styles.loadingPlot), 'bg-primary/[0.06]')}
+        >
+          <svg
+            aria-hidden="true"
+            {...stylex.props(styles.loadingSvg)}
+            viewBox="0 0 600 200"
+            preserveAspectRatio="none"
+          >
+            {[0.25, 0.5, 0.75].map((progress) => (
+              <line
+                key={progress}
+                x1="0"
+                x2="600"
+                y1={200 * progress}
+                y2={200 * progress}
+                stroke={GRID_COLOR}
+                strokeOpacity="0.4"
+              />
+            ))}
+            <path
+              d="M0,150 C60,142 100,92 160,82 C240,68 300,112 380,92 C460,74 540,42 600,52 L600,200 L0,200 Z"
+              fill="hsl(var(--chart-1) / 0.14)"
+            />
+            <path
+              d="M0,176 C80,170 140,132 220,126 C320,118 400,142 500,120 C550,109 580,106 600,102 L600,200 L0,200 Z"
+              fill="hsl(var(--chart-2, var(--chart-1)) / 0.18)"
+            />
+          </svg>
+          <div {...stylex.props(styles.loadingAxis)}>
+            {Array.from({ length: 8 }).map((_, index) => (
+              <Skeleton key={index} width={24} height={8} />
+            ))}
+          </div>
+        </Skeleton>
+      </div>
+      <div {...stylex.props(styles.legendFrame)}>
+        <div {...stylex.props(styles.loadingLegend)}>
+          {LEGEND_PLACEHOLDER_WIDTHS.map((width) => (
+            <Skeleton key={width} height={16} width={width} />
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -261,6 +483,8 @@ export function UsageStackedAreaChart({
   tooltipValueFormatter = (value) => new Intl.NumberFormat().format(Math.round(value)),
   renderSeriesMarker,
   tintSeriesLabel = false,
+  loading = false,
+  loadingText,
 }: UsageStackedAreaChartProps) {
   const gradientPrefix = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const isMobile = useIsMobileChart();
@@ -268,14 +492,30 @@ export function UsageStackedAreaChart({
 
   const prepared = useMemo(() => prepareChart(buckets, maxSeries), [buckets, maxSeries]);
 
+  if (loading && !prepared) {
+    return (
+      <div
+        {...withClassName(stylex.props(styles.card, styles.clippedCard), className)}
+        role="status"
+        aria-busy="true"
+      >
+        <header {...stylex.props(styles.header)}>
+          <p {...stylex.props(styles.headerTitle)}>{title}</p>
+        </header>
+        <ChartLoadingPlaceholder chartHeight={chartHeight} />
+        {loadingText ? <span {...stylex.props(styles.visuallyHidden)}>{loadingText}</span> : null}
+      </div>
+    );
+  }
+
   if (!prepared) {
     return (
-      <div className={cn('rounded-lg border border-border/70 bg-card/60 text-sm', className)}>
-        <header className="flex min-h-10 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
-          <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+      <div {...withClassName(stylex.props(styles.card, styles.emptyCard), className)}>
+        <header {...stylex.props(styles.header)}>
+          <p {...stylex.props(styles.headerTitle)}>{title}</p>
         </header>
-        <div className="p-4">
-          <p className="text-sm text-muted-foreground">{emptyText}</p>
+        <div {...stylex.props(styles.plotInset)}>
+          <p {...stylex.props(styles.emptyMessage)}>{emptyText}</p>
         </div>
       </div>
     );
@@ -283,14 +523,17 @@ export function UsageStackedAreaChart({
 
   // Keep the x-axis to ~8 labels regardless of bucket count so the "All time"
   // range (which can have many daily buckets) does not crowd the axis.
-  const xInterval = Math.max(0, Math.ceil(prepared.data.length / 8) - 1);
+  const xTickStep = Math.max(1, Math.ceil(prepared.data.length / 8));
+  const xTicks = prepared.data
+    .filter((_, index) => index % xTickStep === 0)
+    .map((row) => row.label);
 
   return (
-    <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}>
-      <header className="flex min-h-10 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
-        <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+    <div {...withClassName(stylex.props(styles.card, styles.clippedCard), className)}>
+      <header {...stylex.props(styles.header)}>
+        <p {...stylex.props(styles.headerTitle)}>{title}</p>
       </header>
-      <div className="p-4">
+      <div {...stylex.props(styles.plotInset)}>
         {/* ResponsiveContainer measures the parent and never overflows, so the
            chart always fits its column — no horizontal scroll. */}
         <ResponsiveContainer width="100%" height={chartHeight}>
@@ -311,7 +554,8 @@ export function UsageStackedAreaChart({
 
             <XAxis
               dataKey="label"
-              interval={xInterval}
+              ticks={xTicks}
+              interval="preserveStartEnd"
               tickLine={false}
               axisLine={{ stroke: GRID_COLOR, strokeOpacity: 0.6 }}
               tick={{ fill: AXIS_COLOR, fontSize: 10 }}
@@ -358,28 +602,24 @@ export function UsageStackedAreaChart({
         </ResponsiveContainer>
       </div>
 
-      <div className="border-t border-border/60 px-4 pb-3 pt-2">
-        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+      <div {...stylex.props(styles.legendFrame)}>
+        <div {...stylex.props(styles.legend)}>
           {prepared.series.map((s) => (
-            <div key={s.id} className="inline-flex items-center gap-1.5 text-xs">
+            <div key={s.id} {...stylex.props(styles.legendItem)}>
               {renderSeriesMarker ? (
                 renderSeriesMarker(s)
               ) : (
                 <DefaultSeriesMarker color={s.color} size="md" />
               )}
               <span
-                className={
-                  tintSeriesLabel
-                    ? 'max-w-[200px] truncate whitespace-nowrap font-medium'
-                    : 'max-w-[200px] truncate whitespace-nowrap text-muted-foreground'
-                }
-                style={tintSeriesLabel ? { color: s.color } : undefined}
+                {...stylex.props(
+                  styles.legendLabel,
+                  tintSeriesLabel ? styles.seriesColor(s.color) : styles.mutedText
+                )}
               >
                 {s.label}
               </span>
-              <span className="shrink-0 whitespace-nowrap font-mono text-foreground">
-                {valueFormatter(s.total)}
-              </span>
+              <span {...stylex.props(styles.totalValue)}>{valueFormatter(s.total)}</span>
             </div>
           ))}
         </div>
@@ -433,31 +673,25 @@ export function UsagePerspectiveChart({
 
   if (!chart) {
     return (
-      <div className={cn('rounded-lg border border-border/70 bg-card/60 text-sm', className)}>
-        <header className="flex min-h-10 items-center border-b border-border/70 bg-muted/40 px-3 py-1.5">
-          <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+      <div {...withClassName(stylex.props(styles.card, styles.emptyCard), className)}>
+        <header {...stylex.props(styles.header)}>
+          <p {...stylex.props(styles.headerTitle)}>{title}</p>
         </header>
-        <div className="p-4 text-muted-foreground">{emptyText}</div>
+        <div {...stylex.props(styles.plotInset, styles.mutedText)}>{emptyText}</div>
       </div>
     );
   }
 
   return (
-    <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}>
-      <header className="flex min-h-10 items-center border-b border-border/70 bg-muted/40 px-3 py-1.5">
-        <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+    <div {...withClassName(stylex.props(styles.card, styles.clippedCard), className)}>
+      <header {...stylex.props(styles.header)}>
+        <p {...stylex.props(styles.headerTitle)}>{title}</p>
       </header>
-      <div className="relative h-[238px] overflow-hidden bg-muted/20 sm:h-[272px]">
-        <div
-          className="absolute inset-x-3 top-2 h-[250px] sm:inset-x-5"
-          style={{
-            transform: 'perspective(700px) rotateY(-30deg) scale(0.9)',
-            transformOrigin: '50% 50%',
-          }}
-        >
+      <div {...stylex.props(styles.perspectivePlot)}>
+        <div {...stylex.props(styles.perspectiveCanvas)}>
           <svg
             aria-hidden="true"
-            className="h-full w-full"
+            {...stylex.props(styles.perspectiveSvg)}
             viewBox="0 0 1000 260"
             preserveAspectRatio="none"
           >
@@ -501,11 +735,32 @@ export function UsagePerspectiveChart({
                 </text>
               </g>
             ))}
-            <line x1="98" x2="932" y1={chart.baseline} y2={chart.baseline} stroke="currentColor" strokeOpacity="0.35" />
-            <line x1="98" x2="98" y1="34" y2={chart.baseline} stroke="currentColor" strokeOpacity="0.35" />
+            <line
+              x1="98"
+              x2="932"
+              y1={chart.baseline}
+              y2={chart.baseline}
+              stroke="currentColor"
+              strokeOpacity="0.35"
+            />
+            <line
+              x1="98"
+              x2="98"
+              y1="34"
+              y2={chart.baseline}
+              stroke="currentColor"
+              strokeOpacity="0.35"
+            />
             {chart.xTicks.map((tick) => (
               <g key={tick.x}>
-                <line x1={tick.x} x2={tick.x} y1={chart.baseline} y2={chart.baseline + 6} stroke="currentColor" strokeOpacity="0.35" />
+                <line
+                  x1={tick.x}
+                  x2={tick.x}
+                  y1={chart.baseline}
+                  y2={chart.baseline + 6}
+                  stroke="currentColor"
+                  strokeOpacity="0.35"
+                />
                 <text
                   x={tick.x}
                   y={chart.baseline + 23}

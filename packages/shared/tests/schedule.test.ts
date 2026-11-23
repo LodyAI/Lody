@@ -1,0 +1,808 @@
+import { describe, expect, it } from 'vitest';
+import { LoroDoc } from 'loro-crdt';
+import {
+  evaluateSchedule,
+  latestScheduleSlot,
+  nextScheduleSlot,
+  previewSchedule,
+  validateScheduleTrigger,
+} from '../src/schedule-time';
+import {
+  manualScheduleRunKey,
+  scheduleRegistryKeys,
+  scheduleDefinitionFingerprint,
+} from '../src/schedule-registry';
+import {
+  normalizeLegacyScheduleAgent,
+  SCHEDULED_MESSAGE_RETENTION_MS,
+  ScheduleAgentSchema,
+  ScheduleDefinitionSchema,
+} from '../src/schedule-types';
+import { scheduleDeclarationSubject } from '../src/e2ee-execution-intent';
+import { readScheduleAuthorization } from '../src/schedule-authorization';
+import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
+import { zonedLocalInputToInstant, instantToZonedLocalInput } from '../src/schedule-recurrence';
+
+const definition = () =>
+  ScheduleDefinitionSchema.parse({
+    scheduleId: 'test',
+    title: 'Test',
+    ownerId: 'owner',
+    machineId: 'machine',
+    enabled: true,
+    activationId: 'activation',
+    activeFrom: 0,
+    trigger: { kind: 'interval', everyMs: 60_000, anchorAt: '2026-01-01T00:00:00Z' },
+    misfirePolicy: { kind: 'skip' },
+    overlapPolicy: 'queue_one',
+    agent: { agentConfigId: 'agent', modeId: 'safe' },
+    project: { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'main' },
+    retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+    createdAt: 0,
+    updatedAt: 0,
+    createdBy: 'owner',
+  });
+const ms = Date.parse;
+
+describe('Schedule time contract', () => {
+  it('includes an exact due minute, advances one fixed horizon, never replays that horizon', () => {
+    const d = definition();
+    const now = ms('2026-01-02T00:00:00Z');
+    const result = evaluateSchedule(d, undefined, now);
+    expect(result.due).toEqual({ scheduledFor: now, disposition: 'run' });
+    expect(evaluateSchedule(d, result.evaluatedThrough, now).due).toBeUndefined();
+    expect(result.nextScheduledAt).toBe(now + 60_000);
+  });
+  it('skips an old once slot, while run_once admits exactly that one intent', () => {
+    const d = {
+      ...definition(),
+      trigger: validateScheduleTrigger({ kind: 'once', at: '2026-01-01T00:00:00+08:00' }),
+    };
+    const now = ms('2026-01-02T00:00:00Z');
+    expect(evaluateSchedule(d, undefined, now).due?.disposition).toBe('skip');
+    expect(
+      evaluateSchedule({ ...d, misfirePolicy: { kind: 'run_once' } }, undefined, now).due
+        ?.disposition
+    ).toBe('run');
+    expect(evaluateSchedule({ ...d, activeFrom: now }, undefined, now).due).toBeUndefined();
+  });
+  it('uses interval anchor rather than completion time and excludes paused slots', () => {
+    const d = definition();
+    const start = ms('2026-01-01T00:00:10Z');
+    expect(nextScheduleSlot(d.trigger, start, start)).toBe(ms('2026-01-01T00:01:00Z'));
+    expect(latestScheduleSlot(d.trigger, start, start)).toBeUndefined();
+  });
+  it('skips nonexistent DST local times and runs the first repeated local time only', () => {
+    const spring = validateScheduleTrigger({
+      kind: 'cron',
+      expression: '30 2 * * *',
+      timeZone: 'America/New_York',
+    });
+    expect(previewSchedule(spring, 0, ms('2026-03-07T08:00:00Z'), 1)).toEqual([
+      ms('2026-03-09T06:30:00Z'),
+    ]);
+    const fall = validateScheduleTrigger({
+      kind: 'cron',
+      expression: '30 1 * * *',
+      timeZone: 'America/New_York',
+    });
+    expect(previewSchedule(fall, 0, ms('2026-11-01T04:00:00Z'), 2)).toEqual([
+      ms('2026-11-01T05:30:00Z'),
+      ms('2026-11-02T06:30:00Z'),
+    ]);
+    expect(latestScheduleSlot(fall, 0, ms('2026-11-01T06:40:00Z'))).toBe(
+      ms('2026-11-01T05:30:00Z')
+    );
+  });
+  it('uses DOM/DOW OR and rejects unsupported syntax and offsetless instants', () => {
+    const cron = validateScheduleTrigger({
+      kind: 'cron',
+      expression: '0 9 1 * MON',
+      timeZone: 'UTC',
+    });
+    expect(previewSchedule(cron, 0, ms('2026-01-01T09:00:00Z'), 1)).toEqual([
+      ms('2026-01-05T09:00:00Z'),
+    ]);
+    expect(latestScheduleSlot(cron, 0, ms('2026-01-05T09:00:00Z'))).toBe(
+      ms('2026-01-05T09:00:00Z')
+    );
+    for (const expression of ['* * * * * *', '0 0 L * *', '@daily', '* * * * MON#2'])
+      expect(() =>
+        validateScheduleTrigger({ kind: 'cron', expression, timeZone: 'UTC' })
+      ).toThrow();
+    expect(() => validateScheduleTrigger({ kind: 'once', at: '2026-01-01T00:00:00' })).toThrow();
+  });
+});
+
+describe('Schedule persistence contract', () => {
+  it('signs an encrypted declaration first and writes it with the declaration, never unsigned', async () => {
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), value),
+        },
+      }),
+      flush: async () => {},
+    };
+    const d = definition();
+    const save = (repo: ScheduleRepository) =>
+      repo.save({
+        scheduleId: 'signed',
+        draft: {
+          title: d.title,
+          machineId: d.machineId,
+          trigger: d.trigger,
+          agent: d.agent,
+          project: d.project,
+          misfirePolicy: d.misfirePolicy,
+          overlapPolicy: d.overlapPolicy,
+          retryPolicy: d.retryPolicy,
+          prompt: 'hello',
+        },
+        actorId: 'owner',
+        now: 1,
+        activationId: 'activation',
+        activityId: 'created',
+        create: true,
+      });
+    await expect(
+      save(new ScheduleRepository(port, 'workspace' as never, { protectedContent: true }))
+    ).rejects.toThrow('e2ee_signature_unavailable');
+    expect(docs.get('schedule-signed')?.toJSON() ?? {}).toEqual({});
+    const signed: { fingerprint: string; manualRunKey?: string }[] = [];
+    let rejectManual = false;
+    const protectedRepo = new ScheduleRepository(port, 'workspace' as never, {
+      protectedContent: true,
+      signDeclaration: async (document, manualRunKey) => {
+        if (rejectManual && manualRunKey) throw new Error('manual signer unavailable');
+        signed.push({
+          fingerprint: scheduleDeclarationSubject(document, manualRunKey).contentDigest,
+          ...(manualRunKey ? { manualRunKey } : {}),
+        });
+        return 'A'.repeat(131);
+      },
+    });
+    await save(protectedRepo);
+    const signedDoc = docs.get('schedule-signed');
+    if (!signedDoc) throw new Error('missing signed Schedule');
+    const declared = (
+      signedDoc.toJSON() as {
+        scheduleAuthorizations: { definitionFingerprint: string; e2eeIntent?: string }[];
+      }
+    ).scheduleAuthorizations;
+    expect(declared).toEqual([
+      expect.objectContaining({
+        definitionFingerprint: signed[0]!.fingerprint,
+        e2eeIntent: 'A'.repeat(131),
+      }),
+    ]);
+    const unsigned = new ScheduleRepository(port, 'workspace' as never, { protectedContent: true });
+    const pause = {
+      scheduleId: 'signed',
+      enabled: false,
+      actorId: 'owner',
+      now: 2,
+      activationId: 'pause',
+      requestId: 'pause',
+    };
+    await unsigned.setEnabled(pause);
+    await unsigned.setEnabled(pause);
+    expect((await unsigned.read('signed'))?.definition).toMatchObject({
+      enabled: false,
+      activationId: 'pause',
+    });
+    expect((await unsigned.list())[0]?.enabled).toBe(false);
+    expect(
+      (signedDoc.toJSON() as { scheduleAuthorizations: unknown }).scheduleAuthorizations
+    ).toEqual(declared);
+    const manual = { scheduleId: 'signed', actorId: 'owner', manualRunId: 'paused-run', now: 3 };
+    rejectManual = true;
+    await expect(protectedRepo.requestRun(manual)).rejects.toThrow('manual signer unavailable');
+    expect(
+      (signedDoc.toJSON() as { scheduleAuthorizations: unknown }).scheduleAuthorizations
+    ).toEqual(declared);
+    expect(
+      rows.get(JSON.stringify(scheduleRegistryKeys.manual('signed', 'paused-run')))
+    ).toBeUndefined();
+    rejectManual = false;
+    await protectedRepo.requestRun(manual);
+    const paused = await protectedRepo.read('signed');
+    if (!paused) throw new Error('missing paused Schedule');
+    expect(readScheduleAuthorization(signedDoc)?.value).toMatchObject({
+      kind: 'definition',
+      definitionFingerprint: scheduleDefinitionFingerprint(paused),
+    });
+    expect(
+      readScheduleAuthorization(signedDoc, manualScheduleRunKey('signed', 'paused-run'))?.value
+    ).toMatchObject({
+      kind: 'manual',
+      definitionFingerprint: scheduleDefinitionFingerprint(paused),
+    });
+    const authorizations = signedDoc.toJSON().scheduleAuthorizations;
+    await protectedRepo.requestRun(manual);
+    expect(signedDoc.toJSON().scheduleAuthorizations).toEqual(authorizations);
+    expect(
+      rows.get(JSON.stringify(scheduleRegistryKeys.manual('signed', 'paused-run')))
+    ).toMatchObject({ activationId: 'pause' });
+    expect(paused.definition.enabled).toBe(false);
+    signedDoc.getText('prompt').insert(0, 'tampered');
+    await expect(
+      unsigned.setEnabled({ ...pause, enabled: true, requestId: 'resume', activationId: 'resume' })
+    ).rejects.toThrow('e2ee_signature_unavailable');
+    expect((await unsigned.read('signed'))?.definition.enabled).toBe(false);
+  });
+
+  it('writes the definition durably before enabling its Registry and reads absent docs without seeding', async () => {
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const flushes: { doc: unknown; rows: number }[] = [];
+    let interruptPublication = true;
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => {
+            if (interruptPublication) throw new Error('interrupted publication');
+            return rows.set(JSON.stringify(key), value);
+          },
+        },
+      }),
+      flush: async () => {
+        flushes.push({ doc: docs.get('schedule-test')?.toJSON(), rows: rows.size });
+      },
+    };
+    const repo = new ScheduleRepository(port, 'workspace' as never);
+    expect(await repo.read('missing')).toBeNull();
+    expect(docs.get('schedule-missing')!.toJSON()).toEqual({});
+    const d = definition();
+    const create = () =>
+      repo.save({
+        scheduleId: 'test',
+        draft: {
+          title: d.title,
+          machineId: d.machineId,
+          trigger: d.trigger,
+          agent: d.agent,
+          project: d.project,
+          misfirePolicy: d.misfirePolicy,
+          overlapPolicy: d.overlapPolicy,
+          retryPolicy: d.retryPolicy,
+          prompt: 'hello',
+        },
+        actorId: 'owner',
+        now: 1,
+        activationId: 'activation',
+        activityId: 'created',
+        create: true,
+      });
+    await expect(create()).rejects.toThrow('interrupted publication');
+    expect(await repo.list()).toEqual([]);
+    expect((await repo.read('test'))?.timeline).toHaveLength(1);
+    interruptPublication = false;
+    await create();
+    expect(flushes[0]?.rows).toBe(0);
+    expect(flushes.at(-1)?.rows).toBe(1);
+    expect((await repo.read('test'))?.timeline).toHaveLength(1);
+    expect((await repo.read('test'))?.prompt).toBe('hello');
+    await expect(
+      repo.setEnabled({
+        scheduleId: 'test',
+        enabled: false,
+        actorId: 'other',
+        now: 2,
+        activationId: 'a',
+        requestId: 'pause',
+      })
+    ).rejects.toThrow('owner');
+    await repo.delete('test', 'owner', 2);
+    expect(await repo.list()).toEqual([]);
+  });
+});
+
+it.each([false, true, 'false', 'true'])(
+  'preserves ACP value %s and the Registry fingerprint across peers',
+  async (planMode) => {
+    // Nested maps (Agent options) come back from Mirror tagged with `$cid`; the
+    // owning machine must still see the same definition, or the schedule stays
+    // blocked on DEFINITION_NOT_COMMITTED forever.
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), JSON.parse(JSON.stringify(value))),
+        },
+      }),
+      flush: async () => {},
+    };
+    const author = new ScheduleRepository(port, 'workspace' as never);
+    const d = definition();
+    await author.save({
+      scheduleId: 'test',
+      draft: {
+        title: d.title,
+        machineId: d.machineId,
+        trigger: d.trigger,
+        agent: {
+          agentConfigId: d.agent.agentConfigId,
+          modelId: 'model',
+          configOptionValues: {
+            _permission: 'workspace-write',
+            effort: 'high',
+            plan_mode: planMode,
+            select_flag: 'false',
+          },
+        },
+        project: { kind: 'local', localProjectId: 'project' as never, useWorktree: true },
+        destination: { kind: 'own_session', epoch: 0 },
+        misfirePolicy: d.misfirePolicy,
+        overlapPolicy: d.overlapPolicy,
+        retryPolicy: d.retryPolicy,
+        prompt: 'hello',
+      },
+      actorId: 'owner',
+      now: 1,
+      activationId: 'activation',
+      activityId: 'created',
+      create: true,
+    });
+    const [row] = await author.list();
+    const machineDoc = new LoroDoc();
+    machineDoc.import(docs.get('schedule-test')!.export({ mode: 'snapshot' }));
+    const machine = new ScheduleRepository(
+      { ...port, openPersistedDoc: async () => ({ doc: machineDoc }) },
+      'workspace' as never
+    );
+    const read = await machine.read('test');
+    expect(read?.definition.agent.configOptionValues).toEqual({
+      _permission: 'workspace-write',
+      effort: 'high',
+      plan_mode: planMode,
+      select_flag: 'false',
+    });
+    expect(scheduleDefinitionFingerprint(read!)).toBe(row!.definitionFingerprint);
+  }
+);
+
+it('rejects credential options in schedule definitions', () => {
+  expect(
+    ScheduleAgentSchema.safeParse({
+      agentConfigId: 'agent',
+      configOptionValues: { api_key: 'secret' },
+    }).success
+  ).toBe(false);
+});
+
+describe('Chat-mode schedules carry no project', () => {
+  const chatDraft = () => {
+    const d = definition();
+    return {
+      title: d.title,
+      machineId: d.machineId,
+      trigger: d.trigger,
+      agent: d.agent,
+      misfirePolicy: d.misfirePolicy,
+      overlapPolicy: d.overlapPolicy,
+      retryPolicy: d.retryPolicy,
+      prompt: 'hello',
+    };
+  };
+  const memoryPort = () => {
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), value),
+        },
+      }),
+      flush: async () => {},
+    };
+    return port;
+  };
+
+  it('purges terminal one-time messages after retention and retries a busy purge', async () => {
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const purged: string[] = [];
+    let purgeBusy = true;
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () =>
+            [...rows].map(([key, value]) => ({ key: JSON.parse(key) as string[], value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), value),
+          delete: (key) => rows.delete(JSON.stringify(key)),
+        },
+      }),
+      flush: async () => {},
+      purgeDoc: async (id) => {
+        if (purgeBusy) throw new Error('doc is busy');
+        purged.push(id);
+        docs.delete(id);
+      },
+    };
+    const repo = new ScheduleRepository(port, 'workspace' as never);
+    const draft = {
+      ...chatDraft(),
+      prompt: 'hello',
+      message: { inputBlocks: [{ type: 'text' as const, text: 'hello' }] },
+      trigger: { kind: 'once' as const, at: '2026-10-27T09:00:00Z' },
+      destination: { kind: 'existing_session' as const, sessionId: 'chat' },
+    };
+    await repo.save({
+      scheduleId: 'test',
+      draft,
+      actorId: 'owner',
+      now: 1,
+      activationId: 'activation',
+      activityId: 'created',
+      create: true,
+    });
+    const [row] = await repo.list();
+    const setRuntime = (messageState: string, updatedAt: number) => {
+      rows.set(JSON.stringify(['runtime', 'test', 'machine']), {
+        scheduleId: 'test',
+        machineId: 'machine',
+        activationId: 'activation',
+        observedDefinitionFingerprint: row!.definitionFingerprint,
+        messageState,
+        updatedAt,
+      });
+    };
+    setRuntime('pending', 1_000);
+    expect(
+      await repo.pruneExpiredMessages({
+        now: 1_000 + SCHEDULED_MESSAGE_RETENTION_MS,
+        ownerId: 'owner',
+        machineId: 'machine',
+      })
+    ).toEqual([]);
+    setRuntime('sent', 1_000);
+    expect(
+      await repo.pruneExpiredMessages({
+        now: 1_000 + SCHEDULED_MESSAGE_RETENTION_MS - 1,
+        ownerId: 'owner',
+        machineId: 'machine',
+      })
+    ).toEqual([]);
+    expect(
+      await repo.pruneExpiredMessages({
+        now: 1_000 + SCHEDULED_MESSAGE_RETENTION_MS,
+        ownerId: 'owner',
+        machineId: 'machine',
+      })
+    ).toEqual([]);
+    expect(await repo.list()).toHaveLength(1);
+    purgeBusy = false;
+    expect(
+      await repo.pruneExpiredMessages({
+        now: 1_000 + SCHEDULED_MESSAGE_RETENTION_MS,
+        ownerId: 'owner',
+        machineId: 'machine',
+      })
+    ).toEqual(['test']);
+    expect(purged).toEqual(['schedule-test']);
+    expect(await repo.list()).toEqual([]);
+    expect(rows.has(JSON.stringify(['tombstone', 'test']))).toBe(true);
+    expect(rows.has(JSON.stringify(['schedule', 'test']))).toBe(false);
+    expect(rows.has(JSON.stringify(['runtime', 'test', 'machine']))).toBe(false);
+  });
+
+  it('persists complete messages across replicas, fingerprints their payload and replays one creation', async () => {
+    const port = memoryPort();
+    const author = new ScheduleRepository(port, 'workspace' as never);
+    const message = {
+      inputBlocks: [
+        {
+          type: 'text' as const,
+          text: 'Review this',
+          spans: [{ start: 0, end: 6, kind: 'file' as const, label: 'Review' }],
+        },
+        {
+          type: 'file' as const,
+          fileId: 'local-file',
+          fileName: 'notes.txt',
+          mimeType: 'text/plain',
+          sizeBytes: 5,
+          sha256: 'a'.repeat(64),
+          textPreview: true,
+          transport: 'local' as const,
+          machineId: 'machine',
+          uploadedAt: 1,
+        },
+      ],
+      mcpServerIds: [],
+    };
+    const draft = {
+      ...chatDraft(),
+      prompt: 'Review this',
+      message,
+      trigger: { kind: 'once' as const, at: '2026-10-27T09:00:00Z' },
+      destination: { kind: 'existing_session' as const, sessionId: 'chat' },
+    };
+    const args = {
+      scheduleId: 'test',
+      draft,
+      actorId: 'owner',
+      now: 1,
+      activationId: 'activation',
+      activityId: 'create',
+      create: true,
+    };
+    await author.save(args);
+    await author.save(args);
+    const stored = await author.read('test');
+    expect(stored?.message).toEqual(message);
+    expect(stored?.definition.messageVersion).toBe(1);
+    expect(stored?.timeline).toHaveLength(1);
+    const peer = new LoroDoc();
+    peer.import((await port.openPersistedDoc('schedule-test')).doc.export({ mode: 'snapshot' }));
+    const replica = new ScheduleRepository(
+      { ...port, openPersistedDoc: async () => ({ doc: peer }) },
+      'workspace' as never
+    );
+    const read = await replica.read('test');
+    const [row] = await author.list();
+    expect(read?.message).toEqual(message);
+    expect(scheduleDefinitionFingerprint(read!)).toBe(row!.definitionFingerprint);
+    expect(row?.scheduledMessage).toBe(true);
+    const changed = { ...read!, message: { ...message, mcpServerIds: ['another'] } };
+    expect(scheduleDefinitionFingerprint(changed)).not.toBe(row!.definitionFingerprint);
+    const { message: _message, ...without } = draft;
+    await expect(
+      author.save({ ...args, create: false, activityId: 'edit', draft: without })
+    ).rejects.toThrow('payload');
+    peer.getMap('message').delete('payload');
+    peer.commit();
+    expect(await replica.read('test')).toBeNull();
+  });
+
+  it('converges concurrent complete-message creation despite different device clocks', async () => {
+    const ports = [memoryPort(), memoryPort()];
+    const repositories = ports.map((port) => new ScheduleRepository(port, 'workspace' as never));
+    const draft = {
+      ...chatDraft(),
+      prompt: 'continue',
+      message: { inputBlocks: [{ type: 'text' as const, text: 'continue' }] },
+      trigger: { kind: 'once' as const, at: '2026-10-27T09:00:00Z' },
+      destination: { kind: 'existing_session' as const, sessionId: 'chat' },
+    };
+    for (const [index, repository] of repositories.entries())
+      await repository.save({
+        scheduleId: 'quota',
+        draft,
+        actorId: 'owner',
+        now: 1000 + index * 5000,
+        activationId: 'activation',
+        activityId: 'create',
+        create: true,
+      });
+    const docs = await Promise.all(
+      ports.map(async (port) => (await port.openPersistedDoc('schedule-quota')).doc)
+    );
+    const snapshots = docs.map((doc) => doc.export({ mode: 'snapshot' }));
+    docs[0]!.import(snapshots[1]!);
+    docs[1]!.import(snapshots[0]!);
+    const rows = await Promise.all(
+      repositories.map(async (repository) => (await repository.list())[0]!)
+    );
+    expect(rows[0]!.definitionFingerprint).toBe(rows[1]!.definitionFingerprint);
+    for (const repository of repositories) {
+      const merged = (await repository.read('quota'))!;
+      expect(merged.prompt).toBe('continue');
+      expect(merged.timeline).toHaveLength(1);
+      expect(merged.message?.inputBlocks).toEqual(draft.message.inputBlocks);
+      expect(scheduleDefinitionFingerprint(merged)).toBe(rows[0]!.definitionFingerprint);
+      await repository.save({
+        scheduleId: 'quota',
+        draft,
+        actorId: 'owner',
+        now: 9999,
+        activationId: 'activation',
+        activityId: 'create',
+        create: true,
+      });
+      expect((await repository.read('quota'))?.prompt).toBe('continue');
+    }
+  });
+
+  it('supports attachment-only messages and rejects missing, empty or non-once payloads', async () => {
+    const repo = new ScheduleRepository(memoryPort(), 'workspace' as never);
+    const draft = {
+      ...chatDraft(),
+      prompt: '',
+      message: {
+        inputBlocks: [
+          {
+            type: 'image' as const,
+            imageId: 'image',
+            mimeType: 'image/png',
+            fileName: 'image.png',
+            sizeBytes: 5,
+            width: 1,
+            height: 1,
+          },
+        ],
+      },
+      trigger: { kind: 'once' as const, at: '2026-10-27T09:00:00Z' },
+      destination: { kind: 'existing_session' as const, sessionId: 'chat' },
+    };
+    const stored = await repo.save({
+      scheduleId: 'image-only',
+      draft,
+      actorId: 'owner',
+      now: 1,
+      activationId: 'a',
+      activityId: 'create',
+      create: true,
+    });
+    expect((await repo.read('image-only'))?.message).toEqual(draft.message);
+    expect(() => scheduleDefinitionFingerprint({ ...stored, message: undefined })).toThrow(
+      'missing'
+    );
+    expect(() =>
+      scheduleDefinitionFingerprint({ ...stored, message: { inputBlocks: [] } })
+    ).toThrow();
+    expect(() =>
+      scheduleDefinitionFingerprint({
+        ...stored,
+        definition: { ...stored.definition, trigger: { kind: 'manual' } },
+      })
+    ).toThrow('one-time');
+  });
+
+  it.each([
+    ['2026-10-01T02:21', '2026-10-01T09:21:00.000Z'],
+    ['2026-11-01T01:30', '2026-11-01T08:30:00.000Z'],
+  ])(
+    'saves and restores the Once instant before evaluating its due slot (%s)',
+    async (input, at) => {
+      const zone = 'America/Los_Angeles';
+      const port = memoryPort();
+      const repo = new ScheduleRepository(port, 'workspace' as never);
+      const instant = zonedLocalInputToInstant(input, zone)!;
+      expect(instant).toBe(Date.parse(at));
+      await repo.save({
+        scheduleId: 'test',
+        draft: { ...chatDraft(), trigger: { kind: 'once', at: new Date(instant).toISOString() } },
+        actorId: 'owner',
+        now: instant - 60_000,
+        activationId: 'activation',
+        activityId: 'created',
+        create: true,
+      });
+      const doc = (await port.openPersistedDoc('schedule-test')).doc;
+      const peer = new LoroDoc();
+      peer.import(doc.export({ mode: 'snapshot' }));
+      const restored = await new ScheduleRepository(
+        {
+          ...port,
+          openPersistedDoc: async () => ({ doc: peer }),
+        },
+        'workspace' as never
+      ).read('test');
+      expect(restored!.definition.trigger).toEqual({ kind: 'once', at });
+      expect(scheduleDefinitionFingerprint(restored!)).toBe(
+        (await repo.list())[0]!.definitionFingerprint
+      );
+      expect(instantToZonedLocalInput(instant, zone)).toBe(input);
+      expect(
+        previewSchedule(restored!.definition.trigger, restored!.definition.activeFrom, instant - 1)
+      ).toEqual([instant]);
+      const due = evaluateSchedule(restored!.definition, undefined, instant);
+      expect(due.due).toEqual({ scheduledFor: instant, disposition: 'run' });
+      expect(
+        evaluateSchedule(restored!.definition, due.evaluatedThrough, instant + 60_000).due
+      ).toBeUndefined();
+    }
+  );
+});
+
+describe('legacy Schedule ACP value compatibility', () => {
+  it('projects only declared boolean literals without rewriting the authorized definition', () => {
+    const agent = {
+      agentConfigId: 'agent',
+      configOptionValues: {
+        plan_mode: 'false',
+        verbose: 'true',
+        select_flag: 'false',
+        unknown: 'true',
+        invalid: 'off',
+        typed: false,
+      },
+    };
+    const document = { definition: { ...definition(), agent }, prompt: 'hello', timeline: [] };
+    const fingerprint = scheduleDefinitionFingerprint(document);
+    expect(
+      normalizeLegacyScheduleAgent(agent, [
+        { id: 'plan_mode', type: 'boolean' },
+        { id: 'verbose', type: 'boolean' },
+        { id: 'select_flag', type: 'select' },
+        { id: 'invalid', type: 'boolean' },
+        { id: 'typed', type: 'boolean' },
+      ]).configOptionValues
+    ).toEqual({
+      plan_mode: false,
+      verbose: true,
+      select_flag: 'false',
+      unknown: 'true',
+      invalid: 'off',
+      typed: false,
+    });
+    expect(normalizeLegacyScheduleAgent(agent).configOptionValues).toEqual(
+      agent.configOptionValues
+    );
+    expect(agent.configOptionValues.plan_mode).toBe('false');
+    expect(scheduleDefinitionFingerprint(document)).toBe(fingerprint);
+  });
+  it('projects legacy Fast literals by semantic id only when the probe does not declare a select', () => {
+    const agent = {
+      agentConfigId: 'agent',
+      configOptionValues: {
+        fast: 'false',
+        'fast-mode': 'true',
+        fast_select: 'false',
+      },
+    };
+
+    expect(
+      normalizeLegacyScheduleAgent(agent, [
+        {
+          id: 'fast',
+          name: 'Custom Fast choice',
+          type: 'select',
+          currentValue: 'false',
+          options: [{ value: 'false', name: 'False' }],
+        },
+        {
+          id: 'fast_select',
+          name: 'Fast selection',
+          type: 'select',
+          currentValue: 'false',
+          options: [{ value: 'false', name: 'False' }],
+        },
+      ]).configOptionValues
+    ).toEqual({
+      fast: 'false',
+      'fast-mode': true,
+      fast_select: 'false',
+    });
+
+    expect(normalizeLegacyScheduleAgent(agent).configOptionValues).toEqual({
+      fast: false,
+      'fast-mode': true,
+      fast_select: 'false',
+    });
+  });
+});

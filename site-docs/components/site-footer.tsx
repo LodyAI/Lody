@@ -1,3 +1,4 @@
+import { SiteAnchor } from '@site/components/site-anchor';
 /**
  * Shared site footer — same structure as the homepage underwater footer:
  * copyright, support / terms / privacy / GitHub / X.
@@ -5,11 +6,11 @@
  */
 
 import { founderCallUrl } from '@site/lib/founder-call';
+import { GITHUB_REPO_URL } from '@site/lib/github';
 
 export type SiteFooterLocale = 'en' | 'zh';
 
 const X_HREF = 'https://x.com/lody_ai';
-const GITHUB_HREF = 'https://github.com/LodyAI/Lody';
 
 const copy = {
   en: {
@@ -42,18 +43,18 @@ export function SiteFooter({ locale }: { locale: SiteFooterLocale }) {
       <div className="underwater-footer__inner">
         <p className="underwater-footer__rights">{t.rights}</p>
         <nav className="underwater-footer__links" aria-label="Footer">
-          <a href={t.supportHref}>{t.support}</a>
-          <a href={founderCallUrl('footer')} rel="noreferrer" target="_blank">
+          <SiteAnchor href={t.supportHref}>{t.support}</SiteAnchor>
+          <SiteAnchor href={founderCallUrl('footer')} rel="noreferrer" target="_blank">
             {t.bookCall}
-          </a>
-          <a href={t.termsHref}>{t.terms}</a>
-          <a href={t.privacyHref}>{t.privacy}</a>
-          <a href={GITHUB_HREF} rel="noreferrer" target="_blank">
+          </SiteAnchor>
+          <SiteAnchor href={t.termsHref}>{t.terms}</SiteAnchor>
+          <SiteAnchor href={t.privacyHref}>{t.privacy}</SiteAnchor>
+          <SiteAnchor href={GITHUB_REPO_URL} rel="noreferrer" target="_blank">
             GitHub
-          </a>
-          <a href={X_HREF} rel="noreferrer" target="_blank">
+          </SiteAnchor>
+          <SiteAnchor href={X_HREF} rel="noreferrer" target="_blank">
             X
-          </a>
+          </SiteAnchor>
         </nav>
       </div>
     </footer>

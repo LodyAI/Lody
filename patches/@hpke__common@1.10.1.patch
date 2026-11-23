@@ -1,0 +1,122 @@
+diff --git a/esm/src/algorithm.js b/esm/src/algorithm.js
+index 15b6b3dc407b03e0629a76b62d56f9bfe167a9a4..893027917848987796942b6079d62aa7b2743cf5 100644
+--- a/esm/src/algorithm.js
++++ b/esm/src/algorithm.js
+@@ -5,15 +5,8 @@ async function loadSubtleCrypto() {
+         // Browsers, Node.js >= v19, Cloudflare Workers, Bun, etc.
+         return globalThis.crypto.subtle;
+     }
+-    // Node.js <= v18
+-    try {
+-        // @ts-ignore: to ignore "crypto"
+-        const { webcrypto } = await import("crypto"); // node:crypto
+-        return webcrypto.subtle;
+-    }
+-    catch (e) {
+-        throw new NotSupportedError(e);
+-    }
++    // Lody supports global WebCrypto runtimes only; never load Node builtins.
++    throw new NotSupportedError("Global WebCrypto required");
+ }
+ export class NativeAlgorithm {
+     constructor() {
+diff --git a/esm/src/utils/misc.js b/esm/src/utils/misc.js
+index 09cb9e3aa40ec979f97b50d4d0b1123285a50851..d8a7edc5867952f95ec5307ba85ef9e1d5796a0a 100644
+--- a/esm/src/utils/misc.js
++++ b/esm/src/utils/misc.js
+@@ -136,30 +136,16 @@ export async function loadSubtleCrypto() {
+         // Browsers, Node.js >= v19, Cloudflare Workers, Bun, etc.
+         return globalThis.crypto.subtle;
+     }
+-    // Node.js <= v18
+-    try {
+-        // @ts-ignore: to ignore "crypto"
+-        const { webcrypto } = await import("crypto"); // node:crypto
+-        return webcrypto.subtle;
+-    }
+-    catch (_e) {
+-        throw new Error("Failed to load SubtleCrypto");
+-    }
++    // Lody supports global WebCrypto runtimes only; never load Node builtins.
++    throw new Error("Failed to load SubtleCrypto");
+ }
+ export async function loadCrypto() {
+     if (typeof dntShim.dntGlobalThis !== "undefined" && globalThis.crypto !== undefined) {
+         // Browsers, Node.js >= v19, Cloudflare Workers, Bun, etc.
+         return globalThis.crypto;
+     }
+-    // Node.js <= v18
+-    try {
+-        // @ts-ignore: to ignore "crypto"
+-        const { webcrypto } = await import("crypto"); // node:crypto
+-        return webcrypto;
+-    }
+-    catch (_e) {
+-        throw new Error("failed to load Crypto");
+-    }
++    // Lody supports global WebCrypto runtimes only; never load Node builtins.
++    throw new Error("failed to load Crypto");
+ }
+ /**
+  * XOR for Uint8Array.
+diff --git a/script/src/algorithm.js b/script/src/algorithm.js
+index 3ebdc1749878aee1705fa370694d457caf68b5b7..9a14dccef7f79455c40f98b02458372e3cad7bcb 100644
+--- a/script/src/algorithm.js
++++ b/script/src/algorithm.js
+@@ -41,15 +41,8 @@ var __importStar = (this && this.__importStar) || function (mod) {
+             // Browsers, Node.js >= v19, Cloudflare Workers, Bun, etc.
+             return globalThis.crypto.subtle;
+         }
+-        // Node.js <= v18
+-        try {
+-            // @ts-ignore: to ignore "crypto"
+-            const { webcrypto } = await (__syncRequire ? Promise.resolve().then(() => __importStar(require("crypto"))) : new Promise((resolve_1, reject_1) => { require(["crypto"], resolve_1, reject_1); }).then(__importStar)); // node:crypto
+-            return webcrypto.subtle;
+-        }
+-        catch (e) {
+-            throw new errors_js_1.NotSupportedError(e);
+-        }
++        // Lody supports global WebCrypto runtimes only; never load Node builtins.
++        throw new errors_js_1.NotSupportedError("Global WebCrypto required");
+     }
+     class NativeAlgorithm {
+         constructor() {
+diff --git a/script/src/utils/misc.js b/script/src/utils/misc.js
+index c365fa0a1e0cd439ed301f801f22f61d962cdc35..51d6bf68512d07388d32a761a6d3ef4d1dbae2bc 100644
+--- a/script/src/utils/misc.js
++++ b/script/src/utils/misc.js
+@@ -185,30 +185,16 @@ var __importStar = (this && this.__importStar) || function (mod) {
+             // Browsers, Node.js >= v19, Cloudflare Workers, Bun, etc.
+             return globalThis.crypto.subtle;
+         }
+-        // Node.js <= v18
+-        try {
+-            // @ts-ignore: to ignore "crypto"
+-            const { webcrypto } = await (__syncRequire ? Promise.resolve().then(() => __importStar(require("crypto"))) : new Promise((resolve_1, reject_1) => { require(["crypto"], resolve_1, reject_1); }).then(__importStar)); // node:crypto
+-            return webcrypto.subtle;
+-        }
+-        catch (_e) {
+-            throw new Error("Failed to load SubtleCrypto");
+-        }
++        // Lody supports global WebCrypto runtimes only; never load Node builtins.
++        throw new Error("Failed to load SubtleCrypto");
+     }
+     async function loadCrypto() {
+         if (typeof dntShim.dntGlobalThis !== "undefined" && globalThis.crypto !== undefined) {
+             // Browsers, Node.js >= v19, Cloudflare Workers, Bun, etc.
+             return globalThis.crypto;
+         }
+-        // Node.js <= v18
+-        try {
+-            // @ts-ignore: to ignore "crypto"
+-            const { webcrypto } = await (__syncRequire ? Promise.resolve().then(() => __importStar(require("crypto"))) : new Promise((resolve_2, reject_2) => { require(["crypto"], resolve_2, reject_2); }).then(__importStar)); // node:crypto
+-            return webcrypto;
+-        }
+-        catch (_e) {
+-            throw new Error("failed to load Crypto");
+-        }
++        // Lody supports global WebCrypto runtimes only; never load Node builtins.
++        throw new Error("failed to load Crypto");
+     }
+     /**
+      * XOR for Uint8Array.

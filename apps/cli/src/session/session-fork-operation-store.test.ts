@@ -34,6 +34,10 @@ describe('file session fork operation store', () => {
   beforeEach(() => {
     tempHome = mkdtempSync(path.join(os.tmpdir(), 'lody-fork-operation-store-'));
     vi.stubEnv('HOME', tempHome);
+    // Pin the data root the store derives, so the literal `.lody` the assertions
+    // below join stays correct: without `LODY_PLATFORM`, `getLodyDataDir()` picks
+    // the OSS profile's `.lody-oss` instead (as CI does).
+    vi.stubEnv('LODY_DATA_DIR', path.join(tempHome, '.lody'));
   });
 
   afterEach(() => {

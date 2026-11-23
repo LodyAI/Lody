@@ -1,3 +1,4 @@
+import '@site/app/legal.css';
 import { getMDXComponents } from '@site/components/mdx';
 import { SiteNav } from '@site/components/site-nav';
 import type { LegalPageEntry, PageLocale } from '@site/lib/pages';
@@ -23,8 +24,7 @@ export async function preloadLegalPageContent(locale: PageLocale, docPath: strin
 }
 
 export function LegalPage({ entry, locale }: { entry: LegalPageEntry; locale: PageLocale }) {
-  const languageHref =
-    locale === 'zh' ? `/${entry.slug}` : `/zh/${entry.slug}`;
+  const languageHref = locale === 'zh' ? `/${entry.slug}` : `/zh/${entry.slug}`;
 
   return (
     <div className="landing-page-root legal-page-root">

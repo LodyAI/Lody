@@ -1,16 +1,36 @@
+@layer theme, base, stylex, components, utilities;
 @import './fonts.css';
 @import 'katex/dist/katex.min.css';
 @import 'tw-animate-css';
 @import 'tailwindcss';
 @import 'konsta/theme.css';
+@import './scrollbars.css';
 
 @config "../../tailwind.config.js";
 @source "../**/*.{ts,tsx}";
-@source "../../node_modules/konsta/react";
-@source "../../node_modules/konsta/shared";
-@source "../../node_modules/konsta/styles";
+/* Konsta is imported for its theme, safe-area utilities and the `safe-areas`
+   hook only; no Konsta component is rendered. Do NOT scan Konsta's sources:
+   that generates utilities such as `last-child-hairline-b-none`, whose
+   unanchored `:last-child … ::after` selectors make every portal open/close
+   restyle the whole app (~25ms per popover on a large workspace). */
 
-@custom-variant dark (&:where(.dark, .dark *));
+/* Sidebar session-row lists: skip style, layout and paint for rows scrolled out
+   of view. `auto` remembers each row's last rendered height; 50px is only the
+   estimate for rows never on screen (two-line repo rows are 54px, child and
+   chat rows 30-36px), kept close so the scrollbar barely moves as rows render.
+   See SIDEBAR_ROW_LIST_CLASS. */
+@utility sidebar-row-list {
+  & > * {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 50px;
+  }
+}
+
+@custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
+/* `placeholder:` also styles the composer editor's placeholder (`ui/mention/mention-input.tsx`),
+   painted as its `::before`, so a composer's placeholder colour is the textarea's in every
+   engine. WebKit reports no computed style for `::placeholder`, so it cannot be copied. */
+@custom-variant placeholder (&::placeholder, &[data-composer-editor]::before);
 
 @theme inline {
   --font-ios: var(--font-sans);
@@ -33,6 +53,8 @@
 :root {
   --diffs-token-light-font-style: normal;
   --diffs-token-dark-font-style: normal;
+  /* Appearance's document baseline; @lody/ui text tokens derive every role. */
+  --ui-font-size: 14px;
 
   /* Dialogs use CSS variables in Tailwind arbitrary z-index classes. Keep these
      concrete at runtime so ordinary Radix portals (`z-50`) stay under modal
@@ -73,11 +95,11 @@ body {
   margin: 0;
   /* Inter is bundled; keep system fonts as fallback only. */
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--ui-font-size, 14px);
   line-height: 1.45;
-  /* Native-like font rendering */
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* Subpixel: the macOS default weight; `antialiased` thins text app-wide. */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   /* Prevent iOS auto font-size adjustment */
   -webkit-text-size-adjust: 100%;
 }
@@ -87,15 +109,52 @@ code,
 pre,
 .font-mono {
   font-family: var(--font-mono);
-  font-variant-ligatures: contextual;
+  font-variant-ligatures: var(--lody-font-ligatures, contextual);
 }
 
 .font-terminal {
   font-family: var(--font-terminal);
-  font-variant-ligatures: contextual;
+  font-variant-ligatures: var(--lody-font-ligatures, contextual);
 }
 
 @layer utilities {
+  /* Links are jellyfish cyan (the brand accent, #7CC4E8 in dark themes).
+     Markdown anchors take it from the `.markdown-renderer a` rule: a
+     hand-written class has no `[&_a]:` variant in Tailwind v4, so the
+     renderer's `[&_a]:text-markdown-link` never applied and links inherited
+     the prose color. */
+  .text-markdown-link,
+  .markdown-renderer a {
+    color: hsl(200 72% 34%);
+  }
+  .dark .text-markdown-link,
+  .dark .markdown-renderer a {
+    color: hsl(200 69% 70%);
+  }
+  /* Reference/link colours must yield to the same selected foreground as prose. */
+  [data-composer-editor] [data-mention-value][data-selected] {
+    color: HighlightText;
+  }
+
+  /* A link rendered as a reference label (GitHub PR / issue): a link-blue
+     tinted chip (no border) instead of the prose underline, so it reads as
+     clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
+     renderer's `[&_a]:` link variants in this same layer. */
+  .markdown-renderer :is(a, button, span).markdown-reference-chip {
+    --reference-chip-hue: 200 72% 34%;
+    color: hsl(var(--reference-chip-hue));
+    background-color: hsl(var(--reference-chip-hue) / 0.12);
+    text-decoration: none;
+  }
+  .markdown-renderer :is(a, button).markdown-reference-chip:hover {
+    background-color: hsl(var(--reference-chip-hue) / 0.18);
+  }
+  .dark .markdown-renderer :is(a, button, span).markdown-reference-chip {
+    --reference-chip-hue: 200 69% 70%;
+  }
+  .text-pr-merged {
+    color: hsl(var(--github-merged));
+  }
   .text-balance {
     text-wrap: balance;
   }
@@ -132,19 +191,155 @@ pre,
 }
 
 @layer components {
-  .markdown-renderer > div {
-    /* Streamdown only exposes block/circle carets. Keep chat output cursor-free
-       even if upstream changes the default or a caller accidentally enables it. */
-    --streamdown-caret: '' !important;
+  /* Desktop settings content: in light themes the section/card surfaces take the
+     theme's popover fill (white in Lody Light) instead of the gray --card, so
+     grouped rows read as lifted panels on the page rather than gray-on-gray.
+     Dark themes keep their tuned --card. */
+  [data-settings-surface]:not(.dark *) {
+    --card: var(--popover);
   }
 
-  .markdown-renderer [data-streamdown='code-block'] {
-    --markdown-code-block-bg: hsl(var(--code-background));
-    --markdown-code-block-border: hsl(var(--code-border));
-    --markdown-code-block-foreground: hsl(var(--code-foreground));
-    --markdown-code-block-language: hsl(var(--code-foreground) / 0.55);
-    --markdown-code-block-action-bg: hsl(var(--code-background) / 0.88);
-    --markdown-code-block-action-border: hsl(var(--code-border) / 0.78);
+  /* Markdown table columns (`markdown-table.tsx`). Every column keeps a
+     floor so the auto layout cannot squeeze it to a character or two, and
+     breaks between words; a column holding a long unbroken token (path, URL,
+     hash) may also break inside it and has its maximum capped, so it wraps
+     instead of starving prose columns in the auto layout's distribution.
+     `<col>` widths give each column a content-estimated preferred width, and
+     an intrinsically wide column keeps a higher floor so it stays readable
+     when even the minimums already overflow. Beyond phone widths a column of
+     short cells stays on one line at its natural width. Columns past the
+     24th get no classification. */
+  .markdown-renderer [data-markdown-table] :is(th, td) {
+    min-width: 5em;
+    overflow-wrap: break-word;
+  }
+  .markdown-renderer
+    :is(
+      [data-break-anywhere-columns~='1'] tr > :nth-child(1),
+      [data-break-anywhere-columns~='2'] tr > :nth-child(2),
+      [data-break-anywhere-columns~='3'] tr > :nth-child(3),
+      [data-break-anywhere-columns~='4'] tr > :nth-child(4),
+      [data-break-anywhere-columns~='5'] tr > :nth-child(5),
+      [data-break-anywhere-columns~='6'] tr > :nth-child(6),
+      [data-break-anywhere-columns~='7'] tr > :nth-child(7),
+      [data-break-anywhere-columns~='8'] tr > :nth-child(8),
+      [data-break-anywhere-columns~='9'] tr > :nth-child(9),
+      [data-break-anywhere-columns~='10'] tr > :nth-child(10),
+      [data-break-anywhere-columns~='11'] tr > :nth-child(11),
+      [data-break-anywhere-columns~='12'] tr > :nth-child(12),
+      [data-break-anywhere-columns~='13'] tr > :nth-child(13),
+      [data-break-anywhere-columns~='14'] tr > :nth-child(14),
+      [data-break-anywhere-columns~='15'] tr > :nth-child(15),
+      [data-break-anywhere-columns~='16'] tr > :nth-child(16),
+      [data-break-anywhere-columns~='17'] tr > :nth-child(17),
+      [data-break-anywhere-columns~='18'] tr > :nth-child(18),
+      [data-break-anywhere-columns~='19'] tr > :nth-child(19),
+      [data-break-anywhere-columns~='20'] tr > :nth-child(20),
+      [data-break-anywhere-columns~='21'] tr > :nth-child(21),
+      [data-break-anywhere-columns~='22'] tr > :nth-child(22),
+      [data-break-anywhere-columns~='23'] tr > :nth-child(23),
+      [data-break-anywhere-columns~='24'] tr > :nth-child(24)
+    ) {
+    max-width: 20em;
+    overflow-wrap: anywhere;
+  }
+  .markdown-renderer
+    :is(
+      [data-wide-columns~='1'] tr > :nth-child(1),
+      [data-wide-columns~='2'] tr > :nth-child(2),
+      [data-wide-columns~='3'] tr > :nth-child(3),
+      [data-wide-columns~='4'] tr > :nth-child(4),
+      [data-wide-columns~='5'] tr > :nth-child(5),
+      [data-wide-columns~='6'] tr > :nth-child(6),
+      [data-wide-columns~='7'] tr > :nth-child(7),
+      [data-wide-columns~='8'] tr > :nth-child(8),
+      [data-wide-columns~='9'] tr > :nth-child(9),
+      [data-wide-columns~='10'] tr > :nth-child(10),
+      [data-wide-columns~='11'] tr > :nth-child(11),
+      [data-wide-columns~='12'] tr > :nth-child(12),
+      [data-wide-columns~='13'] tr > :nth-child(13),
+      [data-wide-columns~='14'] tr > :nth-child(14),
+      [data-wide-columns~='15'] tr > :nth-child(15),
+      [data-wide-columns~='16'] tr > :nth-child(16),
+      [data-wide-columns~='17'] tr > :nth-child(17),
+      [data-wide-columns~='18'] tr > :nth-child(18),
+      [data-wide-columns~='19'] tr > :nth-child(19),
+      [data-wide-columns~='20'] tr > :nth-child(20),
+      [data-wide-columns~='21'] tr > :nth-child(21),
+      [data-wide-columns~='22'] tr > :nth-child(22),
+      [data-wide-columns~='23'] tr > :nth-child(23),
+      [data-wide-columns~='24'] tr > :nth-child(24)
+    ) {
+    min-width: 9em;
+  }
+  @media (min-width: 641px) {
+    .markdown-renderer [data-markdown-table] :is(th, td) {
+      min-width: 8em;
+    }
+    .markdown-renderer
+      :is(
+        [data-wide-columns~='1'] tr > :nth-child(1),
+        [data-wide-columns~='2'] tr > :nth-child(2),
+        [data-wide-columns~='3'] tr > :nth-child(3),
+        [data-wide-columns~='4'] tr > :nth-child(4),
+        [data-wide-columns~='5'] tr > :nth-child(5),
+        [data-wide-columns~='6'] tr > :nth-child(6),
+        [data-wide-columns~='7'] tr > :nth-child(7),
+        [data-wide-columns~='8'] tr > :nth-child(8),
+        [data-wide-columns~='9'] tr > :nth-child(9),
+        [data-wide-columns~='10'] tr > :nth-child(10),
+        [data-wide-columns~='11'] tr > :nth-child(11),
+        [data-wide-columns~='12'] tr > :nth-child(12),
+        [data-wide-columns~='13'] tr > :nth-child(13),
+        [data-wide-columns~='14'] tr > :nth-child(14),
+        [data-wide-columns~='15'] tr > :nth-child(15),
+        [data-wide-columns~='16'] tr > :nth-child(16),
+        [data-wide-columns~='17'] tr > :nth-child(17),
+        [data-wide-columns~='18'] tr > :nth-child(18),
+        [data-wide-columns~='19'] tr > :nth-child(19),
+        [data-wide-columns~='20'] tr > :nth-child(20),
+        [data-wide-columns~='21'] tr > :nth-child(21),
+        [data-wide-columns~='22'] tr > :nth-child(22),
+        [data-wide-columns~='23'] tr > :nth-child(23),
+        [data-wide-columns~='24'] tr > :nth-child(24)
+      ) {
+      min-width: 15em;
+    }
+    .markdown-renderer
+      :is(
+        [data-one-line-columns~='1'] tr > :nth-child(1),
+        [data-one-line-columns~='2'] tr > :nth-child(2),
+        [data-one-line-columns~='3'] tr > :nth-child(3),
+        [data-one-line-columns~='4'] tr > :nth-child(4),
+        [data-one-line-columns~='5'] tr > :nth-child(5),
+        [data-one-line-columns~='6'] tr > :nth-child(6),
+        [data-one-line-columns~='7'] tr > :nth-child(7),
+        [data-one-line-columns~='8'] tr > :nth-child(8),
+        [data-one-line-columns~='9'] tr > :nth-child(9),
+        [data-one-line-columns~='10'] tr > :nth-child(10),
+        [data-one-line-columns~='11'] tr > :nth-child(11),
+        [data-one-line-columns~='12'] tr > :nth-child(12),
+        [data-one-line-columns~='13'] tr > :nth-child(13),
+        [data-one-line-columns~='14'] tr > :nth-child(14),
+        [data-one-line-columns~='15'] tr > :nth-child(15),
+        [data-one-line-columns~='16'] tr > :nth-child(16),
+        [data-one-line-columns~='17'] tr > :nth-child(17),
+        [data-one-line-columns~='18'] tr > :nth-child(18),
+        [data-one-line-columns~='19'] tr > :nth-child(19),
+        [data-one-line-columns~='20'] tr > :nth-child(20),
+        [data-one-line-columns~='21'] tr > :nth-child(21),
+        [data-one-line-columns~='22'] tr > :nth-child(22),
+        [data-one-line-columns~='23'] tr > :nth-child(23),
+        [data-one-line-columns~='24'] tr > :nth-child(24)
+      ) {
+      min-width: 0;
+      white-space: nowrap;
+    }
+  }
+
+  /* Shiki's CSS-variables theme, for every surface that shows its tokens: a
+     markdown fence and a tool step's command (`tool-call-detail.tsx`). */
+  :is(.markdown-renderer [data-streamdown='code-block'], [data-shiki-palette]) {
     --lody-shiki-background: transparent;
     --lody-shiki-foreground: hsl(var(--code-foreground));
     --lody-shiki-token-comment: hsl(var(--syntax-comment));
@@ -159,224 +354,125 @@ pre,
     --lody-shiki-token-inserted: hsl(var(--code-added));
     --lody-shiki-token-deleted: hsl(var(--code-removed));
     --lody-shiki-token-changed: hsl(var(--modified-file));
-    position: relative;
-    /* Plain rounded container; the language label and copy actions float as
-       absolute overlays, so the code body spans the full width and scrolls
-       cleanly beneath them (no reserved right rail). */
-    display: block !important;
-    width: 100%;
-    margin-block: 0.875rem !important;
-    overflow: hidden;
-    gap: 0 !important;
-    /* Streamdown ships `bg-sidebar border-border rounded-xl p-2` utilities on
-       this element. Tailwind's utilities layer beats our components layer, so
-       these must be `!important` to pin the block to our --code-* tokens. */
-    border: 1px solid var(--markdown-code-block-border) !important;
-    border-radius: 0.5rem !important;
-    background: var(--markdown-code-block-bg) !important;
-    padding: 0 !important;
-    color: var(--markdown-code-block-foreground);
   }
 
-  .markdown-renderer [data-streamdown='code-block-header'] {
-    position: absolute;
-    inset-block-start: 0;
-    inset-inline-end: 0;
-    z-index: 1;
-    display: flex;
-    /* `h-8` utility from Streamdown overrides plain height; pin ours. */
-    height: 1.75rem !important;
-    align-items: center;
-    justify-content: flex-end;
-    margin: 0;
-    /* Opaque mask in the SAME color as the pinned block background, so a long
-       first line scrolls cleanly beneath the label with no visible pill. */
-    padding-inline: 0.75rem;
-    background: var(--markdown-code-block-bg);
-    border-end-start-radius: 0.375rem;
-    color: var(--markdown-code-block-language);
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    line-height: 1;
-    letter-spacing: 0.04em;
-    pointer-events: none;
-    transition: opacity 120ms ease;
+  /* A `diff` fence is often an explanatory, headerless snippet rather than a
+     parseable patch. Its renderer marks rows directly so the
+     semantic add/remove treatment works for both forms and while streaming. */
+  .markdown-renderer [data-markdown-diff-block='true'] {
+    --markdown-diff-addition-bg: color-mix(
+      in oklab,
+      hsl(var(--code-added)) 12%,
+      var(--markdown-code-block-bg)
+    );
+    --markdown-diff-deletion-bg: color-mix(
+      in oklab,
+      hsl(var(--code-removed)) 12%,
+      var(--markdown-code-block-bg)
+    );
+    --markdown-diff-hunk-bg: color-mix(
+      in oklab,
+      hsl(var(--modified-file)) 9%,
+      var(--markdown-code-block-bg)
+    );
   }
 
-  .markdown-renderer [data-streamdown='code-block-header'] span {
-    margin-left: 0;
+  .markdown-renderer [data-markdown-diff-block='true'] [data-streamdown='code-block-body'] {
+    padding-inline: 0 !important;
   }
 
-  /* Streamdown wraps the actions in a `position: sticky` `h-8 -mt-10` container.
-     Left intact it becomes the positioned ancestor for our absolute chip,
-     anchoring it to the wrapper's flow position (block bottom) instead of the
-     block. `display: contents` removes the wrapper's box so the chip positions
-     against the code-block (position: relative) — top-right, every block. */
-  .markdown-renderer
-    [data-streamdown='code-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='code-block-actions']) {
-    display: contents !important;
+  .markdown-renderer [data-markdown-diff-block='true'] pre {
+    width: max-content;
+    min-width: 100%;
   }
 
-  .markdown-renderer [data-streamdown='code-block-actions'] {
-    position: absolute;
-    /* Center the chip on the first code line: body top padding + half the code
-       line-height (0.75rem font x 1.4). For a single-line block this equals the
-       block's vertical center; for multi-line it stays aligned to the top line. */
-    inset-block-start: calc(0.75rem + (0.75rem * 1.4) / 2);
-    inset-inline-end: 0.3125rem;
-    transform: translateY(-50%);
-    z-index: 2;
-    height: auto;
-    margin-top: 0;
-    /* Streamdown ships `bg-sidebar/80 border-sidebar px-1.5 py-1` here; pin our
-       tokens so the copy chip matches the block surface. */
-    padding: 0.25rem !important;
-    border: 1px solid var(--markdown-code-block-action-border) !important;
-    border-radius: 0.375rem;
-    background: var(--markdown-code-block-action-bg) !important;
-    color: var(--markdown-code-block-language);
-    opacity: 0;
-    backdrop-filter: blur(8px);
-    transition:
-      opacity 120ms ease,
-      color 120ms ease;
-  }
-
-  .markdown-renderer
-    [data-streamdown='code-block']:is(:hover, :focus-within)
-    [data-streamdown='code-block-actions'] {
-    opacity: 1;
-  }
-
-  .markdown-renderer
-    [data-streamdown='code-block']:is(:hover, :focus-within)
-    [data-streamdown='code-block-header'] {
-    opacity: 0;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button {
-    /* Streamdown's button is `display:block` with an inline <svg>, which sits
-       off-center. Make it a centered flex box. */
-    display: inline-flex;
-    width: 1.5rem;
-    height: 1.5rem;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border-radius: 0.25rem;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button svg {
-    width: 0.875rem;
-    height: 0.875rem;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button:hover {
-    color: var(--markdown-code-block-foreground);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] {
-    overflow-x: auto;
-    /* Streamdown ships `bg-background border border-border rounded-md p-4` on
-       the body — a second surface inside our container. Flatten it with
-       `!important` so the container is the only visible surface. */
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-    padding-block: 0.75rem !important;
-    padding-inline: 1rem !important;
-    color: var(--markdown-code-block-foreground);
-  }
-
-  /* No language fence: nothing to label, so drop the floating label entirely. */
-  .markdown-renderer
-    [data-streamdown='code-block'][data-language='']
-    [data-streamdown='code-block-header'] {
-    display: none;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] pre {
-    min-width: max-content;
-    margin: 0;
-    background: transparent !important;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] code {
-    font-family: var(--font-mono);
-    /* Match the terminal output font-size (text-xs / 0.75rem) used in
-       terminal-component.tsx so code blocks and command output read at
-       the same density in the agent message stream. */
-    font-size: 0.75rem;
-    line-height: 1.4;
-    font-variant-ligatures: contextual;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] pre > code > span {
+  .markdown-renderer [data-markdown-diff-line] {
     display: block;
+    min-height: 1.4em;
+    padding-inline: 1rem;
   }
 
-  @media (hover: none) {
-    .markdown-renderer [data-streamdown='code-block-actions'] {
-      opacity: 1;
-    }
-
-    .markdown-renderer [data-streamdown='code-block-header'] {
-      opacity: 0;
-    }
+  .markdown-renderer [data-markdown-diff-line='addition'] {
+    background: var(--markdown-diff-addition-bg);
+    box-shadow: inset 0.125rem 0 hsl(var(--code-added));
+    color: hsl(var(--code-added));
   }
 
+  .markdown-renderer [data-markdown-diff-line='deletion'] {
+    background: var(--markdown-diff-deletion-bg);
+    box-shadow: inset 0.125rem 0 hsl(var(--code-removed));
+    color: hsl(var(--code-removed));
+  }
+
+  .markdown-renderer [data-markdown-diff-line='hunk'] {
+    background: var(--markdown-diff-hunk-bg);
+    color: hsl(var(--modified-file));
+  }
+
+  .markdown-renderer [data-markdown-diff-line='metadata'] {
+    color: var(--markdown-code-block-language);
+  }
+
+  /* A diagram is content, not a card: the block keeps no frame, fill, or
+     reserved height, so it sits in the prose the way an image does. Two
+     rectangles remain. This one positions the hover controls and carries the
+     palette; the frame inside `[data-streamdown='mermaid']` bounds a tall
+     diagram and is the area an activated canvas pans inside. */
   .markdown-renderer [data-streamdown='mermaid-block'] {
-    --markdown-mermaid-bg: hsl(var(--muted) / 0.32);
-    --markdown-mermaid-border: hsl(var(--border));
     --markdown-mermaid-foreground: hsl(var(--foreground));
     --markdown-mermaid-muted: hsl(var(--muted-foreground));
-    --markdown-mermaid-control-bg: hsl(var(--background) / 0.86);
-    --markdown-mermaid-control-border: hsl(var(--border) / 0.78);
+    --markdown-mermaid-control-bg: hsl(var(--background));
+    --markdown-mermaid-control-border: hsl(var(--border));
+    /* Diagram colors come from the app palette's tokens (Lody Light or Vesper),
+       so they match the surrounding chrome. Labels are content, so they use the
+       prose foreground. `--pele-bg` backs edge labels, so it is the page
+       background the diagram is drawn on. Chart series keep Pele's categorical
+       palette: status tokens carry meaning (a "danger" slice misreads) and are
+       not built to be told apart as categories. */
+    --pele-bg: hsl(var(--background));
+    --pele-fg: hsl(var(--reading-foreground));
+    --pele-muted: hsl(var(--muted-foreground));
+    --pele-line: hsl(var(--muted-foreground));
+    --pele-surface: hsl(var(--background));
+    --pele-surface-alt: color-mix(in srgb, hsl(var(--muted)) 72%, hsl(var(--background)));
+    --pele-border: color-mix(in srgb, hsl(var(--primary)) 50%, hsl(var(--muted-foreground)));
+    --pele-accent: hsl(var(--primary));
+    --pele-critical: hsl(var(--destructive));
+    --pele-error: hsl(var(--destructive));
     position: relative;
     display: block !important;
     width: 100%;
     max-width: 100%;
     margin-block: 1rem !important;
-    overflow: hidden;
+    overflow: visible;
     gap: 0 !important;
-    border: 1px solid var(--markdown-mermaid-border);
-    border-radius: 0.375rem;
-    background: var(--markdown-mermaid-bg);
     padding: 0 !important;
+    background: none;
     color: var(--markdown-mermaid-foreground);
   }
 
-  .markdown-renderer [data-streamdown='mermaid-block'] > div:first-child:not([data-streamdown]) {
-    display: none;
-  }
-
-  .markdown-renderer
-    [data-streamdown='mermaid-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='mermaid-block-actions']) {
-    position: absolute !important;
-    inset-block-start: 0.375rem;
-    inset-inline-end: 0.375rem;
-    z-index: 2;
-    height: auto !important;
-    min-height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    pointer-events: none;
-  }
-
   .markdown-renderer [data-streamdown='mermaid-block-actions'] {
+    position: absolute;
+    inset-block-start: 0.125rem;
+    inset-inline-end: 0.25rem;
+    z-index: 2;
+    display: flex;
+    align-items: center;
     gap: 0.125rem;
-    border-color: var(--markdown-mermaid-control-border);
-    border-radius: 0.3125rem;
+    padding: 0.125rem;
+    border-radius: 9999px;
+    /* Opaque: an edge of the diagram can still pass under the pill, and a
+       translucent fill would show it through the controls. */
+    border: 1px solid var(--markdown-mermaid-control-border);
     background: var(--markdown-mermaid-control-bg);
     color: var(--markdown-mermaid-muted);
     opacity: 0;
-    backdrop-filter: blur(8px);
+    /* The scale's lightest tier: a control-sized lift, and a black shadow in both
+       themes (`--foreground` is near-white in Vesper, so tinting by it would glow). */
+    box-shadow: var(--shadow-xs);
     transition:
       opacity 120ms ease,
-      color 120ms ease,
-      border-color 120ms ease;
+      color 120ms ease;
   }
 
   .markdown-renderer
@@ -388,9 +484,22 @@ pre,
     opacity: 1;
   }
 
+  /* A touch device never hovers, so the reveal above never fires there and the
+     copy/download controls stay invisible for good. Same rule the code block
+     already carries. */
+  @media (hover: none) {
+    .markdown-renderer [data-streamdown='mermaid-block-actions'] {
+      opacity: 1;
+    }
+  }
+
   .markdown-renderer [data-streamdown='mermaid-block-actions'] button {
-    border-radius: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
     padding: 0.25rem;
+    cursor: pointer;
   }
 
   .markdown-renderer [data-streamdown='mermaid-block-actions'] button:hover {
@@ -398,74 +507,63 @@ pre,
     color: var(--markdown-mermaid-foreground);
   }
 
-  .markdown-renderer
-    [data-streamdown='mermaid-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='mermaid']) {
-    overflow: visible;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-  }
-
+  /* The control lane belongs to this box, not to the scrolling one inside it:
+     a tall diagram scrolls under the pill, and the pill must never sit on top of
+     what is scrolling past. */
   .markdown-renderer [data-streamdown='mermaid'] {
     width: 100%;
     height: auto !important;
-    min-height: 12rem;
+    padding-block-start: 2rem;
     color: var(--markdown-mermaid-foreground);
   }
 
   .markdown-renderer [data-streamdown='mermaid'] > div {
     width: 100% !important;
     height: auto !important;
-    min-height: 12rem !important;
-    overflow-x: auto !important;
-    overflow-y: visible !important;
-    overscroll-behavior-x: contain;
-    padding: 1rem;
-    cursor: default !important;
+    /* Only height is bounded. A tall diagram scrolls in place instead of running
+       for several screens of the conversation; width never scrolls, because the
+       diagram inside is scaled to the message. */
+    max-height: min(70vh, 36rem) !important;
+    overflow: auto !important;
+    /* Let wheel/touch scrolling continue into the conversation at either edge,
+       including when the diagram fits and has no vertical scroll range. */
+    overscroll-behavior: auto;
+    padding-block: 0.5rem;
+    /* An inactive preview does not pan, it activates on click
+       (`use-mermaid-diagram-canvas.tsx` tags it `role="button"`). */
+    cursor: zoom-in !important;
     scrollbar-gutter: stable;
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
   }
 
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+  .markdown-renderer [data-streamdown='mermaid']:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 0.375rem;
   }
 
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar-track {
-    background: transparent;
+  /* The activated canvas stops promising a zoom it has already performed.
+     Activation adds no ring: the grab cursor is the state, so a diagram that
+     carries no border does not grow one by being clicked. */
+  .markdown-renderer [data-streamdown='mermaid'][data-lody-canvas='active'] > div {
+    cursor: grab !important;
   }
 
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border: 3px solid transparent;
-    border-radius: 999px;
-    background-clip: content-box;
+  .markdown-renderer [data-streamdown='mermaid'][data-lody-canvas='active'] > div:active {
+    cursor: grabbing !important;
   }
 
-  .markdown-renderer [data-streamdown='mermaid'] > div::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] > div > div:last-child {
-    min-width: 100%;
-    align-items: flex-start;
-    justify-content: flex-start !important;
-    padding-block: 0.125rem;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] [aria-label='Mermaid chart'] {
-    display: block !important;
-    width: 100%;
+  .markdown-renderer [data-streamdown='mermaid-svg'] {
     min-width: 100%;
   }
 
-  .markdown-renderer [data-streamdown='mermaid'] [aria-label='Mermaid chart'] svg {
+  .markdown-renderer [data-streamdown='mermaid-svg'] svg {
     display: block;
     margin-inline: auto;
+    /* Fit the message width and nothing wider: a diagram that already fits stays
+       at natural size, one that does not is scaled down rather than cut off at
+       the right edge, and neither axis is upscaled by the layout. */
     width: auto !important;
-    max-width: none !important;
+    max-width: 100% !important;
     height: auto !important;
     max-height: none !important;
     overflow: visible;
@@ -781,69 +879,77 @@ pre,
 }
 
 @layer base {
-  /* Cool-white Linear-like fallbacks (overridden by Lody Light VS Code theme).
-     Hierarchy: pure white page → barely-gray sidebar → soft selection pill. */
+  /* Neutral-gray fallbacks (overridden by the bundled Lody Light theme).
+     Hierarchy: light conversation canvas → neutral sidebar → near-white composer
+     → visible hover → slightly deeper selection pill. */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 225 7% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 225 7% 11%;
+    --background: 240 9.1% 97.8%;
+    --foreground: 0 0% 11%;
+    --card: 240 3.2% 93.9%;
+    --card-foreground: 0 0% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 225 7% 11%;
+    --popover-foreground: 0 0% 11%;
+    --composer: 0 0% 100%;
     --primary: 220 82% 65%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 16% 97%;
-    --secondary-foreground: 225 7% 11%;
-    --muted: 220 16% 96%;
-    --muted-foreground: 220 6% 42%;
+    --secondary: 0 0% 97%;
+    --secondary-foreground: 0 0% 11%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 42%;
     --highlight: var(--primary);
     --highlight-foreground: var(--primary-foreground);
-    --hover: 220 14% 95%;
+    --hover: 0 0% 94.5%;
     --hover-foreground: var(--foreground);
-    --selection: 220 12% 92%;
+    --selection: 0 0% 87%;
     --selection-foreground: var(--foreground);
     --selection-inactive: var(--selection);
     --selection-inactive-foreground: var(--selection-foreground);
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 14% 91%;
-    --input: 220 12% 92%;
+    --border: 0 0% 86%;
+    --input: 0 0% 92%;
     --input-foreground: var(--foreground);
     --input-placeholder: var(--muted-foreground);
-    --input-border: 220 12% 86%;
+    --input-border: 0 0% 86%;
     /* Fill of an editable control. `--input` stays the recessed slab used by
        the composer and by muted chips; a form field on a light canvas must not
        be darker than the page or it reads as disabled, so it sits on white and
        is delimited by `--input-border`. Themed builds compute the same rule in
        `vscode-theme-css.ts`. */
     --input-field: 0 0% 100%;
-    --switch-track: 220 9% 64%;
+    /* Long-form conversation text, unselected sidebar rows and the one step
+       above the dark brightness ceiling (headings, bold). Themed builds derive
+       them in `vscode-theme-css.ts`; unthemed they are the plain foregrounds. */
+    --reading-foreground: var(--foreground);
+    --foreground-strong: var(--foreground);
+    --sidebar-row-foreground: 0 0% 28%;
+    --switch-track: 0 0% 64%;
     --ring: 220 82% 65%;
     --chart-1: 220 82% 65%;
     --chart-2: 210 70% 45%;
     --chart-3: 262 60% 55%;
     --chart-4: 24 90% 50%;
     --chart-5: 151 55% 40%;
-    --sidebar-background: 220 20% 98%;
-    --sidebar-foreground: 220 8% 28%;
-    --sidebar-foreground-muted: 220 6% 46%;
+    --sidebar-background: 240 3.2% 93.9%;
+    --sidebar-foreground: 0 0% 11%;
+    --sidebar-foreground-muted: 0 0% 42%;
     --sidebar-primary: 220 82% 65%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-highlight: var(--sidebar-primary);
     --sidebar-highlight-foreground: var(--sidebar-primary-foreground);
-    --sidebar-hover: 220 14% 95%;
+    --sidebar-hover: 0 0% 91.5%;
     --sidebar-hover-foreground: var(--sidebar-foreground);
-    --sidebar-selection: 220 12% 92%;
+    --sidebar-selection: 0 0% 84%;
     --sidebar-selection-foreground: var(--sidebar-foreground);
-    --sidebar-border: 220 12% 88%;
+    --sidebar-border: 0 0% 88%;
     --sidebar-ring: 220 82% 65%;
     --button-hover: 219 65% 57%;
     --button-secondary: var(--secondary);
     --button-secondary-foreground: var(--secondary-foreground);
     --button-secondary-hover: var(--hover);
     --bottom-bar: 0 0% 100%;
-    --bottom-bar-foreground: 225 7% 11%;
-    --tab-bar: 220 14% 97%;
+    --bottom-bar-foreground: 0 0% 11%;
+    --tab-bar: 0 0% 97%;
     --tab-active: var(--background);
     --tab-active-foreground: var(--foreground);
     --tab-inactive: var(--tab-bar);
@@ -868,7 +974,7 @@ pre,
     --scrollbar-thumb: var(--muted-foreground);
     --scrollbar-thumb-hover: var(--muted-foreground);
     --scrollbar-thumb-active: var(--muted-foreground);
-    --code-background: 220 14% 96%;
+    --code-background: 240 14% 94.1%;
     --code-foreground: 225 7% 11%;
     --code-border: 220 13% 90%;
     --code-added: var(--github-addition);
@@ -912,12 +1018,20 @@ pre,
     --terminal-ansi-bright-magenta: var(--vscode-terminal-ansiBrightMagenta, #bc05bc);
     --terminal-ansi-bright-cyan: var(--vscode-terminal-ansiBrightCyan, #0598bc);
     --terminal-ansi-bright-white: var(--vscode-terminal-ansiBrightWhite, #a5a5a5);
+    /* macOS draws Latin runs in SF Pro Display; it has no CJK glyphs, so Chinese
+       falls through per glyph to PingFang SC (macOS / iOS, Apple's system font,
+       which cannot be bundled) or Microsoft YaHei on Windows. Where SF Pro is
+       absent (other platforms, unpatched macOS) the self-hosted Inter Variable
+       takes over, then the remaining system faces. PingFang first rendered Latin
+       too, with wide hyphens in file and repo names. */
     --font-sans-default:
-      'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue',
-      Arial, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Apple Color Emoji',
-      'Segoe UI Emoji', sans-serif;
+      'SF Pro Display', 'Inter Variable', 'PingFang SC', -apple-system, BlinkMacSystemFont,
+      'Hiragino Sans GB', 'Segoe UI', 'Microsoft YaHei', 'Helvetica Neue', Arial,
+      'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
+    --font-wordmark:
+      'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
     --font-mono:
       'JetBrains Mono', ui-monospace, 'SF Mono', 'SFMono-Regular', 'Monaco', 'Menlo', 'Consolas',
       'Liberation Mono', 'Courier New', monospace;
@@ -962,6 +1076,18 @@ pre,
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --safe-area-left: env(safe-area-inset-left, 0px);
     --native-keyboard-height: 0px;
+    /*
+     * The strip the OS caption buttons occupy over web content. Electron's
+     * Windows `titleBarOverlay` turns on Window Controls Overlay, whose
+     * `titlebar-area-*` rect is the part of that strip left free for the app;
+     * the caption buttons sit to its right. Everywhere else, and in native
+     * fullscreen where the overlay hides, those variables are undefined and
+     * both insets fall back to 0, so a surface can always reserve them.
+     */
+    --window-caption-height: env(titlebar-area-height, 0px);
+    --window-caption-inset-right: calc(
+      100vw - env(titlebar-area-x, 100vw) - env(titlebar-area-width, 0px)
+    );
   }
   .dark {
     --background: 222 55% 9.6%;
@@ -994,6 +1120,7 @@ pre,
     /* Dark canvases already raise the field above the page, so it keeps the
        theme fill. */
     --input-field: var(--input);
+    --composer: var(--input);
     --switch-track: 220 13% 40%;
     --ring: 210 90% 62%;
     --chart-1: 210 90% 62%;
@@ -1003,14 +1130,15 @@ pre,
     --chart-5: 154 68% 52%;
     --sidebar-background: 222 55% 9.6%;
     --sidebar-foreground: 210 40% 96%;
+    --sidebar-row-foreground: var(--sidebar-foreground);
     --sidebar-foreground-muted: 216 18% 70%;
     --sidebar-primary: 210 90% 62%;
     --sidebar-primary-foreground: 220 50% 12%;
     --sidebar-highlight: var(--sidebar-primary);
     --sidebar-highlight-foreground: var(--sidebar-primary-foreground);
-    --sidebar-hover: 220 44% 14%;
+    --sidebar-hover: 220 44% 13%;
     --sidebar-hover-foreground: var(--sidebar-foreground);
-    --sidebar-selection: 220 44% 20%;
+    --sidebar-selection: 220 44% 22%;
     --sidebar-selection-foreground: var(--sidebar-foreground);
     --sidebar-border: 220 32% 18%;
     --sidebar-ring: 210 90% 62%;
@@ -1115,23 +1243,47 @@ pre,
     -webkit-touch-callout: none;
   }
 
-  body.native-mobile-shell * {
+  body * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  body textarea,
+  body [contenteditable]:not([contenteditable='false']),
+  body [contenteditable]:not([contenteditable='false']) *,
+  body [data-text-selectable],
+  body [data-text-selectable] *,
+  body
+    input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
+      [type='radio']
+    ):not([type='range']):not([type='file']):not([type='color']) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  body [data-text-selectable] :is(button, [role='button']),
+  body [data-text-selectable] :is(button, [role='button']) * {
     -webkit-user-select: none;
     user-select: none;
   }
 
   body.native-mobile-shell textarea,
-  body.native-mobile-shell [contenteditable='true'],
-  body.native-mobile-shell [contenteditable='true'] *,
-  body.native-mobile-shell [data-native-selection-allow],
-  body.native-mobile-shell [data-native-selection-allow] *,
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']),
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']) *,
+  body.native-mobile-shell [data-text-selectable],
+  body.native-mobile-shell [data-text-selectable] *,
   body.native-mobile-shell
     input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
       [type='radio']
     ):not([type='range']):not([type='file']):not([type='color']) {
     -webkit-touch-callout: default;
-    -webkit-user-select: text;
-    user-select: text;
+  }
+
+  /* No WKWebView link preview inside selectable text: after its "Open Link",
+     every later tap in the app reopened that link. Links open with a tap. */
+  body.native-mobile-shell [data-text-selectable] a[href],
+  body.native-mobile-shell [data-text-selectable] a[href] * {
+    -webkit-touch-callout: none;
   }
 
   button,
@@ -1139,21 +1291,74 @@ pre,
   input[type='button'],
   input[type='submit'],
   input[type='reset'] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role='button'][aria-disabled='true'],
+  input[type='button']:disabled,
+  input[type='submit']:disabled,
+  input[type='reset']:disabled {
     cursor: default;
   }
 
-  .cursor-pointer {
-    cursor: default !important;
+  /* The composer editor (`ui/mention/mention-input.tsx`) is a contenteditable
+     that lays out, scrolls and paints its placeholder exactly like the textarea
+     it replaced: a textarea's UA box, `rows` lines tall plus its padding and
+     border, with utilities still free to size it. */
+  [data-composer-editor] {
+    display: inline-block;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    overflow: auto;
+    cursor: text;
+    height: calc(var(--composer-rows, 2) * 1lh + var(--composer-rows-chrome, 0px));
+  }
+
+  [data-composer-editor][data-empty]::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+    color: var(--composer-placeholder-color, rgb(117 117 117));
+    opacity: var(--composer-placeholder-opacity, 1);
+  }
+
+  /* Chip composers always painted their selection with the system colours. */
+  [data-composer-editor][data-system-selection] ::selection,
+  [data-composer-editor][data-system-selection]::selection {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+
+  /* Atomic mentions paint one selection surface from the editor's range.
+     Native text fragments must not add a second rectangle or recolour the icon. */
+  [data-composer-editor][data-system-selection] [data-mention-value]::selection,
+  [data-composer-editor][data-system-selection] [data-mention-value] *::selection {
+    background-color: transparent;
+    color: inherit;
   }
 
   /* Pro focus style: only show on keyboard navigation */
-  :where(a, button, input, textarea, select, [tabindex]):focus {
+  :where(a, button, input, textarea, select, [tabindex], [data-composer-editor]):focus {
     outline: none;
   }
 
-  :where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  :where(a, button, input, textarea, select, [tabindex], [data-composer-editor]):focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.5);
+  }
+
+  /* …but only while the person navigates by keyboard: focus handed back after
+     Escape is `:focus-visible` too. Text entry keeps it (see the modality rule
+     at the end of this file). */
+  :where(html[data-focus-modality='pointer'])
+    :where(a, button, select, [tabindex]):not(
+      input,
+      textarea,
+      [data-composer-editor]
+    ):focus-visible {
+    box-shadow: none;
   }
 
   /* Radix menu items already paint their own focus highlight (focus:bg-hover /
@@ -1405,31 +1610,31 @@ pre,
    * because Radix portals escape this subtree.
    */
   :root:not(.dark) .tasks-surface {
-    --background: 220 16% 98%;
-    --foreground: 222 18% 12%;
+    --background: 0 0% 98%;
+    --foreground: 0 0% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 222 18% 12%;
+    --card-foreground: 0 0% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 18% 12%;
-    --muted: 220 12% 95%;
-    --muted-foreground: 220 9% 40%;
-    --secondary: 220 12% 95%;
-    --secondary-foreground: 222 18% 12%;
-    --hover: 220 12% 94%;
-    --hover-foreground: 222 18% 12%;
-    --selection: 220 14% 92%;
-    --selection-foreground: 222 18% 12%;
-    --border: 220 10% 90%;
+    --popover-foreground: 0 0% 12%;
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 40%;
+    --secondary: 0 0% 95%;
+    --secondary-foreground: 0 0% 12%;
+    --hover: 0 0% 94%;
+    --hover-foreground: 0 0% 12%;
+    --selection: 0 0% 92%;
+    --selection-foreground: 0 0% 12%;
+    --border: 0 0% 90%;
     --input: 0 0% 100%;
-    --input-border: 220 10% 88%;
+    --input-border: 0 0% 88%;
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 222 18% 12%;
-    --sidebar-foreground-muted: 220 9% 40%;
-    --sidebar-border: 220 10% 90%;
-    --sidebar-hover: 220 12% 96%;
-    --sidebar-hover-foreground: 222 18% 12%;
-    --sidebar-selection: 220 12% 93%;
-    --sidebar-selection-foreground: 222 18% 12%;
+    --sidebar-foreground: 0 0% 12%;
+    --sidebar-foreground-muted: 0 0% 40%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-hover: 0 0% 94%;
+    --sidebar-hover-foreground: 0 0% 12%;
+    --sidebar-selection: 0 0% 87%;
+    --sidebar-selection-foreground: 0 0% 12%;
     color-scheme: light;
   }
 
@@ -1528,117 +1733,12 @@ pre,
     background-color: hsl(var(--tasks-menu-item-hover));
   }
 
-  /* Pro scrollbar: lightweight, unobtrusive (VS Code/Linear style) */
-  .scrollbar-pro {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border-radius: 999px;
-    border: 3px solid transparent;
-    background-clip: content-box;
-  }
-
-  .scrollbar-pro::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  /* Thin scrollbar for file tree */
-  .thin-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border-radius: 3px;
-    border: none;
-  }
-
-  .thin-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  /* Chat message list scrollbar aligned with theme colors */
+  /* Appearance comes from scrollbars.css; keep the conversation's stable gutter. */
   .chat-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
     /* Always reserve the scrollbar gutter so it appearing/disappearing (e.g. when
        the terminal dock pops up and the conversation starts overflowing) never
        shifts the message content sideways. */
     scrollbar-gutter: stable;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar {
-    width: 10px;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.5);
-    border-radius: 999px;
-    border: 3px solid transparent;
-    background-clip: content-box;
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
-  }
-
-  .chat-scrollbar::-webkit-scrollbar-thumb:active {
-    background-color: hsl(var(--scrollbar-thumb-active) / 0.75);
-  }
-
-  /* Input scrollbar: thin and low-contrast, similar to shadcn textarea usage */
-  .input-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--scrollbar-thumb) / 0.45) transparent;
-  }
-
-  .input-scrollbar::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  .input-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .input-scrollbar::-webkit-scrollbar-thumb {
-    background-color: hsl(var(--scrollbar-thumb) / 0.45);
-    border-radius: 999px;
-    border: 2px solid transparent;
-    background-clip: content-box;
-  }
-
-  .input-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(var(--scrollbar-thumb-hover) / 0.55);
-  }
-
-  .input-scrollbar::-webkit-scrollbar-thumb:active {
-    background-color: hsl(var(--scrollbar-thumb-active) / 0.65);
   }
 
   /* Todo checkbox with consistent minimalist styling */
@@ -1662,8 +1762,7 @@ pre,
     /* Smooth transitions */
     transition: all 0.15s ease-in-out;
 
-    /* Interactive cursor */
-    cursor: default;
+    cursor: pointer;
 
     /* Focus outline for accessibility */
     outline: none;
@@ -1734,17 +1833,6 @@ pre,
   .cm-line:has(.cm-todo-checkbox:checked) {
     color: hsl(var(--muted-foreground) / 0.7);
     opacity: 0.8;
-  }
-
-  /* Keyboard navigation highlight for sidebar items. offset -1px straddles the
-     row edge (1px in, 1px out) so the ring reads as a border ON the edge rather
-     than a floating inner ring, while still surviving the scroll viewport's
-     horizontal clip (only 1px extends outside the row box). */
-  .keyboard-nav-highlight {
-    background: hsl(var(--sidebar-hover)) !important;
-    outline: 2px solid hsl(var(--sidebar-ring) / 0.4);
-    outline-offset: -1px;
-    border-radius: var(--radius-md);
   }
 
   /* Photo viewer safe area insets for mobile (notch/status bar) */
@@ -1831,6 +1919,14 @@ pre,
    sweeps an ellipse and the glyph visibly wobbles. Measured 14×14 →
    13.55×15.43 in the reconnecting pill before this rule.
 
+   Spinning an `<svg>` directly is no longer done anywhere in this
+   package: Chromium refuses to composite a transform animation on an SVG
+   target whose effective zoom is not 1 (crbug.com/1186312), which is every
+   SVG on a Retina display, so the rotation re-ran style, pre-paint and
+   layerize on the main thread at the refresh rate. `ui/spinner.tsx` puts
+   the animation on an HTML wrapper instead. The `svg` rule below stays as
+   a safety net for any stray `<svg class="animate-spin">`.
+
    `@layer base` keeps this below utilities, so an explicit
    `origin-*` / `shrink` utility at a call site still wins. */
 @layer base {
@@ -1840,11 +1936,11 @@ pre,
     flex-shrink: 0;
   }
 
-  /* `SessionSyncingIndicator` animates an HTML wrapper instead of the
-     glyph. A wrapper is only equivalent while its box matches the
-     glyph's: the moment anything else lands inside it (a label, a gap)
-     its box grows, its center moves off the glyph, and the glyph
-     orbits. It must therefore stay icon-only and explicitly sized;
+  /* `ui/spinner.tsx` animates an HTML wrapper instead of the glyph so
+     the rotation composites. A wrapper is only equivalent while its box
+     matches the glyph's: the moment anything else lands inside it (a
+     label, a gap) its box grows, its center moves off the glyph, and the
+     glyph orbits. It must therefore stay icon-only and explicitly sized;
      centering the origin here makes that failure mode a wobble-free
      no-op rather than an orbit. */
   span.animate-spin {
@@ -1895,78 +1991,68 @@ pre,
   will-change: transform;
 }
 
+/* Back destination under the sliding-off page (`useMobileBackRevealClass`):
+   iOS-style parallax in from a dimmed, left-shifted position. */
+@keyframes mobile-drill-reveal {
+  from {
+    transform: translate3d(-28%, 0, 0);
+    opacity: 0.72;
+  }
+}
+
+.mobile-drill-reveal {
+  animation: mobile-drill-reveal 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mobile-drill-in,
-  .mobile-drill-out {
+  .mobile-drill-out,
+  .mobile-drill-reveal {
     animation: none;
   }
 }
 
-/* Agent activity stays on compositor-friendly transform/opacity animations.
-   The highlighted label is a pseudo-element so React remains idle while the
-   agent is working. */
-@keyframes agent-activity-dot-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.7);
-  }
-  50% {
-    opacity: 0.8;
-    transform: scale(1);
-  }
+/* Live agent status shimmer (the look of shadcn's text shimmer, driven by the
+   compositor). A soft band in the page background color slides across the
+   label: over glyphs it fades them toward the background, over the empty
+   background it is invisible. Only `transform` animates, so a working turn
+   repaints nothing while it waits (see the streaming performance e2e budget);
+   shadcn's `background-position` shimmer repaints the text every frame. */
+.agent-shimmer {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: top;
 }
 
-@keyframes agent-activity-label-highlight {
-  0%,
-  12% {
-    opacity: 0;
-    transform: translateX(-0.08em);
-  }
-  24%,
-  42% {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  58%,
-  100% {
-    opacity: 0;
-    transform: translateX(0.08em);
-  }
-}
-
-.agent-activity-dot-pulse {
-  animation: agent-activity-dot-pulse 3.5s ease-in-out infinite;
-  will-change: opacity, transform;
-}
-
-.agent-activity-label {
-  color: var(--agent-activity-label-base);
-}
-
-.agent-activity-label::after {
+.agent-shimmer::after {
   position: absolute;
-  inset: 0;
-  color: var(--agent-activity-label-highlight);
-  content: attr(data-highlight-label);
-  opacity: 0;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 60%;
+  content: '';
   pointer-events: none;
-  text-shadow: var(--agent-activity-label-glow);
-  transform: translateX(-0.08em);
-  animation: agent-activity-label-highlight var(--agent-activity-label-duration) ease-in-out
-    infinite;
-  will-change: opacity, transform;
+  background: linear-gradient(90deg, transparent, hsl(var(--background) / 0.78), transparent);
+  transform: translateX(-100%);
+  animation: agent-shimmer-sweep 2.2s linear infinite;
+  will-change: transform;
+}
+
+@keyframes agent-shimmer-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    /* Band is 60% of the label: 100% / 0.6 carries it fully past the end. */
+    transform: translateX(167%);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-activity-dot-pulse,
-  .agent-activity-label::after {
+  .agent-shimmer::after {
+    display: none;
     animation: none;
-  }
-
-  .agent-activity-dot-pulse {
-    opacity: 0.6;
-    transform: scale(0.85);
   }
 }
 
@@ -1993,17 +2079,6 @@ pre,
   }
 }
 
-/* Mobile mention picker: collapse the menu's inner `scrollbar-pro
-   max-h-[260px] overflow-auto` list into a single scroller owned by the
-   docked panel. Two nested scroll containers (panel + inner cap) made
-   touch scrolling flaky and pinned the list to 260px regardless of the
-   panel's own max-height. Inside the mobile panel the inner list should
-   just flow; the panel scrolls. */
-.mention-mobile-panel .scrollbar-pro {
-  max-height: none !important;
-  overflow: visible !important;
-}
-
 /* Usage heatmap: each day pops in with a short scale+fade. The stagger is
    driven by an inline `animation-delay` per column, so the reveal sweeps
    left to right across the year instead of flashing all 371 cells at once.
@@ -2026,4 +2101,311 @@ pre,
   .animate-usage-heatmap-cell {
     animation: none;
   }
+}
+
+/* Indeterminate `ui/progress.tsx`: work with no known total sweeps instead of
+   inventing a percentage. Under reduced-motion it holds a static partial fill,
+   which still reads as "in progress" without implying a measured position. */
+@keyframes progress-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.animate-progress-sweep {
+  animation: progress-sweep 1.15s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-progress-sweep {
+    animation: none;
+    transform: translateX(50%);
+  }
+}
+
+/* A long desktop sidebar title only travels while its row is hovered or
+   keyboard-focused. The distance and duration come from the measured overflow,
+   so short labels keep their ordinary ellipsis and the full row layout stays put. */
+@keyframes sidebar-session-title-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--sidebar-title-distance));
+  }
+}
+
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:hover [data-sidebar-session-title],
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:focus-within
+  [data-sidebar-session-title] {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  animation: sidebar-session-title-marquee var(--sidebar-title-duration, 5s) ease-in-out 600ms
+    infinite alternate;
+  will-change: transform;
+}
+
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:hover [data-sidebar-title-clip],
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:focus-within
+  [data-sidebar-title-clip] {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar-session-row][data-sidebar-title-overflow='true']:hover [data-sidebar-session-title],
+  [data-sidebar-session-row][data-sidebar-title-overflow='true']:focus-within
+    [data-sidebar-session-title] {
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    mask-image: none;
+    animation: none;
+    transform: none;
+    will-change: auto;
+  }
+}
+
+[data-sidebar-session-row][data-sidebar-title-overflow='true'][data-sidebar-title-swiping='true']
+  [data-sidebar-session-title] {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  animation: none;
+  transform: translateX(var(--sidebar-title-swipe-offset, 0px));
+  will-change: transform;
+  user-select: none;
+}
+
+[data-sidebar-session-row][data-sidebar-title-swiping='true'] [data-sidebar-title-clip] {
+  overflow: hidden;
+}
+
+/* Focus rings are for keyboard navigation. `installFocusModality` (@lody/ui)
+   marks the document `pointer` until Tab or an arrow key moves focus, and zeroes
+   `focus.ringWidth` for every StyleX ring; this does the same for the legacy
+   Tailwind `focus-visible:ring-*` utilities. Unlayered, so it outranks them.
+   Text entry keeps its ring: whoever is typing needs to see where. */
+html[data-focus-modality='pointer']
+  :focus-visible:not(input, textarea, select, [contenteditable='true'], [contenteditable='']) {
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+/* The new-chat page's typed transition (`components/chat/home/home-dashboard.tsx`). Keep
+   the page still while the board, heading and every part of the switch follow one curve.
+   Named snapshots are siblings in the overlay, regardless of DOM nesting or z-index:
+   the pill must be below the segments, and the persistent labels above both. The pill
+   carries an own snapshot only across a board change, when it glides between the
+   segments; appearing or leaving with the fold, it is unnamed and part of its segment's.
+   Segment snapshots hold the changing summaries; clip them to their animated width without
+   stretching their text. Reduced motion never starts a transition. */
+html:active-view-transition-type(home-board)::view-transition-old(root),
+html:active-view-transition-type(home-board)::view-transition-new(root) {
+  animation: none;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-board),
+html:active-view-transition-type(home-board)::view-transition-group(home-pill),
+html:active-view-transition-type(home-board)::view-transition-group(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-segment),
+html:active-view-transition-type(home-board)::view-transition-group(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-fold),
+html:active-view-transition-type(home-board)::view-transition-group(home-heading) {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-pill) {
+  z-index: 1;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-segment) {
+  z-index: 2;
+  overflow: clip;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-fold) {
+  z-index: 3;
+}
+
+/* The label remains readable throughout: only its position moves, never its bitmap size. */
+html:active-view-transition-type(home-board)::view-transition-old(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-old(home-week-label) {
+  animation: none;
+  opacity: 0;
+}
+
+html:active-view-transition-type(home-board)::view-transition-new(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-new(home-week-label) {
+  animation: none;
+  width: auto;
+  height: auto;
+}
+
+html:active-view-transition-type(home-board)::view-transition-old(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-new(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-old(home-week-segment),
+html:active-view-transition-type(home-board)::view-transition-new(home-week-segment) {
+  width: auto;
+  height: auto;
+  animation-duration: 200ms;
+  animation-timing-function: linear;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-board) {
+  /* Switching drifts the old and new pictures beyond this box. Clipping the group shears the
+     leading card edge until the picture arrives, so the short drift must be allowed to paint. */
+  overflow: visible;
+}
+
+html:active-view-transition-type(home-board)::view-transition-old(home-board),
+html:active-view-transition-type(home-board)::view-transition-new(home-board) {
+  height: auto;
+  animation-duration: 200ms;
+  animation-timing-function: linear;
+}
+
+/* Where the board comes from (`morph.ts`). The line holds still while a board is open, so the
+   board carries the direction: switching, it drifts toward the segment left behind as the new
+   one arrives from the side of the one pressed. Short drifts, never scaled, on the switch's
+   curve. */
+@keyframes home-board-out-start {
+  to {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+}
+
+@keyframes home-board-out-end {
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
+@keyframes home-board-in-end {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+@keyframes home-board-in-start {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+
+/* Unfolding and folding, the stage re-centres and the heading and the line travel. The board
+   travels with them as one piece, fixed under the line on the same curve, fading in as it rides
+   into place or out as it rides away (`morph.ts` measures the line's travel). Nothing grows,
+   unrolls or is revealed; its group is not clipped, since the picture moves outside its box. */
+@keyframes home-board-ride-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--home-line-travel, 0px)));
+  }
+  60% {
+    opacity: 1;
+  }
+}
+
+@keyframes home-board-ride-out {
+  40% {
+    opacity: 0;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--home-line-travel, 0px));
+  }
+}
+
+html:active-view-transition-type(home-board-next)::view-transition-old(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-out-start 160ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+html:active-view-transition-type(home-board-next)::view-transition-new(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-in-end 300ms cubic-bezier(0.2, 0, 0, 1) 40ms both;
+}
+
+html:active-view-transition-type(home-board-previous)::view-transition-old(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-out-end 160ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+html:active-view-transition-type(home-board-previous)::view-transition-new(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-in-start 300ms cubic-bezier(0.2, 0, 0, 1) 40ms both;
+}
+
+html:active-view-transition-type(home-board-unfold)::view-transition-group(home-board),
+html:active-view-transition-type(home-board-fold)::view-transition-group(home-board) {
+  overflow: visible;
+}
+
+html:active-view-transition-type(home-board-unfold)::view-transition-new(home-board) {
+  animation: home-board-ride-in 240ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+html:active-view-transition-type(home-board-fold)::view-transition-old(home-board) {
+  animation: home-board-ride-out 240ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/* One-shot entry for the new-chat landing heading: blur + fade in. */
+@keyframes home-heading-in {
+  from {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+.animate-home-heading-in {
+  animation: home-heading-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-home-heading-in {
+    animation: none;
+    filter: none;
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* Pinned sidebar drags (`lib/pinned-drop-settle.ts`): while a pin row or section is
+   held the cursor is grabbing everywhere; from the drop until the pointer next moves,
+   pin sections take no hover, so a landed row does not light up under a still pointer. */
+body[data-pin-dragging],
+body[data-pin-dragging] * {
+  cursor: grabbing !important;
+}
+
+body[data-pin-hover-suppressed] [data-pin-section] {
+  pointer-events: none;
 }

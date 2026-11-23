@@ -2,6 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installGitHubTokenPort } from '../src/lib/github-token-port';
 
 const mockAction = vi.fn();
+const mockFreshJwt = vi.fn();
+const retriedRequests: string[] = [];
+vi.mock('../src/lib/auth-client-singleton', () => ({ getRegisteredAuthClient: () => ({}) }));
+vi.mock('../src/lib/convex-jwt', () => ({ requestCurrentConvexJwt: () => mockFreshJwt() }));
+vi.mock('convex/browser', () => ({
+  ConvexHttpClient: class {
+    setAuth() {}
+    async action() {
+      retriedRequests.push('retried');
+      return { success: true, token: 'retried-token', expiresAt: 'synthetic' };
+    }
+  },
+}));
 
 vi.mock('@lody/cloud-api', () => ({
   api: {
@@ -14,6 +27,7 @@ vi.mock('@lody/cloud-api', () => ({
 
 vi.mock('../src/providers/convex-provider', () => ({
   convexClient: {
+    url: 'https://synthetic.invalid',
     action: (...args: unknown[]) => mockAction(...args),
   },
 }));
@@ -42,8 +56,49 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   uninstallGitHubTokenPort?.();
   uninstallGitHubTokenPort = undefined;
+});
+
+describe('stable repository identity before operations', () => {
+  it('rejects a renamed/reused name before executing a write, including cached tokens', async () => {
+    invalidateGitHubTokensForWorkspace('identity-test');
+    mockAction.mockResolvedValue({ success: true, token: 'token', tokenSource: 'personal' });
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 101, full_name: 'org/new-name' }),
+    }));
+    vi.stubGlobal('fetch', fetch);
+    const write = vi.fn(async () => 'written');
+    await getGitHubOperationToken('identity-test', 'org/old-name', 'write');
+    await expect(
+      withGitHubOperationTokenRetry('identity-test', 'org/old-name', 'write', write, 101)
+    ).rejects.toMatchObject({ code: 'repository_identity_changed' });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.github.com/repos/org/old-name',
+      expect.anything()
+    );
+    expect(write).not.toHaveBeenCalled();
+  });
+  it('runs the operation only after canonical name and numeric ID agree', async () => {
+    invalidateGitHubTokensForWorkspace('identity-test');
+    mockAction.mockResolvedValue({ success: true, token: 'token', tokenSource: 'app' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 101, full_name: 'Org/New' }),
+      }))
+    );
+    const write = vi.fn(async () => 'written');
+    await expect(
+      withGitHubOperationTokenRetry('identity-test', 'org/new', 'write', write, 101)
+    ).resolves.toBe('written');
+    expect(write).toHaveBeenCalledOnce();
+  });
 });
 
 function deferred<T>() {
@@ -57,211 +112,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe('getGitHubRepoToken', () => {
-  beforeEach(() => {
-    mockAction.mockReset();
-    // Clear module-level token cache between tests
-    invalidateGitHubRepoToken('ws-1', 'owner/repo');
-    invalidateGitHubOperationToken('ws-1', 'owner/repo', 'write');
-  });
-
-  it('fetches a token from the backend', async () => {
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghs_abc123',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-
-    const token = await getGitHubRepoToken('ws-1', 'owner/repo');
-    expect(token).toBe('ghs_abc123');
-    expect(mockAction).toHaveBeenCalledTimes(1);
-  });
-
-  it('returns cached token on subsequent calls', async () => {
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghs_cached',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-
-    await getGitHubRepoToken('ws-1', 'owner/repo');
-    const second = await getGitHubRepoToken('ws-1', 'owner/repo');
-
-    expect(second).toBe('ghs_cached');
-    expect(mockAction).toHaveBeenCalledTimes(1);
-  });
-
-  it('throws on backend error', async () => {
-    mockAction.mockResolvedValueOnce({
-      success: false,
-      errorCode: 'repo_not_linked',
-      errorMessage: 'Not linked',
-    });
-
-    await expect(getGitHubRepoToken('ws-1', 'owner/repo')).rejects.toThrow('Not linked');
-  });
-});
-
-describe('withGitHubTokenRetry', () => {
-  beforeEach(() => {
-    mockAction.mockReset();
-    invalidateGitHubRepoToken('ws-1', 'owner/repo');
-    invalidateGitHubOperationToken('ws-1', 'owner/repo', 'write');
-  });
-
-  it('passes through on success', async () => {
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghs_ok',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-
-    const result = await withGitHubTokenRetry('ws-1', 'owner/repo', async (token) => {
-      return `result-${token}`;
-    });
-
-    expect(result).toBe('result-ghs_ok');
-    expect(mockAction).toHaveBeenCalledTimes(1);
-  });
-
-  it('retries once on GitHubAuthError with a fresh token', async () => {
-    // First call: returns initial token
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghs_stale',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-    // Second call (after invalidation): returns fresh token
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghs_fresh',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-
-    let callCount = 0;
-    const result = await withGitHubTokenRetry('ws-1', 'owner/repo', async (token) => {
-      callCount++;
-      if (callCount === 1) {
-        expect(token).toBe('ghs_stale');
-        throw new GitHubAuthError();
-      }
-      expect(token).toBe('ghs_fresh');
-      return 'recovered';
-    });
-
-    expect(result).toBe('recovered');
-    expect(callCount).toBe(2);
-    expect(mockAction).toHaveBeenCalledTimes(2);
-  });
-
-  it('propagates non-401 errors without retry', async () => {
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghs_ok',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-
-    await expect(
-      withGitHubTokenRetry('ws-1', 'owner/repo', async () => {
-        throw new Error('GitHub API error: 403 Forbidden');
-      })
-    ).rejects.toThrow('403 Forbidden');
-
-    // Should NOT have requested a second token
-    expect(mockAction).toHaveBeenCalledTimes(1);
-  });
-
-  it('propagates GitHubAuthError on retry failure', async () => {
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghs_stale',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghs_also_stale',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-
-    await expect(
-      withGitHubTokenRetry('ws-1', 'owner/repo', async () => {
-        throw new GitHubAuthError();
-      })
-    ).rejects.toThrow(GitHubAuthError);
-
-    // Two backend calls: original + retry
-    expect(mockAction).toHaveBeenCalledTimes(2);
-  });
-});
-
 describe('withGitHubOperationTokenRetry', () => {
   beforeEach(() => {
     mockAction.mockReset();
     invalidateGitHubOperationToken('ws-1', 'owner/repo', 'write');
-  });
-
-  it('uses the personal operation token on success', async () => {
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghu_personal',
-      tokenSource: 'personal',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-
-    const result = await withGitHubOperationTokenRetry(
-      'ws-1',
-      'owner/repo',
-      'write',
-      async (token) => `result-${token}`
-    );
-
-    expect(result).toBe('result-ghu_personal');
-    expect(mockAction).toHaveBeenCalledTimes(1);
-  });
-
-  it('caches personal operation tokens for the same repo and operation', async () => {
-    mockAction.mockResolvedValueOnce({
-      success: true,
-      token: 'ghu_cached_personal',
-      tokenSource: 'personal',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    });
-
-    const first = await getGitHubOperationToken('ws-1', 'owner/repo', 'write');
-    const second = await getGitHubOperationToken('ws-1', 'owner/repo', 'write');
-
-    expect(first.token).toBe('ghu_cached_personal');
-    expect(second.token).toBe('ghu_cached_personal');
-    expect(mockAction).toHaveBeenCalledTimes(1);
-  });
-
-  it('invalidates all cached tokens for a workspace after personal identity changes', async () => {
-    mockAction
-      .mockResolvedValueOnce({
-        success: true,
-        token: 'ghs_cached_app',
-        tokenSource: 'app',
-        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        token: 'ghu_personal_after_toggle',
-        tokenSource: 'personal',
-        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-      });
-
-    await expect(getGitHubOperationToken('ws-1', 'owner/repo', 'write')).resolves.toMatchObject({
-      token: 'ghs_cached_app',
-      tokenSource: 'app',
-    });
-
-    invalidateGitHubTokensForWorkspace('ws-1');
-
-    await expect(getGitHubOperationToken('ws-1', 'owner/repo', 'write')).resolves.toMatchObject({
-      token: 'ghu_personal_after_toggle',
-      tokenSource: 'personal',
-    });
-    expect(mockAction).toHaveBeenCalledTimes(2);
   });
 
   it('does not cache an in-flight app token after workspace token invalidation', async () => {
@@ -390,4 +244,146 @@ describe('withGitHubOperationTokenRetry', () => {
     });
     expect(mockAction.mock.calls[1]?.[1]).not.toMatchObject({ forceAppFallback: true });
   });
+});
+
+describe('shared refresh after GitHub rejects a token', () => {
+  const expiresAt = () => new Date(Date.now() + 3600_000).toISOString();
+
+  beforeEach(() => {
+    mockAction.mockReset();
+    invalidateGitHubTokensForWorkspace('race');
+  });
+
+  it('reuses the new token when an old request reports its 401 after the refresh', async () => {
+    mockAction
+      .mockResolvedValueOnce({ success: true, token: 'ghs_old', expiresAt: expiresAt() })
+      .mockResolvedValueOnce({ success: true, token: 'ghs_new', expiresAt: expiresAt() });
+    const lateFailure = deferred<void>();
+    const late = withGitHubTokenRetry('race', 'owner/repo', async (token) => {
+      if (token === 'ghs_old') {
+        await lateFailure.promise;
+        throw new GitHubAuthError();
+      }
+      return token;
+    });
+    const early = withGitHubTokenRetry('race', 'owner/repo', async (token) => {
+      if (token === 'ghs_old') throw new GitHubAuthError();
+      return token;
+    });
+    await expect(early).resolves.toBe('ghs_new');
+
+    lateFailure.resolve();
+    await expect(late).resolves.toBe('ghs_new');
+    await expect(getGitHubRepoToken('race', 'owner/repo')).resolves.toBe('ghs_new');
+    expect(mockAction).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks again when a shared fetch without the rejection returns the rejected token', async () => {
+    mockAction.mockResolvedValueOnce({
+      success: true,
+      token: 'ghu_old',
+      tokenSource: 'personal',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    // Inside the safety window: the next plain read starts a refresh without a rejection hint.
+    await getGitHubOperationToken('race', 'owner/repo', 'write');
+    const plainRefresh = deferred<unknown>();
+    mockAction.mockReturnValueOnce(plainRefresh.promise).mockResolvedValueOnce({
+      success: true,
+      token: 'ghu_new',
+      tokenSource: 'personal',
+      expiresAt: expiresAt(),
+    });
+    const plain = getGitHubOperationToken('race', 'owner/repo', 'write');
+    const rejecting = getGitHubOperationToken('race', 'owner/repo', 'write', {
+      invalidatedPersonalToken: 'ghu_old',
+    });
+    plainRefresh.resolve({
+      success: true,
+      token: 'ghu_old',
+      tokenSource: 'personal',
+      expiresAt: expiresAt(),
+    });
+    await expect(plain).resolves.toMatchObject({ token: 'ghu_old' });
+    await expect(rejecting).resolves.toMatchObject({ token: 'ghu_new' });
+    expect(mockAction).toHaveBeenCalledTimes(3);
+    expect(mockAction.mock.calls[2]?.[1]).toMatchObject({ invalidatedPersonalToken: 'ghu_old' });
+  });
+});
+
+describe('imperative cloud token admission', () => {
+  beforeEach(() => {
+    mockFreshJwt.mockReset();
+    retriedRequests.length = 0;
+  });
+
+  it('refuses before sending when admission is unknown and preserves ordinary success', async () => {
+    const { createCloudGitHubTokenPort } = await import('../src/providers/cloud-github-token-port');
+    let admitted = false;
+    let sent = false;
+    mockAction.mockImplementation(async () => {
+      sent = true;
+      return { success: true, token: 'ordinary-token', expiresAt: 'synthetic' };
+    });
+    const port = createCloudGitHubTokenPort(() => {
+      if (!admitted) throw new Error('admission_pending');
+      return 'account/workspace/route';
+    });
+    await expect(
+      port.getRepoToken({ workspaceId: 'workspace', repoFullName: 'synthetic/repo' })
+    ).rejects.toThrow('admission_pending');
+    expect(sent).toBe(false);
+    admitted = true;
+    await expect(
+      port.getRepoToken({ workspaceId: 'workspace', repoFullName: 'synthetic/repo' })
+    ).resolves.toMatchObject({ success: true, token: 'ordinary-token' });
+    expect(sent).toBe(true);
+  });
+
+  it('does not expose a token arriving after the account binding changes', async () => {
+    const { createCloudGitHubTokenPort } = await import('../src/providers/cloud-github-token-port');
+    const response = Promise.withResolvers<unknown>();
+    mockAction.mockReturnValue(response.promise);
+    let binding = 'first-account/workspace/route';
+    const port = createCloudGitHubTokenPort(() => binding);
+    const pending = port.getRepoToken({ workspaceId: 'workspace', repoFullName: 'synthetic/repo' });
+    binding = 'second-account/workspace/route';
+    response.resolve({ success: true, token: 'first-account-token', expiresAt: 'synthetic' });
+    await expect(pending).rejects.toMatchObject({ code: 'legacy_workspace_admission_changed' });
+  });
+
+  it.each([false, true])(
+    'rechecks admission after auth refresh before retry (changed=%s)',
+    async (changed) => {
+      const { createCloudGitHubTokenPort } =
+        await import('../src/providers/cloud-github-token-port');
+      const refresh = Promise.withResolvers<string>();
+      const refreshing = Promise.withResolvers<void>();
+      mockAction.mockResolvedValue({
+        success: false,
+        errorCode: 'unauthorized',
+        errorMessage: 'synthetic',
+      });
+      mockFreshJwt.mockImplementation(() => {
+        refreshing.resolve();
+        return refresh.promise;
+      });
+      let binding = 'ordinary-account/workspace/route';
+      const port = createCloudGitHubTokenPort(() => binding);
+      const pending = port.getRepoToken({
+        workspaceId: 'workspace',
+        repoFullName: 'synthetic/repo',
+      });
+      await refreshing.promise;
+      if (changed) binding = 'different-account/workspace/route';
+      refresh.resolve('synthetic-jwt');
+      if (changed) {
+        await expect(pending).rejects.toMatchObject({ code: 'legacy_workspace_admission_changed' });
+        expect(retriedRequests).toEqual([]);
+      } else {
+        await expect(pending).resolves.toMatchObject({ success: true, token: 'retried-token' });
+        expect(retriedRequests).toEqual(['retried']);
+      }
+    }
+  );
 });

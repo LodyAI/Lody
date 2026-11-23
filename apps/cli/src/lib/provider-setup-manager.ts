@@ -1,13 +1,19 @@
 import {
   applyProviderSetupCancellationToFlock,
+  encodeCodexProfileConfig,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAgentConfigs,
   getMachineFlockDocId,
   getMachineFlockProviderSetups,
+  findBuiltinAgentOptOutToRetract,
   getMachineFlockProviderSetupCancellations,
   getServerNow,
+  hasBuiltinRuntimeOverrideValues,
+  hasEmptyModelSelectOption,
+  isManagedBuiltinAgentType,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
+  supportsBuiltinProviderSetup,
   writeMachineFlockRowToFlock,
   type AgentConfigId,
   type MachineId,
@@ -22,6 +28,7 @@ import type { LoroRepo } from 'loro-repo';
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
+import { getCodexProfileStore } from '@/agent/codex-profile-store';
 
 type ProviderSetupExecution = Pick<
   SessionExecutionService,
@@ -47,6 +54,31 @@ const RESUMABLE_STATUSES = new Set<ProviderSetupStatus>([
   'verifying',
 ]);
 
+const isMissingBubRuntimeError = (error: string | undefined): boolean => {
+  if (!error) return false;
+  const normalized = error.toLowerCase();
+  return (
+    normalized.includes('spawn bub enoent') ||
+    normalized.includes('command not found') ||
+    normalized.includes("no such command 'acp'") ||
+    normalized.includes("failed to load plugin 'acp-server'") ||
+    normalized.includes("no module named 'bub_acp_server'")
+  );
+};
+
+const isMissingDimcodeRuntimeError = (error: string | undefined): boolean => {
+  const normalized = error?.toLowerCase() ?? '';
+  return (
+    normalized.includes('spawn dimcode enoent') ||
+    normalized.includes('command not found') ||
+    normalized.includes('dimcode is not recognized') ||
+    normalized.includes("'dimcode' is not recognized") ||
+    normalized.includes("no such command 'acp'") ||
+    normalized.includes("unknown command 'acp'") ||
+    normalized.includes("unrecognized subcommand 'acp'")
+  );
+};
+
 /**
  * Owns the non-interactive half of built-in provider creation on the target
  * machine. Flock rows are the durable queue: syncing a row or restarting the
@@ -63,6 +95,8 @@ export class ProviderSetupManager {
   private drainPromise: Promise<void> | null = null;
   private drainRequested = false;
   private stopped = false;
+  private readonly runtimeCancellation = new AbortController();
+  private cleanupRetry: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: ProviderSetupManagerOptions) {
     this.repo = options.repo;
@@ -93,7 +127,10 @@ export class ProviderSetupManager {
 
   stop(): void {
     this.stopped = true;
+    this.runtimeCancellation.abort();
     this.drainRequested = false;
+    clearTimeout(this.cleanupRetry);
+    this.cleanupRetry = undefined;
   }
 
   async resumeAfterAuthentication(setupId: AgentConfigId): Promise<void> {
@@ -120,6 +157,11 @@ export class ProviderSetupManager {
     while (!this.stopped) {
       this.drainRequested = false;
       await this.reconcileCancellations();
+      try {
+        await this.reconcileCodexProfiles();
+      } catch {
+        this.logger.warn('[provider-setup] Codex profile scan failed; continuing setup queue');
+      }
       const setups = (await this.readSetups())
         .filter((setup) => RESUMABLE_STATUSES.has(setup.status))
         .sort((left, right) => left.createdAt - right.createdAt);
@@ -146,35 +188,52 @@ export class ProviderSetupManager {
     const attempt = setup.attempt;
     let unexpectedFailureCode: ProviderSetupFailureCode = 'runtime-unavailable';
     try {
-      const preparing = await this.updateStatus(setup.id, attempt, 'preparing-runtime');
-      if (!preparing || this.stopped) return;
-
-      const binaryStatus = await this.execution.getMachineAcpBinaryStatus({
-        type: 'machine/acp-binary-status',
-        machineId: this.machineId,
-        workspaceId: this.workspaceId,
-        agentType: preparing.config.agentType,
-      });
       if (
-        !binaryStatus.success ||
-        binaryStatus.status === 'unsupported-platform' ||
-        binaryStatus.status === 'incompatible-host' ||
-        binaryStatus.status === 'error'
+        setup.config.cliType !== 'builtin' ||
+        !supportsBuiltinProviderSetup(setup.config.agentType) ||
+        hasBuiltinRuntimeOverrideValues(setup.config.runtimeOverrides)
       ) {
         await this.fail(setup.id, attempt, 'runtime-unavailable');
         return;
       }
-      if (binaryStatus.status !== 'installed' && binaryStatus.status !== 'not-applicable') {
-        unexpectedFailureCode = 'runtime-install-failed';
-        const install = await this.execution.installMachineAcpBinary({
-          type: 'machine/acp-binary-install',
+
+      // Non-managed builtins prepare their command during the live probe:
+      // Bub and Dimcode are user-installed. Keep the config
+      // unpublished until that ACP process passes verification.
+      if (isManagedBuiltinAgentType(setup.config.agentType)) {
+        const preparing = await this.updateStatus(setup.id, attempt, 'preparing-runtime');
+        if (!preparing || this.stopped) return;
+
+        const binaryStatus = await this.execution.getMachineAcpBinaryStatus({
+          type: 'machine/acp-binary-status',
           machineId: this.machineId,
           workspaceId: this.workspaceId,
           agentType: preparing.config.agentType,
         });
-        if (!install.success) {
-          await this.fail(setup.id, attempt, 'runtime-install-failed');
+        if (
+          !binaryStatus.success ||
+          binaryStatus.status === 'unsupported-platform' ||
+          binaryStatus.status === 'incompatible-host' ||
+          binaryStatus.status === 'error'
+        ) {
+          await this.fail(setup.id, attempt, 'runtime-unavailable');
           return;
+        }
+        if (binaryStatus.status !== 'installed' && binaryStatus.status !== 'not-applicable') {
+          unexpectedFailureCode = 'runtime-install-failed';
+          const install = await this.execution.installMachineAcpBinary(
+            {
+              type: 'machine/acp-binary-install',
+              machineId: this.machineId,
+              workspaceId: this.workspaceId,
+              agentType: preparing.config.agentType,
+            },
+            { signal: this.runtimeCancellation.signal }
+          );
+          if (!install.success) {
+            await this.fail(setup.id, attempt, 'runtime-install-failed');
+            return;
+          }
         }
       }
 
@@ -186,13 +245,19 @@ export class ProviderSetupManager {
         machineId: this.machineId,
         workspaceId: this.workspaceId,
         configId: verifying.config.id,
-        cliType: verifying.config.cliType,
-        agentType: verifying.config.agentType,
-        customAcp: verifying.config.customAcp,
-        runtimeOverrides: verifying.config.runtimeOverrides,
-        env: verifying.config.env,
+        // Provider setup publishes a config only after the runtime it just
+        // installed answered session/new, so this verification never accepts a
+        // cached entry from an earlier install.
+        force: true,
       });
       if (response.success) {
+        if (hasEmptyModelSelectOption(response.capability?.configOptions)) {
+          // The agent answered but its model catalog is empty: the provider is
+          // degraded, not verified. Do not publish it as a working config — a
+          // later setup attempt can verify again once the catalog heals.
+          await this.fail(verifying.id, attempt, 'verification-failed');
+          return;
+        }
         await this.publishVerifiedConfig(verifying.id, attempt);
         return;
       }
@@ -200,7 +265,14 @@ export class ProviderSetupManager {
         await this.updateStatus(verifying.id, attempt, 'awaiting-auth');
         return;
       }
-      await this.fail(verifying.id, attempt, 'verification-failed');
+      await this.fail(
+        verifying.id,
+        attempt,
+        (verifying.config.agentType === 'bub' && isMissingBubRuntimeError(response.error)) ||
+          (verifying.config.agentType === 'dimcode' && isMissingDimcodeRuntimeError(response.error))
+          ? 'runtime-unavailable'
+          : 'verification-failed'
+      );
     } catch (error) {
       this.logger.debug(`[provider-setup] Failed setup ${setup.id}: ${formatErrorMessage(error)}`);
       await this.fail(setup.id, attempt, unexpectedFailureCode).catch(() => undefined);
@@ -241,6 +313,45 @@ export class ProviderSetupManager {
     if (!changed) return;
     await this.repo.flush();
     this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-cancel' });
+  }
+
+  private async reconcileCodexProfiles(): Promise<void> {
+    const store = getCodexProfileStore();
+    const profiles = await store.list(this.workspaceId);
+    if (!profiles.length) return;
+    const handle = await this.repo.openFlockDoc(
+      getMachineFlockDocId(this.workspaceId, this.machineId)
+    );
+    const rows = readMachineFlockRowsFromFlock(handle.flock, {
+      families: ['agentConfig', 'providerSetup'],
+    });
+    const configs = getMachineFlockAgentConfigs(rows);
+    const setups = getMachineFlockProviderSetups(rows);
+    for (const profile of profiles) {
+      if (profile.machineId !== this.machineId) continue;
+      const config =
+        configs[profile.configId as AgentConfigId] ??
+        setups[profile.configId as AgentConfigId]?.config;
+      try {
+        if (config?.codexAuth?.profileId === profile.profile.profileId)
+          await store.reconcileGenerations(profile);
+        else if (!(await store.remove(profile))) this.scheduleCleanupRetry();
+      } catch {
+        this.scheduleCleanupRetry();
+        this.logger.debug(
+          '[provider-setup] Codex credential cleanup is pending; it will retry on the next scan'
+        );
+      }
+    }
+  }
+
+  private scheduleCleanupRetry(): void {
+    if (this.stopped || this.cleanupRetry) return;
+    this.cleanupRetry = setTimeout(() => {
+      this.cleanupRetry = undefined;
+      void this.kick();
+    }, 30_000);
+    this.cleanupRetry.unref?.();
   }
 
   private async readSetup(setupId: AgentConfigId): Promise<ProviderSetupTask | undefined> {
@@ -343,6 +454,7 @@ export class ProviderSetupManager {
         machineFlockKeys.providerSetupCancellation(setupId),
         machineFlockKeys.agentConfig(setupId),
       ],
+      families: ['builtinAgentOptOut'],
     });
     const cancellation = getMachineFlockProviderSetupCancellations(rows)[setupId];
     if (cancellation) {
@@ -365,10 +477,19 @@ export class ProviderSetupManager {
       await this.deleteSetup(setupId);
       return;
     }
+    if (setup.config.codexAuth)
+      await getCodexProfileStore().resolve(this.workspaceId, setup.config);
 
     const now = getServerNow();
     const flock = handle.flock as unknown as MachineFlockWritableFlock;
-    flock.set(machineFlockKeys.agentConfig(setupId), setup.config, now);
+    flock.set(machineFlockKeys.agentConfig(setupId), encodeCodexProfileConfig(setup.config), now);
+    // Publishing is the user adding the provider explicitly, so the earlier same-type
+    // removal intent has to be retracted too, or the list holds it while startup still
+    // treats it as removed.
+    const optOutKey = findBuiltinAgentOptOutToRetract(rows, setup.config);
+    if (optOutKey) {
+      flock.delete(optOutKey, now);
+    }
     flock.delete(machineFlockKeys.providerSetup(setupId), now);
     flock.commit();
     await this.repo.flush();

@@ -1,4 +1,9 @@
-import type { Alias, PluginOption } from 'vite';
+import type { PluginOption } from 'vite';
+
+export interface BundlerAlias {
+  find: string | RegExp;
+  replacement: string;
+}
 
 export const VITEST_INLINE_WASM_DEPS = [
   'loro-repo',
@@ -7,8 +12,7 @@ export const VITEST_INLINE_WASM_DEPS = [
   '@loro-dev/streams-crdt',
 ];
 
-// Alias[] (not AliasOptions) so callers with an existing alias array can spread it.
-export function loroCrdtBundlerAlias(): Alias[] {
+export function loroCrdtBundlerAlias(): BundlerAlias[] {
   return [{ find: /^loro-crdt$/, replacement: 'loro-crdt/bundler' }];
 }
 

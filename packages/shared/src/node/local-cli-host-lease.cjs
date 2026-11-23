@@ -5,6 +5,9 @@ const { getInstallationProfile } = require('./installation-profile.cjs');
 
 const HOST_TCP_ADDRESS = '127.0.0.1';
 const HOST_REQUEST_TIMEOUT_MS = 800;
+const E2E_HOST_PORT_ENV = 'LODY_E2E_LOCAL_CLI_HOST_PORT';
+const E2E_HOST_PIPE_ENV = 'LODY_E2E_LOCAL_CLI_HOST_PIPE';
+const E2E_HOST_PIPE_PATTERN = /^\\\\\.\\pipe\\lody-e2e-[A-Za-z0-9-]{1,80}$/u;
 
 function getUserPipeSuffix() {
   if (typeof process.getuid === 'function') return String(process.getuid());
@@ -16,15 +19,44 @@ function getUserPipeSuffix() {
     .slice(0, 16);
 }
 
+function getE2eHostPort() {
+  if (process.env.LODY_E2E !== '1') return null;
+  const rawPort = process.env[E2E_HOST_PORT_ENV]?.trim();
+  if (!rawPort) return null;
+  if (!/^\d+$/u.test(rawPort)) {
+    throw new Error(`${E2E_HOST_PORT_ENV} must be an integer between 1024 and 65535`);
+  }
+  const port = Number(rawPort);
+  if (!Number.isSafeInteger(port) || port < 1024 || port > 65_535) {
+    throw new Error(`${E2E_HOST_PORT_ENV} must be an integer between 1024 and 65535`);
+  }
+  return port;
+}
+
+function getE2eHostPipe(nodePlatform = process.platform) {
+  if (nodePlatform !== 'win32' || process.env.LODY_E2E !== '1') return null;
+  const pipe = process.env[E2E_HOST_PIPE_ENV]?.trim();
+  if (!pipe) return null;
+  if (!E2E_HOST_PIPE_PATTERN.test(pipe)) {
+    throw new Error(`${E2E_HOST_PIPE_ENV} must use the \\\\.\\pipe\\lody-e2e-<id> namespace`);
+  }
+  return pipe;
+}
+
 function getLocalCliHostEndpoint(platform) {
   const profile = getInstallationProfile(platform);
   if (process.platform === 'win32') {
     return {
       kind: 'pipe',
-      path: `\\\\.\\pipe\\${profile.namespace}-agent-host-${getUserPipeSuffix()}`,
+      path:
+        getE2eHostPipe() ?? `\\\\.\\pipe\\${profile.namespace}-agent-host-${getUserPipeSuffix()}`,
     };
   }
-  return { kind: 'tcp', host: HOST_TCP_ADDRESS, port: profile.localCliHostPort };
+  return {
+    kind: 'tcp',
+    host: HOST_TCP_ADDRESS,
+    port: getE2eHostPort() ?? profile.localCliHostPort,
+  };
 }
 
 function throwIfAborted(signal) {
@@ -60,19 +92,29 @@ function listen(server, endpoint) {
   else server.listen(endpoint.port, endpoint.host);
 }
 
+function isAccessDenied(error) {
+  // libuv reports Win32 ERROR_ACCESS_DENIED on a pipe connect as EPERM; a Unix
+  // socket the caller may not open fails with EACCES.
+  return error?.code === 'EPERM' || error?.code === 'EACCES';
+}
+
 async function inspectLocalCliHost(
   endpoint = getLocalCliHostEndpoint(),
   timeoutMs = HOST_REQUEST_TIMEOUT_MS
 ) {
+  return (await probeLocalCliHost(endpoint, timeoutMs)).record;
+}
+
+async function probeLocalCliHost(endpoint, timeoutMs = HOST_REQUEST_TIMEOUT_MS) {
   return await new Promise((resolve) => {
     const socket = connect(endpoint);
     let buffer = '';
     let settled = false;
-    const finish = (record) => {
+    const finish = (record, accessDenied = false) => {
       if (settled) return;
       settled = true;
       socket.destroy();
-      resolve(record);
+      resolve({ record, accessDenied });
     };
     socket.setTimeout(timeoutMs, () => finish(null));
     socket.on('data', (chunk) => {
@@ -86,9 +128,15 @@ async function inspectLocalCliHost(
         finish(null);
       }
     });
-    socket.once('error', () => finish(null));
+    socket.once('error', (error) => finish(null, isAccessDenied(error)));
     socket.once('end', () => finish(null));
   });
+}
+
+function occupiedBy(probe) {
+  return probe.accessDenied
+    ? { status: 'occupied', record: probe.record, accessDenied: true }
+    : { status: 'occupied', record: probe.record };
 }
 
 function isShutdownRequest(value) {
@@ -184,9 +232,9 @@ async function closeListeningHost(host) {
 async function acquireLocalCliHostLease(options) {
   const endpoint = options.endpoint ?? getLocalCliHostEndpoint();
   throwIfAborted(options.signal);
-  const observed = await inspectLocalCliHost(endpoint);
+  const observed = await probeLocalCliHost(endpoint);
   throwIfAborted(options.signal);
-  if (observed) return { status: 'occupied', record: observed };
+  if (observed.record || observed.accessDenied) return occupiedBy(observed);
   const record = {
     version: 1,
     instanceId: options.instanceId,
@@ -196,7 +244,7 @@ async function acquireLocalCliHostLease(options) {
   };
   const listening = await createListeningHost(endpoint, record, options.shutdownControl);
   if (!listening) {
-    return { status: 'occupied', record: await inspectLocalCliHost(endpoint) };
+    return occupiedBy(await probeLocalCliHost(endpoint));
   }
   if (options.signal?.aborted) {
     await closeListeningHost(listening);
@@ -278,6 +326,7 @@ async function requestLocalCliHostShutdown(options) {
 
 module.exports = {
   acquireLocalCliHostLease,
+  getE2eHostPipe,
   getLocalCliHostEndpoint,
   inspectLocalCliHost,
   requestLocalCliHostShutdown,

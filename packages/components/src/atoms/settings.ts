@@ -1,17 +1,29 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import type { MachineId, SupportedLanguage } from '@lody/shared';
+
+import type { CodeCollabAllChangesScope, MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
-import {
-  SETTINGS_DEFAULT_TAB,
-  type SettingsTabId,
-} from '@/components/settings/settings-tabs';
+import { isSymbolFontFamily } from '@/lib/local-fonts';
+import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
+
+/** Automatically load external HTTPS images in GitHub review content on this device. */
+export const prRemoteImagesEnabledAtom = atomWithStorage<boolean>(
+  'lody-pr-remote-images-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
 
 export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 'en');
 
 export const DEFAULT_CONVERSATION_FONT_SIZE = 14;
-export const CONVERSATION_FONT_SIZE_MIN = 9;
-export const CONVERSATION_FONT_SIZE_MAX = 32;
+/**
+ * The sizes settings offers, ascending — five named tiers (smaller, small, default,
+ * large, larger). Free-form entry is deliberately gone: a number field silently rewrote
+ * whatever the user typed (clamped into a range, rounded), which reads as the app
+ * fighting the keystrokes. A short scale has one value per visible step.
+ */
+export const CONVERSATION_FONT_SIZES = [12, 13, 14, 15, 16] as const;
 export type ConversationFontSize = number;
 
 const LEGACY_CONVERSATION_FONT_SIZES: Record<string, ConversationFontSize> = {
@@ -20,14 +32,18 @@ const LEGACY_CONVERSATION_FONT_SIZES: Record<string, ConversationFontSize> = {
   large: 16,
 };
 
+/**
+ * Snaps to the nearest offered size (ties go up) so a value persisted by an older build —
+ * a preset name, or any number the old input accepted — keeps the closest size the user
+ * chose instead of collapsing to the default.
+ */
 export function normalizeConversationFontSize(value: unknown): ConversationFontSize {
   const migratedValue = typeof value === 'string' ? LEGACY_CONVERSATION_FONT_SIZES[value] : value;
   if (typeof migratedValue !== 'number' || !Number.isFinite(migratedValue)) {
     return DEFAULT_CONVERSATION_FONT_SIZE;
   }
-  return Math.min(
-    CONVERSATION_FONT_SIZE_MAX,
-    Math.max(CONVERSATION_FONT_SIZE_MIN, Math.round(migratedValue))
+  return CONVERSATION_FONT_SIZES.reduce((closest, size) =>
+    Math.abs(size - migratedValue) <= Math.abs(closest - migratedValue) ? size : closest
   );
 }
 
@@ -43,10 +59,23 @@ export const conversationFontSizeAtom = atom(
   }
 );
 
+/**
+ * Full-width conversation column (Notion-style): the session conversation's
+ * centered column drops its ~48rem cap and spans the pane, keeping only the
+ * shared side gutter. Read through `ConversationColumn` — never restyle one
+ * column by hand.
+ */
+export const conversationWideModeAtom = atomWithStorage<boolean>(
+  'lody-conversation-wide-mode',
+  false
+);
+
 export const INTERFACE_FONT_FAMILY_MAX_LENGTH = 100;
 
 export function normalizeInterfaceFontFamily(value: unknown): string {
-  return typeof value === 'string' ? value.trim().slice(0, INTERFACE_FONT_FAMILY_MAX_LENGTH) : '';
+  return typeof value === 'string' && !isSymbolFontFamily(value)
+    ? value.trim().slice(0, INTERFACE_FONT_FAMILY_MAX_LENGTH)
+    : '';
 }
 
 const interfaceFontFamilyStorageAtom = atomWithStorage<unknown>('lody-interface-font-family', '');
@@ -64,7 +93,9 @@ export const TERMINAL_FONT_SIZE_MAX = 24;
 export const TERMINAL_FONT_FAMILY_MAX_LENGTH = 100;
 
 export function normalizeTerminalFontFamily(value: unknown): string {
-  return typeof value === 'string' ? value.trim().slice(0, TERMINAL_FONT_FAMILY_MAX_LENGTH) : '';
+  return typeof value === 'string' && !isSymbolFontFamily(value)
+    ? value.trim().slice(0, TERMINAL_FONT_FAMILY_MAX_LENGTH)
+    : '';
 }
 
 export function normalizeTerminalFontSize(value: unknown): number {
@@ -95,6 +126,64 @@ export const terminalFontSizeAtom = atom(
   }
 );
 
+export const DEFAULT_FONT_LIGATURES_ENABLED = true;
+
+export function normalizeFontLigaturesEnabled(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : DEFAULT_FONT_LIGATURES_ENABLED;
+}
+
+const fontLigaturesEnabledStorageAtom = atomWithStorage<unknown>(
+  'lody-font-ligatures-enabled',
+  DEFAULT_FONT_LIGATURES_ENABLED
+);
+
+export const fontLigaturesEnabledAtom = atom(
+  (get) => normalizeFontLigaturesEnabled(get(fontLigaturesEnabledStorageAtom)),
+  (_get, set, nextValue: boolean) => {
+    set(fontLigaturesEnabledStorageAtom, nextValue);
+  }
+);
+
+export const DEFAULT_INLINE_MATH_ENABLED = false;
+
+export function normalizeInlineMathEnabled(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : DEFAULT_INLINE_MATH_ENABLED;
+}
+
+const inlineMathEnabledStorageAtom = atomWithStorage<unknown>(
+  'lody-inline-math-enabled',
+  DEFAULT_INLINE_MATH_ENABLED
+);
+
+export const inlineMathEnabledAtom = atom(
+  (get) => normalizeInlineMathEnabled(get(inlineMathEnabledStorageAtom)),
+  (_get, set, nextValue: boolean) => {
+    set(inlineMathEnabledStorageAtom, nextValue);
+  }
+);
+
+/**
+ * Optional syntax grammars stay out of the default rendering path. The
+ * preference is local because it changes only the languages this client loads.
+ */
+export const DEFAULT_EXTENDED_CODE_LANGUAGES_ENABLED = false;
+
+export function normalizeExtendedCodeLanguagesEnabled(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : DEFAULT_EXTENDED_CODE_LANGUAGES_ENABLED;
+}
+
+const extendedCodeLanguagesEnabledStorageAtom = atomWithStorage<unknown>(
+  'lody-extended-code-languages-enabled',
+  DEFAULT_EXTENDED_CODE_LANGUAGES_ENABLED
+);
+
+export const extendedCodeLanguagesEnabledAtom = atom(
+  (get) => normalizeExtendedCodeLanguagesEnabled(get(extendedCodeLanguagesEnabledStorageAtom)),
+  (_get, set, nextValue: boolean) => {
+    set(extendedCodeLanguagesEnabledStorageAtom, nextValue);
+  }
+);
+
 // Desktop settings modal open state. On desktop (non-mobile) the settings UI is a
 // modal overlay driven by this atom instead of a full-page route. Mobile keeps the
 // route-based settings page and ignores this atom.
@@ -122,14 +211,18 @@ export const electronSessionCompletionNotificationsEnabledAtom = atomWithStorage
   true
 );
 
+// Desktop app, per computer: while this window is focused, the Host that finishes
+// one of your turns skips the mobile push (published as `desktop-foreground` presence).
+export const electronSuppressMobilePushWhenFocusedAtom = atomWithStorage<boolean>(
+  'lody-electron-suppress-mobile-push-when-focused',
+  true
+);
+
 // File viewer (Monaco) line-wrap toggle. Defaults on so a long single line
 // (e.g. an unwrapped Markdown paragraph) stays readable without horizontal
 // scrolling — especially on mobile. Shared by every SessionMonacoTextViewer
 // mount via the viewer reading this atom directly.
-export const fileViewerWordWrapAtom = atomWithStorage<boolean>(
-  'lody-file-viewer-word-wrap',
-  true
-);
+export const fileViewerWordWrapAtom = atomWithStorage<boolean>('lody-file-viewer-word-wrap', true);
 
 // Mobile composer keyboard return key behavior.
 export const mobileKeyboardActionAtom = atomWithStorage<MobileKeyboardAction>(
@@ -149,6 +242,21 @@ export const sessionSidebarCodeChangesOnlyAtom = atomWithStorage<boolean>(
   false
 );
 
+// All Changes workspace diff: branch cumulative (merge-base -> disk) vs uncommitted
+// (HEAD -> disk). Persisted globally; default preserves the existing branch view.
+const allChangesDiffScopeStorageAtom = atomWithStorage<string>(
+  'lody-all-changes-diff-scope',
+  'branch'
+);
+
+export const allChangesDiffScopeAtom = atom(
+  (get): CodeCollabAllChangesScope =>
+    get(allChangesDiffScopeStorageAtom) === 'uncommitted' ? 'uncommitted' : 'branch',
+  (_get, set, nextValue: CodeCollabAllChangesScope) => {
+    set(allChangesDiffScopeStorageAtom, nextValue);
+  }
+);
+
 export const QUEUED_MESSAGE_BEHAVIOR_VALUES = ['queue', 'guide'] as const;
 export type QueuedMessageBehavior = (typeof QUEUED_MESSAGE_BEHAVIOR_VALUES)[number];
 
@@ -165,49 +273,12 @@ export const queuedMessageBehaviorAtom = atom(
   }
 );
 
-// Auto-archive a session when its linked PR is merged. Per-user, browser-local.
-export const autoArchiveOnPrMergedAtom = atomWithStorage<boolean>(
-  'lody-auto-archive-on-pr-merged',
-  false
-);
-
-// Auto-archive a session when its linked PR is closed (without merge). Per-user, browser-local.
-export const autoArchiveOnPrClosedAtom = atomWithStorage<boolean>(
-  'lody-auto-archive-on-pr-closed',
-  false
-);
-
 /** localStorage keys for developer-only beta gates — keep in sync with the atoms below. */
 export const DEVELOPER_MODE_STORAGE_KEY = 'lody-developer-mode-enabled';
-export const TASKS_BETA_STORAGE_KEY = 'lody-tasks-beta-enabled';
 export const INBOX_BETA_STORAGE_KEY = 'lody-inbox-beta-enabled';
 
-/**
- * Synchronous read of the Tasks feature gate from localStorage.
- *
- * `atomWithStorage` without a settled store can still report its default on the
- * first paint (and `getOnInit` only samples storage once at module load, so a
- * test or late write is invisible). Route guards that redirect on `false` must
- * use this on that first frame so a bookmarked `/tasks/$taskId` is not bounced
- * to chat before hydration finishes.
- */
-export function readTasksFeatureEnabledFromStorage(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-  try {
-    const developerMode = JSON.parse(
-      localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) ?? 'false'
-    );
-    const tasksBeta = JSON.parse(localStorage.getItem(TASKS_BETA_STORAGE_KEY) ?? 'false');
-    return developerMode === true && tasksBeta === true;
-  } catch {
-    return false;
-  }
-}
-
 // getOnInit samples storage when the atom module loads so a cold SPA boot
-// (the deep-link case) already has the right init value.
+// already has the right init value.
 export const developerModeEnabledAtom = atomWithStorage<boolean>(
   DEVELOPER_MODE_STORAGE_KEY,
   false,
@@ -215,31 +286,8 @@ export const developerModeEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true }
 );
 
-// Opt-in for the Tasks beta. Reachable only from the beta section of Settings,
-// which itself only renders while Developer mode is on.
-export const tasksBetaEnabledAtom = atomWithStorage<boolean>(
-  TASKS_BETA_STORAGE_KEY,
-  false,
-  undefined,
-  { getOnInit: true }
-);
-
-/**
- * The single gate every Tasks surface reads — sidebar entry, routes, commands,
- * quick-add, index sync, status watcher, session task chip, and the agent's task
- * proposal card. When it is false the feature must be indistinguishable from one
- * that was never built.
- *
- * Developer mode is part of the condition, not merely the way to reach the
- * switch: turning Developer mode off has to hide Tasks again, and it does so
- * without discarding the opt-in, so turning it back on restores the choice.
- */
-export const tasksFeatureEnabledAtom = atom(
-  (get) => get(developerModeEnabledAtom) && get(tasksBetaEnabledAtom)
-);
-
-// Opt-in for the unfinished mobile Inbox. Like Tasks, this is reachable only
-// from the beta section while Developer mode is on.
+// Opt-in for the unfinished mobile Inbox. Reachable only from the beta section
+// while Developer mode is on.
 export const inboxBetaEnabledAtom = atomWithStorage<boolean>(
   INBOX_BETA_STORAGE_KEY,
   false,
@@ -252,9 +300,42 @@ export const inboxFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(inboxBetaEnabledAtom)
 );
 
+/** Enables creation only. Existing encrypted workspaces retain their immutable mode. */
+export const e2eeWorkspaceCreationEnabledAtom = atomWithStorage<boolean>(
+  'lody-e2ee-workspace-creation-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const e2eeWorkspaceCreationFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(e2eeWorkspaceCreationEnabledAtom)
+);
+
+/** Account recovery vault controls, enabled by default. Main independently honors LODY_E2EE_RECOVERY_VAULT=off as a kill switch. */
+export const e2eeRecoveryVaultEnabledAtom = atomWithStorage<boolean>(
+  'lody-e2ee-recovery-vault-v2-enabled',
+  true,
+  undefined,
+  { getOnInit: true }
+);
+
+export const e2eeRecoveryVaultFeatureEnabledAtom = atom((get) => get(e2eeRecoveryVaultEnabledAtom));
+
+export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-semantic-shortcuts-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const semanticShortcutsFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(semanticShortcutsBetaEnabledAtom)
+);
+
 /** localStorage keys for the experimental features gate. */
 export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'lody-experimental-features-enabled';
-export const REVIEW_AGENT_EXPERIMENT_STORAGE_KEY = 'lody-review-agent-enabled';
+export const ROOST_HISTORY_EXPERIMENT_STORAGE_KEY = 'lody-roost-history-enabled';
 
 /**
  * Master switch for user-facing experimental features.
@@ -271,23 +352,42 @@ export const experimentalFeaturesEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true }
 );
 
-/** Opt-in for the review agent, listed once experimental features are on. */
-export const reviewAgentExperimentEnabledAtom = atomWithStorage<boolean>(
-  REVIEW_AGENT_EXPERIMENT_STORAGE_KEY,
+/** Opt-in for the Today outline notes (specs/today-outline.md). */
+export const todayExperimentEnabledAtom = atomWithStorage<boolean>(
+  'lody-today-enabled',
   false,
   undefined,
   { getOnInit: true }
 );
 
 /**
- * The single gate every review-agent surface reads.
- *
- * Note what this gate does NOT control: a run already authorized on a session
- * keeps going, because the authorization is durable session state that the
- * machine acts on, and this switch is per-device UI visibility. Turning the
- * experiment off hides the controls; it does not silently abandon a branch the
- * user was told would be merged.
+ * The single gate for every Today surface. Turning the master switch off hides
+ * Today without clearing its opt-in; data keeps syncing either way.
  */
-export const reviewAgentFeatureEnabledAtom = atom(
-  (get) => get(experimentalFeaturesEnabledAtom) && get(reviewAgentExperimentEnabledAtom)
+export const todayFeatureEnabledAtom = atom(
+  (get) => get(experimentalFeaturesEnabledAtom) && get(todayExperimentEnabledAtom)
+);
+
+/** Opt-in for Roost-backed history on newly created sessions. */
+export const roostHistoryExperimentEnabledAtom = atomWithStorage<boolean>(
+  ROOST_HISTORY_EXPERIMENT_STORAGE_KEY,
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+/** The single gate for selecting Roost when a new session is accepted. */
+export const roostHistoryFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(roostHistoryExperimentEnabledAtom)
+);
+
+export const lodyAgentBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-agent-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const lodyAgentFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(lodyAgentBetaEnabledAtom)
 );

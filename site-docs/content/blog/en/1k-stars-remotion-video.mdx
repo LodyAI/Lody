@@ -1,0 +1,96 @@
+---
+title: 'A Thousand Stars, Rendered Into a Video: The Making of Lody''s 1K Celebration Short'
+date: 2026-09-09
+author: Lody Team
+authorLink: https://lody.ai
+description: Lody just passed 1,000 stars on GitHub. Instead of opening a video editor, we wrote the celebration video in code with Remotion.
+image: /_docs-assets/1k-video/cover.png
+tag: Engineering
+sidebar: false
+aside: false
+---
+
+Lody recently reached 1,000 stars on GitHub. Thank you to everyone who clicked that star!
+
+A milestone deserves a proper celebration video, and this one — every frame and every sound — was rendered from code. So we'd like to walk through how it was made and share the thinking behind it.
+
+## Why make a video with code
+
+We used [Remotion](https://remotion.dev), because every frame of the video is a React component rendered at a point in time. That means the video gets all the benefits of code: version control, parameterization, component reuse, and frame-exact control at 60fps.
+
+Camera move feels off? Change a number, re-render, and tens of seconds later you have a new cut — instead of dragging things around a timeline for another half hour. It's also AI-friendly: an AI can generate React components directly, or emit JSON data that React renders.
+
+The structure of the piece is simple:
+
+<img src="/_docs-assets/1k-video/timeline.png" alt="Video structure timeline" />
+
+The first 7 seconds are a 3D camera move across the GitHub repo page: the camera pushes in, a cursor clicks Star, and the counter climbs to 1,000. The last 6 seconds land in Lody's own watercolor world.
+
+Here are the engineering stories we found most interesting.
+
+## 1. Redrawing GitHub instead of using screenshots
+
+From the start, we felt we shouldn't use real screenshots.
+
+Under a pushing camera, a bitmap has limited resolution — ask an AI to screenshot the page and you'll hit the edge case where everything smears as soon as you zoom in. And nothing in a screenshot can move.
+
+So we redrew the entire page in DOM — the tab bar, buttons, file list, the About sidebar — with icons taken from GitHub's official octicons.
+
+Redrawing has a bonus: elements can act. In the opening, each section of the page drops from above and "docks" into place with a slight overshoot, as if the interface is assembling itself in front of you.
+
+The core of it is a function under ten lines:
+
+```tsx
+const dock = (delay: number): React.CSSProperties => {
+  const s = spring({frame: frame - delay, fps, config: {damping: 14, mass: 0.9, stiffness: 160}});
+  return {
+    opacity: interpolate(s, [0, 0.45], [0, 1], {extrapolateRight: 'clamp'}),
+    transform: `translateY(${interpolate(s, [0, 1], [-80, 0])}px)`,
+  };
+};
+```
+
+Spread a `...dock(n)` on each section, stagger `n` by a few frames from top to bottom, and the page breathes.
+
+For the cursor clicking the Star button: the button sits tilted in 3D space, so we push the page coordinates through the same rotation-projection matrix to get screen coordinates back — the cursor always lands exactly on the button's center.
+
+## 2. The camera feel
+
+The difference between "shot by a camera" and "a PowerPoint in motion" is mostly depth of field and the continuity of movement.
+
+The simplest take on depth of field is one big blur with a sharp window, but that leaves a hard edge. So we stacked three plates: a heavily blurred full-frame plate at the bottom, a lightly blurred plate covering a wide feathered region in the middle, and a sharp core that lives only near the focal plane on top. All three use wide soft masks, so the blur amount falls off gradually with defocus distance:
+
+<img src="/_docs-assets/1k-video/dof.png" alt="Three depth-of-field plates" />
+
+> Strictly speaking, graduated depth of field is an optical result — it should be a convolution kernel, not a simple linear gradient. But given the resolution and bitrate of video on social media, a simple gradient is more than enough.
+
+For continuity: after the camera move ends, the page has a subtle "breathing" sway. The first version kicked the sway in at the exact frame the camera stopped — but the sine wasn't at zero at that moment, so the shot gave a barely perceptible little "clunk", like a dropped frame.
+
+The fix is to start the sine at a zero crossing and multiply it by a fade-in/fade-out envelope:
+
+```tsx
+const breathe =
+  Math.sin((frame - 92) / 55) * 0.9 *
+  interpolate(frame, [92, 122, 266, 296], [0, 1, 1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+```
+
+The sway grows out of stillness and quietly dies before the pull-back.
+
+## 3. The sound is rendered too
+
+The score isn't a random stock track thrown underneath. We used a royalty-free piece as the base — the track we picked is in A major, so every sound effect was then synthesized in code within the A major system: the riser under the count climbs the pentatonic scale, the 1,000 moment is an A-major bell, and the confetti shimmer is a bit of harp partials in the same key.
+
+<img src="/_docs-assets/1k-video/audio.png" alt="Audio system" />
+
+
+## Wrapping up
+
+Thanks again for the thousand stars — and to everyone who filed an issue, opened a PR, or recommended Lody to a friend!
+
+If you'd like to try making videos with code, Remotion is a great place to start!
+
+- GitHub: [github.com/LodyAI/lody](https://github.com/LodyAI/lody)
+- Website: [lody.ai](https://lody.ai)

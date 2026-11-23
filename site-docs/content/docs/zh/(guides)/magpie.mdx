@@ -1,0 +1,97 @@
+---
+title: 接入 Magpie
+description: 在服务器上一条命令导入 Magpie，供 Claude、Codex、Pi 等 Agent 使用。
+---
+
+# 接入 Magpie
+
+Magpie 负责连接模型供应商，Lody 负责创建 Agent 配置。供应商 API Key 保存在 Magpie 中，无需复制到 Lody。
+
+## 准备
+
+- 在**同一台服务器**上运行 Magpie 和 Lody daemon，并在 Magpie 中启用至少一个模型。
+- Lody 已登录，且服务器已加入目标工作区。登录方式见 [CLI 登录](/zh/docs/cli#基础命令)。
+- 使用支持 `import-magpie` 的 Lody CLI。本文命令适用于云版工作区，不适用于 OSS 纯本地模式。
+
+在服务器终端检查命令、启动 daemon 并查找工作区：
+
+```bash
+lody agent-config import-magpie --help
+lody daemon start
+lody workspace list
+```
+
+如果 daemon 已运行，无需重复启动。下文的 `my-team` 请替换为你的工作区 ID、名称或 slug。
+
+## 一键导入
+
+```bash
+lody agent-config import-magpie --workspace my-team --json
+```
+
+默认连接 `http://127.0.0.1:3425`，导入以下七种 Provider：
+
+| `--targets` 值 | 创建的配置 |
+| --- | --- |
+| `claude` | Claude-magpie |
+| `codex` | Codex-magpie |
+| `pi` | Pi-magpie |
+| `dsh` | DSH-magpie |
+| `kimi` | Kimi Code-magpie |
+| `grok` | Grok-magpie |
+| `bub` | Bub-magpie |
+
+命令只导入到**运行命令的机器**，不支持 `--machine`。`127.0.0.1` 指这台服务器，不是你的电脑。
+Bub 需要预先安装 `bub acp` 及其 ACP 插件。
+
+### 只导入指定 Agent
+
+用逗号分隔目标。例如，只导入 Pi 和 Codex：
+
+```bash
+lody agent-config import-magpie --workspace my-team --targets pi,codex --json
+```
+
+### 指定端口或导入链接
+
+Magpie 使用其他端口时，传入网关根地址，不要加 `/v1`：
+
+```bash
+lody agent-config import-magpie --workspace my-team --gateway http://127.0.0.1:4000 --json
+```
+
+如果已有 Magpie 导入链接，可以直接传入完整链接：
+
+```bash
+lody agent-config import-magpie --workspace my-team --link 'lody://provider/import?v=1&data=…' --json
+```
+
+`--link` 和 `--gateway` 不能同时使用。使用链接时，默认导入链接提供的全部目标；`--targets` 只能从这些目标中选择。
+网关仅接受本机 HTTP 回环地址：`127.0.0.1`、`localhost` 或 `[::1]`。
+
+## 查看结果
+
+JSON 中的 `providers` 列出每个目标的 `agentConfigId` 和 `status`：
+
+| 状态 | 含义 |
+| --- | --- |
+| `queued` | 已保存准备任务，等待 daemon 安装或验证运行时 |
+| `preparing-runtime` / `verifying` | 已有任务正在准备或验证 |
+| `awaiting-auth` | 已有任务等待认证 |
+| `created` | 配置已保存，尚未验证模型请求 |
+| `existing` | 已有相同网关和 Agent 类型的配置，保持原样 |
+
+在 Lody 的 **Providers** 页面查看准备进度。配置就绪后，在对应服务器上选择该 Provider 创建会话。
+导入成功不代表上游模型请求成功；还需要实际发送一条消息验证。
+
+`synced: false` 表示配置已保存在本机，但尚未确认同步到工作区。恢复连接后重新运行导入命令即可。
+
+重复导入不会覆盖已有配置；失败的准备任务会使用原配置重试。
+如果提示不支持 Pi，请更新服务器上的 Lody 并重启 daemon，或用 `--targets` 排除 `pi`。
+
+## 模型与配置更新
+
+在 Magpie 中管理模型。Lody 在后续启动时读取最新模型列表，已运行的会话不会自动更新。
+生成的原生配置由 Lody 管理，手动修改可能在下次启动时被覆盖。
+
+桌面端也可打开已有的 Magpie 导入链接，确认后导入桌面本机。要导入服务器，请在服务器终端执行本文命令。

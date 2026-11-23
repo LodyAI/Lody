@@ -53,11 +53,16 @@ function InteractiveWorkspaceScreen({
       workspaces={workspaces}
       selectedWorkspaceId={selectedId}
       creating={creating}
+      repairingWorkspaceName={null}
       onStartCreate={() => setCreating(true)}
+      onStartRepair={fn()}
       onCancelCreate={() => setCreating(false)}
       newName={newName}
       newSlug={newSlug}
       newSlugChecking={false}
+      newSlugAvailable
+      newSlugCheckSlow={false}
+      newSlugCheckError={null}
       newSlugError={null}
       canResetSlug={manuallyEditedSlug && newSlug !== suggestedSlug}
       onNewNameChange={setNewName}
@@ -69,7 +74,14 @@ function InteractiveWorkspaceScreen({
         setManuallyEditedSlug(false);
         setManualSlug(suggestedSlug);
       }}
+      onRetryNewSlugCheck={fn()}
       saving={saving}
+      writePending={saving}
+      createError={null}
+      workspacesStatus="ready"
+      workspacesError={null}
+      retryingWorkspaces={false}
+      onRetryWorkspaces={fn()}
       onSelectWorkspace={setSelectedId}
       onConfirmSelection={() => {
         if (selectedId === null) return;
@@ -102,6 +114,18 @@ const meta = {
   },
   tags: ['autodocs'],
   args: {
+    createError: null,
+    workspacesStatus: 'ready',
+    workspacesError: null,
+    retryingWorkspaces: false,
+    onRetryWorkspaces: fn(),
+    repairingWorkspaceName: null,
+    onStartRepair: fn(),
+    newSlugAvailable: true,
+    newSlugCheckSlow: false,
+    newSlugCheckError: null,
+    onRetryNewSlugCheck: fn(),
+    writePending: false,
     onStartCreate: fn(),
     onCancelCreate: fn(),
     onNewNameChange: fn(),
@@ -135,6 +159,7 @@ export const SingleWorkspace: Story = {
     newSlugError: null,
     canResetSlug: false,
     saving: false,
+    writePending: false,
   },
 };
 
@@ -208,6 +233,68 @@ export const SlugChecking: Story = {
   },
 };
 
+export const SlugCheckingSlow: Story = {
+  args: {
+    workspaces: sampleWorkspaces,
+    selectedWorkspaceId: sampleWorkspaces[0]!.id,
+    creating: true,
+    newName: 'Loro Lab',
+    newSlug: 'loro-lab',
+    newSlugChecking: true,
+    newSlugCheckSlow: true,
+    newSlugError: null,
+    canResetSlug: true,
+    saving: false,
+  },
+};
+
+export const SlugCheckFailed: Story = {
+  args: {
+    workspaces: sampleWorkspaces,
+    selectedWorkspaceId: sampleWorkspaces[0]!.id,
+    creating: true,
+    newName: 'Loro Lab',
+    newSlug: 'loro-lab',
+    newSlugChecking: false,
+    newSlugAvailable: false,
+    newSlugCheckError: 'network connection unavailable',
+    newSlugError: null,
+    canResetSlug: true,
+    saving: false,
+  },
+};
+
+export const MissingHandle: Story = {
+  args: {
+    workspaces: [{ id: 'org_legacy', name: 'Legacy Workspace', slug: '' }],
+    selectedWorkspaceId: null,
+    creating: false,
+    newName: '',
+    newSlug: '',
+    newSlugChecking: false,
+    newSlugAvailable: false,
+    newSlugError: null,
+    canResetSlug: false,
+    saving: false,
+  },
+};
+
+export const RepairHandle: Story = {
+  args: {
+    workspaces: [{ id: 'org_legacy', name: 'Legacy Workspace', slug: '' }],
+    selectedWorkspaceId: null,
+    creating: true,
+    repairingWorkspaceName: 'Legacy Workspace',
+    newName: 'Legacy Workspace',
+    newSlug: 'legacy-workspace',
+    newSlugChecking: false,
+    newSlugAvailable: true,
+    newSlugError: null,
+    canResetSlug: false,
+    saving: false,
+  },
+};
+
 export const SlugUnavailable: Story = {
   args: {
     workspaces: sampleWorkspaces,
@@ -233,6 +320,53 @@ export const Saving: Story = {
     newSlugError: null,
     canResetSlug: false,
     saving: true,
+    writePending: true,
+  },
+};
+
+export const Loading: Story = {
+  args: {
+    workspaces: [],
+    selectedWorkspaceId: null,
+    creating: false,
+    newName: '',
+    newSlug: '',
+    newSlugChecking: false,
+    newSlugError: null,
+    canResetSlug: false,
+    saving: false,
+    workspacesStatus: 'loading',
+  },
+};
+
+export const LoadFailed: Story = {
+  args: {
+    workspaces: [],
+    selectedWorkspaceId: null,
+    creating: false,
+    newName: '',
+    newSlug: '',
+    newSlugChecking: false,
+    newSlugError: null,
+    canResetSlug: false,
+    saving: false,
+    workspacesStatus: 'error',
+    workspacesError: 'network request failed',
+  },
+};
+
+export const CreateFailed: Story = {
+  args: {
+    workspaces: [],
+    selectedWorkspaceId: null,
+    creating: true,
+    newName: 'Loro Lab',
+    newSlug: 'loro-lab',
+    newSlugChecking: false,
+    newSlugError: null,
+    canResetSlug: false,
+    saving: false,
+    createError: 'rate limited: too many workspaces created this hour',
   },
 };
 

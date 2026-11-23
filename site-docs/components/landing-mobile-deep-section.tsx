@@ -48,6 +48,7 @@ export function LandingMobileDeepSection({ copy }: { copy: MobileDeepSectionCopy
                   alt={copy.mediaAlt ?? ''}
                   width={1280}
                   height={753}
+                  sizes="(min-width: 32rem) 32rem, 100vw"
                   loading="lazy"
                   decoding="async"
                 />

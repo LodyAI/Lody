@@ -1,4 +1,6 @@
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { sidebarSurface } from './sidebar-surface';
 import {
   closestCenter,
   DndContext,
@@ -23,7 +25,6 @@ import {
   GitPullRequest,
   GripVertical,
   Link2,
-  Loader2,
   LockKeyhole,
   Pencil,
   Pin,
@@ -31,6 +32,7 @@ import {
   Plus,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import {
   memo,
   useCallback,
@@ -43,15 +45,8 @@ import {
 } from 'react';
 import { useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { TooltipProvider } from '@/ui/tooltip';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
+import { Tooltip } from '@lody/ui/tooltip';
+import { ContextMenu } from '@lody/ui/context-menu';
 import type {
   LocalProjectHistoryProvider,
   MachineId,
@@ -59,7 +54,7 @@ import type {
   SessionPullRequestCiState,
   SessionPullRequestReadiness,
 } from '@lody/shared';
-import { ONLY_CHATS_KEY, sidebarShowFullListAtom } from '@/atoms/focus-layer';
+import { ONLY_CHATS_KEY, sidebarRevealedRowsAtom } from '@/atoms/focus-layer';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
@@ -68,13 +63,20 @@ import {
   GitHubOwnerIcon,
   SessionPrIcon,
   SessionRowLeadingSlot,
+  SessionRowMenuButton,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
+  SidebarListSkeleton,
+  SidebarSessionTitleText,
   SessionMergeablePill,
+  SIDEBAR_GROUP_LABEL_CLASS,
+  SIDEBAR_GROUP_LABEL_COLOR_CLASS,
+  SIDEBAR_ROW_TEXT_CLASS,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import { SessionSharingIndicator } from '@/components/session-sharing';
 import type { SessionSharingState } from '@/lib/session-sharing';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type { PrStatus };
 
@@ -186,31 +188,8 @@ export type TaskGroup = {
 
 export const MAX_VISIBLE_TASKS = 5;
 
-export function getVisibleTaskGroupTasks(
-  group: TaskGroup,
-  whetherShowFullList: boolean
-): TaskListTask[] {
-  return whetherShowFullList ? group.tasks : group.tasks.slice(0, MAX_VISIBLE_TASKS);
-}
-
-function TaskListSkeleton({ className }: { className?: string }) {
-  const rowWidths = ['w-[70%]', 'w-[58%]', 'w-[76%]', 'w-[62%]', 'w-[68%]', 'w-[54%]'];
-  return (
-    <div className={cn('space-y-3', className)}>
-      <div className="space-y-2">
-        <Skeleton className="h-3 w-24" />
-        <div className="space-y-2 rounded-lg border border-border/50 p-2">
-          {rowWidths.map((width, index) => (
-            <div key={index} className="flex items-center gap-2 px-1 py-1.5">
-              <Skeleton className="h-7 w-7 rounded-md" />
-              <Skeleton className={cn('h-3', width)} />
-              <Skeleton className="ml-auto h-3 w-10" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+export function getVisibleTaskGroupTasks(group: TaskGroup, revealedRows: number): TaskListTask[] {
+  return group.tasks.slice(0, MAX_VISIBLE_TASKS + revealedRows);
 }
 
 function normalizeRepoFullName(value: TaskListTask['repoFullName']): string | null {
@@ -328,15 +307,15 @@ export function buildGroups(
   return ordered;
 }
 
-function reconcileShowFullListByGroups(
-  current: Record<string, boolean>,
+function reconcileRevealedRowsByGroups(
+  current: Record<string, number>,
   groups: TaskGroup[]
-): Record<string, boolean> {
-  let next: Record<string, boolean> | null = null;
+): Record<string, number> {
+  let next: Record<string, number> | null = null;
 
   for (const group of groups) {
-    const previousValue = current[group.key] ?? false;
-    const nextValue = group.collapsed ? false : previousValue;
+    const previousValue = current[group.key] ?? 0;
+    const nextValue = group.collapsed ? 0 : previousValue;
 
     if (current[group.key] !== nextValue) {
       next ??= { ...current };
@@ -366,7 +345,8 @@ type TaskGroupSectionProps = {
   now: Date;
   selectedTaskId?: string | null;
   activeGroupKey?: string | null;
-  whetherShowFullList: boolean;
+  /** Extra rows revealed beyond {@link MAX_VISIBLE_TASKS}. */
+  revealedRows: number;
   onSelectTask?: (taskId: string) => void;
   onToggleRepoCollapsed?: (repoFullName: string) => void;
   onToggleChatsCollapsed?: () => void;
@@ -378,7 +358,8 @@ type TaskGroupSectionProps = {
   onNew?: (repoFullName?: string) => void;
   onNavigateToNewSession?: (repoFullName?: string) => void;
   onOpenPullRequest?: (request: TaskListPullRequestOpen) => void;
-  onToggleFullList?: (groupKey: string) => void;
+  onShowMore?: (groupKey: string) => void;
+  onShowLess?: (groupKey: string) => void;
   getTaskHref?: (taskId: string) => string | undefined;
   dragHandle?: ReactNode;
   archiveTooltipLabel: string;
@@ -414,7 +395,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
   now,
   selectedTaskId,
   activeGroupKey,
-  whetherShowFullList,
+  revealedRows,
   onSelectTask,
   onToggleRepoCollapsed,
   onToggleChatsCollapsed,
@@ -426,7 +407,8 @@ const TaskGroupSection = memo(function TaskGroupSection({
   onNew,
   onNavigateToNewSession,
   onOpenPullRequest,
-  onToggleFullList,
+  onShowMore,
+  onShowLess,
   getTaskHref,
   dragHandle,
   archiveTooltipLabel,
@@ -500,31 +482,21 @@ const TaskGroupSection = memo(function TaskGroupSection({
   };
 
   const isSelectable = typeof onSelectTask === 'function';
-  // whetherShowFullList keeps each group in a compact preview by default (latest N),
-  // and only reveals the full list after the user explicitly expands it.
-  const canToggleFullList = group.tasks.length > MAX_VISIBLE_TASKS;
-  const visibleTasks = getVisibleTaskGroupTasks(group, whetherShowFullList);
-  const shouldShowExpandCollapse = canToggleFullList;
-  const toggleListLabel = whetherShowFullList
-    ? t('sessions.showLess', 'Show less')
-    : t('sessions.showAll', 'Show all ({{count}})', { count: group.tasks.length });
+  const canRevealRows = group.tasks.length > MAX_VISIBLE_TASKS;
+  const hasMoreRows = group.tasks.length > MAX_VISIBLE_TASKS + revealedRows;
+  const visibleTasks = getVisibleTaskGroupTasks(group, revealedRows);
+  const showMoreLabel = t('sessions.showMore', 'Show more');
+  const showLessLabel = t('sessions.showLess', 'Show less');
   const resolvedTrailingContent = trailingContent ?? (group.collapsed ? null : dragHandle);
-  // Repo group labels (e.g. "loro-dev/loro") name concrete content, but dark-mode
-  // resting chrome should still recede behind the conversation. Hover and active
-  // states restore full contrast; "Chats" stays at the quieter section-label tone.
-  const headerBaseColorClass =
-    group.kind === 'repo'
-      ? 'text-sidebar-foreground dark:text-sidebar-foreground/75'
-      : 'text-sidebar-foreground-muted/55';
-  // Typography splits with color: repo headers read as content (xs semibold),
-  // the "Chats" header reads as section chrome (13px medium) so
-  // section labels visually recede from titles at a glance.
-  const headerTypographyClass =
-    group.kind === 'repo' ? 'text-xs font-semibold' : 'text-[13px] font-medium';
-  const headerToggleHoverClass =
-    group.kind === 'repo'
-      ? 'hover:text-sidebar-hover-foreground'
-      : 'hover:text-sidebar-foreground-muted';
+  // The same two rungs as the session list: a repo ("loro-dev/loro") is a row
+  // (row type, medium, the row ink from `sidebarSurface.row`) and "Chats" is the
+  // shared group label.
+  const isRepoHeader = group.kind === 'repo';
+  const headerBaseColorClass = isRepoHeader ? undefined : SIDEBAR_GROUP_LABEL_COLOR_CLASS;
+  const headerTypographyClass = isRepoHeader
+    ? cn(SIDEBAR_ROW_TEXT_CLASS, 'font-medium')
+    : SIDEBAR_GROUP_LABEL_CLASS;
+  const headerToggleHoverClass = isRepoHeader ? undefined : 'hover:text-sidebar-foreground';
 
   return (
     <div
@@ -537,27 +509,27 @@ const TaskGroupSection = memo(function TaskGroupSection({
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}
+          data-id={`group:${group.key}`}
+          data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
-            'relative flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-left',
+            'relative flex h-7 w-full select-none items-center gap-1 text-left',
             'border border-transparent',
             'min-w-0 flex-1 transition-colors',
             headerTypographyClass,
+            stylex.props(
+              sidebarSurface.row,
+              showActiveGroupState
+                ? sidebarSurface.selected
+                : canNavigate && !isMobile && isRepoHeader && sidebarSurface.hover
+            ).className,
             showActiveGroupState
-              ? 'cursor-pointer border-sidebar-ring/30 bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection'
+              ? 'cursor-pointer border-sidebar-ring/30'
               : canNavigate
-                ? cn(
-                    'cursor-pointer bg-transparent',
-                    headerBaseColorClass,
-                    !isMobile && 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
-                  )
+                ? cn('cursor-pointer', headerBaseColorClass)
                 : canToggle
-                  ? cn(
-                      'cursor-pointer bg-transparent',
-                      headerBaseColorClass,
-                      !isMobile && headerToggleHoverClass
-                    )
-                  : cn('cursor-default bg-transparent', headerBaseColorClass)
+                  ? cn('cursor-pointer', headerBaseColorClass, !isMobile && headerToggleHoverClass)
+                  : cn('cursor-default', headerBaseColorClass)
           )}
           onClick={canNavigate ? handleNavigate : handleToggleGroup}
           onKeyDown={
@@ -609,7 +581,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 <ChevronDown
                   className={cn(
                     'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4',
-                    'transition-[opacity,translate,scale] duration-150 ease-out',
+                    'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
                     isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                     group.collapsed ? '-rotate-90' : 'rotate-0'
                   )}
@@ -622,7 +594,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
             <ChevronDown
               className={cn(
                 'h-3.5 w-3.5 shrink-0 text-current',
-                'transition-[opacity,translate,scale] duration-150 ease-out',
+                'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
                 group.collapsed || isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                 // Chats is a top-level sidebar section, so its collapsed chevron
                 // stays visible without hover.
@@ -742,7 +714,13 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     )}
                   />
                 ) : (
-                  <span className={cn('truncate', extraClassName)}>{task.title}</span>
+                  <SidebarSessionTitleText
+                    sessionId={task.taskId}
+                    selected={showSelectedState}
+                    className={cn('truncate font-normal', extraClassName)}
+                  >
+                    {task.title}
+                  </SidebarSessionTitleText>
                 );
               const handleAnchorClick = useAnchor
                 ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
@@ -761,7 +739,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 : undefined;
               // Mobile keeps swipe-to-archive as the only row gesture; the context
               // menu (and its ⋯ button) is desktop-only. Computed before the row so
-              // the leading slot can show the ⋯ affordance.
+              // the end slot can reveal the ⋯ affordance.
               const hasMenuActions =
                 !isMobile &&
                 Boolean(
@@ -779,20 +757,23 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   role={!useAnchor && isSelectable ? 'button' : undefined}
                   tabIndex={!useAnchor && isSelectable ? 0 : undefined}
                   aria-disabled={!isSelectable ? true : undefined}
+                  aria-current={isSelected ? 'page' : undefined}
+                  data-id={`session:${task.taskId}`}
+                  data-scope-item="row"
                   data-sidebar-session-id={task.taskId}
                   className={cn(
-                    'group relative w-full rounded-md text-left',
+                    'group relative w-full text-left',
                     // Both chat and repo rows are a single line now; the repo row's
                     // low-signal metadata (time / repo / branch / PR) moves to the
                     // desktop hover info card so both organize modes read equally compact.
-                    'px-2 py-1',
-                    'border border-transparent bg-transparent',
-                    !showSelectedState &&
-                      isSelectable &&
-                      !isMobile &&
-                      'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-                    showSelectedState &&
-                      'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
+                    stylex.props(
+                      sidebarSurface.row,
+                      sidebarSurface.snug,
+                      showSelectedState
+                        ? sidebarSurface.selected
+                        : isSelectable && !isMobile && sidebarSurface.hover
+                    ).className,
+                    'border border-transparent',
                     // Keyboard-only focus ring. Plain :focus-within also matches
                     // after a mouse click (the overlay <a> keeps focus), which
                     // left a permanent inset ring on the selected row that read
@@ -833,19 +814,15 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     />
                   ) : null}
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <SessionRowLeadingSlot
-                      isWaitingPermission={task.isWaitingPermission}
-                      isWorking={task.isWorking}
-                      hasUnreadMessages={task.hasUnreadMessages}
-                      showMenuButton={hasMenuActions}
-                      menuLabel={moreActionsLabel}
-                    />
+                    <SessionRowLeadingSlot />
                     <div
                       className={cn(
-                        'min-w-0 flex-1 flex items-center gap-1 truncate text-sm',
-                        showSelectedState
-                          ? 'text-sidebar-selection-foreground'
-                          : 'text-sidebar-foreground dark:text-sidebar-foreground/75',
+                        'flex items-center gap-1',
+                        SIDEBAR_ROW_TEXT_CLASS,
+                        stylex.props(
+                          sidebarSurface.title,
+                          showSelectedState && sidebarSurface.titleSelected
+                        ).className,
                         useAnchor && isEditingTitle && 'relative z-20'
                       )}
                       // Double-click to rename is scoped to the title only, so it can't
@@ -865,8 +842,12 @@ const TaskGroupSection = memo(function TaskGroupSection({
                       ) : null}
                       {renderTitle()}
                     </div>
-                    {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
+                    {/* Keep PR at the right edge. Line totals stay in the hover card. */}
                     <SidebarRowEndSlot
+                      sessionId={task.taskId}
+                      isWaitingPermission={task.isWaitingPermission}
+                      isWorking={task.isWorking}
+                      hasUnreadMessages={task.hasUnreadMessages}
                       restIcon={
                         isChatTask ? (
                           <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
@@ -877,7 +858,6 @@ const TaskGroupSection = memo(function TaskGroupSection({
                             {task.sharing ? <SessionSharingIndicator state={task.sharing} /> : null}
                           </span>
                         ) : hasPr ||
-                          hasChanges ||
                           showMergeablePill ||
                           isMobile ||
                           task.sharing?.visibility === 'private' ? (
@@ -893,19 +873,21 @@ const TaskGroupSection = memo(function TaskGroupSection({
                                 className="text-muted-foreground"
                               />
                             ) : null}
-                            {showMergeablePill ? (
-                              <SessionMergeablePill />
-                            ) : hasChanges && !isMergeable ? (
-                              <span className="flex items-center gap-1">
-                                <span className="text-code-added">+{task.addedLines}</span>
-                                <span className="text-code-removed">-{task.deletedLines}</span>
-                              </span>
-                            ) : null}
+                            {showMergeablePill ? <SessionMergeablePill /> : null}
                             {hasPr ? (
-                              <SessionPrIcon prStatus={prStatus} prCiState={task.prCiState} />
+                              <SessionPrIcon
+                                compact
+                                prStatus={prStatus}
+                                prCiState={task.prCiState}
+                              />
                             ) : null}
                             {task.sharing ? <SessionSharingIndicator state={task.sharing} /> : null}
                           </span>
+                        ) : undefined
+                      }
+                      menu={
+                        hasMenuActions ? (
+                          <SessionRowMenuButton label={moreActionsLabel} />
                         ) : undefined
                       }
                       archive={
@@ -924,13 +906,14 @@ const TaskGroupSection = memo(function TaskGroupSection({
               // Desktop repo rows get a hover info card wrapping the whole row/menu.
               const showInfoCard = !isMobile;
               const menuRow = hasMenuActions ? (
-                <ContextMenu key={task.taskId}>
-                  <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                  <ContextMenuContent className="min-w-[180px]">
+                <ContextMenu.Root key={task.taskId}>
+                  <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
+                  <ContextMenu.Content className="min-w-[180px]">
                     {onOpenPullRequest && prUrl ? (
                       <>
-                        <ContextMenuItem
-                          onSelect={() => {
+                        <ContextMenu.Item
+                          icon={GitPullRequest}
+                          onClick={() => {
                             onOpenPullRequest({
                               taskId: task.taskId,
                               repoFullName: group.repoFullName,
@@ -939,76 +922,77 @@ const TaskGroupSection = memo(function TaskGroupSection({
                             });
                           }}
                         >
-                          <GitPullRequest />
                           {contextMenuLabels.openPr}
-                        </ContextMenuItem>
+                        </ContextMenu.Item>
                         {onRenameTask ||
                         onTogglePinTask ||
                         onArchiveTask ||
                         onCopySessionUrl ||
                         task.branchName ? (
-                          <ContextMenuSeparator />
+                          <ContextMenu.Separator />
                         ) : null}
                       </>
                     ) : null}
                     {onRenameTask ? (
-                      <ContextMenuItem
-                        onSelect={() => {
+                      <ContextMenu.Item
+                        icon={Pencil}
+                        onClick={() => {
                           beginRename(task.taskId, task.title);
                         }}
                       >
-                        <Pencil />
                         {contextMenuLabels.rename}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {onTogglePinTask ? (
-                      <ContextMenuItem
-                        onSelect={() => {
+                      <ContextMenu.Item
+                        icon={task.isPinned ? PinOff : Pin}
+                        onClick={() => {
                           onTogglePinTask(task.taskId, !task.isPinned);
                         }}
                       >
-                        {task.isPinned ? <PinOff /> : <Pin />}
                         {task.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {onArchiveTask ? (
-                      <ContextMenuItem
-                        onSelect={() => {
+                      <ContextMenu.Item
+                        icon={Archive}
+                        onClick={() => {
                           onArchiveTask(task.taskId);
                         }}
                       >
-                        <Archive />
                         {contextMenuLabels.archive}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {(onRenameTask || onTogglePinTask || onArchiveTask) &&
                     (onCopySessionUrl || task.branchName) ? (
-                      <ContextMenuSeparator />
+                      <ContextMenu.Separator />
                     ) : null}
                     {onCopySessionUrl ? (
-                      <ContextMenuItem
-                        onSelect={() => {
+                      <ContextMenu.Item
+                        icon={Link2}
+                        onClick={() => {
                           onCopySessionUrl(task.taskId);
                         }}
                       >
-                        <Link2 />
                         {contextMenuLabels.copyUrl}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {shareMenuState ? (
-                      <ContextMenuItem
+                      <ContextMenu.Item
                         disabled={shareMenuState !== 'share'}
-                        onSelect={() => {
+                        icon={
+                          shareMenuState === 'share' ? (
+                            Users
+                          ) : shareMenuState === 'loading' ? (
+                            <Spinner size="small" label={null} />
+                          ) : (
+                            LockKeyhole
+                          )
+                        }
+                        onClick={() => {
                           onShareSessionWithTeam?.(task.taskId);
                         }}
                       >
-                        {shareMenuState === 'share' ? (
-                          <Users />
-                        ) : shareMenuState === 'loading' ? (
-                          <Loader2 className="animate-spin" />
-                        ) : (
-                          <LockKeyhole />
-                        )}
                         {shareMenuState === 'share'
                           ? contextMenuLabels.shareWithTeam
                           : shareMenuState === 'unregistered'
@@ -1016,20 +1000,20 @@ const TaskGroupSection = memo(function TaskGroupSection({
                             : shareMenuState === 'owner-only'
                               ? contextMenuLabels.onlyOwnerCanShare
                               : contextMenuLabels.loadingSharing}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {task.branchName ? (
-                      <ContextMenuItem
-                        onSelect={() => {
-                          void navigator.clipboard.writeText(task.branchName).catch(() => {});
+                      <ContextMenu.Item
+                        icon={GitBranch}
+                        onClick={() => {
+                          void copyTextToClipboard(task.branchName).catch(() => {});
                         }}
                       >
-                        <GitBranch />
                         {contextMenuLabels.copyBranch}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
-                  </ContextMenuContent>
-                </ContextMenu>
+                  </ContextMenu.Content>
+                </ContextMenu.Root>
               ) : (
                 row
               );
@@ -1101,9 +1085,11 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 </SwipeActionRow>
               );
             })}
-          {shouldShowExpandCollapse && (
+          {canRevealRows && hasMoreRows && (
             <button
               type="button"
+              data-id={`show-more:${group.key}`}
+              data-scope-item="row"
               data-sidebar-show-more={group.key}
               className={cn(
                 'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
@@ -1111,11 +1097,30 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
               )}
-              aria-label={toggleListLabel}
-              onClick={() => onToggleFullList?.(group.key)}
+              aria-label={showMoreLabel}
+              onClick={() => onShowMore?.(group.key)}
             >
               <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
-              <span>{toggleListLabel}</span>
+              <span>{showMoreLabel}</span>
+            </button>
+          )}
+          {canRevealRows && revealedRows > 0 && (
+            <button
+              type="button"
+              data-id={`show-less:${group.key}`}
+              data-scope-item="row"
+              data-sidebar-show-less={group.key}
+              className={cn(
+                'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
+                'transition-colors',
+                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+              )}
+              aria-label={showLessLabel}
+              onClick={() => onShowLess?.(group.key)}
+            >
+              <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
+              <span>{showLessLabel}</span>
             </button>
           )}
         </div>
@@ -1247,8 +1252,7 @@ export const TaskList = memo(function TaskList({
     [tasks, repos, chatsCollapsed]
   );
   const now = useStableNow();
-  const [whetherShowFullListByGroup, setWhetherShowFullListByGroup] =
-    useAtom(sidebarShowFullListAtom);
+  const [revealedRowsByGroup, setRevealedRowsByGroup] = useAtom(sidebarRevealedRowsAtom);
   const handleSelect = onSelect ?? onSelectTask;
   const repoIds = useMemo(
     () => groups.filter((group) => group.kind === 'repo').map((group) => group.key),
@@ -1269,25 +1273,33 @@ export const TaskList = memo(function TaskList({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const handleToggleFullList = useCallback(
+  const handleShowMore = useCallback(
     (groupKey: string) => {
-      setWhetherShowFullListByGroup((prev) => {
-        return { ...prev, [groupKey]: !prev[groupKey] };
+      setRevealedRowsByGroup((prev) => {
+        return { ...prev, [groupKey]: (prev[groupKey] ?? 0) + MAX_VISIBLE_TASKS };
       });
     },
-    [setWhetherShowFullListByGroup]
+    [setRevealedRowsByGroup]
+  );
+  const handleShowLess = useCallback(
+    (groupKey: string) => {
+      setRevealedRowsByGroup((prev) => {
+        return { ...prev, [groupKey]: 0 };
+      });
+    },
+    [setRevealedRowsByGroup]
   );
 
-  const resolvedShowFullListByGroup = useMemo(
-    () => reconcileShowFullListByGroups(whetherShowFullListByGroup, groups),
-    [whetherShowFullListByGroup, groups]
+  const resolvedRevealedRowsByGroup = useMemo(
+    () => reconcileRevealedRowsByGroups(revealedRowsByGroup, groups),
+    [revealedRowsByGroup, groups]
   );
 
   useLayoutEffect(() => {
-    setWhetherShowFullListByGroup((prev) => {
-      return reconcileShowFullListByGroups(prev, groups);
+    setRevealedRowsByGroup((prev) => {
+      return reconcileRevealedRowsByGroups(prev, groups);
     });
-  }, [groups, setWhetherShowFullListByGroup]);
+  }, [groups, setRevealedRowsByGroup]);
 
   if (isLoading && tasks.length === 0) {
     return (
@@ -1295,7 +1307,7 @@ export const TaskList = memo(function TaskList({
         {headerAction ? (
           <div className="flex h-7 shrink-0 items-center justify-end">{headerAction}</div>
         ) : null}
-        <TaskListSkeleton className={className} />
+        <SidebarListSkeleton className={className} />
       </div>
     );
   }
@@ -1331,12 +1343,12 @@ export const TaskList = memo(function TaskList({
   }
 
   return (
-    <TooltipProvider>
+    <Tooltip.Provider>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={repoIds} strategy={verticalListSortingStrategy}>
           <div className={cn('flex flex-col', className)}>
             {groups.map((group, groupIndex) => {
-              const whetherShowFullList = resolvedShowFullListByGroup[group.key] ?? false;
+              const revealedRows = resolvedRevealedRowsByGroup[group.key] ?? 0;
               const groupHeaderAction = groupIndex === 0 ? headerAction : undefined;
               if (group.kind === 'repo' && group.repoFullName) {
                 return (
@@ -1348,7 +1360,7 @@ export const TaskList = memo(function TaskList({
                     now={now}
                     selectedTaskId={selectedTaskId}
                     activeGroupKey={activeGroupKey}
-                    whetherShowFullList={whetherShowFullList}
+                    revealedRows={revealedRows}
                     onSelectTask={handleSelect}
                     onToggleRepoCollapsed={onToggleRepoCollapsed}
                     onToggleChatsCollapsed={onToggleChatsCollapsed}
@@ -1360,7 +1372,8 @@ export const TaskList = memo(function TaskList({
                     onNew={onNew}
                     onNavigateToNewSession={onNavigateToNewSession}
                     onOpenPullRequest={onOpenPullRequest}
-                    onToggleFullList={handleToggleFullList}
+                    onShowMore={handleShowMore}
+                    onShowLess={handleShowLess}
                     getTaskHref={getTaskHref}
                     archiveTooltipLabel={archiveTooltipLabel}
                     archiveActionLabel={archiveActionLabel}
@@ -1379,7 +1392,7 @@ export const TaskList = memo(function TaskList({
                   now={now}
                   selectedTaskId={selectedTaskId}
                   activeGroupKey={activeGroupKey}
-                  whetherShowFullList={whetherShowFullList}
+                  revealedRows={revealedRows}
                   onSelectTask={handleSelect}
                   onToggleRepoCollapsed={onToggleRepoCollapsed}
                   onToggleChatsCollapsed={onToggleChatsCollapsed}
@@ -1391,7 +1404,8 @@ export const TaskList = memo(function TaskList({
                   onNew={onNew}
                   onNavigateToNewSession={onNavigateToNewSession}
                   onOpenPullRequest={onOpenPullRequest}
-                  onToggleFullList={handleToggleFullList}
+                  onShowMore={handleShowMore}
+                  onShowLess={handleShowLess}
                   getTaskHref={getTaskHref}
                   archiveTooltipLabel={archiveTooltipLabel}
                   archiveActionLabel={archiveActionLabel}
@@ -1404,6 +1418,6 @@ export const TaskList = memo(function TaskList({
           </div>
         </SortableContext>
       </DndContext>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 });

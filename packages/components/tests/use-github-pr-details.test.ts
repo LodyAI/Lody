@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
-
 import { act, createElement, useEffect } from 'react';
+import { useStore } from 'jotai';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  clearSessionPrMergeStatus,
+  sessionPrMergeStatusesAtom,
+} from '../src/atoms/session-pr-merge-status';
 import type {
   GitHubCheckRunsSummary,
   GitHubMergeResult,
@@ -35,13 +39,32 @@ const convexAuthMock = vi.hoisted(() => ({
   },
 }));
 
+const identityMocks = vi.hoisted(() => ({
+  versions: null as null | {
+    identityPending?: boolean;
+    repositoryId?: number;
+    repoFullName?: string;
+  },
+  repair: vi.fn(async () => ({ resolved: false })),
+}));
+
+vi.mock('convex/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('convex/react')>()),
+  useMutation: () => identityMocks.repair,
+}));
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
+}));
+
 vi.mock('../src/hooks/use-recoverable-convex-query', () => ({
   usePublicConvexQuery: () => undefined,
-  useRecoverableConvexQuery: () => null,
+  useRecoverableConvexQuery: () => identityMocks.versions,
 }));
 
 vi.mock('../src/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => convexAuthMock.state,
+  useOptionalAuthenticatedConvex: () => convexAuthMock.state,
 }));
 
 vi.mock('@lody/cloud-api', () => ({
@@ -59,6 +82,8 @@ const githubTokenMockModule = vi.hoisted(() => ({
     _mode: 'read' | 'write',
     run: (token: string) => Promise<unknown>
   ) => run('github-token'),
+  isGitHubOperationTokenConnectionLostError: (error: unknown) =>
+    error instanceof Error && error.message === 'Connection lost while action was in flight',
   isGitHubUnauthorizedTokenError: (error: unknown) =>
     Boolean(
       error &&
@@ -90,10 +115,11 @@ vi.mock('@/lib/github-pr-cache', () => prCacheMockModule);
 
 vi.mock('../src/lib/github-pr-cache', () => prCacheMockModule);
 
-vi.mock('@lody/shared', () => {
+vi.mock('@lody/shared', async (importOriginal) => {
   class GitHubPermissionError extends Error {}
 
   return {
+    ...(await importOriginal<typeof import('@lody/shared')>()),
     getServerNow: () => Date.now(),
     GitHubPermissionError,
     githubBranchExists: githubMocks.githubBranchExists,
@@ -118,7 +144,8 @@ import type {
 
 const { getAuthRecoveryBackoffMs, useGitHubPrDetails } =
   await import('../src/hooks/use-github-pr-details');
-const { TestCloudPlatformProvider } = await import('./test-platform');
+const { TestCloudPlatformProvider, TestOrdinaryWorkspaceProvider } =
+  await import('./test-platform');
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -184,6 +211,23 @@ function Probe({
   input: UseGitHubPrDetailsInput;
   onResult: (result: UseGitHubPrDetailsResult) => void;
 }) {
+  return createElement(
+    TestOrdinaryWorkspaceProvider,
+    { workspaceId: input.workspaceId! },
+    createElement(AdmittedProbe, { input, onResult })
+  );
+}
+
+let currentStore: ReturnType<typeof useStore> | null = null;
+
+function AdmittedProbe({
+  input,
+  onResult,
+}: {
+  input: UseGitHubPrDetailsInput;
+  onResult: (result: UseGitHubPrDetailsResult) => void;
+}) {
+  currentStore = useStore();
   const result = useGitHubPrDetails(input);
   useEffect(() => {
     onResult(result);
@@ -238,6 +282,12 @@ describe('useGitHubPrDetails target isolation', () => {
   };
 
   beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 404 }))
+    );
+    identityMocks.versions = null;
+    identityMocks.repair.mockClear();
     currentResult = null;
     convexAuthMock.state = { isAuthenticated: true, isLoading: false };
     cacheMocks.readPrCacheEntry.mockImplementation(
@@ -291,88 +341,217 @@ describe('useGitHubPrDetails target isolation', () => {
     root = undefined;
     container?.remove();
     container = undefined;
+    vi.unstubAllGlobals();
     vi.useRealTimers();
     vi.clearAllMocks();
   });
 
-  it('bypasses the browser cache when manually refreshing an idle PR tab', async () => {
-    const refreshedPullRequest = createPullRequest(1, {
-      title: 'Refreshed pull request',
-      headSha: 'fresh-head-sha',
-      updatedAt: '2026-05-26T00:02:00.000Z',
-    });
-
+  it('loads an unlinked public PR anonymously while rejecting every mutation', async () => {
+    identityMocks.versions = { identityPending: true };
+    cacheMocks.readPrCacheEntry.mockResolvedValue(null);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, options: RequestInit) => {
+        expect(options.credentials).toBe('omit');
+        expect(new Headers(options.headers).has('authorization')).toBe(false);
+        return new Response(JSON.stringify({ id: 123, private: false, full_name: 'org/public' }));
+      })
+    );
     await renderHook({
+      workspaceId: 'public-ws',
+      sessionId: 'session',
+      repoFullName: 'org/public',
+      prNumber: 7,
+    });
+    expect(currentResult?.state).toBe('ready');
+    expect(currentResult?.data?.pullRequest.number).toBe(7);
+    expect(currentResult?.error).toBeNull();
+    expect(currentResult?.canWrite).toBe(false);
+    expect(githubMocks.githubFetchPullRequestDetails.mock.calls[0]?.[0]).toBe('');
+    await act(async () => {
+      await expect(currentResult!.postComment('hello')).rejects.toThrow('repository identity');
+      await expect(currentResult!.mergePullRequest('merge')).rejects.toThrow('repository identity');
+      await expect(currentResult!.setPullRequestState('closed')).rejects.toThrow(
+        'repository identity'
+      );
+      await expect(currentResult!.markReadyForReview()).rejects.toThrow('repository identity');
+      await expect(currentResult!.deleteBranch()).rejects.toThrow('repository identity');
+    });
+    expect(githubMocks.githubCreatePRIssueComment).not.toHaveBeenCalled();
+    expect(githubMocks.githubMergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not hydrate authenticated data while an anonymous PR request is pending', async () => {
+    identityMocks.versions = { identityPending: true };
+    const details = createDeferred<GitHubPullRequestDetails>();
+    githubMocks.githubFetchPullRequestDetails.mockReturnValue(details.promise);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ id: 123, private: false, full_name: 'org/public' }))
+      )
+    );
+    await renderHook({
+      workspaceId: 'public-ws',
+      sessionId: 'session',
+      repoFullName: 'org/public',
+      prNumber: 7,
+    });
+    // The default IDB fixture contains a complete authenticated PR. It must not render.
+    expect(currentResult?.data).toBeNull();
+    await act(async () => details.resolve(createPullRequest(7, { title: 'Anonymous result' })));
+    expect(currentResult?.data?.pullRequest.title).toBe('Anonymous result');
+    expect(cacheMocks.writePrCacheEntry).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { id: 123, private: true, full_name: 'org/public' },
+    { id: 123, private: false, full_name: 'other/repo' },
+    { id: 999, private: false, full_name: 'org/public' },
+  ])(
+    'does not release the gate for private or mismatched repository metadata: %j',
+    async (repository) => {
+      identityMocks.versions = { identityPending: true, repositoryId: 123 };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify(repository)))
+      );
+      await renderHook({
+        workspaceId: 'public-ws',
+        sessionId: 'session',
+        repoFullName: 'org/public',
+        prNumber: 7,
+      });
+      expect(currentResult?.state).toBe('error');
+      expect(currentResult?.data).toBeNull();
+      expect(currentResult?.canWrite).toBe(false);
+    }
+  );
+
+  it('ignores a public repository response after switching to another PR', async () => {
+    identityMocks.versions = { identityPending: true };
+    const response = createDeferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        url.endsWith('/org/public')
+          ? response.promise
+          : Promise.resolve(new Response(null, { status: 404 }))
+      )
+    );
+    await renderHook({
+      workspaceId: 'public-ws',
+      sessionId: 'session',
+      repoFullName: 'org/public',
+      prNumber: 7,
+    });
+    await renderHook({
+      workspaceId: 'public-ws',
+      sessionId: 'other-session',
+      repoFullName: 'org/private',
+      prNumber: 8,
+    });
+    await act(async () =>
+      response.resolve(
+        new Response(JSON.stringify({ id: 123, private: false, full_name: 'org/public' }))
+      )
+    );
+    expect(currentResult?.state).toBe('error');
+    expect(currentResult?.data).toBeNull();
+  });
+
+  it('shows a blocked identity error and retries safe repair instead of loading forever', async () => {
+    identityMocks.versions = { identityPending: true };
+    const input = {
+      workspaceId: 'identity-ws',
+      sessionId: 'old-session',
+      repoFullName: 'org/repo',
+      prNumber: 7,
+    };
+    await renderHook(input);
+    expect(currentResult?.state).toBe('error');
+    expect(currentResult?.data).toBeNull();
+    expect(currentResult?.error?.message).toContain('repository identity');
+    expect(githubMocks.githubFetchPullRequestDetails).not.toHaveBeenCalled();
+    await act(async () => {
+      await currentResult?.refresh();
+    });
+    expect(identityMocks.repair).toHaveBeenCalledWith(input);
+    identityMocks.versions = { identityPending: false, repositoryId: 99, repoFullName: 'org/repo' };
+    await renderHook(input);
+    await waitForResult((result) => result.state === 'ready');
+    expect(currentResult?.error).toBeNull();
+  });
+
+  it('does not fall back to a session name when its identity query returns null', async () => {
+    await renderHook({
+      workspaceId: 'ws-null',
+      sessionId: 'missing',
+      repoFullName: 'org/reused',
+      prNumber: 7,
+    });
+    expect(currentResult?.state).toBe('error');
+    expect(currentResult?.data).toBeNull();
+    expect(githubMocks.githubFetchPullRequestDetails).not.toHaveBeenCalled();
+  });
+
+  it("does not let a refresh join another view's poll that started before it", async () => {
+    vi.useFakeTimers();
+    const results: Array<UseGitHubPrDetailsResult | null> = [null, null];
+    const base: UseGitHubPrDetailsInput = {
       workspaceId: 'workspace-1',
       repoFullName: 'loro-dev/lody',
       prNumber: 1,
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(
+          TestCloudPlatformProvider,
+          null,
+          // The merging view is off screen, so only the other view polls.
+          createElement(Probe, {
+            input: { ...base, visible: false },
+            onResult: (result) => (results[0] = result),
+          }),
+          createElement(Probe, { input: base, onResult: (result) => (results[1] = result) })
+        )
+      );
     });
-    await waitForResult(
-      (result) =>
-        result.state === 'ready' &&
-        !result.isRevalidating &&
-        githubMocks.githubFetchPullRequestDetails.mock.calls.length === 1 &&
-        githubMocks.githubFetchCheckRuns.mock.calls.length === 1
-    );
+    for (let attempt = 0; attempt < 30 && !results.every((r) => r?.state === 'ready'); attempt++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
 
     githubMocks.githubFetchPullRequestDetails.mockClear();
-    githubMocks.githubFetchPRReviewComments.mockClear();
-    githubMocks.githubFetchPullRequestReviews.mockClear();
-    githubMocks.githubFetchPRIssueComments.mockClear();
-    githubMocks.githubFetchCheckRuns.mockClear();
-    const manualPullRequest = createDeferred<GitHubPullRequestDetails>();
-    githubMocks.githubFetchPullRequestDetails.mockReturnValueOnce(manualPullRequest.promise);
-
-    let refreshPromise: Promise<GitHubPrDetailsData | null> | null = null;
+    const beforeMerge = createDeferred<GitHubPullRequestDetails>();
+    const afterMerge = createDeferred<GitHubPullRequestDetails>();
+    githubMocks.githubFetchPullRequestDetails
+      .mockReturnValueOnce(beforeMerge.promise)
+      .mockReturnValueOnce(afterMerge.promise);
     await act(async () => {
-      refreshPromise = currentResult?.refresh() ?? null;
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(15_000);
     });
-    if (!refreshPromise) {
-      throw new Error('Expected manual refresh to start');
-    }
-    await waitForResult((result) => result.isRevalidating);
-
     expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(1);
-    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      1,
-      { cache: 'reload' }
-    );
-    expect(githubMocks.githubFetchCheckRuns).not.toHaveBeenCalled();
+
+    // The first view merges, then refreshes: that read must be its own.
+    let refreshed: Promise<GitHubPrDetailsData | null> | undefined;
+    await act(async () => {
+      refreshed = results[0]?.refresh();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      manualPullRequest.resolve(refreshedPullRequest);
-      await refreshPromise;
+      afterMerge.resolve(createPullRequest(1, { title: 'After merge' }));
+      beforeMerge.resolve(createPullRequest(1, { title: 'Before merge' }));
+      await vi.advanceTimersByTimeAsync(0);
     });
-
-    expect(githubMocks.githubFetchPRReviewComments).toHaveBeenLastCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      1,
-      { cache: 'reload' }
-    );
-    expect(githubMocks.githubFetchPullRequestReviews).toHaveBeenLastCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      1,
-      { cache: 'reload' }
-    );
-    expect(githubMocks.githubFetchPRIssueComments).toHaveBeenLastCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      1,
-      { cache: 'reload' }
-    );
-    expect(githubMocks.githubFetchCheckRuns).toHaveBeenLastCalledWith(
-      'github-token',
-      'loro-dev/lody',
-      'fresh-head-sha',
-      { cache: 'reload' }
-    );
-    expect(currentResult?.data?.pullRequest.title).toBe('Refreshed pull request');
-    expect(currentResult?.isRevalidating).toBe(false);
+    expect((await refreshed)?.pullRequest.title).toBe('After merge');
   });
 
   it('fetches the current head and check runs without falling back to cached CI data', async () => {
@@ -521,6 +700,28 @@ describe('useGitHubPrDetails target isolation', () => {
     expect(currentResult?.data?.pullRequest.mergeableState).toBe('clean');
   });
 
+  it("never presents the previous PR's details as the next one's while its cache read is pending", async () => {
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 });
+    await waitForResult((result) => result.data?.pullRequest.number === 1);
+    expect(currentResult?.state).toBe('ready');
+
+    const pendingRead = createDeferred<null>();
+    const pendingDetails = createDeferred<ReturnType<typeof createPullRequest>>();
+    cacheMocks.readPrCacheEntry.mockReturnValueOnce(pendingRead.promise);
+    githubMocks.githubFetchPullRequestDetails.mockReturnValueOnce(pendingDetails.promise);
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 2 });
+
+    // PR 1's checks and ready state must not render (or enable Merge) for PR 2.
+    expect(currentResult?.data).toBeNull();
+    expect(currentResult?.state).toBe('loading');
+
+    await act(async () => {
+      pendingRead.resolve(null);
+      pendingDetails.resolve(createPullRequest(2));
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 2);
+  });
+
   it('does not apply a completed merge to the PR opened after navigation', async () => {
     const mergeDeferred = createDeferred<GitHubMergeResult>();
     githubMocks.githubMergePullRequest.mockReturnValueOnce(mergeDeferred.promise);
@@ -532,7 +733,7 @@ describe('useGitHubPrDetails target isolation', () => {
     });
     await waitForResult((result) => result.data?.pullRequest.number === 1);
 
-    let mergePromise: Promise<void> | null = null;
+    let mergePromise: Promise<boolean> | null = null;
     await act(async () => {
       mergePromise = currentResult?.mergePullRequest('merge') ?? null;
     });
@@ -560,35 +761,53 @@ describe('useGitHubPrDetails target isolation', () => {
 
     expect(currentResult?.data?.pullRequest.number).toBe(2);
     expect(currentResult?.data?.pullRequest.merged).toBe(false);
+    await expect(mergePromise).resolves.toBe(false);
   });
 
-  it('silently recovers from an apparent session expiry instead of showing the auth error', async () => {
-    // Convex reports unauthenticated (a stale JWT after a long idle) and nothing
-    // is cached, so the previous behavior dropped straight to a "Session
-    // expired" screen the user had to dismiss by hand. The hook should instead
-    // refetch silently — the token path mints a fresh JWT from the still-valid
-    // BetterAuth cookie — and resolve to ready without surfacing an auth error.
-    convexAuthMock.state = { isAuthenticated: false, isLoading: false };
-    cacheMocks.readPrCacheEntry.mockResolvedValueOnce(null);
+  it('reports a merge as done only when GitHub merged the PR', async () => {
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 });
+    await waitForResult((result) => result.state === 'ready' && !result.isRevalidating);
 
-    await renderHook({
-      workspaceId: 'workspace-1',
-      repoFullName: 'loro-dev/lody',
-      prNumber: 7,
+    githubMocks.githubMergePullRequest.mockResolvedValueOnce({
+      sha: '',
+      merged: false,
+      message: 'Base branch was modified',
     });
+    let notMerged: boolean | undefined;
+    await act(async () => {
+      notMerged = await currentResult?.mergePullRequest('merge');
+    });
+    expect(notMerged).toBe(false);
+    expect(currentResult?.data?.pullRequest.merged).toBe(false);
 
-    await waitForResult(
-      (result) => result.state === 'ready' && result.data?.pullRequest.number === 7
-    );
-
-    expect(currentResult?.data?.pullRequest.number).toBe(7);
-    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalled();
+    githubMocks.githubMergePullRequest.mockResolvedValueOnce({
+      sha: 'merged-sha',
+      merged: true,
+      message: 'merged',
+    });
+    let merged: boolean | undefined;
+    await act(async () => {
+      merged = await currentResult?.mergePullRequest('merge');
+    });
+    expect(merged).toBe(true);
+    expect(currentResult?.data?.pullRequest.merged).toBe(true);
   });
 
-  it('grows the auth recovery delay and caps it at 30 seconds', () => {
-    expect([0, 1, 2, 3, 99].map(getAuthRecoveryBackoffMs)).toEqual([
-      1000, 3000, 10_000, 30_000, 30_000,
-    ]);
+  it('reports ready-for-review as not done when the PR cannot be addressed', async () => {
+    githubMocks.githubFetchPullRequestDetails.mockImplementation(
+      async (_token: string, _repoFullName: string, prNumber: number) =>
+        createPullRequest(prNumber, { draft: true, nodeId: '' })
+    );
+    cacheMocks.readPrCacheEntry.mockResolvedValue(null);
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 });
+    await waitForResult((result) => result.state === 'ready' && !result.isRevalidating);
+
+    let done: boolean | undefined;
+    await act(async () => {
+      done = await currentResult?.markReadyForReview();
+    });
+    expect(done).toBe(false);
+    expect(githubMocks.githubMarkPullRequestReadyForReview).not.toHaveBeenCalled();
   });
 
   it('surfaces a workspace membership failure without entering auth recovery', async () => {
@@ -655,5 +874,126 @@ describe('useGitHubPrDetails target isolation', () => {
     );
 
     expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps merging and updates session merge status when switching conversations mid-merge', async () => {
+    identityMocks.versions = { repositoryId: 123, repoFullName: 'loro-dev/lody' };
+    const headFetchDeferred = createDeferred<GitHubPullRequestDetails>();
+    const mergeDeferred = createDeferred<GitHubMergeResult>();
+    await renderHook({
+      sessionId: 'session-1',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 1,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 1);
+    const store = currentStore!;
+
+    githubMocks.githubFetchPullRequestDetails.mockReturnValueOnce(headFetchDeferred.promise);
+    githubMocks.githubMergePullRequest.mockReturnValueOnce(mergeDeferred.promise);
+
+    let mergePromise: Promise<boolean> | null = null;
+    await act(async () => {
+      mergePromise = currentResult?.mergePullRequest('merge') ?? null;
+    });
+    expect(store.get(sessionPrMergeStatusesAtom)['session-1']).toEqual({
+      phase: 'merging',
+      prNumber: 1,
+      repoFullName: 'loro-dev/lody',
+    });
+
+    await renderHook({
+      sessionId: 'session-2',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 2,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 2);
+
+    await act(async () => {
+      headFetchDeferred.resolve(createPullRequest(1, { headSha: 'sha-1-fresh' }));
+    });
+    await waitForResult(() => githubMocks.githubMergePullRequest.mock.calls.length === 1);
+    expect(githubMocks.githubMergePullRequest).toHaveBeenCalledWith(
+      'github-token',
+      'loro-dev/lody',
+      1,
+      { method: 'merge', sha: 'sha-1-fresh' }
+    );
+
+    await renderHook({
+      sessionId: 'session-1',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 1,
+    });
+    expect(currentResult?.isMerging).toBe(true);
+
+    await renderHook({
+      sessionId: 'session-2',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 2,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 2);
+
+    await act(async () => {
+      mergeDeferred.resolve({ sha: 'merged-sha', merged: true, message: 'merged' });
+      await mergePromise;
+    });
+
+    expect(currentResult?.data?.pullRequest.number).toBe(2);
+    expect(currentResult?.data?.pullRequest.merged).toBe(false);
+    expect(store.get(sessionPrMergeStatusesAtom)['session-1']).toEqual({
+      phase: 'merged',
+      prNumber: 1,
+      repoFullName: 'loro-dev/lody',
+    });
+    clearSessionPrMergeStatus(store, 'session-1');
+  });
+
+  it('marks session merge failed and rejects when a background merge fails after switching away', async () => {
+    identityMocks.versions = { repositoryId: 123, repoFullName: 'loro-dev/lody' };
+    const mergeDeferred = createDeferred<GitHubMergeResult>();
+    githubMocks.githubMergePullRequest.mockReturnValueOnce(mergeDeferred.promise);
+
+    await renderHook({
+      sessionId: 'session-fail',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 1,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 1);
+    const store = currentStore!;
+
+    let mergePromise: Promise<boolean> | null = null;
+    await act(async () => {
+      mergePromise = currentResult?.mergePullRequest('merge') ?? null;
+    });
+    const mergeOutcome = mergePromise!.catch((err: unknown) => err);
+
+    await renderHook({
+      sessionId: 'session-other',
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 2,
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 2);
+
+    let caughtError: unknown;
+    await act(async () => {
+      mergeDeferred.reject(new Error('Required status check failed'));
+      caughtError = await mergeOutcome;
+    });
+
+    expect(caughtError).toBeInstanceOf(Error);
+    expect((caughtError as Error).message).toBe('Required status check failed');
+    expect(store.get(sessionPrMergeStatusesAtom)['session-fail']).toEqual({
+      phase: 'failed',
+      prNumber: 1,
+      repoFullName: 'loro-dev/lody',
+      error: 'Required status check failed',
+    });
+    clearSessionPrMergeStatus(store, 'session-fail');
   });
 });

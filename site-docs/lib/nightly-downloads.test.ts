@@ -1,0 +1,189 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  parseNightlyAndroidRelease,
+  parseNightlyRelease,
+  resolveNightlyDownloadBase,
+} from './nightly-downloads.ts';
+
+const base = 'https://downloads.example.test/production/nightly';
+const version = '0.89.4-nightly.42';
+function manifestForVersion(displayVersion: string) {
+  const files = [
+    'arm64.dmg',
+    'x64.dmg',
+    'x64-setup.exe',
+    'x64.AppImage',
+    'x64.deb',
+    'x64.snap',
+  ].map((suffix) => `Lody-${displayVersion}-${suffix.replace(/\.([^.]+)$/u, '-nightly.$1')}`);
+  return {
+    minimumStableVersion: '0.100.1',
+    schema: 1,
+    channel: 'nightly',
+    version: displayVersion,
+    files,
+    downloads: Object.fromEntries(files.map((file) => [file, file])),
+  };
+}
+const manifest = manifestForVersion(version);
+const files = manifest.files;
+
+void test('Nightly download links cover the full published matrix at immutable URLs', () => {
+  const release = parseNightlyRelease(manifest, `${base}/`);
+  assert.equal(release.version, version);
+  assert.equal(release.minimumStableVersion, '0.100.1');
+  assert.deepEqual(
+    release.downloads.map((item) => item.href),
+    files.map((file) => `${base}/${file}`)
+  );
+  assert.deepEqual(
+    release.downloads.map((item) => item.platform),
+    ['mac', 'mac', 'win', 'linux', 'linux', 'linux']
+  );
+});
+
+void test('zero-based Nightly cycles produce all installer links without accepting malformed counters', () => {
+  for (const displayVersion of ['0.102.0-nightly.0', '0.102.0-nightly.1', '0.103.0-nightly.0']) {
+    const cycleManifest = manifestForVersion(displayVersion);
+    const release = parseNightlyRelease(cycleManifest, base);
+    assert.equal(release.version, displayVersion);
+    assert.deepEqual(
+      release.downloads.map((item) => item.href),
+      cycleManifest.files.map((file) => `${base}/${file}`)
+    );
+  }
+  for (const suffix of ['00', '01', '-1', '1.0', '100000000']) {
+    assert.throws(() => parseNightlyRelease(manifestForVersion(`0.102.0-nightly.${suffix}`), base));
+  }
+});
+
+void test('Nightly refuses missing, mixed, mutable or external installers', () => {
+  for (const replacement of [
+    'https://evil.example/installer',
+    '../latest.exe',
+    'Lody-latest-x64.dmg',
+    `Lody-0.89.4-nightly.41-arm64-nightly.dmg`,
+  ]) {
+    assert.throws(() =>
+      parseNightlyRelease(
+        { ...manifest, downloads: { ...manifest.downloads, [files[0]!]: replacement } },
+        base
+      )
+    );
+  }
+  assert.throws(() => parseNightlyRelease({ ...manifest, files: files.slice(1) }, base));
+  assert.throws(() => parseNightlyRelease({ ...manifest, downloads: {} }, base));
+  for (const changed of [
+    { channel: 'stable' },
+    { schema: 2 },
+    { version: '0.89.4' },
+    { version: '../../bad' },
+    { version: '0.89.4-nightly.00' },
+    { minimumStableVersion: undefined },
+    { minimumStableVersion: '0.100.1-nightly.1' },
+  ]) {
+    assert.throws(() => parseNightlyRelease({ ...manifest, ...changed }, base));
+  }
+});
+
+void test('Nightly download configuration must select a dedicated HTTPS path', () => {
+  assert.equal(resolveNightlyDownloadBase(`${base}/`), base);
+  for (const invalid of [
+    undefined,
+    '',
+    'http://downloads.example/nightly',
+    'https://downloads.example/production',
+    'https://user:secret@downloads.example/nightly',
+    `${base}?token=x`,
+    `${base}#x`,
+    'javascript:alert(1)',
+  ]) {
+    assert.equal(resolveNightlyDownloadBase(invalid), null);
+    assert.throws(() => parseNightlyRelease(manifest, String(invalid)));
+  }
+});
+
+void test('Android appears only with a matching immutable APK in both manifest lists', () => {
+  const apk = `Lody-${version}-android.apk`;
+  const mobile = {
+    ...manifest,
+    files: [...files, apk],
+    downloads: { ...manifest.downloads, [apk]: apk },
+  };
+  assert.deepEqual(parseNightlyRelease(mobile, base).downloads.at(-1), {
+    platform: 'android',
+    label: 'APK',
+    href: `${base}/${apk}`,
+  });
+  assert.equal(parseNightlyRelease(manifest, base).downloads.length, 6);
+  for (const invalid of [
+    { ...mobile, files },
+    { ...mobile, downloads: manifest.downloads },
+    { ...mobile, downloads: { ...mobile.downloads, [apk]: 'https://elsewhere.test/app.apk' } },
+    { ...mobile, downloads: { ...mobile.downloads, [apk]: '../app.apk' } },
+  ])
+    assert.throws(() => parseNightlyRelease(invalid, base));
+});
+
+void test('Android uses its own version and does not require desktop metadata', () => {
+  const androidVersion = '0.104.0-nightly.0';
+  const apk = `Lody-${androidVersion}-android.apk`;
+  const android = {
+    schema: 1,
+    channel: 'nightly',
+    target: 'android',
+    version: androidVersion,
+    files: [apk],
+    downloads: { [apk]: apk },
+  };
+  assert.deepEqual(parseNightlyAndroidRelease(android, base), {
+    version: androidVersion,
+    downloads: [{ platform: 'android', label: 'APK', href: `${base}/${apk}` }],
+  });
+  for (const changed of [
+    { schema: 2 },
+    { channel: 'stable' },
+    { target: 'mac' },
+    { version: '0.104.0' },
+    { version: '0.104.0-nightly.00' },
+    { files: [] },
+    { downloads: {} },
+    { downloads: { [apk]: '../app.apk' } },
+    { downloads: { [apk]: 'https://elsewhere.test/app.apk' } },
+    { version: '0.104.0-nightly.1' },
+  ])
+    assert.throws(() => parseNightlyAndroidRelease({ ...android, ...changed }, base));
+  assert.throws(() => parseNightlyAndroidRelease(android, 'http://example.test/nightly'));
+  assert.throws(() => parseNightlyAndroidRelease(manifest, base));
+});
+
+void test('Linux ARM64 is additive for old manifests but requires a complete matching pair', () => {
+  const armFiles = ['AppImage', 'deb'].map(
+    (extension) => `Lody-${version}-arm64-nightly.${extension}`
+  );
+  const arm = {
+    ...manifest,
+    files: [...files, ...armFiles],
+    downloads: {
+      ...manifest.downloads,
+      ...Object.fromEntries(armFiles.map((file) => [file, file])),
+    },
+  };
+  assert.deepEqual(parseNightlyRelease(arm, base).downloads.slice(-2), [
+    { platform: 'linux', label: 'AppImage · ARM64', href: `${base}/${armFiles[0]}` },
+    { platform: 'linux', label: 'Debian / Ubuntu · ARM64', href: `${base}/${armFiles[1]}` },
+  ]);
+  assert.equal(parseNightlyRelease(manifest, base).downloads.length, 6);
+  for (const file of armFiles) {
+    assert.throws(() =>
+      parseNightlyRelease({ ...arm, files: arm.files.filter((name) => name !== file) }, base)
+    );
+    const downloads = { ...arm.downloads };
+    delete downloads[file];
+    assert.throws(() => parseNightlyRelease({ ...arm, downloads }, base));
+    assert.throws(() =>
+      parseNightlyRelease({ ...arm, downloads: { ...arm.downloads, [file]: '../bad' } }, base)
+    );
+  }
+});

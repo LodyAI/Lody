@@ -1,343 +1,598 @@
-import { spawn } from 'child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import http from 'http';
-import os from 'os';
-import path from 'path';
+import { EventEmitter } from 'node:events';
+import * as fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import vm from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   ensureGhShimScript,
   getGhShimHostBinDir,
   getGhShimHostPath,
 } from '../src/lib/gh-shim-script';
-import {
-  getGhTokenFingerprint,
-  LODY_MANAGED_GH_TOKEN_SHA256_ENV,
-} from '../src/lib/gh-token-injector';
 
-let tempHomeDir: string | null = null;
-let fakeBinDir: string | null = null;
-let tokenBroker: http.Server | null = null;
-let brokerRequestCount = 0;
-
-const originalPath = process.env.PATH ?? '';
-// Full workspace test runs can heavily delay Node child startup/close on CI.
-const SHIM_INTEGRATION_TIMEOUT_MS = 150_000;
-const SHIM_CHILD_TIMEOUT_MS = 120_000;
-
+let directory: string;
+let statePath: string;
 beforeEach(() => {
-  tempHomeDir = mkdtempSync(path.join(os.tmpdir(), 'lody-gh-shim-home-'));
-  fakeBinDir = mkdtempSync(path.join(os.tmpdir(), 'lody-gh-shim-bin-'));
-  vi.spyOn(os, 'homedir').mockReturnValue(tempHomeDir);
-  vi.stubEnv('PATH', `${fakeBinDir}${path.delimiter}${originalPath}`);
-  brokerRequestCount = 0;
-
-  writeFakeGh(
-    `#!/bin/sh
-if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  if [ "$FAKE_GH_AUTHED" = "1" ]; then
-    exit 0
-  fi
-  exit 1
-fi
-if [ "$1" = "print-token" ]; then
-  printf 'GH_TOKEN=%s\\n' "\${GH_TOKEN:-}"
-  printf 'GITHUB_TOKEN=%s\\n' "\${GITHUB_TOKEN:-}"
-  printf 'MARKER=%s\\n' "\${${LODY_MANAGED_GH_TOKEN_SHA256_ENV}:-}"
-  exit 0
-fi
-printf '%s\\n' "$*"
-`
-  );
+  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-gh-policy-'));
+  vi.spyOn(os, 'homedir').mockReturnValue(directory);
+  vi.stubEnv('LODY_DATA_DIR', directory);
+  statePath = path.join(directory, 'workspace-broker.json');
+  ensureGhShimScript(statePath);
 });
-
-afterEach(async () => {
-  vi.unstubAllEnvs();
+afterEach(() => {
   vi.restoreAllMocks();
-  if (tokenBroker) {
-    await new Promise<void>((resolve) => tokenBroker?.close(() => resolve()));
-    tokenBroker = null;
-  }
-  if (tempHomeDir) {
-    rmSync(tempHomeDir, { recursive: true, force: true });
-    tempHomeDir = null;
-  }
-  if (fakeBinDir) {
-    rmSync(fakeBinDir, { recursive: true, force: true });
-    fakeBinDir = null;
-  }
+  vi.unstubAllEnvs();
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
-describe('ensureGhShimScript', () => {
-  it('generates a gh wrapper without PR association behavior', () => {
-    ensureGhShimScript();
-
-    const source = readFileSync(getGhShimHostPath(), 'utf8');
-
-    expect(source).toContain('/github-token');
-    expect(source).not.toContain('associatePullRequestForCli');
-    expect(source).not.toContain('pr create');
-  });
-
-  it('generates a Windows gh.cmd launcher that points at the Node shim', () => {
-    const restorePlatform = setPlatformForTest('win32');
-    try {
-      writeFakeGhNamed('gh.cmd', '@echo off\r\n');
-      ensureGhShimScript();
-
-      const launcherPath = getGhShimHostPath();
-      const launcherSource = readFileSync(launcherPath, 'utf8');
-      const nodeShimPath = path.join(getGhShimHostBinDir(), 'gh');
-      const nodeShimSource = readFileSync(nodeShimPath, 'utf8');
-
-      expect(launcherPath).toMatch(/gh\.cmd$/i);
-      expect(launcherSource).toContain(process.execPath);
-      expect(launcherSource).toContain('%~dp0gh');
-      expect(nodeShimSource).toContain('/github-token');
-      expect(nodeShimSource).toContain(path.join(fakeBinDir!, 'gh.cmd'));
-    } finally {
-      restorePlatform();
-    }
-  });
-
-  it(
-    'fetches a fresh installation token when the session has no gh auth',
-    async () => {
-      const broker = await startTokenBroker('installation-token');
-      ensureGhShimScript();
-
-      const result = await runShim({
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=installation-token');
-      expect(result.stdout).toContain('GITHUB_TOKEN=installation-token');
-      expect(brokerRequestCount).toBe(1);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-
-  it(
-    'preserves a user-provided GH_TOKEN and does not call the broker',
-    async () => {
-      const broker = await startTokenBroker('installation-token');
-      ensureGhShimScript();
-
-      const result = await runShim({
-        GH_TOKEN: 'user-token',
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=user-token');
-      expect(result.stdout).toContain('GITHUB_TOKEN=');
-      expect(brokerRequestCount).toBe(0);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-
-  it(
-    'clears a managed GH_TOKEN while preserving a user-provided GITHUB_TOKEN',
-    async () => {
-      const broker = await startTokenBroker('installation-token');
-      const managedToken = 'old-lody-token';
-      ensureGhShimScript();
-
-      const result = await runShim({
-        GH_TOKEN: managedToken,
-        GITHUB_TOKEN: 'user-github-token',
-        [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: getGhTokenFingerprint(managedToken),
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=');
-      expect(result.stdout).toContain('GITHUB_TOKEN=user-github-token');
-      expect(result.stdout).not.toContain(managedToken);
-      expect(brokerRequestCount).toBe(0);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-
-  it(
-    'uses the broker token before ambient gh auth for managed repo sessions',
-    async () => {
-      const broker = await startTokenBroker('installation-token');
-      const managedToken = 'old-lody-token';
-      ensureGhShimScript();
-
-      const result = await runShim({
-        FAKE_GH_AUTHED: '1',
-        GH_TOKEN: managedToken,
-        [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: getGhTokenFingerprint(managedToken),
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=installation-token');
-      expect(result.stdout).toContain('GITHUB_TOKEN=installation-token');
-      expect(result.stdout).not.toContain(managedToken);
-      expect(brokerRequestCount).toBe(1);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-
-  it(
-    'clears stale managed tokens when the broker rejects the requester context',
-    async () => {
-      const broker = await startTokenBroker('ignored-token', { status: 403 });
-      const managedToken = 'old-lody-token';
-      ensureGhShimScript();
-
-      const result = await runShim({
-        GH_TOKEN: managedToken,
-        [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: getGhTokenFingerprint(managedToken),
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GIT_CRED_CONTEXT_TOKEN: 'stale-context',
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=');
-      expect(result.stdout).toContain('GITHUB_TOKEN=');
-      expect(result.stdout).not.toContain(managedToken);
-      expect(brokerRequestCount).toBe(1);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-});
-
-const writeFakeGh = (source: string): void => {
-  writeFakeGhNamed('gh', source);
-};
-
-const writeFakeGhNamed = (name: string, source: string): void => {
-  if (!fakeBinDir) {
-    throw new Error('fakeBinDir is not initialized');
-  }
-  writeFileSync(path.join(fakeBinDir, name), source, { encoding: 'utf8', mode: 0o755 });
-};
-
-const setPlatformForTest = (platform: NodeJS.Platform): (() => void) => {
-  const originalPlatform = process.platform;
-  Object.defineProperty(process, 'platform', { value: platform });
-  return () => {
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
-  };
-};
-
-const runShim = async (
-  env: Record<string, string>
-): Promise<{ status: number | null; stdout: string; stderr: string }> => {
-  const shimPath = getGhShimHostPath();
-  const shimBinDir = getGhShimHostBinDir();
-  if (!fakeBinDir) {
-    throw new Error('fakeBinDir is not initialized');
-  }
-  if (!tempHomeDir) {
-    throw new Error('tempHomeDir is not initialized');
-  }
-
-  const childEnv: NodeJS.ProcessEnv = {
-    HOME: tempHomeDir,
-    PATH: [shimBinDir, fakeBinDir, path.dirname(process.execPath)].join(path.delimiter),
-  };
-  if (process.platform === 'win32') {
-    childEnv.USERPROFILE = tempHomeDir;
-    childEnv.SystemRoot = process.env.SystemRoot;
-    childEnv.ComSpec = process.env.ComSpec;
-    childEnv.PATHEXT = process.env.PATHEXT;
-  }
-  Object.assign(childEnv, env);
-
-  const child = spawn(process.execPath, [shimPath, 'print-token'], {
-    env: childEnv,
-  });
-
-  let stdout = '';
-  let stderr = '';
-  child.stdout.setEncoding('utf8');
-  child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (chunk: string) => {
-    stdout += chunk;
-  });
-  child.stderr.on('data', (chunk: string) => {
-    stderr += chunk;
-  });
-
-  const status = await new Promise<number | null>((resolve, reject) => {
-    let settled = false;
-    const finish = (callback: () => void): void => {
-      if (settled) {
-        return;
+function harness(
+  options: {
+    owner?: boolean;
+    personal?: boolean;
+    env?: Record<string, string>;
+    localToken?: string;
+    remote?: string;
+    status?: number;
+    permissions?: { push?: boolean; admin?: boolean };
+    executions?: Array<{ code: number; stderr?: string; stdout?: string }>;
+    prFailure?: 'rejected' | 'lost-response' | 'invalid-response' | 'metadata';
+    bodyFiles?: Record<string, string>;
+    publishedTip?: string;
+    mergeBase?: string;
+    report?: 'linked' | 'refused' | 'throw';
+  } = {}
+) {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const actual: Array<string[]> = [];
+  const identities: string[] = [];
+  const pullRequests: Array<{
+    payload: Record<string, unknown>;
+    token: string;
+    metadata: string[];
+  }> = [];
+  const spawn = vi.fn((_command: string, args: string[], init: { env: Record<string, string> }) => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+    });
+    queueMicrotask(() => {
+      let status = 0;
+      if (args[0] === 'remote')
+        child.stdout.emit('data', options.remote ?? 'git@github.com:cwd/project.git');
+      else if (args[0] === 'symbolic-ref') child.stdout.emit('data', 'feature');
+      else if (args[0] === 'rev-parse') child.stdout.emit('data', 'abc123');
+      else if (args[0] === 'config') {
+        if (options.mergeBase) child.stdout.emit('data', options.mergeBase);
+        else status = 1;
+      } else if (args[0] === 'auth' && args[1] === 'token') {
+        if (options.localToken) child.stdout.emit('data', options.localToken);
+        else status = 1;
+      } else {
+        const result = options.executions?.[actual.length];
+        actual.push(args);
+        identities.push(init.env.GH_TOKEN);
+        if (result) {
+          status = result.code;
+          if (result.stderr) child.stderr.emit('data', result.stderr);
+          if (result.stdout) child.stdout.emit('data', result.stdout);
+        } else if (args[0] === 'api' && args.some((arg) => /^repos\/.+\/pulls$/.test(arg))) {
+          if (options.prFailure === 'rejected') {
+            status = 1;
+            child.stderr.emit('data', 'HTTP 403: Forbidden');
+          } else {
+            const payload: Record<string, unknown> = {};
+            for (let i = 0; i < args.length; i++) {
+              if (args[i] !== '-f' && args[i] !== '-F') continue;
+              const typed = args[i] === '-F';
+              const field = args[++i] ?? '';
+              const equals = field.indexOf('=');
+              payload[field.slice(0, equals)] = typed
+                ? JSON.parse(field.slice(equals + 1))
+                : field.slice(equals + 1);
+            }
+            pullRequests.push({ payload, token: init.env.GH_TOKEN ?? '', metadata: [] });
+            const repo = args.find((arg) => /^repos\/.+\/pulls$/.test(arg))?.slice(6, -6);
+            if (options.prFailure === 'lost-response') {
+              status = 1;
+              child.stderr.emit('data', 'connection reset');
+            } else {
+              child.stdout.emit(
+                'data',
+                options.prFailure === 'invalid-response'
+                  ? '{}'
+                  : JSON.stringify({ number: 42, html_url: `https://github.com/${repo}/pull/42` })
+              );
+            }
+          }
+        } else if (args[0] === 'api' && args.includes('.object.sha')) {
+          child.stdout.emit('data', options.publishedTip ?? 'abc123');
+        } else if (args[0] === 'api' && args.includes('.default_branch')) {
+          child.stdout.emit('data', 'main');
+        } else if (args[0] === 'pr' && args[1] === 'edit' && pullRequests[0]) {
+          if (options.prFailure === 'metadata') {
+            status = 1;
+            child.stderr.emit('data', 'HTTP 403: Forbidden');
+          } else pullRequests[0].metadata = args.slice(5);
+        }
       }
-      settled = true;
-      clearTimeout(timeout);
-      callback();
+      child.emit('close', status);
+    });
+    return child;
+  });
+  const fetch = vi.fn(async (url: string, init: { body?: string }) => {
+    if (url.startsWith('https://api.github.com/'))
+      return {
+        ok: (options.status ?? 200) === 200,
+        status: options.status ?? 200,
+        json: async () => ({ permissions: options.permissions ?? { push: false } }),
+      };
+    const endpoint = new URL(url).pathname;
+    const body = JSON.parse(init.body ?? '{}');
+    calls.push({ path: endpoint, body });
+    if (endpoint === '/pull-request/report') {
+      if (options.report === 'throw')
+        throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
+      return {
+        ok: options.report !== 'refused',
+        status: options.report === 'refused' ? 403 : 200,
+        json: async () =>
+          options.report === 'refused'
+            ? { linked: false, reason: 'invalid_context' }
+            : { linked: true },
+      };
+    }
+    if (body.source === 'personal' && !options.personal)
+      return { ok: true, json: async () => ({ available: false }) };
+    return {
+      ok: true,
+      json: async () => ({
+        token: body.source + ':' + body.repoFullName,
+        tokenSource: body.source,
+        available: true,
+      }),
     };
-    const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
-      finish(() =>
-        reject(
-          new Error(
-            `gh shim did not exit within ${SHIM_CHILD_TIMEOUT_MS}ms\nstdout:\n${stdout}\nstderr:\n${stderr}`
-          )
-        )
+  });
+  const source = fs
+    .readFileSync(getGhShimHostPath(statePath), 'utf8')
+    .replace(
+      /main\(\)\.catch\([\s\S]*$/,
+      'globalThis.build = async (...args) => (await ghEnvironments(...args).next()).value; globalThis.execute = main;'
+    );
+  const context = vm.createContext({
+    require: (name: string) => {
+      if (name === 'child_process') return { spawn };
+      if (name === 'fs')
+        return {
+          ...fs,
+          accessSync: () => {},
+          statSync: () => ({ isFile: () => true }),
+          realpathSync: { native: (p: string) => p },
+          readFileSync: (p: string | number) => {
+            if (options.bodyFiles && String(p) in options.bodyFiles)
+              return options.bodyFiles[String(p)];
+            if (p === statePath + '.contexts/context.json')
+              return JSON.stringify({
+                version: 1,
+                contextToken: 'context',
+                allowLocalAuth: options.owner ?? true,
+              });
+            if (p !== statePath) throw new Error('Wrong workspace broker');
+            return JSON.stringify({ url: 'http://broker.test', token: 'bearer' });
+          },
+        };
+      return { path, crypto, os }[name as 'path' | 'crypto' | 'os'];
+    },
+    __filename: getGhShimHostPath(statePath),
+    process: {
+      env: {
+        PATH: '/native/bin',
+        LODY_GIT_CRED_CONTEXT_TOKEN: 'context',
+        LODY_GITHUB_REPO_FULL_NAME: 'startup/repo',
+        ...options.env,
+      },
+      argv: ['node', '/shim/gh'],
+      stdout: { write: vi.fn() },
+      stderr: { write: vi.fn() },
+      platform: 'linux',
+      on: vi.fn(),
+    },
+    console: { error: vi.fn() },
+    fetch,
+    URL,
+    AbortSignal,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+  });
+  vm.runInContext(source, context);
+  return {
+    calls,
+    actual,
+    identities,
+    pullRequests,
+    stdout: context.process.stdout.write,
+    stderr: context.console.error,
+    execute: async (args: string[]) => {
+      context.process.argv = ['node', '/shim/gh', ...args];
+      await (context.execute as () => Promise<void>)();
+      return context.process.exitCode ?? 0;
+    },
+    spawn,
+    build: (args: string[]) =>
+      (
+        context.build as (
+          command: string,
+          args: string[]
+        ) => Promise<{ env: Record<string, string> }>
+      )('/native/bin/gh', args),
+  };
+}
+
+describe('gh pr create reports the created PR to its Session', () => {
+  const createArgs = [
+    'pr',
+    'create',
+    '-R',
+    'owner/repo',
+    '--title',
+    'T',
+    '--body',
+    '',
+    '--base',
+    'main',
+    '--head',
+    'feature',
+  ];
+  const reports = (h: ReturnType<typeof harness>) =>
+    h.calls.filter((call) => call.path === '/pull-request/report').map((call) => call.body);
+
+  it('reports a REST-created PR with the host-authored context and keeps stdout and exit code', async () => {
+    const h = harness({ personal: true });
+    expect(await h.execute(createArgs)).toBe(0);
+    expect(reports(h)).toEqual([
+      { contextToken: 'context', url: 'https://github.com/owner/repo/pull/42' },
+    ]);
+    expect(h.stdout.mock.calls).toEqual([['https://github.com/owner/repo/pull/42\n']]);
+    expect(h.stderr).toHaveBeenCalledWith(
+      '[Lody] Linked https://github.com/owner/repo/pull/42 to this Session.'
+    );
+  });
+
+  it('reports the URL native gh printed from any directory or branch', async () => {
+    const h = harness({
+      localToken: 'native-token',
+      executions: [
+        {
+          code: 0,
+          stdout:
+            'Creating pull request for agy-remote-login\nhttps://github.com/owner/repo/pull/3019\n',
+        },
+      ],
+    });
+    expect(await h.execute(['pr', 'create', '--fill'])).toBe(0);
+    expect(reports(h)).toEqual([
+      { contextToken: 'context', url: 'https://github.com/owner/repo/pull/3019' },
+    ]);
+  });
+
+  it.each(['throw', 'refused'] as const)(
+    'never changes the outcome when the report %s',
+    async (report) => {
+      const h = harness({ personal: true, report });
+      expect(await h.execute(createArgs)).toBe(0);
+      expect(h.stdout.mock.calls).toEqual([['https://github.com/owner/repo/pull/42\n']]);
+      expect(h.stderr).toHaveBeenCalledWith(
+        '[Lody] https://github.com/owner/repo/pull/42 was not linked to this Session. It can be linked with lody_session_manage action pr_link.'
       );
-    }, SHIM_CHILD_TIMEOUT_MS);
+    }
+  );
 
-    child.on('error', (error) => finish(() => reject(error)));
-    child.on('close', (code) => finish(() => resolve(code)));
-  });
-  return { status, stdout, stderr };
-};
-
-const startTokenBroker = async (
-  token: string,
-  options?: { status?: number }
-): Promise<{ url: string; authToken: string }> => {
-  const authToken = 'broker-auth-token';
-  tokenBroker = http.createServer((req, res) => {
-    req.resume();
-    res.setHeader('Connection', 'close');
-    if (req.method !== 'POST' || req.url !== '/github-token') {
-      res.writeHead(404);
-      res.end();
-      return;
-    }
-    if (req.headers.authorization !== `Bearer ${authToken}`) {
-      res.writeHead(401);
-      res.end();
-      return;
-    }
-    brokerRequestCount += 1;
-    if (options?.status && options.status !== 200) {
-      res.writeHead(options.status, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'invalid_context' }));
-      return;
-    }
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ token }));
+  it('still reports a created PR whose metadata update failed, keeping the failure exit code', async () => {
+    const h = harness({ personal: true, prFailure: 'metadata' });
+    expect(await h.execute([...createArgs, '--label', 'bug'])).toBe(1);
+    expect(reports(h)).toHaveLength(1);
   });
 
-  await new Promise<void>((resolve, reject) => {
-    tokenBroker?.once('error', reject);
-    tokenBroker?.listen(0, '127.0.0.1', () => resolve());
+  it('reports nothing for a failed or non-create command', async () => {
+    const failed = harness({ personal: true, prFailure: 'rejected' });
+    await failed.execute(createArgs);
+    expect(reports(failed)).toEqual([]);
+    const view = harness({
+      localToken: 'native-token',
+      executions: [{ code: 0, stdout: 'https://github.com/owner/repo/pull/7\n' }],
+    });
+    expect(await view.execute(['pr', 'view', '7', '-R', 'owner/repo'])).toBe(0);
+    expect(reports(view)).toEqual([]);
   });
+});
 
-  const address = tokenBroker.address();
-  if (!address || typeof address === 'string') {
-    throw new Error('broker did not bind to a TCP port');
-  }
-  return { url: `http://127.0.0.1:${address.port}`, authToken };
-};
+describe('generated gh command boundary', () => {
+  const createArgs = [
+    'pr',
+    'create',
+    '-R',
+    'owner/repo',
+    '--title',
+    'A title',
+    '--body',
+    '',
+    '--base',
+    'main',
+    '--head',
+    'feature',
+  ];
+  it('creates a user-attributed REST PR and applies metadata with the same credential', async () => {
+    const h = harness({ personal: true, localToken: 'native-token' });
+    expect(
+      await h.execute([
+        ...createArgs,
+        '--body',
+        '@literal\n{owner}/{repo}',
+        '--draft',
+        '--no-maintainer-edit',
+        '-lbug,cli',
+        '--label=security',
+        '-r',
+        'reviewer',
+      ])
+    ).toBe(0);
+    expect(h.pullRequests).toEqual([
+      {
+        payload: {
+          title: 'A title',
+          body: '@literal\n{owner}/{repo}',
+          base: 'main',
+          head: 'feature',
+          draft: true,
+          maintainer_can_modify: false,
+        },
+        token: 'personal:owner/repo',
+        metadata: [
+          '--add-label',
+          'bug,cli',
+          '--add-label',
+          'security',
+          '--add-reviewer',
+          'reviewer',
+        ],
+      },
+    ]);
+    expect(h.identities).toEqual(['personal:owner/repo', 'personal:owner/repo']);
+    expect(h.stdout).toHaveBeenCalledWith('https://github.com/owner/repo/pull/42\n');
+  });
+  it.each(['body.md', '-'])(
+    'reads --body-file %s before writing and supports inherited repo flags and new alias',
+    async (file) => {
+      const h = harness({
+        personal: true,
+        bodyFiles: { [file === '-' ? '0' : file]: 'Multiline\nbody' },
+      });
+      expect(
+        await h.execute([
+          '--repo=owner/repo',
+          'pr',
+          'new',
+          '-tTitle',
+          '-F',
+          file,
+          '-Bmain',
+          '-Hfeature',
+          '--draft=false',
+        ])
+      ).toBe(0);
+      expect(h.pullRequests[0]?.payload).toEqual({
+        title: 'Title',
+        body: 'Multiline\nbody',
+        base: 'main',
+        head: 'feature',
+        draft: false,
+        maintainer_can_modify: true,
+      });
+    }
+  );
+  it('supports App credentials without changing native machine-authenticated creation', async () => {
+    const app = harness({ owner: false });
+    expect(await app.execute(createArgs)).toBe(0);
+    expect(app.pullRequests[0]?.token).toBe('app:owner/repo');
+    const local = harness({ localToken: 'native-token' });
+    expect(await local.execute(createArgs)).toBe(0);
+    expect(local.pullRequests).toEqual([]);
+    expect(local.actual).toEqual([createArgs]);
+  });
+  it.each(['rejected', 'lost-response', 'invalid-response', 'metadata'] as const)(
+    'does not recreate or change identity after %s',
+    async (prFailure) => {
+      const h = harness({ personal: true, localToken: 'native-token', prFailure });
+      expect(await h.execute([...createArgs, '--label', 'bug'])).toBe(1);
+      expect(h.pullRequests).toHaveLength(prFailure === 'rejected' ? 0 : 1);
+      expect(h.identities.every((token) => token === 'personal:owner/repo')).toBe(true);
+      expect(h.actual.filter((args) => args[0] === 'api')).toHaveLength(1);
+      if (prFailure === 'metadata') {
+        expect(h.stdout).toHaveBeenCalledWith('https://github.com/owner/repo/pull/42\n');
+        expect(h.stderr).toHaveBeenCalledWith(
+          expect.stringContaining('PR was created, but metadata update failed')
+        );
+      }
+    }
+  );
+  it.each([
+    ['pr', 'create', '--fill'],
+    [...createArgs, '--web'],
+    [...createArgs, '--attach', 'image.png'],
+    [...createArgs, '--body-file', 'body.md'],
+  ])('preserves native behavior with an attribution warning for %j', async (...args) => {
+    const h = harness({ personal: true });
+    expect(await h.execute(args)).toBe(0);
+    expect(h.actual).toEqual([args]);
+    expect(h.pullRequests).toEqual([]);
+    expect(h.stderr).toHaveBeenCalledWith(
+      expect.stringContaining('GitHub may omit App attribution')
+    );
+  });
+  it('does not write when an explicit body file is unreadable', async () => {
+    const h = harness({ personal: true });
+    expect(
+      await h.execute([
+        'pr',
+        'create',
+        '-t',
+        'Title',
+        '-F',
+        'missing.md',
+        '-B',
+        'main',
+        '-H',
+        'feature',
+      ])
+    ).toBe(1);
+    expect(h.actual).toEqual([]);
+  });
+  it.each([undefined, 'release'])(
+    'infers a published current branch and base (%s)',
+    async (mergeBase) => {
+      const h = harness({ personal: true, mergeBase });
+      expect(
+        await h.execute(['pr', 'create', '-R', 'owner/repo', '-t', 'Title', '-b', 'Body'])
+      ).toBe(0);
+      expect(h.pullRequests[0]?.payload).toMatchObject({
+        head: 'feature',
+        base: mergeBase ?? 'main',
+      });
+    }
+  );
+  it('leaves native gh to push or select a fork when the inferred head is not published in the target', async () => {
+    const h = harness({ personal: true, publishedTip: 'older-sha' });
+    const args = ['pr', 'create', '-R', 'owner/repo', '-t', 'Title', '-b', 'Body'];
+    expect(await h.execute(args)).toBe(0);
+    expect(h.pullRequests).toEqual([]);
+    expect(h.actual.at(-1)).toEqual(args);
+  });
+  it('prints a dry-run plan without writes and preserves credential-free help', async () => {
+    const h = harness({ personal: true });
+    expect(await h.execute([...createArgs, '--dry-run'])).toBe(0);
+    expect(h.actual).toEqual([]);
+    expect(h.stdout).toHaveBeenCalledWith(expect.stringContaining('"repository":"owner/repo"'));
+    const help = harness();
+    expect(await help.execute(['pr', 'create', '--help'])).toBe(0);
+    expect(help.calls).toEqual([]);
+    expect(help.pullRequests).toEqual([]);
+  });
+  it('advances a definitively rejected single REST write to local without retrying personal', async () => {
+    const h = harness({
+      personal: true,
+      localToken: 'native-token',
+      executions: [
+        { code: 1, stderr: 'HTTP 403: Forbidden' },
+        { code: 0, stdout: 'created' },
+      ],
+    });
+    expect(await h.execute(['api', 'repos/owner/repo/issues', '-X', 'POST'])).toBe(0);
+    expect(h.identities).toEqual(['personal:owner/repo', 'native-token']);
+  });
+  it('advances a failed read-only repository command without replaying a source', async () => {
+    const h = harness({
+      personal: true,
+      localToken: 'native-token',
+      executions: [
+        { code: 1, stderr: 'HTTP 403: Forbidden' },
+        { code: 0, stdout: 'pull request' },
+      ],
+    });
+    expect(await h.execute(['pr', 'view', '1', '-R', 'owner/repo'])).toBe(0);
+    expect(h.identities).toEqual(['personal:owner/repo', 'native-token']);
+  });
+  it.each(['HTTP 403: Forbidden', 'connection reset'])(
+    'never replays a compound write after %s',
+    async (stderr) => {
+      const h = harness({
+        personal: true,
+        localToken: 'native-token',
+        executions: [{ code: 1, stderr }],
+      });
+      expect(await h.execute(['pr', 'merge', '1', '-R', 'owner/repo'])).toBe(1);
+      expect(h.identities).toEqual(['personal:owner/repo']);
+    }
+  );
+  it('does not replay a REST request after partial output', async () => {
+    const h = harness({
+      personal: true,
+      executions: [{ code: 1, stdout: 'partial', stderr: 'HTTP 403: Forbidden' }],
+    });
+    expect(await h.execute(['api', 'repos/owner/repo'])).toBe(1);
+    expect(h.identities).toEqual(['personal:owner/repo']);
+  });
+  it('selects personal without querying cloud policy or executing the write', async () => {
+    const h = harness({ personal: true, localToken: 'owner-token' });
+    expect((await h.build(['pr', 'merge', '1', '-R', 'other/repo'])).env.GH_TOKEN).toBe(
+      'personal:other/repo'
+    );
+    expect(h.actual).toEqual([]);
+    expect(h.calls.map((call) => call.path)).toEqual(['/github-token']);
+  });
+  it('generates syntactically valid standalone gh and Git transports', () => {
+    for (const command of ['gh', 'git', 'git-remote-https'])
+      expect(
+        () =>
+          new vm.Script(fs.readFileSync(path.join(getGhShimHostBinDir(statePath), command), 'utf8'))
+      ).not.toThrow();
+  });
+  it.each([
+    { args: ['pr', 'view', '1', '-R', 'other/repo'], repo: 'other/repo' },
+    { args: ['pr', 'view', 'https://github.com/url/repo/pull/1'], repo: 'url/repo' },
+    { args: ['pr', 'view', '1'], repo: 'cwd/project' },
+    { args: ['api', 'repos/api/repo/pulls'], repo: 'api/repo' },
+    { args: ['repo', 'clone', 'clone/repo'], repo: 'clone/repo' },
+  ])('uses actual target $repo rather than startup repo', async ({ args, repo }) => {
+    const h = harness({ owner: false });
+    expect((await h.build(args)).env.GH_TOKEN).toBe('app:' + repo);
+    expect(
+      h.calls.filter((c) => c.path === '/github-token').map((c) => c.body.repoFullName)
+    ).toEqual([repo, repo]);
+  });
+  it('honors GH_REPO ahead of current directory', async () => {
+    const h = harness({ owner: false, env: { GH_REPO: 'env/repo' } });
+    expect((await h.build(['pr', 'list'])).env.GH_TOKEN).toBe('app:env/repo');
+  });
+  it('owner uses local before App', async () => {
+    const h = harness({ localToken: 'local' });
+    expect((await h.build(['pr', 'list'])).env.GH_TOKEN).toBe('local');
+    expect(h.calls.map((c) => c.path)).toEqual(['/github-token']);
+  });
+  it('does not preflight permissions before a write', async () => {
+    const h = harness({ localToken: 'read-only', permissions: { push: false } });
+    expect((await h.build(['pr', 'merge', '1'])).env.GH_TOKEN).toBe('read-only');
+    expect(h.actual).toEqual([]);
+    expect(h.calls.map((call) => call.path)).toEqual(['/github-token']);
+  });
+  it('does not reinterpret a comment body as a write command', async () => {
+    const h = harness({ localToken: 'reader' });
+    expect(
+      (await h.build(['pr', '--repo', 'other/repo', 'comment', '1', '--body', 'merge'])).env
+        .GH_TOKEN
+    ).toBe('reader');
+  });
+  it('personal overrides ambient tokens and local login even without push permission', async () => {
+    const h = harness({ personal: true, localToken: 'local', env: { GH_TOKEN: 'ambient' } });
+    expect((await h.build(['pr', 'comment', '1'])).env.GH_TOKEN).toBe('personal:cwd/project');
+    expect(h.spawn.mock.calls.some((call) => call[1][0] === 'auth')).toBe(false);
+  });
+  it('nonowner never reads local credentials', async () => {
+    const h = harness({ owner: false, localToken: 'local', env: { GH_TOKEN: 'owner-secret' } });
+    expect((await h.build(['pr', 'list'])).env.GH_TOKEN).toBe('app:cwd/project');
+    expect(h.spawn.mock.calls.some((call) => call[1][0] === 'auth')).toBe(false);
+  });
+  it('does not send App credentials to an enterprise host', async () => {
+    const h = harness({ owner: false });
+    await expect(
+      h.build(['pr', 'view', 'https://github.example.com/o/r/pull/1'])
+    ).rejects.toThrow();
+    expect(h.calls.filter((c) => c.path === '/github-token')).toEqual([]);
+  });
+  it('lets the eligible machine handle unsupported targets without borrowing an App token', async () => {
+    const h = harness({ personal: true, localToken: 'local' });
+    expect((await h.build(['some-extension', 'write'])).env.GH_TOKEN).toBeUndefined();
+    expect(h.calls).toEqual([]);
+  });
+});

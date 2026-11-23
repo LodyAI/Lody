@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -11,7 +10,7 @@ import type {
   AcpConfigOptionValue,
 } from '../src/components/shared/acp-selector-options';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const selectors: AcpConfigOptionSelector[] = [
   {
@@ -72,7 +71,7 @@ describe('AcpBottomBarModeSelector UI', () => {
     flushSync(() => {
       root?.render(
         createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           null,
           createElement(AcpBottomBarModeSelector, {
             tone: 'light',
@@ -87,56 +86,26 @@ describe('AcpBottomBarModeSelector UI', () => {
     });
   }
 
-  it('uses highlighted active styling for fast mode and labels the plan toggle Plan', () => {
-    renderSelector({ 'fast-mode': 'on', collaboration_mode: 'plan' });
-
-    const fastModeButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Fast Mode"]'
-    );
-    const planModeButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Collaboration mode"]'
-    );
-
-    expect(fastModeButton?.className).toContain('bg-primary/[0.12]');
-    expect(planModeButton?.textContent).toBe('Plan');
-    expect(planModeButton?.className).not.toContain('border');
-    expect(
-      planModeButton && fastModeButton
-        ? (planModeButton.compareDocumentPosition(fastModeButton) &
-            Node.DOCUMENT_POSITION_FOLLOWING) !==
-            0
-        : false
-    ).toBe(true);
-  });
-
-  it('renders on/off select fast options as the fast toggle and writes the next select value', () => {
-    const onChange = vi.fn();
-    renderSelector(
-      { fast: 'on' },
-      {
-        selectors: [
-          {
-            configId: 'fast',
-            label: 'Fast mode',
-            type: 'select',
-            currentValue: 'on',
-            options: [
-              { value: 'on', label: 'On' },
-              { value: 'off', label: 'Off' },
-            ],
-          },
-        ],
-        onConfigOptionChange: onChange,
-      }
-    );
-
-    const fastModeButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Fast mode"]'
-    );
-
-    expect(fastModeButton?.className).toContain('bg-primary/[0.12]');
-    fastModeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(onChange).toHaveBeenCalledWith('fast', 'off');
+  it('renders Core planning and sends boolean changes while preserving permission', () => {
+    const values: Record<string, AcpConfigOptionValue> = { plan_mode: false, mode: 'agent' };
+    renderSelector(values, {
+      selectors: [
+        {
+          configId: 'plan_mode',
+          label: 'Plan',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      onConfigOptionChange: (id, value) => {
+        values[id] = value;
+      },
+    });
+    const button = container?.querySelector<HTMLButtonElement>('button[aria-label="Plan"]');
+    expect(button?.textContent).toBe('Plan');
+    flushSync(() => button?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(values).toEqual({ plan_mode: true, mode: 'agent' });
   });
 
   it('shows an explicit permission selector instead of the provider interaction modes', () => {
@@ -176,9 +145,10 @@ describe('AcpBottomBarModeSelector UI', () => {
     );
 
     const permissionButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Permission Mode"]'
+      'button[aria-label^="Permission Mode"]'
     );
-    expect(permissionButton?.textContent).toContain('Ask Every Time');
+    // The selector is icon-only; the selected mode is named in its label.
+    expect(permissionButton?.getAttribute('aria-label')).toBe('Permission Mode: Ask Every Time');
     expect(container?.textContent).not.toContain('Agent');
   });
 });

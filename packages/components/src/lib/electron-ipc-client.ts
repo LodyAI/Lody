@@ -1,6 +1,7 @@
 import type {
   ElectronPublicBrowserBounds,
   ElectronPublicBrowserState,
+  ElectronPublicBrowserInteraction,
   IpcPushMap,
   IpcSendMap,
   SendLocalSessionControlResult,
@@ -97,9 +98,16 @@ export function getPublicBrowserBridge() {
     stop: (browserId: string) => pub.stop({ browserId }),
     setBounds: (browserId: string, bounds: ElectronPublicBrowserBounds) =>
       pub.setBounds({ browserId, bounds }),
-    setVisible: (browserId: string, visible: boolean) => pub.setVisible({ browserId, visible }),
+    setVisible: (browserId: string, visible: boolean, trackInteraction?: boolean) =>
+      pub.setVisible({
+        browserId,
+        visible,
+        ...(trackInteraction === undefined ? {} : { trackInteraction }),
+      }),
     destroy: (browserId: string) => pub.destroy({ browserId }),
     onState: (handler: (state: ElectronPublicBrowserState) => void) =>
       onIpcEvent('publicBrowser.state', handler),
+    onInteraction: (handler: (event: ElectronPublicBrowserInteraction) => void) =>
+      onIpcEvent('publicBrowser.interaction', handler),
   };
 }

@@ -1,14 +1,15 @@
 import { memo, useCallback, useMemo } from 'react';
 import { Pin, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import type { SessionHistoryParsed } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 
 interface SessionPinProps {
   pinnedHistoryId: string | null;
-  history: SessionHistoryParsed[];
+  /** The pinned user turn, hydrated by the caller through the conversation view. */
+  pinnedMessage: SessionHistoryParsed | null;
   onUnpin: () => void;
   onScrollToMessage?: (historyId: string) => void;
 }
@@ -28,16 +29,18 @@ function getTextFromHistory(entry: SessionHistoryParsed): string {
  */
 export const SessionPin = memo(function SessionPin({
   pinnedHistoryId,
-  history,
+  pinnedMessage,
   onUnpin,
   onScrollToMessage,
 }: SessionPinProps) {
   const { t } = useTranslation();
 
   const pinnedEntry = useMemo(() => {
-    if (!pinnedHistoryId) return null;
-    return history.find((h) => h.id === pinnedHistoryId && h.role === 'user') ?? null;
-  }, [pinnedHistoryId, history]);
+    if (!pinnedHistoryId || !pinnedMessage) return null;
+    return pinnedMessage.id === pinnedHistoryId && pinnedMessage.role === 'user'
+      ? pinnedMessage
+      : null;
+  }, [pinnedHistoryId, pinnedMessage]);
 
   const pinnedText = useMemo(() => {
     if (!pinnedEntry) return '';
@@ -61,7 +64,7 @@ export const SessionPin = memo(function SessionPin({
         <Button
           type="button"
           variant="ghost"
-          className="flex-1 min-w-0 truncate h-auto py-2 px-0 text-sm text-left text-foreground/80 cursor-pointer hover:text-foreground hover:bg-transparent transition-colors justify-start"
+          className="flex-1 min-w-0 truncate text-left cursor-pointer justify-start"
           onClick={handleClick}
           title={pinnedText}
         >
@@ -70,8 +73,9 @@ export const SessionPin = memo(function SessionPin({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="shrink-0 h-6 w-6 text-muted-foreground hover:text-foreground"
+          size="mini"
+          icon
+          className="shrink-0"
           onClick={onUnpin}
           aria-label={t('sessions.pin.unpin', 'Unpin message')}
         >

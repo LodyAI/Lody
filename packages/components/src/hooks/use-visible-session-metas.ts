@@ -1,12 +1,21 @@
 import { useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import type { MachineId, SessionMeta, WorkspaceId } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { allActiveSessionsAtom, archivedSessionListAtom, sessionListAtom } from '@/atoms/doc-meta';
-import { filterSessionsByVisibility, type SessionListEntry } from '@/lib/session-visibility';
+import {
+  filterSessionsByVisibility,
+  isSessionEditableToUser,
+  isImportedIntoWorkspace,
+  isSessionReadShared,
+  type SessionListEntry,
+} from '@/lib/session-visibility';
 import { useVisibleLocalProjects } from './use-visible-local-projects';
 import { useVisibleMachineMetas } from './use-visible-machine-metas';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
+import { useSessionAccess } from './use-session-access';
+import type { SessionAccessView } from '@lody/platform';
+import { useWorkspaceHistoryAccess } from './use-workspace-history-access';
 
 function areSetsEqual<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
   if (left === right) return true;
@@ -18,6 +27,8 @@ function areSetsEqual<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
 }
 
 type VisibleSessionMetasResult = {
+  workspaceHistoryReadable: boolean;
+  historyOnlySessionIds: ReadonlySet<string>;
   sessions: SessionListEntry[];
   allActiveSessions: SessionMeta[];
   visibleMachineIds: Set<MachineId>;
@@ -26,6 +37,8 @@ type VisibleSessionMetasResult = {
 };
 
 type VisibleArchivedSessionMetasResult = {
+  workspaceHistoryReadable: boolean;
+  historyOnlySessionIds: ReadonlySet<string>;
   archivedSessions: SessionListEntry[];
   visibleMachineIds: Set<MachineId>;
   visibleLocalProjectKeys: Set<string>;
@@ -37,8 +50,50 @@ type WorkspaceVisibilityOptions = {
   enabled?: boolean;
 };
 
+/** Read grants do not add machine or management authority. */
+function useHistoryOnlySessionIds(
+  sessions: readonly SessionMeta[],
+  machines: ReadonlySet<MachineId>,
+  projects: ReadonlySet<string>,
+  accountId: string | null,
+  readable: boolean,
+  ownedMachineIds: ReadonlySet<MachineId>,
+  readSharedSessions: ReadonlyMap<string, SessionAccessView>,
+  sessionsById: ReadonlyMap<string, SessionMeta>,
+  workspaceId: string | null
+) {
+  const previous = useRef(new Set<string>());
+  return useMemo(() => {
+    const next = new Set(
+      sessions
+        .filter(
+          (session) =>
+            (isSessionReadShared(session, readSharedSessions, sessionsById, accountId) ||
+              (!!accountId && session.userId === accountId) ||
+              isImportedIntoWorkspace(session, workspaceId, accountId)) &&
+            !isSessionEditableToUser(session, machines, projects, accountId, ownedMachineIds)
+        )
+        .map((session) => session.id)
+    );
+    if (areSetsEqual(previous.current, next)) return previous.current;
+    previous.current = next;
+    return next;
+  }, [
+    sessions,
+    machines,
+    projects,
+    accountId,
+    workspaceId,
+    readable,
+    ownedMachineIds,
+    readSharedSessions,
+    sessionsById,
+  ]);
+}
+
 export function useVisibleMachineIdSet(options: WorkspaceVisibilityOptions = {}): {
   visibleMachineIds: Set<MachineId>;
+  ownedMachineIds: Set<MachineId>;
   isLoading: boolean;
 } {
   const { accessByMachineId, isLoading } = useVisibleMachineMetas({
@@ -60,7 +115,22 @@ export function useVisibleMachineIdSet(options: WorkspaceVisibilityOptions = {})
     return next;
   }, [accessByMachineId]);
 
-  return { visibleMachineIds, isLoading };
+  const accountId = useWorkspaceLocalAccountId();
+  const ownedRef = useRef(new Set<MachineId>());
+  const ownedMachineIds = useMemo(() => {
+    const next = new Set(
+      [...accessByMachineId]
+        .filter(
+          ([, access]) =>
+            !!accountId && options.enabled !== false && access.ownerUserId === accountId
+        )
+        .map(([id]) => id)
+    );
+    if (areSetsEqual(ownedRef.current, next)) return ownedRef.current;
+    ownedRef.current = next;
+    return next;
+  }, [accessByMachineId, accountId, options.enabled]);
+  return { visibleMachineIds, ownedMachineIds, isLoading };
 }
 
 export function useVisibleLocalProjectKeySet(options: WorkspaceVisibilityOptions = {}): {
@@ -89,15 +159,36 @@ export function useVisibleSessionMetas(
   options: WorkspaceVisibilityOptions = {}
 ): VisibleSessionMetasResult {
   const scope = useResolvedWorkspaceScope(options);
+  const workspaceHistoryReadable = useWorkspaceHistoryAccess(scope);
+  const { views: readSharedSessions, loading: sessionAccessLoading } = useSessionAccess(scope);
   const sessions = useAtomValue(sessionListAtom);
   const allActiveSessions = useAtomValue(allActiveSessionsAtom);
-  const { visibleMachineIds, isLoading: machineLoading } = useVisibleMachineIdSet(scope);
+  const {
+    visibleMachineIds,
+    ownedMachineIds,
+    isLoading: machineLoading,
+  } = useVisibleMachineIdSet(scope);
   const { visibleLocalProjectKeys, isLoading: localProjectLoading } =
     useVisibleLocalProjectKeySet(scope);
+  const sessionsById = useMemo(
+    () => new Map(allActiveSessions.map((session) => [session.id, session])),
+    [allActiveSessions]
+  );
   const enabled = scope.enabled;
-  const currentUserIdValue = useAtomValue(userAtom)?.id ?? null;
+  const currentUserIdValue = useWorkspaceLocalAccountId();
   const currentUserId = enabled ? currentUserIdValue : null;
-  const isLoading = machineLoading || localProjectLoading;
+  const isLoading = machineLoading || localProjectLoading || sessionAccessLoading;
+  const historyOnlySessionIds = useHistoryOnlySessionIds(
+    allActiveSessions,
+    visibleMachineIds,
+    visibleLocalProjectKeys,
+    currentUserId,
+    workspaceHistoryReadable,
+    ownedMachineIds,
+    readSharedSessions,
+    sessionsById,
+    scope.workspaceId
+  );
 
   const visibleSessions = useMemo(
     () =>
@@ -107,10 +198,27 @@ export function useVisibleSessionMetas(
             visibleMachineIds,
             visibleLocalProjectKeys,
             machineLoading,
-            currentUserId
+            currentUserId,
+            workspaceHistoryReadable,
+            ownedMachineIds,
+            readSharedSessions,
+            sessionsById,
+            scope.workspaceId
           )
         : [],
-    [currentUserId, enabled, machineLoading, sessions, visibleLocalProjectKeys, visibleMachineIds]
+    [
+      currentUserId,
+      enabled,
+      machineLoading,
+      sessions,
+      visibleLocalProjectKeys,
+      visibleMachineIds,
+      workspaceHistoryReadable,
+      ownedMachineIds,
+      readSharedSessions,
+      sessionsById,
+      scope.workspaceId,
+    ]
   );
   const visibleAllActiveSessions = useMemo(
     () =>
@@ -120,7 +228,12 @@ export function useVisibleSessionMetas(
             visibleMachineIds,
             visibleLocalProjectKeys,
             machineLoading,
-            currentUserId
+            currentUserId,
+            workspaceHistoryReadable,
+            ownedMachineIds,
+            readSharedSessions,
+            sessionsById,
+            scope.workspaceId
           )
         : [],
     [
@@ -130,10 +243,17 @@ export function useVisibleSessionMetas(
       machineLoading,
       visibleLocalProjectKeys,
       visibleMachineIds,
+      workspaceHistoryReadable,
+      ownedMachineIds,
+      readSharedSessions,
+      sessionsById,
+      scope.workspaceId,
     ]
   );
 
   return {
+    workspaceHistoryReadable,
+    historyOnlySessionIds,
     sessions: visibleSessions,
     allActiveSessions: visibleAllActiveSessions,
     visibleMachineIds,
@@ -146,13 +266,34 @@ export function useVisibleArchivedSessionMetas(
   options: WorkspaceVisibilityOptions = {}
 ): VisibleArchivedSessionMetasResult {
   const scope = useResolvedWorkspaceScope(options);
+  const workspaceHistoryReadable = useWorkspaceHistoryAccess(scope);
+  const { views: readSharedSessions, loading: sessionAccessLoading } = useSessionAccess(scope);
   const archivedSessions = useAtomValue(archivedSessionListAtom);
-  const { visibleMachineIds, isLoading: machineLoading } = useVisibleMachineIdSet(scope);
+  const {
+    visibleMachineIds,
+    ownedMachineIds,
+    isLoading: machineLoading,
+  } = useVisibleMachineIdSet(scope);
   const { visibleLocalProjectKeys, isLoading: localProjectLoading } =
     useVisibleLocalProjectKeySet(scope);
-  const currentUserIdValue = useAtomValue(userAtom)?.id ?? null;
+  const sessionsById = useMemo(
+    () => new Map(archivedSessions.map((session) => [session.id, session])),
+    [archivedSessions]
+  );
+  const currentUserIdValue = useWorkspaceLocalAccountId();
   const currentUserId = scope.enabled ? currentUserIdValue : null;
-  const isLoading = machineLoading || localProjectLoading;
+  const isLoading = machineLoading || localProjectLoading || sessionAccessLoading;
+  const historyOnlySessionIds = useHistoryOnlySessionIds(
+    archivedSessions,
+    visibleMachineIds,
+    visibleLocalProjectKeys,
+    currentUserId,
+    workspaceHistoryReadable,
+    ownedMachineIds,
+    readSharedSessions,
+    sessionsById,
+    scope.workspaceId
+  );
 
   const visibleArchivedSessions = useMemo(
     () =>
@@ -162,7 +303,12 @@ export function useVisibleArchivedSessionMetas(
             visibleMachineIds,
             visibleLocalProjectKeys,
             machineLoading,
-            currentUserId
+            currentUserId,
+            workspaceHistoryReadable,
+            ownedMachineIds,
+            readSharedSessions,
+            sessionsById,
+            scope.workspaceId
           )
         : [],
     [
@@ -172,13 +318,27 @@ export function useVisibleArchivedSessionMetas(
       scope.enabled,
       visibleLocalProjectKeys,
       visibleMachineIds,
+      workspaceHistoryReadable,
+      ownedMachineIds,
+      readSharedSessions,
+      sessionsById,
+      scope.workspaceId,
     ]
   );
 
   return {
+    workspaceHistoryReadable,
+    historyOnlySessionIds,
     archivedSessions: visibleArchivedSessions,
     visibleMachineIds,
     visibleLocalProjectKeys,
     isLoading,
   };
+}
+
+/** Ownership is resolved by the same access rows as sharing management, including its BC fallback. */
+export function useMySessionScope(options: WorkspaceVisibilityOptions = {}) {
+  const currentUserId = useWorkspaceLocalAccountId();
+  const { ownedMachineIds } = useVisibleMachineIdSet(options);
+  return { currentUserId, ownedMachineIds };
 }

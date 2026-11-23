@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 
 import {
   installEmbeddedNodePtyBinding,
+  installEmbeddedKeyringBinding,
+  installEmbeddedRoostBinding,
   installEmbeddedSqliteBinding,
   stageCliRuntimePackages
 } from './cli-native-deps.mjs'
@@ -36,7 +38,12 @@ function copyDir(fromDir, toDir) {
 }
 
 function writeCliPackageMetadata() {
+  const cliPackage = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, '../../cli/package.json'), 'utf8')
+  )
   const metadata = {
+    name: cliPackage.name || 'lody',
+    version: cliPackage.version || '0.0.0',
     private: true,
     type: 'module',
     main: 'index.js'
@@ -59,8 +66,11 @@ writeCliPackageMetadata()
 // platform/arch bindings staged here make local `electron-vite preview` and
 // same-arch packaging work; electron-builder's beforePack hook re-stages bindings
 // per packaging target (mac release builds both arm64 and x64).
+fs.rmSync(path.resolve(__dirname, '../resources/roost'), { recursive: true, force: true })
 stageCliRuntimePackages()
 installEmbeddedSqliteBinding({ platform: process.platform, arch: process.arch })
 installEmbeddedNodePtyBinding({ platform: process.platform, arch: process.arch })
+installEmbeddedKeyringBinding({ platform: process.platform, arch: process.arch })
+installEmbeddedRoostBinding({ platform: process.platform, arch: process.arch })
 
 console.log(`Synced CLI dist to ${destDir}`)

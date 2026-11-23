@@ -28,15 +28,11 @@ const LOADED_GROUPS: ProjectSkillResolvedGroup[] = [
         isSymlink: false,
         content: [
           '## When to use',
-          '',
           'Run this before opening a PR to catch correctness bugs and tidy up.',
-          '',
           '### Steps',
-          '',
           '1. Diff the branch against `main`.',
           '2. Flag **correctness** issues first, then reuse/simplification.',
           '3. Suggest concrete fixes with `code` snippets.',
-          '',
           '> Tip: keep findings high-signal — no nitpicks.',
         ].join('\n'),
       },
@@ -163,6 +159,48 @@ export const Loaded: Story = {
     stale: false,
     fetchedAt: FETCHED_AT,
     onRefresh: noop,
+  },
+};
+
+export const InternalAnchors: Story = {
+  args: {
+    status: 'ready',
+    stale: false,
+    onRefresh: noop,
+    groups: [
+      {
+        scope: 'project',
+        dir: '.agents/skills',
+        registration: 'registered',
+        truncated: false,
+        skills: [
+          {
+            id: 'anchor-demo',
+            name: 'anchor-demo',
+            relativePath: '.agents/skills/anchor-demo',
+            isSymlink: false,
+            content: [
+              '[Handle rebase conflicts](#handle-rebase-conflicts-agent-workflow)',
+              '[中文](#%E4%B8%AD%E6%96%87%E6%A0%87%E9%A2%98) [Repeat](#repeat-1) [Nested](#nested-heading)',
+              '[External](https://example.com/guide#section)',
+              ...Array.from(
+                { length: 24 },
+                (_, index) => `\nSynthetic context paragraph ${index + 1}.`
+              ),
+              '\n## Handle rebase conflicts (agent workflow)',
+              '\n## 中文标题',
+              '\n## Repeat',
+              '\n## Repeat',
+              '\n> ### Nested **heading**',
+              ...Array.from(
+                { length: 24 },
+                (_, index) => `\nSynthetic trailing paragraph ${index + 1}.`
+              ),
+            ].join('\n'),
+          },
+        ],
+      },
+    ],
   },
 };
 

@@ -1,18 +1,45 @@
 import type {
+  E2eeWorkspaceHistoryRequest,
+  E2eeWorkspaceHistoryPage,
+  E2eeContentTokenRequest,
+  E2eeContentToken,
+  E2eeMailboxRequests,
+  E2eeMailboxReplies,
+} from '@lody/cloud-api';
+import type { NotificationPresentation } from '@lody/shared/notifications';
+import type { Effect, Scope } from 'effect';
+export type { LoroStreamsTokenProvider } from '@lody/shared';
+import type { TerminalOutcome } from '@lody/shared/notifications';
+import type {
+  BugReportClientLog,
   LiveActivityConversationItem,
   LiveActivityPermissionAlert,
   LiveActivityStatusCounts,
   MachineBugReportResponse,
   PermissionRequestKind,
   SessionPullRequestMeta,
-  ACPSessionId,
   BillingPlanTier,
   MachineId,
   SessionId,
   WorkspaceId,
-  createLoroStreamsTokenProvider,
+  createLoroStreamsTokenProviderLegacy,
+  LoroStreamsTokenProvider,
 } from '@lody/shared';
 import type { PlatformKind, WorkspaceSummary } from './provider';
+import type {
+  SessionShareRequestInput,
+  SessionShareRequestResult,
+} from '@lody/shared/session-sharing';
+
+export interface CloudSessionSharingPort {
+  request(input: SessionShareRequestInput): Promise<SessionShareRequestResult>;
+  getResult(
+    input: Pick<
+      SessionShareRequestInput,
+      'workspaceId' | 'sourceSessionId' | 'requesterUserId' | 'deliveryPublicKey'
+    > & { shareRequestId: string }
+  ): Promise<SessionShareRequestResult>;
+}
 
 /**
  * CloudPort is the CLI-side seam: every cloud service the daemon talks to is
@@ -24,7 +51,75 @@ import type { PlatformKind, WorkspaceSummary } from './provider';
  * so. Call sites must never construct cloud clients or probe reachability to
  * invent a fallback.
  */
+/**
+ * Lody-operated iroh relays for encrypted-workspace RPC. Supplied only by the
+ * official build composition; never fetched from the control plane. Every dial
+ * names all of them, so no address is published anywhere.
+ */
+export interface E2eeIrohRelays {
+  readonly urls: readonly string[];
+  /** Shared relay access token, sent as a bearer token. */
+  readonly token?: string;
+}
+
+/** Device-scoped cloud transport; local opens and custody stay with its host. */
+export interface CloudE2eePort {
+  readonly machineSharing?: import('./e2ee-machine-sharing').E2eeMachineSharingTransport;
+  /** Absent: no iroh route; the host keeps Streams RPC and durable dispatch. */
+  readonly irohRelays?: E2eeIrohRelays;
+
+  /** Raw retained update messages, never a snapshot or an attribution verdict. */
+  readExecutionOriginPage?(
+    input: {
+      workspaceId: string;
+      credential: string;
+      docId: string;
+      before?: string;
+    },
+    signal: AbortSignal
+  ): Promise<{ messages: readonly Uint8Array[]; before: string; atStart: boolean }>;
+
+  completeMachinePairing?(input: {
+    workspaceId: string;
+    credential: string;
+    pairingSessionId: string;
+  }): Promise<void>;
+  /** CLI-only native kernel assembled by its optional cloud composition. */
+  createContentTokenProvider?(input: {
+    workspaceId: string;
+    credential: string;
+    rpcOnly?: true;
+  }): Effect.Effect<
+    LoroStreamsTokenProvider & { getBucketId(): string | undefined },
+    never,
+    Scope.Scope
+  >;
+
+  getHistory(
+    input: Omit<E2eeWorkspaceHistoryRequest, 'cliToken'> & { credential: string }
+  ): Promise<E2eeWorkspaceHistoryPage>;
+  getContentToken(input: Omit<E2eeContentTokenRequest, 'cliToken'>): Promise<E2eeContentToken>;
+  /** Untrusted current publication originals; the native host verifies ledger binding and HPKE. */
+  readEpochGroup?(
+    input: Omit<import('@lody/cloud-api').ReadEpochGroupRequest, 'cliToken'>
+  ): Promise<import('@lody/cloud-api').EpochStagedGroupDto | null>;
+  mailboxCall<K extends keyof E2eeMailboxRequests>(
+    method: K,
+    input: Omit<E2eeMailboxRequests[K], 'cliToken'>
+  ): Promise<E2eeMailboxReplies[K]>;
+}
 export interface CloudPort {
+  /** Absent until the cloud can issue and verify scoped remote Automation proofs. */
+  remoteAutomation?: {
+    verifyControl(input: {
+      intent: import('@lody/shared/automations').RemoteAutomationIntent;
+      requestToken: string;
+    }): Promise<{ requesterUserId: string; expiresAt: number }>;
+  };
+  /** Absent in ordinary/local composition; does not own local key material. */
+  e2ee?: CloudE2eePort | null;
+  /** Explicit one-workspace machine service composition; never permits a legacy bridge. */
+  readonly e2eeMachineScope?: { workspaceId: string; genesisHash: string };
   readonly kind: PlatformKind;
   /** The identity every durable write is authored under. */
   identity: CloudPortIdentity;
@@ -41,6 +136,8 @@ export interface CloudPort {
   githubTokens: CloudGithubTokenPort | null;
   /** `null` ⇒ no in-app bug report upload. */
   bugReports: CloudBugReportPort | null;
+  /** Proposals only. Human approval and publication have no daemon port. */
+  sessionSharing: CloudSessionSharingPort | null;
   /** `null` ⇒ no PR association / status reconciliation. */
   prAssociation: CloudPrAssociationPort | null;
   /**
@@ -104,6 +201,27 @@ export type CloudAccessSnapshot =
  * local catalog, the owner is always allowed, and no network I/O happens.
  */
 export interface CloudAccessPort {
+  /** Online verification of a short-lived, purpose-bound ordinary history proof. */
+  verifySessionHistoryRead?: (request: {
+    workspaceId: string;
+    machineId: string;
+    sessionId: string;
+    rootSessionId: string;
+    sessionOwnerUserId?: string;
+    localProjectId?: string;
+    requestToken: string;
+  }) => Promise<boolean>;
+  verifySessionHistoryWrite?: (request: {
+    requestId: string;
+    intentDigest: string;
+    workspaceId: string;
+    machineId: string;
+    sessionId: string;
+    rootSessionId: string;
+    sessionOwnerUserId?: string;
+    localProjectId?: string;
+    requestToken: string;
+  }) => Promise<{ expiresAt: number } | null>;
   /**
    * Emits the current workspace set immediately and on every change.
    */
@@ -119,10 +237,16 @@ export interface CloudAccessPort {
   }): Promise<CloudWorkspaceUserProfile | null>;
 }
 
-export type LoroStreamsTokenProvider = ReturnType<typeof createLoroStreamsTokenProvider>;
+export type LoroStreamsTokenProviderLegacy = ReturnType<
+  typeof createLoroStreamsTokenProviderLegacy
+>;
 
 export interface CloudStreamsTokenPort {
-  createTokenProvider(options: { workspaceId: WorkspaceId }): LoroStreamsTokenProvider;
+  createTokenProvider(options: {
+    workspaceId: WorkspaceId;
+  }): Effect.Effect<LoroStreamsTokenProvider, never, Scope.Scope>;
+  /** @deprecated Promise consumers retain the visible Legacy entry until their owners migrate. */
+  createTokenProviderLegacy(options: { workspaceId: WorkspaceId }): LoroStreamsTokenProviderLegacy;
 }
 
 export interface CloudPermissionRequestNotificationInput {
@@ -136,6 +260,7 @@ export interface CloudPermissionRequestNotificationInput {
   toolTitle?: string | null;
   toolKind?: string | null;
   requestKind?: PermissionRequestKind;
+  presentation?: NotificationPresentation;
 }
 
 export interface CloudPermissionRequestResolutionInput {
@@ -150,6 +275,8 @@ export interface CloudNotificationsPort {
   notifySessionCompleted(input: {
     sessionId: SessionId;
     occurrenceId: string;
+    outcome?: TerminalOutcome;
+    presentation?: NotificationPresentation;
     sessionTitle?: string | null;
     pullRequests?: readonly SessionPullRequestMeta[];
     workspaceId: WorkspaceId;
@@ -174,7 +301,8 @@ export interface CloudNotificationsPort {
 export interface CloudUsageUpdateInput {
   workspaceId: WorkspaceId;
   sessionId: SessionId;
-  acpSessionId: ACPSessionId;
+  /** Accounting scope; may be a native session ID or a provider turn key. */
+  acpSessionId: string;
   userId: string;
   machineId: MachineId;
   cliType: string;
@@ -207,6 +335,8 @@ export interface CloudBugReportInput {
   reporterUserId: string;
   requestToken: string;
   machineUserId: string;
+  /** The reporter's client log, already validated against its schema. */
+  clientLog?: BugReportClientLog;
 }
 
 export interface CloudBugReportPort {
@@ -219,7 +349,14 @@ export interface CloudAttachmentUploadPort {
 }
 
 export interface CloudRemotePreviewPort {
-  gatewayBaseUrl: string;
+  /** Short-lived ICE credentials; null/absent providers never trigger cloud I/O. */
+  simulatorIceServers?(input: MachineAccessRequest): Promise<{
+    iceServers: Array<{ urls: string[]; username?: string; credential?: string }>;
+    expiresAt: number;
+  }>;
+  verifyControl(
+    input: import('@lody/shared').VerifyPreviewControlInput
+  ): Promise<{ requesterUserId: string; expiresAt: number }>;
 }
 
 export interface RuntimeArtifactsPort {
@@ -237,7 +374,7 @@ export interface CloudBillingEntitlement {
 }
 
 export interface CloudBillingPort {
-  /** Callers apply cooperative quota policy and MUST fail open on errors. */
+  /** Cooperative quotas fail open on errors; opt-in paid transfers require a positive entitlement. */
   getWorkspaceEntitlement(workspaceId: string): Promise<CloudBillingEntitlement>;
 }
 
@@ -247,6 +384,15 @@ export interface CloudGithubWriteTokenContext {
 }
 
 export interface CloudGithubTokenManager {
+  getCredentialPolicy(context: CloudGithubWriteTokenContext, signal?: AbortSignal): Promise<{ personalEnabled: boolean }>;
+  getCredentialCandidate(
+    repoFullName: string,
+    context: CloudGithubWriteTokenContext,
+    source: 'personal' | 'app',
+    invalidatedPersonalToken?: string
+  ): Promise<
+    { token: string; tokenSource: 'personal' | 'app' } | { available: false; reason: string } | null
+  >;
   startAutoRefresh(): void;
   getAppTokenForRepo(repoFullName: string): Promise<string>;
   getWriteTokenForRepo(

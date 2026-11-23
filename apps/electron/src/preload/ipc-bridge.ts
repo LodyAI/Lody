@@ -1,6 +1,6 @@
 import { ipcRenderer } from 'electron'
 import { IPC_PUSH_CHANNELS, isIpcPushChannel, isIpcSendChannel } from '@lody/shared/electron-ipc'
-import { isIpcInvokeChannel } from './ipc-invoke-policy'
+import { isClientLossProbeChannel, isIpcInvokeChannel } from './ipc-invoke-policy'
 
 const pendingDeepLinks: unknown[] = []
 const deepLinkHandlers = new Set<(payload: unknown) => void>()
@@ -17,7 +17,7 @@ ipcRenderer.on(IPC_PUSH_CHANNELS.appDeepLink, (_event, url: unknown) => {
 
 export const ipcBridge = {
   invoke: async (channel: string, ...args: unknown[]) => {
-    if (!isIpcInvokeChannel(channel)) {
+    if (!isIpcInvokeChannel(channel) && !isClientLossProbeChannel(channel)) {
       throw new Error(`Blocked IPC invoke: ${channel}`)
     }
     return await ipcRenderer.invoke(channel, ...args)
@@ -41,7 +41,7 @@ export const ipcBridge = {
     return () => ipcRenderer.removeListener(channel, handler)
   },
   send: (channel: string, payload?: unknown) => {
-    if (!isIpcSendChannel(channel)) {
+    if (!isIpcSendChannel(channel) && !isClientLossProbeChannel(channel)) {
       throw new Error(`Blocked IPC send: ${channel}`)
     }
     ipcRenderer.send(channel, payload)

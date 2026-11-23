@@ -1,20 +1,14 @@
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import type {
   LocalProjectHistoryProvider,
   MachineId,
-  PrStatus,
-  SessionPullRequestCiState,
-  SessionPullRequestReadiness,
   SessionMeta,
   SessionStatus,
 } from '@lody/shared';
-import {
-  deriveSessionPullRequestReadiness,
-  getSessionPullRequestLegacyFields,
-  parseGitHubPrNumber,
-  resolveProjectGitHubRepo,
-} from '@lody/shared';
+import { resolveProjectGitHubRepo } from '@lody/shared';
 import type { TaskListTask, TaskListTaskOwner } from '@/components/task-list';
 import { getLineChangeDeltaForScope, type LineChangeScope } from '@/lib/file-change-category';
+import { getLatestPullRequestInfo } from './session-list-rows';
 
 export type SessionTaskListScope = 'my' | 'team';
 
@@ -101,13 +95,6 @@ export function getEffectiveLatestMessageAt(
   return maxMs;
 }
 
-function sessionHasUnreadMessages(session: SessionMeta): boolean {
-  const lastMessageAt = parseTimestamp(session.lastMessageAt);
-  if (lastMessageAt === null) return false;
-  const lastReadAt = parseTimestamp(session.lastReadAt);
-  return lastReadAt === null || lastMessageAt > lastReadAt;
-}
-
 export type EffectiveSessionActivitySummary = {
   isWorking: boolean;
   isWaitingPermission: boolean;
@@ -158,38 +145,6 @@ export function getEffectiveSessionActivitySummary(
   };
 }
 
-type LatestPullRequestInfo = {
-  url: string | null;
-  number: number | null;
-  status: PrStatus | null;
-  ciState: SessionPullRequestCiState | null;
-  readiness: SessionPullRequestReadiness | null;
-};
-
-export function getLatestPullRequestInfo(session: SessionMeta): LatestPullRequestInfo {
-  const pullRequests = session.pullRequests ?? [];
-  if (!pullRequests.length) {
-    return { url: null, number: null, status: null, ciState: null, readiness: null };
-  }
-
-  const latest = pullRequests.some((pr) => getSessionPullRequestLegacyFields(pr).reportedAt)
-    ? [...pullRequests].sort((a, b) =>
-        (getSessionPullRequestLegacyFields(b).reportedAt ?? '').localeCompare(
-          getSessionPullRequestLegacyFields(a).reportedAt ?? ''
-        )
-      )[0]
-    : pullRequests[pullRequests.length - 1];
-  const url = normalizeString(latest?.url ?? '');
-  const legacy = getSessionPullRequestLegacyFields(latest);
-  return {
-    url: url ? url : null,
-    number: legacy.number ?? (url ? parseGitHubPrNumber(url) : null),
-    status: latest?.status ?? null,
-    ciState: url ? (session.pullRequestState?.[url]?.s ?? null) : null,
-    readiness: url ? deriveSessionPullRequestReadiness(session.pullRequestState?.[url]) : null,
-  };
-}
-
 export function mapSessionMetaToTaskListTask(
   session: SessionMeta,
   defaultTitle: string,
@@ -211,10 +166,7 @@ export function mapSessionMetaToTaskListTask(
       ? session.lastMessageAt
       : normalizeString(typeof session.lastMessageAt === 'string' ? session.lastMessageAt : '') ||
         session.createdAt;
-  const lastMessageAt = parseTimestamp(session.lastMessageAt);
-  const lastReadAt = parseTimestamp(session.lastReadAt);
-  const hasUnreadMessages =
-    lastMessageAt !== null && (lastReadAt === null || lastMessageAt > lastReadAt);
+  const hasUnreadMessages = sessionHasUnreadMessages(session);
 
   // A session is offline if we have online machine tracking and its machine is not in the set
   const isOffline = onlineMachineIds ? !onlineMachineIds.has(session.machineId) : false;

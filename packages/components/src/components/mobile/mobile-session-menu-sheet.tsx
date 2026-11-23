@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Copy, UserRoundCog } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -5,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { UserAvatar } from '@/components/user-avatar';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 /**
  * Bottom sheet that replaces the mobile session header "…" dropdown. A dropdown
@@ -50,6 +52,7 @@ export type MobileSessionMenuOwner = {
   /** Current `SessionMeta.userId`; may name someone who already left. */
   ownerUserId: string;
   onSelect: (userId: string) => void;
+  getDisabledReason?: (userId: string) => string | null;
 };
 
 export type MobileSessionMenuSheetProps = {
@@ -70,6 +73,7 @@ export function MobileSessionMenuSheet({
   owner,
 }: MobileSessionMenuSheetProps) {
   const { t } = useTranslation();
+  const maxHeight = useFoldAwareSheetHeight();
   const heading = title ?? t('sessions.moreActions', 'More actions');
   const [ownerListOpen, setOwnerListOpen] = useState(false);
   // Reopening the sheet should start from the collapsed row again.
@@ -86,7 +90,7 @@ export function MobileSessionMenuSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent className="h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60">
+      <DrawerContent style={{ maxHeight }} className="h-auto! rounded-t-2xl border-border/60">
         <DrawerTitle className="sr-only">{heading}</DrawerTitle>
         <DrawerDescription className="sr-only">{heading}</DrawerDescription>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(16px+var(--safe-area-bottom,0px))] pt-3">
@@ -167,23 +171,31 @@ export function MobileSessionMenuSheet({
                 <div className="flex max-h-64 flex-col overflow-y-auto border-t border-border/40">
                   {owner.members.map((member) => {
                     const isOwner = member.userId === owner.ownerUserId;
+                    const disabledReason = owner.getDisabledReason?.(member.userId);
                     return (
                       <button
                         key={member.userId}
                         type="button"
+                        disabled={!!disabledReason}
+                        title={disabledReason ?? undefined}
                         onClick={() => {
+                          if (disabledReason) return;
                           if (!isOwner) run(() => owner.onSelect(member.userId));
                           else onOpenChange(false);
                         }}
-                        className="flex w-full select-none items-center gap-2.5 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-muted/60"
+                        className={cn(
+                          'flex w-full select-none items-center gap-2.5 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-muted/60',
+                          stylex.props(!!disabledReason && ownerStyles.disabled).className
+                        )}
                       >
                         <UserAvatar
                           user={{ id: member.userId, name: member.name, image: member.image }}
-                          className="h-5 w-5 shrink-0"
-                          fallbackClassName="text-[0.6rem]"
+                          size="small"
+                          className="shrink-0"
                         />
                         <span className="min-w-0 flex-1 truncate text-foreground">
                           {member.name}
+                          {disabledReason ? <span> — {disabledReason}</span> : null}
                         </span>
                         {isOwner ? (
                           <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -225,3 +237,5 @@ export function MobileSessionMenuSheet({
     </Drawer>
   );
 }
+
+const ownerStyles = stylex.create({ disabled: { opacity: 0.5 } });

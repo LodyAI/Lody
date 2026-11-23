@@ -1,0 +1,408 @@
+import {
+  scheduleDefinitionFingerprint,
+  type ScheduleDocument,
+  type ScheduleAuthorizationRequest,
+  type ScheduleRegistryRow,
+  type ScheduleRuntimeRow,
+} from '@lody/shared';
+import type { ScheduleRun, ScheduleStore } from './schedule-store';
+
+export class ScheduleConfigurationError extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    super(code);
+    this.name = 'ScheduleConfigurationError';
+    this.code = code;
+  }
+}
+
+const CAPACITY_EXHAUSTED = 'CAPACITY_EXHAUSTED';
+
+export type ScheduleEnginePorts<Prepared> = {
+  workspaceId: string;
+  machineId: string;
+  userId: string;
+  store: ScheduleStore<Prepared>;
+  now: () => number;
+  disabled: () => boolean;
+  ready: () => boolean;
+  encrypted?: boolean;
+  authorize?: (request: ScheduleAuthorizationRequest) => Promise<boolean>;
+  list: () => Promise<ScheduleRegistryRow[]>;
+  /** True for an activation a workspace import carried in; it never runs automatically here. */
+  importFenced?: (row: ScheduleRegistryRow) => Promise<boolean>;
+  read: (scheduleId: string) => Promise<ScheduleDocument | null>;
+  validateTarget: (run: ScheduleRun<Prepared>) => Promise<void>;
+  /**
+   * Quota reset time when the run's agent binding is definitively exhausted.
+   * Undefined for available, unknown or stale capacity, which dispatches as usual.
+   */
+  capacityRetryAt?: (run: ScheduleRun<Prepared>) => Promise<number | undefined>;
+  prepare: (run: ScheduleRun<Prepared>) => Promise<Prepared>;
+  materialize: (prepared: Prepared) => Promise<void>;
+  isDispatched: (prepared: Prepared) => Promise<boolean>;
+  dispatch: (prepared: Prepared, run: ScheduleRun<Prepared>) => Promise<void | 'discarded'>;
+  isFinished: (run: ScheduleRun<Prepared>) => Promise<boolean>;
+  publish: (runtime: ScheduleRuntimeRow) => Promise<void>;
+  onError: (error: unknown) => void;
+  onEvent?: (event: {
+    type: string;
+    scheduleId: string;
+    runKey?: string;
+    code?: string;
+    scheduledFor?: number;
+  }) => void;
+};
+
+/** One serialized worker per Host/workspace, woken by time and local facts. */
+export class ScheduleEngine<Prepared> {
+  private active: Promise<void> | undefined;
+  private dirty = false;
+  private stopped = false;
+  private readonly projections = new Map<string, ScheduleRuntimeRow>();
+  constructor(private readonly ports: ScheduleEnginePorts<Prepared>) {}
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    await this.active;
+  }
+  evaluate(): Promise<void> {
+    this.dirty = true;
+    if (!this.active)
+      this.active = this.drain().finally(() => {
+        this.active = undefined;
+      });
+    return this.active;
+  }
+  private async drain(): Promise<void> {
+    while (this.dirty && !this.stopped) {
+      this.dirty = false;
+      this.projections.clear();
+      try {
+        await this.pass();
+        for (const runtime of this.projections.values()) await this.ports.publish(runtime);
+      } catch (error) {
+        this.ports.onError(error);
+      }
+    }
+  }
+  private owned(row: ScheduleRegistryRow): boolean {
+    return row.ownerId === this.ports.userId && row.machineId === this.ports.machineId;
+  }
+  private async pass(): Promise<void> {
+    const p = this.ports;
+    // Accepted Sessions recover even when scheduling is disabled or the cloud
+    // is unavailable. The ordinary watcher owns their execution now.
+    for (const run of p.store.unfinished(p.workspaceId)) {
+      if (
+        run.prepared !== undefined &&
+        run.state !== 'dispatched' &&
+        (await p.isDispatched(run.prepared))
+      ) {
+        p.store.transition(run.runKey, [run.state], { state: 'dispatched', dispatchedAt: p.now() });
+        p.onEvent?.({ type: 'recovered', scheduleId: run.scheduleId, runKey: run.runKey });
+      }
+      const current = p.store.get(run.runKey)!;
+      if (current.state === 'dispatched' && (await p.isFinished(current))) {
+        p.store.transition(current.runKey, ['dispatched'], { state: 'finished' });
+        p.onEvent?.({ type: 'finished', scheduleId: run.scheduleId, runKey: run.runKey });
+      }
+    }
+    if (!p.ready()) return;
+    const now = p.now();
+    const rows = await p.list();
+    if (p.disabled()) {
+      for (const row of rows)
+        if (this.owned(row))
+          await this.project(row, { queueState: 'blocked', blockedCode: 'SCHEDULES_DISABLED' });
+      return;
+    }
+    for (const row of rows) {
+      if (!this.owned(row) || !row.enabled) continue;
+      if (await p.importFenced?.(row)) continue;
+      if (row.scheduledMessage && p.store.messageDispatch(p.workspaceId, row.scheduleId)) {
+        await this.project(row, { nextScheduledAt: undefined });
+        continue;
+      }
+      try {
+        const last = p.store.history(p.workspaceId, row.scheduleId, 1)[0];
+        if (last?.activationId === row.activationId && last.state === 'failed')
+          await this.project(row, { queueState: 'blocked', blockedCode: last.errorCode });
+        const cursor = p.store.planningState(p.workspaceId, row.scheduleId, row.activationId);
+        if (
+          cursor?.fingerprint === row.definitionFingerprint &&
+          (cursor.nextSlot === null || cursor.nextSlot > now)
+        ) {
+          await this.project(row, { nextScheduledAt: cursor.nextSlot ?? undefined });
+          continue;
+        }
+        const document = await p.read(row.scheduleId);
+        if (!document || scheduleDefinitionFingerprint(document) !== row.definitionFingerprint) {
+          await this.project(row, {
+            queueState: 'blocked',
+            blockedCode: 'DEFINITION_NOT_COMMITTED',
+          });
+          continue;
+        }
+        const evaluation = p.store.plan(p.workspaceId, document, row.definitionFingerprint, now);
+        if (evaluation.due)
+          p.onEvent?.({
+            type: 'planned',
+            scheduleId: row.scheduleId,
+            scheduledFor: evaluation.due.scheduledFor,
+            code: evaluation.due.disposition,
+          });
+        await this.project(row, { nextScheduledAt: evaluation.nextScheduledAt });
+      } catch (error) {
+        await this.project(row, { queueState: 'blocked', blockedCode: 'DEFINITION_UNAVAILABLE' });
+        p.onError(error);
+      }
+    }
+    for (const run of p.store.unfinished(p.workspaceId)) {
+      if (run.state === 'dispatched') continue;
+      if (run.message && p.store.messageDispatch(p.workspaceId, run.scheduleId)) {
+        this.skip(run, 'MESSAGE_ALREADY_SENT');
+        continue;
+      }
+      // Never hold the last known enabled value across awaits in the create
+      // path. Re-read the local authoritative gate at each handoff attempt.
+      const row = (await p.list()).find((entry) => entry.scheduleId === run.scheduleId);
+      if (
+        !row ||
+        !this.owned(row) ||
+        (!row.enabled && !run.manual) ||
+        row.activationId !== run.activationId ||
+        row.definitionFingerprint !== run.definitionFingerprint
+      ) {
+        this.skip(run, 'ACTIVATION_REVOKED');
+        continue;
+      }
+      if (now - run.plannedAt >= run.definition.retryPolicy.dispatchMaxAgeMs) {
+        this.skip(run, 'DISPATCH_EXPIRED');
+        continue;
+      }
+      if (run.retryAt !== undefined && run.retryAt > now) {
+        await this.project(row, {
+          queueState: run.errorCode === 'DISPATCH_UNAVAILABLE' ? 'retrying' : 'blocked',
+          blockedCode: run.errorCode,
+        });
+        continue;
+      }
+      if (await this.deferForCapacity(row, run, now)) continue;
+      try {
+        await this.authorize(run);
+        let current = p.store.transition(run.runKey, [run.state], {
+          state: 'claimed',
+          attempts: run.attempts + 1,
+          retryAt: undefined,
+        });
+        if (current.prepared === undefined) {
+          const prepared = await p.prepare(current);
+          current = p.store.transition(run.runKey, ['claimed'], { prepared });
+        }
+        await p.materialize(current.prepared!);
+        p.store.transition(run.runKey, ['claimed'], { state: 'session_prepared' });
+        const latest = (await p.list()).find((entry) => entry.scheduleId === run.scheduleId);
+        const document = await p.read(run.scheduleId);
+        if (!p.ready() || p.disabled()) {
+          continue;
+        }
+        if (
+          !latest ||
+          !this.owned(latest) ||
+          (!latest.enabled && !run.manual) ||
+          latest.activationId !== run.activationId ||
+          latest.definitionFingerprint !== run.definitionFingerprint ||
+          !document ||
+          scheduleDefinitionFingerprint(document) !== run.definitionFingerprint
+        ) {
+          this.skip(p.store.get(run.runKey)!, 'ACTIVATION_REVOKED');
+          continue;
+        }
+        if (p.now() - run.plannedAt >= run.definition.retryPolicy.dispatchMaxAgeMs) {
+          this.skip(p.store.get(run.runKey)!, 'DISPATCH_EXPIRED');
+          continue;
+        }
+        await p.validateTarget(current);
+        // Validation may await local reads; close the authorization window again.
+        const gate = (await p.list()).find((entry) => entry.scheduleId === run.scheduleId);
+        if (!p.ready() || p.disabled()) {
+          continue;
+        }
+        if (
+          !gate ||
+          !this.owned(gate) ||
+          (!gate.enabled && !run.manual) ||
+          gate.activationId !== run.activationId ||
+          gate.definitionFingerprint !== run.definitionFingerprint
+        ) {
+          this.skip(p.store.get(run.runKey)!, 'ACTIVATION_REVOKED');
+          continue;
+        }
+        await this.authorize(run);
+        const result = await p.dispatch(current.prepared!, current);
+        if (result === 'discarded') {
+          this.skip(p.store.get(current.runKey)!, 'QUOTA_RECOVERY_ALREADY_ACCEPTED');
+          await this.project(row, {
+            queueState: 'blocked',
+            blockedCode: 'QUOTA_RECOVERY_ALREADY_ACCEPTED',
+          });
+          continue;
+        }
+        p.store.transition(run.runKey, ['session_prepared'], {
+          state: 'dispatched',
+          dispatchedAt: p.now(),
+        });
+        p.onEvent?.({ type: 'dispatched', scheduleId: run.scheduleId, runKey: run.runKey });
+        await this.project(row, {
+          lastDispatch: {
+            scheduledFor: run.scheduledFor,
+            dispatchedAt: p.now(),
+            sessionId: run.sessionId,
+          },
+        });
+      } catch (error) {
+        // A transport acknowledgement can fail after the pointer was committed.
+        // Inspect durable evidence before assigning any Schedule retry.
+        const current = p.store.get(run.runKey)!;
+        if (current.prepared !== undefined && (await p.isDispatched(current.prepared))) {
+          if (current.state !== 'dispatched')
+            p.store.transition(run.runKey, [current.state], {
+              state: 'dispatched',
+              dispatchedAt: p.now(),
+            });
+        } else {
+          const code =
+            error instanceof ScheduleConfigurationError ? error.code : 'DISPATCH_UNAVAILABLE';
+          if (error instanceof ScheduleConfigurationError)
+            p.store.transition(run.runKey, [current.state], {
+              state: 'retry_wait',
+              attempts: run.attempts,
+              retryAt: p.now() + 30_000,
+              errorCode: code,
+            });
+          else p.store.failAttempt(run.runKey, code, p.now());
+          p.onEvent?.({ type: 'blocked', scheduleId: run.scheduleId, runKey: run.runKey, code });
+          await this.project(row, {
+            queueState:
+              error instanceof ScheduleConfigurationError ||
+              p.store.get(run.runKey)?.state === 'failed'
+                ? 'blocked'
+                : 'retrying',
+            blockedCode: code,
+          });
+        }
+        p.onError(error);
+      }
+    }
+    for (const row of await p.list())
+      if (this.owned(row) && row.scheduledMessage) await this.project(row, {});
+  }
+
+  /**
+   * Defers a run whose agent quota is definitively exhausted until its reset,
+   * instead of dispatching it to fail. One deferred run per Schedule: later
+   * occurrences during the same exhaustion are skipped, so a reset never
+   * releases a burst. A run that could not start before its dispatch window
+   * closes is skipped. Any capacity read failure dispatches as usual.
+   */
+  private async deferForCapacity(
+    row: ScheduleRegistryRow,
+    run: ScheduleRun<Prepared>,
+    now: number
+  ): Promise<boolean> {
+    const eligible =
+      run.state === 'pending' ||
+      (run.state === 'retry_wait' && run.errorCode === CAPACITY_EXHAUSTED);
+    if (!eligible) return false;
+    const resetAt = await this.ports.capacityRetryAt?.(run).catch(() => undefined);
+    if (resetAt === undefined || resetAt <= now) return false;
+    const deferred = this.ports.store
+      .unfinished(this.ports.workspaceId)
+      .some(
+        (other) =>
+          other.runKey !== run.runKey &&
+          other.scheduleId === run.scheduleId &&
+          other.errorCode === CAPACITY_EXHAUSTED
+      );
+    if (deferred || resetAt - run.plannedAt >= run.definition.retryPolicy.dispatchMaxAgeMs) {
+      this.skip(run, CAPACITY_EXHAUSTED);
+    } else {
+      this.ports.store.transition(run.runKey, [run.state], {
+        state: 'retry_wait',
+        retryAt: resetAt,
+        errorCode: CAPACITY_EXHAUSTED,
+      });
+      this.ports.onEvent?.({
+        type: 'blocked',
+        scheduleId: run.scheduleId,
+        runKey: run.runKey,
+        code: CAPACITY_EXHAUSTED,
+      });
+    }
+    await this.project(row, { queueState: 'blocked', blockedCode: CAPACITY_EXHAUSTED });
+    return true;
+  }
+
+  private async authorize(run: ScheduleRun<Prepared>): Promise<void> {
+    if (!this.ports.encrypted) return;
+    if (
+      !this.ports.authorize ||
+      !(await this.ports.authorize({
+        scheduleId: run.scheduleId,
+        definitionFingerprint: run.definitionFingerprint,
+        ...(run.manual ? { manualRunKey: run.runKey } : {}),
+      }))
+    )
+      throw new ScheduleConfigurationError('E2EE_SCHEDULE_NOT_AUTHORIZED');
+  }
+
+  private skip(run: ScheduleRun<Prepared>, code: string): void {
+    this.ports.store.transition(run.runKey, [run.state], { state: 'skipped', errorCode: code });
+    this.ports.onEvent?.({ type: 'skipped', scheduleId: run.scheduleId, runKey: run.runKey, code });
+  }
+  private async project(
+    row: ScheduleRegistryRow,
+    projection: Partial<ScheduleRuntimeRow>
+  ): Promise<void> {
+    const last = this.ports.store.history(this.ports.workspaceId, row.scheduleId, 1)[0];
+    const dispatched = row.scheduledMessage
+      ? this.ports.store.messageDispatch(this.ports.workspaceId, row.scheduleId)
+      : last;
+    const lastDispatch =
+      dispatched &&
+      (row.scheduledMessage || dispatched.activationId === row.activationId) &&
+      (dispatched.state === 'dispatched' || dispatched.state === 'finished')
+        ? {
+            scheduledFor: dispatched.scheduledFor,
+            dispatchedAt: dispatched.dispatchedAt ?? dispatched.plannedAt,
+            sessionId: dispatched.sessionId,
+          }
+        : undefined;
+    this.projections.set(row.scheduleId, {
+      ...this.projections.get(row.scheduleId),
+      ...(lastDispatch ? { lastDispatch } : {}),
+      ...(last?.activationId === row.activationId &&
+      last.errorCode === 'QUOTA_RECOVERY_ALREADY_ACCEPTED'
+        ? { blockedCode: last.errorCode }
+        : {}),
+      ...(row.scheduledMessage
+        ? {
+            messageState: lastDispatch
+              ? ('sent' as const)
+              : !row.enabled
+                ? ('cancelled' as const)
+                : last?.state === 'failed' || last?.state === 'skipped'
+                  ? ('failed' as const)
+                  : ('pending' as const),
+          }
+        : {}),
+      scheduleId: row.scheduleId,
+      machineId: this.ports.machineId,
+      activationId: row.activationId,
+      observedDefinitionFingerprint: row.definitionFingerprint,
+      updatedAt: this.ports.now(),
+      ...projection,
+    });
+  }
+}

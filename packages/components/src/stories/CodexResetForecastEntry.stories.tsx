@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import {
   getRateLimitEntryKey,
   getServerNow,
@@ -9,8 +11,8 @@ import {
   type MachineViewMeta,
 } from '@lody/shared';
 
-// The chip is not rendered directly: the provider row below is its only call
-// site, and mounting the real row is what proves the gating and the placement.
+// Render the real provider row to exercise its direct forecast action,
+// eligibility, and placement beside read-only remaining quota.
 import { ProviderRow } from '@/components/settings/provider-row';
 import { SessionUsagePopover } from '@/components/sessions/session-usage-popover';
 import type { CodexResetStatus, CodexResetWatch } from '@/lib/codex-reset-forecast';
@@ -19,6 +21,17 @@ import {
   type CodexResetForecastState,
   type CodexResetForecastStore,
 } from '@/lib/codex-reset-forecast-store';
+
+const styles = stylex.create({
+  entries: {
+    display: 'flex',
+    width: '560px',
+    maxWidth: '100%',
+    flexDirection: 'column',
+    gap: space[8],
+  },
+  narrow: { width: '340px' },
+});
 
 const NOW_MS = getServerNow();
 
@@ -72,7 +85,7 @@ const codexMachine: MachineViewMeta = {
   os: 'macOS',
   sessions: [],
   raceLimits: {
-    [getRateLimitEntryKey('codex', 'codex')]: {
+    [getRateLimitEntryKey('codex', 'codex', 'cfg-codex' as AgentConfigId)]: {
       limitId: 'codex',
       scope: { providerId: 'codex' },
       planName: 'ChatGPT Plus',
@@ -104,22 +117,27 @@ const codexConfig: AgentConfigMeta = {
 
 type StoryProps = {
   state: CodexResetForecastState;
+  showActions?: boolean;
+  narrow?: boolean;
+  withoutRateLimits?: boolean;
 };
 
 /**
  * Both entry points side by side, each in the surface it actually ships in: the
  * composer's usage popover, and the settings provider row beside its rate limits.
  */
-function EntryPoints({ state }: StoryProps) {
+function EntryPoints({ state, showActions, narrow, withoutRateLimits }: StoryProps) {
+  const [lastAction, setLastAction] = useState<string | null>(null);
   return (
     <WithStubbedForecast state={state}>
-      <div className="flex w-[560px] flex-col gap-8">
+      <div {...stylex.props(styles.entries, narrow && styles.narrow)}>
         <section className="flex flex-col gap-2">
           <p className="text-xs font-medium text-muted-foreground">Composer usage popover</p>
           <SessionUsagePopover
             contextWindowUsage={{ size: 258_400, used: 203_700 }}
             rateLimits={codexMachine.raceLimits}
             agentType="codex"
+            agentConfigId={codexConfig.id}
             modelId="codex"
             modelLabel="5.6-Sol"
             showCodexResetForecast
@@ -130,8 +148,19 @@ function EntryPoints({ state }: StoryProps) {
         <section className="flex flex-col gap-2">
           <p className="text-xs font-medium text-muted-foreground">Provider row</p>
           <div className="rounded-lg border border-border/60 bg-card/50">
-            <ProviderRow config={codexConfig} machine={codexMachine} onEdit={() => {}} />
+            <ProviderRow
+              config={codexConfig}
+              machine={withoutRateLimits ? { ...codexMachine, raceLimits: {} } : codexMachine}
+              onEdit={() => {}}
+              onRefresh={showActions ? async () => setLastAction('Refreshed Codex') : undefined}
+              onDelete={showActions ? async () => {} : undefined}
+            />
           </div>
+          {lastAction ? (
+            <p role="status" aria-label="Provider action result">
+              {lastAction}
+            </p>
+          ) : null}
         </section>
       </div>
     </WithStubbedForecast>
@@ -149,13 +178,22 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ActiveForecast: Story = {
-  args: { state: readyState({ watch, latestReset: null }) },
+  args: { state: readyState({ watch, scheduledReset: null, latestReset: null }) },
+};
+
+export const ActiveForecastWithActions: Story = {
+  args: { ...ActiveForecast.args, showActions: true },
+};
+
+export const ActiveForecastNarrowWithActions: Story = {
+  args: { ...ActiveForecastWithActions.args, narrow: true },
 };
 
 export const WithoutProbability: Story = {
   args: {
     state: readyState({
       watch: { ...watch, chancePercent: null, level: 'elevated' },
+      scheduledReset: null,
       latestReset: null,
     }),
   },
@@ -163,8 +201,29 @@ export const WithoutProbability: Story = {
 
 /**
  * No forecast in force: the popover row disappears entirely, while the provider
- * row keeps its always-present entry into the dialog.
+ * row keeps its direct entry into the forecast dialog.
  */
 export const NoActiveWatch: Story = {
-  args: { state: readyState({ watch: null, latestReset: null }) },
+  args: { state: readyState({ watch: null, scheduledReset: null, latestReset: null }) },
+};
+
+export const NoActiveWatchWithActions: Story = {
+  args: { ...NoActiveWatch.args, showActions: true, withoutRateLimits: true },
+};
+
+export const ScheduledReset: Story = {
+  args: {
+    state: readyState({
+      watch: null,
+      latestReset: null,
+      scheduledReset: {
+        announcedAtIso: watch.observedAtIso,
+        announcedAtMs: watch.observedAtMs,
+        scheduledForIso: watch.expiresAtIso,
+        scheduledForMs: watch.expiresAtMs,
+        text: 'A reset is scheduled for later today.',
+        source: watch.source,
+      },
+    }),
+  },
 };

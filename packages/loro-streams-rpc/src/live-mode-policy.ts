@@ -17,6 +17,8 @@
  * - Fall back to long-poll when SSE is unsupported, when consecutive SSE reads
  *   fail, or when pending RPC responses keep timing out while SSE looks healthy
  *   (the silent-loss case that has no transport-level signal).
+ * - Renew earlier for an appended interactive history input that still needs
+ *   a reply, without failing or replaying that input.
  * - Re-probe SSE after a cooldown, except when the server said it does not
  *   support SSE at all.
  *
@@ -37,6 +39,8 @@ export type LoroStreamsLiveModeReason =
   | 'sse-read-failures'
   /** Pending RPC calls timed out while the SSE read itself looked healthy. */
   | 'sse-response-starvation'
+  /** An appended foreground history write still needs its response. */
+  | 'pending-write-recovery'
   /** Cooldown elapsed; probing SSE again. */
   | 'sse-retry-probe';
 
@@ -72,8 +76,8 @@ export type LoroStreamsLiveReadOutcome = {
 export const DEFAULT_SSE_READ_FAILURE_LIMIT = 3;
 /**
  * Pending-response timeouts (with no response received in between) tolerated on
- * a seemingly healthy SSE read before falling back. This is the only signal for
- * an SSE connection that stays open but stops delivering appends.
+ * a seemingly healthy SSE read before falling back. Interactive history inputs
+ * also have an earlier response-read recovery trigger.
  */
 export const DEFAULT_SSE_RESPONSE_TIMEOUT_LIMIT = 3;
 /** How long to stay on long-poll before probing SSE again. */
@@ -108,19 +112,23 @@ export class LoroStreamsLiveModePolicy {
   private readonly sseResponseTimeoutLimit: number;
   private readonly sseRetryCooldownMs: number;
   private readonly now: () => number;
-  private readonly onChange:
-    | ((diagnostics: LoroStreamsLiveModeDiagnostics) => void)
-    | undefined;
+  private readonly onChange: ((diagnostics: LoroStreamsLiveModeDiagnostics) => void) | undefined;
 
   constructor(options: LoroStreamsLiveModePolicyOptions = {}) {
     this.pin = options.pin;
     this.transport = options.pin ?? 'sse';
-    this.sseReadFailureLimit = Math.max(1, options.sseReadFailureLimit ?? DEFAULT_SSE_READ_FAILURE_LIMIT);
+    this.sseReadFailureLimit = Math.max(
+      1,
+      options.sseReadFailureLimit ?? DEFAULT_SSE_READ_FAILURE_LIMIT
+    );
     this.sseResponseTimeoutLimit = Math.max(
       1,
       options.sseResponseTimeoutLimit ?? DEFAULT_SSE_RESPONSE_TIMEOUT_LIMIT
     );
-    this.sseRetryCooldownMs = Math.max(0, options.sseRetryCooldownMs ?? DEFAULT_SSE_RETRY_COOLDOWN_MS);
+    this.sseRetryCooldownMs = Math.max(
+      0,
+      options.sseRetryCooldownMs ?? DEFAULT_SSE_RETRY_COOLDOWN_MS
+    );
     this.now = options.now ?? (() => Date.now());
     this.onChange = options.onChange;
   }
@@ -195,6 +203,17 @@ export class LoroStreamsLiveModePolicy {
     }
   }
 
+  /** Recover the response read without expiring or replaying an input write. */
+  recoverPendingWrite(): void {
+    if (this.pin) return;
+    if (this.transport === 'sse') {
+      this.fallback('pending-write-recovery', { probeAgain: true });
+    } else if (this.nextSseProbeAtMs !== undefined) {
+      // Do not use the foreground recovery read as an SSE retry probe.
+      this.nextSseProbeAtMs = this.now() + this.sseRetryCooldownMs;
+    }
+  }
+
   getDiagnostics(): LoroStreamsLiveModeDiagnostics {
     return {
       transport: this.transport,
@@ -214,7 +233,10 @@ export class LoroStreamsLiveModePolicy {
     this.setTransport('long-poll', reason);
   }
 
-  private setTransport(transport: LoroStreamsLiveTransport, reason: LoroStreamsLiveModeReason): void {
+  private setTransport(
+    transport: LoroStreamsLiveTransport,
+    reason: LoroStreamsLiveModeReason
+  ): void {
     const changed = this.transport !== transport;
     this.transport = transport;
     this.reason = reason;

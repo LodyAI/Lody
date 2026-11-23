@@ -8,16 +8,18 @@ import {
   type KeyboardEvent,
   type SVGProps,
 } from 'react';
-import { ChevronDown, Clock, Loader2, Pause, Play, Target, X } from 'lucide-react';
+import { ChevronDown, Clock, Pause, Play, Target, X } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
-import { formatDurationCompact, type DurationUnitLabels } from '@/lib/format-duration';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   isSessionGoalCleared,
+  isSessionGoalResumable,
   sanitizeGoalObjective,
   type SessionGoalCommand,
   type SessionGoalMessage,
@@ -62,22 +64,18 @@ export const GoalActionButton = ({
   return (
     <Button
       type="button"
-      variant="outline"
-      size="sm"
+      variant="secondary"
+      size="small"
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'h-7 gap-1.5 rounded-md px-2.5 text-xs font-medium',
-        'bg-background/70 backdrop-blur-xs',
         tone === 'success' &&
           'border-status-success/40 text-status-success hover:text-status-success hover:bg-status-success/10',
-        tone === 'danger' &&
-          'border-destructive/40 text-destructive hover:text-destructive hover:bg-destructive/10',
-        tone === 'default' && 'text-foreground/80 hover:text-foreground'
+        tone === 'danger' && 'text-destructive'
       )}
     >
       {loading ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
       ) : (
         <Icon className="h-3.5 w-3.5" aria-hidden="true" />
       )}
@@ -173,9 +171,8 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
   const showPause =
     goal.status === 'active' && commands?.includes('pause') === true && onGoalCommand != null;
   const showResume =
-    goal.status === 'paused' && commands?.includes('resume') === true && onGoalCommand != null;
-  const showClear =
-    !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
+    isSessionGoalResumable(goal) && commands?.includes('resume') === true && onGoalCommand != null;
+  const showClear = !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
   const showDismiss = isCleared && onDismiss != null;
 
   const triggerCommand = (command: SessionGoalCommand) => {
@@ -183,11 +180,7 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
     onGoalCommand?.(command, goal);
   };
 
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   const tokensUsed = Math.max(0, Math.floor(goal.tokensUsed ?? 0));
   const tokenBudget =
     typeof goal.tokenBudget === 'number' && goal.tokenBudget > 0
@@ -311,11 +304,12 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon"
+                size="small"
+                icon
                 onClick={() => onDismiss(goal)}
                 aria-label={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
                 title={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
-                className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                className="shrink-0"
               >
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
               </Button>

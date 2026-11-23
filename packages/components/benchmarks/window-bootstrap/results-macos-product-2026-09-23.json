@@ -1,0 +1,178 @@
+{
+  "date": "2026-09-23",
+  "platform": "macOS arm64 / M4 Max / Electron 39.5.1",
+  "entries": 3000,
+  "timingBoundary": "automation dispatch of source row Command-click to native show / unique text insertion observed after a frame",
+  "limits": [
+    "Synthetic 100% ready hits in first case; not a measured real-world hit rate",
+    "Input probe focuses composer and uses webContents.insertText; not physical keyboard, IME or display scanout",
+    "Existing bundled CLI 0.93.3 reused; desktop built from working tree",
+    "No native animation override in these production-path runs",
+    "An earlier 10-sample attempt completed 10 checks including warmups, then timed out after native show was requested; exact stalled capture/input step was not recorded. Added stage diagnostics; full rerun passed. Cause remains unestablished."
+  ],
+  "runs": [
+    {
+      "case": "prepared-hit",
+      "intentLeadMs": null,
+      "hitRate": 1,
+      "samples": [
+        {
+          "showMs": 32.5958329999994,
+          "inputObservedMs": 82.94312499999978,
+          "preparationMs": 402.044417000001
+        },
+        {
+          "showMs": 32.40745799999968,
+          "inputObservedMs": 81.98362499999894,
+          "preparationMs": 398.7034999999996
+        },
+        {
+          "showMs": 28.190458999999464,
+          "inputObservedMs": 71.14500000000044,
+          "preparationMs": 408.20800000000054
+        },
+        {
+          "showMs": 68.56537499999831,
+          "inputObservedMs": 116.42312500000116,
+          "preparationMs": 405.14095799999996
+        },
+        {
+          "showMs": 25.680583000001207,
+          "inputObservedMs": 83.64408299999923,
+          "preparationMs": 390.36066700000083
+        },
+        {
+          "showMs": 24.259165999999823,
+          "inputObservedMs": 69.49379100000078,
+          "preparationMs": 416.36995899999965
+        },
+        {
+          "showMs": 26.738792000000103,
+          "inputObservedMs": 67.41804200000115,
+          "preparationMs": 405.40520800000013
+        },
+        {
+          "showMs": 37.08912500000224,
+          "inputObservedMs": 89.19387500000084,
+          "preparationMs": 417.2017500000002
+        },
+        {
+          "showMs": 36.32770800000071,
+          "inputObservedMs": 94.98858300000211,
+          "preparationMs": 394.84312500000306
+        },
+        {
+          "showMs": 35.10870799999975,
+          "inputObservedMs": 74.05941699999676,
+          "preparationMs": 403.69316600000093
+        }
+      ],
+      "showMedianMs": 32.50164549999954,
+      "inputMedianMs": 82.46337499999936,
+      "passingChecksIncludingWarmups": 13,
+      "unreadPreservedChecks": 13,
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "7f76c5416cf9bbf5a72d5754db9c548299fc50c7bf741748dc9c1eca8bfdae7a",
+        "runtimeProviderSha256": "805b81429d4bde42beb62cf66aa65ab37a058add071dd65cac4d2420ea5497bc",
+        "rendererIndexSha256": "9472ec82c55334b79d315ed11411148f81ef4a4d0bc838177224368e5f7eb477"
+      }
+    },
+    {
+      "case": "zero-lead",
+      "intentLeadMs": 0,
+      "hitRate": 0,
+      "samples": [
+        {
+          "showMs": 443.992083000001,
+          "inputObservedMs": 491.60270800000035,
+          "preparationMs": null
+        },
+        {
+          "showMs": 438.38850000000093,
+          "inputObservedMs": 474.1413329999996,
+          "preparationMs": null
+        },
+        {
+          "showMs": 471.16595899999993,
+          "inputObservedMs": 533.8897089999991,
+          "preparationMs": null
+        },
+        {
+          "showMs": 460.6633330000004,
+          "inputObservedMs": 528.822583000001,
+          "preparationMs": null
+        },
+        {
+          "showMs": 451.13404100000116,
+          "inputObservedMs": 492.83612500000163,
+          "preparationMs": null
+        }
+      ],
+      "showMedianMs": 451.13404100000116,
+      "inputMedianMs": 492.83612500000163,
+      "passingChecksIncludingWarmups": 8,
+      "unreadPreservedChecks": 8,
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "7f76c5416cf9bbf5a72d5754db9c548299fc50c7bf741748dc9c1eca8bfdae7a",
+        "runtimeProviderSha256": "805b81429d4bde42beb62cf66aa65ab37a058add071dd65cac4d2420ea5497bc",
+        "rendererIndexSha256": "9472ec82c55334b79d315ed11411148f81ef4a4d0bc838177224368e5f7eb477"
+      }
+    },
+    {
+      "case": "early-claim",
+      "intentLeadMs": 200,
+      "hitRate": 0,
+      "samples": [
+        {
+          "showMs": 376.0689160000002,
+          "inputObservedMs": 458.92370800000026,
+          "preparationMs": 408.0082080000011
+        },
+        {
+          "showMs": 346.9358749999992,
+          "inputObservedMs": 430.4203749999997,
+          "preparationMs": 403.279833999999
+        },
+        {
+          "showMs": 356.01579200000015,
+          "inputObservedMs": 421.81633299999885,
+          "preparationMs": 405.17366700000093
+        },
+        {
+          "showMs": 332.0863750000026,
+          "inputObservedMs": 408.95358300000225,
+          "preparationMs": 389.73745899999994
+        },
+        {
+          "showMs": 343.8925829999971,
+          "inputObservedMs": 397.5462499999994,
+          "preparationMs": 391.062291000002
+        }
+      ],
+      "showMedianMs": 346.9358749999992,
+      "inputMedianMs": 421.81633299999885,
+      "passingChecksIncludingWarmups": 8,
+      "unreadPreservedChecks": 8,
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "7f76c5416cf9bbf5a72d5754db9c548299fc50c7bf741748dc9c1eca8bfdae7a",
+        "runtimeProviderSha256": "805b81429d4bde42beb62cf66aa65ab37a058add071dd65cac4d2420ea5497bc",
+        "rendererIndexSha256": "9472ec82c55334b79d315ed11411148f81ef4a4d0bc838177224368e5f7eb477"
+      }
+    }
+  ]
+}

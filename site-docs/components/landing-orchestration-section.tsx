@@ -1,5 +1,7 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 /**
  * Landing — one agent runs the others.
  * Scannable claim + short use cases + a simple fan-out visual (no MCP diagram, no CLI).
@@ -12,6 +14,7 @@ const MARK_BY_ID = new Map(LANDING_AGENTS.map((agent) => [agent.id, agent]));
 export type OrchestrationSectionCopy = {
   title: string;
   body: string;
+  docsLink?: { href: string; label: string };
   useCases: readonly { title: string; body: string }[];
   hubLabel: string;
   sessions: readonly { task: string; agentId: string }[];
@@ -28,6 +31,11 @@ export function LandingOrchestrationSection({ copy }: { copy: OrchestrationSecti
                 {copy.title}
               </h2>
               <p className="uw-orch__body">{copy.body}</p>
+              {copy.docsLink ? (
+                <p className="uw-section-docs">
+                  <SiteAnchor href={copy.docsLink.href}>{copy.docsLink.label}</SiteAnchor>
+                </p>
+              ) : null}
             </header>
 
             <ul className="uw-orch__cases">
@@ -63,9 +71,7 @@ export function LandingOrchestrationSection({ copy }: { copy: OrchestrationSecti
                     </span>
                     <span className="uw-orch__session-copy">
                       <span className="uw-orch__session-task">{session.task}</span>
-                      {mark ? (
-                        <span className="uw-orch__session-agent">{mark.name}</span>
-                      ) : null}
+                      {mark ? <span className="uw-orch__session-agent">{mark.name}</span> : null}
                     </span>
                   </li>
                 );

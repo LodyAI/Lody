@@ -1,16 +1,15 @@
 // @vitest-environment jsdom
-
-import React, { type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createStore, Provider } from 'jotai';
 
 import lodyLogo from '../src/assets/lody-icon.png';
-import { LoadingPlaceholder } from '../src/components/loading-placeholder';
+
 import { LoroSidebar, type LoroSidebarProps } from '../src/components/loro-sidebar';
 import { MobileHomeScreen } from '../src/components/mobile/mobile-home-screen';
 import { initI18n } from '../src/i18n';
-import { resolveWorkspaceIdentityLogo } from '../src/lib/workspace-identity';
 
 const sidebarProps: LoroSidebarProps = {
   workspaceName: 'Lody',
@@ -68,14 +67,6 @@ describe('workspace identity capability boundary', () => {
     flushSync(() => root?.render(node));
   }
 
-  it('uses the Lody brand logo only for the implicit local workspace', () => {
-    expect(resolveWorkspaceIdentityLogo('https://example.com/org.png', false)).toBe(lodyLogo);
-    expect(resolveWorkspaceIdentityLogo('https://example.com/org.png', true)).toBe(
-      'https://example.com/org.png'
-    );
-    expect(resolveWorkspaceIdentityLogo(null, true)).toBeNull();
-  });
-
   it('renders the desktop local workspace as a static nameplate', () => {
     render(<LoroSidebar {...sidebarProps} workspaceSwitcherEnabled={false} />);
 
@@ -85,11 +76,23 @@ describe('workspace identity capability boundary', () => {
     expect(container?.querySelector('[data-workspace-switcher-trigger]')).toBeNull();
   });
 
-  it('keeps the desktop cloud workspace trigger enabled by default', () => {
-    render(<LoroSidebar {...sidebarProps} />);
+  it('restores the sidebar viewport after unmount and keeps workspace positions separate', () => {
+    const store = createStore();
+    const sidebar = (key: string) => <LoroSidebar {...sidebarProps} scrollStateKey={key} />;
+    render(<Provider store={store}>{sidebar('workspace-a')}</Provider>);
 
-    expect(container?.querySelector('[data-workspace-switcher-trigger]')?.tagName).toBe('BUTTON');
-    expect(container?.querySelector('[data-workspace-identity]')).toBeNull();
+    const viewport = () => container?.querySelector<HTMLDivElement>('[data-scroll-area-viewport]');
+    expect(viewport()).not.toBeNull();
+    viewport()!.scrollTop = 180;
+    flushSync(() => root?.render(<Provider store={store}>{null}</Provider>));
+    flushSync(() => root?.render(<Provider store={store}>{sidebar('workspace-a')}</Provider>));
+    expect(viewport()?.scrollTop).toBe(180);
+
+    flushSync(() => root?.render(<Provider store={store}>{sidebar('workspace-b')}</Provider>));
+    expect(viewport()?.scrollTop).toBe(0);
+    viewport()!.scrollTop = 55;
+    flushSync(() => root?.render(<Provider store={store}>{sidebar('workspace-a')}</Provider>));
+    expect(viewport()?.scrollTop).toBe(180);
   });
 
   it('keeps scoped workspace synchronization visible after the connection is online', () => {
@@ -108,6 +111,7 @@ describe('workspace identity capability boundary', () => {
     const status = container?.querySelector('[data-workspace-status]');
     expect(status?.getAttribute('data-workspace-status')).toBe('syncing');
     expect(status?.textContent).toBe('Syncing target workspace…');
+    expect(status?.querySelector('[data-working-grid]')).not.toBeNull();
   });
 
   it('keeps connection failures ahead of workspace synchronization', () => {
@@ -123,15 +127,7 @@ describe('workspace identity capability boundary', () => {
     const status = container?.querySelector('[data-workspace-status]');
     expect(status?.getAttribute('data-workspace-status')).toBe('offline');
     expect(status?.textContent).toBe('No connection');
-  });
-
-  it('supports a content-scoped loading placeholder without taking over the viewport', () => {
-    render(<LoadingPlaceholder variant="content" title="Switching workspace" />);
-
-    const placeholder = container?.querySelector('[data-loading-placeholder-scope]');
-    expect(placeholder?.getAttribute('data-loading-placeholder-scope')).toBe('content');
-    expect(placeholder?.className).toContain('h-full');
-    expect(placeholder?.className).not.toContain('min-h-[100dvh]');
+    expect(status?.querySelector('[data-working-grid]')).toBeNull();
   });
 
   it('renders the mobile local workspace identity without a dialog trigger', () => {

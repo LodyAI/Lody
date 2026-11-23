@@ -112,7 +112,7 @@ const IMAGE_EXTENSIONS = new Set([
   'heic',
 ]);
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus']);
-const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v']);
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v', 'ogv']);
 // Plain-text-ish files: neutral icon tile. Kept distinct from DOCUMENT (pdf/
 // word) so prose docs and logs/markdown don't share the same accent.
 const TEXT_EXTENSIONS = new Set(['txt', 'text', 'log', 'md', 'markdown', 'mdx', 'rst']);
@@ -133,6 +133,10 @@ export const isHtmlSessionFile = (
   const mimeType = file.mimeType.split(';', 1)[0]?.trim().toLowerCase();
   return extension === 'html' || extension === 'htm' || mimeType === 'text/html';
 };
+
+export const isVideoSessionFile = (
+  file: Pick<SessionFilePayload, 'fileName' | 'mimeType'>
+): boolean => getSessionFileKind(file.fileName, file.mimeType) === 'video';
 
 /** Pick a coarse file kind from the name (then MIME) for icon selection. */
 export const getSessionFileKind = (fileName: string, mimeType?: string): SessionFileKind => {
@@ -184,5 +188,5 @@ export const getSessionFileDisplayState = (
 ): SessionFileDisplayState => {
   if (file.transport === 'local') return 'pending';
   if (isSessionFileExpired(file, now)) return 'expired';
-  return file.textPreview ? 'previewable' : 'downloadable';
+  return file.textPreview || isVideoSessionFile(file) ? 'previewable' : 'downloadable';
 };

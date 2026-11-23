@@ -62,6 +62,7 @@ export function computeTargetDueAtMs(target: SchedulableTarget): number {
  * The batch lane is the highest lane among its targets.
  */
 export type PrPollBatchPlan = {
+  nativeCredentials?: boolean;
   workspaceId: string;
   repoFullName: string;
   lane: PrPollLane;
@@ -79,10 +80,13 @@ export function planDueBatches(
     if (dueAtMs > nowMs) {
       continue;
     }
-    const key = `${target.workspaceId}|${target.repoFullName}`;
+    const nativeCredentials =
+      target.status?.nativeCredentials ?? target.discovery?.nativeCredentials ?? false;
+    const key = `${target.workspaceId}|${target.repoFullName}|${nativeCredentials}`;
     const batch = batches.get(key);
     if (!batch) {
       batches.set(key, {
+        nativeCredentials,
         workspaceId: target.workspaceId,
         repoFullName: target.repoFullName,
         lane: target.lane,
@@ -120,7 +124,10 @@ export function pickNextBatch(
     (a.workspaceId + a.repoFullName < b.workspaceId + b.repoFullName ? -1 : 1);
   const highs = batches.filter((batch) => batch.lane === 'high').sort(byOldest);
   const lows = batches.filter((batch) => batch.lane === 'low').sort(byOldest);
-  if (lows.length > 0 && (highs.length === 0 || consecutiveHighDispatches >= lowEveryNBatches - 1)) {
+  if (
+    lows.length > 0 &&
+    (highs.length === 0 || consecutiveHighDispatches >= lowEveryNBatches - 1)
+  ) {
     return lows[0] ?? null;
   }
   return highs[0] ?? lows[0] ?? null;

@@ -1,15 +1,21 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Loader2, X, History, Undo2, Pin, FileDiff } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { space, radius } from '@lody/ui/tokens/scales.stylex';
+import { tabPillStyles } from '../shared/tab-pill-strip';
+import { Plus, X, History, Undo2, FileDiff, Hand, ArchiveRestore } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import { cn } from '@/lib/utils';
+import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { focusLayerAtom } from '@/atoms/focus-layer';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
+import { WORKSPACE_FOCUS_SCOPES } from '@/atoms/focus-layer';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { ScrollArea } from '@/ui/scroll-area';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Tooltip } from '@lody/ui/tooltip';
+import { useListKeyboardNavigation } from '@/ui/focus-scope';
+import { ScrollArea } from '@lody/ui/scroll-area';
+import { Popover } from '@lody/ui/popover';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { FileIcon } from '@/components/icons/file-icons';
 import {
@@ -30,8 +36,14 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { type DraftSessionTab, getDraftTabLabel } from '@/lib/session-draft-tabs';
-import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
+import {
+  closedSessionHasUnreadMessages,
+  sessionHasUnreadMessages,
+} from '@/lib/session-read-receipt';
+import { isArchivedOutsideWorkspace, isSessionTabClosed } from '@/lib/session-tab-url';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
+import { SESSION_PAGE_CONTAINER_CLASS } from './session-conversation-page';
+import { dndPointerPoint } from '@/lib/dnd-pointer';
 import {
   armSessionMentionDrag,
   clearSessionMentionDrag,
@@ -91,50 +103,278 @@ interface SessionTabBarProps {
   onMentionSession?: (sessionId: string) => void;
 }
 
-/* One canvas: `bg-background` runs unbroken from this bar down through the
-   message list, and the tabs sit ON it without breaking it. The ACTIVE tab is
-   the heaviest thing in the row — it wears the app's floating-panel material
-   (`bg-sidebar` + `border-sidebar-border` + the same drop shadow as the side
-   panel and terminal dock), so "the one in a box" reads as the current page.
-   Inactive tabs get a flat borderless wash and dimmed text; they must stay
-   lighter-weight than the active tab, since chrome is what the eye scores as
-   selected among siblings.
+const savingPulse = stylex.keyframes({ '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } });
 
-   Keep the surface ladder ordered — canvas → inactive → active — measured, not
-   assumed. `bg-sidebar` gives light that ladder for free (canvas 241 → active
-   229), but DARK needs the override: Vesper's sideBar is #161616, a mere 6
-   above the #101010 canvas and BELOW the inactive wash (26), so the active pill
-   rendered as a dent and only its border kept it legible. Hence the `dark:`
-   pair, which lands canvas 16 → inactive 26 → active 42, border 70.
-   `--tab-active`/`--tab-inactive` are useless here: both collapse onto
-   `--background` in dark, which is what forced the original `/[0.22]` vs
-   `/[0.12]` tints — a 10% gap that rendered as one gray.
-   `border-transparent` on the base keeps every state on the same box model, so
-   switching tabs never shifts a label by a pixel. */
-const TAB_ITEM_CLASS =
-  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[13px] transition-colors cursor-pointer';
-// Colors are shared with TabPillStrip / TaskTabBar — same measured surface-
-// ladder values, not independently eyeballed copies.
-const TAB_ITEM_ACTIVE_CLASS = TAB_PILL_ACTIVE_CLASS;
-const TAB_ITEM_INACTIVE_CLASS = TAB_PILL_INACTIVE_CLASS;
-const TAB_INLINE_ACTION_CLASS =
-  'ml-auto shrink-0 rounded-sm p-0.5 opacity-70 transition-[opacity,background-color,color] hover:bg-muted-foreground/10 hover:text-tab-hover-foreground hover:opacity-100';
-const TAB_BAR_ACTION_CLASS =
-  'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground';
-
-function clientPointFromDragEnd(event: DragEndEvent): { x: number; y: number } | null {
-  const source = event.activatorEvent;
-  if (
-    !source ||
-    !('clientX' in source) ||
-    !('clientY' in source) ||
-    typeof source.clientX !== 'number' ||
-    typeof source.clientY !== 'number'
-  ) {
-    return null;
-  }
-  return { x: source.clientX + event.delta.x, y: source.clientY + event.delta.y };
-}
+const styles = stylex.create({
+  tab: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    height: '32px',
+    alignItems: 'center',
+    gap: space[1.5],
+    overflow: 'hidden',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    borderRadius: radius.medium,
+    paddingInline: space[3],
+    fontSize: '0.9em',
+    cursor: 'default',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  soloTab: {
+    color: 'hsl(var(--tab-active-foreground))',
+  },
+  tabIconSlot: {
+    display: 'inline-flex',
+    width: '12px',
+    height: '12px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  waitingIcon: {
+    width: '12px',
+    height: '12px',
+    color: 'hsl(var(--status-warning))',
+  },
+  closedUnreadMark: {
+    display: 'block',
+  },
+  unreadDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: radius.full,
+    backgroundColor: 'hsl(var(--primary))',
+  },
+  agentIcon: {
+    width: '12px',
+    height: '12px',
+    opacity: 0.6,
+  },
+  compactIcon: { width: '12px', height: '12px' },
+  iconContainer: { flexShrink: 0 },
+  editInput: {
+    width: '100%',
+    minWidth: 0,
+    backgroundColor: 'transparent',
+    outline: {
+      default: 'none',
+      '@media (forced-colors: active)': '2px solid transparent',
+    },
+    outlineOffset: {
+      default: null,
+      '@media (forced-colors: active)': '2px',
+    },
+    fontSize: '0.9em',
+  },
+  truncate: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  tabInlineAction: {
+    marginInlineStart: 'auto',
+    flexShrink: 0,
+    borderRadius: 'var(--radius-sm)',
+    padding: '2px',
+    opacity: {
+      default: 0.7,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 1,
+      },
+    },
+    transitionProperty: 'opacity, background-color, color',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: {
+      default: null,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--muted-foreground) / 0.1)',
+      },
+    },
+    color: {
+      default: null,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--tab-hover-foreground))',
+      },
+    },
+  },
+  hiddenAction: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':where([role="tab"]):hover')]: {
+        default: null,
+        '@media (hover: hover)': 1,
+      },
+    },
+  },
+  visibleAction: {
+    opacity: 1,
+  },
+  closeGlyph: {
+    width: '12px',
+    height: '12px',
+  },
+  saveMark: {
+    width: '6px',
+    height: '6px',
+    flexShrink: 0,
+    borderRadius: radius.full,
+  },
+  conflictMark: {
+    backgroundColor: 'hsl(var(--status-danger))',
+  },
+  savingMark: {
+    backgroundColor: 'hsl(var(--status-info))',
+    animationName: savingPulse,
+    animationDuration: '2s',
+    animationTimingFunction: 'ease-in-out',
+    animationIterationCount: 'infinite',
+  },
+  dirtyWarningMark: {
+    backgroundColor: 'hsl(var(--status-warning))',
+  },
+  monoLabel: {
+    fontFamily: 'var(--font-mono)',
+  },
+  barAction: {
+    display: 'flex',
+    width: '28px',
+    height: '28px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'var(--radius-md)',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--hover-foreground))',
+      },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: {
+      default: null,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--hover))',
+      },
+    },
+  },
+  barActionRelative: {
+    position: 'relative',
+  },
+  actionGlyph: {
+    width: '16px',
+    height: '16px',
+  },
+  bar: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  leadingSlot: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    paddingInlineStart: '12px',
+  },
+  leadingSlotRegular: {
+    paddingInlineEnd: '8px',
+  },
+  trailingCluster: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  adaptiveStrip: {
+    height: '44px',
+    maxHeight: '100%',
+  },
+  popoverHeader: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border))',
+    paddingInline: space[3],
+    paddingBlock: '8px',
+  },
+  popoverTitle: {
+    fontSize: '0.8em',
+    fontWeight: 500,
+    color: 'hsl(var(--popover-foreground) / 0.7)',
+  },
+  popoverList: {
+    paddingBlock: '4px',
+  },
+  closedRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBlock: '6px',
+    textAlign: 'left',
+    fontSize: '0.9em',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: {
+      default: null,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--hover) / 0.6)',
+      },
+    },
+  },
+  closedStatus: {
+    flexShrink: 0,
+    color: 'hsl(var(--popover-foreground) / 0.65)',
+  },
+  closedLabel: {
+    minWidth: 0,
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  closedTime: {
+    flexShrink: 0,
+    color: 'hsl(var(--popover-foreground) / 0.65)',
+  },
+  closedActionIcon: {
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    color: 'hsl(var(--popover-foreground) / 0.7)',
+  },
+  closedUnreadDot: {
+    position: 'absolute',
+    top: '4px',
+    right: '4px',
+    display: 'block',
+    width: '8px',
+    height: '8px',
+    borderRadius: radius.full,
+    backgroundColor: 'hsl(var(--primary))',
+  },
+  popoverScroll: {
+    maxHeight: '15rem',
+  },
+});
 
 function getTabLabel(
   session: SessionMeta,
@@ -172,11 +412,9 @@ function TabContent({
   isEditing,
   isParent,
   editDraft,
-  iconVisibility,
   inputRef,
   onTabSelect,
   onTabRename,
-  isL2Focus,
   onTabClose,
   setEditDraft,
   setEditingTabId,
@@ -195,7 +433,6 @@ function TabContent({
   /** Parent tab is not in the dnd-kit strip, so it starts an HTML5 mention drag. */
   html5MentionDrag?: boolean;
   editDraft: string;
-  iconVisibility: string;
   inputRef: React.RefObject<HTMLInputElement>;
   onTabSelect: (tabId: string) => MaybePromiseVoid;
   onTabRename?: (sessionId: SessionId, title: string) => MaybePromiseVoid;
@@ -204,14 +441,21 @@ function TabContent({
   setEditingTabId: (v: SessionId | null) => void;
   commitRename: () => void;
   cancelRename: () => void;
-  isL2Focus: boolean;
   t: (key: string, fallback: string) => string;
 }) {
   const liveStatus = useAtomValue(sessionLiveStatusAtomFamily(session.id));
   const isWorking = liveStatus != null;
   const isWaiting = liveStatus?.type === 'requestPermission';
+  /* A background sub-session tab is the only place its new output is announced:
+     child tabs get no sidebar row of their own, so without this the finished
+     answer stays invisible until the user happens to click the tab. Suppressed
+     on the ACTIVE tab because that surface is the one clearing unread — the dot
+     would be a flash between the click and the read receipt landing. */
+  const isUnread = !isActive && sessionHasUnreadMessages(session);
   const label = getTabLabel(session, isParent, defaultTitle, t);
-  const showClose = !isParent && onTabClose && !isEditing;
+  // A lone tab has no close button: there is nothing to switch to, and closing
+  // it would only swap the conversation for an empty draft.
+  const showClose = onTabClose && !isEditing && !solo;
   const tabId = `session-tab-${session.id}`;
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(session.agentConfigId));
   const iconEnv = agentConfig?.env ?? getSessionLaunchConfigLegacyFields(session)?.env;
@@ -222,6 +466,8 @@ function TabContent({
       role="tab"
       aria-selected={isActive}
       tabIndex={isActive ? 0 : -1}
+      data-id={`session-tab:${session.id}`}
+      data-scope-item="row"
       aria-label={label}
       draggable={html5MentionDrag && !isEditing}
       onDragStart={
@@ -232,13 +478,12 @@ function TabContent({
           : undefined
       }
       className={cn(
-        TAB_ITEM_CLASS,
-        solo
-          ? 'text-tab-active-foreground'
-          : isActive
-            ? TAB_ITEM_ACTIVE_CLASS
-            : TAB_ITEM_INACTIVE_CLASS,
-        isActive && isL2Focus && 'ring-2 ring-ring/40 ring-inset'
+        stylex.props(
+          stylex.defaultMarker(),
+          styles.tab,
+          solo ? styles.soloTab : isActive ? tabPillStyles.active : tabPillStyles.inactive
+        ).className,
+        !solo && WINDOW_DRAG_EXEMPT_CLASS
       )}
       onClick={() => {
         if (!isEditing) void onTabSelect(session.id);
@@ -257,17 +502,31 @@ function TabContent({
         }
       }}
     >
-      <span className="shrink-0">
-        {isWorking ? (
-          <Loader2 className="h-3 w-3 animate-spin text-tab-active-accent" />
-        ) : isWaiting ? (
-          <span className="inline-block h-2 w-2 rounded-full bg-status-warning" />
+      {/* ONE status slot, priority-ordered `waiting > working > unread > agent`,
+          matching the sidebar row and the mobile tab sheet. `isWaiting` must be
+          tested BEFORE `isWorking`: a permission request is also live presence,
+          so the busy spinner would otherwise swallow the one state that needs
+          the user. Waiting is the sidebar's `Hand`, NOT a dot: `--primary` and
+          `--status-warning` are both amber in the shipped themes, so an amber
+          waiting dot beside a primary unread dot read as the same marker.
+          Fixed 12px box so every state keeps the label on the same pixel. */}
+      <span {...stylex.props(styles.tabIconSlot)}>
+        {isWaiting ? (
+          <Hand {...stylex.props(styles.waitingIcon)} />
+        ) : isWorking ? (
+          <Spinner className="h-3 w-3 text-tab-active-accent" />
+        ) : isUnread ? (
+          <span
+            data-session-tab-unread=""
+            {...stylex.props(styles.unreadDot)}
+            aria-label={t('sessions.unreadMessages', 'Unread messages')}
+          />
         ) : (
           <AgentIcon
             cliType={session.cliType}
             agentType={session.agentType}
             env={iconEnv}
-            className="h-3 w-3 opacity-60"
+            {...stylex.props(styles.agentIcon)}
           />
         )}
       </span>
@@ -283,34 +542,22 @@ function TabContent({
             if (e.key === 'Enter') commitRename();
             if (e.key === 'Escape') cancelRename();
           }}
-          className="w-full min-w-0 bg-transparent outline-hidden text-[13px]"
+          {...stylex.props(styles.editInput)}
         />
       ) : (
-        <span className="truncate">{label}</span>
-      )}
-      {isParent && !isEditing && !solo && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className={cn(TAB_INLINE_ACTION_CLASS, iconVisibility)}>
-              <Pin className="h-3 w-3" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {t('sessions.tabs.mainThread', 'Main thread — cannot be closed')}
-          </TooltipContent>
-        </Tooltip>
+        <span {...stylex.props(styles.truncate)}>{label}</span>
       )}
       {showClose && (
         <button
           type="button"
-          className={cn(TAB_INLINE_ACTION_CLASS, iconVisibility)}
+          {...stylex.props(styles.tabInlineAction, styles.hiddenAction)}
           onClick={(e) => {
             e.stopPropagation();
             void onTabClose?.(session.id);
           }}
           aria-label={t('sessions.tabs.closeTab', 'Close tab')}
         >
-          <X className="h-3 w-3" />
+          <X {...stylex.props(styles.closeGlyph)} />
         </button>
       )}
     </div>
@@ -332,7 +579,6 @@ function SessionAgentIcon({ session, className }: { session: SessionMeta; classN
 function DraftTabContent({
   draft,
   isActive,
-  isL2Focus,
   onSelect,
   onClose,
   t,
@@ -340,14 +586,12 @@ function DraftTabContent({
 }: {
   draft: DraftSessionTab;
   isActive: boolean;
-  isL2Focus: boolean;
   solo: boolean;
   onSelect: (tabId: string) => MaybePromiseVoid;
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string) => string;
 }) {
-  const showClose = onClose;
-  const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
+  const showClose = onClose && !solo;
   const label = getDraftTabLabel(draft, t('sessions.tabs.newTab', 'New Tab'));
   const tabId = `draft-tab-${draft.id}`;
   // Drafts carry no env snapshot of their own; resolve the chosen config so the
@@ -360,15 +604,16 @@ function DraftTabContent({
       role="tab"
       aria-selected={isActive}
       tabIndex={isActive ? 0 : -1}
+      data-id={`draft-tab:${draft.id}`}
+      data-scope-item="row"
       aria-label={label}
       className={cn(
-        TAB_ITEM_CLASS,
-        solo
-          ? 'text-tab-active-foreground'
-          : isActive
-            ? TAB_ITEM_ACTIVE_CLASS
-            : TAB_ITEM_INACTIVE_CLASS,
-        isActive && isL2Focus && 'ring-2 ring-ring/40 ring-inset'
+        stylex.props(
+          stylex.defaultMarker(),
+          styles.tab,
+          solo ? styles.soloTab : isActive ? tabPillStyles.active : tabPillStyles.inactive
+        ).className,
+        !solo && WINDOW_DRAG_EXEMPT_CLASS
       )}
       onClick={() => {
         void onSelect(draft.id);
@@ -380,27 +625,30 @@ function DraftTabContent({
         }
       }}
     >
-      <span className="shrink-0">
+      <span {...stylex.props(styles.iconContainer)}>
         <AgentIcon
           cliType={draft.cliType}
           agentType={draft.agentType}
           brandId={draftAgentConfig?.brandId}
           env={draftAgentConfig?.env}
-          className="h-3 w-3 opacity-60"
+          {...stylex.props(styles.agentIcon)}
         />
       </span>
-      <span className="truncate">{label}</span>
+      <span {...stylex.props(styles.truncate)}>{label}</span>
       {showClose && (
         <button
           type="button"
-          className={cn(TAB_INLINE_ACTION_CLASS, closeIconVisibility)}
+          {...stylex.props(
+            styles.tabInlineAction,
+            isActive ? styles.visibleAction : styles.hiddenAction
+          )}
           onClick={(event) => {
             event.stopPropagation();
             void onClose(draft.id);
           }}
           aria-label={t('sessions.tabs.closeTab', 'Close tab')}
         >
-          <X className="h-3 w-3" />
+          <X {...stylex.props(styles.closeGlyph)} />
         </button>
       )}
     </div>
@@ -411,7 +659,6 @@ function DraftTabContent({
 function ViewerTabContent({
   tab,
   isActive,
-  isL2Focus,
   onSelect,
   onClose,
   t,
@@ -419,14 +666,12 @@ function ViewerTabContent({
 }: {
   tab: ViewerTabItem;
   isActive: boolean;
-  isL2Focus: boolean;
   solo: boolean;
   onSelect: (tabId: string) => MaybePromiseVoid;
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string, opts?: Record<string, unknown>) => string;
 }) {
-  const showClose = onClose;
-  const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
+  const showClose = onClose && !solo;
   const tabId = `viewer-tab-${tab.id}`;
   const saveStateLabel = tab.saving
     ? t('sessions.fileViewer.tabSaving', 'Saving')
@@ -442,15 +687,16 @@ function ViewerTabContent({
       role="tab"
       aria-selected={isActive}
       tabIndex={isActive ? 0 : -1}
+      data-id={`viewer-tab:${tab.id}`}
+      data-scope-item="row"
       aria-label={saveStateLabel ? `${tab.label}, ${saveStateLabel}` : tab.label}
       className={cn(
-        TAB_ITEM_CLASS,
-        solo
-          ? 'text-tab-active-foreground'
-          : isActive
-            ? TAB_ITEM_ACTIVE_CLASS
-            : TAB_ITEM_INACTIVE_CLASS,
-        isActive && isL2Focus && 'ring-2 ring-ring/40 ring-inset'
+        stylex.props(
+          stylex.defaultMarker(),
+          styles.tab,
+          solo ? styles.soloTab : isActive ? tabPillStyles.active : tabPillStyles.inactive
+        ).className,
+        !solo && WINDOW_DRAG_EXEMPT_CLASS
       )}
       onClick={() => {
         void onSelect(tab.id);
@@ -462,32 +708,35 @@ function ViewerTabContent({
         }
       }}
     >
-      <span className="shrink-0">
+      <span {...stylex.props(styles.iconContainer)}>
         {tab.type === 'file' && tab.filePath ? (
-          <FileIcon filePath={tab.filePath} className="h-3 w-3" />
+          <FileIcon filePath={tab.filePath} {...stylex.props(styles.compactIcon)} />
         ) : (
-          <FileDiff className="h-3 w-3 opacity-60" />
+          <FileDiff {...stylex.props(styles.agentIcon)} />
         )}
       </span>
       {saveStateLabel ? (
         <span
-          className={cn(
-            'h-1.5 w-1.5 shrink-0 rounded-full',
+          {...stylex.props(
+            styles.saveMark,
             tab.conflict
-              ? 'bg-status-danger'
+              ? styles.conflictMark
               : tab.saving
-                ? 'bg-status-info animate-pulse'
-                : 'bg-status-warning'
+                ? styles.savingMark
+                : styles.dirtyWarningMark
           )}
           title={saveStateLabel}
           aria-hidden="true"
         />
       ) : null}
-      <span className="truncate font-mono">{tab.label}</span>
+      <span {...stylex.props(styles.truncate, styles.monoLabel)}>{tab.label}</span>
       {showClose && (
         <button
           type="button"
-          className={cn(TAB_INLINE_ACTION_CLASS, closeIconVisibility)}
+          {...stylex.props(
+            styles.tabInlineAction,
+            isActive ? styles.visibleAction : styles.hiddenAction
+          )}
           onClick={(e) => {
             e.stopPropagation();
             void onClose(tab.id);
@@ -496,7 +745,7 @@ function ViewerTabContent({
             fileName: tab.label,
           })}
         >
-          <X className="h-3 w-3" />
+          <X {...stylex.props(styles.closeGlyph)} />
         </button>
       )}
     </div>
@@ -555,11 +804,15 @@ export const SessionTabBar = memo(function SessionTabBar({
   onMentionSession,
 }: SessionTabBarProps) {
   const { t } = useTranslation();
-  const focusLayer = useAtomValue(focusLayerAtom);
+  const windowDragClass = useWindowDragRegionClass();
+  useListKeyboardNavigation({ scopeId: WORKSPACE_FOCUS_SCOPES.sessionConversation });
   const defaultTitle = t('sessions.untitled', 'Untitled session');
   const showSessionTabs = variant !== 'viewer';
+  const workspaceArchived = parentSession.isArchived === true;
+  const showParentTab = showSessionTabs && !isSessionTabClosed(parentSession, workspaceArchived);
   const showViewerTabs = variant !== 'session';
-  const showNewTabButton = variant !== 'viewer';
+  // An archived workspace is review-only: no new conversation until Restore.
+  const showNewTabButton = variant !== 'viewer' && !workspaceArchived;
   const showArchivedTabs = variant !== 'viewer';
   const [editingTabId, setEditingTabId] = useState<SessionId | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -569,7 +822,9 @@ export const SessionTabBar = memo(function SessionTabBar({
   const sortableItems = useMemo(() => {
     const sessionMap = showSessionTabs
       ? new Map<string, SortableItemData>(
-          childSessions.map((s) => [s.id, { kind: 'session', session: s }])
+          childSessions
+            .filter((s) => !isSessionTabClosed(s, workspaceArchived))
+            .map((s) => [s.id, { kind: 'session', session: s }])
         )
       : new Map<string, SortableItemData>();
     const draftMap = showSessionTabs
@@ -622,7 +877,15 @@ export const SessionTabBar = memo(function SessionTabBar({
     }
 
     return result;
-  }, [childSessions, draftTabs, showSessionTabs, showViewerTabs, tabOrder, viewerTabs]);
+  }, [
+    childSessions,
+    draftTabs,
+    showSessionTabs,
+    showViewerTabs,
+    tabOrder,
+    viewerTabs,
+    workspaceArchived,
+  ]);
 
   const sortableIds = useMemo(() => sortableItems.map((i) => i.id), [sortableItems]);
   const sessionIdByTabId = useMemo(() => {
@@ -634,9 +897,8 @@ export const SessionTabBar = memo(function SessionTabBar({
   }, [sortableItems]);
 
   // A lone tab spans the whole row, so it drops the active fill — a full-width
-  // pill would paint the entire bar and break the one-canvas rule. It also has
-  // no sibling to switch to, so it hides the main-thread Pin marker.
-  const soloTab = (showSessionTabs ? 1 : 0) + sortableItems.length === 1;
+  // pill would paint the entire bar and break the one-canvas rule.
+  const soloTab = (showParentTab ? 1 : 0) + sortableItems.length === 1;
 
   useEffect(() => {
     if (editingTabId && inputRef.current) {
@@ -674,7 +936,7 @@ export const SessionTabBar = memo(function SessionTabBar({
       const { active, over } = event;
       const activeId = String(active.id);
       const overId = over ? String(over.id) : null;
-      const point = clientPointFromDragEnd(event);
+      const point = dndPointerPoint(event);
       // Tab droppables stay the closest collision even when the pointer is in
       // the conversation below, so mention wins whenever the pointer is there.
       const droppedOnConversation =
@@ -701,12 +963,9 @@ export const SessionTabBar = memo(function SessionTabBar({
     clearSessionMentionDrag();
   }, []);
 
-  const iconVisibility = 'opacity-0 group-hover:opacity-100';
-
   const sharedTabProps = {
     defaultTitle,
     editDraft,
-    iconVisibility,
     inputRef,
     onTabSelect,
     onTabRename,
@@ -715,7 +974,6 @@ export const SessionTabBar = memo(function SessionTabBar({
     setEditingTabId,
     commitRename,
     cancelRename,
-    isL2Focus: focusLayer === 'L2',
     solo: soloTab,
     t: t as (key: string, fallback: string) => string,
   };
@@ -723,8 +981,8 @@ export const SessionTabBar = memo(function SessionTabBar({
   // In mixed mode, an active viewer tab deselects the session tabs.
   const hasActiveViewerTab = variant === 'mixed' && !!activeViewerTabId;
   const visibleTabIds = useMemo(
-    () => (showSessionTabs ? [parentSession.id, ...sortableIds] : sortableIds),
-    [parentSession.id, showSessionTabs, sortableIds]
+    () => (showParentTab ? [parentSession.id, ...sortableIds] : sortableIds),
+    [parentSession.id, showParentTab, sortableIds]
   );
   const activeTabId =
     showViewerTabs && activeViewerTabId
@@ -736,20 +994,32 @@ export const SessionTabBar = memo(function SessionTabBar({
   const newTabButton = showNewTabButton ? (
     <button
       type="button"
-      className={TAB_BAR_ACTION_CLASS}
+      className={cn(stylex.props(styles.barAction).className, WINDOW_DRAG_EXEMPT_CLASS)}
       onClick={() => {
         void onNewTab();
       }}
       aria-label={t('sessions.tabs.newTab', 'New tab')}
     >
-      <Plus className="h-4 w-4" />
+      <Plus {...stylex.props(styles.actionGlyph)} />
     </button>
   ) : null;
 
   return (
-    <div className={cn('flex min-w-0 items-center bg-background', className)}>
+    <div
+      className={cn(
+        SESSION_PAGE_CONTAINER_CLASS,
+        stylex.props(styles.bar).className,
+        windowDragClass,
+        className
+      )}
+    >
       {leftSlot ? (
-        <div className={cn('flex shrink-0 items-center pl-3', soloTab ? 'pr-0' : 'pr-2')}>
+        <div
+          className={cn(
+            stylex.props(styles.leadingSlot, !soloTab && styles.leadingSlotRegular).className,
+            WINDOW_DRAG_EXEMPT_CLASS
+          )}
+        >
           {leftSlot}
         </div>
       ) : null}
@@ -758,11 +1028,16 @@ export const SessionTabBar = memo(function SessionTabBar({
         activeItemId={activeTabId}
         role="tablist"
         aria-label={t('sessions.tabs.label', 'Session tabs')}
-        className="h-11"
-        paddingLeft={variant === 'session' ? 4 : 8}
-        paddingRight={8}
+        // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
+        className={stylex.props(styles.adaptiveStrip).className}
+        // A filled first pill needs more than the 6px inter-tab gap from the
+        // workspace card's left edge, or it hugs the card's 14px corner. A solo tab
+        // has no fill, and a leading slot already supplies its own 8px gap, so
+        // those keep the tight 3px inset that leaves the label where it was.
+        paddingLeft={soloTab || leftSlot ? 3 : 8}
+        paddingRight={3}
       >
-        {showSessionTabs && (
+        {showParentTab && (
           <AdaptiveTabStripItem itemId={parentSession.id}>
             <TabContent
               session={parentSession}
@@ -799,7 +1074,6 @@ export const SessionTabBar = memo(function SessionTabBar({
                   <DraftTabContent
                     draft={item.data.draft}
                     isActive={!hasActiveViewerTab && item.data.draft.id === activeTabSessionId}
-                    isL2Focus={focusLayer === 'L2'}
                     solo={soloTab}
                     onSelect={onTabSelect}
                     onClose={onTabClose}
@@ -811,7 +1085,6 @@ export const SessionTabBar = memo(function SessionTabBar({
                   <ViewerTabContent
                     tab={item.data.tab}
                     isActive={activeViewerTabId === item.data.tab.id}
-                    isL2Focus={focusLayer === 'L2'}
                     solo={soloTab}
                     onSelect={onViewerTabSelect ?? (() => {})}
                     onClose={onViewerTabClose}
@@ -825,20 +1098,29 @@ export const SessionTabBar = memo(function SessionTabBar({
       </AdaptiveTabStrip>
       {/* Pinned right cluster: new-tab, then the archived-tabs history (only
           when closed tabs exist), then the caller's toolbar ("…" etc.). */}
-      {newTabButton}
-      {showArchivedTabs && archivedChildSessions.length > 0 && onTabRestore && (
-        <ArchivedTabsPopover archivedSessions={archivedChildSessions} onRestore={onTabRestore} />
-      )}
-      {rightSlot}
+      <div className={cn(stylex.props(styles.trailingCluster).className, WINDOW_DRAG_EXEMPT_CLASS)}>
+        {newTabButton}
+        {showArchivedTabs && archivedChildSessions.length > 0 && onTabRestore && (
+          <ClosedTabsPopover
+            archivedSessions={archivedChildSessions}
+            workspaceArchived={workspaceArchived}
+            onRestore={onTabRestore}
+          />
+        )}
+        {rightSlot}
+      </div>
     </div>
   );
 });
 
-function ArchivedTabsPopover({
+export function ClosedTabsPopover({
   archivedSessions,
+  workspaceArchived,
   onRestore,
 }: {
   archivedSessions: SessionMeta[];
+  /** Reopening a tab never unarchives; only archived children of a live workspace restore. */
+  workspaceArchived: boolean;
   onRestore: (sessionId: SessionId) => MaybePromiseVoid;
 }) {
   const { t } = useTranslation();
@@ -846,62 +1128,106 @@ function ArchivedTabsPopover({
     () => [...archivedSessions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [archivedSessions]
   );
+  const hasUnread = archivedSessions.some(closedSessionHasUnreadMessages);
+  const triggerLabel = t('sessions.tabs.closedTabs', 'Closed conversations');
 
   return (
-    <Popover>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className={cn(TAB_BAR_ACTION_CLASS, 'relative')}
-              aria-label={t('sessions.tabs.archivedTabs', 'Archived tabs')}
-            >
-              <History className="h-4 w-4" />
-            </button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          {t('sessions.tabs.archivedTabs', 'Archived tabs')}
-        </TooltipContent>
-      </Tooltip>
-      <PopoverContent align="end" className="w-72 p-0" sideOffset={4}>
-        <div className="border-b border-border px-3 py-2">
-          <p className="text-xs font-medium text-popover-foreground/70">
-            {t('sessions.tabs.archivedTabs', 'Archived tabs')}
+    <Popover.Root>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          render={
+            <Popover.Trigger
+              render={
+                <button
+                  type="button"
+                  className={cn(
+                    stylex.props(styles.barAction, styles.barActionRelative).className,
+                    WINDOW_DRAG_EXEMPT_CLASS
+                  )}
+                  aria-label={
+                    hasUnread
+                      ? `${triggerLabel}: ${t('sessions.unreadMessages', 'Unread messages')}`
+                      : triggerLabel
+                  }
+                >
+                  <History {...stylex.props(styles.actionGlyph)} />
+                  {hasUnread ? (
+                    <span
+                      aria-hidden
+                      data-closed-tabs-unread=""
+                      {...stylex.props(styles.closedUnreadDot)}
+                    />
+                  ) : null}
+                </button>
+              }
+            />
+          }
+        />
+        <Tooltip.Content side="bottom">
+          {t('sessions.tabs.closedTabs', 'Closed conversations')}
+        </Tooltip.Content>
+      </Tooltip.Root>
+      <Popover.Content align="end" className="w-72 p-0" sideOffset={4}>
+        <div {...stylex.props(styles.popoverHeader)}>
+          <p {...stylex.props(styles.popoverTitle)}>
+            {t('sessions.tabs.closedTabs', 'Closed conversations')}
           </p>
         </div>
-        <ScrollArea className="max-h-60">
-          <div className="py-1">
+        <ScrollArea viewportClassName={stylex.props(styles.popoverScroll).className}>
+          <div {...stylex.props(styles.popoverList)}>
             {sorted.map((session) => {
               const label = session.title?.trim() || t('sessions.tabs.newTab', 'New Tab');
               const time = formatRelativeTime(session.lastMessageAt ?? session.createdAt, t);
+              const restoresArchive = isArchivedOutsideWorkspace(session, workspaceArchived);
+              const ActionIcon = restoresArchive ? ArchiveRestore : Undo2;
+              const actionLabel = restoresArchive
+                ? t('archive.restore', 'Restore session')
+                : t('sessions.tabs.reopenTab', 'Reopen conversation');
               return (
-                <div
+                <button
                   key={session.id}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-hover/60"
+                  type="button"
+                  {...stylex.props(styles.closedRow)}
+                  onClick={() => {
+                    void onRestore(session.id);
+                  }}
+                  aria-label={`${actionLabel}: ${label}`}
                 >
-                  <span className="shrink-0 text-popover-foreground/65">
-                    <SessionAgentIcon session={session} className="h-3 w-3" />
+                  <span {...stylex.props(styles.closedStatus)}>
+                    <ClosedConversationStatus session={session} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate">{label}</span>
-                  <span className="shrink-0 text-popover-foreground/65">{time}</span>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-xs p-0.5 text-popover-foreground/70 transition-colors hover:bg-hover hover:text-hover-foreground"
-                    onClick={() => {
-                      void onRestore(session.id);
-                    }}
-                    aria-label={t('sessions.tabs.restoreTab', 'Restore tab')}
-                  >
-                    <Undo2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                  <span {...stylex.props(styles.closedLabel)}>{label}</span>
+                  <span {...stylex.props(styles.closedTime)}>{time}</span>
+                  <ActionIcon {...stylex.props(styles.closedActionIcon)} />
+                </button>
               );
             })}
           </div>
         </ScrollArea>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+
+function ClosedConversationStatus({ session }: { session: SessionMeta }) {
+  const { t } = useTranslation();
+  const status = useAtomValue(sessionLiveStatusAtomFamily(session.id));
+  if (status?.type === 'requestPermission')
+    return (
+      <Hand
+        {...stylex.props(styles.waitingIcon)}
+        aria-label={t('sessions.waitingPermission', 'Waiting for permission')}
+      />
+    );
+  if (status) return <Spinner className="h-3 w-3" />;
+  if (closedSessionHasUnreadMessages(session))
+    return (
+      <span
+        {...stylex.props(styles.unreadDot, styles.closedUnreadMark)}
+        aria-label={t('sessions.unreadMessages', 'Unread messages')}
+      />
+    );
+  return (
+    <SessionAgentIcon session={session} className={stylex.props(styles.compactIcon).className} />
   );
 }

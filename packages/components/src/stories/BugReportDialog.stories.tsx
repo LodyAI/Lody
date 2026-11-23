@@ -44,13 +44,23 @@ export const Submitting: Story = {
 
 export const Success: Story = {
   args: {
-    state: { status: 'success', bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya', withLogs: true },
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: true,
+      clientDiagnostics: 'uploaded',
+    },
   },
 };
 
 export const SuccessWithoutLogs: Story = {
   args: {
-    state: { status: 'success', bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya', withLogs: false },
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: false,
+      clientDiagnostics: 'uploaded',
+    },
   },
 };
 
@@ -67,5 +77,52 @@ export const NoMachines: Story = {
   args: {
     machines: [],
     initialMachineId: null,
+  },
+};
+
+export const ClientDiagnosticsUploading: Story = {
+  args: {
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: false,
+      clientDiagnostics: 'uploading',
+    },
+  },
+};
+
+export const ClientDiagnosticsFailed: Story = {
+  args: {
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: true,
+      clientDiagnostics: 'failed',
+    },
+    onRetryClientDiagnostics: fn(),
+  },
+};
+
+export const EncryptedWorkspace: Story = {
+  args: {
+    descriptionOnly: 'encrypted',
+  },
+};
+
+export const EncryptedWorkspaceSuccess: Story = {
+  args: {
+    descriptionOnly: 'encrypted',
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: false,
+      clientDiagnostics: 'omitted',
+    },
+  },
+};
+
+export const UnconfirmedWorkspaceMode: Story = {
+  args: {
+    descriptionOnly: 'pending',
   },
 };

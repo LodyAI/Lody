@@ -1,9 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { updateTestHistory, withHistoryPort } from './history-port-fixture';
+import { composeTestSessionDoc } from './session-doc-fixture';
+import { describe, expect, it, vi } from 'vitest';
 
 import { LoroRepo } from 'loro-repo';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
+  appendACPNotificationsToAssistantEntry,
+  appendAutonomousACPNotifications,
   applyMessageContentsBatch,
   ensurePermissionRequestOnToolCall,
   updatePermissionOutcomeInHistory,
@@ -13,8 +19,19 @@ import {
   buildMessageContentFromNotification,
 } from '../src/lib/acp/history-apply';
 import { SessionDocument } from '../src/lib/loro/doc';
-import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
-import type { MessageContent, SessionHistoryInput, SessionId, ToolCallContent } from '@lody/shared';
+import type {
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  SessionNotification,
+} from '@agentclientprotocol/sdk';
+import {
+  parseSessionNotifications,
+  type AcpSessionNotification,
+  type MessageContent,
+  type SessionHistoryInput,
+  type SessionId,
+  type ToolCallContent,
+} from '@lody/shared';
 import type { Logger } from '../src/utils/logger';
 
 const createSilentLogger = (): Logger => ({
@@ -23,12 +40,82 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
 });
 
 describe('acp history batch', () => {
+  it('keeps operation IDs aligned when invalid and non-history notifications are filtered', async () => {
+    const text: AcpSessionNotification = {
+      sessionId: 'synthetic-session',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'kept' },
+      },
+    };
+    const invalid = {
+      sessionId: 'synthetic-session',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 42 },
+      },
+    } as unknown as AcpSessionNotification;
+    const nonHistory = {
+      sessionId: 'synthetic-session',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'resource', resource: { uri: 'file:///tmp/resource.txt' } },
+      },
+    } as unknown as AcpSessionNotification;
+    const applied: unknown[] = [];
+    const backend = {
+      applyAgentBatch: async (input: unknown) => {
+        applied.push(input);
+      },
+    };
+    const doc = { sessionId: 'synthetic-session' } as SessionDocument;
+
+    await appendACPNotificationsToAssistantEntry(
+      doc,
+      [invalid, nonHistory, text],
+      'assistant-entry',
+      {
+        logger: createSilentLogger(),
+        backend: backend as never,
+        operationIds: ['invalid-id', 'filtered-id', 'kept-id'],
+      }
+    );
+
+    expect(applied).toEqual([
+      expect.objectContaining({
+        notifications: [text],
+        operationIds: ['kept-id'],
+      }),
+    ]);
+  });
+
+  it('rejects an operation ID list that does not match its notification batch', async () => {
+    const backend = { applyAgentBatch: async () => undefined };
+    const doc = { sessionId: 'synthetic-session' } as SessionDocument;
+
+    await expect(
+      appendACPNotificationsToAssistantEntry(
+        doc,
+        {
+          sessionId: 'synthetic-session',
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'kept' },
+          },
+        },
+        'assistant-entry',
+        { backend: backend as never, operationIds: [] }
+      )
+    ).rejects.toThrow('ACP notification operation IDs must match the input batch length');
+  });
+
   it('merges text deltas into last assistant entry', () => {
     const history: SessionHistoryInput[] = [
       {
@@ -931,7 +1018,7 @@ describe('acp history permission', () => {
     ];
 
     await doc.initOffline();
-    await doc.updateHistory(() => initialHistory);
+    await updateTestHistory(doc, () => initialHistory);
 
     try {
       const request: RequestPermissionRequest = {
@@ -970,7 +1057,7 @@ describe('acp history permission', () => {
 
       await expect(ensurePermissionRequestOnToolCall(doc, 'req1', request)).resolves.toBe(true);
 
-      let history = await doc.getHistory();
+      let history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       let contents = (history[0]!.items ?? []) as MessageContent[];
       const toolCall = contents[0] as Extract<MessageContent, { type: 'tool_call' }>;
@@ -983,7 +1070,7 @@ describe('acp history permission', () => {
       };
       await updatePermissionOutcomeInHistory(doc, 'req1', outcome, logger);
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       contents = (history[0]!.items ?? []) as MessageContent[];
       const updated = contents[0] as Extract<MessageContent, { type: 'tool_call' }>;
       expect(updated.permissionRequest?.outcome).toEqual(outcome);
@@ -1010,7 +1097,7 @@ describe('acp history permission', () => {
     ];
 
     await doc.initOffline();
-    await doc.updateHistory(() => initialHistory);
+    await updateTestHistory(doc, () => initialHistory);
 
     try {
       const request: RequestPermissionRequest = {
@@ -1032,7 +1119,7 @@ describe('acp history permission', () => {
 
       await expect(ensurePermissionRequestOnToolCall(doc, 'req1', request)).resolves.toBe(true);
 
-      let history = await doc.getHistory();
+      let history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.id).toBe('turn-1');
       let contents = (history[0]!.items ?? []) as MessageContent[];
@@ -1042,7 +1129,7 @@ describe('acp history permission', () => {
       expect(toolCall.toolCallId).toBe('tc_late');
       expect(toolCall.permissionRequest?.requestId).toBe('req1');
 
-      await doc.updateHistory((currentHistory) =>
+      await updateTestHistory(doc, (currentHistory) =>
         applyMessageContentsBatch(currentHistory, [
           {
             type: 'tool_call',
@@ -1054,7 +1141,7 @@ describe('acp history permission', () => {
         ])
       );
 
-      history = await doc.getHistory();
+      history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.id).toBe('turn-1');
       contents = (history[0]!.items ?? []) as MessageContent[];
@@ -1073,7 +1160,7 @@ describe('acp history permission', () => {
     const doc = new SessionDocument(repo, sessionId);
 
     await doc.initOffline();
-    await doc.updateHistory(() => [
+    await updateTestHistory(doc, () => [
       {
         id: 'user-1',
         role: 'user',
@@ -1106,7 +1193,7 @@ describe('acp history permission', () => {
 
       await expect(ensurePermissionRequestOnToolCall(doc, 'req1', request)).resolves.toBe(false);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.role).toBe('user');
     } finally {
@@ -1121,7 +1208,7 @@ describe('acp history permission', () => {
     const doc = new SessionDocument(repo, sessionId);
 
     await doc.initOffline();
-    await doc.updateHistory(() => [
+    await updateTestHistory(doc, () => [
       {
         id: 'turn-1',
         role: 'assistant',
@@ -1167,7 +1254,7 @@ describe('acp history permission', () => {
 
       await expect(ensurePermissionRequestOnToolCall(doc, 'req1', request)).resolves.toBe(true);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
       expect(history[0]!.id).toBe('turn-1');
       const contents = (history[0]!.items ?? []) as MessageContent[];
@@ -1190,7 +1277,7 @@ describe('acp history permission', () => {
       };
       await updatePermissionOutcomeInHistory(doc, 'req1', outcome, logger);
 
-      const updatedHistory = await doc.getHistory();
+      const updatedHistory = await doc.sessionData.history.readAll();
       const updatedJson = JSON.stringify(updatedHistory);
       expect(updatedJson.includes(oldSentinel)).toBe(false);
       expect(updatedJson.includes(newSentinel)).toBe(false);
@@ -1409,5 +1496,238 @@ describe('Claude Code thinking tag parsing', () => {
     // Second item should be text
     expect(items[1]?.type).toBe('text');
     expect((items[1] as { text?: string })?.text).toBe('\nHere is my answer.');
+  });
+});
+
+describe('acp notification fixtures', () => {
+  it('derives stable terminal_output blocks and keeps ANSI escapes', async () => {
+    const fixturePath = path.join(
+      __dirname,
+      'fixtures',
+      'acp',
+      'codex-terminal-notifications.sample.json'
+    );
+    const notifications = parseSessionNotifications(
+      JSON.parse(fs.readFileSync(fixturePath, 'utf8'))
+    );
+
+    const repo = await LoroRepo.create({});
+    const doc = new SessionDocument(repo, 'session-sample' as SessionId);
+    await doc.initOffline();
+
+    try {
+      await appendAutonomousACPNotifications(doc, notifications);
+      const history = await doc.sessionData.history.readAll();
+      const toolCalls = history
+        .flatMap((h) => {
+          const rawItems = h.items;
+          return Array.isArray(rawItems) ? (rawItems as unknown as MessageContent[]) : [];
+        })
+        .filter((c) => c.type === 'tool_call');
+
+      expect(toolCalls.length).toBeGreaterThan(0);
+      const last = toolCalls[toolCalls.length - 1]!;
+
+      expect(last.rawInput).toBeUndefined();
+      expect(last.rawOutput).toBeUndefined();
+
+      const terminalOutputs = (last.content || []).filter((c) => c.type === 'terminal_output');
+      expect(terminalOutputs.length).toBeGreaterThan(0);
+      expect(terminalOutputs.some((b) => b.output === '\u001b[31mred\u001b[0m\n')).toBe(true);
+    } finally {
+      await repo.destroy();
+    }
+  });
+});
+
+describe('ACP history batching equivalence', () => {
+  const normalizeMessageContent = (item: MessageContent): MessageContent => {
+    const normalized = JSON.parse(JSON.stringify(item)) as MessageContent;
+    if (normalized.type === 'tool_call' && !Array.isArray(normalized.content)) {
+      return {
+        ...normalized,
+        content: [],
+      };
+    }
+    return normalized;
+  };
+
+  const normalizeHistory = (history: unknown[]) => {
+    return history.map((entry) => {
+      const record = entry as {
+        role?: unknown;
+        items?: unknown;
+        contents?: unknown;
+        plan?: unknown;
+        modelInfo?: unknown;
+      };
+      const rawContents = Array.isArray(record.items)
+        ? (record.items as MessageContent[])
+        : Array.isArray(record.contents)
+          ? (record.contents as MessageContent[])
+          : [];
+
+      return JSON.parse(
+        JSON.stringify({
+          role: record.role,
+          contents: rawContents.map(normalizeMessageContent),
+          ...(Array.isArray(record.plan) ? { plan: record.plan } : {}),
+          ...(record.modelInfo ? { modelInfo: record.modelInfo } : {}),
+        })
+      );
+    });
+  };
+
+  const loadFixtureNotifications = (fixtureName: string): AcpSessionNotification[] => {
+    const fixturePath = path.join(__dirname, 'fixtures', 'acp', fixtureName);
+    return parseSessionNotifications(JSON.parse(fs.readFileSync(fixturePath, 'utf8')));
+  };
+
+  const buildHistory = async (
+    notifications: AcpSessionNotification[],
+    mode: 'batched' | 'streamed'
+  ): Promise<unknown[]> => {
+    const repo = await LoroRepo.create({});
+    const doc = new SessionDocument(repo, `${mode}-session` as SessionId);
+    await doc.initOffline();
+
+    try {
+      if (mode === 'batched') {
+        await appendAutonomousACPNotifications(doc, notifications);
+      } else {
+        for (const notification of notifications) {
+          await appendAutonomousACPNotifications(doc, notification);
+        }
+      }
+      return await doc.sessionData.history.readAll();
+    } finally {
+      await repo.destroy();
+    }
+  };
+
+  it.each([
+    'codex-terminal-notifications.sample.json',
+    'claude-code-notifications.captured.json',
+    'claude-code-terminal-notifications.captured.json',
+    'claude-code-thinking-notifications.captured.json',
+    'kimi-shell-notifications.sample.json',
+  ])('preserves history when replaying %s as a batch or as individual updates', async (fixture) => {
+    const notifications = loadFixtureNotifications(fixture);
+    const [batchedHistory, streamedHistory] = await Promise.all([
+      buildHistory(notifications, 'batched'),
+      buildHistory(notifications, 'streamed'),
+    ]);
+
+    expect(normalizeHistory(batchedHistory)).toEqual(normalizeHistory(streamedHistory));
+  });
+});
+
+describe('handleACPUpdateMessage plan sync', () => {
+  const makeNotification = (update: SessionNotification['update']): SessionNotification => ({
+    sessionId: 'session-1' as SessionId,
+    update,
+  });
+
+  it('surfaces refused and unknown plan writes without reporting success', async () => {
+    const doc = new SessionDocument({} as never, 'plan-session' as SessionId);
+    composeTestSessionDoc(doc, {
+      history: [
+        {
+          id: 'a',
+          role: 'assistant',
+          timestamp: '2026-01-01T00:00:00Z',
+          items: [],
+          fileDiff: [],
+          plan: [],
+        },
+      ],
+    });
+    await expect(
+      doc.setPlan([{ content: 'bad', priority: 'invalid', status: 'pending' }] as never)
+    ).rejects.toThrow('Invalid history write');
+    expect((await doc.sessionData.history.readAll())[0]?.plan).toEqual([]);
+    const cause = new Error('storage outcome unknown');
+    const stub = vi.spyOn(doc, 'agentWrites', 'get').mockReturnValue({
+      ...doc.agentWrites,
+      setTurnField: async () => {
+        throw cause;
+      },
+    });
+    await expect(doc.setPlan([])).rejects.toBe(cause);
+    stub.mockRestore();
+    await expect(
+      doc.setPlan([{ content: 'valid', priority: 'low', status: 'pending' }])
+    ).resolves.toBeUndefined();
+    expect((await doc.sessionData.history.readAll())[0]?.plan).toEqual([
+      { content: 'valid', priority: 'low', status: 'pending' },
+    ]);
+    expect(await doc.getDocState()).not.toHaveProperty('history');
+  });
+
+  it('writes the latest plan snapshot onto the session doc', async () => {
+    let history: any[] = [];
+    const updateHistory = vi.fn(async (updateFn: (history: any[]) => any[]) => {
+      history = updateFn(history);
+    });
+    const setPlan = vi.fn(async () => {});
+    const applyAgentBatch = vi.fn(async (input: any) => {
+      if (input.notifications?.length) {
+        history = applyNotificationOnHistory(history, input.notifications, input.model, {
+          ...(input.createId ? { createId: input.createId } : {}),
+          ...(input.targetAssistantEntryId
+            ? { targetAssistantEntryId: input.targetAssistantEntryId }
+            : {}),
+        });
+      }
+      return {
+        status: 'accepted',
+        receipt: {
+          sessionId: 'session-1',
+          kind: 'apply-agent-batch',
+          turnIds: input.targetAssistantEntryId ? [input.targetAssistantEntryId] : [],
+        },
+      };
+    });
+
+    const doc = withHistoryPort({
+      updateHistory,
+      setPlan,
+      agentWrites: { applyAgentBatch },
+      sessionData: {
+        commands: {},
+        history: {
+          count: async () => 0,
+          readAt: async () => ({ state: 'missing' as const }),
+          readTurn: async () => ({ state: 'missing' as const }),
+          readRange: async () => [],
+          readDirectory: async () => [],
+          observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+        },
+      },
+    }) as any;
+
+    await appendAutonomousACPNotifications(
+      doc,
+      [
+        makeNotification({
+          sessionUpdate: 'plan',
+          entries: [{ content: 'a', priority: 'low', status: 'pending' }],
+        }),
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'hello' },
+        }),
+        makeNotification({
+          sessionUpdate: 'plan',
+          entries: [{ content: 'b', priority: 'high', status: 'in_progress' }],
+        }),
+      ],
+      {} as any
+    );
+
+    expect(setPlan).toHaveBeenCalledTimes(1);
+    expect(setPlan).toHaveBeenCalledWith([
+      { content: 'b', priority: 'high', status: 'in_progress' },
+    ]);
   });
 });

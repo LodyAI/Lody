@@ -1,0 +1,171 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
+import { historyQueryRow } from '../../../packages/shared/src/session-data/history-selection';
+import { resolveLatestSessionGoalFromHistory } from '@lody/shared';
+import { selectTurnOutput } from '../../../packages/shared/src/session-data/read';
+import {
+  pickDirectoryScalars,
+  pickDirectoryInputConfig,
+} from '../../../packages/shared/src/session-data/directory';
+;
+import type { LoroDoc } from 'loro-crdt';
+import { applyHistoryAction } from '../../../packages/shared/src/session-data/history-actions';
+import type { SessionData, SessionEntry, HistoryAction } from '@lody/shared/session-data';
+
+/** Service-test storage owner. Preserve each fixture's injected persistence
+ * failures while exposing the same data-only history commands as production.
+ * Backend correctness is covered separately over real Loro storage. */
+export function withHistoryPort<T extends object>(
+  fixture: T
+): T & {
+  sessionData: SessionData;
+  applyHistoryAction: SessionData['commands']['applyHistoryAction'];
+} {
+  const storage = fixture as T & {
+    getHistory?: () => SessionEntry[];
+    readHistorySnapshot?: () => SessionEntry[];
+    updateHistory?: (update: (history: SessionEntry[]) => SessionEntry[]) => Promise<void>;
+    sessionData?: Partial<SessionData>;
+    mirror?: { subscribe: (listener: () => void) => () => void };
+    subscribeAll?: (listener: () => void) => () => void;
+  };
+  const read = () => storage.getHistory?.() ?? storage.readHistorySnapshot?.() ?? [];
+  const commands = {
+    async applyHistoryAction(action: HistoryAction) {
+      let plan: ReturnType<typeof applyHistoryAction> | undefined;
+      if (action.kind === 'operation-progress') {
+        plan = applyHistoryAction(structuredClone(read()), action);
+        if (!plan.matched) return { matched: false, proposal: plan.proposal };
+      }
+      if (!storage.updateHistory) throw new Error('Fixture has no history writer');
+      await storage.updateHistory((history) => {
+        plan = applyHistoryAction(history, action);
+        return plan.turns;
+      });
+      return {
+        matched:
+          plan?.matched ?? (action.kind === 'user-status' && action.requeueUndelivered === true),
+        proposal: plan?.proposal,
+      };
+    },
+    async appendTurn(turn: SessionEntry) {
+      if (!storage.updateHistory) throw new Error('Fixture has no history writer');
+      await storage.updateHistory((history) => [...history, turn]);
+    },
+  };
+  storage.sessionData = {
+    ...storage.sessionData,
+    readLatestGoal: () => resolveLatestSessionGoalFromHistory(read()),
+    readLatestUserId: () =>
+      [...read()]
+        .reverse()
+        .find((row) => row.role === 'user' && typeof row.userId === 'string' && row.userId.trim())
+        ?.userId,
+    writer: {
+      readQuery: (options?: { transcriptVisibility?: boolean }) =>
+        read().map((row) =>
+          historyQueryRow(
+            row,
+            {
+              field: (value, key) =>
+                value && typeof value === 'object' ? Reflect.get(value, key) : undefined,
+              scalar: (value) => value,
+              length: (value) => (Array.isArray(value) ? value.length : 0),
+              at: (value, index) => (value as unknown[])[index],
+              keys: (value) =>
+                value && typeof value === 'object' && !Array.isArray(value)
+                  ? Object.keys(value)
+                  : [],
+            },
+            options?.transcriptVisibility
+          )
+        ),
+      readSelected: (
+        select: (
+          rows: readonly import('@lody/shared/session-data').HistoryQueryRow[]
+        ) => readonly number[],
+        options?: { transcriptVisibility?: boolean }
+      ) => {
+        const snapshot = read();
+        const query = snapshot.map((row) =>
+          historyQueryRow(
+            row,
+            {
+              field: (value, key) =>
+                value && typeof value === 'object' ? Reflect.get(value, key) : undefined,
+              scalar: (value) => value,
+              length: (value) => (Array.isArray(value) ? value.length : 0),
+              at: (value, index) => (value as unknown[])[index],
+            },
+            options?.transcriptVisibility
+          )
+        );
+        return select(query).map((index) => snapshot[index]);
+      },
+      forEachStored: (visit: (entry: SessionEntry) => void) => read().forEach(visit),
+    },
+    history: {
+      readTurnOutput: (userTurnId: string) => {
+        const snapshot = read();
+        return selectTurnOutput(
+          snapshot.length,
+          userTurnId,
+          (index) => pickDirectoryScalars(snapshot[index]),
+          (index) => snapshot[index]
+        );
+      },
+      count: () => read().length,
+      readTurn: (id: string) => {
+        const turn = [...read()].reverse().find((t) => t.id === id);
+        return turn ? { state: 'ready', turn } : { state: 'missing' };
+      },
+      readDirectory: (from: number, to: number) =>
+        read()
+          .slice(from, to)
+          .map((t, i) => ({
+            position: from + i,
+            turnId: t.id,
+            state: 'ready',
+            scalars: pickDirectoryScalars(t),
+            inputConfig: pickDirectoryInputConfig(t.inputConfig),
+          })),
+      observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+      ...storage.sessionData?.history,
+      readAll: read,
+    },
+    commands: { ...commands, ...storage.sessionData?.commands },
+  } as SessionData;
+  // The production helper now accepts the backend command port directly. Keep
+  // this data-only fixture usable at that boundary without making tests fake a
+  // full SessionBackend implementation.
+  (
+    storage as T & { applyHistoryAction?: SessionData['commands']['applyHistoryAction'] }
+  ).applyHistoryAction = storage.sessionData.commands.applyHistoryAction;
+  storage.subscribeAll ??= (listener) => storage.mirror?.subscribe(listener) ?? (() => {});
+  return fixture as T & {
+    sessionData: SessionData;
+    applyHistoryAction: SessionData['commands']['applyHistoryAction'];
+  };
+}
+
+/** Test-only seed/edit helper; application code cannot receive a history callback. */
+export async function updateTestHistory(
+  doc: {
+    handle?: { doc: LoroDoc } | null;
+    updateHistory?: (fn: (history: SessionEntry[]) => SessionEntry[]) => Promise<void>;
+  },
+  update: (history: SessionEntry[]) => SessionEntry[],
+  options?: { onlyEntryId: string }
+): Promise<void> {
+  if (doc.handle) {
+    const writer = createHistoryWriter(doc.handle.doc);
+    if (options && writer.updateEntry(options.onlyEntryId, (entry) => update([entry])[0] ?? entry))
+      return;
+    writer.update(update);
+    return;
+  }
+  if (doc.updateHistory) {
+    await doc.updateHistory(update);
+    return;
+  }
+  throw new Error('Test fixture has no backing store');
+}

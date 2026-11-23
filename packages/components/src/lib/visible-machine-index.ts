@@ -5,8 +5,8 @@ export type MachineVisibilityAccess = {
   ownerUserId: string;
   sharedWithTeam: boolean;
   /**
-   * `updatedAt` as returned by Convex `workspaceMachines`. For rows synthesized locally under
-   * BC-2026-04-16-MACHINE-VISIBILITY-OWNER-FALLBACK this is `0` (sentinel for "unknown"): the
+   * `updatedAt` as returned by Convex `workspaceMachines`. For rows synthesized locally by the
+   * owner fallback in `buildVisibleMachineIndex` this is `0` (sentinel for "unknown"): the
    * record has no real last-updated time because it never reached Convex.
    */
   updatedAt: number;
@@ -23,6 +23,8 @@ export type VisibleMachineIndex = {
   machines: Map<MachineId, MachineViewMeta>;
   accessByMachineId: Map<MachineId, MachineVisibilityAccess>;
   isLoading: boolean;
+  /** Encrypted only: owner-signed shared project ids of other members' visible machines. */
+  sharedProjectIdsByMachineId?: ReadonlyMap<MachineId, readonly string[]>;
 };
 
 function selectAccessRow(
@@ -36,7 +38,7 @@ function selectAccessRow(
 /**
  * Build the visible-machine index exposed by `useVisibleMachineMetas`.
  *
- * BC-2026-04-16-MACHINE-VISIBILITY-OWNER-FALLBACK:
+ * Owner fallback:
  * Machines introduced in PR #1806 require a `workspaceMachines` row to be visible. Older CLI
  * versions never write that row, so their owners' own machines (and sessions) disappear from the
  * UI until the CLI is upgraded and restarted. This helper additionally synthesizes an implicit
@@ -94,4 +96,17 @@ export function buildVisibleMachineIndex({
     accessByMachineId,
     isLoading,
   };
+}
+
+/**
+ * Encrypted shared machines are exposed for selection and execution only. Surfaces
+ * that write to a machine's catalog automatically or need ordinary machine RPC
+ * (fenced in encrypted workspaces) use this view of the index.
+ */
+export function withoutEncryptedSharedMachines<A>(
+  machines: ReadonlyMap<MachineId, A>,
+  index: Pick<VisibleMachineIndex, 'sharedProjectIdsByMachineId'>
+): Map<MachineId, A> {
+  const shared = index.sharedProjectIdsByMachineId;
+  return new Map([...machines].filter(([machineId]) => !shared?.has(machineId)));
 }

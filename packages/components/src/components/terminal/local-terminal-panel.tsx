@@ -1,22 +1,22 @@
 import { FitAddon } from '@xterm/addon-fit';
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type ILink } from '@xterm/xterm';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import '@xterm/xterm/css/xterm.css';
 import './terminal-scrollbars.css';
 
-import { terminalFontFamilyAtom, terminalFontSizeAtom } from '@/atoms';
+import {
+  conversationFontSizeAtom,
+  DEFAULT_CONVERSATION_FONT_SIZE,
+  terminalFontFamilyAtom,
+  terminalFontSizeAtom,
+} from '@/atoms';
 import { formatKeyBinding } from '@/lib/commands';
+import { openExternalUrl } from '@/lib/native-browser';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuShortcut,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
+import { ContextMenu } from '@lody/ui/context-menu';
 import { useActiveVSCodeThemeId, useResolvedTheme } from '../../theme-provider';
 import {
   copyShortcutBinding,
@@ -39,6 +39,7 @@ import {
   buildTerminalTheme,
   resolveTerminalFontFamily,
 } from './terminal-theme';
+import { isHttpUrl, isLinkOpenModifierPressed, readTerminalUrlLinks } from './terminal-links';
 
 // A single interactive terminal: one xterm.js instance bound to one PTY via the
 // channel. Pure/presentational — all I/O goes through the injected `TerminalChannel`,
@@ -94,7 +95,10 @@ export function LocalTerminalPanel({
   const pasteShortcutLabel = formatKeyBinding(pasteShortcutBinding());
   const windowsRightClick = usesWindowsCopyPasteRightClick();
   const terminalFontFamily = useAtomValue(terminalFontFamilyAtom);
-  const terminalFontSize = useAtomValue(terminalFontSizeAtom);
+  const terminalBaseFontSize = useAtomValue(terminalFontSizeAtom);
+  const interfaceFontSize = useAtomValue(conversationFontSizeAtom);
+  const terminalFontSize =
+    (terminalBaseFontSize * interfaceFontSize) / DEFAULT_CONVERSATION_FONT_SIZE;
   const terminalFontFamilyRef = useRef(terminalFontFamily);
   const terminalFontSizeRef = useRef(terminalFontSize);
   terminalFontFamilyRef.current = terminalFontFamily;
@@ -122,6 +126,22 @@ export function LocalTerminalPanel({
     let offTitle: (() => void) | undefined;
     let offExit: (() => void) | undefined;
     const disposers: Array<() => void> = [];
+    let modifierDown = false;
+    let hoveredLink: ILink | undefined;
+
+    const syncLinkDecorations = () => {
+      if (!hoveredLink?.decorations) return;
+      hoveredLink.decorations.underline = modifierDown;
+      hoveredLink.decorations.pointerCursor = modifierDown;
+    };
+    const syncLinkModifier = (event: KeyboardEvent | globalThis.MouseEvent) => {
+      modifierDown = isLinkOpenModifierPressed(event);
+      syncLinkDecorations();
+    };
+    const clearLinkModifier = () => {
+      modifierDown = false;
+      syncLinkDecorations();
+    };
 
     const start = () => {
       if (disposed) return;
@@ -134,12 +154,66 @@ export function LocalTerminalPanel({
         theme: buildTerminalTheme(host),
         allowProposedApi: true,
         scrollback: 5000,
+        linkHandler: { activate: (event, url) => activateLink(event, url) },
       });
+      const activateLink = (event: globalThis.MouseEvent, url: string) => {
+        if (
+          event.button === 0 &&
+          isLinkOpenModifierPressed(event) &&
+          !t.hasSelection() &&
+          isHttpUrl(url)
+        ) {
+          void openExternalUrl(url);
+        }
+      };
       termRef.current = t;
       const fitAddon = new FitAddon();
       fitAddonRef.current = fitAddon;
       t.loadAddon(fitAddon);
       t.open(host);
+      window.addEventListener('keydown', syncLinkModifier, true);
+      window.addEventListener('keyup', syncLinkModifier, true);
+      window.addEventListener('blur', clearLinkModifier);
+      host.addEventListener('mousemove', syncLinkModifier, true);
+      disposers.push(
+        () => window.removeEventListener('keydown', syncLinkModifier, true),
+        () => window.removeEventListener('keyup', syncLinkModifier, true),
+        () => window.removeEventListener('blur', clearLinkModifier),
+        () => host.removeEventListener('mousemove', syncLinkModifier, true)
+      );
+      disposers.push(
+        t.registerLinkProvider({
+          provideLinks: (lineNumber, callback) => {
+            callback(
+              readTerminalUrlLinks(t.buffer.active, lineNumber).map(({ text, range }) => {
+                const link: ILink = {
+                  text,
+                  range,
+                  decorations: {
+                    get pointerCursor() {
+                      return modifierDown;
+                    },
+                    set pointerCursor(_value: boolean) {},
+                    get underline() {
+                      return modifierDown;
+                    },
+                    set underline(_value: boolean) {},
+                  },
+                  activate: activateLink,
+                  hover: () => {
+                    hoveredLink = link;
+                    syncLinkDecorations();
+                  },
+                  leave: () => {
+                    if (hoveredLink === link) hoveredLink = undefined;
+                  },
+                };
+                return link;
+              })
+            );
+          },
+        }).dispose
+      );
       let selectionAnchor: CellPos | null = null;
       let selectionHead: CellPos | null = null;
       const syncKeyboardSelectionCache = () => {
@@ -284,6 +358,8 @@ export function LocalTerminalPanel({
       offTitle?.();
       offExit?.();
       for (const dispose of disposers) dispose();
+      hoveredLink = undefined;
+      modifierDown = false;
       termRef.current?.dispose();
       termRef.current = null;
       fitAddonRef.current = null;
@@ -371,22 +447,24 @@ export function LocalTerminalPanel({
   if (windowsRightClick) return host;
 
   return (
-    <ContextMenu
+    <ContextMenu.Root
       onOpenChange={(open) => {
         if (open) setHasSelection(termRef.current?.hasSelection() ?? false);
       }}
     >
-      <ContextMenuTrigger asChild>{host}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-40">
-        <ContextMenuItem disabled={!hasSelection} onSelect={copySelection}>
+      <ContextMenu.Trigger>{host}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-40">
+        <ContextMenu.Item
+          disabled={!hasSelection}
+          onClick={copySelection}
+          shortcut={copyShortcutLabel}
+        >
           {translate('common.copy', 'Copy')}
-          <ContextMenuShortcut>{copyShortcutLabel}</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={pasteClipboard}>
+        </ContextMenu.Item>
+        <ContextMenu.Item onClick={pasteClipboard} shortcut={pasteShortcutLabel}>
           {translate('common.paste', 'Paste')}
-          <ContextMenuShortcut>{pasteShortcutLabel}</ContextMenuShortcut>
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+        </ContextMenu.Item>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   );
 }

@@ -10,16 +10,17 @@ import { Mention, MentionInput, MentionLabel } from '@/ui/mention';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 
 /**
- * Prototype for icon chips in the plain-textarea composer.
+ * Every chip kind the composer paints.
  *
  * The mention menu is deliberately out of the picture: these stories drive the
  * `Mention` primitive directly so the only variable is how a committed range is
  * painted. Type into any box — the ranges track edits, and the caret, the
- * selection, and the wrap points all come from the native textarea underneath,
- * so a chip that measured wrong would visibly drift from the text it decorates.
+ * selection and the wrap points all come from the editor that paints the chips,
+ * so a chip that measured wrong would visibly push the text after it.
  */
 
 const PASTED_LABEL = wrapPastedTextChipLabel('[Pasted 4,182 chars]');
+const QUOTE_LABEL = wrapPastedTextChipLabel('[Keep the reading position]');
 
 type Fixture = {
   text: string;
@@ -37,13 +38,15 @@ const fixture = (text: string, tokens: Array<[string, string]>): Fixture => ({
 });
 
 const MIXED = fixture(
-  `Compare @src/ui/mention/mention-highlighter.tsx against #482, run $review-diff, then summarise ${PASTED_LABEL} for @crdt-metadata-cleanup.`,
+  `Compare @src/ui/mention/mention-input.tsx against #482, run $review-diff, then summarise ${PASTED_LABEL} for @crdt-metadata-cleanup. ${QUOTE_LABEL} Why keep it? Ask @Release-Notes.`,
   [
-    ['@src/ui/mention/mention-highlighter.tsx', 'file'],
+    ['@src/ui/mention/mention-input.tsx', 'file'],
     ['#482', 'issue'],
     ['$review-diff', 'skill'],
     [PASTED_LABEL, 'pasted_text'],
     ['@crdt-metadata-cleanup', 'session'],
+    [QUOTE_LABEL, 'message_quote'],
+    ['@Release-Notes', 'agent_role'],
   ]
 );
 
@@ -88,15 +91,9 @@ function ComposerBox({
         onMentionsChange={setMentions}
         getMentionChip={chips ? getComposerMentionChip : undefined}
         triggers={[]}
-        // The real composer's surface, verbatim, including the
-        // `--mention-chip-surface` it sets. A decoration hides the textarea's
-        // glyphs by painting that colour, so a story on a *different* surface
-        // would hide the one bug this is most likely to have: the cover showing
-        // up as a rectangle.
         className={cn(
           'w-full rounded-xl border border-foreground/[0.10] bg-background px-3 py-2.5',
-          'dark:border-input-border/70 dark:bg-input/90',
-          '[--mention-chip-surface:hsl(var(--background))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]'
+          'dark:border-input-border/70 dark:bg-input/90'
         )}
       >
         <MentionLabel className="sr-only">Prototype composer</MentionLabel>

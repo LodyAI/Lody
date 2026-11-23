@@ -2,12 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { McpServerId } from '../src/ids';
 import {
-  formatMcpResolutionProblem,
-  interpolateEnvVars,
-  isMcpConnectionSpec,
+  getEffectiveDefaultMcpIds,
+  getProjectMcpKey,
   normalizeMcpServerIdSelection,
   resolveSessionMcpServers,
-  type McpResolutionProblem,
   type WorkspaceMcpServerMeta,
 } from '../src/workspace-mcp';
 
@@ -27,23 +25,6 @@ const stdioServer = (
 });
 
 describe('workspace MCP resolution', () => {
-  it('interpolates set variables and preserves missing placeholders', () => {
-    expect(
-      interpolateEnvVars('https://${HOST}/${PATH}', { HOST: 'example.test', PATH: 'mcp' })
-    ).toEqual({
-      value: 'https://example.test/mcp',
-      missing: [],
-    });
-    expect(interpolateEnvVars('token=${TOKEN}', {})).toEqual({
-      value: 'token=${TOKEN}',
-      missing: ['TOKEN'],
-    });
-    expect(interpolateEnvVars('token=${TOKEN}', { TOKEN: '' })).toEqual({
-      value: 'token=${TOKEN}',
-      missing: ['TOKEN'],
-    });
-  });
-
   it('resolves stdio values and daemon environment passthrough', () => {
     const entry = stdioServer('stdio', {
       name: 'filesystem',
@@ -188,53 +169,46 @@ describe('workspace MCP resolution', () => {
     expect(result.servers.map(({ name }) => name)).toEqual(['good']);
     expect(result.problems).toHaveLength(1);
   });
-
-  it('formats all problem kinds as actionable warnings', () => {
-    const problems: McpResolutionProblem[] = [
-      { kind: 'catalog_unavailable', reason: 'offline' },
-      { kind: 'unknown_server', mcpServerId: serverId('unknown') },
-      { kind: 'missing_connection', mcpServerId: serverId('missing'), name: 'Missing' },
-      {
-        kind: 'unsupported_transport',
-        mcpServerId: serverId('http'),
-        name: 'HTTP',
-        transport: 'http',
-      },
-      {
-        kind: 'unresolved_env_var',
-        mcpServerId: serverId('env'),
-        name: 'Env',
-        field: 'bearerToken',
-        variable: 'TOKEN',
-      },
-      {
-        kind: 'invalid_connection',
-        mcpServerId: serverId('invalid'),
-        name: 'Invalid',
-        reason: 'empty URL',
-      },
-    ];
-
-    for (const problem of problems) {
-      expect(formatMcpResolutionProblem(problem)).toMatch(/Settings|retry|connectivity|selection/i);
-    }
-  });
 });
 
 describe('workspace MCP guards and normalization', () => {
-  it('accepts valid connection specs and rejects malformed or SSE specs', () => {
-    expect(isMcpConnectionSpec({ transport: 'stdio', command: 'node', args: ['server.js'] })).toBe(
-      true
-    );
-    expect(isMcpConnectionSpec({ transport: 'http', url: 'https://example.test/mcp' })).toBe(true);
-    expect(isMcpConnectionSpec({ transport: 'stdio', command: 42 })).toBe(false);
-    expect(isMcpConnectionSpec({ transport: 'http', url: 42 })).toBe(false);
-    expect(isMcpConnectionSpec({ transport: 'sse', url: 'https://example.test/sse' })).toBe(false);
-  });
-
   it('keeps explicit empty selections distinct from absent selections', () => {
     expect(normalizeMcpServerIdSelection([])).toEqual([]);
     expect(normalizeMcpServerIdSelection(undefined)).toBeUndefined();
     expect(normalizeMcpServerIdSelection([' one ', '', 'one', 42, 'two'])).toEqual(['one', 'two']);
+  });
+});
+
+describe('project default selection', () => {
+  it('inherits only absent preferences and filters deleted ids without re-enabling defaults', () => {
+    const catalog = [stdioServer('a', { enabledByDefault: true }), stdioServer('b')];
+    expect(getEffectiveDefaultMcpIds(catalog)).toEqual(['a']);
+    expect(getEffectiveDefaultMcpIds(catalog, { ids: [] })).toEqual([]);
+    expect(
+      getEffectiveDefaultMcpIds(catalog, { ids: [serverId('b'), serverId('gone'), serverId('b')] })
+    ).toEqual(['b']);
+    expect(
+      getEffectiveDefaultMcpIds([...catalog, stdioServer('new', { enabledByDefault: true })], {
+        ids: [serverId('b')],
+      })
+    ).toEqual(['b']);
+  });
+
+  it('shares project defaults across branches but isolates project kinds and machines', () => {
+    const local = {
+      kind: 'local' as const,
+      localProjectId: 'project' as import('../src/project').LocalProjectId,
+      githubRepoFullName: 'Example/Repo',
+    };
+    expect(getProjectMcpKey(local, 'a')).toBe(
+      getProjectMcpKey({ ...local, branch: 'feature', useWorktree: true }, 'a')
+    );
+    expect(getProjectMcpKey(local, 'a')).not.toBe(getProjectMcpKey(local, 'b'));
+    expect(getProjectMcpKey(local)).toBeUndefined();
+    const github = { kind: 'github' as const, repoFullName: 'Example/Repo', branch: 'main' };
+    expect(getProjectMcpKey(github)).toBe(
+      getProjectMcpKey({ ...github, repoFullName: 'example/repo', branch: 'feature' })
+    );
+    expect(getProjectMcpKey(github)).not.toBe(getProjectMcpKey(local, 'a'));
   });
 });

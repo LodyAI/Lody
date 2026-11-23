@@ -1,0 +1,144 @@
+import { readSessionHistoryMetadata } from '@lody/shared/session-data';
+import { normalizeSessionTurnInputConfig } from '@lody/shared';
+import { isDeepStrictEqual } from 'node:util';
+import {
+  getSessionRoomId,
+  isLoroRepoDocDeleted,
+  type SessionHistoryInput,
+  type SessionId,
+  type SessionMeta,
+} from '@lody/shared';
+import type { LoroDocumentManager } from './loro/doc';
+import { createSessionBackend, readHistoryEntry } from '@/session/session-backend';
+
+/** JSON-only preparation, persisted before any Session mutation. */
+export type PreparedSessionInput = {
+  sessionId: SessionId;
+  meta: SessionMeta;
+  userTurn: SessionHistoryInput;
+  source?: SessionHistoryInput;
+};
+
+export function hasSessionDispatchEvidence(
+  meta: SessionMeta,
+  history: readonly {
+    id: string;
+    role: string;
+    status?: string;
+    userTurnId?: string;
+    finished?: boolean;
+    endedAt?: number;
+  }[],
+  userTurnId: string
+): boolean {
+  const user = history.find((entry) => entry.id === userTurnId && entry.role === 'user');
+  return (
+    !!user &&
+    (meta.latestUserMsgId === userTurnId ||
+      meta.processingUserMsgId === userTurnId ||
+      meta.lastHandledUserMsgId === userTurnId ||
+      user.status === 'handled' ||
+      user.status === 'failed' ||
+      user.status === 'canceled' ||
+      history.some(
+        (entry) =>
+          entry.role === 'assistant' &&
+          entry.userTurnId === userTurnId &&
+          (entry.finished === true || typeof entry.endedAt === 'number')
+      ))
+  );
+}
+
+export async function isPreparedSessionDispatched(
+  manager: LoroDocumentManager,
+  prepared: PreparedSessionInput
+): Promise<boolean> {
+  const record = await manager.repo.getDocMeta(getSessionRoomId(prepared.sessionId));
+  if (!record?.meta || isLoroRepoDocDeleted(record)) return false;
+  const session = await manager.getOrCreateSessionDoc(prepared.sessionId);
+  const backend = await createSessionBackend(session, record.meta as SessionMeta);
+  return hasSessionDispatchEvidence(
+    record.meta as SessionMeta,
+    await readSessionHistoryMetadata(backend.history),
+    prepared.userTurn.id
+  );
+}
+
+/** Replay only inserts missing records; mutable status/title and consumed turns survive. */
+export async function materializePreparedSessionInput(
+  manager: LoroDocumentManager,
+  prepared: PreparedSessionInput
+): Promise<void> {
+  const roomId = getSessionRoomId(prepared.sessionId);
+  const existing = await manager.repo.getDocMeta(roomId);
+  if (existing && isLoroRepoDocDeleted(existing)) throw new Error('Prepared Session was deleted');
+  if (existing?.meta && (existing.meta as SessionMeta).id) {
+    const meta = existing.meta as SessionMeta;
+    if (
+      meta.id !== prepared.sessionId ||
+      meta.machineId !== prepared.meta.machineId ||
+      meta.userId !== prepared.meta.userId ||
+      meta.agentConfigId !== prepared.meta.agentConfigId
+    ) {
+      throw new Error('Prepared Session identity conflict');
+    }
+  } else await manager.repo.upsertDocMeta(roomId, prepared.meta);
+  const session = await manager.getOrCreateSessionDoc(prepared.sessionId);
+  const backend = await createSessionBackend(
+    session,
+    (existing?.meta as SessionMeta | undefined) ?? prepared.meta
+  );
+  // Encrypted: an input this machine prepares carries the machine's signed intent,
+  // written with it in the same commit (owner decision 2026-11-10).
+  const userTurn =
+    manager.isEncryptedWorkspace() &&
+    prepared.userTurn.role === 'user' &&
+    !prepared.userTurn.e2eeIntent
+      ? {
+          ...prepared.userTurn,
+          e2eeIntent: await manager.signMachineInput({
+            sessionId: prepared.sessionId,
+            targetMachineId: prepared.meta.machineId,
+            userTurnId: prepared.userTurn.id,
+            inputConfig: prepared.userTurn.inputConfig,
+            ...(prepared.userTurn.derivedFrom
+              ? { derivedFrom: prepared.userTurn.derivedFrom }
+              : {}),
+            ...(prepared.userTurn.scheduleRun
+              ? { scheduleRun: prepared.userTurn.scheduleRun }
+              : {}),
+          }),
+        }
+      : prepared.userTurn;
+  if (userTurn.e2eeIntent === undefined) delete userTurn.e2eeIntent;
+  for (const entry of [prepared.source, userTurn]) {
+    if (!entry) continue;
+    const prior = await readHistoryEntry(backend, entry.id);
+    if (prior) {
+      if (
+        prior.role !== entry.role ||
+        !isDeepStrictEqual(
+          JSON.parse(JSON.stringify(prior.items)),
+          JSON.parse(JSON.stringify(entry.items))
+        ) ||
+        !isDeepStrictEqual(
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(prior.inputConfig) ?? {})),
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(entry.inputConfig) ?? {}))
+        )
+      )
+        throw new Error('Prepared Session Turn identity conflict');
+    } else await backend.appendHistoryTurn(entry);
+  }
+  await manager.repo.flush();
+}
+
+/** Irreversible handoff to the ordinary dispatch watcher. Never call with stale authorization. */
+export async function commitPreparedSessionDispatch(
+  manager: LoroDocumentManager,
+  prepared: PreparedSessionInput
+): Promise<void> {
+  if (await isPreparedSessionDispatched(manager, prepared)) return;
+  await manager.repo.upsertDocMeta(getSessionRoomId(prepared.sessionId), {
+    latestUserMsgId: prepared.userTurn.id,
+  } satisfies Partial<SessionMeta>);
+}

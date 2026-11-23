@@ -1,13 +1,35 @@
-import { shell } from 'electron'
-import { spawn } from 'node:child_process'
+import { constants as fsConstants } from 'node:fs'
+import { access, stat } from 'node:fs/promises'
+import path from 'node:path'
+import { app, shell, dialog, type BrowserWindow } from 'electron'
+import { createMainSettingsStore } from '../settings-store'
+import { translateMenu } from '../menu'
+import {
+  buildPathLauncherLaunchInput,
+  validateCustomPathLauncherCommandTemplate,
+  type BuiltinPathLauncherId
+} from '@lody/shared/path-launchers'
+import {
+  CustomPathLauncherApprovalSchema,
+  type CustomPathLauncherApproval,
+  type PathLauncherRequest
+} from '@lody/shared/electron-ipc'
+import { runCommandTextLegacy, startProcessLegacy } from '@lody/shared/node/process'
 import type {
   LaunchLocalPathInput,
   LaunchLocalPathResult,
   LocalPathCommandSpec
 } from '@lody/shared/electron-ipc'
 import { formatUnknownError } from '../utils'
-import { launchCommandPathWithFallback } from './local-path-launcher-core'
-import { getUserShellEnvCached, shouldUseWindowsShell } from './shell-env'
+import {
+  launchCommandPathWithFallback,
+  probePathLauncher,
+  selectSafePathLauncherInput
+} from './local-path-launcher-core'
+import { getUserShellEnvCachedLegacy, shouldUseWindowsShell } from './shell-env'
+
+const PROBE_CACHE_MS = 5 * 60 * 1000
+const probeCache = new Map<string, { available: boolean; checkedAt: number }>()
 
 // Editors launch via their CLI first. VS Code falls back to its protocol handler
 // when no CLI candidate is available; Warp always launches through its protocol.
@@ -25,6 +47,103 @@ function normalizeAllowedLocalLaunchUrl(value: string): string | null {
   }
 }
 
+async function hasPath(filePath: string): Promise<boolean> {
+  return stat(filePath).then(
+    async (info) => {
+      if (!info.isFile()) return false
+      return access(
+        filePath,
+        process.platform === 'win32' ? fsConstants.F_OK : fsConstants.X_OK
+      ).then(
+        () => true,
+        () => false
+      )
+    },
+    () => false
+  )
+}
+
+/** Whether a probe command exits 0; a command that cannot start counts as no. */
+async function commandSucceeds(
+  command: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv
+): Promise<boolean> {
+  return await runCommandTextLegacy({ command, args, env, check: 'none' }).then(
+    ({ code }) => code === 0,
+    () => false
+  )
+}
+
+async function hasMacApp(name: string): Promise<boolean> {
+  return await commandSucceeds('/usr/bin/open', ['-Ra', name])
+}
+
+async function hasCommand(command: string, args?: readonly string[]): Promise<boolean> {
+  const applicationName =
+    process.platform === 'darwin' && path.basename(command) === 'open' && args && args[0] === '-a'
+      ? args[1]
+      : undefined
+  const cacheKey = `command:${command}:${applicationName ? applicationName : ''}`
+  const cached = probeCache.get(cacheKey)
+  if (cached && Date.now() - cached.checkedAt < PROBE_CACHE_MS) {
+    return cached.available
+  }
+
+  let available = false
+  // `/usr/bin/open` exists on every Mac, but `open -a Foo` is launchable only
+  // when Foo is installed. This also covers custom launchers using that idiom.
+  if (applicationName) {
+    available = await hasMacApp(applicationName)
+  } else if (path.isAbsolute(command) || command.includes('/') || command.includes('\\')) {
+    available = await hasPath(command)
+  } else {
+    const shellEnv = await getUserShellEnvCachedLegacy()
+    const env = shellEnv ? { ...process.env, ...shellEnv } : process.env
+    const pathValue = env.PATH ? env.PATH : ''
+    const pathEntries = pathValue.split(path.delimiter).filter(Boolean)
+    const extensions =
+      process.platform === 'win32'
+        ? (env.PATHEXT ? env.PATHEXT : '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+        : ['']
+    const commandHasExtension = process.platform === 'win32' && path.extname(command) !== ''
+    const candidates = pathEntries.flatMap((entry) =>
+      commandHasExtension
+        ? [path.join(entry, command)]
+        : extensions.map((extension) => path.join(entry, `${command}${extension}`))
+    )
+    available = (await Promise.all(candidates.map(hasPath))).some(Boolean)
+  }
+
+  probeCache.set(cacheKey, { available, checkedAt: Date.now() })
+  return available
+}
+
+async function hasProtocol(urlValue: string): Promise<boolean> {
+  if (!URL.canParse(urlValue)) return false
+  const protocol = new URL(urlValue).protocol
+
+  const cacheKey = `protocol:${protocol}`
+  const cached = probeCache.get(cacheKey)
+  if (cached && Date.now() - cached.checkedAt < PROBE_CACHE_MS) {
+    return cached.available
+  }
+
+  const available = app.getApplicationNameForProtocol(`${protocol}//`).length > 0
+  probeCache.set(cacheKey, { available, checkedAt: Date.now() })
+  return available
+}
+
+export function hasPathLauncher(input: LaunchLocalPathInput): Promise<boolean> {
+  const selected = selectSafePathLauncherInput(input, process.platform, shouldUseWindowsShell)
+  if (!selected) return Promise.resolve(false)
+  return probePathLauncher(
+    selected,
+    (candidate) => hasCommand(candidate.command, candidate.args),
+    hasProtocol
+  )
+}
+
 async function canResolveWindowsShellCommand(
   command: string,
   env: NodeJS.ProcessEnv
@@ -33,17 +152,7 @@ async function canResolveWindowsShellCommand(
     return true
   }
 
-  return await new Promise<boolean>((resolve) => {
-    const child = spawn('where.exe', [command], {
-      env,
-      shell: false,
-      stdio: 'ignore',
-      windowsHide: true
-    })
-
-    child.once('error', () => resolve(false))
-    child.once('close', (code) => resolve(code === 0))
-  })
+  return await commandSucceeds('where.exe', [command], env)
 }
 
 async function spawnDetached(
@@ -54,7 +163,7 @@ async function spawnDetached(
   // (the default a user types into a custom launcher) would never resolve. Spawn
   // with the user's login-shell env so commands resolve the same way they do in a
   // terminal; fall back to process.env when the probe is unavailable.
-  const shellEnv = await getUserShellEnvCached()
+  const shellEnv = await getUserShellEnvCachedLegacy()
   const env = shellEnv ? { ...process.env, ...shellEnv } : process.env
 
   if (
@@ -79,18 +188,26 @@ async function spawnDetached(
 
     try {
       const useWindowsShell = shouldUseWindowsShell(spec.command)
-      const child = spawn(spec.command, spec.args ?? [], {
-        detached: true,
-        // Windows `.cmd`/`.bat` shims (e.g. the `code` shim) can't be spawned
-        // with shell:false; everywhere else keep the shell out of the loop.
-        shell: useWindowsShell,
-        env,
-        stdio: 'ignore',
-        // Only hide the cmd.exe wrapper window. libuv maps windowsHide to
-        // SW_HIDE as well, which would start a directly spawned native editor
-        // (sublime_text.exe, idea64.exe, ...) with no visible window; and
-        // DETACHED_PROCESS already suppresses console allocation here.
-        windowsHide: useWindowsShell
+      // The launched editor outlives this app: nothing here ever terminates it.
+      const { child } = startProcessLegacy({
+        command: spec.command,
+        args: spec.args ?? [],
+        options: {
+          // Windows `.cmd`/`.bat` shims (e.g. the `code` shim) can't be spawned
+          // with shell:false; everywhere else keep the shell out of the loop.
+          shell: useWindowsShell,
+          env,
+          stdio: 'ignore',
+          // Only hide the cmd.exe wrapper window. libuv maps windowsHide to
+          // SW_HIDE as well, which would start a directly spawned native editor
+          // (sublime_text.exe, idea64.exe, ...) with no visible window; and
+          // DETACHED_PROCESS already suppresses console allocation here.
+          windowsHide: useWindowsShell
+        },
+        // `detached: true` on every platform: its own session on POSIX, its
+        // own console-less process on Windows.
+        processGroup: true,
+        windowsDetached: true
       })
 
       child.once('spawn', () => {
@@ -150,6 +267,9 @@ async function launchLocalUrl(urlValue: string): Promise<LaunchLocalPathResult> 
 }
 
 export async function launchLocalPath(input: LaunchLocalPathInput): Promise<LaunchLocalPathResult> {
+  const selected = selectSafePathLauncherInput(input, process.platform, shouldUseWindowsShell)
+  if (!selected) return { launched: false, error: 'unsafe_shell_path' }
+  input = selected
   if (input.kind === 'url') {
     return await launchLocalUrl(input.url)
   }
@@ -162,4 +282,104 @@ export async function launchLocalPath(input: LaunchLocalPathInput): Promise<Laun
       }),
     launchLocalUrl
   )
+}
+
+const launcherStore = createMainSettingsStore<{ launchers: CustomPathLauncherApproval[] }>({
+  configName: 'path-launchers',
+  defaults: { launchers: [] },
+  schema: {
+    launchers: {
+      type: 'array',
+      maxItems: 20,
+      items: {
+        type: 'object',
+        required: ['id', 'label', 'commandTemplate'],
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', maxLength: 80 },
+          label: { type: 'string', maxLength: 48 },
+          commandTemplate: { type: 'string', maxLength: 1000 }
+        }
+      }
+    }
+  }
+})
+const builtinIds = new Set([
+  'vscode',
+  'cursor',
+  'antigravity',
+  'windsurf',
+  'zed',
+  'sublime',
+  'warp',
+  'delta',
+  'xcode'
+])
+
+export function resolvePathLauncher(request: PathLauncherRequest): LaunchLocalPathInput | null {
+  if (!path.isAbsolute(request.targetPath)) return null
+  const targetPath = path.normalize(request.targetPath)
+  if (builtinIds.has(request.launcherId)) {
+    if (request.launcherId === 'xcode' && process.platform !== 'darwin') return null
+    return buildPathLauncherLaunchInput(
+      {
+        kind: 'builtin',
+        id: request.launcherId as BuiltinPathLauncherId,
+        label: request.launcherId
+      },
+      targetPath,
+      process.platform,
+      request.targetKind
+    )
+  }
+  const id = request.launcherId.startsWith('custom:') ? request.launcherId.slice(7) : null
+  const stored = launcherStore.get('launchers').find((item) => item.id === id)
+  const parsed = CustomPathLauncherApprovalSchema.safeParse(stored)
+  if (!parsed.success || !validateCustomPathLauncherCommandTemplate(parsed.data.commandTemplate).ok)
+    return null
+  return buildPathLauncherLaunchInput(
+    { ...parsed.data, kind: 'custom', launcherId: request.launcherId },
+    targetPath,
+    process.platform,
+    request.targetKind
+  )
+}
+
+export async function approvePathLauncher(
+  raw: unknown,
+  owner: BrowserWindow
+): Promise<{ approved: boolean }> {
+  const parsed = CustomPathLauncherApprovalSchema.safeParse(raw)
+  if (!parsed.success || !validateCustomPathLauncherCommandTemplate(parsed.data.commandTemplate).ok)
+    return { approved: false }
+  const candidate = parsed.data
+  if (
+    launcherStore
+      .get('launchers')
+      .some(
+        (item) => item.id === candidate.id && item.commandTemplate === candidate.commandTemplate
+      )
+  )
+    return { approved: true }
+  const result = await dialog.showMessageBox(owner, {
+    type: 'warning',
+    message: translateMenu(
+      'desktop.pathLauncher.approve',
+      'Allow this custom launcher to run commands?'
+    ),
+    detail: `${candidate.label}\n\n${candidate.commandTemplate}`,
+    buttons: [
+      translateMenu('common.cancel', 'Cancel'),
+      translateMenu('desktop.pathLauncher.allow', 'Allow launcher')
+    ],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true
+  })
+  if (result.response !== 1 || owner.isDestroyed()) return { approved: false }
+  const launchers = launcherStore.get('launchers').filter((item) => item.id !== candidate.id)
+  // Renderer preferences can delete old ids; obsolete approvals must not fill
+  // the native store forever and prevent a newly approved launcher from working.
+  launcherStore.set('launchers', [...launchers.slice(-19), candidate])
+  return { approved: true }
 }

@@ -1,42 +1,15 @@
-/* Terminal viewport + tab-strip scrollbars. Colors come from the shared
-   --scrollbar-thumb tokens (tailwind/index.css) so they match the rest of the
-   app's scrollbars (.scrollbar-pro) in light/dark + VS Code themes. */
+/* Terminal overflow geometry; native scrollbar appearance comes from the
+   product baseline in tailwind/scrollbars.css. */
 .lody-terminal-panel .xterm .xterm-viewport {
   overflow-y: overlay !important;
   scrollbar-gutter: auto !important;
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
-}
-
-.lody-terminal-panel .xterm .xterm-viewport::-webkit-scrollbar {
-  width: 8px;
 }
 
 .lody-terminal-tab-strip {
   overflow-x: overlay;
   scrollbar-gutter: auto;
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--scrollbar-thumb) / 0.5) transparent;
 }
 
 .lody-terminal-tab-strip::-webkit-scrollbar {
   height: 6px;
-}
-
-.lody-terminal-panel .xterm .xterm-viewport::-webkit-scrollbar-track,
-.lody-terminal-tab-strip::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.lody-terminal-panel .xterm .xterm-viewport::-webkit-scrollbar-thumb,
-.lody-terminal-tab-strip::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-color: hsl(var(--scrollbar-thumb) / 0.5);
-  background-clip: content-box;
-}
-
-.lody-terminal-panel .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover,
-.lody-terminal-tab-strip::-webkit-scrollbar-thumb:hover {
-  background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
 }

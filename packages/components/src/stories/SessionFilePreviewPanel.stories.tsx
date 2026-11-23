@@ -1,10 +1,14 @@
+import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { getServerNow, type SessionFilePayload } from '@lody/shared';
 import {
   SessionFilePreviewPanel,
+  SessionFilePreviewDialog,
   type SessionFilePreviewStatus,
 } from '@/components/ai-gui/session-file-preview-dialog';
-import { Dialog, DialogContentWithoutClose } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import { SessionSidePanelTabBar } from '@/components/sessions/session-side-panel-tab-bar';
 
 const file = (overrides: Partial<SessionFilePayload>): SessionFilePayload => ({
   type: 'file',
@@ -78,15 +82,15 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// The panel renders a `DialogTitle`, which requires a Dialog ancestor — mirror
-// the real composition (SessionFilePreviewDialog wraps it in Dialog/DialogContent)
+// The panel renders a `Dialog.Title`, which requires a Dialog.Root ancestor — mirror
+// the real composition (SessionFilePreviewDialog wraps it in Dialog.Root/Dialog.Content)
 // so the story exercises the panel exactly as users see it.
 const wrap = (content: React.ReactNode) => (
-  <Dialog open>
-    <DialogContentWithoutClose className="w-[calc(100vw-2rem)] max-w-3xl">
+  <Dialog.Root open>
+    <Dialog.Content closeButton={false} width="48rem">
       {content}
-    </DialogContentWithoutClose>
-  </Dialog>
+    </Dialog.Content>
+  </Dialog.Root>
 );
 
 const loaded = (text: string, truncated = false): SessionFilePreviewStatus => ({
@@ -156,4 +160,139 @@ export const Error: Story = {
     onDownload: () => {},
   },
   render: (args) => wrap(<SessionFilePreviewPanel {...args} />),
+};
+
+const HTML_TEXT = `<!doctype html><html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body { margin: 0; padding: 24px; font: 16px system-ui; background: #f3f7ff; color: #153052; } h1 { font-size: 24px; }</style>
+</head><body><h1>HTML 附件预览</h1><p>打开即预览，小眼睛切换源码。</p>
+<button onclick="this.textContent='Script ran'">Run script</button>
+<a href="https://example.invalid/escape">External link</a>
+<script>document.body.dataset.executed='yes';</script></body></html>`;
+
+export const HtmlAttachment: Story = {
+  args: {
+    file: file({ fileName: 'demo.html', mimeType: 'text/html' }),
+    status: loaded(HTML_TEXT),
+    onDownload: () => {},
+  },
+  render: function HtmlAttachmentDialog(args) {
+    const [open, setOpen] = useState(true);
+    return <SessionFilePreviewDialog {...args} open={open} onOpenChange={setOpen} />;
+  },
+};
+
+export const TruncatedHtml: Story = {
+  ...HtmlAttachment,
+  args: { ...HtmlAttachment.args, status: loaded(HTML_TEXT, true) },
+};
+
+export const LoadingHtml: Story = {
+  ...HtmlAttachment,
+  args: { ...HtmlAttachment.args, status: { kind: 'loading' } },
+};
+
+export const FailedHtml: Story = {
+  ...HtmlAttachment,
+  args: { ...HtmlAttachment.args, status: { kind: 'error', message: 'Could not load preview' } },
+};
+
+export const MobileHtmlAttachment: Story = {
+  ...HtmlAttachment,
+  decorators: [
+    (Story) => (
+      <ForceMobileLayoutProvider force>
+        <Story />
+      </ForceMobileLayoutProvider>
+    ),
+  ],
+};
+export const MobileMarkdownAttachment: Story = {
+  ...MobileHtmlAttachment,
+  args: {
+    ...HtmlAttachment.args,
+    file: file({ fileName: 'notes.md' }),
+    status: loaded(SAMPLE_TEXT),
+  },
+};
+export const MobileTextAttachment: Story = {
+  ...MobileHtmlAttachment,
+  args: {
+    ...HtmlAttachment.args,
+    file: file({ fileName: 'notes.txt' }),
+    status: loaded(PLAIN_TEXT),
+  },
+};
+
+/* The desktop composition: an attachment opens as a side-panel tab. The name and
+   actions sit directly under the tab strip and the body fills the panel. */
+const sidePanel = (args: React.ComponentProps<typeof SessionFilePreviewPanel>) => (
+  <div className="flex h-[560px] w-[640px] flex-col overflow-hidden bg-background text-foreground">
+    <SessionSidePanelTabBar
+      tabs={[
+        {
+          id: `attachment:${args.file.fileId}`,
+          label: args.file.fileName,
+          kind: 'file',
+          filePath: args.file.fileName,
+          closeable: true,
+        },
+      ]}
+      activeTabId={`attachment:${args.file.fileId}`}
+      onTabSelect={() => {}}
+      onTabClose={() => {}}
+      closeTabLabel={(label) => `Close ${label}`}
+    />
+    <div className="min-h-0 flex-1">
+      <SessionFilePreviewPanel {...args} variant="pane" />
+    </div>
+  </div>
+);
+
+export const SidePanelMarkdown: Story = {
+  args: MarkdownRendered.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelHtml: Story = {
+  args: HtmlAttachment.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelPlainText: Story = {
+  args: PlainText.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+const syntheticVideoUrl = new URL('./fixtures/video-preview.webm', import.meta.url).href;
+
+export const SidePanelVideo: Story = {
+  args: {
+    file: file({
+      fileId: 'preview-video',
+      fileName: 'walkthrough.webm',
+      mimeType: 'video/webm',
+      sizeBytes: 12_800,
+      textPreview: false,
+    }),
+    status: { kind: 'video', src: syntheticVideoUrl },
+    onDownload: () => {},
+  },
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelTruncated: Story = {
+  args: Truncated.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelError: Story = {
+  args: Error.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
 };

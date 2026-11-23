@@ -20,11 +20,6 @@ type BuiltInCommandDefinition = {
 // keeps them non-executable; a mounted real command replaces the placeholder by id. Titles
 // carry a `titleKey` (not a pre-translated string) because this module registers outside
 // React and can't call `t()` — display surfaces translate via the key instead.
-// The Tasks commands (`tasks.quickAdd` / `tasks.open`) are deliberately absent: a
-// placeholder here would list them in the palette and keyboard settings even for
-// users who never enabled the Tasks beta. `app-commands.tsx` registers the real
-// ones behind `tasksFeatureEnabledAtom`, and it is mounted workspace-wide, so
-// nothing is lost once the beta is on.
 const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
   {
     id: 'nav.back',
@@ -48,6 +43,12 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     id: 'app.cycleTheme',
     titleKey: 'commands.app.cycleTheme',
     title: 'Cycle Theme',
+    category: 'View',
+  },
+  {
+    id: 'layout.toggleZenMode',
+    titleKey: 'commands.layout.toggleZenMode',
+    title: 'Toggle Zen Layout',
     category: 'View',
   },
   {
@@ -117,12 +118,6 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'Session',
   },
   {
-    id: 'session.closeFocusedTab',
-    titleKey: 'commands.session.closeFocusedTab',
-    title: 'Close Focused Tab',
-    category: 'Session',
-  },
-  {
     id: 'session.toggleTerminal',
     titleKey: 'commands.session.toggleTerminal',
     title: 'Toggle Terminal',
@@ -158,6 +153,12 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     title: 'Switch to Next Session',
     category: 'Navigation',
   },
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((slot) => ({
+    id: `session.switchToVisible${slot}` as ShortcutCommandId,
+    titleKey: `commands.session.switchToVisible${slot}`,
+    title: `Switch to Session ${slot}`,
+    category: 'Navigation' as const,
+  })),
   {
     id: 'session.cycleMode',
     titleKey: 'commands.session.cycleMode',
@@ -181,6 +182,24 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     titleKey: 'commands.session.cycleThinkEffort',
     title: 'Cycle Thinking Effort',
     category: 'Session',
+  },
+  {
+    id: 'session.openRunConfig',
+    titleKey: 'commands.session.openRunConfig',
+    title: 'Open Run Configuration',
+    category: 'Session',
+  },
+  {
+    id: 'session.openAddMenu',
+    titleKey: 'commands.session.openAddMenu',
+    title: 'Open Composer + Menu',
+    category: 'Session',
+  },
+  {
+    id: 'mention.toggleSessionProjectScope',
+    titleKey: 'commands.mention.toggleSessionProjectScope',
+    title: 'Toggle Session Mention Project Scope',
+    category: 'Editor',
   },
 ];
 

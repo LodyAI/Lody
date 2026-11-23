@@ -1,0 +1,466 @@
+// @vitest-environment jsdom
+import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
+import i18next from 'i18next';
+
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { Provider, createStore, useAtom } from 'jotai';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SessionId, WorkspaceId } from '@lody/shared';
+
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { createSessionSendResources } from '../src/lib/session-send-resources';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+import {
+  buildChatLandingDraftKey,
+  buildChatLandingSurfaceDraftKey,
+  chatLandingDraftSessionIdAtomFamily,
+  chatLandingPendingFilesAtomFamily,
+  chatLandingPendingImagesAtomFamily,
+} from '../src/atoms/chat-landing-draft';
+import { chatLandingSessionStateAtomFamily } from '../src/atoms/local-storage-cache';
+import { useChatLandingDraftSession } from '../src/hooks/use-chat-landing-draft-session';
+import {
+  useChatLandingImageDraft,
+  type ChatLandingImageDraftItem,
+} from '../src/hooks/use-chat-landing-image-draft';
+import {
+  useChatLandingFileDraft,
+  type ChatLandingFileDraftItem,
+} from '../src/hooks/use-chat-landing-file-draft';
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+};
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    reject = fail;
+    resolve = done;
+  });
+  return { promise, resolve, reject };
+}
+
+const uploadMocks = vi.hoisted(() => ({
+  imageUploadStarted: null as Deferred<void> | null,
+  imageUpload: null as Deferred<unknown> | null,
+  fileUpload: null as Deferred<unknown> | null,
+  /** Resolves the moment the hook reaches `uploadSessionFile`, so the test
+   *  waits on that call rather than on a guessed number of microtasks. */
+  fileUploadAborted: null as Deferred<void> | null,
+  fileUploadStarted: null as Deferred<void> | null,
+  fileUploadSignals: [] as (AbortSignal | undefined)[],
+}));
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback ?? _key,
+    i18n: { language: 'en' },
+  }),
+}));
+
+vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn() } }));
+
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => null }));
+
+vi.mock('../src/lib/posthog-analytics', () => ({ capturePostHogEvent: vi.fn() }));
+
+vi.mock('../src/lib/session-image-upload', () => ({
+  validateSessionImageFile: () => null,
+  uploadSessionImage: ({ signal }: { signal?: AbortSignal }) => {
+    uploadMocks.imageUpload = deferred<unknown>();
+    const upload = uploadMocks.imageUpload;
+    signal?.addEventListener(
+      'abort',
+      () => upload.reject(new DOMException('Aborted', 'AbortError')),
+      { once: true }
+    );
+    uploadMocks.imageUploadStarted?.resolve();
+    return uploadMocks.imageUpload.promise;
+  },
+}));
+
+vi.mock('../src/lib/session-file-upload', () => ({
+  SESSION_FILE_MAX_SIZE_MB: 20,
+  validateSessionFile: () => null,
+  computeSha256Hex: async () => 'sha256',
+  computeTextPreviewable: async () => undefined,
+  isUploadAbortedError: (error: unknown) =>
+    error instanceof DOMException && error.name === 'AbortError',
+  isSessionFileTransferPhase: (status: string) => status === 'preparing' || status === 'uploading',
+  uploadSessionFile: ({ signal }: { signal?: AbortSignal }) => {
+    uploadMocks.fileUploadSignals.push(signal);
+    uploadMocks.fileUpload = deferred<unknown>();
+    const upload = uploadMocks.fileUpload;
+    signal?.addEventListener(
+      'abort',
+      () => {
+        upload.reject(new DOMException('Aborted', 'AbortError'));
+        uploadMocks.fileUploadAborted?.resolve();
+      },
+      { once: true }
+    );
+    uploadMocks.fileUploadStarted?.resolve();
+    return uploadMocks.fileUpload.promise;
+  },
+}));
+
+vi.mock('../src/lib/electron-session-file-sender', () => ({
+  canUseElectronLocalFileSend: () => false,
+  sendSessionFileToLocalRuntime: async () => null,
+}));
+
+const WORKSPACE_A_KEY = buildChatLandingDraftKey('user-1', 'workspace-a');
+const WORKSPACE_B_KEY = buildChatLandingDraftKey('user-1', 'workspace-b');
+
+type Harness = {
+  attachments: import('../src/lib/session-attachment-draft').SessionAttachmentDraft[];
+  imageItems: ChatLandingImageDraftItem[];
+  fileItems: ChatLandingFileDraftItem[];
+  sessionId: SessionId | null;
+  prompt: string;
+  setPrompt: (prompt: string) => void;
+  addImages: (files: File[]) => void;
+  addFiles: (files: File[]) => void;
+  removeImage: (localId: string) => void;
+  clearDraft: () => void;
+};
+
+let harness: Harness | null = null;
+
+function DraftHarness({ draftKey }: { draftKey: string }) {
+  const [sessionState, setSessionState] = useAtom(chatLandingSessionStateAtomFamily(draftKey));
+  const { sessionId, ensureSessionId } = useChatLandingDraftSession(draftKey);
+  const imageDraft = useChatLandingImageDraft({
+    draftKey,
+    workspaceId: 'workspace-a' as WorkspaceId,
+    authToken: 'token',
+    isMobile: false,
+    projectKind: null,
+    sessionId,
+    ensureSessionId,
+  });
+  const fileDraft = useChatLandingFileDraft({
+    draftKey,
+    workspaceId: 'workspace-a' as WorkspaceId,
+    authToken: 'token',
+    machineId: null,
+    sessionId,
+    ensureSessionId,
+  });
+  harness = {
+    attachments: [...imageDraft.attachments, ...fileDraft.attachments],
+    imageItems: imageDraft.imageItems,
+    fileItems: fileDraft.fileItems,
+    sessionId,
+    prompt: sessionState.prompt,
+    setPrompt: (prompt) => {
+      void setSessionState({ ...sessionState, prompt });
+    },
+    addImages: imageDraft.addFiles,
+    addFiles: fileDraft.addFiles,
+    removeImage: imageDraft.handleRemoveImage,
+    // What submit acceptance calls in `chat-landing.tsx`.
+    clearDraft: () => {
+      imageDraft.clearPendingImages();
+      fileDraft.clearPendingFiles();
+    },
+  };
+  return null;
+}
+
+let resources: ReturnType<typeof createSessionSendResources>;
+let store = createStore();
+let root: Root | null = null;
+let container: HTMLDivElement | null = null;
+let objectUrlSeq = 0;
+let revokedUrls: string[] = [];
+
+function mountLanding(draftKey: string): void {
+  store.set(runtimeAtom, {
+    workspaceId: 'workspace-a',
+    sendResources: resources,
+  } as WorkspaceRuntime);
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => {
+    root?.render(createElement(Provider, { store }, createElement(DraftHarness, { draftKey })));
+  });
+}
+
+function unmountLanding(): void {
+  act(() => {
+    root?.unmount();
+  });
+  container?.remove();
+  root = null;
+  container = null;
+}
+
+function readHarness(): Harness {
+  if (!harness) throw new Error('landing harness is not mounted');
+  return harness;
+}
+
+function pngFile(name: string): File {
+  return new File([new Uint8Array([1, 2, 3])], name, { type: 'image/png' });
+}
+
+function textFile(name: string): File {
+  return new File([new Uint8Array([4, 5, 6])], name, { type: 'text/plain' });
+}
+
+beforeEach(() => {
+  resources = createSessionSendResources({
+    acquire: async () => {
+      throw new Error('Unexpected store acquisition');
+    },
+    releaseRef: () => {},
+  });
+  uploadMocks.imageUploadStarted = deferred<void>();
+  localStorage.clear();
+  sessionStorage.clear();
+  Object.defineProperty(window, '__LODY_ELECTRON__', {
+    value: false,
+    configurable: true,
+    writable: true,
+  });
+  store = createStore();
+  harness = null;
+  objectUrlSeq = 0;
+  revokedUrls = [];
+  uploadMocks.imageUpload = null;
+  uploadMocks.fileUpload = null;
+  uploadMocks.fileUploadStarted = deferred<void>();
+  uploadMocks.fileUploadAborted = deferred<void>();
+  uploadMocks.fileUploadSignals = [];
+  URL.createObjectURL = () => `blob:preview/${(objectUrlSeq += 1)}`;
+  URL.revokeObjectURL = (url: string) => {
+    revokedUrls.push(url);
+  };
+});
+
+afterEach(async () => {
+  if (root) unmountLanding();
+  await resources.dispose();
+});
+
+describe('chat landing draft persistence', () => {
+  it('persists prompt text separately for each workspace', () => {
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().setPrompt('draft from workspace A');
+    });
+    unmountLanding();
+
+    store = createStore();
+    mountLanding(WORKSPACE_B_KEY);
+    expect(readHarness().prompt).toBe('');
+    act(() => {
+      readHarness().setPrompt('draft from workspace B');
+    });
+    unmountLanding();
+
+    store = createStore();
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().prompt).toBe('draft from workspace A');
+    unmountLanding();
+
+    store = createStore();
+    mountLanding(WORKSPACE_B_KEY);
+    expect(readHarness().prompt).toBe('draft from workspace B');
+  });
+
+  it('uses the same durable workspace draft from every peer window', () => {
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().setPrompt('workspace draft');
+    });
+    unmountLanding();
+
+    window.__LODY_ELECTRON__ = true;
+    sessionStorage.setItem('lody:auxiliaryWindow', '1');
+    store = createStore();
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().prompt).toBe('workspace draft');
+    act(() => {
+      readHarness().setPrompt('updated workspace draft');
+    });
+    unmountLanding();
+
+    window.__LODY_ELECTRON__ = false;
+    store = createStore();
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().prompt).toBe('updated workspace draft');
+  });
+
+  it('restores images, their preview URLs, and the reserved session id', () => {
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().addImages([pngFile('shot.png')]);
+    });
+
+    const added = readHarness().imageItems;
+    expect(added).toHaveLength(1);
+    const previewUrl = added[0]!.previewUrl;
+    const reservedSessionId = readHarness().sessionId;
+    expect(reservedSessionId).not.toBeNull();
+
+    unmountLanding();
+    expect(revokedUrls).toEqual([]);
+
+    mountLanding(WORKSPACE_A_KEY);
+    const restored = readHarness().imageItems;
+    expect(restored).toHaveLength(1);
+    expect(restored[0]!.id).toBe(added[0]!.id);
+    expect(restored[0]!.previewUrl).toBe(previewUrl);
+    expect(readHarness().sessionId).toBe(reservedSessionId);
+  });
+
+  it('keeps images and files as nonblocking local drafts across navigation', () => {
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().addImages([pngFile('shot.png')]);
+      readHarness().addFiles([textFile('notes.txt')]);
+    });
+    expect(readHarness().imageItems[0]?.status).toBe('draft');
+    expect(readHarness().fileItems[0]?.status).toBe('draft');
+    expect(resources.getActiveCount()).toBe(0);
+    const identity = readHarness().sessionId;
+    unmountLanding();
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().imageItems[0]?.status).toBe('draft');
+    expect(readHarness().fileItems[0]?.status).toBe('draft');
+    expect(readHarness().sessionId).toBe(identity);
+  });
+
+  it('releases local draft sources and previews on explicit reset', () => {
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().addImages([pngFile('shot.png')]);
+      readHarness().addFiles([textFile('notes.txt')]);
+    });
+    const preview = readHarness().imageItems[0]!.previewUrl;
+    act(() => readHarness().clearDraft());
+    expect(revokedUrls).toEqual([preview]);
+    unmountLanding();
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().imageItems).toEqual([]);
+    expect(readHarness().fileItems).toEqual([]);
+    expect(resources.getActiveCount()).toBe(0);
+  });
+
+  it("keeps the Convert-to-task dialog's draft apart from the page draft", () => {
+    // The anonymous owner is the case a plain suffix-free key would collide on.
+    for (const owner of ['user-1', null]) {
+      expect(buildChatLandingSurfaceDraftKey(owner, 'today-convert', 'workspace-a')).not.toBe(
+        buildChatLandingDraftKey(owner, 'workspace-a')
+      );
+    }
+    const surfaceKey = buildChatLandingSurfaceDraftKey('user-1', 'today-convert', 'workspace-a');
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().setPrompt('page draft');
+      readHarness().addImages([pngFile('page.png')]);
+    });
+    const page = readHarness();
+    unmountLanding();
+
+    mountLanding(surfaceKey);
+    expect(readHarness().prompt).toBe('');
+    expect(readHarness().imageItems).toEqual([]);
+    act(() => {
+      readHarness().setPrompt('dialog draft');
+      readHarness().addImages([pngFile('dialog.png')]);
+      readHarness().addFiles([textFile('dialog.txt')]);
+    });
+    expect(readHarness().sessionId).not.toBe(page.sessionId);
+    act(() => readHarness().clearDraft());
+    unmountLanding();
+
+    expect(store.get(chatLandingSessionStateAtomFamily(WORKSPACE_A_KEY)).prompt).toBe('page draft');
+    expect(store.get(chatLandingDraftSessionIdAtomFamily(WORKSPACE_A_KEY))).toBe(page.sessionId);
+    expect(store.get(chatLandingPendingImagesAtomFamily(WORKSPACE_A_KEY))).toHaveLength(1);
+    expect(store.get(chatLandingPendingFilesAtomFamily(WORKSPACE_A_KEY))).toEqual([]);
+    expect(revokedUrls).not.toContain(page.imageItems[0]!.previewUrl);
+  });
+
+  it('keeps drafts in different workspaces apart', () => {
+    mountLanding(WORKSPACE_A_KEY);
+    act(() => {
+      readHarness().addImages([pngFile('from-a.png')]);
+    });
+    const workspaceAItems = readHarness().imageItems;
+    const workspaceASessionId = readHarness().sessionId;
+    unmountLanding();
+
+    mountLanding(WORKSPACE_B_KEY);
+    expect(readHarness().imageItems).toEqual([]);
+    expect(readHarness().sessionId).toBeNull();
+    unmountLanding();
+
+    mountLanding(WORKSPACE_A_KEY);
+    expect(readHarness().imageItems).toEqual(workspaceAItems);
+    expect(readHarness().sessionId).toBe(workspaceASessionId);
+  });
+});
+
+it('retains encrypted attachment drafts and the reserved identity after storage admission fails', async () => {
+  await i18next.init({ lng: 'en', resources: {} });
+  mountLanding(WORKSPACE_A_KEY);
+  const file = textFile('private.txt');
+  act(() => {
+    readHarness().setPrompt('keep this encrypted draft');
+    readHarness().addFiles([file]);
+    readHarness().addImages([pngFile('private.png')]);
+  });
+  const bytes = (blob: Blob) =>
+    new Promise<number[]>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => resolve([...new Uint8Array(reader.result as ArrayBuffer)]);
+      reader.readAsArrayBuffer(blob);
+    });
+  const before = readHarness();
+  const sourceBytes = await Promise.all(before.attachments.map((item) => bytes(item.source!)));
+  const reserved = before.sessionId!;
+  await expect(
+    acceptSessionUserTurn(
+      {
+        contentMode: 'e2ee',
+        repo: {
+          getDocMeta: async () => {
+            throw new Error('Workspace storage unavailable');
+          },
+        },
+      } as unknown as WorkspaceRuntime,
+      reserved,
+      {} as never,
+      { kind: 'dispatch' },
+      undefined,
+      undefined,
+      before.attachments,
+      before.clearDraft
+    )
+  ).rejects.toThrow('Workspace storage unavailable');
+  unmountLanding();
+  mountLanding(WORKSPACE_A_KEY);
+  const restored = readHarness();
+  expect(restored.prompt).toBe('keep this encrypted draft');
+  expect(restored.sessionId).toBe(reserved);
+  expect(restored.fileItems.map((item) => item.name)).toEqual(['private.txt']);
+  expect(restored.imageItems.map((item) => item.name)).toEqual(['private.png']);
+  expect(restored.attachments).toHaveLength(before.attachments.length);
+  for (const [index, attachment] of restored.attachments.entries()) {
+    expect(await bytes(attachment.source!)).toEqual(sourceBytes[index]);
+  }
+  expect(restored.imageItems[0]?.previewUrl).toBe(before.imageItems[0]?.previewUrl);
+  expect(revokedUrls).toEqual([]);
+});

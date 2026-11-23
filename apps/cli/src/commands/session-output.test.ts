@@ -1,9 +1,9 @@
+import { withHistoryPort } from '../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionHistoryInput, SessionId } from '@lody/shared';
 import {
   SessionTurnWaitError,
-  calculateTurnDurationMs,
-  findAssistantEntryForUserTurn,
+  sessionHistoryActivityAt,
   waitForTurnCompletion,
 } from './session-output';
 
@@ -41,37 +41,23 @@ const createMirror = (initialState: MirrorState) => {
   };
 };
 
-const createSessionDoc = (mirror: ReturnType<typeof createMirror>) => ({
-  sessionId: 'session-1' as SessionId,
-  mirror: mirror as unknown,
-});
+const createSessionDoc = (mirror: ReturnType<typeof createMirror>) => {
+  const sessionDoc = withHistoryPort({
+    sessionId: 'session-1' as SessionId,
+    readHistorySnapshot: () => mirror.getState().history ?? [],
+    subscribeAll: (listener: () => void) => mirror.subscribe(() => listener()),
+  });
+  return {
+    sessionDoc,
+    backend: {
+      readTurnOutput: (userTurnId: string) =>
+        sessionDoc.sessionData.history.readTurnOutput(userTurnId),
+      subscribeHistory: (listener: () => void) => sessionDoc.subscribeAll(listener),
+    },
+  };
+};
 
 describe('session output helpers', () => {
-  it('finds the assistant entry linked to the target user turn', () => {
-    const history = [
-      createHistoryEntry({
-        id: 'assistant-before',
-        role: 'assistant',
-      }),
-      createHistoryEntry({
-        id: 'user-1',
-        role: 'user',
-      }),
-      createHistoryEntry({
-        id: 'assistant-unrelated',
-        role: 'assistant',
-        userTurnId: 'user-2',
-      }),
-      createHistoryEntry({
-        id: 'assistant-target',
-        role: 'assistant',
-        userTurnId: 'user-1',
-      }),
-    ];
-
-    expect(findAssistantEntryForUserTurn(history, 'user-1')?.id).toBe('assistant-target');
-  });
-
   it('streams updated assistant items and resolves when the turn finishes', async () => {
     const userTurn = createHistoryEntry({
       id: 'user-1',
@@ -81,8 +67,10 @@ describe('session output helpers', () => {
     });
     const mirror = createMirror({ history: [userTurn] });
     const events: Array<Record<string, unknown>> = [];
+    const { sessionDoc, backend } = createSessionDoc(mirror);
     const completion = waitForTurnCompletion({
-      sessionDoc: createSessionDoc(mirror),
+      sessionDoc,
+      backend,
       userTurnId: 'user-1',
       outputMode: 'jsonl',
       timeoutMs: 5_000,
@@ -102,6 +90,7 @@ describe('session output helpers', () => {
         }),
       ],
     });
+    await Promise.resolve();
     mirror.setState({
       history: [
         userTurn,
@@ -113,6 +102,7 @@ describe('session output helpers', () => {
         }),
       ],
     });
+    await Promise.resolve();
     mirror.setState({
       history: [
         createHistoryEntry({
@@ -162,8 +152,10 @@ describe('session output helpers', () => {
       status: 'processing',
     });
     const mirror = createMirror({ history: [userTurn] });
+    const { sessionDoc, backend } = createSessionDoc(mirror);
     const completion = waitForTurnCompletion({
-      sessionDoc: createSessionDoc(mirror),
+      sessionDoc,
+      backend,
       userTurnId: 'user-1',
       outputMode: 'json',
       timeoutMs: 5_000,
@@ -215,8 +207,10 @@ describe('session output helpers', () => {
       endedAt: Date.parse('2026-03-27T00:00:01.000Z'),
     });
     const mirror = createMirror({ history: [userTurn] });
+    const { sessionDoc, backend } = createSessionDoc(mirror);
     const completion = waitForTurnCompletion({
-      sessionDoc: createSessionDoc(mirror),
+      sessionDoc,
+      backend,
       userTurnId: 'user-1',
       outputMode: 'json',
       timeoutMs: 5_000,
@@ -271,8 +265,10 @@ describe('session output helpers', () => {
       items: [{ type: 'text', text: 'hello' }],
     });
     const mirror = createMirror({ history: [userTurn] });
+    const { sessionDoc, backend } = createSessionDoc(mirror);
     const completion = waitForTurnCompletion({
-      sessionDoc: createSessionDoc(mirror),
+      sessionDoc,
+      backend,
       userTurnId: 'user-1',
       outputMode: 'json',
       timeoutMs: 5_000,
@@ -327,8 +323,10 @@ describe('session output helpers', () => {
         ],
       });
 
+      const { sessionDoc, backend } = createSessionDoc(mirror);
       const completion = waitForTurnCompletion({
-        sessionDoc: createSessionDoc(mirror),
+        sessionDoc,
+        backend,
         userTurnId: 'user-1',
         outputMode: 'json',
         timeoutMs: 1_000,
@@ -344,13 +342,19 @@ describe('session output helpers', () => {
       vi.useRealTimers();
     }
   });
+});
 
-  it('calculates turn durations from timestamp and endedAt', () => {
-    expect(
-      calculateTurnDurationMs({
-        timestamp: '2026-03-27T00:00:00.000Z',
-        endedAt: Date.parse('2026-03-27T00:00:03.000Z'),
-      })
-    ).toBe(3_000);
+describe('history summary activity time', () => {
+  it('uses completion for finished assistant entries and retains creation for active/legacy/user entries', () => {
+    const timestamp = '2026-01-01T00:00:00.000Z';
+    const endedAt = Date.parse('2026-01-01T00:07:00.000Z');
+    const entry = { role: 'assistant' as const, timestamp, endedAt, finished: true };
+    expect(sessionHistoryActivityAt(entry)).toBe('2026-01-01T00:07:00.000Z');
+    expect(sessionHistoryActivityAt({ ...entry, finished: false })).toBe(timestamp);
+    expect(sessionHistoryActivityAt({ ...entry, role: 'user' })).toBe(timestamp);
+    expect(sessionHistoryActivityAt({ ...entry, endedAt: undefined })).toBe(timestamp);
+    expect(sessionHistoryActivityAt({ ...entry, endedAt: NaN })).toBe(timestamp);
+    expect(sessionHistoryActivityAt(undefined)).toBeUndefined();
+    expect(entry.timestamp).toBe(timestamp);
   });
 });

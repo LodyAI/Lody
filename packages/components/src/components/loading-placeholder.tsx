@@ -1,25 +1,84 @@
-import { Loader2 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { BootLoadingIndicator, BootShell } from '@/components/boot-shell';
 import { cn } from '@/lib/utils';
+
+const styles = stylex.create({
+  content: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'hsl(var(--background))',
+    color: colors.secondaryLabel,
+  },
+});
 
 export function LoadingPlaceholder({
   title = 'Loading',
   description = '',
   variant = 'viewport',
+  startsNow = false,
 }: {
   title?: string;
   description?: string;
   /**
-   * `viewport` is reserved for boot/auth gates where no application shell is
-   * safe to show yet. `content` fills an already-mounted workspace pane so the
+   * `boot` is for the boot/auth gates between the window's first frame and the
+   * workspace layout: it continues the boot shell painted by `index.html`, with
+   * this copy under the mark. `viewport` fills the viewport where that frame is
+   * not continued. `content` fills an already-mounted workspace pane so the
    * sidebar and workspace identity remain stable during scoped synchronization.
    */
-  variant?: 'viewport' | 'content';
+  variant?: 'boot' | 'viewport' | 'content';
+  /**
+   * A `content` wait that begins inside a running page rather than continuing the
+   * boot frame: the mark fades in after a beat, so a wait that ends quickly shows
+   * only the empty pane instead of flashing the mark.
+   */
+  startsNow?: boolean;
 }) {
+  if (variant === 'boot') {
+    return (
+      <BootShell
+        status={
+          <>
+            <div data-testid="workspace-loading" className="lody-boot-shell__status-title">
+              {title}
+            </div>
+            {description ? <div>{description}</div> : null}
+          </>
+        }
+      />
+    );
+  }
+
+  if (variant === 'content') {
+    return (
+      <div {...stylex.props(styles.content)} data-loading-placeholder-scope="content">
+        <BootLoadingIndicator
+          elapsedMs={startsNow ? 0 : undefined}
+          status={
+            <>
+              <div data-testid="workspace-loading" className="lody-boot-shell__status-title">
+                {title}
+              </div>
+              {description ? <div>{description}</div> : null}
+            </>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
         'flex w-full items-center justify-center bg-background p-6 text-muted-foreground',
-        variant === 'viewport' ? 'min-h-[100dvh]' : 'h-full min-h-0'
+        'min-h-[100dvh]'
       )}
       data-loading-placeholder-scope={variant}
     >
@@ -28,7 +87,7 @@ export function LoadingPlaceholder({
         role="status"
         aria-live="polite"
       >
-        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+        <Spinner className="h-5 w-5" aria-hidden />
         <div className="space-y-1">
           <div className="text-sm font-medium text-foreground">{title}</div>
           {description ? (

@@ -1,28 +1,31 @@
+import { BillingIntervalDialog, type IntervalResult } from './billing-interval-dialog';
+import { useReferralPolicyRefresh } from '@/hooks/use-referral-policy-refresh';
+import {
+  readReferral,
+  clearReferral,
+  attachStoredReferral,
+  REFERRAL_ERROR_KEYS,
+} from '@/lib/referral-attribution';
+import { ReferralSettings } from './referral-settings';
+import type { BillingInvoiceDetail } from '@lody/cloud-api';
+import { BillingInvoiceDetails } from './billing-invoice-details';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { usePostHog } from '@/lib/posthog-context';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { useCloudAction } from '@lody/platform/react';
-import { ConvexError } from 'convex/values';
+import { getBillingErrorCode } from './billing-errors';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
 import { sessionMetaCountAtom } from '@/atoms/doc-meta';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { isElectronRenderer } from '@/lib/electron';
 import { useAppCapability } from '@/lib/app-platform';
 import { openExternalUrl } from '@/lib/native-browser';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 // Relative: the consuming apps only alias a curated set of `@/` prefixes
 // (ui, components, lib, hooks, atoms), and `providers` is not one of them.
 import { useAuthClient } from '../../providers/convex-provider';
@@ -35,9 +38,14 @@ import {
   writeBillingOverviewCache,
 } from './billing-overview-cache';
 import {
+  clearBillingCheckoutReturn,
+  isBillingActivationSettled,
+  markBillingCheckoutReturn,
+  readBillingCheckoutReturn,
+} from './billing-checkout-return';
+import {
   BillingSettingsView,
   formatDate,
-  formatUsd,
   type BillingOverviewData,
   type BillingInterval,
   type BillingInvoice,
@@ -45,23 +53,16 @@ import {
   type BillingUpcomingInvoice,
 } from './billing-setting-pure';
 
-/** Extract the billing error code from a ConvexError thrown by billing actions. */
-function getBillingErrorCode(error: unknown): string | null {
-  if (error instanceof ConvexError) {
-    const data: unknown = error.data;
-    if (
-      data &&
-      typeof data === 'object' &&
-      'code' in data &&
-      typeof (data as { code: unknown }).code === 'string'
-    ) {
-      return (data as { code: string }).code;
-    }
+function captureBillingEvent(...args: Parameters<typeof capturePostHogEvent>) {
+  try {
+    capturePostHogEvent(...args);
+  } catch {
+    // Analytics must not interrupt checkout navigation or return reconciliation.
   }
-  return null;
 }
 
 const BILLING_ERROR_TOAST_KEYS: Record<string, string> = {
+  ...REFERRAL_ERROR_KEYS,
   workspace_already_paid: 'billing.alreadyPaidError',
   checkout_processing: 'billing.checkoutProcessingError',
   checkout_already_completed: 'billing.checkoutProcessingError',
@@ -70,6 +71,10 @@ const BILLING_ERROR_TOAST_KEYS: Record<string, string> = {
   redemption_in_progress: 'billing.redeemInProgress',
 };
 
+/** How long a just-finished checkout may keep polling Stripe for confirmation. */
+const CHECKOUT_CONFIRMATION_WINDOW_MS = 2 * 60 * 1000;
+const CHECKOUT_CONFIRMATION_INTERVAL_MS = 3_000;
+
 export function BillingSettingsComponent() {
   // Registry-level gating already hides the billing tab without the 'billing'
   // capability (open-source local build); this is a safety net for deep links.
@@ -77,11 +82,19 @@ export function BillingSettingsComponent() {
   if (!billingAvailable) {
     return null;
   }
-  return <CloudBillingSettings />;
+  return <BillingSettingsScope />;
+}
+
+// Dialogs and async continuations belong to one account/workspace, never the next one.
+function BillingSettingsScope() {
+  const { authSessionId } = useAuthenticatedConvex();
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  return <CloudBillingSettings key={`${authSessionId ?? ''}:${workspaceId ?? ''}`} />;
 }
 
 function CloudBillingSettings() {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const { authSessionId } = useAuthenticatedConvex();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
@@ -91,11 +104,24 @@ function CloudBillingSettings() {
     workspaceId ? { workspaceId } : 'skip'
   );
   const overviewScope = workspaceId && authSessionId ? `${authSessionId}:${workspaceId}` : null;
+  // Count visits, not reactive overview refreshes or StrictMode effect replay.
+  const viewedScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (!overviewScope || !postHog || viewedScope.current === overviewScope) return;
+    viewedScope.current = overviewScope;
+    captureBillingEvent(postHog, 'billing/page_viewed', { workspace_id: workspaceId });
+  }, [overviewScope, postHog, workspaceId]);
+
+  const trackBilling = (event: string, properties?: Record<string, unknown>) => {
+    captureBillingEvent(postHog, event, { workspace_id: workspaceId, ...properties });
+  };
+
   const persistedOverview = useMemo(
     () => (workspaceId ? readBillingOverviewCache(workspaceId, authSessionId) : null),
     [authSessionId, workspaceId]
   );
   const cachedOverview = workspaceId ? (persistedOverview ?? OPTIMISTIC_BILLING_OVERVIEW) : null;
+  const [referralCode, setReferralCode] = useState(() => readReferral());
   const [resolvedOverview, setResolvedOverview] = useState<{
     scope: string;
     value: BillingOverviewData | null;
@@ -132,25 +158,44 @@ function CloudBillingSettings() {
     const owner = activeOrganization.members?.find((member) => member.role === 'owner');
     return owner?.user?.name?.trim() || owner?.user?.email?.trim() || null;
   }, [activeOrganization, workspaceId]);
+  const createBillingPortalSession = useCloudAction(
+    cloudOperations.billing.createBillingPortalSession
+  );
+  const portalInFlight = useRef(false);
   const createCheckoutSession = useCloudAction(cloudOperations.billing.createCheckoutSession);
   const reconcileWorkspaceCheckout = useCloudAction(
     cloudOperations.billing.reconcileWorkspaceCheckout
   );
+  // `useCloudAction` can hand back a new function identity every render; the
+  // confirmation loop must survive those renders instead of restarting.
+  const reconcileWorkspaceCheckoutRef = useRef(reconcileWorkspaceCheckout);
+  reconcileWorkspaceCheckoutRef.current = reconcileWorkspaceCheckout;
   const redeemCode = useCloudAction(cloudOperations.billing.redeemStripePromotionCode);
   const listBillingInvoices = useCloudAction(cloudOperations.billing.listBillingInvoices);
   const setSubscriptionCancelAtPeriodEnd = useCloudAction(
     cloudOperations.billing.setSubscriptionCancelAtPeriodEnd
   );
   const setSubscriptionInterval = useCloudAction(cloudOperations.billing.setSubscriptionInterval);
+  const getPaymentStatus = useCloudAction(cloudOperations.billing.getSubscriptionPaymentStatus);
+  const getOutstandingInvoice = useCloudAction(cloudOperations.billing.getBillingInvoice);
+  const getPaymentStatusRef = useRef(getPaymentStatus);
+  getPaymentStatusRef.current = getPaymentStatus;
   const previewSubscriptionIntervalChange = useCloudAction(
     cloudOperations.billing.previewSubscriptionIntervalChange
   );
+
   const [pendingAction, setPendingAction] = useState<BillingPendingAction>(null);
   const [redeemPending, setRedeemPending] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [switchIntervalDialogOpen, setSwitchIntervalDialogOpen] = useState(false);
   const [switchIntervalPending, setSwitchIntervalPending] = useState(false);
+  const [targetInterval, setTargetInterval] = useState<BillingInterval>('month');
+  const intervalPreviewAction = useRef(previewSubscriptionIntervalChange);
+  intervalPreviewAction.current = previewSubscriptionIntervalChange;
+  const [intervalResult, setIntervalResult] = useState<IntervalResult | null>(null);
+  const [intervalError, setIntervalError] = useState<string | null>(null);
+  const [intervalReloadKey, setIntervalReloadKey] = useState(0);
   // undefined = previewing, null = preview failed, object = ready.
   const [intervalPreview, setIntervalPreview] = useState<
     Awaited<ReturnType<typeof previewSubscriptionIntervalChange>> | undefined
@@ -160,9 +205,17 @@ function CloudBillingSettings() {
   const [upcomingInvoice, setUpcomingInvoice] = useState<BillingUpcomingInvoice | null>(null);
   const [invoicesError, setInvoicesError] = useState(false);
   const [invoicesReloadKey, setInvoicesReloadKey] = useState(0);
+  const [selectedInvoice, setSelectedInvoice] = useState<{
+    scope: string;
+    invoice: BillingInvoice;
+  } | null>(null);
   const [checkoutSuccessReturn, setCheckoutSuccessReturn] = useState(false);
-  const [reconciling, setReconciling] = useState(false);
-  const reconcileStartedRef = useRef(false);
+  // Anchor the confirmation window to when the return was first seen, so a
+  // reload inside an already-slow confirmation does not restart the wait.
+  const checkoutReturnStartedAtRef = useRef<number | null>(null);
+  // Persisted/preloaded data can describe the state before Checkout. Only the
+  // live query may prove that the returned payment or gift setup has landed.
+  const activationSettled = isBillingActivationSettled(fetchedOverview);
   // Desktop: checkout/portal opened in the system browser; poll until Stripe
   // confirms so the app updates even if the user never clicks "back to Lody".
   const [externalCheckoutPending, setExternalCheckoutPending] = useState(false);
@@ -207,41 +260,103 @@ function CloudBillingSettings() {
 
   // Stripe sends the user back to this route with ?checkout=success|canceled
   // (+ session_id on success). Capture the success return, then strip the
-  // params so a refresh doesn't re-trigger the flow.
+  // params so a refresh doesn't re-trigger the flow. The marker can also arrive
+  // without the query (desktop deep-link hand-off, reload after the first
+  // parse), so a per-tab intent is what actually drives the confirmation below.
   useEffect(() => {
+    if (!workspaceId || typeof window === 'undefined') return;
+    const clearReturn = () => {
+      clearBillingCheckoutReturn(workspaceId);
+      checkoutReturnStartedAtRef.current = null;
+      setCheckoutSuccessReturn(false);
+    };
     const url = new URL(window.location.href);
     const checkout = url.searchParams.get('checkout');
-    if (!checkout) return;
-    if (checkout === 'success') setCheckoutSuccessReturn(true);
-    url.searchParams.delete('checkout');
-    url.searchParams.delete('session_id');
-    window.history.replaceState(window.history.state, '', url);
-  }, []);
+    if (checkout === 'success' || checkout === 'canceled') {
+      captureBillingEvent(postHog, 'billing/checkout_returned', {
+        workspace_id: workspaceId,
+        return_status: checkout,
+      });
+    }
+    if (checkout === 'success') {
+      const now = Date.now();
+      markBillingCheckoutReturn(workspaceId, now);
+      checkoutReturnStartedAtRef.current = now;
+      setCheckoutSuccessReturn(true);
+    } else if (checkout === 'canceled') {
+      clearReturn();
+    } else if (checkout === null) {
+      // No marker: this is a reload, remount, or desktop hand-off after the
+      // first parse, so the per-tab intent is the remaining signal.
+      const pendingSince = readBillingCheckoutReturn(workspaceId);
+      if (pendingSince !== null) {
+        checkoutReturnStartedAtRef.current = pendingSince;
+        setCheckoutSuccessReturn(true);
+      }
+    } else {
+      // Unknown marker value: never trust a stale intent.
+      clearReturn();
+    }
+    if (checkout !== null) {
+      url.searchParams.delete('checkout');
+      url.searchParams.delete('session_id');
+      window.history.replaceState(window.history.state, '', url);
+    }
+  }, [workspaceId, postHog]);
 
-  // Webhooks can lag behind the checkout redirect. Reconcile the in-flight
-  // checkout session against Stripe once when we return from checkout (or see
-  // a pending checkout), so the reactive overview query flips to paid without
-  // waiting for the webhook. Ref-guarded to run at most once per mount.
+  // An ordinary pending checkout gets one background check and keeps its payment
+  // entry available. Only a successful return retries transient misses while
+  // waiting for the webhook/reconcile write to reach the live overview.
   const shouldReconcile =
     checkoutSuccessReturn ||
     overview?.checkoutPending === true ||
     overview?.subscriptionSetupPending === true;
   useEffect(() => {
-    if (!workspaceId || !shouldReconcile || reconcileStartedRef.current) return;
-    reconcileStartedRef.current = true;
-    setReconciling(true);
-    reconcileWorkspaceCheckout({ workspaceId })
-      .then((result) => {
-        // The checkout didn't go through after all; drop the processing banner.
-        if (result.status === 'expired' || result.status === 'none') {
-          setCheckoutSuccessReturn(false);
+    if (!workspaceId || !shouldReconcile || activationSettled) return undefined;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline =
+      (checkoutReturnStartedAtRef.current ?? Date.now()) + CHECKOUT_CONFIRMATION_WINDOW_MS;
+    const finish = () => {
+      clearBillingCheckoutReturn(workspaceId);
+      checkoutReturnStartedAtRef.current = null;
+      setCheckoutSuccessReturn(false);
+    };
+    const tick = async () => {
+      try {
+        const result = await reconcileWorkspaceCheckoutRef.current({ workspaceId });
+        if (cancelled) return;
+        if (result.status === 'expired') {
+          finish();
+          return;
         }
-      })
-      .catch((error) => {
+        if (result.status === 'paid') {
+          // Keep the return marker and activation banner until the live overview
+          // lands, including across a reload between the write and query update.
+          if (!checkoutSuccessReturn) {
+            const startedAt = Date.now();
+            markBillingCheckoutReturn(workspaceId, startedAt);
+            checkoutReturnStartedAtRef.current = startedAt;
+            setCheckoutSuccessReturn(true);
+          }
+          return;
+        }
+      } catch (error) {
         console.error('Failed to reconcile Stripe checkout:', error);
-      })
-      .finally(() => setReconciling(false));
-  }, [workspaceId, shouldReconcile, reconcileWorkspaceCheckout]);
+      }
+      if (cancelled || !checkoutSuccessReturn) return;
+      if (Date.now() >= deadline) {
+        finish();
+        return;
+      }
+      timer = setTimeout(() => void tick(), CHECKOUT_CONFIRMATION_INTERVAL_MS);
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [workspaceId, shouldReconcile, checkoutSuccessReturn, activationSettled]);
 
   // bfcache: navigating to Stripe and back can restore this page from the
   // back/forward cache with the pending spinner still set. Reset it.
@@ -300,7 +415,21 @@ function CloudBillingSettings() {
     if (externalCheckoutPending && completed) {
       setExternalCheckoutPending(false);
     }
-  }, [externalCheckoutKind, externalCheckoutPending, overview]);
+    // Drop the per-tab return intent once the entitlement lands, so a later
+    // remount does not reconcile an already-consumed checkout session.
+    if (checkoutSuccessReturn && activationSettled) {
+      checkoutReturnStartedAtRef.current = null;
+      setCheckoutSuccessReturn(false);
+      if (workspaceId) clearBillingCheckoutReturn(workspaceId);
+    }
+  }, [
+    activationSettled,
+    checkoutSuccessReturn,
+    externalCheckoutKind,
+    externalCheckoutPending,
+    overview,
+    workspaceId,
+  ]);
 
   const returnUrl = (() => {
     if (typeof window === 'undefined') return undefined;
@@ -322,18 +451,80 @@ function CloudBillingSettings() {
     return 'in-app';
   };
 
+  const handlePaymentMethod = async () => {
+    if (!workspaceId || !overview?.canManageBilling || portalInFlight.current) return;
+    portalInFlight.current = true;
+    setPendingAction('portal');
+    try {
+      const result = await createBillingPortalSession({
+        workspaceId,
+        ...(isDesktop ? { returnTarget: 'desktop' as const } : { returnUrl }),
+      });
+      trackBilling('billing/portal_opened');
+      await openCheckoutUrl(result.url);
+    } catch (error) {
+      const code = getBillingErrorCode(error);
+      trackBilling('billing/portal_failed', { reason_code: 'portal_open_failed' });
+      toast.error(t((code && BILLING_ERROR_TOAST_KEYS[code]) || 'billing.paymentMethodError'));
+    } finally {
+      portalInFlight.current = false;
+      setPendingAction(null);
+    }
+  };
+
+  // Ask the server before promising the newcomer discount: a stored link is only a hint.
+  const [policyRefreshKey, refreshPolicy] = useState(0);
+  const referralOffer = useCloudQuery(
+    cloudOperations.referrals.getCheckoutOffer,
+    workspaceId &&
+      overview?.referralRewardsSupported &&
+      overview.canManageBilling &&
+      overview.effectivePlanTier === 'free'
+      ? { workspaceId, policyRefreshKey, ...(referralCode ? { code: referralCode } : {}) }
+      : 'skip'
+  );
+
+  useReferralPolicyRefresh(
+    Math.min(
+      referralOffer?.policy?.nextChangeAt ?? Infinity,
+      referralOffer?.retained?.expiresAt ?? Infinity
+    ),
+    refreshPolicy
+  );
+
+  // Credit pays toward the first subscription; members never see the Checkout.
+  const dismissLead = useCloudMutation(cloudOperations.referrals.dismissLead);
+  const attachLead = useCloudMutation(cloudOperations.referrals.attachLead);
+  const referralWallet = useCloudQuery(
+    cloudOperations.referrals.getOverview,
+    workspaceId &&
+      overview?.referralRewardsSupported &&
+      overview.canManageBilling &&
+      overview.effectivePlanTier === 'free'
+      ? { workspaceId }
+      : 'skip'
+  );
+
   const handleUpgrade = async () => {
     if (!workspaceId) return;
     setPendingAction('checkout');
+    trackBilling('billing/checkout_started', { billing_interval: interval, source: 'upgrade' });
     try {
+      if (overview?.referralRewardsSupported) await attachStoredReferral(attachLead);
       const result = await createCheckoutSession({
         workspaceId,
         interval,
+        ...(referralCode && referralOffer?.sendCode ? { referralCode } : {}),
         ...(isDesktop
           ? { returnTarget: 'desktop' as const }
           : returnUrl
             ? { successUrl: returnUrl, cancelUrl: returnUrl }
             : {}),
+      });
+      trackBilling('billing/checkout_redirected', {
+        billing_interval: interval,
+        source: 'upgrade',
+        checkout_kind: result.checkoutKind ?? 'subscription',
       });
       if ((await openCheckoutUrl(result.url)) === 'external') {
         setPendingAction(null);
@@ -351,6 +542,12 @@ function CloudBillingSettings() {
     } catch (error) {
       console.error('Failed to start Stripe checkout:', error);
       const code = getBillingErrorCode(error);
+      trackBilling('billing/checkout_failed', {
+        billing_interval: interval,
+        source: 'upgrade',
+        reason_code:
+          code && Object.hasOwn(BILLING_ERROR_TOAST_KEYS, code) ? code : 'checkout_open_failed',
+      });
       const toastKey = (code && BILLING_ERROR_TOAST_KEYS[code]) || 'billing.checkoutError';
       toast.error(t(toastKey));
       setPendingAction(null);
@@ -361,62 +558,116 @@ function CloudBillingSettings() {
   // proration: the new interval's period starts today, the unused portion of
   // the current period is credited, and the net is charged now. The confirm
   // dialog previews that breakdown before the user commits.
-  const targetInterval: BillingInterval = overview?.billingInterval === 'month' ? 'year' : 'month';
 
   // Load the proration preview whenever the dialog opens.
   useEffect(() => {
-    if (!switchIntervalDialogOpen || !workspaceId) return undefined;
+    if (!switchIntervalDialogOpen || !workspaceId || intervalResult) return undefined;
     let cancelled = false;
     setIntervalPreview(undefined);
-    previewSubscriptionIntervalChange({ workspaceId, interval: targetInterval })
+    setIntervalError(null);
+    intervalPreviewAction
+      .current({ workspaceId, interval: targetInterval })
       .then((result) => {
-        if (!cancelled) setIntervalPreview(result);
+        if (!cancelled) {
+          setIntervalPreview(result);
+          if (result?.continuation) setTargetInterval(result.interval);
+        }
       })
-      .catch((error) => {
+      .catch(async (error) => {
+        if (getBillingErrorCode(error) === 'interval_already_current') {
+          try {
+            const status = await getPaymentStatusRef.current({ workspaceId });
+            if (!cancelled) {
+              setIntervalResult(status);
+              setIntervalError(null);
+            }
+          } catch {
+            if (!cancelled) {
+              setIntervalPreview(null);
+              setIntervalError('payment_status_unavailable');
+            }
+          }
+          return;
+        }
         console.error('Failed to preview interval switch:', error);
-        if (!cancelled) setIntervalPreview(null);
+        if (!cancelled) {
+          setIntervalPreview(null);
+          setIntervalError(getBillingErrorCode(error));
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [switchIntervalDialogOpen, workspaceId, targetInterval, previewSubscriptionIntervalChange]);
-
-  // When switching to monthly leaves leftover account credit, estimate the
-  // date it runs out: each covered renewal draws one month of the recurring
-  // total (subtotalAmount) from the credit, starting after the first period.
-  const switchCreditCoverageDate = (() => {
-    if (
-      targetInterval !== 'month' ||
-      !intervalPreview ||
-      intervalPreview.remainingCredit <= 0 ||
-      intervalPreview.subtotalAmount <= 0 ||
-      !intervalPreview.nextRenewalAt
-    ) {
-      return null;
-    }
-    const coveredMonths = Math.floor(
-      intervalPreview.remainingCredit / intervalPreview.subtotalAmount
-    );
-    const date = new Date(intervalPreview.nextRenewalAt);
-    date.setMonth(date.getMonth() + coveredMonths);
-    return date.getTime();
-  })();
+  }, [switchIntervalDialogOpen, workspaceId, targetInterval, intervalReloadKey, intervalResult]);
 
   // The invoice history + next-charge preview come from an action (not a
   // reactive query), so subscription changes must trigger a reload explicitly.
   const reloadInvoices = () => setInvoicesReloadKey((key) => key + 1);
 
   const handleSwitchInterval = async () => {
-    if (!workspaceId) return;
+    if (!workspaceId || !intervalPreview) return;
     setSwitchIntervalPending(true);
+    setIntervalError(null);
     try {
-      await setSubscriptionInterval({ workspaceId, interval: targetInterval });
+      const result = await setSubscriptionInterval({
+        workspaceId,
+        interval: targetInterval,
+        quoteId: intervalPreview.quoteId,
+      });
+      setIntervalResult(result);
+      trackBilling('billing/interval_change_result', {
+        billing_interval: targetInterval,
+        outcome: 'success',
+      });
       toast.success(t('billing.switchIntervalSuccess'));
-      setSwitchIntervalDialogOpen(false);
       reloadInvoices();
     } catch (error) {
       console.error('Failed to switch billing interval:', error);
-      toast.error(t('billing.switchIntervalError'));
+      trackBilling('billing/interval_change_result', {
+        outcome: 'failed',
+        billing_interval: targetInterval,
+        reason_code: 'interval_change_failed',
+      });
+      setIntervalError(getBillingErrorCode(error) ?? 'unknown');
+      reloadInvoices();
+    } finally {
+      setSwitchIntervalPending(false);
+    }
+  };
+
+  const refreshPaymentStatus = async () => {
+    if (!workspaceId || switchIntervalPending) return;
+    setSwitchIntervalPending(true);
+    setIntervalError(null);
+    try {
+      setIntervalResult(await getPaymentStatus({ workspaceId }));
+      reloadInvoices();
+    } catch {
+      setIntervalError('payment_status_unavailable');
+    } finally {
+      setSwitchIntervalPending(false);
+    }
+  };
+
+  const viewOutstandingInvoice = async () => {
+    if (!workspaceId || !overviewScope || switchIntervalPending) return;
+    setSwitchIntervalPending(true);
+    setIntervalError(null);
+    try {
+      const status = await getPaymentStatus({ workspaceId });
+      setIntervalResult(status);
+      const outstanding = status.payment?.outstandingInvoices ?? [];
+      if (outstanding[0]) {
+        const detail = await getOutstandingInvoice({ workspaceId, invoiceId: outstanding[0].id });
+        setSelectedInvoice({ scope: overviewScope, invoice: detail.invoice });
+        setSwitchIntervalDialogOpen(false);
+      } else if (status.payment?.status === 'settled') {
+        setIntervalResult(status);
+      } else {
+        setIntervalError('payment_status_unavailable');
+      }
+    } catch {
+      setIntervalError('payment_status_unavailable');
     } finally {
       setSwitchIntervalPending(false);
     }
@@ -452,6 +703,7 @@ function CloudBillingSettings() {
   const handleRedeemCode = async (code: string) => {
     if (!workspaceId) return;
     setRedeemPending(true);
+    let checkoutRequired = false;
     try {
       const result = await redeemCode({
         code,
@@ -462,11 +714,21 @@ function CloudBillingSettings() {
             ? { successUrl: returnUrl, cancelUrl: returnUrl }
             : {}),
       });
+      trackBilling('billing/code_redemption_result', {
+        redemption_status: result.status,
+        outcome:
+          result.status === 'gift_redeemed' || result.status === 'checkout_required'
+            ? 'success'
+            : 'failed',
+      });
       if (result.status === 'gift_redeemed') {
         toast.success(t('billing.redeemPlusSuccess', { date: formatDate(result.endsAt) }));
         reloadInvoices();
       } else if (result.status === 'checkout_required') {
+        checkoutRequired = true;
+        trackBilling('billing/checkout_started', { source: 'promotion_code' });
         toast.success(t('billing.redeemFounderSuccess'));
+        trackBilling('billing/checkout_redirected', { source: 'promotion_code' });
         if ((await openCheckoutUrl(result.url)) === 'external') {
           setExternalCheckoutPending(true);
         }
@@ -484,6 +746,17 @@ function CloudBillingSettings() {
         toast.error(t('billing.redeemInvalid'));
       }
     } catch (error) {
+      if (checkoutRequired) {
+        trackBilling('billing/checkout_failed', {
+          source: 'promotion_code',
+          reason_code: 'checkout_open_failed',
+        });
+      } else {
+        trackBilling('billing/code_redemption_result', {
+          outcome: 'failed',
+          reason_code: 'redemption_failed',
+        });
+      }
       console.error('Failed to redeem billing code:', error);
       toast.error(t('billing.redeemInvalid'));
     } finally {
@@ -491,13 +764,8 @@ function CloudBillingSettings() {
     }
   };
 
-  // "Payment received, activating" banner: reconcile in flight, or we came
-  // back from a successful checkout but the reactive overview still reports
-  // the free tier (webhook/reconcile hasn't landed yet).
-  const paymentProcessing =
-    (reconciling || checkoutSuccessReturn) &&
-    overview != null &&
-    (overview.effectivePlanTier === 'free' || overview.subscriptionSetupPending);
+  // Checking an unpaid checkout does not imply that payment was received.
+  const paymentProcessing = checkoutSuccessReturn && !activationSettled && overview != null;
 
   return (
     <>
@@ -516,136 +784,84 @@ function CloudBillingSettings() {
         paymentProcessing={paymentProcessing}
         externalCheckoutPending={externalCheckoutPending}
         onIntervalChange={setInterval}
+        onPaymentMethod={() => void handlePaymentMethod()}
         onUpgrade={() => void handleUpgrade()}
-        onSwitchInterval={() => setSwitchIntervalDialogOpen(true)}
+        onSwitchInterval={() => {
+          setTargetInterval(overview?.billingInterval === 'month' ? 'year' : 'month');
+          setIntervalResult(null);
+          setIntervalError(null);
+          setSwitchIntervalDialogOpen(true);
+        }}
         switchIntervalPending={switchIntervalPending}
         onCancelSubscription={() => setCancelDialogOpen(true)}
         onResumeSubscription={() => void handleSetCancelAtPeriodEnd(false)}
         onRedeemCode={(code) => void handleRedeemCode(code)}
         onRetryInvoices={() => setInvoicesReloadKey((key) => key + 1)}
+        onViewInvoice={(invoice) => {
+          if (overviewScope) setSelectedInvoice({ scope: overviewScope, invoice });
+        }}
         onCancelExternalCheckout={() => setExternalCheckoutPending(false)}
+        referralOffer={
+          referralOffer?.discount
+            ? {
+                policy: referralOffer.policy,
+                retained: referralOffer.retained,
+                // A workspace already bound to a referral keeps it; only a stored link can be dropped.
+                onRemove: referralOffer.bound
+                  ? undefined
+                  : () => {
+                      clearReferral();
+                      // Also decline the link remembered on the account.
+                      void dismissLead({}).catch(() => {});
+                      setReferralCode(undefined);
+                    },
+              }
+            : null
+        }
+        referralCreditCents={referralWallet?.available ?? 0}
+        referral={
+          workspaceId && overview?.referralRewardsSupported ? (
+            <ReferralSettings
+              key={overviewScope ?? workspaceId}
+              workspaceId={workspaceId}
+              canManage={overview.canManageBilling}
+            />
+          ) : null
+        }
       />
-      <AlertDialog open={switchIntervalDialogOpen} onOpenChange={setSwitchIntervalDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('billing.switchIntervalDialogTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(
-                targetInterval === 'year'
-                  ? 'billing.switchIntervalDialogDescriptionYearly'
-                  : 'billing.switchIntervalDialogDescriptionMonthly',
-                { date: formatDate(intervalPreview?.nextRenewalAt ?? undefined) }
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {intervalPreview === undefined ? (
-            <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {t('billing.historyLoading')}
-            </div>
-          ) : intervalPreview === null ? (
-            <p className="py-2 text-sm text-destructive">{t('billing.switchPreviewError')}</p>
-          ) : (
-            <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-sm">
-              {/* Subtotal: seats × unit price */}
-              <div className="flex items-baseline justify-between gap-4">
-                <span className="text-muted-foreground">
-                  {t(
-                    targetInterval === 'year'
-                      ? 'billing.switchLineSeatsYearly'
-                      : 'billing.switchLineSeatsMonthly',
-                    {
-                      count: intervalPreview.quantity,
-                      price: formatUsd(intervalPreview.unitAmount),
-                    }
-                  )}
-                </span>
-                <span className="tabular-nums text-foreground">
-                  {formatUsd(intervalPreview.subtotalAmount)}
-                </span>
-              </div>
-              {/* Permanent yearly early-bird discount */}
-              {intervalPreview.promoDiscountAmount !== 0 ? (
-                <div className="mt-1.5 flex items-baseline justify-between gap-4">
-                  <span className="text-primary">{t('billing.switchLinePromoDiscount')}</span>
-                  <span className="tabular-nums text-primary">
-                    {formatUsd(intervalPreview.promoDiscountAmount)}
-                  </span>
-                </div>
-              ) : null}
-              {intervalPreview.promoApplied ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t('billing.yearlyEarlyBirdLocked')}
-                </p>
-              ) : null}
-              {/* Credit for the unused portion of the current period */}
-              {intervalPreview.creditAmount !== 0 ? (
-                <div className="mt-1.5 flex items-baseline justify-between gap-4">
-                  <span className="text-muted-foreground">{t('billing.switchLineCredit')}</span>
-                  <span className="tabular-nums text-foreground">
-                    {formatUsd(intervalPreview.creditAmount)}
-                  </span>
-                </div>
-              ) : null}
-              {/* Credit that exceeds today's charge, saved to account balance —
-                  keeps the lines reconciling to the $0 charged today. */}
-              {intervalPreview.deferredToBalanceAmount !== 0 ? (
-                <div className="mt-1.5 flex items-baseline justify-between gap-4">
-                  <span className="text-muted-foreground">
-                    {t('billing.switchLineDeferredCredit')}
-                  </span>
-                  <span className="tabular-nums text-foreground">
-                    {formatUsd(intervalPreview.deferredToBalanceAmount)}
-                  </span>
-                </div>
-              ) : null}
-              {/* Net charged today */}
-              <div className="mt-2 flex items-baseline justify-between gap-4 border-t border-border/60 pt-2 font-medium">
-                <span className="text-foreground">{t('billing.switchLineDueNow')}</span>
-                <span className="tabular-nums text-foreground">
-                  {formatUsd(intervalPreview.amountDueNow)}
-                </span>
-              </div>
-              {/* When leftover credit remains (e.g. year→month), spell out how
-                  long it covers renewals before billing resumes. */}
-              {intervalPreview.remainingCredit > 0 ? (
-                <p className="mt-2.5 border-t border-border/60 pt-2.5 text-xs text-muted-foreground">
-                  {switchCreditCoverageDate
-                    ? t('billing.switchCreditCoverageNote', {
-                        amount: formatUsd(intervalPreview.remainingCredit),
-                        date: formatDate(switchCreditCoverageDate),
-                      })
-                    : t('billing.switchCreditGenericNote', {
-                        amount: formatUsd(intervalPreview.remainingCredit),
-                      })}
-                </p>
-              ) : null}
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={switchIntervalPending}>
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={switchIntervalPending || intervalPreview === undefined}
-              onClick={(event) => {
-                // Keep the dialog open until the switch resolves (it closes in
-                // the handler on success) so the pending state is visible.
-                event.preventDefault();
-                void handleSwitchInterval();
-              }}
-            >
-              {switchIntervalPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {t('billing.switchIntervalConfirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('billing.cancelDialogTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      {selectedInvoice &&
+      selectedInvoice.scope === overviewScope &&
+      workspaceId &&
+      canLoadInvoices ? (
+        <ManagedBillingInvoiceDetails
+          key={`${overviewScope}:${selectedInvoice.invoice.id}`}
+          workspaceId={workspaceId}
+          invoice={selectedInvoice.invoice}
+          onClose={() => setSelectedInvoice(null)}
+          onCanceled={reloadInvoices}
+        />
+      ) : null}
+      <BillingIntervalDialog
+        open={switchIntervalDialogOpen}
+        onOpenChange={setSwitchIntervalDialogOpen}
+        interval={targetInterval}
+        preview={intervalPreview}
+        pending={switchIntervalPending}
+        result={intervalResult}
+        errorCode={intervalError}
+        onConfirm={() => void handleSwitchInterval()}
+        onRetry={() => {
+          if (intervalResult) void refreshPaymentStatus();
+          else setIntervalReloadKey((key) => key + 1);
+        }}
+        onPaymentMethod={() => void handlePaymentMethod()}
+        onViewInvoices={() => void viewOutstandingInvoice()}
+      />
+      <AlertDialog.Root open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('billing.cancelDialogTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('billing.cancelDialogDescription', {
                 date: formatDate(
                   overview?.giftEndsAt && overview.giftEndsAt > Date.now()
@@ -653,19 +869,97 @@ function CloudBillingSettings() {
                     : overview?.currentPeriodEnd
                 ),
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('billing.cancelDialogKeep')}</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('billing.cancelDialogKeep')}</AlertDialog.Cancel>
+            <AlertDialog.Action
+              variant="destructive"
               onClick={() => void handleSetCancelAtPeriodEnd(true)}
             >
               {t('billing.cancelDialogConfirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
+  );
+}
+
+function ManagedBillingInvoiceDetails({
+  workspaceId,
+  invoice,
+  onClose,
+  onCanceled,
+}: {
+  workspaceId: string;
+  invoice: BillingInvoice;
+  onClose: () => void;
+  onCanceled: () => void;
+}) {
+  const getDetail = useCloudAction(cloudOperations.billing.getBillingInvoice);
+  const cancelInvoice = useCloudAction(cloudOperations.billing.cancelPendingSeatInvoice);
+  const [detail, setDetail] = useState<BillingInvoiceDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
+  const [cancelError, setCancelError] = useState(false);
+  const [reload, setReload] = useState(0);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    setError(false);
+    getDetail({ workspaceId, invoiceId: invoice.id })
+      .then((value) => {
+        if (current) setDetail(value);
+      })
+      .catch(() => {
+        if (current) setError(true);
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [workspaceId, invoice.id, getDetail, reload]);
+  const cancel = async () => {
+    if (cancelPending) return;
+    setCancelPending(true);
+    setCancelError(false);
+    try {
+      await cancelInvoice({ workspaceId, invoiceId: invoice.id });
+      if (alive.current) {
+        onCanceled();
+        setReload((value) => value + 1);
+      }
+    } catch {
+      if (alive.current) {
+        setCancelError(true);
+        setReload((value) => value + 1);
+      }
+    } finally {
+      if (alive.current) setCancelPending(false);
+    }
+  };
+  return (
+    <BillingInvoiceDetails
+      invoice={invoice}
+      detail={detail}
+      loading={loading}
+      error={error}
+      cancelPending={cancelPending}
+      cancelError={cancelError}
+      onClose={onClose}
+      onRetry={() => setReload((value) => value + 1)}
+      onCancel={() => void cancel()}
+    />
   );
 }

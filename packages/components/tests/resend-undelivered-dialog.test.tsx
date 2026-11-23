@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -89,7 +88,8 @@ describe('UserMessageRowView undelivered resend dialog', () => {
   });
 
   const renderRow = async (
-    onResendUndelivered: (userTurnId: string, inputBlocks: unknown) => Promise<boolean>
+    onResendUndelivered: (userTurnId: string, inputBlocks: unknown) => Promise<boolean>,
+    message = undeliveredMessage
   ) => {
     const store = createStore();
     store.set(sessionMetaCacheAtom, { [getSessionRoomId(sessionId)]: markerMeta });
@@ -99,7 +99,7 @@ describe('UserMessageRowView undelivered resend dialog', () => {
           JotaiProvider,
           { store },
           createElement(MessageRowView, {
-            message: undeliveredMessage,
+            message,
             sessionId,
             onResendUndelivered,
           })
@@ -126,35 +126,57 @@ describe('UserMessageRowView undelivered resend dialog', () => {
     expect(document.body.textContent).not.toContain('did not run');
   });
 
-  it('cancels without resending', async () => {
-    const onResendUndelivered = vi.fn(async () => true);
-    await renderRow(onResendUndelivered);
-
-    await click(queryBodyButton('Not delivered'));
-    expect(document.body.textContent).toContain('Message not delivered');
-
-    await click(queryBodyButton('Cancel'));
-    expect(onResendUndelivered).not.toHaveBeenCalled();
+  it('warns that unknown delivery may repeat work and waits for explicit confirmation', async () => {
+    const submissions: unknown[] = [];
+    await renderRow(
+      async (id, blocks) => {
+        submissions.push({ id, blocks });
+        return true;
+      },
+      { ...undeliveredMessage, status: 'delivery_unknown', read: true }
+    );
+    expect(document.body.textContent).not.toContain('Not delivered');
+    await click(queryBodyButton('Application unknown'));
+    expect(document.body.textContent).toContain('may already have applied');
+    expect(document.body.textContent).toContain('could repeat work');
     expect(document.body.textContent).not.toContain('did not run');
+    expect(submissions).toEqual([]);
+    await click(queryBodyButton('Resend message'));
+    expect(submissions).toEqual([
+      { id: missingTurnId, blocks: buildResendInputBlocks(undeliveredMessage) },
+    ]);
+  });
+  it('a turn interrupted by a forced machine update offers Continue, which resends after confirmation', async () => {
+    const submissions: unknown[] = [];
+    const interrupted = {
+      ...undeliveredMessage,
+      id: 'user-turn-interrupted-by-update',
+      status: 'canceled',
+      read: true,
+      cancellationReason: 'machine_update',
+    } as unknown as SessionHistoryParsed;
+    await renderRow(async (id, blocks) => {
+      submissions.push({ id, blocks });
+      return true;
+    }, interrupted);
+    expect(document.body.textContent).not.toContain('Not delivered');
+    await click(queryBodyButton('Interrupted by update'));
+    expect(document.body.textContent).toContain('machine update interrupted');
+    expect(submissions).toEqual([]);
+    await click(queryBodyButton('Continue'));
+    expect(submissions).toEqual([
+      { id: 'user-turn-interrupted-by-update', blocks: buildResendInputBlocks(interrupted) },
+    ]);
   });
 
-  it('keeps the label non-interactive without a resend handler', async () => {
-    const store = createStore();
-    store.set(sessionMetaCacheAtom, { [getSessionRoomId(sessionId)]: markerMeta });
-    await act(async () => {
-      root?.render(
-        createElement(
-          JotaiProvider,
-          { store },
-          createElement(MessageRowView, { message: undeliveredMessage, sessionId })
-        )
-      );
-    });
-
-    const labelButton = [...document.body.querySelectorAll('button')].find((candidate) =>
-      candidate.textContent?.includes('Not delivered')
-    );
-    expect(labelButton).toBeUndefined();
-    expect(container?.textContent).toContain('Not delivered');
+  it('a manual Stop is not presented as an update interruption', async () => {
+    await renderRow(async () => true, {
+      ...undeliveredMessage,
+      id: 'user-turn-stopped',
+      status: 'canceled',
+      read: true,
+      cancellationReason: 'user_stop',
+    } as unknown as SessionHistoryParsed);
+    expect(document.body.textContent).not.toContain('Interrupted by update');
   });
 });

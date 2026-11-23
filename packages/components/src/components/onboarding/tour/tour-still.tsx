@@ -1,10 +1,12 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   type MutableRefObject,
+  type ReactNode,
 } from 'react';
 import {
   cameraAtRest,
@@ -60,12 +62,19 @@ export interface TourStillDebugOptions {
   activeAnchor?: string;
 }
 
-export function TourStill({
+// Memoised: the host re-renders for reasons of its own (an agent's download
+// ticking in the setup panel), and each of those used to re-render the whole
+// real product tree underneath.
+export const TourStill = memo(function TourStill({
   identity = DEFAULT_TOUR_IDENTITY,
   shot = { anchor: 'window', padding: 26 },
   tracks,
   configurationState,
   debug,
+  overlay,
+  windowShadow = '0 30px 80px -30px rgba(4,12,40,0.7)',
+  windowSize,
+  tilt = false,
 }: {
   identity?: TourIdentity;
   /** What to frame. Defaults to the whole window. */
@@ -76,14 +85,31 @@ export function TourStill({
   configurationState?: TourConfigurationState;
   /** Development-only visual diagnostics for camera authoring stories. */
   debug?: TourStillDebugOptions;
+  /**
+   * Drawn over the window in the window's own coordinates, so it moves with
+   * every shot: the onboarding blueprint's pencil layer lives here.
+   */
+  overlay?: ReactNode;
+  /** The window's shadow on the stage it stands on. */
+  windowShadow?: string;
+  /**
+   * Re-lays the product out at another window size. The onboarding handoff
+   * uses it to make the window exactly the screen it is about to become.
+   */
+  windowSize?: { width: number; height: number };
+  /**
+   * Lean the window with the camera's velocity while it travels, as a real
+   * dolly shot does, and settle level when the camera parks.
+   */
+  tilt?: boolean;
 }): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const cameraRef = useRef(createCameraMotion());
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number | null>(null);
-  const inputsRef = useRef({ shot });
-  inputsRef.current = { shot };
+  const inputsRef = useRef({ shot, tilt });
+  inputsRef.current = { shot, tilt };
   const resolvedTracks = useMemo(() => ({ ...STILL_TRACKS, ...tracks }), [tracks]);
 
   const startCamera = useCallback((): void => {
@@ -135,6 +161,9 @@ export function TourStill({
 
       const currentShot = inputsRef.current.shot;
       const applied = cameraRef.current.scale > 0 ? cameraRef.current.scale : 1;
+      // Measure level. A perspective tilt distorts every rect under it, and a
+      // camera that aims at distorted rects parks in the wrong place.
+      if (viewport.style.transform) viewport.style.transform = '';
       const rect = measureAnchor(content, currentShot.anchor, applied) ?? {
         x: 0,
         y: 0,
@@ -156,8 +185,22 @@ export function TourStill({
       const pose = poseFromMotion(cameraRef.current, size);
       content.style.transform = `translate3d(${pose.x.toFixed(2)}px, ${pose.y.toFixed(2)}px, 0) scale(${pose.scale.toFixed(4)})`;
       content.style.visibility = 'visible';
+      if (inputsRef.current.tilt) {
+        // Screen-space velocity, in px/s. A few degrees at the fastest pan:
+        // felt as weight, not seen as a trick.
+        const vx = cameraRef.current.velocity.centreX * pose.scale;
+        const vy = cameraRef.current.velocity.centreY * pose.scale;
+        const clamp = (value: number): number => Math.max(-3.2, Math.min(3.2, value));
+        const yaw = clamp(vx * 0.0016);
+        const pitch = clamp(-vy * 0.0016);
+        viewport.style.transform =
+          Math.abs(yaw) + Math.abs(pitch) < 0.02
+            ? ''
+            : `perspective(2200px) rotateY(${yaw.toFixed(3)}deg) rotateX(${pitch.toFixed(3)}deg)`;
+      }
 
       if (cameraAtRest(cameraRef.current, target)) {
+        viewport.style.transform = '';
         rafRef.current = null;
         lastFrameRef.current = null;
         return;
@@ -194,6 +237,9 @@ export function TourStill({
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(startCamera);
     observer.observe(viewport);
+    // The window itself resizes too (`windowSize` animates), and a camera
+    // parked on its old size would frame a window that is no longer there.
+    if (contentRef.current) observer.observe(contentRef.current);
     return () => observer.disconnect();
   }, [startCamera]);
 
@@ -210,10 +256,11 @@ export function TourStill({
       <div
         className="absolute left-0 top-0 origin-top-left"
         style={{
-          width: WINDOW_WIDTH,
-          height: WINDOW_HEIGHT,
-          transition: 'none',
-          boxShadow: '0 30px 80px -30px rgba(4,12,40,0.7)',
+          width: windowSize?.width ?? WINDOW_WIDTH,
+          height: windowSize?.height ?? WINDOW_HEIGHT,
+          // Only the size moves on its own; position and scale are the camera's.
+          transition: 'width 700ms cubic-bezier(.3,0,.1,1), height 700ms cubic-bezier(.3,0,.1,1)',
+          boxShadow: windowShadow,
           borderRadius: 14,
           visibility: 'hidden',
         }}
@@ -221,18 +268,23 @@ export function TourStill({
           contentRef.current = node;
         }}
       >
-        <TourApp
-          identity={identity}
-          tracks={resolvedTracks}
-          configurationState={configurationState}
-          permissionAnswer="allow"
-          onPermissionAnswer={() => undefined}
-          activeSidePanelTab="files"
-          onSidePanelTabSelect={() => undefined}
-          selectedTaskId="tour-1"
-          activeTabIndex={0}
-          onSelectTabIndex={() => undefined}
-        />
+        {/* Its own stacking context: a raised node inside the product (the
+            composer's card) must not climb over whatever is drawn above it. */}
+        <div style={{ position: 'relative', zIndex: 0, width: '100%', height: '100%' }}>
+          <TourApp
+            identity={identity}
+            tracks={resolvedTracks}
+            configurationState={configurationState}
+            permissionAnswer="allow"
+            onPermissionAnswer={() => undefined}
+            activeSidePanelTab="files"
+            onSidePanelTabSelect={() => undefined}
+            selectedTaskId="tour-1"
+            activeTabIndex={0}
+            onSelectTabIndex={() => undefined}
+          />
+        </div>
+        {overlay}
         {debug?.showAnchors ? (
           <TourAnchorDebugOverlay
             activeAnchor={debug.activeAnchor}
@@ -243,7 +295,7 @@ export function TourStill({
       </div>
     </div>
   );
-}
+});
 
 const DEBUG_ANCHORS = [
   'window',

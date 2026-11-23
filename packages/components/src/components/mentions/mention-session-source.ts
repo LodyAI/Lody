@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { buildSessionLink } from '@lody/shared/session-link';
 import {
   hydrateSlugMentionsFromText,
   type HydratedMentions,
@@ -9,6 +10,8 @@ import type { TextRewrite } from '@lody/shared';
 import type { SessionId, SessionMeta } from '@lody/shared';
 import { getEffectiveLatestMessageAt } from '@/components/sessions/session-list-rows';
 import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
+import { resolveSessionRepoFullName } from '@/lib/session-repo';
+import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 
 /**
  * Session mention — the one type whose displayed text is not what the agent
@@ -39,8 +42,12 @@ export type SessionMentionItem = {
   title: string;
   /** Recency key used for ordering. */
   activityAt: number;
-  projectLabel?: string;
+  /** Internal identity used only to derive the menu's current-project candidates. */
+  projectKey: SessionMentionProjectKey;
 };
+
+export type SessionMentionProjectKey = `local:${string}:${string}` | `github:${string}` | 'chat';
+export type SessionMentionProjectScope = 'current' | 'all';
 
 function normalizeTitle(title: string | undefined): string {
   return (title ?? '').trim();
@@ -66,13 +73,46 @@ export function buildSessionMentionSlug(title: string | undefined, sessionId: st
   return Array.from(normalized).slice(0, MAX_SLUG_LENGTH).join('');
 }
 
-/** Repo the session belongs to, or nothing — `project.kind` is not a label. */
-function getProjectLabel(session: SessionMeta): string | undefined {
-  const project = session.project;
-  if (project?.kind === 'local') {
-    return project.githubRepoFullName ?? session.repoFullName ?? undefined;
+function githubProjectKey(repoFullName: string | undefined): SessionMentionProjectKey {
+  const normalized = repoFullName?.trim().toLowerCase();
+  return normalized ? `github:${normalized}` : 'chat';
+}
+
+/** Stable project identity for grouping session candidates. */
+export function getSessionMentionProjectKey(
+  session: Pick<SessionMeta, 'machineId' | 'project' | 'repoFullName'>
+): SessionMentionProjectKey {
+  if (session.project?.kind === 'local') {
+    return `local:${session.machineId}:${session.project.localProjectId}`;
   }
-  return session.repoFullName ?? undefined;
+  return githubProjectKey(resolveSessionRepoFullName(session));
+}
+
+/** Project identity of the composer, including landing composers without a Session yet. */
+export function getMentionSourceProjectKey(
+  source: MentionProjectSource | undefined
+): SessionMentionProjectKey {
+  if (source?.kind === 'local') {
+    return `local:${source.machineId}:${source.localProjectId}`;
+  }
+  if (source?.kind === 'github') return githubProjectKey(source.repoFullName);
+  if (source?.kind === 'provider') {
+    return source.localProject
+      ? `local:${source.localProject.machineId}:${source.localProject.localProjectId}`
+      : githubProjectKey(source.githubRepoFullName);
+  }
+  return 'chat';
+}
+
+/** Filter only the menu candidates; callers retain the complete item list for addressing. */
+export function filterSessionMentionItemsByProject(
+  items: readonly SessionMentionItem[],
+  currentProjectKey: SessionMentionProjectKey,
+  scope: SessionMentionProjectScope
+): SessionMentionItem[] {
+  return scope === 'all'
+    ? [...items]
+    : items.filter((item) => item.projectKey === currentProjectKey);
 }
 
 /**
@@ -111,7 +151,7 @@ export function buildSessionMentionItems(
       sessionId: session.id,
       title: normalizeTitle(session.title),
       activityAt,
-      projectLabel: getProjectLabel(session),
+      projectKey: getSessionMentionProjectKey(session),
     });
   }
   return items;
@@ -136,10 +176,6 @@ export function selectSessionMentionCandidates(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Insertion from outside the menu (drag and drop)
-// ---------------------------------------------------------------------------
-
 /**
  * The edit that adds a session mention to a draft nobody is typing in.
  *
@@ -158,7 +194,8 @@ export function selectSessionMentionCandidates(
  */
 export function buildSessionMentionInsertion(
   mentions: readonly { value: string; kind?: string }[],
-  item: Pick<SessionMentionItem, 'slug' | 'sessionId'>
+  item: Pick<SessionMentionItem, 'slug' | 'sessionId'>,
+  options: { at?: number; replaceEnd?: number } = {}
 ): MentionInsertRequest | null {
   const alreadyMentioned = mentions.some(
     (mention) => mention.kind === 'session' && mention.value === item.sessionId
@@ -171,15 +208,14 @@ export function buildSessionMentionInsertion(
     kind: 'session',
     // Appended, so the separator and the trailing space keep the token
     // whitespace-delimited — which is what the hydrator that recovers it from a
-    // reloaded draft scans for.
+    // reloaded draft scans for. Paste supplies `at`/`replaceEnd` to land on the
+    // caret (or replace the selection) instead.
+    ...(options.at === undefined ? {} : { at: options.at }),
+    ...(options.replaceEnd === undefined ? {} : { replaceEnd: options.replaceEnd }),
     separate: true,
     suffix: ' ',
   };
 }
-
-// ---------------------------------------------------------------------------
-// Slug -> id resolution
-// ---------------------------------------------------------------------------
 
 /**
  * Persistent slug -> id map.
@@ -222,8 +258,14 @@ function readSlugCache(): SlugCache {
   }
 }
 
+// Every composer surface of a conversation (input area, composer, mention
+// textarea) asks for the same items; they share one array, remembered once.
+const rememberedItemLists = new WeakSet<readonly SessionMentionItem[]>();
+
 export function rememberSessionMentionSlugs(items: readonly SessionMentionItem[]): void {
   if (typeof localStorage === 'undefined' || items.length === 0) return;
+  if (rememberedItemLists.has(items)) return;
+  rememberedItemLists.add(items);
   try {
     const raw = localStorage.getItem(SLUG_CACHE_KEY);
     const merged: SlugCache = { ...parseSlugCache(raw) };
@@ -254,10 +296,41 @@ export function rememberSessionMentionSlugs(items: readonly SessionMentionItem[]
  * review runs, task sessions — are exactly what gets referenced. `sessions` is
  * the sidebar-row projection, which deliberately hides child tabs.
  */
+// Every composer surface of a conversation asks for the same items, each with
+// its own (equal) filtered session array. Reuse the last result while the
+// sessions are the same objects, so they build and remember the items once.
+let lastMentionItems: {
+  sessions: readonly SessionMeta[];
+  currentSessionId: string | null;
+  items: SessionMentionItem[];
+} | null = null;
+
+function sameSessions(left: readonly SessionMeta[], right: readonly SessionMeta[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index++) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function getSessionMentionItems(
+  sessions: readonly SessionMeta[],
+  currentSessionId: string | null
+): SessionMentionItem[] {
+  const last = lastMentionItems;
+  if (last && last.currentSessionId === currentSessionId && sameSessions(last.sessions, sessions)) {
+    return last.items;
+  }
+  const items = buildSessionMentionItems(sessions, currentSessionId);
+  lastMentionItems = { sessions, currentSessionId, items };
+  return items;
+}
+
 export function useSessionMentionItems(currentSessionId?: string | null): SessionMentionItem[] {
   const { allActiveSessions } = useVisibleSessionMetas();
   const items = React.useMemo(
-    () => buildSessionMentionItems(allActiveSessions, currentSessionId),
+    () => getSessionMentionItems(allActiveSessions, currentSessionId ?? null),
     [currentSessionId, allActiveSessions]
   );
   // Keep the slug -> id map durable so a draft reloaded tomorrow, or one whose
@@ -277,13 +350,38 @@ export function resolveSessionMentionIds(
   return resolved;
 }
 
-// ---------------------------------------------------------------------------
-// Text: hydration and before-send expansion
-// ---------------------------------------------------------------------------
+export type SessionMentionPromptFields = {
+  sessionId: string;
+  workspaceId?: string;
+  /**
+   * Link label after `@`. Prefers the human title; callers fall back to the
+   * composer slug when the title is unknown.
+   */
+  title: string;
+};
 
-export function buildSessionMentionPrompt(sessionId: string): string {
-  return `use lody mcp to query session[id: ${sessionId}] history`;
+/** Escape characters that would break a markdown inline link label. */
+export function escapeSessionMentionLinkLabel(label: string): string {
+  return label.replace(/\\/gu, '\\\\').replace(/[[\]]/gu, '\\$&');
 }
+
+/**
+ * Machine-readable form the agent receives for a session mention.
+ *
+ * Markdown link with a `lody://session/` URI so the transcript stays readable while
+ * Lody MCP can resolve the id via `lody_session_history`.
+ */
+export function buildSessionMentionPrompt(fields: SessionMentionPromptFields): string {
+  const title = fields.title.trim() || fields.sessionId;
+  const label = escapeSessionMentionLinkLabel(`@${title}`);
+  return `[${label}](${buildSessionLink(fields)})`;
+}
+
+export type SessionMentionRewriteContext = {
+  workspaceId?: string;
+  /** Live mention items — title comes from here when the range only carries an id. */
+  items?: readonly Pick<SessionMentionItem, 'sessionId' | 'title'>[];
+};
 
 /**
  * The session -> MCP-instruction rewrites these ranges imply.
@@ -300,17 +398,26 @@ export function buildSessionMentionPrompt(sessionId: string): string {
  */
 export function buildSessionMentionRewrites(
   text: string,
-  mentions: readonly { start: number; end: number; kind?: string; value: string }[]
+  mentions: readonly { start: number; end: number; kind?: string; value: string }[],
+  context: SessionMentionRewriteContext = {}
 ): TextRewrite[] {
+  const titleById = new Map<string, string>(
+    (context.items ?? []).map((item) => [item.sessionId, item.title])
+  );
   const rewrites: TextRewrite[] = [];
   for (const mention of mentions) {
     if (mention.kind !== 'session' || !mention.value) continue;
     const label = text.slice(mention.start, mention.end).replace(/^@/, '');
     if (!label) continue;
+    const title = titleById.get(mention.value)?.trim() || label;
     rewrites.push({
       start: mention.start,
       end: mention.end,
-      replacement: buildSessionMentionPrompt(mention.value),
+      replacement: buildSessionMentionPrompt({
+        sessionId: mention.value,
+        workspaceId: context.workspaceId,
+        title,
+      }),
       span: { kind: 'session', label, target: mention.value },
     });
   }
@@ -336,5 +443,10 @@ export function hydrateSessionMentionsFromText(
   slugToId: ReadonlyMap<string, string>,
   knownFileTokens?: ReadonlySet<string>
 ): HydratedMentions {
-  return hydrateSlugMentionsFromText({ text, slugToValue: slugToId, kind: 'session', knownFileTokens });
+  return hydrateSlugMentionsFromText({
+    text,
+    slugToValue: slugToId,
+    kind: 'session',
+    knownFileTokens,
+  });
 }

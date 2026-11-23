@@ -11,6 +11,8 @@ import type {
   MachineId,
 } from '@lody/shared';
 
+import { CLI_STORAGE_WRITE_FAILED_ISSUE_CODE } from '@lody/shared/electron-ipc';
+
 const MAX_RUNTIME_ISSUES = 50;
 
 type UpsertCliRuntimeIssueInput = {
@@ -23,30 +25,48 @@ type UpsertCliRuntimeIssueInput = {
 type CliRuntimeStateReporterOptions = {
   machineId?: MachineId;
   pid?: number;
+  cliVersion?: string;
   supervisor?: CliRuntimeState['supervisor'];
+  trackBackendConnectionAge?: boolean;
+  now?: () => number;
 };
 
 export class CliRuntimeStateReporter {
   private readonly pid: number;
+  private readonly cliVersion?: string;
   private readonly supervisor: CliRuntimeState['supervisor'];
   private phase: CliRuntimePhase = 'starting';
   private startupStage: CliRuntimeStartupStage | undefined = 'bootstrap';
   private connectivity: CliRuntimeConnectivity | undefined;
-  private backend: NonNullable<CliRuntimeState['backend']> = {
-    authorization: 'pending',
-    connection: 'connecting',
-  };
+  private backend: NonNullable<CliRuntimeState['backend']>;
+  private backendNotConnectedSinceMs: number | undefined;
   private connectedWorkspaces: CliRuntimeWorkspace[] = [];
+  private workspaceNotConnectedSinceMs = new Map<string, number>();
   private machineId: string | undefined;
   private activeSessionCount = 0;
   private connectedRoomCount = 0;
-  private updatedAtMs = Date.now();
+  private updatedAtMs: number;
   private readonly issuesByCode = new Map<string, CliRuntimeIssue>();
+  private readonly e2eeAccessWindows = new Map<
+    string,
+    { executionUntilMs: number; readUntilMs: number }
+  >();
+  private readonly trackBackendConnectionAge: boolean;
+  private readonly now: () => number;
 
   constructor(options: CliRuntimeStateReporterOptions = {}) {
     this.pid = options.pid ?? process.pid;
+    this.cliVersion = options.cliVersion;
     this.machineId = options.machineId;
     this.supervisor = options.supervisor;
+    this.trackBackendConnectionAge = options.trackBackendConnectionAge ?? true;
+    this.now = options.now ?? Date.now;
+    this.updatedAtMs = this.now();
+    this.backend = {
+      authorization: 'pending',
+      connection: 'connecting',
+    };
+    this.backendNotConnectedSinceMs = this.trackBackendConnectionAge ? this.updatedAtMs : undefined;
   }
 
   setMachineId(machineId: MachineId): void {
@@ -98,23 +118,63 @@ export class CliRuntimeStateReporter {
   }
 
   setBackendConnection(connection: CliBackendConnection): void {
-    if (this.backend.connection === connection) {
+    const nowMs = this.now();
+    const notConnectedSinceMs =
+      !this.trackBackendConnectionAge || connection === 'connected'
+        ? undefined
+        : this.backend.connection === 'connected'
+          ? nowMs
+          : (this.backendNotConnectedSinceMs ?? nowMs);
+    if (
+      this.backend.connection === connection &&
+      this.backendNotConnectedSinceMs === notConnectedSinceMs
+    ) {
       return;
     }
     this.backend = { ...this.backend, connection };
+    this.backendNotConnectedSinceMs = notConnectedSinceMs;
     this.touch();
   }
 
   setConnectedWorkspaces(workspaces: CliRuntimeWorkspace[]): void {
-    if (JSON.stringify(this.connectedWorkspaces) === JSON.stringify(workspaces)) {
+    const nowMs = this.now();
+    const previousById = new Map(
+      this.connectedWorkspaces.map((workspace) => [workspace.id, workspace])
+    );
+    const nextWorkspaceNotConnectedSinceMs = new Map<string, number>();
+    const nextWorkspaces = workspaces.map((workspace): CliRuntimeWorkspace => {
+      const previous = previousById.get(workspace.id);
+      const notConnectedSinceMs =
+        !this.trackBackendConnectionAge || workspace.backendConnection === 'connected'
+          ? undefined
+          : previous?.backendConnection === 'connected'
+            ? nowMs
+            : (this.workspaceNotConnectedSinceMs.get(workspace.id) ?? nowMs);
+      if (notConnectedSinceMs !== undefined) {
+        nextWorkspaceNotConnectedSinceMs.set(workspace.id, notConnectedSinceMs);
+      }
+      return {
+        id: workspace.id,
+        name: workspace.name,
+        slug: workspace.slug,
+        role: workspace.role,
+        backendConnection: workspace.backendConnection,
+      };
+    });
+    if (
+      JSON.stringify(this.connectedWorkspaces) === JSON.stringify(nextWorkspaces) &&
+      JSON.stringify([...this.workspaceNotConnectedSinceMs]) ===
+        JSON.stringify([...nextWorkspaceNotConnectedSinceMs])
+    ) {
       return;
     }
-    this.connectedWorkspaces = workspaces;
+    this.connectedWorkspaces = nextWorkspaces;
+    this.workspaceNotConnectedSinceMs = nextWorkspaceNotConnectedSinceMs;
     this.touch();
   }
 
   upsertIssue(input: UpsertCliRuntimeIssueInput): void {
-    const nowMs = Date.now();
+    const nowMs = this.now();
     const existing = this.issuesByCode.get(input.code);
     if (existing) {
       const next: CliRuntimeIssue = {
@@ -142,6 +202,41 @@ export class CliRuntimeStateReporter {
     });
     this.trimIssues();
     this.touch();
+  }
+
+  /** An encrypted workspace relying on the backend-outage window, or `undefined` once its
+   * access is confirmed or refused again. Display only: the window's wall-clock ends. */
+  setE2eeAccessWindow(
+    workspaceId: string,
+    window: { executionUntilMs: number; readUntilMs: number } | undefined
+  ): void {
+    const previous = this.e2eeAccessWindows.get(workspaceId);
+    if (!window) {
+      if (!this.e2eeAccessWindows.delete(workspaceId)) return;
+      this.touch();
+      return;
+    }
+    const next = {
+      executionUntilMs: Math.max(0, Math.trunc(window.executionUntilMs)),
+      readUntilMs: Math.max(0, Math.trunc(window.readUntilMs)),
+    };
+    if (
+      previous?.executionUntilMs === next.executionUntilMs &&
+      previous.readUntilMs === next.readUntilMs
+    )
+      return;
+    this.e2eeAccessWindows.set(workspaceId, next);
+    this.touch();
+  }
+
+  /** Local-only runtime state; never include storage paths or document contents. */
+  reportStorageWriteFailure(): void {
+    this.upsertIssue({
+      code: CLI_STORAGE_WRITE_FAILED_ISSUE_CODE,
+      severity: 'warning',
+      recoverable: true,
+      message: 'A write to local repository storage failed.',
+    });
   }
 
   clearIssue(code: string): void {
@@ -179,11 +274,29 @@ export class CliRuntimeStateReporter {
 
     return {
       schemaVersion: 1,
+      ...(this.cliVersion ? { cliVersion: this.cliVersion } : {}),
       phase: this.phase,
       startupStage: this.startupStage,
       connectivity: this.connectivity,
       backend: this.backend,
       connectedWorkspaces: this.connectedWorkspaces,
+      connectionAges: this.trackBackendConnectionAge
+        ? {
+            ...(this.backendNotConnectedSinceMs === undefined
+              ? {}
+              : { backendNotConnectedSinceMs: this.backendNotConnectedSinceMs }),
+            ...(this.workspaceNotConnectedSinceMs.size === 0
+              ? {}
+              : {
+                  workspaceNotConnectedSinceMs: Object.fromEntries(
+                    this.workspaceNotConnectedSinceMs
+                  ),
+                }),
+          }
+        : undefined,
+      ...(this.e2eeAccessWindows.size === 0
+        ? {}
+        : { e2eeAccessWindows: Object.fromEntries(this.e2eeAccessWindows) }),
       machineId: this.machineId,
       pid: this.pid,
       updatedAtMs: this.updatedAtMs,
@@ -211,7 +324,7 @@ export class CliRuntimeStateReporter {
   }
 
   private touch(): void {
-    this.updatedAtMs = Date.now();
+    this.updatedAtMs = this.now();
     this.phase = this.computePhase();
   }
 

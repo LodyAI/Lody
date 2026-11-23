@@ -4,8 +4,20 @@ import {
   ConversationDropOverlay,
   type ConversationDropKind,
 } from '@/components/shared/conversation-drop-overlay';
-import { CardHeader } from '@/ui/card';
 import { cn } from '@/lib/utils';
+
+/**
+ * Conversation-column width at which the IDE launcher and share pills appear.
+ * Keep the pixel token in `SESSION_PAGE_HEADER_PILLS_CLASS` in lockstep —
+ * Tailwind cannot interpolate this constant.
+ */
+export const SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX = 800;
+
+/** Named container so nested `@container`s cannot steal the page-width query. */
+export const SESSION_PAGE_CONTAINER_CLASS = '@container/session-page';
+
+/** `display: none` below the breakpoint; flex above. */
+export const SESSION_PAGE_HEADER_PILLS_CLASS = 'hidden @[800px]/session-page:flex';
 
 export interface SessionConversationPageHeaderProps {
   titleSlot: ReactNode;
@@ -27,8 +39,9 @@ export function SessionConversationPageHeader({
   reserveMacTrafficLightInset = false,
 }: SessionConversationPageHeaderProps) {
   return (
-    <CardHeader
+    <div
       className={cn(
+        SESSION_PAGE_CONTAINER_CLASS,
         'flex flex-col justify-center gap-1 border-b border-border px-3 py-2 shrink-0 h-12',
         nativeApp &&
           'h-[calc(3rem+var(--safe-area-top))] pt-[calc(0.5rem+var(--safe-area-top))] pl-[calc(0.75rem+var(--safe-area-left))] pr-[calc(0.75rem+var(--safe-area-right))]',
@@ -48,7 +61,7 @@ export function SessionConversationPageHeader({
           {endSlot}
         </div>
       </div>
-    </CardHeader>
+    </div>
   );
 }
 

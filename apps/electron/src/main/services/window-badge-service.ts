@@ -142,6 +142,15 @@ export function bindWindowBadgeToBrowserWindows(service: WindowBadgeService): vo
   // so hook each window's `closed` event when it's created instead.
   app.on('browser-window-created', (_event, window: BrowserWindow) => {
     const { id } = window
+    // A crashed/reloaded renderer cannot run React's unmount cleanup. Its old
+    // contribution must not survive a new workspace owner taking over.
+    window.webContents.on('render-process-gone', () => service.clearWindow(id))
+    window.webContents.on(
+      'did-start-navigation',
+      (_navigationEvent, _url, isInPlace, isMainFrame) => {
+        if (isMainFrame && !isInPlace) service.clearWindow(id)
+      }
+    )
     window.once('closed', () => {
       service.clearWindow(id)
     })

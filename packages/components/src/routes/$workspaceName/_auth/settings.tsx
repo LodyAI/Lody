@@ -1,3 +1,4 @@
+import { readGitHubInstallError } from '@/lib/github-installation-recovery';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Outlet, createFileRoute, useLocation, useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +12,11 @@ import {
 import type { MachineId } from '@lody/shared';
 import { AppThemeShell } from '@/components/app-theme-shell';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { getSettingsBackDestination, resolveSettingsCloseTo } from '@/lib/settings-navigation';
+import {
+  getSettingsBackDestination,
+  resolveSettingsCloseTo,
+  isSettingsPath,
+} from '@/lib/settings-navigation';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { SettingsDataCacheProvider } from '@/components/settings/settings-data-cache';
 import {
@@ -24,12 +29,15 @@ import type { MobileWorkspaceTab } from '@/components/mobile/mobile-workspace-ta
 
 type SettingsSearch = {
   from?: string;
+  github_install_error?: string;
 };
 
 export const Route = createFileRoute('/$workspaceName/_auth/settings')({
   component: SettingsLayoutComponent,
   validateSearch: (search: Record<string, unknown>): SettingsSearch => ({
     from: typeof search.from === 'string' ? search.from : undefined,
+    github_install_error:
+      typeof search.github_install_error === 'string' ? search.github_install_error : undefined,
   }),
 });
 
@@ -52,23 +60,20 @@ export function SettingsLayoutComponent() {
     [activeTabId]
   );
 
-  // Mobile machine detail views (URL has ?machine=<id>) swap the settings
-  // header for a back-only bar that returns to the machine list.
+  // The mobile Machines detail view (URL has ?machine=<id>) swaps the settings
+  // header for a back-only bar that returns to the machine list. Agents uses
+  // the same query parameter as an inline selector and remains a single page.
   const locationSearch = location.search as Record<string, unknown>;
   const hasAgentConfigMachineParam =
     typeof locationSearch.machine === 'string' && locationSearch.machine.length > 0;
   const isMobileMachineDetail =
-    isMobile &&
-    (activeTabId === 'agents' || activeTabId === 'machines') &&
-    hasAgentConfigMachineParam;
+    isMobile && activeTabId === 'machines' && hasAgentConfigMachineParam;
+  const settingsFrom = (location.search as { from?: string }).from;
 
   const handleBack = useCallback(() => {
     if (isMobileMachineDetail) {
       void navigate({
-        to:
-          activeTabId === 'agents'
-            ? '/$workspaceName/settings/agents'
-            : '/$workspaceName/settings/machines',
+        to: '/$workspaceName/settings/machines',
         params: { workspaceName },
         search: (prev) => ({ ...prev, machine: undefined }),
         replace: true,
@@ -79,9 +84,10 @@ export function SettingsLayoutComponent() {
     const destination = getSettingsBackDestination({
       isMobile,
       settingsListPage,
+      from: settingsFrom,
     });
 
-    if (destination === 'settings-list') {
+    if (destination.kind === 'settings-list') {
       void navigate({
         to: '/$workspaceName/settings',
         params: { workspaceName },
@@ -91,16 +97,20 @@ export function SettingsLayoutComponent() {
       return;
     }
 
-    // Settings exits back to the new session landing instead of browser history.
+    if (destination.kind === 'source') {
+      void navigate({ to: destination.to });
+      return;
+    }
+
+    // A direct settings entry has no source to restore.
     void navigate({
       to: '/$workspaceName/chat',
       params: { workspaceName },
     });
-  }, [activeTabId, isMobile, isMobileMachineDetail, navigate, settingsListPage, workspaceName]);
+  }, [isMobile, isMobileMachineDetail, navigate, settingsFrom, settingsListPage, workspaceName]);
 
   // Close (exit) settings entirely — back to where it was opened from (the `from` search
   // param, preserved across tabs) or the chat landing. Used by ⌘, (toggle) and Esc.
-  const settingsFrom = (location.search as { from?: string }).from;
   const handleCloseSettings = useCallback(() => {
     const closeTo = resolveSettingsCloseTo(settingsFrom);
     if (closeTo) {
@@ -119,22 +129,40 @@ export function SettingsLayoutComponent() {
   const setSettingsMachineTarget = useSetAtom(settingsSelectedMachineIdAtom);
   const setSettingsProjectTarget = useSetAtom(settingsSelectedProjectKeyAtom);
   useEffect(() => {
-    if (isMobile) return;
+    if (isMobile || !isSettingsPath(location.pathname, workspaceName)) return;
     setSettingsModalTab(activeTabId ?? SETTINGS_DEFAULT_TAB);
     setSettingsMachineTarget(
-      typeof locationSearch.machine === 'string'
-        ? (locationSearch.machine as MachineId)
-        : null
+      typeof locationSearch.machine === 'string' ? (locationSearch.machine as MachineId) : null
     );
     setSettingsProjectTarget(
       typeof locationSearch.project === 'string' ? locationSearch.project : null
     );
     setSettingsModalOpen(true);
+    // OAuth returns through this route before the desktop GitHub settings modal mounts.
+    const hash =
+      location.hash?.startsWith('github-personal=') ||
+      location.hash?.startsWith('github-install-retry=')
+        ? location.hash
+        : undefined;
+    const githubInstallError = readGitHubInstallError(location.searchStr ?? '') ?? undefined;
+    const search = (prev: Record<string, unknown>) => {
+      const safe = { ...prev };
+      delete safe.state;
+      delete safe['github-install-retry'];
+      delete safe.github_install_retry;
+      return { ...safe, github_install_error: githubInstallError };
+    };
     const closeTo = resolveSettingsCloseTo(settingsFrom);
     if (closeTo) {
-      void navigate({ to: closeTo, replace: true });
+      void navigate({ to: closeTo, replace: true, hash, search });
     } else {
-      void navigate({ to: '/$workspaceName/chat', params: { workspaceName }, replace: true });
+      void navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName },
+        replace: true,
+        hash,
+        search,
+      });
     }
   }, [
     isMobile,
@@ -148,6 +176,9 @@ export function SettingsLayoutComponent() {
     setSettingsProjectTarget,
     locationSearch.machine,
     locationSearch.project,
+    location.hash,
+    location.searchStr,
+    location.pathname,
   ]);
 
   // Esc closes the settings page — unless a modal/menu/popover (incl. shortcut recording,
@@ -175,8 +206,8 @@ export function SettingsLayoutComponent() {
   const mobileTitle = settingsListPage
     ? t('settings.title')
     : activeTab
-    ? t(activeTab.labelKey)
-    : t('settings.title');
+      ? t(activeTab.labelKey)
+      : t('settings.title');
 
   /* Workspace tabbar (本地 / GitHub / Chat / 设置) navigates back to the
      chat landing for the first three tabs; the 设置 tab is a no-op

@@ -1,10 +1,12 @@
-/**
- * Moved to `@lody/shared` so the auto-review engine in the CLI can ask the
- * author to open a PR with the exact text the manual quick action uses. Kept as
- * a re-export so existing imports stay put.
- */
+/** Shared manual PR and commit prompts, re-exported for session quick actions. */
 export {
   COMMIT_AND_PUSH_PROMPT,
-  CREATE_DRAFT_PR_PROMPT,
-  CREATE_PR_PROMPT,
+  CREATE_DRAFT_PR_BASE_PROMPT,
+  CREATE_DRAFT_PR_ORIGIN_PROMPT,
+  CREATE_PR_BASE_PROMPT,
+  CREATE_PR_ORIGIN_PROMPT,
+  PR_BRANCH_UPKEEP_PROMPT,
+  withPrBranchUpkeep,
+  withProjectGroupPrScope,
+  withQuickActionOrigin,
 } from '@lody/shared';

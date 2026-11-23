@@ -1,10 +1,13 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 /**
  * Hero primary CTA: same platform-aware download as the closing CTA.
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { GithubMark } from './github-mark';
 import {
   DOWNLOAD_BASE,
   detectPlatform,
@@ -14,8 +17,14 @@ import {
 } from './landing-platform-download';
 
 export type LandingHeroDownloadCopy = {
+  /**
+   * Ghost secondary. It is the source-repository link by contract, so the
+   * button always carries the GitHub mark.
+   */
   secondary: string;
   secondaryHref: string;
+  /** Set when `secondaryHref` leaves the site (source repository). */
+  secondaryExternal?: boolean;
   webAppHref: string;
   labels: PlatformDownloadLabels;
   /** Link to the full multi-platform download page. */
@@ -37,15 +46,15 @@ export function LandingHeroDownload({ copy }: { copy: LandingHeroDownloadCopy })
       resolvePrimaryDownloadAction({
         platform,
         labels: copy.labels,
-        webAppHref: copy.webAppHref,
+        allPlatforms: { label: copy.otherDownloads, href: copy.otherDownloadsHref },
       }),
-    [copy.labels, copy.webAppHref, platform]
+    [copy.labels, copy.otherDownloads, copy.otherDownloadsHref, platform]
   );
 
   return (
     <div className="underwater-hero__cta-wrap">
       <div className="underwater-hero__cta">
-        <a
+        <SiteAnchor
           className="underwater-btn underwater-btn--primary"
           href={primary.href}
           {...(primary.external
@@ -55,27 +64,45 @@ export function LandingHeroDownload({ copy }: { copy: LandingHeroDownloadCopy })
               : {})}
         >
           {primary.label}
-        </a>
-        <a className="underwater-btn underwater-btn--ghost" href={copy.secondaryHref}>
+        </SiteAnchor>
+        <SiteAnchor className="underwater-btn underwater-btn--ghost" href={copy.webAppHref}>
+          {copy.labels.browser}
+        </SiteAnchor>
+        <SiteAnchor
+          className="underwater-btn underwater-btn--ghost underwater-hero__github-desktop"
+          href={copy.secondaryHref}
+          {...(copy.secondaryExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
+        >
+          <GithubMark className="underwater-btn__icon" />
           {copy.secondary}
-        </a>
+        </SiteAnchor>
       </div>
       <div className="underwater-hero__cta-links">
-        <a className="underwater-hero__more" href={copy.otherDownloadsHref}>
-          {copy.otherDownloads}
-        </a>
+        <SiteAnchor
+          className="underwater-hero__more underwater-hero__github-mobile"
+          href={copy.secondaryHref}
+          {...(copy.secondaryExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
+        >
+          <GithubMark className="underwater-btn__icon" />
+          {copy.secondary}
+        </SiteAnchor>
+        {primary.key !== 'browser' ? (
+          <SiteAnchor className="underwater-hero__more" href={copy.otherDownloadsHref}>
+            {copy.otherDownloads}
+          </SiteAnchor>
+        ) : null}
         {copy.showIntelMac !== false && platform === 'mac-arm' ? (
           <>
             <span className="underwater-hero__link-dot" aria-hidden="true">
               ·
             </span>
-            <a
+            <SiteAnchor
               className="underwater-hero__more"
               href={`${DOWNLOAD_BASE}/Lody-latest-x64.dmg`}
               download
             >
               {copy.labels.macIntel}
-            </a>
+            </SiteAnchor>
           </>
         ) : null}
       </div>

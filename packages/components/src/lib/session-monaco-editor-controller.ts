@@ -51,7 +51,9 @@ export type SessionMonacoEditorControllerOptions = {
   readonly initialTheme: string;
   readonly initialReadOnly: boolean;
   readonly initialWordWrap: boolean;
-  readonly initialModelUri?: monaco.Uri;
+  // Serialized `monaco.Uri` (e.g. `code-collab://<fileId>/<path>`), kept as a
+  // string so callers can build it without importing the editor bundle.
+  readonly initialModelUri?: string;
   readonly callbacks: SessionMonacoEditorCallbacks;
 };
 
@@ -75,17 +77,14 @@ export class SessionMonacoEditorController {
     // `createModel` rejects duplicate URIs. If a peer mount already
     // built a model for our URI, reuse it — and remember not to
     // dispose it during teardown.
-    const existingModel = options.initialModelUri
-      ? monaco.editor.getModel(options.initialModelUri)
-      : null;
+    const modelUri = options.initialModelUri
+      ? monaco.Uri.parse(options.initialModelUri)
+      : undefined;
+    const existingModel = modelUri ? monaco.editor.getModel(modelUri) : null;
     this.ownsModel = !existingModel;
     this.model =
       existingModel ??
-      monaco.editor.createModel(
-        options.initialText,
-        options.initialLanguage,
-        options.initialModelUri
-      );
+      monaco.editor.createModel(options.initialText, options.initialLanguage, modelUri);
 
     this.editor = monaco.editor.create(options.container, {
       model: this.model,
@@ -298,9 +297,9 @@ export class SessionMonacoEditorController {
   }
 
   setLanguage(language: string): void {
-    if (this.model.getLanguageId() !== language) {
-      monaco.editor.setModelLanguage(this.model, language);
-    }
+    // Reapply even when the id is unchanged: an optional contribution may
+    // have registered after the model was created with that language id.
+    monaco.editor.setModelLanguage(this.model, language);
   }
 
   setTheme(themeName: string): void {
@@ -331,12 +330,14 @@ export class SessionMonacoEditorController {
         ),
         options: {
           isWholeLine: true,
-          className: 'lody-session-monaco-selected-line',
-          marginClassName: 'lody-session-monaco-selected-line-gutter',
+          className: 'rangeHighlight',
         },
       },
     ]);
-    this.editor.revealLineInCenter(range.startLineNumber);
+    // Keep Monaco's cursor anchor at the requested line, too: initial language
+    // setup and wrapped-line layout can otherwise restore the line-1 cursor.
+    this.editor.setPosition({ lineNumber: range.startLineNumber, column: 1 });
+    this.editor.revealLineInCenter(range.startLineNumber, monaco.editor.ScrollType.Immediate);
   }
 
   dispose(): void {

@@ -8,7 +8,6 @@ import type {
   SessionId,
   WorkspaceId,
 } from '@lody/shared';
-import { SessionIdSchema } from '@lody/shared';
 
 const configId = 'config-1' as AgentConfigId;
 
@@ -59,11 +58,14 @@ import {
   LoroStreamsLiveModePolicy,
   LoroStreamsMachineRpcClient,
   LoroStreamsRpcResponseDispatcher,
+  HISTORY_INPUT_RESPONSE_RECOVERY_MS,
   LoroStreamsRpcRequestSchema,
+  LoroMachineAcpCapabilitiesRefreshRpcRequestSchema,
   createRpcSecretRecipient,
   createLoroStreamsJsonStreamClient,
   decryptCodeCollabV2RpcPayload,
   encryptCodeCollabV2RpcPayload,
+  getMachineAcpAuthenticationInputSecretContext,
   getLoroWorkspaceRpcResponseStreamId,
   getMachineAcpAuthorizationCodeSecretContext,
   normalizeLoroGatewayBaseUrl,
@@ -95,66 +97,6 @@ describe('session steer RPC schema', () => {
     });
 
     expect(result.success).toBe(true);
-  });
-});
-
-describe('session preparation RPC schema', () => {
-  const baseRequest = {
-    jsonrpc: '2.0',
-    id: 'request-prepare-1',
-    rpcVersion: '1',
-    workspaceId: 'workspace-1',
-    machineId: 'machine-1',
-    replyTo: 'workspace-1:rpc:res',
-    sentAt: 1,
-    expiresAt: 2,
-  } as const;
-
-  it('accepts identifier-only preparation and cancellation payloads', () => {
-    expect(
-      LoroStreamsRpcRequestSchema.safeParse({
-        ...baseRequest,
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-        },
-      }).success
-    ).toBe(true);
-    expect(
-      LoroStreamsRpcRequestSchema.safeParse({
-        ...baseRequest,
-        method: 'session/prepare-cancel',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-        },
-      }).success
-    ).toBe(true);
-  });
-
-  it('rejects preparation payloads containing draft content or secrets', () => {
-    const result = LoroStreamsRpcRequestSchema.safeParse({
-      ...baseRequest,
-      method: 'session/prepare',
-      params: {
-        preparationId: 'prepare-1',
-        sessionId: 'session-1',
-        requestedByUserId: 'user-1',
-        agentConfigId: 'config-1',
-        cliType: 'builtin',
-        agentType: 'codex',
-        prompt: 'private draft',
-        env: { API_KEY: 'secret' },
-      },
-    });
-
-    expect(result.success).toBe(false);
   });
 });
 
@@ -249,74 +191,47 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcClient', () => {
-  it('sends minimal session preparation requests and resolves the response', async () => {
-    const fake = createFakeStreamClient();
-    const sessionId = SessionIdSchema.parse('session-1');
-    const client = new LoroStreamsMachineRpcClient({
-      workspaceId: 'workspace-1',
-      machineId: 'machine-1',
-      streamClient: fake.streamClient,
+  describe('capability refresh force field', () => {
+    // How a daemon without the acpCapabilityRefreshCache capability parses this
+    // request: the same strict schema minus the params field that build never
+    // declared. Derived from the current schema so it cannot drift from what shipped.
+    const previousGenerationSchema = LoroMachineAcpCapabilitiesRefreshRpcRequestSchema.extend({
+      params: LoroMachineAcpCapabilitiesRefreshRpcRequestSchema.shape.params.omit({ force: true }),
     });
 
-    const responsePromise = client.requestSessionPrepare({
-      preparationId: 'prepare-1',
-      sessionId,
-      requestedByUserId: 'user-1',
-      agentConfigId: configId,
-      cliType: 'builtin',
-      agentType: 'codex',
-      timeoutMs: 5_000,
-    });
-    await vi.waitFor(() => expect(fake.appended).toHaveLength(1));
+    const emitRefreshRequest = async (force: boolean | undefined): Promise<unknown> => {
+      const fake = createFakeStreamClient();
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: 'workspace-1',
+        machineId: 'machine-1',
+        streamClient: fake.streamClient,
+      });
+      void client
+        .requestMachineAcpCapabilitiesRefresh({ configId, force, timeoutMs: 5_000 })
+        .catch(() => undefined);
+      await vi.waitFor(() => expect(fake.appended).toHaveLength(1));
+      return fake.appended[0]?.value;
+    };
 
-    const request = fake.appended[0]?.value as { id: string; params: Record<string, unknown> };
-    expect(fake.appended[0]?.value).toEqual(
-      expect.objectContaining({
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          project: undefined,
-        },
-      })
-    );
-    expect(request.params).not.toHaveProperty('prompt');
-    expect(request.params).not.toHaveProperty('env');
+    it('omits the field entirely when the caller did not negotiate a forced refresh', async () => {
+      const request = await emitRefreshRequest(undefined);
 
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
-          id: request.id,
-          method: 'session/prepare',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          result: {
-            type: 'session/prepare_response',
-            preparationId: 'prepare-1',
-            sessionId: 'session-1',
-            accepted: true,
-            disposition: 'accepted',
-          },
-        },
-      ],
-      nextOffset: '1',
-      cursor: 'cursor-1',
-      upToDate: true,
+      // A strict schema rejects the key even when its value is undefined, so
+      // absence — not falsiness — is what keeps an older daemon able to answer.
+      expect(Object.keys((request as { params: object }).params)).not.toContain('force');
+      expect(previousGenerationSchema.safeParse(request).success).toBe(true);
+      expect(LoroStreamsRpcRequestSchema.safeParse(request).success).toBe(true);
     });
 
-    await expect(responsePromise).resolves.toEqual({
-      type: 'session/prepare_response',
-      preparationId: 'prepare-1',
-      sessionId: 'session-1',
-      accepted: true,
-      disposition: 'accepted',
+    it('sends the field when the caller negotiated a forced refresh', async () => {
+      const request = await emitRefreshRequest(true);
+
+      expect((request as { params: { force?: boolean } }).params.force).toBe(true);
+      expect(LoroStreamsRpcRequestSchema.safeParse(request).success).toBe(true);
+      // The regression negotiation prevents: an older daemon fails to parse the
+      // request and drops it without a reply, so the caller only sees a timeout.
+      expect(previousGenerationSchema.safeParse(request).success).toBe(false);
     });
-    client.stop();
   });
 
   it('sends session terminate requests and resolves the response', async () => {
@@ -492,6 +407,24 @@ describe('LoroStreamsMachineRpcClient', () => {
       success: true,
       replacementUserTurnId: 'user-new',
     });
+    client.stop();
+  });
+
+  it('forwards includeDisk on machine status only when asked', async () => {
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    void client.requestMachineStatus({ timeoutMs: 5000, includeDisk: true });
+    void client.requestMachineStatus({ timeoutMs: 5000 });
+    await vi.waitFor(() => expect(fake.appended).toHaveLength(2));
+    // Older daemons reject unknown params, so the default request stays empty.
+    expect(fake.appended.map((entry) => (entry.value as { params: unknown }).params)).toEqual([
+      { includeDisk: true },
+      {},
+    ]);
     client.stop();
   });
 
@@ -1147,10 +1080,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'custom',
-      agentType: 'custom-agent',
-      customAcp: { command: 'my-acp-agent', args: ['--stdio'] },
-      env: { ACP_PROVIDER_TOKEN: 'secret-token' },
       timeoutMs: 5000,
     });
 
@@ -1162,13 +1091,10 @@ describe('LoroStreamsMachineRpcClient', () => {
       id: string;
       params?: {
         configId?: string;
-        customAcp?: { command: string; args?: string[] };
-        env?: Record<string, string>;
       };
     };
     expect(request.params?.configId).toBe(configId);
-    expect(request.params?.customAcp).toEqual({ command: 'my-acp-agent', args: ['--stdio'] });
-    expect(request.params?.env).toEqual({ ACP_PROVIDER_TOKEN: 'secret-token' });
+    expect(request.params).toEqual({ configId });
     fake.pushBatch({
       messages: [
         {
@@ -1192,8 +1118,8 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect.objectContaining({
         type: 'machine/acp-capabilities-refresh_response',
         configId,
-        cliType: 'custom',
-        agentType: 'custom-agent',
+        cliType: 'builtin',
+        agentType: 'unknown',
         success: false,
       })
     );
@@ -1212,8 +1138,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       onProgress,
       timeoutMs: 5000,
     });
@@ -1305,8 +1229,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       onProgress,
       signal: controller.signal,
       timeoutMs: 5000,
@@ -1387,8 +1309,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
       const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
         configId,
-        cliType: 'builtin',
-        agentType: 'codex',
         timeoutMs: 1_000,
       });
       await originalAppendStarted;
@@ -1424,8 +1344,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       timeoutMs: 5_000,
     });
     await fake.waitForAppendedCount(1);
@@ -1453,8 +1371,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       timeoutMs: 5_000,
     });
     client.stop();
@@ -1476,9 +1392,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       requestId: 'auth-1',
       action: 'start',
       configId,
-      cliType: 'builtin',
-      agentType: 'kimi',
-      runtimeOverrides: { kimiPath: '/opt/kimi' },
       onProgress,
       timeoutMs: 5000,
     });
@@ -1492,10 +1405,10 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect.objectContaining({
         requestId: 'auth-1',
         action: 'start',
-        agentType: 'kimi',
-        runtimeOverrides: { kimiPath: '/opt/kimi' },
+        configId,
       })
     );
+    expect(request.params).toEqual({ requestId: 'auth-1', action: 'start', configId });
 
     fake.pushBatch({
       messages: [
@@ -1578,8 +1491,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       requestId: 'auth-claude',
       action: 'start',
       configId,
-      cliType: 'builtin',
-      agentType: 'claude',
       timeoutMs: 5000,
       onProgress: () => resolveProgressReceived(),
     });
@@ -1616,9 +1527,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       action: 'submit-code',
       authenticationRequestId: 'auth-claude',
       authorizationCode: 'browser-returned-code',
-      configId,
-      cliType: 'builtin',
-      agentType: 'claude',
       timeoutMs: 5000,
     });
 
@@ -1707,6 +1615,136 @@ describe('LoroStreamsMachineRpcClient', () => {
     client.stop();
   });
 
+  it('binds encrypted form input to the authentication request and interaction', async () => {
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    const recipient = await createRpcSecretRecipient();
+    let resolveProgressReceived: () => void = () => {};
+    const progressReceived = new Promise<void>((resolve) => {
+      resolveProgressReceived = resolve;
+    });
+    const startPromise = client.requestMachineAcpAuthenticate({
+      requestId: 'auth-custom',
+      action: 'start',
+      configId,
+      timeoutMs: 5000,
+      onProgress: () => resolveProgressReceived(),
+    });
+    await fake.waitForAppendedCount(1);
+    const startRequest = fake.appended[0]?.value as { id: string };
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: startRequest.id,
+          method: 'machine/acp-authenticate',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'machine/acp-authentication-progress',
+            machineId: 'machine-1',
+            requestId: 'auth-custom',
+            agentType: 'custom-agent',
+            status: 'input-required',
+            interactionId: 'form-1',
+            message: 'Complete sign-in',
+            form: {
+              fields: [{ id: 'code', type: 'secret', label: 'Code', required: true }],
+            },
+            authenticationInputPublicKey: recipient.publicKey,
+          },
+        },
+      ],
+      nextOffset: '2',
+      cursor: 'cursor-2',
+      upToDate: false,
+    });
+    await progressReceived;
+
+    const authenticationInput = JSON.stringify({
+      action: 'accept',
+      content: { code: 'secret-code' },
+    });
+    const responsePromise = client.requestMachineAcpAuthenticate({
+      requestId: 'auth-input-ack',
+      action: 'submit-input',
+      authenticationRequestId: 'auth-custom',
+      interactionId: 'form-1',
+      authenticationInput,
+      timeoutMs: 5000,
+    });
+    await fake.waitForAppendedCount(2);
+    const inputRequest = fake.appended[1]?.value as {
+      id: string;
+      params?: { authenticationInputEnvelope?: RpcSecretEnvelope };
+    };
+    expect(JSON.stringify(inputRequest)).not.toContain('secret-code');
+    await expect(
+      recipient.decrypt(
+        inputRequest.params!.authenticationInputEnvelope!,
+        getMachineAcpAuthenticationInputSecretContext({
+          workspaceId: 'workspace-1',
+          machineId: 'machine-1',
+          authenticationRequestId: 'auth-custom',
+          interactionId: 'form-1',
+        })
+      )
+    ).resolves.toBe(authenticationInput);
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: inputRequest.id,
+          method: 'machine/acp-authenticate',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'machine/acp-authenticate_response',
+            machineId: 'machine-1',
+            requestId: 'auth-input-ack',
+            agentType: 'custom-agent',
+            success: true,
+            disposition: 'input-accepted',
+          },
+        },
+      ],
+      nextOffset: '3',
+      cursor: 'cursor-3',
+      upToDate: true,
+    });
+    await expect(responsePromise).resolves.toMatchObject({ disposition: 'input-accepted' });
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: startRequest.id,
+          method: 'machine/acp-authenticate',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'machine/acp-authenticate_response',
+            machineId: 'machine-1',
+            requestId: 'auth-custom',
+            agentType: 'custom-agent',
+            success: true,
+            disposition: 'authenticated',
+          },
+        },
+      ],
+      nextOffset: '4',
+      cursor: 'cursor-4',
+      upToDate: true,
+    });
+    await expect(startPromise).resolves.toMatchObject({ disposition: 'authenticated' });
+    client.stop();
+  });
+
   it('sends local project control requests and resolves matching RPC responses', async () => {
     const fake = createFakeStreamClient();
     const workspaceId = 'workspace-1' as WorkspaceId;
@@ -1776,7 +1814,12 @@ describe('LoroStreamsMachineRpcClient', () => {
     client.stop();
   });
 
-  it('sends session preview create requests and resolves preview responses', async () => {
+  it('keeps preview creation pending beyond public route propagation and resolves its response', async () => {
+    const proof = {
+      runtimeNonce: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      requestToken: 'synthetic-preview-proof',
+    };
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({
       workspaceId: 'workspace-1',
@@ -1784,76 +1827,132 @@ describe('LoroStreamsMachineRpcClient', () => {
       streamClient: fake.streamClient,
     });
 
-    const responsePromise = client.requestSessionPreviewCreate({
-      sessionId: 'session-1',
-      requestedByUserId: 'user-1',
-      target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-        confirmedByUserId: 'user-1',
-        confirmedAt: 1000,
-      },
-      timeoutMs: 5000,
-    });
-
-    await vi.waitFor(() => {
-      expect(fake.appended).toHaveLength(1);
-    });
-
-    const request = fake.appended[0]?.value as {
-      id: string;
-      method: string;
-      params?: { sessionId?: string; requestedByUserId?: string };
-    };
-    expect(request.method).toBe('session/preview-create');
-    expect(request.params).toEqual({
-      sessionId: 'session-1',
-      requestedByUserId: 'user-1',
-      target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-        confirmedByUserId: 'user-1',
-        confirmedAt: 1000,
-      },
-      replaceExisting: undefined,
-    });
-
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
-          id: request.id,
-          method: 'session/preview-create',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          result: {
-            type: 'session/preview-create_response',
-            sessionId: 'session-1',
-            success: false,
-            error: 'tunnel_not_configured',
-            message: 'Preview gateway is not configured.',
-          },
-        },
-      ],
-      nextOffset: '3',
-      cursor: 'cursor-3',
-      upToDate: true,
-    });
-
-    await expect(responsePromise).resolves.toEqual(
-      expect.objectContaining({
-        type: 'session/preview-create_response',
+    vi.useFakeTimers();
+    try {
+      const responsePromise = client.requestSessionPreviewCreate({
+        proof,
         sessionId: 'session-1',
-        success: false,
-        error: 'tunnel_not_configured',
-      })
-    );
+        requestedByUserId: 'user-1',
+        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+        approval: {
+          source: 'browser_address',
+          targetClass: 'loopback',
+          target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+          confirmedByUserId: 'user-1',
+          confirmedAt: 1000,
+        },
+      });
 
-    client.stop();
+      await fake.waitForAppendedCount(1);
+      let settled = false;
+      void responsePromise.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(65_000);
+      expect(settled).toBe(false);
+
+      const request = fake.appended[0]?.value as {
+        id: string;
+        method: string;
+        params?: { sessionId?: string; requestedByUserId?: string };
+      };
+      expect(request.method).toBe('session/preview-create');
+      expect(request.params).toEqual({
+        proof,
+        sessionId: 'session-1',
+        requestedByUserId: 'user-1',
+        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+        approval: {
+          source: 'browser_address',
+          targetClass: 'loopback',
+          target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+          confirmedByUserId: 'user-1',
+          confirmedAt: 1000,
+        },
+        restart: undefined,
+      });
+
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: 'session/preview-create',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            result: {
+              type: 'session/preview-create_response',
+              sessionId: 'session-1',
+              success: false,
+              error: 'tunnel_not_configured',
+              message: 'Remote preview is not configured.',
+            },
+          },
+        ],
+        nextOffset: '3',
+        cursor: 'cursor-3',
+        upToDate: true,
+      });
+
+      await expect(responsePromise).resolves.toEqual(
+        expect.objectContaining({
+          type: 'session/preview-create_response',
+          sessionId: 'session-1',
+          success: false,
+          error: 'tunnel_not_configured',
+        })
+      );
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it('roundtrips a project member probe with its typed result', async () => {
+    vi.useFakeTimers();
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    try {
+      const pending = client.requestProjectProbeLocalMember({
+        localProjectId: 'local-1' as LocalProjectId,
+        requestedByUserId: 'user-1',
+      });
+      await fake.waitForAppendedCount(1);
+      const request = fake.appended[0]!.value as { id: string; method: string; params: unknown };
+      expect(request).toMatchObject({
+        method: 'project/probe-local-member',
+        params: { localProjectId: 'local-1', requestedByUserId: 'user-1' },
+      });
+      const result = {
+        type: 'project/probe-local-member',
+        repoFullName: 'acme/api',
+        isGit: true,
+        submodules: [{ path: 'proto', url: '../proto.git', repoFullName: 'acme/proto' }],
+      };
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: request.method,
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            result,
+          },
+        ],
+        nextOffset: '1',
+        cursor: '1',
+        upToDate: true,
+      });
+      expect(await pending).toEqual(result);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
   });
 
   it('sends local project git state requests and resolves git state responses', async () => {
@@ -1928,6 +2027,74 @@ describe('LoroStreamsMachineRpcClient', () => {
         success: true,
         observedAtMs: 123.5,
         state: expect.objectContaining({ git: true, currentBranch: 'feature/a' }),
+      })
+    );
+
+    const listPromise = client.requestLocalProjectBranches({
+      localProjectId: 'local-project-1' as LocalProjectId,
+      requestedByUserId: 'user-1',
+      query: 'feature',
+      limit: 20,
+      cursor: '20',
+      timeoutMs: 5000,
+    });
+    await vi.waitFor(() => {
+      expect(fake.appended).toHaveLength(2);
+    });
+    const listRequest = fake.appended[1]?.value as {
+      id: string;
+      method: string;
+      params?: Record<string, unknown>;
+    };
+    expect(listRequest.method).toBe('local-project/list-branches');
+    expect(listRequest.params).toEqual({
+      localProjectId: 'local-project-1',
+      requestedByUserId: 'user-1',
+      query: 'feature',
+      limit: 20,
+      cursor: '20',
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: listRequest.id,
+          method: 'local-project/list-branches',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'local-project/list-branches_response',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            localProjectId: 'local-project-1',
+            success: true,
+            observedAtMs: 456,
+            result: {
+              git: true,
+              currentBranch: 'feature/a',
+              defaultBranch: 'main',
+              pinnedBranches: ['main', 'feature/a'],
+              branches: ['feature/a', 'feature/b'],
+              truncated: true,
+              nextCursor: '40',
+              totalCount: 65,
+            },
+          },
+        },
+      ],
+      nextOffset: '5',
+      cursor: 'cursor-5',
+      upToDate: true,
+    });
+    await expect(listPromise).resolves.toEqual(
+      expect.objectContaining({
+        type: 'local-project/list-branches_response',
+        success: true,
+        result: expect.objectContaining({
+          git: true,
+          branches: ['feature/a', 'feature/b'],
+          nextCursor: '40',
+        }),
       })
     );
 
@@ -2035,31 +2202,6 @@ describe('createLoroStreamsJsonStreamClient', () => {
       contentType: 'application/json',
       ttlSeconds: 61,
     });
-  });
-
-  it('forwards timeout config to StreamsClient', async () => {
-    streamsClientMockFns.create.mockResolvedValue({
-      ok: true,
-      result: {
-        created: true,
-        contentType: 'application/json',
-        nextOffset: '-1',
-        closed: false,
-      },
-    });
-
-    const timeout = { connectTimeoutMs: 30_000, pollTimeoutMs: 45_000 };
-    const client = createLoroStreamsJsonStreamClient({
-      bucketId: 'bucket-1',
-      getToken: async () => 'token-1',
-      baseUrl: 'https://streams.example.com',
-      timeout,
-    });
-
-    await client.ensureJsonStream('workspace-1:rpc:req:machine-1');
-
-    const instance = getLastStreamsClientInstance();
-    expect(instance.options.timeout).toEqual(timeout);
   });
 
   it('adds request context to stream ensure errors', async () => {
@@ -2777,6 +2919,270 @@ describe('machine RPC response live transport fallback', () => {
     },
   });
 
+  const signal = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+
+  const inputRecoveryHarness = (
+    policy = new LoroStreamsLiveModePolicy(),
+    holdAppend = false,
+    abortThrows = false
+  ) => {
+    const appendEntered = signal(),
+      appendReleased = signal(),
+      appendFinished = signal();
+    let finishedCount = 0;
+    const appendWaiters: Array<{ count: number; resolve(): void }> = [];
+    const requests: Array<{ id: string; method: string }> = [];
+    const reads: Array<{
+      mode: string;
+      offset?: string;
+      signal?: AbortSignal;
+      reply(messages: unknown[]): Promise<void>;
+    }> = [];
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: async () => {},
+      appendJson: async (_id, value) => {
+        const request = LoroStreamsRpcRequestSchema.parse(value);
+        requests.push({ id: request.id, method: request.method });
+        appendEntered.resolve();
+        if (holdAppend) await appendReleased.promise;
+        return 'request-offset';
+      },
+      readJsonLive: async (_id, state, onBatch, options) => {
+        reads.push({
+          mode: options?.modePolicy?.selectRequestMode() ?? 'sse',
+          offset: state.nextOffset,
+          signal: options?.signal,
+          reply: async (messages) => {
+            await onBatch({ messages, nextOffset: '43', cursor: 'cursor-43', upToDate: false });
+          },
+        });
+        await onBatch({ messages: [], nextOffset: '42', cursor: 'cursor-42', upToDate: true });
+        await untilAborted(options?.signal);
+        if (abortThrows) throw new DOMException('Aborted', 'AbortError');
+      },
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+      liveModePolicy: policy,
+    });
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient,
+      responseDispatcher: dispatcher,
+      trace: (event) => {
+        if (event !== 'machine rpc transport append finished') return;
+        appendFinished.resolve();
+        finishedCount += 1;
+        for (const waiter of appendWaiters) if (finishedCount >= waiter.count) waiter.resolve();
+      },
+    });
+    const input = (timeoutMs = 30_000) =>
+      client.requestSessionHistoryWrite({
+        sessionId: 'session-1' as SessionId,
+        operation: 'accept_input_and_dispatch',
+        payload: { entry: { id: 'input-1' } },
+        timeoutMs,
+      });
+    const receipt = async (index = 0) => ({
+      jsonrpc: '2.0',
+      id: requests[index]!.id,
+      method: 'session/history-write',
+      rpcVersion: '1',
+      machineId: 'machine-1',
+      result: await encryptCodeCollabV2RpcPayload('session-1', {
+        type: 'session/history-write_response',
+        sessionId: 'session-1',
+        operation: 'accept_input_and_dispatch',
+        success: true,
+        result: { status: 'accepted', turnId: 'input-1', active: true },
+        historyRevision: 1,
+        historyCount: 1,
+        historyChange: null,
+      }),
+    });
+    const waitForAppends = (count: number) =>
+      finishedCount >= count
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => appendWaiters.push({ count, resolve }));
+    return {
+      dispatcher,
+      client,
+      requests,
+      reads,
+      input,
+      receipt,
+      appendEntered,
+      appendReleased,
+      appendFinished,
+      waitForAppends,
+    };
+  };
+
+  it.each(['sse', 'long-poll', 'abort-error', 'diagnostic-error'] as const)(
+    'renews a stalled %s response read and receives the real encrypted input receipt before timeout',
+    async (mode) => {
+      const policy = new LoroStreamsLiveModePolicy({
+        onChange:
+          mode === 'diagnostic-error'
+            ? () => {
+                throw new Error('Diagnostic sink failed');
+              }
+            : undefined,
+      });
+      if (mode === 'long-poll')
+        policy.noteReadOutcome({
+          requestedMode: 'auto',
+          observedTransport: 'long-poll',
+          deliveredBatch: true,
+        });
+      const h = inputRecoveryHarness(policy, false, mode === 'abort-error');
+      let settled = false;
+      const pending = h.input().then((value) => {
+        settled = true;
+        return value;
+      });
+      try {
+        await h.appendFinished.promise;
+        await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS - 1);
+        expect(settled).toBe(false);
+        expect(h.reads).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(h.reads.map((read) => [read.mode, read.offset])).toEqual([
+          [mode === 'long-poll' ? 'long-poll' : 'auto', '-1'],
+          ['long-poll', '42'],
+        ]);
+        // Recovery alone is never delivery, even when the actual owner is slow.
+        expect(settled).toBe(false);
+        await h.reads[1]!.reply([await h.receipt()]);
+        await expect(pending).resolves.toMatchObject({
+          success: true,
+          result: { status: 'accepted', turnId: 'input-1', active: true },
+        });
+        expect(h.requests.map((request) => request.method)).toEqual(['session/history-write']);
+        expect(h.dispatcher.getLiveModeDiagnostics()?.sseResponseTimeouts).toBe(0);
+        // A duplicate reply from the previous read cannot start another write.
+        await h.reads[0]!.reply([await h.receipt()]);
+        await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+        expect(h.requests).toHaveLength(1);
+        expect(h.reads).toHaveLength(2);
+      } finally {
+        h.dispatcher.stop();
+      }
+    }
+  );
+
+  it('does not let unrelated replies postpone a pending input recovery', async () => {
+    const h = inputRecoveryHarness();
+    const pending = h.input();
+    try {
+      await h.appendFinished.promise;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const status = h.client.requestMachineStatus();
+      await h.waitForAppends(2);
+      await h.reads[0]!.reply([machineStatusResponse(h.requests[1]!.id, 'machine-1')]);
+      await expect(status).resolves.toMatchObject({ success: true });
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS - 1_000);
+      expect(h.reads).toHaveLength(2);
+      await h.reads[1]!.reply([await h.receipt()]);
+      await expect(pending).resolves.toMatchObject({ success: true });
+    } finally {
+      h.dispatcher.stop();
+    }
+  });
+
+  it('renews once for overlapping inputs and retains both original requests', async () => {
+    const h = inputRecoveryHarness();
+    const first = h.input();
+    try {
+      await h.appendFinished.promise;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const second = h.input();
+      await h.waitForAppends(2);
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS - 1_000);
+      expect(h.reads).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      expect(h.reads).toHaveLength(2);
+      await h.reads[1]!.reply([await h.receipt(0), await h.receipt(1)]);
+      await expect(Promise.all([first, second])).resolves.toMatchObject([
+        { success: true },
+        { success: true },
+      ]);
+      expect(h.requests).toHaveLength(2);
+    } finally {
+      h.dispatcher.stop();
+    }
+  });
+
+  it('leaves a healthy SSE read alone after an input receipt arrives', async () => {
+    const h = inputRecoveryHarness();
+    const pending = h.input();
+    try {
+      await h.appendFinished.promise;
+      await h.reads[0]!.reply([await h.receipt()]);
+      await expect(pending).resolves.toMatchObject({ success: true });
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      expect(h.reads).toHaveLength(1);
+      expect(h.dispatcher.getLiveModeDiagnostics()?.transport).toBe('sse');
+    } finally {
+      h.dispatcher.stop();
+    }
+  });
+
+  it('starts response recovery only after the request append completes', async () => {
+    const h = inputRecoveryHarness(undefined, true);
+    const pending = h.input();
+    try {
+      await h.appendEntered.promise;
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      expect(h.reads).toHaveLength(1);
+      h.appendReleased.resolve();
+      await h.appendFinished.promise;
+      await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+      expect(h.reads).toHaveLength(2);
+      await h.reads[1]!.reply([await h.receipt()]);
+      await expect(pending).resolves.toMatchObject({ success: true });
+    } finally {
+      h.appendReleased.resolve();
+      h.dispatcher.stop();
+    }
+  });
+
+  it.each(['stop', 'cancel', 'pin', 'timeout'] as const)(
+    'does not recover an input after %s',
+    async (end) => {
+      const h = inputRecoveryHarness(
+        new LoroStreamsLiveModePolicy(end === 'pin' ? { pin: 'sse' } : {})
+      );
+      const pending = h.input(end === 'timeout' ? 1_000 : 30_000);
+      try {
+        await h.appendFinished.promise;
+        if (end === 'stop') h.dispatcher.stop();
+        if (end === 'cancel') h.client.stop();
+        await vi.advanceTimersByTimeAsync(HISTORY_INPUT_RESPONSE_RECOVERY_MS);
+        expect(h.reads).toHaveLength(1);
+        if (end === 'pin') {
+          await h.reads[0]!.reply([await h.receipt()]);
+          await expect(pending).resolves.toMatchObject({ success: true });
+        } else if (end === 'timeout')
+          await expect(pending).resolves.toMatchObject({
+            success: false,
+            rpcFailure: { source: 'transport', code: 'response_timeout' },
+          });
+        else await expect(pending).resolves.toBeNull();
+      } finally {
+        h.dispatcher.stop();
+      }
+    }
+  );
+
   it('falls back to long-poll when SSE reads keep failing, and still answers pending calls', async () => {
     const transport = mockBrokenSseTransport();
     const traced: Array<{ event: string; details: Record<string, unknown> }> = [];
@@ -3050,5 +3456,166 @@ describe('machine RPC response live transport fallback', () => {
     });
 
     dispatcher.stop();
+  });
+});
+
+describe('pending RPC deadline', () => {
+  // Flush the microtask queue without advancing the (faked) clock, so the
+  // response loop can deliver a pushed batch between timer advances.
+  const flushMicrotasks = async (): Promise<void> => {
+    for (let index = 0; index < 8; index += 1) {
+      await Promise.resolve();
+    }
+  };
+
+  const registerRefresh = (
+    dispatcher: LoroStreamsRpcResponseDispatcher,
+    onAcpBinaryProgress: (message: unknown) => void
+  ) =>
+    dispatcher.registerPending('request-1', {
+      machineId: 'machine-1',
+      method: 'machine/acp-capabilities-refresh',
+      timeoutMs: 1_000,
+      startedAtMs: Date.now(),
+      onAcpBinaryProgress: onAcpBinaryProgress as never,
+    });
+
+  const progressBatch = (nextOffset: string): LoroJsonStreamBatch => ({
+    messages: [
+      {
+        jsonrpc: '2.0',
+        id: 'request-1',
+        method: 'machine/acp-capabilities-refresh',
+        rpcVersion: '1',
+        machineId: 'machine-1',
+        result: {
+          type: 'machine/acp-binary-progress',
+          machineId: 'machine-1',
+          agentType: 'kimi',
+          status: 'downloading',
+          percent: 42,
+        },
+      },
+    ],
+    nextOffset,
+    cursor: `cursor-${nextOffset}`,
+    upToDate: true,
+  });
+
+  it('measures silence, so a reporting download cannot expire its own request', async () => {
+    // The startup budget excludes runtime download on the stated grounds that
+    // progress frames keep resetting this deadline. With an absolute timer that
+    // was simply false: a download slower than the budget expired the very
+    // request that was reporting it, and the user got a client-side timeout
+    // instead of the machine's answer.
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeStreamClient();
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient: fake.streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+      await dispatcher.start();
+      await flushMicrotasks();
+
+      const progress: unknown[] = [];
+      let settled = false;
+      const pending = registerRefresh(dispatcher, (message) => progress.push(message)).then(
+        (value) => {
+          settled = true;
+          return value;
+        }
+      );
+
+      for (let elapsed = 0; elapsed < 5_000; elapsed += 800) {
+        await vi.advanceTimersByTimeAsync(800);
+        fake.pushBatch(progressBatch(String(elapsed)));
+        await flushMicrotasks();
+      }
+
+      // Five seconds on a one-second deadline, and still in flight.
+      expect(progress).toHaveLength(7);
+      expect(settled).toBe(false);
+
+      dispatcher.stop();
+      await expect(pending).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still gives up once the machine goes quiet', async () => {
+    // The point of re-arming is that silence, not elapsed work, is what a
+    // dead daemon looks like. A machine that stops reporting must still expire.
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeStreamClient();
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient: fake.streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+      await dispatcher.start();
+      await flushMicrotasks();
+
+      const pending = registerRefresh(dispatcher, () => {});
+
+      await vi.advanceTimersByTimeAsync(800);
+      fake.pushBatch(progressBatch('1'));
+      await flushMicrotasks();
+
+      await vi.advanceTimersByTimeAsync(800);
+      await flushMicrotasks();
+      // 1.6s total, but only 0.8s since the last frame.
+      await expect(Promise.race([pending, Promise.resolve('pending')])).resolves.toBe('pending');
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toBeNull();
+
+      dispatcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('LoroStreamsRpcResponseDispatcher response loop', () => {
+  it('keeps reading responses when recreating a missing response stream fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let ensureCalls = 0;
+      let reads = 0;
+      const streamClient: LoroStreamsJsonStreamClient = {
+        ensureJsonStream: vi.fn(async () => {
+          ensureCalls += 1;
+          if (ensureCalls === 1) throw new Error('synthetic gateway unavailable');
+        }),
+        appendJson: vi.fn(async () => 'next-offset'),
+        readJsonLive: vi.fn(async (_streamId, _state, _onBatch, options) => {
+          reads += 1;
+          if (reads <= 2) throw new LoroStreamsGatewayError('stream not found', 404);
+          await new Promise((_resolve, reject) =>
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            })
+          );
+        }),
+      };
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+
+      await dispatcher.start();
+      await vi.waitFor(() => expect(ensureCalls).toBe(1));
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(reads).toBe(3));
+      expect(ensureCalls).toBe(2);
+      dispatcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

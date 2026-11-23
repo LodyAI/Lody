@@ -1,27 +1,266 @@
-import { useState } from 'react';
+import type { ReferralCheckoutOffer, ReferralPolicy } from '@lody/cloud-api';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { FREE_SESSION_LIMIT_PER_WORKSPACE, FREE_WORKSPACE_MEMBER_LIMIT } from '@lody/shared';
-import { ArrowLeftRight, Check, Loader2 } from 'lucide-react';
-import { Badge, Button, Card, Input } from '@/ui';
-import { Progress } from '@/ui/progress';
-import { Skeleton } from '@/ui/skeleton';
-import { cn } from '@/lib/utils';
+import { ArrowLeftRight, Check } from 'lucide-react';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Progress } from '@lody/ui/progress';
+import { Skeleton } from '@lody/ui/skeleton';
+import { Spinner } from '@lody/ui/spinner';
+import { Tabs } from '@lody/ui/tabs';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { FounderCallLink } from '../shared/founder-call-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
+import { CompactLinkRow, CompactRow, CompactSection } from './compact-layout';
+import { ReferralCreditNotice, ReferralOfferNotice } from './referral-settings-pure';
+import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
+import { settingsType as type } from './type.stylex';
+
+const WIDE = '@media (min-width: 640px)';
+
+/**
+ * Billing is settings cards like every other page: one card rung, one 16px
+ * inset shared by every line, a group's name above its card rather than in a
+ * band inside it, and records as ruled rows.
+ */
+const styles = stylex.create({
+  /** A line of a card that is not a `CompactRow`: the row's own inset. */
+  block: { paddingInline: space[4], paddingBlock: space[3], minWidth: 0 },
+  banner: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: space[3],
+  },
+  bannerMark: { marginTop: '2px', color: colors.accent },
+  bannerText: { flexGrow: 1, minWidth: 0 },
+
+  planHeading: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  planName: { margin: 0, fontSize: '1.125em', lineHeight: type.leading, color: colors.label },
+  /**
+   * One plan card for every tier: the plan's identity and narrative on the
+   * left, the one dated fact a subscriber acts on on the right — the same
+   * label-over-value column the upcoming-charge summary below draws.
+   */
+  planStripe: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: space[3],
+  },
+  planIdentity: { minWidth: 0, flexGrow: 1 },
+  planFocus: {
+    flexShrink: 0,
+    textAlign: { default: 'start', [WIDE]: 'end' },
+  },
+  planFocusLabel: { margin: 0, color: colors.secondaryLabel, fontSize: uiText.footnoteSize },
+  planFocusDate: {
+    margin: 0,
+    marginTop: '2px',
+    fontSize: '1.125em',
+    lineHeight: type.leading,
+    color: colors.label,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  statusLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[2],
+    rowGap: '2px',
+    marginTop: space[1],
+    fontSize: uiText.footnoteSize,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  statusInterval: { display: 'inline-flex', alignItems: 'center', gap: space[1.5] },
+  statusDot: { color: colors.tertiaryLabel },
+  inlineAction: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: colors.accent,
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    opacity: { default: 1, ':hover': 0.8, ':disabled': 0.6 },
+  },
+  glyphSmall: { width: '12px', height: '12px', flexShrink: 0 },
+  danger: { color: colors.destructive },
+
+  metric: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  metricValue: { color: colors.secondaryLabel, fontVariantNumeric: 'tabular-nums' },
+  metricStrong: { color: colors.label },
+  meter: { marginTop: space[3] },
+  helper: {
+    margin: 0,
+    marginTop: space[2],
+    fontSize: uiText.footnoteSize,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  helperFlush: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+
+  /** The offer: its heading, the strip, the price and the action, one column. */
+  offer: { display: 'flex', flexDirection: 'column', gap: space[4], paddingBlock: space[4] },
+  offerTitle: { margin: 0, lineHeight: type.leading, color: colors.label },
+  strip: { display: 'flex' },
+  checkoutInterval: { display: 'flex', alignItems: 'center', gap: space[1] },
+  pricePanel: { display: 'flex', flexDirection: 'column', paddingTop: space[2] },
+  price: { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: space[2] },
+  priceValue: {
+    fontSize: '2em',
+    lineHeight: 1.1,
+    letterSpacing: '-0.02em',
+    color: colors.label,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  priceUnit: { fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
+  action: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[2] },
+  perks: {
+    display: 'grid',
+    gridTemplateColumns: { default: 'minmax(0, 1fr)', [WIDE]: 'repeat(2, minmax(0, 1fr))' },
+    columnGap: space[4],
+    rowGap: space[1.5],
+    margin: 0,
+    padding: 0,
+    listStyleType: 'none',
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  perk: { display: 'flex', alignItems: 'center', gap: space[1.5], minWidth: 0 },
+  perkMark: { width: '14px', height: '14px', flexShrink: 0, color: colors.accent },
+  links: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[4],
+    rowGap: space[1],
+  },
+
+  redeemField: { width: '220px', maxWidth: '100%' },
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+
+  chargeSummary: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: space[3],
+    paddingBlock: space[4],
+  },
+  chargeDate: {
+    margin: 0,
+    marginTop: space[1],
+    color: colors.label,
+    fontSize: '1.125em',
+    lineHeight: 1.3,
+  },
+  chargeAmount: {
+    color: colors.label,
+    fontSize: '2em',
+    fontVariantNumeric: 'tabular-nums',
+    letterSpacing: '-0.03em',
+    lineHeight: 1,
+  },
+  chargeLabel: { margin: 0, color: colors.secondaryLabel, fontSize: uiText.footnoteSize },
+  chargeValue: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: space[1] },
+  chargeBreakdown: {
+    paddingBlock: space[3],
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+  },
+  breakdown: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[1],
+    margin: 0,
+    listStyleType: 'none',
+  },
+  breakdownLine: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space[4],
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  tabular: { flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: colors.label },
+
+  inlineRow: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[3] },
+  history: { maxHeight: '320px', overflowY: 'auto', margin: 0, padding: 0, listStyleType: 'none' },
+
+  trailing: { display: 'flex', justifyContent: 'flex-end', paddingInline: space[4] },
+  quietAction: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    fontFamily: 'inherit',
+    fontSize: uiText.footnoteSize,
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    opacity: { default: 1, ':disabled': 0.6 },
+  },
+  quietActionDanger: { color: { default: colors.secondaryLabel, ':hover': colors.destructive } },
+});
 
 export type BillingInterval = 'month' | 'year';
-export type BillingPendingAction = 'checkout' | null;
+export type BillingPendingAction = 'checkout' | 'portal' | null;
 
 export interface BillingOverviewData {
   billingAccountId: string | null;
   /** Backend capability fence for rolling frontend/backend deployments. */
   giftStackingSupported: boolean;
+  seatBilling?: {
+    policy: 'deferred';
+    capacity: number;
+    available: number;
+    renewalQuantity: number;
+    periodEnd: number | null;
+  } | null;
   effectivePlanTier: 'free' | 'plus' | 'enterprise';
   entitlementSource: 'free' | 'stripe' | 'stripe_gift' | 'enterprise';
   offerKey: string | null;
-  yearlyEarlyBirdEligible: boolean;
   promotionalEntitlementEndsAt: number | null;
   /** Entire granted gift window, including a gift phase that starts later. */
   giftStartsAt: number | null;
@@ -46,6 +285,7 @@ export interface BillingOverviewData {
   currentPeriodEnd: number | null;
   seatCount: number;
   canManageBilling: boolean;
+  referralRewardsSupported?: boolean;
   pricing: {
     monthlyAmountCents: number;
     yearlyAmountCents: number;
@@ -59,6 +299,20 @@ export interface BillingInvoice {
   number: string | null;
   status: string;
   amountPaid: number;
+  /** Optional for clients connected to an older billing backend. */
+  amountDue?: number | null;
+  amountRemaining?: number | null;
+  total?: number | null;
+  reason?:
+    | 'subscription_started'
+    | 'subscription_renewed'
+    | 'seats_added'
+    | 'seats_removed'
+    | 'plan_changed'
+    | 'subscription_changed'
+    | 'gift_redemption'
+    | 'other';
+  seatChange?: { from: number; to: number } | null;
   currency: string;
   periodStart: number | null;
   periodEnd: number | null;
@@ -122,13 +376,134 @@ export interface BillingSettingsViewProps {
   onSwitchInterval: () => void;
   /** Interval switch request in flight. */
   switchIntervalPending: boolean;
+  /** Opens the Stripe payment-method-only Portal. */
+  onPaymentMethod?: () => void;
   /** Opens the cancel-at-period-end confirmation dialog (container-owned). */
   onCancelSubscription: () => void;
   /** Undoes a scheduled cancel-at-period-end. */
   onResumeSubscription: () => void;
   onRedeemCode: (code: string) => void;
   onRetryInvoices: () => void;
+  onViewInvoice?: (invoice: BillingInvoice) => void;
   onCancelExternalCheckout?: () => void;
+  /**
+   * The server confirmed a first checkout now would get the referral discount.
+   * `onRemove` checks out at the regular price instead; absent once the
+   * workspace is bound to its referral.
+   */
+  referralOffer?: {
+    onRemove?: () => void;
+    policy?: ReferralPolicy;
+    retained?: ReferralCheckoutOffer['retained'];
+  } | null;
+  /** The workspace's referral card, placed right under the plan. */
+  referral?: ReactNode;
+  /** Available referral credit (cents), spent on the first subscription payment. */
+  referralCreditCents?: number;
+}
+
+export function invoiceDisplayAmount(invoice: BillingInvoice): number | null {
+  if (invoice.status === 'open' || invoice.status === 'uncollectible') {
+    return invoice.amountRemaining ?? invoice.amountDue ?? null;
+  }
+  return invoice.status === 'paid'
+    ? invoice.amountPaid
+    : (invoice.total ?? invoice.amountDue ?? null);
+}
+
+export function invoiceReasonKey(invoice: BillingInvoice) {
+  if (invoice.kind === 'gift_redemption') return 'billing.historyGiftPlus' as const;
+  switch (invoice.reason) {
+    case 'subscription_started':
+      return 'billing.invoiceReasonStarted';
+    case 'subscription_renewed':
+      return 'billing.invoiceReasonRenewed';
+    case 'seats_added':
+      return 'billing.invoiceReasonSeatsAdded';
+    case 'seats_removed':
+      return 'billing.invoiceReasonSeatsRemoved';
+    case 'plan_changed':
+      return 'billing.invoiceReasonPlanChanged';
+    case 'subscription_changed':
+      return 'billing.invoiceReasonAdjusted';
+    default:
+      return 'billing.invoiceReasonOther';
+  }
+}
+
+export function invoiceStatusKey(status: string) {
+  switch (status) {
+    case 'open':
+      return 'billing.invoiceStatusOpen';
+    case 'paid':
+      return 'billing.invoiceStatusPaid';
+    case 'void':
+      return 'billing.invoiceStatusVoid';
+    case 'draft':
+      return 'billing.invoiceStatusDraft';
+    case 'uncollectible':
+      return 'billing.invoiceStatusUncollectible';
+    default:
+      return 'billing.invoiceStatusUnknown';
+  }
+}
+
+/** One invoice as a settings line: why it exists, when, and what it costs. */
+export function BillingInvoiceRow({
+  invoice,
+  onOpen,
+}: {
+  invoice: BillingInvoice;
+  /** Opens the invoice's details; without it the row leads to Stripe's page. */
+  onOpen?: () => void;
+}) {
+  const { t } = useTranslation();
+  // Gift schedules create one $0 invoice per covered service period while
+  // repeating the total gift duration in each record. Show the period here so
+  // one three-month gift cannot read as three separate three-month grants.
+  const isGiftPeriod = invoice.kind === 'gift_redemption';
+  const label = t(invoiceReasonKey(invoice));
+  const giftPeriod =
+    isGiftPeriod && invoice.periodStart != null && invoice.periodEnd != null
+      ? t('billing.historyGiftPeriod', {
+          start: formatDate(invoice.periodStart),
+          end: formatDate(invoice.periodEnd),
+        })
+      : null;
+  const helper = [
+    giftPeriod ?? formatDate(invoice.createdAt),
+    invoice.seatChange ? t('billing.invoiceSeatChange', invoice.seatChange) : null,
+    invoice.status === 'paid' ? null : t(invoiceStatusKey(invoice.status)),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const value = formatInvoiceAmount(invoiceDisplayAmount(invoice), invoice.currency);
+  const url = invoice.hostedInvoiceUrl;
+  if (onOpen) {
+    return (
+      <CompactLinkRow to="open" label={label} helper={helper} detail={value} onClick={onOpen} />
+    );
+  }
+  if (url?.startsWith('https://')) {
+    return (
+      <CompactLinkRow
+        label={label}
+        helper={helper}
+        detail={value}
+        onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+      />
+    );
+  }
+  return (
+    <CompactRow label={label} helper={helper}>
+      <span {...stylex.props(styles.tabular)}>{value}</span>
+    </CompactRow>
+  );
+}
+
+/** An amount the backend could not report reads as a dash, not a sentence. */
+export function formatInvoiceAmount(cents: number | null | undefined, currency: string): string {
+  return cents == null ? '—' : formatMoney(cents, currency);
 }
 
 export function formatUsd(cents: number): string {
@@ -140,7 +515,7 @@ export function formatDate(timestamp: number | null | undefined): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(timestamp));
 }
 
-function formatMoney(cents: number, currency: string): string {
+export function formatMoney(cents: number, currency: string): string {
   try {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -170,11 +545,16 @@ export function BillingSettingsView({
   onUpgrade,
   onSwitchInterval,
   switchIntervalPending,
+  onPaymentMethod,
   onCancelSubscription,
   onResumeSubscription,
   onRedeemCode,
   onRetryInvoices,
+  onViewInvoice,
   onCancelExternalCheckout,
+  referralOffer = null,
+  referral = null,
+  referralCreditCents = 0,
 }: BillingSettingsViewProps) {
   const { t } = useTranslation();
   const [code, setCode] = useState('');
@@ -182,7 +562,9 @@ export function BillingSettingsView({
   if (overview === null) {
     return (
       <div className={settingContainerClass}>
-        <Card className="p-6 text-sm text-muted-foreground">{t('billing.unavailable')}</Card>
+        <CompactSection>
+          <p {...stylex.props(surface.cardNote)}>{t('billing.unavailable')}</p>
+        </CompactSection>
       </div>
     );
   }
@@ -191,8 +573,13 @@ export function BillingSettingsView({
     overview.effectivePlanTier === 'plus' || overview.effectivePlanTier === 'enterprise';
   const checkoutInProgress = overview.checkoutPending || overview.subscriptionSetupPending;
   const paidCheckoutPending = overview.checkoutPending && !overview.subscriptionSetupPending;
+  // A successful web checkout keeps the page on the pre-payment free overview
+  // until the webhook/reconcile lands. Treat that window as the Plus plan being
+  // activated instead of rendering "Free" over the payment-received banner.
+  const activationPending = paymentProcessing && !isPaid;
+  const entitled = isPaid || activationPending;
   const planName =
-    paidCheckoutPending || overview.effectivePlanTier === 'plus'
+    paidCheckoutPending || overview.effectivePlanTier === 'plus' || activationPending
       ? t('billing.plan.plus')
       : overview.effectivePlanTier === 'enterprise'
         ? t('billing.plan.enterprise')
@@ -213,11 +600,18 @@ export function BillingSettingsView({
     !overview.autoRenewAfterGift &&
     !overview.canResumeAfterGift &&
     overview.effectivePlanTier === 'plus';
-  const showSubscriptionOffer = !isPaid || canScheduleAfterGift;
+  const showSubscriptionOffer = !entitled || canScheduleAfterGift;
+  const showGiftFocus = isPromotional && hasGiftTimeline && !checkoutInProgress && !isPastDue;
+  const showPaidFocus =
+    overview.entitlementSource === 'stripe' &&
+    isPaid &&
+    overview.currentPeriodEnd !== null &&
+    !checkoutInProgress &&
+    !isPastDue;
+  const planFocusAt = showGiftFocus ? giftEnd : showPaidFocus ? overview.currentPeriodEnd : null;
 
   // `null` = unlimited.
-  const sessionLimit =
-    overview.effectivePlanTier === 'free' ? FREE_SESSION_LIMIT_PER_WORKSPACE : null;
+  const sessionLimit = entitled ? null : FREE_SESSION_LIMIT_PER_WORKSPACE;
   const nearLimit =
     sessionCount !== null &&
     sessionLimit !== null &&
@@ -226,10 +620,25 @@ export function BillingSettingsView({
 
   const monthlyPrice = formatUsd(overview.pricing.monthlyAmountCents);
   const yearlyPerMonthPrice = formatUsd(Math.round(overview.pricing.yearlyAmountCents / 12));
-  const yearlyEarlyBirdSelected =
-    interval === 'year' && overview.pricing.yearlyOfferKey === 'early_bird_yearly_6000_forever';
   const selectedOfferLabel =
     interval === 'month' && overview.pricing.monthlyOfferKey ? t('billing.founderPrice') : null;
+  // The newcomer discount never stacks with a locked offer price.
+  const selectedOfferKey =
+    interval === 'year' ? overview.pricing.yearlyOfferKey : overview.pricing.monthlyOfferKey;
+  const showReferralOffer = !selectedOfferKey && !canScheduleAfterGift;
+  // Checkout takes one discount: credit pays toward a first payment with no other offer.
+  // An open Checkout already holds its credit, so the notice is only for a new one.
+  const firstPaymentCents =
+    (interval === 'year'
+      ? overview.pricing.yearlyAmountCents
+      : overview.pricing.monthlyAmountCents) * Math.max(1, overview.seatCount);
+  const creditCents = Math.min(referralCreditCents, firstPaymentCents);
+  const showReferralCredit =
+    creditCents > 0 &&
+    !referralOffer &&
+    !selectedOfferKey &&
+    !canScheduleAfterGift &&
+    !checkoutInProgress;
 
   // Plan status line: the interval label carries the inline switch link right
   // beside it, and the status detail (renewal/cancel date, past-due, pending)
@@ -237,7 +646,9 @@ export function BillingSettingsView({
   const planIntervalLabel =
     isPaid && !checkoutInProgress && overview.billingInterval
       ? isPromotional
-        ? t('billing.promotionalBadge')
+        ? showGiftFocus
+          ? null
+          : t('billing.promotionalBadge')
         : overview.billingInterval === 'year'
           ? t('billing.yearly')
           : t('billing.monthly')
@@ -269,272 +680,373 @@ export function BillingSettingsView({
             ? t('billing.promotionalEndsOn', {
                 date: formatDate(giftEnd),
               })
-            : isPaid && overview.currentPeriodEnd
-              ? overview.cancelAtPeriodEnd
-                ? t('billing.cancelsOn', { date: formatDate(overview.currentPeriodEnd) })
-                : t('billing.renewsOn', { date: formatDate(overview.currentPeriodEnd) })
-              : !isPaid
-                ? t('billing.freeTagline')
-                : null;
+            : activationPending
+              ? t('billing.paymentProcessingTitle')
+              : isPaid && overview.currentPeriodEnd
+                ? overview.cancelAtPeriodEnd
+                  ? t('billing.cancelsOn', { date: formatDate(overview.currentPeriodEnd) })
+                  : t('billing.renewsOn', { date: formatDate(overview.currentPeriodEnd) })
+                : !isPaid
+                  ? t('billing.freeTagline')
+                  : null;
+
+  const offerTitle = checkoutInProgress
+    ? overview.subscriptionSetupPending
+      ? t('billing.completeSubscriptionSetupTitle')
+      : t('billing.completeCheckoutTitle')
+    : canScheduleAfterGift
+      ? t('billing.subscribeAfterGiftTitle')
+      : t('billing.upgradeTitle');
+  const offerSubtitle = checkoutInProgress
+    ? overview.subscriptionSetupPending
+      ? t('billing.subscriptionSetupPendingDescription')
+      : t('billing.checkoutPendingDescription')
+    : canScheduleAfterGift
+      ? t('billing.subscribeAfterGiftSubtitle', { date: formatDate(giftEnd) })
+      : t('billing.upgradeSubtitle');
+  const postGiftBillingScheduled =
+    isPromotional && overview.autoRenewAfterGift && overview.nextBillingAt !== null;
+  // During a gift, Stripe may preview the next $0 service invoice. Use its
+  // amount for the first post-gift charge only when it reaches that boundary.
+  const chargePreview = isPromotional
+    ? postGiftBillingScheduled &&
+      upcomingInvoice?.expectedAt != null &&
+      overview.nextBillingAt !== null &&
+      upcomingInvoice.expectedAt >= overview.nextBillingAt
+      ? upcomingInvoice
+      : null
+    : upcomingInvoice;
+  const breakdown = chargePreview
+    ? [
+        chargePreview.renewal
+          ? {
+              key: 'renewal',
+              label:
+                chargePreview.renewal.quantity != null
+                  ? isPromotional && overview.autoRenewAfterGift
+                    ? t('billing.upcomingPostGiftRenewalWithSeats', {
+                        count: chargePreview.renewal.quantity,
+                        interval:
+                          overview.scheduledBillingInterval === 'year'
+                            ? t('billing.yearly').toLocaleLowerCase()
+                            : t('billing.monthly').toLocaleLowerCase(),
+                      })
+                    : t('billing.upcomingRenewalWithSeats', {
+                        count: chargePreview.renewal.quantity,
+                      })
+                  : t('billing.upcomingRenewal'),
+              amount: chargePreview.renewal.amount,
+            }
+          : null,
+        chargePreview.discount
+          ? {
+              key: 'discount',
+              label: t('billing.upcomingDiscount'),
+              amount: chargePreview.discount.amount,
+            }
+          : null,
+        chargePreview.adjustment
+          ? {
+              key: 'adjustment',
+              label: t('billing.upcomingAdjustment'),
+              amount: chargePreview.adjustment.amount,
+            }
+          : null,
+        chargePreview.creditApplied
+          ? {
+              key: 'credit',
+              label: t('billing.upcomingCreditApplied'),
+              amount: chargePreview.creditApplied.amount,
+            }
+          : null,
+      ].filter((line) => line !== null)
+    : [];
+  const upcomingChargeAt = chargePreview?.expectedAt ?? overview.nextBillingAt;
+  const showUpcomingCharge =
+    canManage &&
+    ((overview.entitlementSource === 'stripe' && chargePreview !== null) ||
+      postGiftBillingScheduled);
 
   return (
-    <div className={settingContainerClass}>
+    <div className={settingContainerClass} data-text-selectable>
       {/* Desktop: checkout opened in the system browser, awaiting payment */}
       {externalCheckoutPending ? (
-        <Card className="flex items-start gap-3 border-primary/30 bg-primary/5 p-4">
-          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-foreground">
-              {canScheduleAfterGift || overview.subscriptionSetupPending
-                ? t('billing.externalSetupTitle')
-                : t('billing.externalCheckoutTitle')}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {canScheduleAfterGift || overview.subscriptionSetupPending
-                ? t('billing.externalSetupDescription')
-                : t('billing.externalCheckoutDescription')}
-            </p>
+        <CompactSection>
+          <div {...stylex.props(styles.banner)}>
+            <Spinner size="small" {...stylex.props(styles.bannerMark)} />
+            <div {...stylex.props(styles.bannerText)}>
+              <p {...stylex.props(surface.rowLabel)}>
+                {canScheduleAfterGift || overview.subscriptionSetupPending
+                  ? t('billing.externalSetupTitle')
+                  : t('billing.externalCheckoutTitle')}
+              </p>
+              <p {...stylex.props(surface.rowHelper)}>
+                {canScheduleAfterGift || overview.subscriptionSetupPending
+                  ? t('billing.externalSetupDescription')
+                  : t('billing.externalCheckoutDescription')}
+              </p>
+            </div>
+            {onCancelExternalCheckout ? (
+              <Button variant="ghost" size="small" onClick={onCancelExternalCheckout}>
+                {t('billing.externalCheckoutDismiss')}
+              </Button>
+            ) : null}
           </div>
-          {onCancelExternalCheckout ? (
-            <Button size="sm" variant="ghost" onClick={onCancelExternalCheckout}>
-              {t('billing.externalCheckoutDismiss')}
-            </Button>
-          ) : null}
-        </Card>
+        </CompactSection>
       ) : null}
 
       {/* Payment received, activation in flight */}
       {paymentProcessing && !externalCheckoutPending ? (
-        <Card className="flex items-start gap-3 border-primary/30 bg-primary/5 p-4">
-          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              {overview.subscriptionSetupPending
-                ? t('billing.subscriptionSetupProcessingTitle')
-                : t('billing.paymentProcessingTitle')}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {overview.subscriptionSetupPending
-                ? t('billing.subscriptionSetupProcessingDescription')
-                : t('billing.paymentProcessingDescription')}
-            </p>
+        <CompactSection>
+          <div {...stylex.props(styles.banner)}>
+            <Spinner size="small" {...stylex.props(styles.bannerMark)} />
+            <div {...stylex.props(styles.bannerText)}>
+              <p {...stylex.props(surface.rowLabel)}>
+                {overview.subscriptionSetupPending
+                  ? t('billing.subscriptionSetupProcessingTitle')
+                  : t('billing.paymentProcessingTitle')}
+              </p>
+              <p {...stylex.props(surface.rowHelper)}>
+                {overview.subscriptionSetupPending
+                  ? t('billing.subscriptionSetupProcessingDescription')
+                  : t('billing.paymentProcessingDescription')}
+              </p>
+            </div>
           </div>
-        </Card>
+        </CompactSection>
       ) : null}
 
-      {/* Plan status */}
-      <Card className="p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-lg font-semibold leading-tight text-foreground">{planName}</span>
-          {/* A gift always ends at its schedule boundary; its status line says
-              so already, and a cancel badge would read as an error state. */}
-          {overview.cancelAtPeriodEnd && !isPromotional ? (
-            <Badge variant="outline">{t('billing.cancelAtPeriodEnd')}</Badge>
-          ) : null}
-          {checkoutInProgress ? (
-            <Badge variant="secondary">{t('billing.checkoutPending')}</Badge>
-          ) : null}
-          {hasGiftTimeline && overview.autoRenewAfterGift ? (
-            <Badge variant="secondary">{t('billing.postGiftBillingScheduled')}</Badge>
-          ) : null}
-          {overview.yearlyEarlyBirdEligible ? (
-            <Badge variant="secondary">{t('billing.yearlyPromoPrice')}</Badge>
-          ) : null}
-        </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-          {planIntervalLabel ? (
-            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-              {planIntervalLabel}
-              {showIntervalSwitch ? (
-                <button
-                  type="button"
-                  disabled={switchIntervalPending || !overview.billingAccountId}
-                  onClick={onSwitchInterval}
-                  className="inline-flex items-center gap-1 font-medium text-primary transition-colors hover:text-primary/80 disabled:opacity-60"
-                >
-                  {switchIntervalPending ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <ArrowLeftRight className="h-3 w-3" />
-                  )}
-                  {overview.billingInterval === 'month'
-                    ? t('billing.switchToYearly')
-                    : t('billing.switchToMonthly')}
-                </button>
+      {/* One plan card for gift, paid and free states: identity and narrative
+          on the left, the one dated fact a subscriber acts on on the right.
+          Pending and past-due states keep their status copy in the narrative. */}
+      <CompactSection>
+        <div {...stylex.props(styles.block, styles.planStripe)}>
+          <div {...stylex.props(styles.planIdentity)}>
+            <div {...stylex.props(styles.planHeading)}>
+              <p {...stylex.props(styles.planName)}>{planName}</p>
+              {showGiftFocus ? <Badge>{t('billing.promotionalBadge')}</Badge> : null}
+              {overview.cancelAtPeriodEnd && !isPromotional ? (
+                <Badge>{t('billing.cancelAtPeriodEnd')}</Badge>
               ) : null}
-            </span>
-          ) : null}
-          {planIntervalLabel && planStatusDetail ? (
-            <span className="text-muted-foreground/50">·</span>
-          ) : null}
-          {planStatusDetail ? (
-            <span className={isPastDue ? 'text-destructive' : 'text-muted-foreground'}>
-              {planStatusDetail}
-            </span>
+              {checkoutInProgress ? <Badge>{t('billing.checkoutPending')}</Badge> : null}
+            </div>
+            <div {...stylex.props(styles.statusLine)}>
+              {planIntervalLabel ? (
+                <span {...stylex.props(styles.statusInterval)}>
+                  {planIntervalLabel}
+                  {showIntervalSwitch ? (
+                    <button
+                      type="button"
+                      disabled={switchIntervalPending || !overview.billingAccountId}
+                      onClick={onSwitchInterval}
+                      {...stylex.props(styles.inlineAction)}
+                    >
+                      {switchIntervalPending ? (
+                        <Spinner size="small" />
+                      ) : (
+                        <ArrowLeftRight aria-hidden="true" {...stylex.props(styles.glyphSmall)} />
+                      )}
+                      {overview.billingInterval === 'month'
+                        ? t('billing.switchToYearly')
+                        : t('billing.switchToMonthly')}
+                    </button>
+                  ) : null}
+                </span>
+              ) : null}
+              {planIntervalLabel && planFocusAt === null && planStatusDetail ? (
+                <span aria-hidden="true" {...stylex.props(styles.statusDot)}>
+                  ·
+                </span>
+              ) : null}
+              {planFocusAt === null && planStatusDetail ? (
+                <span {...stylex.props(isPastDue && styles.danger)}>{planStatusDetail}</span>
+              ) : showGiftFocus ? (
+                <span>
+                  {overview.autoRenewAfterGift
+                    ? t('billing.giftHeroScheduled', {
+                        interval:
+                          overview.scheduledBillingInterval === 'year'
+                            ? t('billing.yearly').toLocaleLowerCase()
+                            : t('billing.monthly').toLocaleLowerCase(),
+                      })
+                    : t('billing.giftHeroEnds')}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          {planFocusAt !== null ? (
+            <div {...stylex.props(styles.planFocus)}>
+              <p {...stylex.props(styles.planFocusLabel)}>
+                {showGiftFocus
+                  ? t('billing.giftHeroTitle')
+                  : overview.cancelAtPeriodEnd
+                    ? t('billing.planEndsAt')
+                    : t('billing.planRenewsAt')}
+              </p>
+              <p {...stylex.props(styles.planFocusDate)}>{formatDate(planFocusAt)}</p>
+            </div>
           ) : null}
         </div>
-      </Card>
+      </CompactSection>
+
+      {referral}
 
       {/* Session usage */}
       {!paidCheckoutPending ? (
-        <Card className="p-5">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-sm font-medium text-foreground">{t('billing.sessions')}</span>
-            <div className="text-sm tabular-nums text-muted-foreground">
-              {sessionLimit === null ? (
-                t('billing.unlimited')
-              ) : sessionCount === null ? (
-                <Skeleton className="h-4 w-14" />
-              ) : (
-                <>
-                  <span
-                    className={cn(
-                      'font-medium',
-                      nearLimit ? 'text-destructive' : 'text-foreground'
-                    )}
-                  >
-                    {sessionCount}
-                  </span>
-                  {' / '}
-                  {sessionLimit}
-                </>
-              )}
+        <CompactSection>
+          <div {...stylex.props(styles.block)}>
+            <div {...stylex.props(styles.metric)}>
+              <p {...stylex.props(surface.rowLabel)}>{t('billing.sessions')}</p>
+              <div {...stylex.props(styles.metricValue)}>
+                {sessionLimit === null ? (
+                  t('billing.unlimited')
+                ) : sessionCount === null ? (
+                  <Skeleton width="56px" height="16px" />
+                ) : (
+                  <>
+                    <span {...stylex.props(styles.metricStrong, nearLimit && styles.danger)}>
+                      {sessionCount}
+                    </span>
+                    {' / '}
+                    {sessionLimit}
+                  </>
+                )}
+              </div>
             </div>
+            {sessionLimit !== null ? (
+              <div {...stylex.props(styles.meter)}>
+                {sessionCount === null ? (
+                  <Skeleton width="100%" height="8px" />
+                ) : (
+                  <Progress
+                    value={sessionCount}
+                    max={sessionLimit}
+                    tone={nearLimit ? 'danger' : 'running'}
+                  />
+                )}
+              </div>
+            ) : null}
+            {sessionLimit !== null ? (
+              <p {...stylex.props(styles.helper)}>{t('billing.sessionsHelp')}</p>
+            ) : null}
           </div>
-          {sessionLimit !== null && sessionCount === null ? (
-            <Skeleton className="mt-3 h-2 w-full" />
-          ) : sessionLimit !== null && sessionCount !== null ? (
-            <Progress
-              value={sessionCount}
-              max={sessionLimit}
-              className={cn('mt-3', nearLimit && '[&>div]:bg-destructive')}
-            />
-          ) : null}
-          {sessionLimit !== null ? (
-            <p className="mt-2 text-xs text-muted-foreground">{t('billing.sessionsHelp')}</p>
-          ) : null}
-          <div className="mt-4 flex items-baseline justify-between gap-2 border-t border-border/60 pt-4">
-            <span className="text-sm font-medium text-foreground">{t('billing.members')}</span>
-            <span className="text-sm tabular-nums text-muted-foreground">
-              <span className="font-medium text-foreground">{overview.seatCount}</span>
-              {!isPaid ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
-            </span>
+          <div {...stylex.props(styles.block)}>
+            <div {...stylex.props(styles.metric)}>
+              <p {...stylex.props(surface.rowLabel)}>{t('billing.members')}</p>
+              <span {...stylex.props(styles.metricValue)}>
+                <span {...stylex.props(styles.metricStrong)}>{overview.seatCount}</span>
+                {overview.seatBilling
+                  ? ` / ${overview.seatBilling.capacity}`
+                  : !entitled
+                    ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}`
+                    : null}
+              </span>
+            </div>
+            {overview.seatBilling ? (
+              <p {...stylex.props(styles.helper)}>
+                {t(
+                  overview.billingInterval === 'year'
+                    ? 'billing.deferredSeatsYearly'
+                    : 'billing.deferredSeatsMonthly',
+                  { count: overview.seatBilling.available }
+                )}
+              </p>
+            ) : null}
           </div>
-        </Card>
+        </CompactSection>
       ) : null}
 
       {/* Upgrade */}
       {showSubscriptionOffer ? (
-        <Card className="overflow-hidden">
-          <div className="border-b border-border/70 bg-muted/30 px-5 py-3">
-            <p className="text-sm font-semibold text-foreground">
-              {checkoutInProgress
-                ? overview.subscriptionSetupPending
-                  ? t('billing.completeSubscriptionSetupTitle')
-                  : t('billing.completeCheckoutTitle')
-                : canScheduleAfterGift
-                  ? t('billing.subscribeAfterGiftTitle')
-                  : t('billing.upgradeTitle')}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {checkoutInProgress
-                ? overview.subscriptionSetupPending
-                  ? t('billing.subscriptionSetupPendingDescription')
-                  : t('billing.checkoutPendingDescription')
-                : canScheduleAfterGift
-                  ? t('billing.subscribeAfterGiftSubtitle', {
-                      date: formatDate(giftEnd),
-                    })
-                  : t('billing.upgradeSubtitle')}
-            </p>
-          </div>
-          <div className="space-y-4 p-5">
-            {checkoutInProgress ? (
-              /* Awaiting payment: present the plan the checkout was created
-                 for instead of the two-option selector. The small toggle
-                 still lets the user switch (which supersedes the stored
-                 Stripe session server-side on continue). */
-              <div className="flex items-center gap-1">
-                <span className="text-sm font-medium text-foreground">
-                  {interval === 'year' ? t('billing.yearly') : t('billing.monthly')}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                  aria-label={t('billing.switchBillingInterval')}
-                  title={t('billing.switchBillingInterval')}
-                  onClick={() => onIntervalChange(interval === 'year' ? 'month' : 'year')}
-                >
-                  <ArrowLeftRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ) : (
-              <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-sm">
-                {(['year', 'month'] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => onIntervalChange(value)}
-                    className={cn(
-                      'rounded-md px-3 py-1 font-medium transition-colors',
-                      interval === value
-                        ? 'bg-background text-foreground shadow-xs'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    {value === 'year' ? t('billing.yearly') : t('billing.monthly')}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-end gap-2">
-              <span className="text-3xl font-semibold tracking-tight text-foreground">
-                {interval === 'year' ? yearlyPerMonthPrice : monthlyPrice}
-              </span>
-              <span className="pb-1 text-sm text-muted-foreground">
-                {t('billing.perSeatMonth')}
-              </span>
-              {selectedOfferLabel ? (
-                <Badge variant="secondary" className="mb-1">
-                  {selectedOfferLabel}
-                </Badge>
-              ) : null}
+        <CompactSection>
+          <div {...stylex.props(styles.block, styles.offer)}>
+            <div>
+              <p {...stylex.props(styles.offerTitle)}>{offerTitle}</p>
+              <p {...stylex.props(surface.rowHelper)}>{offerSubtitle}</p>
             </div>
 
-            <p
-              className={cn(
-                'text-xs',
-                yearlyEarlyBirdSelected ? 'font-medium text-foreground' : 'text-muted-foreground'
-              )}
+            <Tabs.Root
+              value={interval}
+              onValueChange={(value) => onIntervalChange(value as BillingInterval)}
             >
-              {yearlyEarlyBirdSelected
-                ? overview.yearlyEarlyBirdEligible
-                  ? t('billing.yearlyEarlyBirdAlreadyLocked')
-                  : t('billing.yearlyEarlyBirdCheckoutPromise')
-                : interval === 'year'
-                  ? t('billing.billedYearly')
-                  : t('billing.billedMonthly')}
-            </p>
+              {checkoutInProgress ? (
+                /* Awaiting payment: present the plan the checkout was created
+                   for instead of the two-option strip. The small toggle still
+                   lets the user switch (which supersedes the stored Stripe
+                   session server-side on continue). */
+                <div {...stylex.props(styles.checkoutInterval)}>
+                  <span {...stylex.props(surface.rowLabel)}>
+                    {interval === 'year' ? t('billing.yearly') : t('billing.monthly')}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    aria-label={t('billing.switchBillingInterval')}
+                    title={t('billing.switchBillingInterval')}
+                    size="small"
+                    icon
+                    onClick={() => onIntervalChange(interval === 'year' ? 'month' : 'year')}
+                  >
+                    <ArrowLeftRight aria-hidden="true" />
+                  </Button>
+                </div>
+              ) : (
+                <div {...stylex.props(styles.strip)}>
+                  <Tabs.List>
+                    <Tabs.Tab value="year">{t('billing.yearly')}</Tabs.Tab>
+                    <Tabs.Tab value="month">{t('billing.monthly')}</Tabs.Tab>
+                  </Tabs.List>
+                </div>
+              )}
+              <Tabs.Panel value={interval} className={stylex.props(styles.pricePanel).className}>
+                <div {...stylex.props(styles.price)}>
+                  <span {...stylex.props(styles.priceValue)}>
+                    {interval === 'year' ? yearlyPerMonthPrice : monthlyPrice}
+                  </span>
+                  <span {...stylex.props(styles.priceUnit)}>{t('billing.perSeatMonth')}</span>
+                  {selectedOfferLabel ? <Badge>{selectedOfferLabel}</Badge> : null}
+                </div>
+                <p {...stylex.props(styles.helper)}>
+                  {interval === 'year' ? t('billing.billedYearly') : t('billing.billedMonthly')}
+                </p>
+              </Tabs.Panel>
+            </Tabs.Root>
+
+            {referralOffer && showReferralOffer ? (
+              <ReferralOfferNotice
+                interval={interval}
+                regularCents={
+                  interval === 'year'
+                    ? overview.pricing.yearlyAmountCents
+                    : overview.pricing.monthlyAmountCents
+                }
+                disabled={pendingAction !== null}
+                onRemove={referralOffer.onRemove}
+                policy={referralOffer.policy}
+                retained={referralOffer.retained}
+              />
+            ) : null}
+
+            {showReferralCredit ? (
+              <ReferralCreditNotice
+                creditCents={creditCents}
+                firstPaymentCents={firstPaymentCents}
+              />
+            ) : null}
 
             {permissionBlocked ? (
               /* The button is gone for members, so its slot has to say why —
                  and who to ask — instead of leaving a silent gap. */
-              <div className="rounded-lg border border-border/70 bg-muted/40 p-3">
-                <p className="text-sm font-medium text-foreground">
-                  {t('billing.permissionBlockedTitle')}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
+              <div {...stylex.props(surface.formBlock)}>
+                <p {...stylex.props(surface.rowLabel)}>{t('billing.permissionBlockedTitle')}</p>
+                <p {...stylex.props(surface.rowHelper)}>
                   {workspaceOwnerName
                     ? t('billing.permissionAskOwner', { owner: workspaceOwnerName })
                     : t('billing.permissionDescription')}
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div {...stylex.props(styles.action)}>
                 <Button
-                  className="w-full sm:w-auto"
                   disabled={
                     !canManage ||
                     pendingAction !== null ||
@@ -543,43 +1055,121 @@ export function BillingSettingsView({
                   }
                   onClick={onUpgrade}
                 >
-                  {pendingAction === 'checkout' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : null}
-                  {yearlyEarlyBirdSelected
-                    ? overview.yearlyEarlyBirdEligible
-                      ? t('billing.subscribeLockedEarlyBird')
-                      : t('billing.upgradeEarlyBird')
-                    : checkoutInProgress
-                      ? t('billing.continueCheckout')
-                      : canScheduleAfterGift
-                        ? t('billing.subscribeAfterGift')
-                        : t('billing.upgrade')}
+                  {pendingAction === 'checkout' ? <Spinner size="small" /> : null}
+                  {checkoutInProgress
+                    ? t('billing.continueCheckout')
+                    : canScheduleAfterGift
+                      ? t('billing.subscribeAfterGift')
+                      : t('billing.upgrade')}
                 </Button>
                 <SubscribeConsentNotice />
               </div>
             )}
 
-            <ul className="grid gap-1.5 pt-1 text-xs text-muted-foreground sm:grid-cols-2">
+            <ul {...stylex.props(styles.perks)}>
               {[
                 t('billing.perkUnlimitedSessions'),
                 t('billing.perkUnlimitedTurns'),
                 t('billing.perkUnlimitedMembers'),
                 t('billing.perkSeatBilling'),
               ].map((perk) => (
-                <li key={perk} className="flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <li key={perk} {...stylex.props(styles.perk)}>
+                  <Check aria-hidden="true" {...stylex.props(styles.perkMark)} />
                   <span>{perk}</span>
                 </li>
               ))}
             </ul>
 
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <div {...stylex.props(styles.links)}>
               <PricingPageLink />
               <FounderCallLink />
             </div>
           </div>
-        </Card>
+        </CompactSection>
+      ) : null}
+
+      {/* The date and amount lead the next charge; the breakdown below
+          explains the bill. A gift schedule may have a reliable date before
+          Stripe can estimate the amount. */}
+      {showUpcomingCharge ? (
+        <CompactSection title={t('billing.upcomingTitle')}>
+          <div {...stylex.props(styles.block, styles.chargeSummary)}>
+            <div>
+              <p {...stylex.props(styles.chargeLabel)}>
+                {postGiftBillingScheduled
+                  ? t('billing.upcomingAfterGift')
+                  : t('billing.upcomingChargeDate')}
+              </p>
+              {upcomingChargeAt ? (
+                <p {...stylex.props(styles.chargeDate)}>{formatDate(upcomingChargeAt)}</p>
+              ) : null}
+            </div>
+            <div {...stylex.props(styles.chargeValue)}>
+              <span {...stylex.props(styles.chargeAmount)}>
+                {chargePreview ? formatMoney(chargePreview.amountDue, chargePreview.currency) : '—'}
+              </span>
+              <span {...stylex.props(styles.chargeLabel)}>
+                {chargePreview
+                  ? t('billing.upcomingAmountEstimate')
+                  : t('billing.upcomingAmountPending')}
+              </span>
+            </div>
+          </div>
+          {chargePreview && breakdown.length > 0 ? (
+            <ul {...stylex.props(styles.block, styles.breakdown, styles.chargeBreakdown)}>
+              {breakdown.map((line) => (
+                <li key={line.key} {...stylex.props(styles.breakdownLine)}>
+                  <span {...stylex.props(styles.truncate)}>{line.label}</span>
+                  <span {...stylex.props(styles.tabular)}>
+                    {formatMoney(line.amount, chargePreview.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : !chargePreview && postGiftBillingScheduled ? (
+            <p {...stylex.props(styles.block, styles.helperFlush, styles.chargeBreakdown)}>
+              {t('billing.upcomingPostGiftPending', {
+                interval:
+                  overview.scheduledBillingInterval === 'year'
+                    ? t('billing.yearly').toLocaleLowerCase()
+                    : t('billing.monthly').toLocaleLowerCase(),
+              })}
+            </p>
+          ) : null}
+        </CompactSection>
+      ) : null}
+
+      {/* Billing history */}
+      {canManage && overview.billingAccountId ? (
+        <CompactSection title={t('billing.historyTitle')}>
+          {invoicesError ? (
+            <div {...stylex.props(styles.block, styles.inlineRow)}>
+              <p {...stylex.props(styles.helperFlush)}>{t('billing.historyError')}</p>
+              <Button variant="secondary" size="small" onClick={onRetryInvoices}>
+                {t('billing.historyRetry')}
+              </Button>
+            </div>
+          ) : invoices === undefined ? (
+            <div {...stylex.props(styles.block, styles.inlineRow)}>
+              <Spinner size="small" />
+              <p {...stylex.props(styles.helperFlush)}>{t('billing.historyLoading')}</p>
+            </div>
+          ) : invoices.length === 0 ? (
+            <p {...stylex.props(surface.cardNote)}>{t('billing.historyEmpty')}</p>
+          ) : (
+            // Cap at roughly 6 rows; older invoices scroll.
+            <ul {...withClassName(stylex.props(styles.history), 'input-scrollbar')}>
+              {invoices.map((invoice, index) => (
+                <li key={invoice.id} {...stylex.props(index > 0 && surface.lineRuled)}>
+                  <BillingInvoiceRow
+                    invoice={invoice}
+                    onOpen={onViewInvoice ? () => onViewInvoice(invoice) : undefined}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </CompactSection>
       ) : null}
 
       {/* Gift codes extend both free and paid Plus timelines. Keep redemption
@@ -587,194 +1177,72 @@ export function BillingSettingsView({
       {canManage &&
       overview.effectivePlanTier !== 'enterprise' &&
       (!isPaid || overview.giftStackingSupported) ? (
-        <Card className="p-5">
-          <p className="text-sm font-semibold text-foreground">{t('billing.redeemTitle')}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('billing.redeemSubtitle')}</p>
-          <label htmlFor="billing-redemption-code" className="sr-only">
-            {t('billing.redeemLabel')}
-          </label>
-          <div className="mt-3 flex gap-2">
-            <Input
-              id="billing-redemption-code"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && code.trim() && !redeemPending && !checkoutInProgress) {
-                  onRedeemCode(code.trim());
-                }
-              }}
-              placeholder={t('billing.redeemPlaceholder')}
-              className="h-8 max-w-[220px]"
-              autoComplete="off"
-              spellCheck={false}
-            />
+        <CompactSection>
+          <CompactRow label={t('billing.redeemTitle')} info={t('billing.redeemSubtitle')}>
+            <label htmlFor="billing-redemption-code" {...stylex.props(styles.srOnly)}>
+              {t('billing.redeemLabel')}
+            </label>
+            <div {...stylex.props(styles.redeemField)}>
+              <Input
+                id="billing-redemption-code"
+                size="small"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === 'Enter' &&
+                    code.trim() &&
+                    !redeemPending &&
+                    !checkoutInProgress
+                  ) {
+                    onRedeemCode(code.trim());
+                  }
+                }}
+                placeholder={t('billing.redeemPlaceholder')}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
             <Button
-              size="sm"
-              variant="outline"
+              variant="secondary"
+              size="small"
               disabled={redeemPending || checkoutInProgress || !code.trim()}
               onClick={() => onRedeemCode(code.trim())}
             >
-              {redeemPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {redeemPending ? <Spinner size="small" /> : null}
               {t('billing.redeemApply')}
             </Button>
-          </div>
-        </Card>
+          </CompactRow>
+        </CompactSection>
       ) : null}
 
-      {/* Next charge preview: renewal + net seat proration, as its own card
-          above the history so admins see the exact next amount right after
-          inviting members. */}
-      {canManage && overview.entitlementSource === 'stripe' && upcomingInvoice ? (
-        <Card className="overflow-hidden">
-          <div className="border-b border-border/70 bg-muted/30 px-5 py-3">
-            <p className="text-sm font-semibold text-foreground">{t('billing.upcomingTitle')}</p>
-          </div>
-          <div className="px-5 py-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-              {upcomingInvoice.expectedAt ? (
-                <p className="text-xs text-muted-foreground">
-                  {t('billing.upcomingChargeOn', {
-                    date: formatDate(upcomingInvoice.expectedAt),
-                  })}
-                </p>
-              ) : (
-                <span />
+      {canManage &&
+      overview.billingAccountId &&
+      ['stripe', 'stripe_gift'].includes(overview.entitlementSource) &&
+      onPaymentMethod ? (
+        <CompactSection>
+          <CompactRow label={t('billing.paymentMethod')}>
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={onPaymentMethod}
+              disabled={
+                pendingAction !== null ||
+                cancelPending ||
+                switchIntervalPending ||
+                redeemPending ||
+                checkoutInProgress
+              }
+            >
+              {pendingAction === 'portal' ? <Spinner size="small" /> : null}
+              {t(
+                pendingAction === 'portal'
+                  ? 'billing.paymentMethodOpening'
+                  : 'billing.changePaymentMethod'
               )}
-              <span className="text-base font-semibold tabular-nums text-foreground">
-                {formatMoney(upcomingInvoice.amountDue, upcomingInvoice.currency)}
-              </span>
-            </div>
-            {upcomingInvoice.adjustment ||
-            upcomingInvoice.renewal ||
-            upcomingInvoice.discount ||
-            upcomingInvoice.creditApplied ? (
-              <ul className="mt-3 space-y-1 border-t border-border/60 pt-3">
-                {upcomingInvoice.renewal ? (
-                  <li className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
-                    <span className="min-w-0 truncate">
-                      {upcomingInvoice.renewal.quantity != null
-                        ? t('billing.upcomingRenewalWithSeats', {
-                            count: upcomingInvoice.renewal.quantity,
-                          })
-                        : t('billing.upcomingRenewal')}
-                    </span>
-                    <span className="shrink-0 tabular-nums">
-                      {formatMoney(upcomingInvoice.renewal.amount, upcomingInvoice.currency)}
-                    </span>
-                  </li>
-                ) : null}
-                {upcomingInvoice.discount ? (
-                  <li className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
-                    {/* The invoice discount line is offer-agnostic; only name the
-                        campaign when this account's offer actually is early bird. */}
-                    <span className="min-w-0 truncate">
-                      {t(
-                        overview.offerKey === 'early_bird_yearly_6000_forever'
-                          ? 'billing.upcomingDiscountEarlyBird'
-                          : 'billing.upcomingDiscount'
-                      )}
-                    </span>
-                    <span className="shrink-0 tabular-nums">
-                      {formatMoney(upcomingInvoice.discount.amount, upcomingInvoice.currency)}
-                    </span>
-                  </li>
-                ) : null}
-                {upcomingInvoice.adjustment ? (
-                  <li className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
-                    <span className="min-w-0 truncate">{t('billing.upcomingAdjustment')}</span>
-                    <span className="shrink-0 tabular-nums">
-                      {formatMoney(upcomingInvoice.adjustment.amount, upcomingInvoice.currency)}
-                    </span>
-                  </li>
-                ) : null}
-                {upcomingInvoice.creditApplied ? (
-                  <li className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
-                    <span className="min-w-0 truncate">{t('billing.upcomingCreditApplied')}</span>
-                    <span className="shrink-0 tabular-nums">
-                      {formatMoney(upcomingInvoice.creditApplied.amount, upcomingInvoice.currency)}
-                    </span>
-                  </li>
-                ) : null}
-              </ul>
-            ) : null}
-          </div>
-        </Card>
-      ) : null}
-
-      {/* Billing history */}
-      {canManage && overview.billingAccountId ? (
-        <Card className="overflow-hidden">
-          <div className="border-b border-border/70 bg-muted/30 px-5 py-3">
-            <p className="text-sm font-semibold text-foreground">{t('billing.historyTitle')}</p>
-          </div>
-          <div className="px-5 py-4">
-            {invoicesError ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <p className="text-sm text-muted-foreground">{t('billing.historyError')}</p>
-                <Button size="sm" variant="outline" onClick={onRetryInvoices}>
-                  {t('billing.historyRetry')}
-                </Button>
-              </div>
-            ) : invoices === undefined ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                {t('billing.historyLoading')}
-              </div>
-            ) : invoices.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t('billing.historyEmpty')}</p>
-            ) : (
-              // Cap at roughly 6 rows; older invoices scroll.
-              <ul className="input-scrollbar max-h-80 divide-y divide-border/60 overflow-y-auto text-sm">
-                {invoices.map((invoice) => (
-                  <li
-                    key={invoice.id}
-                    className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0 last:pb-0"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-medium text-foreground">
-                        {formatDate(invoice.periodStart ?? invoice.createdAt)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {invoice.kind === 'gift_redemption'
-                          ? invoice.giftDurationMonths
-                            ? t('billing.historyGiftPlusMonths', {
-                                count: invoice.giftDurationMonths,
-                              })
-                            : t('billing.historyGiftPlus')
-                          : invoice.interval === 'year'
-                            ? t('billing.historyPlanYearly')
-                            : invoice.interval === 'month'
-                              ? t('billing.historyPlanMonthly')
-                              : t('billing.plan.plus')}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-medium tabular-nums text-foreground">
-                        {formatMoney(invoice.amountPaid, invoice.currency)}
-                      </span>
-                      <Badge
-                        variant={invoice.status === 'paid' ? 'secondary' : 'outline'}
-                        className="capitalize"
-                      >
-                        {invoice.status}
-                      </Badge>
-                      {invoice.hostedInvoiceUrl ? (
-                        <a
-                          href={invoice.hostedInvoiceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-medium text-primary hover:underline"
-                        >
-                          {t('billing.historyView')}
-                        </a>
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </Card>
+            </Button>
+          </CompactRow>
+        </CompactSection>
       ) : null}
 
       {/* Cancel / resume subscription: deliberately low-emphasis, tucked at the
@@ -784,15 +1252,15 @@ export function BillingSettingsView({
       ((overview.entitlementSource === 'stripe' &&
         (!overview.scheduleManaged || overview.autoRenewAfterGift || overview.cancelAtPeriodEnd)) ||
         (isPromotional && (overview.autoRenewAfterGift || overview.canResumeAfterGift))) ? (
-        <div className="flex justify-end pt-1">
+        <div {...stylex.props(styles.trailing)}>
           {overview.cancelAtPeriodEnd ? (
             <button
               type="button"
               disabled={cancelPending}
               onClick={onResumeSubscription}
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+              {...stylex.props(styles.quietAction)}
             >
-              {cancelPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+              {cancelPending ? <Spinner size="small" /> : null}
               {t('billing.resumeSubscription')}
             </button>
           ) : (
@@ -800,9 +1268,9 @@ export function BillingSettingsView({
               type="button"
               disabled={cancelPending}
               onClick={onCancelSubscription}
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-destructive disabled:opacity-60"
+              {...stylex.props(styles.quietAction, styles.quietActionDanger)}
             >
-              {cancelPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+              {cancelPending ? <Spinner size="small" /> : null}
               {t('billing.cancelSubscription')}
             </button>
           )}

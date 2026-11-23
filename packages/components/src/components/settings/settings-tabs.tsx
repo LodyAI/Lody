@@ -1,11 +1,16 @@
 import type { LucideIcon } from 'lucide-react';
 import type { PlatformCapability } from '@lody/platform';
+import { useAtomValue } from 'jotai';
+import { lodyAgentFeatureEnabledAtom } from '../../atoms/settings';
 import { useAppCapabilityCheck } from '../../lib/app-platform';
+import { getIpcServices } from '../../lib/electron-ipc-client';
 import {
+  Brain,
   Bot,
   Building2,
   ChartNoAxesCombined,
   CreditCard,
+  DatabaseBackup,
   FolderOpen,
   Github,
   Info,
@@ -13,7 +18,10 @@ import {
   Monitor,
   Palette,
   Plug,
+  FileText,
   SlidersHorizontal,
+  Share2,
+  Sparkles,
   UserRound,
   UserRoundCog,
 } from 'lucide-react';
@@ -26,15 +34,20 @@ export type SettingsTabId =
   | 'appearance'
   | 'keyboard-shortcuts'
   | 'workspace'
+  | 'shares'
   | 'people'
   | 'machines'
   | 'agents'
+  | 'lody-agent'
+  | 'memory'
   | 'agent-roles'
+  | 'prompt-shortcuts'
   | 'mcp'
   | 'projects'
   | 'github'
   | 'ai-usage'
   | 'billing'
+  | 'data'
   | 'about';
 
 export type SettingsPath =
@@ -43,15 +56,20 @@ export type SettingsPath =
   | '/$workspaceName/settings/appearance'
   | '/$workspaceName/settings/keyboard-shortcuts'
   | '/$workspaceName/settings/workspace'
+  | '/$workspaceName/settings/shares'
   | '/$workspaceName/settings/people'
   | '/$workspaceName/settings/machines'
   | '/$workspaceName/settings/agents'
+  | '/$workspaceName/settings/lody-agent'
+  | '/$workspaceName/settings/memory'
   | '/$workspaceName/settings/agent-roles'
+  | '/$workspaceName/settings/prompt-shortcuts'
   | '/$workspaceName/settings/mcp'
   | '/$workspaceName/settings/projects'
   | '/$workspaceName/settings/github'
   | '/$workspaceName/settings/ai-usage'
   | '/$workspaceName/settings/billing'
+  | '/$workspaceName/settings/data'
   | '/$workspaceName/settings/about';
 
 export type SettingsTabConfig = {
@@ -62,8 +80,12 @@ export type SettingsTabConfig = {
   icon: LucideIcon;
   /** Cloud capability the whole tab depends on; the tab hides when missing. */
   capability?: PlatformCapability;
-  /** The workspace machine inventory has no useful distinction in a solo workspace. */
-  multiMemberOnly?: boolean;
+  /** Keyboard-centric surfaces are hidden from the mobile settings list. */
+  desktopOnly?: boolean;
+  /** Shown only while Developer mode and the Lody Agent beta are both on. */
+  lodyAgent?: boolean;
+  /** Needs the desktop host's workspace bundle service (file dialogs and the local agent). */
+  workspaceBundleHost?: boolean;
   path: SettingsPath;
 };
 
@@ -101,6 +123,7 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     labelKey: 'settings.tabs.keyboardShortcuts',
     descriptionKey: 'settings.categories.keyboardShortcuts.description',
     icon: Keyboard,
+    desktopOnly: true,
     path: '/$workspaceName/settings/keyboard-shortcuts',
   },
   {
@@ -118,7 +141,6 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     labelKey: 'settings.tabs.machines',
     descriptionKey: 'settings.categories.machines.description',
     icon: Monitor,
-    multiMemberOnly: true,
     path: '/$workspaceName/settings/machines',
   },
   {
@@ -128,6 +150,15 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     descriptionKey: 'settings.categories.agents.description',
     icon: Bot,
     path: '/$workspaceName/settings/agents',
+  },
+  {
+    id: 'lody-agent',
+    section: 'workspace',
+    labelKey: 'settings.tabs.lodyAgent',
+    descriptionKey: 'settings.categories.lodyAgent.description',
+    icon: Sparkles,
+    lodyAgent: true,
+    path: '/$workspaceName/settings/lody-agent',
   },
   {
     // Beside Agents on purpose: a provider says how an agent starts, a Role
@@ -140,12 +171,28 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     path: '/$workspaceName/settings/agent-roles',
   },
   {
+    id: 'memory',
+    section: 'workspace',
+    labelKey: 'settings.tabs.memory',
+    descriptionKey: 'settings.memory.description',
+    icon: Brain,
+    path: '/$workspaceName/settings/memory',
+  },
+  {
     id: 'mcp',
     section: 'workspace',
     labelKey: 'settings.tabs.mcp',
     descriptionKey: 'settings.categories.mcp.description',
     icon: Plug,
     path: '/$workspaceName/settings/mcp',
+  },
+  {
+    id: 'prompt-shortcuts',
+    section: 'workspace',
+    labelKey: 'settings.tabs.promptShortcuts',
+    descriptionKey: 'settings.categories.promptShortcuts.description',
+    icon: FileText,
+    path: '/$workspaceName/settings/prompt-shortcuts',
   },
   {
     id: 'projects',
@@ -174,6 +221,15 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     path: '/$workspaceName/settings/ai-usage',
   },
   {
+    id: 'shares',
+    section: 'workspace',
+    labelKey: 'settings.tabs.shares',
+    descriptionKey: 'settings.shares.description',
+    icon: Share2,
+    capability: 'teamSharing',
+    path: '/$workspaceName/settings/shares',
+  },
+  {
     id: 'billing',
     section: 'workspace',
     labelKey: 'settings.tabs.billing',
@@ -181,6 +237,16 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     icon: CreditCard,
     capability: 'billing',
     path: '/$workspaceName/settings/billing',
+  },
+  {
+    id: 'data',
+    section: 'workspace',
+    labelKey: 'settings.tabs.workspaceData',
+    descriptionKey: 'settings.categories.workspaceData.description',
+    icon: DatabaseBackup,
+    desktopOnly: true,
+    workspaceBundleHost: true,
+    path: '/$workspaceName/settings/data',
   },
   {
     id: 'about',
@@ -192,33 +258,37 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
   },
 ];
 
-export function useVisibleSettingsTabs(options?: {
-  includeMultiMemberOnly?: boolean;
-}): SettingsTabConfig[] {
+export function useVisibleSettingsTabs(): SettingsTabConfig[] {
   const hasCapability = useAppCapabilityCheck();
-  const includeMultiMemberOnly = options?.includeMultiMemberOnly ?? true;
+  const lodyAgentEnabled = useAtomValue(lodyAgentFeatureEnabledAtom);
   return SETTINGS_TAB_CONFIGS.filter(
     (tab) =>
       (tab.capability === undefined || hasCapability(tab.capability)) &&
-      (!tab.multiMemberOnly || includeMultiMemberOnly)
+      (!tab.lodyAgent || lodyAgentEnabled) &&
+      (!tab.workspaceBundleHost || Boolean(getIpcServices()?.workspaceBundle))
   );
 }
 
 export function getActiveSettingsTabId(pathname: string): SettingsTabId | null {
   const suffixes: Array<[string, SettingsTabId]> = [
     ['/settings/account', 'account'],
+    ['/settings/data', 'data'],
     ['/settings/preferences', 'preferences'],
     ['/settings/general', 'preferences'],
     ['/settings/appearance', 'appearance'],
     ['/settings/keyboard-shortcuts', 'keyboard-shortcuts'],
     ['/settings/my-machines', 'machines'],
     ['/settings/workspace', 'workspace'],
+    ['/settings/shares', 'shares'],
     ['/settings/people', 'workspace'],
     ['/settings/machines', 'machines'],
     ['/settings/devices', 'machines'],
     ['/settings/agents', 'agents'],
     ['/settings/agent-config', 'agents'],
+    ['/settings/lody-agent', 'lody-agent'],
+    ['/settings/memory', 'memory'],
     ['/settings/agent-roles', 'agent-roles'],
+    ['/settings/prompt-shortcuts', 'prompt-shortcuts'],
     ['/settings/mcp', 'mcp'],
     ['/settings/projects', 'projects'],
     ['/settings/github', 'github'],

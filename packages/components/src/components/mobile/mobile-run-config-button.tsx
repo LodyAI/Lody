@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { ListChecks, Zap } from 'lucide-react';
-import { classifyPermissionModeFace } from '@lody/shared';
+import { ACP_FAST_MODE_VALUE_ULTRAFAST, classifyPermissionModeFace } from '@lody/shared';
 
 import {
   resolveConfigOptionValue,
@@ -11,9 +12,52 @@ import {
   type AcpSelectConfigOptionSelector,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import { StackedZapIcon } from '@/components/icons/stacked-zap-icon';
+import { composerSurface } from '@/components/shared/composer-surface';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
-import { cn } from '@/lib/utils';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, space, text } from '@lody/ui/tokens/scales.stylex';
 import { PermissionModeFaceIndicator } from './permission-mode-face';
+
+const styles = stylex.create({
+  /**
+   * The composer's ghost trigger at the touch step: no fill or edge at rest —
+   * the button reads as plain model + indicators text next to the + menu, and
+   * only the pointer's wash marks it as tappable. It stays one row: short names
+   * stay compact, long names shrink inside the footer slot, and only the model
+   * label yields width.
+   */
+  button: {
+    maxWidth: '100%',
+    height: control.medium,
+    paddingInline: space[1.5],
+    overflow: 'hidden',
+    color: colors.label,
+    fontSize: text.bodySize,
+    fontWeight: 400,
+  },
+  /** Identity group: agent logo + model name, the flex item that shrinks. */
+  identity: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  /** Keep the beginning of a long model name visible. */
+  model: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'start',
+    direction: 'ltr',
+  },
+  fixed: { flexShrink: 0, whiteSpace: 'nowrap' },
+  dot: { flexShrink: 0, userSelect: 'none', color: colors.tertiaryLabel },
+  /** Plan / Fast on: live state, so the accent. */
+  live: { color: colors.accent },
+});
 
 /**
  * Collapsed "run config" button for the mobile composer. Consolidates model /
@@ -26,8 +70,7 @@ import { PermissionModeFaceIndicator } from './permission-mode-face';
  * Layout contract (always one row):
  * - The button is `min-w-0 max-w-full` and never wraps; status glyphs stay
  *   `shrink-0`, and only the model label absorbs remaining width via flex.
- * - Model truncates keeping the *tail* (rtl trick) so long
- *   "provider/model-name" labels lose the prefix, not the model suffix.
+ * - Long model names keep their beginning visible.
  * - agent icon: ACP brand icon, passed in by the caller.
  * - reasoning / mode / Plan / Fast: fixed-width status; never force a second
  *   line when the model name is long.
@@ -67,6 +110,7 @@ export function useRunConfigFace({
     permissionModeSelectors,
     modeSelectors,
     thoughtLevelSelectors,
+    speedTierSelectors,
     planModeSelectors,
     fastModeSelectors,
   } = useMemo(() => orderAcpConfigOptionSelectors(configOptionSelectors), [configOptionSelectors]);
@@ -122,17 +166,26 @@ export function useRunConfigFace({
     ? resolvePlanModeSelectorEnabled(planSelector, configOptionValues?.[planSelector.configId])
     : false;
   const fastSelector = fastModeSelectors[0];
+  const speedTierSelector = speedTierSelectors[0];
+  const speedTierValue = speedTierSelector
+    ? ((resolveConfigOptionValue(
+        speedTierSelector,
+        configOptionValues?.[speedTierSelector.configId]
+      ) as string) ?? null)
+    : null;
   const fastOn = fastSelector
     ? resolveOnOffConfigOptionEnabled(fastSelector, configOptionValues?.[fastSelector.configId])
-    : false;
+    : Boolean(speedTierValue && speedTierValue !== 'off');
 
-  return { modelLabel, thinkingLabel, modeId, planOn, fastOn };
+  const ultrafastOn = !fastSelector && speedTierValue === ACP_FAST_MODE_VALUE_ULTRAFAST;
+
+  return { modelLabel, thinkingLabel, modeId, planOn, fastOn, ultrafastOn };
 }
 
 /** Middle-dot separator between the face's identity/status groups. */
 function FaceDot() {
   return (
-    <span aria-hidden="true" className="shrink-0 select-none text-muted-foreground/70">
+    <span aria-hidden="true" {...stylex.props(styles.dot)}>
       ·
     </span>
   );
@@ -145,7 +198,8 @@ export function MobileRunConfigButton({
   ariaLabel = 'Run configuration',
   ...faceProps
 }: MobileRunConfigButtonProps) {
-  const { modelLabel, thinkingLabel, modeId, planOn, fastOn } = useRunConfigFace(faceProps);
+  const { modelLabel, thinkingLabel, modeId, planOn, fastOn, ultrafastOn } =
+    useRunConfigFace(faceProps);
   const hasToggle = planOn || fastOn;
   // The indicator hides itself for default/unknown modes; mirror that here so
   // the separator dot never renders next to nothing.
@@ -157,39 +211,24 @@ export function MobileRunConfigButton({
       disabled={disabled}
       onClick={onOpen}
       aria-label={ariaLabel}
-      className={cn(
-        /* No background/border at rest — the button reads as plain
-           model + indicators text next to the + menu; only a subtle
-           hover/press wash marks it as tappable.
-           inline-flex + max-w-full + nowrap: stay one row; short names stay
-           compact, long names shrink inside the footer slot (parent gives
-           min-w-0 / overflow). Only the model label yields width. */
-        'inline-flex h-8 min-w-0 max-w-full select-none flex-nowrap items-center gap-1.5 overflow-hidden rounded-md px-1.5 text-sm text-foreground transition-colors',
-        'hover:bg-muted/50 active:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-60'
-      )}
+      {...stylex.props(composerSurface.trigger, styles.button)}
     >
-      {/* Identity group: agent logo + model name. min-w-0 so it is the flex
-          item that shrinks when thinking/mode/plan need their full width. */}
-      <span className="flex min-w-0 items-center gap-1 overflow-hidden">
-        {agentIcon ? (
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center [&>*]:h-4 [&>*]:w-4">
-            {agentIcon}
-          </span>
-        ) : null}
-        <span className="min-w-0 truncate text-left [direction:rtl]">
+      <span {...stylex.props(styles.identity)}>
+        {agentIcon ? <span {...stylex.props(composerSurface.glyph)}>{agentIcon}</span> : null}
+        <span {...stylex.props(styles.model)}>
           <span dir="ltr">{modelLabel ?? 'Model'}</span>
         </span>
       </span>
       {thinkingLabel ? (
         <>
           <FaceDot />
-          <span className="shrink-0 whitespace-nowrap">{thinkingLabel}</span>
+          <span {...stylex.props(styles.fixed)}>{thinkingLabel}</span>
         </>
       ) : null}
       {modeVisible ? (
         <>
           <FaceDot />
-          <span className="shrink-0">
+          <span {...stylex.props(styles.fixed)}>
             <PermissionModeFaceIndicator modeId={modeId} />
           </span>
         </>
@@ -199,14 +238,20 @@ export function MobileRunConfigButton({
           <FaceDot />
           {planOn ? (
             <ListChecks
-              className="h-3.5 w-3.5 shrink-0 text-primary"
+              {...stylex.props(composerSurface.glyph14, styles.live)}
               strokeWidth={1.8}
               aria-hidden="true"
             />
           ) : null}
-          {fastOn ? (
+          {ultrafastOn ? (
+            <StackedZapIcon
+              {...stylex.props(composerSurface.glyph14, styles.live)}
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+          ) : fastOn ? (
             <Zap
-              className="h-3.5 w-3.5 shrink-0 text-primary"
+              {...stylex.props(composerSurface.glyph14, styles.live)}
               strokeWidth={1.8}
               aria-hidden="true"
             />

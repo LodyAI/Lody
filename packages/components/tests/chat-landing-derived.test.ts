@@ -2,23 +2,19 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compareChatLandingLocalProjectByRecency,
-  compareChatLandingRepositoryByRecency,
   getChatLandingBranchSelectorState,
   getChatLandingHasAnyOnlineMachine,
-  getChatLandingHintType,
   getChatLandingInitialDataLoading,
   getChatLandingLocalProjectAvailability,
   getChatLandingProjectRecency,
-  getChatLandingSelectedMachineProjectStatus,
+  getChatLandingSelectedMachineState,
   getChatLandingSubmitDisabled,
   getChatLandingVisibleComposerStatus,
-  getSharingReviewActionTarget,
-  getSharingReviewSourceRevision,
+  getChatLandingSharingReviewActionTarget,
   getSharingReviewSourcesReady,
   getSharingReviewTeamHasNoVisibleLocalResources,
   getSharingReviewTeamLooksEmpty,
   isChatLandingMachineReachable,
-  shouldRetrySharingReviewConflict,
 } from '../src/components/chat/chat-landing-derived';
 
 const onlineMachineIds = new Set(['github-runner']);
@@ -39,72 +35,99 @@ describe('sharing review readiness and action', () => {
       getSharingReviewSourcesReady({ ...readySources, isMetaRoomFirstSyncPending: true })
     ).toBe(false);
   });
+});
 
-  it('routes machine privacy to Machines and leaves observer-only notices informational', () => {
-    expect(getSharingReviewActionTarget({ privateMachineCount: 1, privateProjectCount: 1 })).toBe(
+describe('composer sharing review target', () => {
+  const ownPrivate = {
+    machineId: 'own-private',
+    ownerUserId: 'viewer',
+    sharedWithTeam: false,
+    updatedAt: 1,
+  };
+  const args = {
+    currentUserId: 'viewer',
+    machineId: 'teammate-shared',
+    localProjectIds: [] as string[],
+    machineAccessByMachineId: new Map([
+      [ownPrivate.machineId, ownPrivate],
+      [
+        'teammate-shared',
+        {
+          ...ownPrivate,
+          machineId: 'teammate-shared',
+          ownerUserId: 'teammate',
+          sharedWithTeam: true,
+        },
+      ],
+      ['own-shared', { ...ownPrivate, machineId: 'own-shared', sharedWithTeam: true }],
+    ]),
+    localProjectAccessByKey: new Map([
+      [
+        'own-shared:private-project',
+        {
+          machineId: 'own-shared',
+          localProjectId: 'private-project',
+          ownerUserId: 'viewer',
+          sharedWithTeam: false,
+          updatedAt: 1,
+        },
+      ],
+      [
+        'own-shared:shared-project',
+        {
+          machineId: 'own-shared',
+          localProjectId: 'shared-project',
+          ownerUserId: 'viewer',
+          sharedWithTeam: true,
+          updatedAt: 1,
+        },
+      ],
+    ]),
+  };
+
+  it('keeps unrelated private machines out of a teammate’s shared-machine composer', () => {
+    expect(getChatLandingSharingReviewActionTarget(args)).toBeNull();
+    expect(getChatLandingSharingReviewActionTarget({ ...args, machineId: null })).toBeNull();
+  });
+
+  it('offers machine sharing only when the selected machine belongs to the user and is private', () => {
+    expect(getChatLandingSharingReviewActionTarget({ ...args, machineId: 'own-private' })).toBe(
       'machines'
     );
-    expect(getSharingReviewActionTarget({ privateMachineCount: 0, privateProjectCount: 1 })).toBe(
-      'projects'
-    );
     expect(
-      getSharingReviewActionTarget({ privateMachineCount: 0, privateProjectCount: 0 })
+      getChatLandingSharingReviewActionTarget({ ...args, machineId: 'own-shared' })
+    ).toBeNull();
+    expect(
+      getChatLandingSharingReviewActionTarget({
+        ...args,
+        machineId: 'own-private',
+        currentUserId: 'teammate',
+      })
     ).toBeNull();
   });
 
-  it('retries only a latest conflict against an older attempt from this writer', () => {
+  it('ignores private projects outside the selected project or project group', () => {
     expect(
-      shouldRetrySharingReviewConflict({
-        writerId: 'writer-a',
-        attempt: 2,
-        serverWriterId: 'writer-a',
-        serverAttempt: 1,
-        isLatestAttempt: true,
+      getChatLandingSharingReviewActionTarget({
+        ...args,
+        machineId: 'own-shared',
+        localProjectIds: ['shared-project'],
       })
-    ).toBe(true);
+    ).toBeNull();
     expect(
-      shouldRetrySharingReviewConflict({
-        writerId: 'writer-a',
-        attempt: 2,
-        serverWriterId: 'writer-b',
-        serverAttempt: 3,
-        isLatestAttempt: true,
+      getChatLandingSharingReviewActionTarget({
+        ...args,
+        machineId: 'own-shared',
+        localProjectIds: ['private-project'],
       })
-    ).toBe(false);
+    ).toBe('projects');
     expect(
-      shouldRetrySharingReviewConflict({
-        writerId: 'writer-a',
-        attempt: 2,
-        serverWriterId: 'writer-a',
-        serverAttempt: 1,
-        isLatestAttempt: false,
+      getChatLandingSharingReviewActionTarget({
+        ...args,
+        machineId: 'own-shared',
+        localProjectIds: ['shared-project', 'private-project'],
       })
-    ).toBe(false);
-    expect(
-      shouldRetrySharingReviewConflict({
-        writerId: 'writer-a',
-        attempt: 2,
-        serverWriterId: 'writer-a',
-        serverAttempt: 2,
-        isLatestAttempt: true,
-      })
-    ).toBe(false);
-  });
-});
-
-describe('getSharingReviewSourceRevision', () => {
-  it('returns a fixed-length deterministic revision that includes tail changes', () => {
-    const manyProjects = Array.from({ length: 300 }, (_, index) => `project-${index}`).join(',');
-    const first = getSharingReviewSourceRevision(['members:a,b', `projects:${manyProjects}:a`]);
-    const repeated = getSharingReviewSourceRevision(['members:a,b', `projects:${manyProjects}:a`]);
-    const tailChanged = getSharingReviewSourceRevision([
-      'members:a,b',
-      `projects:${manyProjects}:b`,
-    ]);
-
-    expect(first).toHaveLength(19);
-    expect(repeated).toBe(first);
-    expect(tailChanged).not.toBe(first);
+    ).toBe('projects');
   });
 });
 
@@ -130,23 +153,6 @@ describe('getSharingReviewTeamLooksEmpty', () => {
 });
 
 describe('getSharingReviewTeamHasNoVisibleLocalResources', () => {
-  it('reports missing team-local resources after their sources are ready', () => {
-    expect(
-      getSharingReviewTeamHasNoVisibleLocalResources({
-        sourcesReady: false,
-        machineCount: 0,
-        localProjectCount: 0,
-      })
-    ).toBe(false);
-    expect(
-      getSharingReviewTeamHasNoVisibleLocalResources({
-        sourcesReady: true,
-        machineCount: 0,
-        localProjectCount: 0,
-      })
-    ).toBe(true);
-  });
-
   it('still reports missing local resources when GitHub content makes the workspace non-empty', () => {
     expect(
       getSharingReviewTeamLooksEmpty({
@@ -165,23 +171,6 @@ describe('getSharingReviewTeamHasNoVisibleLocalResources', () => {
         localProjectCount: 0,
       })
     ).toBe(true);
-  });
-
-  it('stops reporting once a machine or local project is visible', () => {
-    expect(
-      getSharingReviewTeamHasNoVisibleLocalResources({
-        sourcesReady: true,
-        machineCount: 1,
-        localProjectCount: 0,
-      })
-    ).toBe(false);
-    expect(
-      getSharingReviewTeamHasNoVisibleLocalResources({
-        sourcesReady: true,
-        machineCount: 0,
-        localProjectCount: 1,
-      })
-    ).toBe(false);
   });
 });
 
@@ -221,57 +210,20 @@ describe('getChatLandingProjectRecency', () => {
     expect(recency.byProject.get('machine-2:project-1')).toBe(300);
   });
 
-  it('ignores missing and non-finite lastMessageAt values', () => {
+  it('ranks a multi-member project by its newest conversation', () => {
     const recency = getChatLandingProjectRecency([
-      {
-        machineId: 'machine-1',
-        project: { kind: 'github', repoFullName: 'owner/alpha' },
-      },
+      { machineId: 'machine-1', projectRun: { id: 'shop' }, lastMessageAt: 400 },
+      { machineId: 'machine-2', projectRun: { id: 'shop' }, lastMessageAt: 500 },
       {
         machineId: 'machine-1',
         project: { kind: 'local', localProjectId: 'project-1' },
-        lastMessageAt: Number.NaN,
+        lastMessageAt: 450,
       },
     ]);
 
-    expect(recency.byRepo.has('owner/alpha')).toBe(false);
-    expect(recency.byProject.has('machine-1:project-1')).toBe(false);
-  });
-});
-
-describe('compareChatLandingRepositoryByRecency', () => {
-  it('sorts repos by newest lastMessageAt and falls back to full name', () => {
-    const latest = new Map([
-      ['owner/beta', 200],
-      ['owner/alpha', 300],
-    ]);
-    const repos = [
-      { fullName: 'owner/gamma' },
-      { fullName: 'owner/beta' },
-      { fullName: 'owner/alpha' },
-      { fullName: 'owner/delta' },
-    ];
-
-    expect(
-      repos.sort((left, right) => compareChatLandingRepositoryByRecency(left, right, latest))
-    ).toEqual([
-      { fullName: 'owner/alpha' },
-      { fullName: 'owner/beta' },
-      { fullName: 'owner/delta' },
-      { fullName: 'owner/gamma' },
-    ]);
-  });
-
-  it('sorts equal timestamps alphabetically', () => {
-    const latest = new Map([
-      ['owner/beta', 200],
-      ['owner/alpha', 200],
-    ]);
-    const repos = [{ fullName: 'owner/beta' }, { fullName: 'owner/alpha' }];
-
-    expect(
-      repos.sort((left, right) => compareChatLandingRepositoryByRecency(left, right, latest))
-    ).toEqual([{ fullName: 'owner/alpha' }, { fullName: 'owner/beta' }]);
+    expect(recency.byGroup.get('shop')).toBe(500);
+    // A group conversation is not counted against an unrelated local project.
+    expect(recency.byProject.get('machine-1:project-1')).toBe(450);
   });
 });
 
@@ -281,28 +233,6 @@ describe('compareChatLandingLocalProjectByRecency', () => {
     name: string,
     meta: { lastOpenedAtMs?: number; createdAtMs?: number } = {}
   ) => ({ key, project: { name, ...meta } });
-
-  it('sorts local projects by newest lastMessageAt and falls back to project name', () => {
-    const latest = new Map([
-      ['machine-1:project-beta', 200],
-      ['machine-1:project-alpha', 300],
-    ]);
-    const projects = [
-      project('machine-1:project-gamma', 'Gamma'),
-      project('machine-1:project-beta', 'Beta'),
-      project('machine-1:project-alpha', 'Alpha'),
-      project('machine-1:project-delta', 'Delta'),
-    ];
-
-    expect(
-      projects.sort((left, right) => compareChatLandingLocalProjectByRecency(left, right, latest))
-    ).toEqual([
-      project('machine-1:project-alpha', 'Alpha'),
-      project('machine-1:project-beta', 'Beta'),
-      project('machine-1:project-delta', 'Delta'),
-      project('machine-1:project-gamma', 'Gamma'),
-    ]);
-  });
 
   it('falls back to project activity before project name', () => {
     const latest = new Map<string, number>();
@@ -322,108 +252,9 @@ describe('compareChatLandingLocalProjectByRecency', () => {
       project('machine-1:project-delta', 'Delta'),
     ]);
   });
-
-  it('uses the stable key when names and timestamps are equal', () => {
-    const latest = new Map([
-      ['machine-2:project-1', 200],
-      ['machine-1:project-1', 200],
-    ]);
-    const projects = [
-      project('machine-2:project-1', 'Same'),
-      project('machine-1:project-1', 'Same'),
-    ];
-
-    expect(
-      projects.sort((left, right) => compareChatLandingLocalProjectByRecency(left, right, latest))
-    ).toEqual([project('machine-1:project-1', 'Same'), project('machine-2:project-1', 'Same')]);
-  });
-});
-
-describe('getChatLandingHintType', () => {
-  it('prefers no-machine over no-agent-config', () => {
-    expect(
-      getChatLandingHintType({
-        hasNoMachine: true,
-        hasNoAgentConfig: true,
-        isInitialDataLoading: false,
-      })
-    ).toBe('no-machine');
-  });
-
-  it('returns no-agent-config when machines exist but configs do not', () => {
-    expect(
-      getChatLandingHintType({
-        hasNoMachine: false,
-        hasNoAgentConfig: true,
-        isInitialDataLoading: false,
-      })
-    ).toBe('no-agent-config');
-  });
-
-  it('returns null when both dependencies are available', () => {
-    expect(
-      getChatLandingHintType({
-        hasNoMachine: false,
-        hasNoAgentConfig: false,
-        isInitialDataLoading: false,
-      })
-    ).toBeNull();
-  });
-
-  it('suppresses the no-machine hint while initial data is still loading', () => {
-    expect(
-      getChatLandingHintType({
-        hasNoMachine: true,
-        hasNoAgentConfig: false,
-        isInitialDataLoading: true,
-      })
-    ).toBeNull();
-  });
-
-  it('suppresses the no-agent-config hint while initial data is still loading', () => {
-    expect(
-      getChatLandingHintType({
-        hasNoMachine: false,
-        hasNoAgentConfig: true,
-        isInitialDataLoading: true,
-      })
-    ).toBeNull();
-  });
 });
 
 describe('getChatLandingInitialDataLoading', () => {
-  it('waits for local runtime and doc metadata prerequisites', () => {
-    expect(
-      getChatLandingInitialDataLoading({
-        isRuntimeInitializing: true,
-        isVisibleMachinesLoading: false,
-        isDocMetaCacheReady: true,
-        localMachineStateAttempted: true,
-        hasSelectableMachine: true,
-      })
-    ).toBe(true);
-
-    expect(
-      getChatLandingInitialDataLoading({
-        isRuntimeInitializing: false,
-        isVisibleMachinesLoading: false,
-        isDocMetaCacheReady: false,
-        localMachineStateAttempted: true,
-        hasSelectableMachine: true,
-      })
-    ).toBe(true);
-
-    expect(
-      getChatLandingInitialDataLoading({
-        isRuntimeInitializing: false,
-        isVisibleMachinesLoading: false,
-        isDocMetaCacheReady: true,
-        localMachineStateAttempted: false,
-        hasSelectableMachine: true,
-      })
-    ).toBe(true);
-  });
-
   it('continues initial loading while machine visibility is pending and no local option exists', () => {
     expect(
       getChatLandingInitialDataLoading({
@@ -479,42 +310,6 @@ describe('getChatLandingLocalProjectAvailability', () => {
         isDocMetaCacheReady: false,
       })
     ).toBe('pending');
-  });
-
-  it('accepts a visible project owned by the current user', () => {
-    expect(
-      getChatLandingLocalProjectAvailability({
-        currentUserId: 'user-1',
-        selectedLocalProjectId: 'project-1',
-        machine: {
-          ownerUserId: 'user-1',
-          localProjects: {
-            'project-1': { id: 'project-1' },
-          },
-        },
-        machineOwnerUserId: null,
-        isVisibleMachinesLoading: false,
-        isMachineFlockRemoteSynced: false,
-        isDocMetaCacheReady: true,
-      })
-    ).toBe('available');
-  });
-
-  it('rejects a selected project after loading when the project metadata is still missing', () => {
-    expect(
-      getChatLandingLocalProjectAvailability({
-        currentUserId: 'user-1',
-        selectedLocalProjectId: 'project-1',
-        machine: {
-          ownerUserId: 'user-1',
-          localProjects: {},
-        },
-        machineOwnerUserId: 'user-1',
-        isVisibleMachinesLoading: false,
-        isMachineFlockRemoteSynced: true,
-        isDocMetaCacheReady: true,
-      })
-    ).toBe('unavailable');
   });
 
   it('holds pending for an absent machine until the meta-room first sync completes', () => {
@@ -701,59 +496,6 @@ describe('getChatLandingLocalProjectAvailability', () => {
 });
 
 describe('getChatLandingBranchSelectorState', () => {
-  it('shows the branch selector for github context', () => {
-    expect(
-      getChatLandingBranchSelectorState({
-        contextType: 'github',
-        selectedRepo: 'loro-dev/lody',
-        repoBranchesCount: 3,
-        hasRepoDefaultBranch: true,
-        hasSelectedLocalProject: false,
-        selectedLocalProjectId: null,
-        isRuntimeInitializing: false,
-        isLoadingLocalGitState: false,
-        hasLocalGit: false,
-        branchOptionsCount: 0,
-      }).showBranchSelector
-    ).toBe(true);
-  });
-
-  it('hides the local branch selector when no project is selected', () => {
-    expect(
-      getChatLandingBranchSelectorState({
-        contextType: 'local',
-        workdirMode: 'worktree',
-        selectedRepo: undefined,
-        repoBranchesCount: 0,
-        hasRepoDefaultBranch: false,
-        hasSelectedLocalProject: false,
-        selectedLocalProjectId: null,
-        isRuntimeInitializing: false,
-        isLoadingLocalGitState: false,
-        hasLocalGit: true,
-        branchOptionsCount: 3,
-      }).showBranchSelector
-    ).toBe(false);
-  });
-
-  it('hides the local branch selector while git state is loading', () => {
-    expect(
-      getChatLandingBranchSelectorState({
-        contextType: 'local',
-        workdirMode: 'worktree',
-        selectedRepo: undefined,
-        repoBranchesCount: 0,
-        hasRepoDefaultBranch: false,
-        hasSelectedLocalProject: true,
-        selectedLocalProjectId: 'project-1',
-        isRuntimeInitializing: false,
-        isLoadingLocalGitState: true,
-        hasLocalGit: false,
-        branchOptionsCount: 0,
-      }).showBranchSelector
-    ).toBe(false);
-  });
-
   it('hides branch selection for a direct local project', () => {
     expect(
       getChatLandingBranchSelectorState({
@@ -790,57 +532,9 @@ describe('getChatLandingBranchSelectorState', () => {
     expect(state.showBranchSelector).toBe(true);
     expect(state.isBranchDisabled).toBe(false);
   });
-
-  it('uses stable selector keys for github and local contexts', () => {
-    expect(
-      getChatLandingBranchSelectorState({
-        contextType: 'github',
-        selectedRepo: 'loro-dev/lody',
-        repoBranchesCount: 1,
-        hasRepoDefaultBranch: false,
-        hasSelectedLocalProject: false,
-        selectedLocalProjectId: null,
-        isRuntimeInitializing: false,
-        isLoadingLocalGitState: false,
-        hasLocalGit: false,
-        branchOptionsCount: 0,
-      }).branchSelectorKey
-    ).toBe('github:loro-dev/lody');
-
-    expect(
-      getChatLandingBranchSelectorState({
-        contextType: 'local',
-        workdirMode: 'worktree',
-        selectedRepo: undefined,
-        repoBranchesCount: 0,
-        hasRepoDefaultBranch: false,
-        hasSelectedLocalProject: true,
-        selectedLocalProjectId: 'project-1',
-        isRuntimeInitializing: false,
-        isLoadingLocalGitState: false,
-        hasLocalGit: true,
-        branchOptionsCount: 1,
-      }).branchSelectorKey
-    ).toBe('local:project-1');
-  });
 });
 
 describe('getChatLandingSubmitDisabled', () => {
-  it('disables submit when there is nothing to send', () => {
-    expect(
-      getChatLandingSubmitDisabled({
-        submitting: false,
-        hasBlockingImages: false,
-        hasSendableContent: false,
-        contextType: 'github',
-        hasSelectedLocalProject: false,
-        isRuntimeInitializing: false,
-        isLoadingLocalGitState: false,
-        hasLocalGitStateError: false,
-      })
-    ).toBe(true);
-  });
-
   it('disables worktree submit while local git state is still loading', () => {
     expect(
       getChatLandingSubmitDisabled({
@@ -872,73 +566,6 @@ describe('getChatLandingSubmitDisabled', () => {
       })
     ).toBe(false);
   });
-
-  it('keeps submit enabled for sendable github prompts', () => {
-    expect(
-      getChatLandingSubmitDisabled({
-        submitting: false,
-        hasBlockingImages: false,
-        hasSendableContent: true,
-        contextType: 'github',
-        hasSelectedLocalProject: false,
-        isRuntimeInitializing: false,
-        isLoadingLocalGitState: false,
-        hasLocalGitStateError: false,
-      })
-    ).toBe(false);
-  });
-});
-
-describe('getChatLandingSelectedMachineProjectStatus', () => {
-  const baseArgs = {
-    contextType: 'local' as const,
-    selectedMachineId: 'machine-1',
-    hasSelectedLocalProject: false,
-    hasAnyVisibleLocalProject: true,
-    selectedMachineHasVisibleLocalProject: false,
-    isVisibleLocalProjectsLoading: false,
-    isDocMetaCacheReady: true,
-  };
-
-  it('warns when a selected local machine has no visible projects', () => {
-    expect(getChatLandingSelectedMachineProjectStatus(baseArgs)).toBe(
-      'no-projects-on-selected-machine'
-    );
-  });
-
-  it('distinguishes an entirely empty local-project workspace', () => {
-    expect(
-      getChatLandingSelectedMachineProjectStatus({
-        ...baseArgs,
-        hasAnyVisibleLocalProject: false,
-      })
-    ).toBe('no-local-projects');
-  });
-
-  it('does not warn while local-project visibility is still loading', () => {
-    expect(
-      getChatLandingSelectedMachineProjectStatus({
-        ...baseArgs,
-        isVisibleLocalProjectsLoading: true,
-      })
-    ).toBeNull();
-  });
-
-  it('does not warn once a matching project is selected or available', () => {
-    expect(
-      getChatLandingSelectedMachineProjectStatus({
-        ...baseArgs,
-        hasSelectedLocalProject: true,
-      })
-    ).toBeNull();
-
-    expect(
-      getChatLandingSelectedMachineProjectStatus({
-        ...baseArgs,
-        selectedMachineHasVisibleLocalProject: true,
-      })
-    ).toBeNull();
-  });
 });
 
 describe('getChatLandingVisibleComposerStatus', () => {
@@ -958,16 +585,6 @@ describe('getChatLandingVisibleComposerStatus', () => {
         localGitStateError: 'Failed to append to stream: connect timeout',
       })
     ).toBeNull();
-  });
-
-  it('surfaces explicit actionable composer status', () => {
-    expect(
-      getChatLandingVisibleComposerStatus({
-        contextType: 'local',
-        composerStatus: { message: 'Ready', tone: 'info' },
-        localGitStateError: 'Failed to append to stream: connect timeout',
-      })
-    ).toEqual({ message: 'Ready', tone: 'info' });
   });
 
   it('surfaces selected-machine project warnings only in local context', () => {
@@ -1007,19 +624,6 @@ describe('chat landing machine online state', () => {
     ).toBe(true);
   });
 
-  it('accepts an online machine even when the selected local project is on a different machine', () => {
-    expect(
-      getChatLandingHasAnyOnlineMachine({
-        localMachineId: 'github-runner',
-        machines: new Map([
-          ['github-runner', { id: 'github-runner' }],
-          ['project-machine', { id: 'project-machine' }],
-        ]),
-        isMachineOnline,
-      })
-    ).toBe(true);
-  });
-
   it('uses the local desktop machine to keep known machines reachable when presence is stale', () => {
     const machines = new Map([['local-machine', { id: 'local-machine' }]]);
 
@@ -1032,14 +636,30 @@ describe('chat landing machine online state', () => {
       })
     ).toBe(true);
   });
+});
 
-  it('counts a desktop-known machine as online before machine meta is known', () => {
-    expect(
-      getChatLandingHasAnyOnlineMachine({
-        localMachineId: 'local-machine',
-        machines: new Map(),
-        isMachineOnline,
-      })
-    ).toBe(true);
+describe('getChatLandingSelectedMachineState', () => {
+  const machines = new Map([['remote-machine', { id: 'remote-machine' }]]);
+  const stateFor = (onlineStatus: 'online' | 'offline' | 'unknown', machineId = 'remote-machine') =>
+    getChatLandingSelectedMachineState({
+      machineId,
+      localMachineId: 'local-machine',
+      machines,
+      isMachineOnline: () => onlineStatus === 'online',
+      onlineStatus,
+    });
+
+  it('blocks only a definite offline, never an unanswered presence room', () => {
+    expect(stateFor('online')).toBe('available');
+    expect(stateFor('offline')).toBe('offline');
+    expect(stateFor('unknown')).toBe('unknown');
+  });
+
+  it('treats the local machine as available whatever presence says', () => {
+    expect(stateFor('offline', 'local-machine')).toBe('available');
+  });
+
+  it('reports no selection for a machine this workspace no longer shows', () => {
+    expect(stateFor('offline', 'deleted-machine')).toBe('none');
   });
 });

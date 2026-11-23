@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { Ban, Check, Plus } from 'lucide-react';
 import {
@@ -8,12 +9,80 @@ import {
   type MachineViewMeta,
 } from '@lody/shared';
 
+import { composerSurface as surface } from '@/components/shared/composer-surface';
 import { AgentRoleDetailPane } from '@/components/sessions/agent-role-detail-pane';
+import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import {
   AGENT_ROLE_UNAVAILABLE_REASON_KEYS,
   type ComposerAgentRoleItem,
 } from '@/lib/composer-agent-roles';
-import { DropdownMenuItem, DropdownMenuSeparator } from '@/ui/dropdown-menu';
+import { withClassName } from '@/lib/stylex';
+import { Menu } from '@/ui/menu';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+
+const styles = stylex.create({
+  root: {
+    display: 'flex',
+    maxHeight: '14rem',
+  },
+  twoPane: {
+    height: '14rem',
+  },
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexShrink: 0,
+    minHeight: 0,
+  },
+  listItems: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    scrollbarGutter: 'stable',
+  },
+  listCompact: { maxHeight: '14rem', width: '16rem' },
+  listTwoPane: { maxHeight: '14rem', width: '13.5rem' },
+  roleText: {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    gap: '2px',
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  /** A compact Role is two lines: the row grows past 28px and keeps its words clear. */
+  roleTextStacked: { paddingBlock: space[1] },
+  subtitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 400,
+  },
+  /** The create row holds one mark, centred on the row. */
+  centered: { display: 'flex', flexGrow: 1, justifyContent: 'center' },
+  note: { fontSize: text.captionSize, lineHeight: text.captionLeading, fontWeight: 400 },
+  noteChecking: { color: colors.tertiaryLabel },
+  noteUnavailable: { color: colors.warning },
+});
+
+/** List `13.5rem` + detail pane `16rem`. Below this, the pane cannot fit. */
+const TWO_PANE_MIN_PX = 29.5 * 16;
+
+/** Space the Role submenu may still grow into. Prefer Base UI's positioner var
+ *  (set after it positions); fall back to the box's distance to the viewport. */
+function remainingWidthForRolePanel(el: HTMLElement): number {
+  const fromVar = Number.parseFloat(getComputedStyle(el).getPropertyValue('--available-width'));
+  const host = (el.closest('[role="menu"]') as HTMLElement | null) ?? el;
+  const toViewportRight = window.innerWidth - Math.max(host.getBoundingClientRect().left, 0);
+  const candidates = [toViewportRight];
+  if (Number.isFinite(fromVar) && fromVar > 0) candidates.push(fromVar);
+  return Math.min(...candidates);
+}
 
 /**
  * The Role submenu: the Roles bound to the machine this chat will start on, and
@@ -24,6 +93,9 @@ import { DropdownMenuItem, DropdownMenuSeparator } from '@/ui/dropdown-menu';
  * beside it states the binding — agent, model, reasoning, permission,
  * instruction — because picking a Role authorizes exactly that and nothing
  * about the name says so.
+ *
+ * When the remaining viewport cannot fit that pane, the list itself carries
+ * the binding: each Role is two lines, name then agent · model.
  */
 export function ComposerAgentRolePanel({
   items,
@@ -32,6 +104,7 @@ export function ComposerAgentRolePanel({
   onSelect,
   onCreate,
   onEdit,
+  compact: compactOverride,
 }: {
   items: readonly ComposerAgentRoleItem[];
   /**
@@ -46,86 +119,179 @@ export function ComposerAgentRolePanel({
   onSelect: (roleId: AgentRoleId | null) => void;
   onCreate?: () => void;
   onEdit?: (roleId: AgentRoleId) => void;
+  /** Test/host override. Omit to size from remaining viewport. */
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Start compact so a two-pane first paint cannot overflow before Base UI
+  // writes `--available-width`. Expand only once that space fits.
+  const [detectedCompact, setDetectedCompact] = useState(compactOverride !== false);
+  const compact = compactOverride ?? detectedCompact;
   const [previewRoleId, setPreviewRoleId] = useState<AgentRoleId | null>(null);
   const previewItem =
     items.find((item) => item.role.id === previewRoleId) ??
     items.find((item) => item.role.id === selectedRoleId) ??
     items[0];
+
+  useLayoutEffect(() => {
+    if (compactOverride != null) {
+      setDetectedCompact(compactOverride);
+      return undefined;
+    }
+    const el = rootRef.current;
+    if (!el) return undefined;
+    let frames = 0;
+    let raf = 0;
+    const measure = () => {
+      setDetectedCompact(remainingWidthForRolePanel(el) < TWO_PANE_MIN_PX);
+    };
+    const tick = () => {
+      measure();
+      frames += 1;
+      const positioned = getComputedStyle(el).getPropertyValue('--available-width');
+      if (frames < 16 && (!positioned || frames < 4)) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    tick();
+    window.addEventListener('resize', measure);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', measure);
+    };
+  }, [compactOverride]);
+
   // The Role row turns into a create action instead of opening this submenu
   // when the machine has no Roles, so an empty list never reaches here.
   if (!previewItem) return null;
 
   return (
-    <div className="flex">
-      <div className="scrollbar-pro h-[17rem] w-[13.5rem] shrink-0 overflow-y-auto py-1 [scrollbar-gutter:stable]">
-        {/* Leaving a Role is its own row rather than a second click on the
+    <div ref={rootRef} {...stylex.props(styles.root, !compact && styles.twoPane)}>
+      <div {...stylex.props(styles.list, compact ? styles.listCompact : styles.listTwoPane)}>
+        {/* The Role rows scroll independently; Create stays at the pane's bottom. */}
+        <div {...withClassName(stylex.props(styles.listItems), 'scrollbar-pro')}>
+          {/* Leaving a Role is its own row rather than a second click on the
             selected one: it clears the NAME, not the configuration, and that is
             not the same gesture as picking. */}
-        <DropdownMenuItem
-          role="menuitemradio"
-          aria-checked={selectedRoleId === null}
-          onPointerEnter={() => setPreviewRoleId(null)}
-          onSelect={() => onSelect(null)}
-        >
-          <Ban className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate">{t('chat.runConfig.roles.none', 'None')}</span>
-          {selectedRoleId === null ? (
-            <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          ) : null}
-        </DropdownMenuItem>
-        {items.map((item) => {
-          const { role, availability } = item;
-          return (
-            /* The pointer handler rides a wrapper, not the item: a disabled row
+          <Menu.Item
+            role="menuitemradio"
+            aria-checked={selectedRoleId === null}
+            onPointerEnter={() => {
+              if (!compact) setPreviewRoleId(null);
+            }}
+            onClick={() => onSelect(null)}
+            icon={Ban}
+            endContent={
+              selectedRoleId === null ? (
+                <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
+              ) : null
+            }
+          >
+            {t('chat.runConfig.roles.none', 'None')}
+          </Menu.Item>
+          {items.map((item) => {
+            const { role, availability } = item;
+            return (
+              /* The pointer handler rides a wrapper, not the item: a disabled row
                has `pointer-events-none`, and a Role you cannot pick is still a
                Role whose configuration you may want to read. */
-            <div key={role.id} onPointerEnter={() => setPreviewRoleId(role.id)}>
-              <DropdownMenuItem
-                disabled={availability.kind === 'unavailable'}
-                role="menuitemradio"
-                aria-checked={role.id === selectedRoleId}
-                className="items-start gap-2"
-                onFocus={() => setPreviewRoleId(role.id)}
-                onSelect={() => onSelect(role.id)}
+              <div
+                key={role.id}
+                onPointerEnter={() => {
+                  if (!compact) setPreviewRoleId(role.id);
+                }}
               >
-                <span className="flex h-4 shrink-0 items-center text-sm leading-none">
-                  <span aria-hidden="true">{getAgentRoleEmoji(role)}</span>
-                </span>
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate leading-tight">{role.name}</span>
-                  <RoleAvailabilityNote availability={availability} />
-                </span>
-                {role.id === selectedRoleId ? (
-                  <span className="flex h-4 shrink-0 items-center">
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                <Menu.Item
+                  disabled={availability.kind !== 'available'}
+                  role="menuitemradio"
+                  aria-checked={role.id === selectedRoleId}
+                  onFocus={() => {
+                    if (!compact) setPreviewRoleId(role.id);
+                  }}
+                  onClick={() => onSelect(role.id)}
+                  icon={
+                    <span {...stylex.props(surface.emoji)} aria-hidden="true">
+                      {getAgentRoleEmoji(role)}
+                    </span>
+                  }
+                  endContent={
+                    role.id === selectedRoleId ? (
+                      <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
+                    ) : null
+                  }
+                >
+                  <span {...stylex.props(styles.roleText, compact && styles.roleTextStacked)}>
+                    <span {...stylex.props(surface.truncate)}>{role.name}</span>
+                    {compact ? <RoleBindingSubtitle item={item} machine={machine} /> : null}
+                    <RoleAvailabilityNote availability={availability} />
                   </span>
-                ) : null}
-              </DropdownMenuItem>
-            </div>
-          );
-        })}
+                </Menu.Item>
+              </div>
+            );
+          })}
+        </div>
         {onCreate ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onCreate}>
-              <Plus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">
-                {t('chat.runConfig.roles.create', 'New role')}
-              </span>
-            </DropdownMenuItem>
-          </>
+          <Menu.Item
+            onClick={onCreate}
+            aria-label={t(
+              'chat.runConfig.roles.createFromSettings',
+              'Create role from current settings'
+            )}
+            title={t(
+              'chat.runConfig.roles.createFromSettings',
+              'Create role from current settings'
+            )}
+          >
+            <span {...stylex.props(styles.centered)}>
+              <Plus {...stylex.props(surface.glyph14, surface.hint)} aria-hidden="true" />
+            </span>
+          </Menu.Item>
         ) : null}
       </div>
-      <AgentRoleDetailPane
-        role={previewItem.role}
-        agentConfig={previewItem.agentConfig}
-        machine={machine}
-        onEdit={onEdit}
-      />
+      {compact ? null : (
+        <AgentRoleDetailPane
+          role={previewItem.role}
+          agentConfig={previewItem.agentConfig}
+          machine={machine}
+          availability={previewItem.availability}
+          onEdit={onEdit}
+          className="h-auto min-h-0 max-h-[14rem]"
+        />
+      )}
     </div>
   );
+}
+
+/** Compact-row second line: the agent and model this Role would run. */
+function RoleBindingSubtitle({
+  item,
+  machine,
+}: {
+  item: ComposerAgentRoleItem;
+  machine?: MachineViewMeta | null;
+}) {
+  const { t } = useTranslation();
+  const { role, agentConfig } = item;
+  const selectorOptions = useAcpSelectorOptions(
+    agentConfig
+      ? {
+          configId: role.agentConfigId,
+          cliType: agentConfig.cliType,
+          agentType: agentConfig.agentType,
+          runtimeOverrides: agentConfig.runtimeOverrides,
+          machine: machine ?? null,
+        }
+      : undefined
+  );
+  const modelId = role.runConfig.modelId;
+  const modelLabel = modelId
+    ? (selectorOptions.modelOptions.find((option) => option.value === modelId)?.label ?? modelId)
+    : null;
+  const agentName = agentConfig?.name ?? t('settings.agentRoles.unknownAgentConfig');
+  const parts = [agentName, modelLabel].filter((part): part is string => Boolean(part));
+  if (parts.length === 0) return null;
+  return <span {...stylex.props(styles.subtitle)}>{parts.join(' · ')}</span>;
 }
 
 /**
@@ -142,13 +308,13 @@ function RoleAvailabilityNote({ availability }: { availability: AgentRoleAvailab
   if (availability.kind === 'available') return null;
   if (availability.kind === 'unknown') {
     return (
-      <span className="text-[10.5px] leading-snug text-muted-foreground/80">
+      <span {...stylex.props(styles.note, styles.noteChecking)}>
         {t('settings.agentRoles.status.checking')}
       </span>
     );
   }
   return (
-    <span className="text-[10.5px] leading-snug text-status-warning">
+    <span {...stylex.props(styles.note, styles.noteUnavailable)}>
       {t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason])}
     </span>
   );

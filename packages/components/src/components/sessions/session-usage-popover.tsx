@@ -1,24 +1,29 @@
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { ArrowLeftRight } from 'lucide-react';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
-import { getServerNow, type SessionContextWindowUsage } from '@lody/shared';
-import { Loader2 } from 'lucide-react';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
+import { getServerNow, type AgentConfigId, type SessionContextWindowUsage } from '@lody/shared';
+import { Spinner } from '@lody/ui/spinner';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   CodexResetForecastDialogHost,
   CodexResetForecastUsageRow,
 } from '@/components/codex-reset/codex-reset-forecast-entry';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Progress } from '@/ui/progress';
-import { Separator } from '@/ui/separator';
+import { Popover } from '@lody/ui/popover';
+import { Progress } from '@lody/ui/progress';
+import { Separator } from '@lody/ui/separator';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
 import {
   FIVE_HOUR_WINDOW_SECONDS,
   SEVEN_DAY_WINDOW_SECONDS,
+  formatAgentRateLimitWindowLabel,
   formatRateLimitWindowShortLabel,
   getAgentRateLimitWindows,
   getContextWindowUsageData,
@@ -27,9 +32,11 @@ import {
 } from '@/lib/session-usage';
 
 export type SessionUsagePopoverProps = {
+  onRefreshQuota?: () => void;
   contextWindowUsage?: SessionContextWindowUsage | null;
   rateLimits?: MachineRateLimits | null;
   agentType: string;
+  agentConfigId?: AgentConfigId | null;
   modelId?: string | null;
   modelLabel?: string | null;
   isContextCompacting?: boolean;
@@ -45,9 +52,11 @@ export type SessionUsagePopoverProps = {
 };
 
 export const SessionUsagePopover = memo(function SessionUsagePopover({
+  onRefreshQuota,
   contextWindowUsage,
   rateLimits,
   agentType,
+  agentConfigId,
   modelId,
   modelLabel,
   isContextCompacting = false,
@@ -57,10 +66,14 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
 }: SessionUsagePopoverProps) {
   const { t, i18n } = useTranslation();
   const [isForecastOpen, setIsForecastOpen] = useState(false);
-  const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   const intlLocale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const context = getContextWindowUsageData(contextWindowUsage);
-  const rateLimit = resolveAgentRateLimitForModel({ rateLimits, agentType, modelId });
+  const rateLimit = resolveAgentRateLimitForModel({
+    rateLimits,
+    agentType,
+    agentConfigId,
+    modelId,
+  });
   const rateLimitWindows = rateLimit
     ? getAgentRateLimitWindows(rateLimit.limits).sort(
         (left, right) => (right.windowDurationSeconds ?? 0) - (left.windowDurationSeconds ?? 0)
@@ -69,27 +82,17 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
   const hasRateLimit = rateLimitWindows.length > 0;
   const wallet = rateLimit?.limits.wallet ?? null;
   const hasRateLimitDetails = rateLimit !== null;
+  const triggerRateLimitWindow =
+    rateLimitWindows.find((window) => window.windowDurationSeconds === FIVE_HOUR_WINDOW_SECONDS) ??
+    rateLimitWindows[0];
   const triggerValue =
     context?.usedPercentage ??
-    (showRateLimitWithoutContext ? rateLimitWindows[0]?.usedPercent : undefined);
+    (showRateLimitWithoutContext ? triggerRateLimitWindow?.usedPercent : undefined);
   const resolvedModelLabel =
     modelLabel?.trim() ||
     rateLimit?.limits.limitName?.trim() ||
     modelId?.trim() ||
     t('sessions.usage.modelFallback', 'Model usage');
-
-  const formatReset = useCallback(
-    (resetAtEpochSeconds: number | null | undefined): string | null => {
-      if (!resetAtEpochSeconds) return null;
-      const epochMs = resetAtEpochSeconds * 1_000;
-      const distance = formatDistance(new Date(epochMs), new Date(getServerNow()), {
-        addSuffix: true,
-        locale,
-      });
-      return t('machines.rateLimits.resetsAt', 'Resets {{time}}', { time: distance });
-    },
-    [locale, t]
-  );
 
   const formatWindowLabel = useCallback(
     (windowDurationSeconds: number | null): string => {
@@ -118,33 +121,38 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
 
   return (
     <>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'h-7 select-none gap-1 rounded-md px-1.5 font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring',
-              className
-            )}
-            aria-label={triggerLabel}
-            title={triggerLabel}
-          >
-            {isContextCompacting ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
-                <span className="text-[11px]">{t('sessions.usage.compacting', 'Compacting')}</span>
-              </>
-            ) : (
-              <>
-                <UsageRing value={triggerValue ?? 0} />
-                <span className="font-mono text-[11px] tabular-nums">{roundedTriggerValue}%</span>
-              </>
-            )}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
+      <Popover.Root
+        onOpenChange={(open) => {
+          if (open) onRefreshQuota?.();
+        }}
+      >
+        <Popover.Trigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              className={cn('select-none focus-visible:ring-1 focus-visible:ring-ring', className)}
+              aria-label={triggerLabel}
+              title={triggerLabel}
+            >
+              {isContextCompacting ? (
+                <>
+                  <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="text-[11px]">
+                    {t('sessions.usage.compacting', 'Compacting')}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <UsageRing value={triggerValue ?? 0} />
+                  <span className="font-mono text-[11px] tabular-nums">{roundedTriggerValue}%</span>
+                </>
+              )}
+            </Button>
+          }
+        />
+        <Popover.Content
           side="top"
           align="start"
           sideOffset={8}
@@ -157,7 +165,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 {t('sessions.usage.context', 'Context')}
               </div>
               <div className="flex items-center gap-2 text-xs text-foreground">
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span>{t('sessions.usage.compactingContext', 'Compacting context')}</span>
               </div>
             </div>
@@ -173,7 +181,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
           ) : null}
 
           {(context || isContextCompacting) && hasRateLimitDetails ? (
-            <Separator className="my-2.5 bg-border/60" />
+            <Separator className="my-2.5" />
           ) : null}
 
           {hasRateLimitDetails ? (
@@ -185,9 +193,17 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 rateLimitWindows.map((window, index) => (
                   <UsageMeter
                     key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                    label={formatWindowLabel(window.windowDurationSeconds)}
+                    label={formatAgentRateLimitWindowLabel(
+                      window,
+                      formatWindowLabel(window.windowDurationSeconds),
+                      t
+                    )}
                     value={window.usedPercent}
-                    detail={formatReset(window.resetsAtEpochSeconds)}
+                    detail={
+                      window.resetsAtEpochSeconds ? (
+                        <ResetTime epochSeconds={window.resetsAtEpochSeconds} />
+                      ) : null
+                    }
                   />
                 ))
               ) : (
@@ -205,7 +221,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                       {t('sessions.usage.extraBalance', 'Extra usage balance')}
                     </span>
                     <span className="font-mono tabular-nums">
-                      {formatMoney(wallet.balanceCents, wallet.currency, i18n.language)}
+                      {formatMoney(wallet.balanceCents, wallet.currency, intlLocale)}
                     </span>
                   </div>
                   <div className="flex justify-between gap-3">
@@ -213,12 +229,12 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                       {t('sessions.usage.monthlySpend', 'Monthly spend')}
                     </span>
                     <span className="font-mono tabular-nums">
-                      {formatMoney(wallet.monthlyUsedCents, wallet.currency, i18n.language)}
+                      {formatMoney(wallet.monthlyUsedCents, wallet.currency, intlLocale)}
                       {wallet.monthlyChargeLimitEnabled
                         ? ` / ${formatMoney(
                             wallet.monthlyChargeLimitCents,
                             wallet.currency,
-                            i18n.language
+                            intlLocale
                           )}`
                         : ''}
                     </span>
@@ -234,8 +250,8 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
             enabled={showCodexResetForecast}
             onOpen={() => setIsForecastOpen(true)}
           />
-        </PopoverContent>
-      </Popover>
+        </Popover.Content>
+      </Popover.Root>
       {/* Hosted outside the popover on purpose: opening the dialog dismisses the
           popover, which would unmount a dialog rendered inside its content. */}
       <CodexResetForecastDialogHost
@@ -297,7 +313,7 @@ function UsageMeter({
 }: {
   label: string;
   value: number;
-  detail?: string | null;
+  detail?: ReactNode;
 }) {
   const { t } = useTranslation();
   const roundedValue = Math.round(value);
@@ -313,14 +329,64 @@ function UsageMeter({
       </div>
       <Progress
         value={value}
+        tone="neutral"
         aria-label={`${label}: ${valueLabel}`}
-        className="mt-1 h-1 bg-foreground/10 [&>div]:bg-foreground/55"
+        className="mt-1"
       />
       {detail ? (
         <div className="mt-1 truncate text-[10px] leading-3.5 text-muted-foreground/75">
           {detail}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const resetTimeStyles = stylex.create({
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[1],
+  },
+  text: {
+    minWidth: 0,
+    whiteSpace: 'normal',
+  },
+});
+
+function ResetTime({ epochSeconds }: { epochSeconds: number }) {
+  const { t, i18n } = useTranslation();
+  const [absolute, setAbsolute] = useState(false);
+  const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const date = new Date(epochSeconds * 1_000);
+  const time = absolute
+    ? new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language), {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(date)
+    : formatDistance(date, new Date(getServerNow()), { addSuffix: true, locale });
+  const resetTime = locale === zhCN && /^\d/.test(time) ? ` ${time}` : time;
+  const toggleLabel = absolute
+    ? t('sessions.usage.showRelativeTime', 'Show relative time')
+    : t('sessions.usage.showAbsoluteTime', 'Show absolute time');
+
+  return (
+    <div {...stylex.props(resetTimeStyles.row)}>
+      <span {...stylex.props(resetTimeStyles.text)}>
+        {t('machines.rateLimits.resetsAt', 'Resets {{time}}', { time: resetTime })}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="mini"
+        icon
+        aria-label={toggleLabel}
+        title={toggleLabel}
+        onClick={() => setAbsolute((value) => !value)}
+      >
+        <ArrowLeftRight size={12} aria-hidden="true" />
+      </Button>
     </div>
   );
 }

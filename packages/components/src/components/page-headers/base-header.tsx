@@ -1,6 +1,7 @@
+import { E2eeDeviceRequestsButton } from '@/components/pages/e2ee-automatic-pairing';
 import type { CSSProperties, ReactNode } from 'react';
 import { Menu } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useSetAtom } from 'jotai';
 import { toggleMobileDrawerAtom } from '../../atoms';
@@ -50,7 +51,7 @@ export function BaseHeader({
       {isMobile && !hideMenuButton && (
         <Button
           variant="ghost"
-          size="icon"
+          icon
           className="mr-2 md:hidden"
           onClick={(e) => {
             // Remove focus to avoid aria-hidden warnings in some browsers.
@@ -75,6 +76,8 @@ export function BaseHeader({
       >
         {title}
       </h2>
+
+      {isMobile && <E2eeDeviceRequestsButton className="ml-2 shrink-0" />}
 
       {/* Actions */}
       {actions && <div className="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">{actions}</div>}

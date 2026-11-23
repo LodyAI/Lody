@@ -27,8 +27,8 @@ export interface SessionResolveConflictsAction {
 /**
  * Keyed by session id. `null` when no chat interface is publishing for that
  * session (e.g. the PR tab is open without its owning session mounted, or in
- * Storybook / the landing demo), in which case the PR-tab button stays a plain
- * disabled indicator.
+ * Storybook / the landing demo), in which case the PR tab shows its disabled
+ * merge and leaves the conflict to the merge card.
  */
 export const resolveConflictsActionAtomFamily = atomFamily((_sessionId: string) =>
   atom<SessionResolveConflictsAction | null>(null)

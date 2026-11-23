@@ -1,0 +1,211 @@
+// @vitest-environment jsdom
+
+import { act, createElement, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { Copy, ExternalLink, FolderOpen } from 'lucide-react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  AgentFileLinkContextMenuItemsContext,
+  MarkdownRenderer,
+} from '../src/components/ai-gui/markdown-renderer';
+import { SessionSearchProvider } from '../src/components/sessions/session-search-context';
+import type { MarkdownAgentFileLinkMenuItem } from '../src/hooks/use-session-file-actions';
+import { InteractionArmedProvider } from '../src/ui/interaction-arm';
+import { FileLinkCandidateDialog } from '../src/components/sessions/file-link-candidate-dialog';
+import { initI18n } from '../src/i18n';
+
+describe('markdown-agent-file-link-menu', () => {
+  (
+    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+
+  const FILE_LINK = '[submit.ts](/Users/dev/project/src/ledger/submit.ts:366)';
+
+  describe('agent Markdown file-link context menu', () => {
+    let root: Root | undefined;
+    let container: HTMLDivElement | undefined;
+
+    beforeEach(() => {
+      container = document.createElement('div');
+      document.body.append(container);
+      root = createRoot(container);
+    });
+
+    afterEach(async () => {
+      await act(async () => root?.unmount());
+      root = undefined;
+      container?.remove();
+      container = undefined;
+      document.querySelectorAll('[role="menu"]').forEach((node) => node.remove());
+    });
+
+    const render = async (
+      getItems: (href: string) => readonly MarkdownAgentFileLinkMenuItem[],
+      onAgentFileLinkClick = vi.fn()
+    ) => {
+      await act(async () => {
+        root?.render(
+          createElement(
+            AgentFileLinkContextMenuItemsContext.Provider,
+            { value: getItems },
+            createElement(MarkdownRenderer, { text: FILE_LINK, onAgentFileLinkClick })
+          )
+        );
+      });
+      const link = container?.querySelector('button[title]');
+      if (!link) throw new Error('Markdown file link did not render');
+      return { link, onAgentFileLinkClick };
+    };
+
+    it('keeps left-click navigation and exposes the local menu on right-click', async () => {
+      const onCopy = vi.fn();
+      const onOpen = vi.fn();
+      const onReveal = vi.fn();
+      const { link, onAgentFileLinkClick } = await render(() => [
+        { kind: 'action', id: 'copy-path', label: 'Copy Path', icon: Copy, run: onCopy },
+        { kind: 'action', id: 'open-file', label: 'Open File', icon: ExternalLink, run: onOpen },
+        { kind: 'action', id: 'reveal', label: 'Show in Finder', icon: FolderOpen, run: onReveal },
+      ]);
+
+      await act(async () => {
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      });
+      expect(onAgentFileLinkClick).toHaveBeenCalledWith(
+        '/Users/dev/project/src/ledger/submit.ts:366'
+      );
+
+      await act(async () => {
+        link.dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            clientX: 20,
+            clientY: 20,
+          })
+        );
+        await Promise.resolve();
+      });
+      expect(document.body.textContent).toContain('Copy Path');
+      expect(document.body.textContent).toContain('Open File');
+      expect(document.body.textContent).toContain('Show in Finder');
+    });
+
+    it('arms a file link beside search highlights without losing React-owned text', async () => {
+      const items = () =>
+        [
+          { kind: 'action', id: 'copy-path', label: 'Copy Path', icon: Copy, run: vi.fn() },
+        ] as const;
+      const search = {
+        isOpen: true,
+        query: 'ledger',
+        activeBlockId: 'block',
+        activeResultId: 'r1',
+        blockMatches: new Map([
+          [
+            'block',
+            {
+              blockId: 'block',
+              resultIds: ['r0', 'r1'],
+              activeResultId: 'r1',
+              activeOccurrenceIndex: 1,
+            },
+          ],
+        ]),
+        hasMatchedPrefix: () => true,
+        hasActivePrefix: () => true,
+      };
+      const renderRow = (armed: boolean, isOpen = true) =>
+        root?.render(
+          createElement(
+            SessionSearchProvider,
+            { value: { ...search, isOpen } },
+            createElement(
+              InteractionArmedProvider,
+              { value: armed },
+              createElement(
+                AgentFileLinkContextMenuItemsContext.Provider,
+                { value: items },
+                createElement(MarkdownRenderer, {
+                  text: '1. [ledger/submit.ts](/Users/dev/project/src/ledger/submit.ts:366) posts the ledger entry',
+                  searchBlockId: 'block',
+                })
+              )
+            )
+          )
+        );
+
+      await act(async () => renderRow(false));
+      const marks = () =>
+        [...(container?.querySelectorAll('mark[data-session-search-mark="true"]') ?? [])].map(
+          (mark) => mark.getAttribute('data-search-result-id')
+        );
+      expect(marks()).toEqual(['r0', 'r1']);
+
+      await act(async () => renderRow(true));
+      expect(container?.querySelector('li')?.textContent).toBe(
+        'ledger/submit.ts posts the ledger entry'
+      );
+      expect(container?.querySelector('mark[data-search-result-id="r1"]')?.textContent).toBe(
+        'ledger'
+      );
+
+      await act(async () => renderRow(true, false));
+      expect(marks()).toEqual([]);
+      expect(container?.querySelector('li')?.textContent).toBe(
+        'ledger/submit.ts posts the ledger entry'
+      );
+    });
+  });
+});
+
+describe('file-link-candidate-dialog', () => {
+  const candidates = ['main', 'nested'].map((name) => ({
+    path: `${name}/docs/guide.md`,
+    absolutePath: `/repo/${name}/docs/guide.md`,
+    worktreeRoot: `/repo/${name}`,
+    branch: `refs/heads/${name}`,
+    head: 'a'.repeat(40),
+    mtimeMs: 1000,
+  }));
+
+  it.each(['select', 'cancel'])(
+    'shows both identities and handles %s without guessing',
+    async (action) => {
+      await initI18n();
+      const host = document.createElement('div');
+      document.body.append(host);
+      const root = createRoot(host);
+      function Harness() {
+        const [selected, setSelected] = useState<string | null>(null);
+        return selected === null ? (
+          <FileLinkCandidateDialog
+            candidates={candidates}
+            onSelect={(candidate) => setSelected(candidate.path)}
+            onClose={() => setSelected('cancelled')}
+          />
+        ) : (
+          <output>{selected}</output>
+        );
+      }
+      try {
+        await act(async () => root.render(<Harness />));
+        expect(document.body.textContent).toContain('/repo/main/docs/guide.md');
+        expect(document.body.textContent).toContain('/repo/nested/docs/guide.md');
+        expect(host.querySelector('output')).toBeNull();
+        const buttons = [...document.querySelectorAll('button')];
+        const button =
+          action === 'select'
+            ? buttons.filter((item) => item.textContent === 'Open this file')[1]
+            : buttons.find((item) => item.textContent === 'Cancel');
+        if (!button) throw new Error('Missing file choice action');
+        await act(async () => button.click());
+        expect(host.querySelector('output')?.textContent).toBe(
+          action === 'select' ? 'nested/docs/guide.md' : 'cancelled'
+        );
+      } finally {
+        await act(async () => root.unmount());
+        host.remove();
+      }
+    }
+  );
+});

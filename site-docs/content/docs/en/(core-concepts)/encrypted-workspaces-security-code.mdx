@@ -1,0 +1,66 @@
+---
+title: Security Code
+description: How the security code in Lody end-to-end encrypted workspaces works - what it is computed from, what a match or mismatch means, and what it cannot prove.
+---
+
+# Security Code
+
+The security code is a string of digits that confirms **you and a teammate hold the same [permission ledger](/docs/encrypted-workspaces-ledger)**: the same members, the same devices and the same authorizations.
+
+If your code matches what other members and your other devices show, the workspace member and authorization information is consistent.
+
+## Why it exists
+
+Every ledger record is signed, so the server cannot forge one. It could, however, **show different people different versions of the ledger**, for example hiding from you the record that revoked a device. You cannot detect that by looking only at your own copy.
+
+Comparing the codes two people compute independently reveals it.
+
+## What it is computed from
+
+The code is a digest over all of the following together:
+
+- The protocol version and purpose
+- The workspace and its first record (genesis)
+- The ledger's current position (how many records) and its last record
+- **The complete current authorization state**: every member, role, device and public key
+
+Comparing only the last record is not enough: an altered state can come with a correct-looking last record. That is why the actual authorization state is part of the code.
+
+The QR code also carries the ledger position, so a scan can tell which side is behind.
+
+## What a result means
+
+| Result | Meaning | What to do |
+| --- | --- | --- |
+| They match | You accepted the same members, devices and authorizations at the same position | Nothing |
+| One side is out of date | One ledger is older; everything up to that point is the same | Both refresh and compare again |
+| They differ | Same position, different content | Do not invite or approve anyone; tell the workspace owner |
+
+A different position is not an attack; usually one side simply has not synced yet.
+
+## What it cannot prove
+
+- **Who the other person is**: it only shows your records match. Make sure you are comparing with the teammate you know.
+- **That every past change was sensible**: it shows you accepted the same state, not that each step in it should have happened.
+- **That you are safe from now on**: it covers that position at that moment. Once new records arrive the code changes; compare again when it matters.
+- **Much, if you only compare with whoever invited you**: if that person and the server colluded, a match with them proves little. Compare with at least one other member.
+
+## How to compare
+
+<Steps>
+<Step>
+
+Both of you open Security code & history in the encryption console and refresh.
+
+</Step>
+<Step>
+
+Choose Compare with a teammate and scan the QR code on their screen, or read the groups of digits aloud.
+
+</Step>
+<Step>
+
+Act on the result. In person, on video or by phone all work; do not send the code to each other only through Lody itself.
+
+</Step>
+</Steps>

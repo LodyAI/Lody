@@ -1,52 +1,104 @@
-import { type ReactNode } from 'react';
-import { useAtomValue } from 'jotai';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { Suspense, lazy, memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { useReducedMotion } from 'framer-motion';
 import { useLocation } from '@tanstack/react-router';
 import { LoroAppSidebar } from './loro-app-sidebar';
+import { DEFAULT_DESKTOP_SIDEBAR_WIDTH, MAX_DESKTOP_SIDEBAR_WIDTH } from './loro-sidebar';
 import { ErrorBoundary } from './error-boundary';
 import { useKeyboardNavigation } from '../hooks/use-keyboard-navigation';
-import { focusLayerAtom, sidebarCollapsedAtom, sidebarLastWidthAtom } from '../atoms';
+import { useIsCompactDesktop } from '../hooks/use-mobile';
+import {
+  compactDesktopLayoutAtom,
+  navigationSidebarVisibleAtom,
+  sidebarCollapsedAtom,
+  sidebarLastWidthAtom,
+  WORKSPACE_FOCUS_SCOPES,
+} from '../atoms';
+import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace-layout-utils';
+import { FocusScope } from '@/ui/focus-scope';
+import { WindowDragStrip } from '@/ui/window-drag-region';
+import { getNavigationSidebarMinWidth } from '@/lib/boot-shell-script';
 import { cn } from '@/lib/utils';
-import { isWindowsElectronRenderer, useElectronFullscreen } from '@/lib/electron';
-import { isSettingsRoute, NATIVE_KEYBOARD_OFFSET_CLASS } from './workspace-layout-utils';
+import { CompactNavigationDialog } from './compact-navigation-dialog';
+import { WorkspaceCard } from './workspace-frame';
+import { todayFeatureEnabledAtom } from '@/atoms/settings';
+import { todayPinnedAtom } from '@/atoms/sidebar-state';
 
-// LoroSidebar's default expanded width (see loro-sidebar.tsx `defaultWidth`);
-// `sidebarLastWidthAtom` stores 0 until the user resizes, so fall back to this.
-const DEFAULT_SIDEBAR_WIDTH = 280;
-// Extra px the sidebar card is inset by (`ml-2` + `mr-1` in loro-app-sidebar),
-// added to the slide distance so it clears fully off the left edge.
-const SIDEBAR_GUTTER = 12;
+const TodayPinnedColumn = lazy(async () => {
+  const module = await import('./today/today-pinned-column');
+  return { default: module.TodayPinnedColumn };
+});
+import { useVerticalDivision } from './mobile/use-vertical-division';
+
+const DesktopSidebarContent = memo(function DesktopSidebarContent({
+  pathname,
+  fitDivision,
+}: {
+  pathname: string;
+  fitDivision: boolean;
+}) {
+  return (
+    <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
+      <LoroAppSidebar
+        pauseSidebarSourcesWhenHidden
+        overlay={fitDivision}
+        className={cn('h-full transition-shadow duration-150', fitDivision && 'w-full')}
+      />
+    </ErrorBoundary>
+  );
+});
 
 export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // Only the pathname drives this layout (settings branch + error boundary
   // resets), so search-only navigations (dialogs, panels) don't re-render the
   // whole workspace shell.
   const pathname = useLocation({ select: (l) => l.pathname });
-  const focusLayer = useAtomValue(focusLayerAtom);
-  const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
+  const compact = useIsCompactDesktop();
+  const todayEnabled = useAtomValue(todayFeatureEnabledAtom);
+  const todayPinned = useAtomValue(todayPinnedAtom);
+  const todayColumnShown = !compact && todayEnabled && todayPinned;
+  const division = useVerticalDivision();
+  // Effective on-screen visibility: compact may auto-suppress the sidebar even
+  // while the persisted preference says open — see atoms/layout-state.ts.
+  const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
+  // The viewport hook knows the window is compact one commit before the layout bridge
+  // syncs that into atom state, and only the synced state applies the compact
+  // auto-hide. Until then the navigation would mount open and close again before its
+  // opening frame, an exit Base UI never finishes. Open it only once they agree.
+  const compactSynced = useAtomValue(compactDesktopLayoutAtom);
+  const compactNavigationOpen = compact && compactSynced && sidebarVisible;
+  const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const sidebarLastWidth = useAtomValue(sidebarLastWidthAtom);
   const shouldReduceMotion = useReducedMotion();
-  const isElectronFullscreen = useElectronFullscreen();
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const [layoutRoot, setLayoutRoot] = useState<HTMLDivElement | null>(null);
+  const wasSidebarVisibleRef = useRef(sidebarVisible);
 
+  useLayoutEffect(() => {
+    const wasVisible = wasSidebarVisibleRef.current;
+    wasSidebarVisibleRef.current = sidebarVisible;
+    if (!wasVisible || sidebarVisible || compact || isSettingsRoute(pathname)) return;
+    const active = document.activeElement;
+    // Setting inert can move focus to <body> before layout effects run. A
+    // sidebar popover can also have focus in a portal outside this subtree.
+    // Preserve focus in another panel or a modal, but dismiss sidebar popovers.
+    const inOtherScope =
+      active instanceof Element &&
+      active.closest('[data-focus-scope]') &&
+      !sidebarRef.current?.contains(active);
+    const inModal = active instanceof Element && active.closest('[aria-modal="true"]');
+    if (!inOtherScope && !inModal) {
+      contentRef.current?.focus({ preventScroll: true });
+    }
+  }, [compact, pathname, sidebarVisible]);
   useKeyboardNavigation();
-
-  // On Windows the native title bar is hidden and the caption buttons are an
-  // OS overlay at the top-right; reserve the drag band behind them (36px,
-  // matching MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT in
-  // apps/electron/src/main/window-theme.ts and the drag strip in
-  // routes/__root.tsx) so page content never sits under the buttons.
-  const windowsTitleBarPadding =
-    isWindowsElectronRenderer() && !isElectronFullscreen ? 'pt-9' : undefined;
 
   if (isSettingsRoute(pathname)) {
     return (
-      <div
-        className={cn(
-          'flex h-svh w-full overflow-hidden bg-background',
-          NATIVE_KEYBOARD_OFFSET_CLASS,
-          windowsTitleBarPadding
-        )}
-      >
+      <div className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true })}>
+        <WindowDragStrip />
         <div className="min-h-0 flex-1 overflow-hidden">
           <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
             {children}
@@ -56,51 +108,90 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  // Slide the sidebar in/out horizontally on collapse/expand. Animating
-  // `marginLeft` (not width/transform) both slides the card off the left edge —
-  // clipped by this row's `overflow-hidden` — and reclaims the flex space so the
-  // content pane grows to fill. AnimatePresence keeps the sidebar mounted for the
-  // exit slide, then unmounts it. marginLeft stays 0 while expanded, so live
-  // resize never fights the animation.
-  const sidebarSlideWidth =
-    (sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_SIDEBAR_WIDTH) + SIDEBAR_GUTTER;
-
+  // Keep the sidebar mounted while its transform and flex footprint transition
+  // together. The margin transition lets the content pane resize smoothly;
+  // retaining the sidebar avoids rebuilding every session row on each Cmd+B.
+  // LoroSidebar clamps its persisted default. The hidden wrapper must release
+  // that same actual width, or an old out-of-range preference leaves a gap.
+  const sidebarSlideWidth = Math.min(
+    Math.max(
+      sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_DESKTOP_SIDEBAR_WIDTH,
+      getNavigationSidebarMinWidth()
+    ),
+    MAX_DESKTOP_SIDEBAR_WIDTH
+  );
+  // Only use a division when each side can hold its own usable surface.
+  const fold =
+    !compact &&
+    division &&
+    division.left >= 240 &&
+    division.viewportWidth - division.left - division.width >= 240
+      ? division
+      : null;
+  const visibleSidebarWidth = fold?.left ?? sidebarSlideWidth;
   return (
+    // `bg-sidebar` after the base class: the sidebar's colour is the window's ground.
     <div
-      className={cn(
-        'flex h-svh w-full overflow-hidden bg-background',
-        NATIVE_KEYBOARD_OFFSET_CLASS,
-        windowsTitleBarPadding
-      )}
+      ref={setLayoutRoot}
+      className={cn(getWebWorkspaceLayoutRootClassName(), 'relative bg-sidebar')}
     >
-      <AnimatePresence initial={false}>
-        {!sidebarCollapsed && (
-          <motion.div
-            key="app-sidebar"
-            className="h-full shrink-0"
-            initial={{ marginLeft: -sidebarSlideWidth }}
-            animate={{ marginLeft: 0 }}
-            exit={{ marginLeft: -sidebarSlideWidth }}
-            transition={{ duration: shouldReduceMotion ? 0 : 0.22, ease: [0.32, 0.72, 0, 1] }}
-          >
-            <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
-              <LoroAppSidebar
-                className={cn(
-                  'h-full transition-shadow duration-150',
-                  focusLayer === 'L1' && 'ring-2 ring-ring/30 ring-inset rounded-2xl'
-                )}
-              />
-            </ErrorBoundary>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      <div className="flex min-w-0 flex-1 overflow-hidden">
-        <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
-          <div className="flex h-full min-w-0 w-full flex-1 flex-col overflow-hidden">
-            {children}
-          </div>
+      {compact ? (
+        <CompactNavigationDialog
+          open={compactNavigationOpen}
+          onOpenChange={(open) => setSidebarCollapsed(!open)}
+          container={layoutRoot}
+          returnFocus={returnFocusRef}
+        >
+          <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
+            <LoroAppSidebar overlay className="h-full border-r border-sidebar-border shadow-xl" />
+          </ErrorBoundary>
+        </CompactNavigationDialog>
+      ) : (
+        <div
+          ref={sidebarRef}
+          className="relative z-10 h-full shrink-0"
+          style={{
+            width: fold ? visibleSidebarWidth : undefined,
+            transform: `translateX(${sidebarVisible ? 0 : -visibleSidebarWidth}px)`,
+            marginRight: sidebarVisible ? (fold?.width ?? 0) : -visibleSidebarWidth,
+            transitionProperty: 'transform, margin-right',
+            transitionDuration: shouldReduceMotion ? '0ms' : '220ms',
+            transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
+          }}
+          aria-hidden={!sidebarVisible}
+          inert={!sidebarVisible}
+        >
+          <DesktopSidebarContent pathname={pathname} fitDivision={fold !== null} />
+        </div>
+      )}
+      {todayColumnShown ? (
+        // Outside the pathname-keyed boundary: navigating the main area keeps Today mounted.
+        <ErrorBoundary name="TodayColumn" variant="section">
+          <Suspense fallback={null}>
+            <TodayPinnedColumn />
+          </Suspense>
         </ErrorBoundary>
-      </div>
+      ) : null}
+      <FocusScope
+        ref={contentRef}
+        id={WORKSPACE_FOCUS_SCOPES.content}
+        inert={compactNavigationOpen}
+        onFocusCapture={(event) => {
+          // Capture before inert can blur the opener during the open commit.
+          returnFocusRef.current = event.target;
+        }}
+        style={fold && !sidebarVisible ? { marginLeft: fold.left + fold.width } : undefined}
+        className="relative flex min-w-0 flex-1 overflow-hidden"
+      >
+        <WindowDragStrip />
+        <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
+          {/* Beside a pinned Today card the main card anchors to it, as it does to the
+              sidebar: the Today card's own rim keeps 4px of ground between them. */}
+          <WorkspaceCard anchored={(sidebarVisible || todayColumnShown) && !compact}>
+            {children}
+          </WorkspaceCard>
+        </ErrorBoundary>
+      </FocusScope>
     </div>
   );
 }

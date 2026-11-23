@@ -2,18 +2,19 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { formatDistanceToNow, type Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
 import {
   AlertCircle,
   Boxes,
   ChevronLeft,
   ChevronRight,
-  Loader2,
   PackageOpen,
   RefreshCw,
   User,
   X,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { DEFAULT_PROJECT_SKILL_DIR, type ProjectSkill, type ProjectSkillScope } from '@lody/shared';
 import {
   useProjectSkills,
@@ -34,6 +35,7 @@ import {
   SkillVersionBadge,
 } from '@/components/settings/skill-badges';
 import { cn } from '@/lib/utils';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 type SelectedSkill = { skill: ProjectSkill; scope: ProjectSkillScope };
 
@@ -65,6 +67,7 @@ export function MobileProjectSkillsSheet({
      rows doesn't kick off a scan/fetch per project until the user asks. */
   const activeSource = open ? source : null;
   const { status, groups, error, stale, fetchedAt, refresh } = useProjectSkills(activeSource);
+  const maxHeight = useFoldAwareSheetHeight(88);
   const title = t('workspace.projects.skills.sheetTitle', 'Skills');
   /* The skill detail drills in as an in-sheet slide-over (not a stacked drawer)
      so the sheet's own close chip stays the single dismiss affordance; the
@@ -80,7 +83,7 @@ export function MobileProjectSkillsSheet({
 
   return (
     <Drawer open={open} onOpenChange={handleOpenChange}>
-      <DrawerContent className={cn('h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60')}>
+      <DrawerContent style={{ maxHeight }} className={cn('h-auto! rounded-t-2xl border-border/60')}>
         <div className="flex max-h-full min-h-0 flex-col">
           <header className="relative flex shrink-0 items-center px-4 pb-2 pt-2">
             {detail ? (
@@ -216,7 +219,7 @@ export function MobileProjectSkillsBody({
   if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center gap-2 px-5 py-12 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         {t('workspace.projects.skills.loading', 'Loading skills')}
       </div>
     );
@@ -253,7 +256,7 @@ export function MobileProjectSkillsBody({
         <div className="flex min-w-0 items-center gap-1.5 text-[0.78rem] text-muted-foreground">
           {isRefreshing ? (
             <>
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              <Spinner className="h-3.5 w-3.5 shrink-0" />
               <span>{t('workspace.projects.skills.refreshing', 'Refreshing…')}</span>
             </>
           ) : status === 'error' && stale ? (
@@ -294,7 +297,7 @@ export function MobileProjectSkillsBody({
             'text-muted-foreground transition-colors active:bg-muted/50 disabled:opacity-50'
           )}
         >
-          <RefreshCw className={cn('h-4 w-4', isRefreshing && 'animate-spin')} />
+          <Spinner icon={RefreshCw} spinning={isRefreshing} className="h-4 w-4" />
         </button>
       </div>
 

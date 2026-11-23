@@ -14,6 +14,7 @@ import {
   getAgentRoleEmoji,
   type AgentConfigMeta,
   type AgentRole,
+  type AgentRoleAvailability,
   type AgentRoleId,
   type MachineViewMeta,
 } from '@lody/shared';
@@ -21,7 +22,7 @@ import {
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
-import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
+import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import { cn } from '@/lib/utils';
 
 /**
@@ -45,6 +46,8 @@ export type AgentRoleDetailSubject = {
    * a constant that says nothing.
    */
   machineLabel?: string;
+  /** Marks the pin that makes this Role unavailable, so the fix is obvious. */
+  availability?: AgentRoleAvailability;
 };
 
 /**
@@ -64,6 +67,7 @@ export function AgentRoleDetailPane({
   agentConfig,
   machine,
   machineLabel,
+  availability,
   onEdit,
   className,
 }: AgentRoleDetailSubject & {
@@ -124,7 +128,10 @@ export function AgentRoleDetailPane({
     ? labelFor(permissionFace.options, permissionValue)
     : undefined;
   const permissionTone = classifyPermissionModeFace(permissionValue);
-  const permissionIsWarning = permissionTone.kind !== 'hidden' && permissionTone.tone === 'warning';
+  const unavailableReason = availability?.kind === 'unavailable' ? availability.reason : undefined;
+  const permissionIsWarning =
+    unavailableReason === 'mode_unavailable' ||
+    (permissionTone.kind !== 'hidden' && permissionTone.tone === 'warning');
 
   const thinkingSelector = thoughtLevelSelectors.find((selector) => selector.type === 'select');
   const thinkingValue = pinnedValue(thinkingSelector?.configId);
@@ -176,7 +183,7 @@ export function AgentRoleDetailPane({
 
       {/* Only the values scroll. The header says WHICH Role and the footer is
           how to change it — both stay put however long the instruction runs. */}
-      <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto border-t border-border/60 [scrollbar-gutter:stable]">
+      <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <dl className="flex flex-col gap-2 px-4 py-3">
           {modelId ? (
             <DetailRow
@@ -187,6 +194,7 @@ export function AgentRoleDetailPane({
                  (`claude-opus-5` vs `claude-sonnet-5`), so the START is what
                  gives way when the line runs out. */
               elide="start"
+              tone={unavailableReason === 'model_unavailable' ? 'warning' : undefined}
             />
           ) : null}
           {thinkingValue ? (
@@ -207,7 +215,7 @@ export function AgentRoleDetailPane({
                   <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.8} />
                 )
               }
-              label={t('chat.runConfig.permissionLabel', 'Permission')}
+              label={permissionModeControlLabel(permissionFace, t)}
               value={permissionOption?.label ?? permissionValue}
               tone={permissionIsWarning ? 'warning' : undefined}
             />

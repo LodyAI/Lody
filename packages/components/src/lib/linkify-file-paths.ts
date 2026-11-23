@@ -12,17 +12,15 @@ import { parseMarkdownAgentFileHref } from './markdown-agent-file-link';
 //   - inline code: the ENTIRE backtick content must be a single recognized
 //     file path; partial spans inside commands/snippets are left as code.
 //
-// Wrongly-linkified paths fail open: the file viewer's open handler already
-// degrades gracefully when a path cannot be resolved.
+// These are candidates only. Conversation rendering confirms relative paths
+// against the owning file index; absolute paths can open directly.
 
-export type FilePathTextSegment =
-  | { type: 'text'; value: string }
-  | { type: 'path'; value: string };
+export type FilePathTextSegment = { type: 'text'; value: string } | { type: 'path'; value: string };
 
 // One greedy run of path-ish characters, plus an optional GitHub/VSCode/colon
 // line suffix. The char class excludes whitespace and CJK, so a candidate
 // naturally stops at word/sentence boundaries (incl. inside CJK prose).
-const PATH_BODY = String.raw`(?:\.{0,2}[\\/])?[A-Za-z0-9._-]+(?:[\\/][A-Za-z0-9._-]+)*`;
+const PATH_BODY = String.raw`(?:[A-Za-z]:[\\/]|[\\/]{1,2}|\.{1,2}[\\/])?[A-Za-z0-9._-]+(?:[\\/][A-Za-z0-9._-]+)*`;
 const LINE_SUFFIX = String.raw`(?:#L\d+(?:C\d+)?(?:-L?\d+(?:C\d+)?)?|:L?\d+(?:C\d+)?(?::\d+)?)`;
 const CANDIDATE_PATTERN = new RegExp(`${PATH_BODY}(?:${LINE_SUFFIX})?`, 'g');
 

@@ -1,15 +1,32 @@
+import { isMagpieGatewayUrl, normalizeMagpieGateway } from './magpie-import';
+import { MemoryAssociationSchema, type MemoryAssociation } from './memory-provider';
 import type { RateLimit } from 'acp-extension-core';
+import { CodexAuthProfileSchema, assertManagedCodexProfileConfig } from './codex-auth-profile';
 import {
   getAcpCapabilityCacheKey,
   hasBuiltinRuntimeOverrideValues,
+  hasPersistedBuiltinRuntimeOverrides,
   isBuiltinRuntimeOverrides,
   isBuiltinAgentType,
   isCustomAcpLaunchSpec,
+  isManagedBuiltinAgentType,
   type AcpCapabilityCacheEntry,
   type AgentConfigCliType,
   type AgentType,
   type CliType,
+  type ManagedBuiltinAgentType,
 } from './ai';
+import { isAcpModelCapabilities, type AcpModelCapabilities } from './acp-model-capabilities';
+import {
+  getAcpConfigOptionStructureKey,
+  getAcpConfigOptionsShapeId,
+  isAcpModelConfigOptions,
+  isAcpModelConfigOptionsShape,
+  toAcpModelConfigOptions,
+  type AcpModelConfigOptions,
+  type AcpModelConfigOptionsShape,
+} from './acp-model-config-options';
+import type { AcpConfigOptionSummary } from './ai';
 import type { AgentConfigId, MachineId, SessionId, WorkspaceId } from './ids';
 import type { LocalProjectWorktreeCleanupItem, LocalProjectWorktreeCleanupResult } from './message';
 import type {
@@ -19,16 +36,10 @@ import type {
   WorktreeSetupScriptConfig,
 } from './project';
 import {
-  buildNeedToDeleteSessionQueueItem,
-  mergeNeedToDeleteSessionQueueItem,
-  type NeedToDeleteSessionQueueRecord,
-} from './session-delete-queue';
-import type {
-  AgentConfigMeta,
-  MachineLegacyMetaFields,
-  NeedToDeleteSessionQueueItem,
-  SessionLaunchConfig,
-  SessionMeta,
+  getRateLimitEntryKey,
+  type AgentConfigMeta,
+  type SessionLaunchConfig,
+  type SessionMeta,
 } from './schema';
 
 export const MACHINE_FLOCK_DOC_STREAM_SEGMENT = 'mf';
@@ -86,67 +97,6 @@ export type MachineDeleteLocalProjectCommand = {
   cleanupWorktrees?: true;
   status?: 'completed';
   cleanupResult?: LocalProjectWorktreeCleanupResult;
-};
-
-export const buildMachineArchiveSessionCommand = (options: {
-  requestedAt: number;
-  requestedBy?: string;
-}): MachineArchiveSessionCommand => ({
-  v: 1,
-  requestedAt: options.requestedAt,
-  ...(options.requestedBy ? { requestedBy: options.requestedBy } : {}),
-});
-
-export const shouldQueueMachineDeleteSession = (
-  session: Pick<SessionMeta, 'repoFullName' | 'project' | 'isWorktree' | 'parentSessionId'>
-): boolean => {
-  if (session.parentSessionId) {
-    return false;
-  }
-  return (
-    session.isWorktree === true ||
-    (session.project?.kind !== 'local' && nonEmptyString(session.repoFullName) !== undefined)
-  );
-};
-
-export const machineDeleteCommandToQueueItem = (
-  command: MachineDeleteSessionCommand
-): NeedToDeleteSessionQueueRecord => {
-  const { v: _v, ...queueItem } = command;
-  return queueItem;
-};
-
-export const buildMachineDeleteSessionCommand = (options: {
-  session: Pick<
-    SessionMeta,
-    'project' | 'repoFullName' | 'branchName' | 'baseBranch' | 'isWorktree' | 'parentSessionId'
-  >;
-  machineMeta?: Pick<MachineLegacyMetaFields, 'localProjects'>;
-  requestedAt: number;
-  existing?: NeedToDeleteSessionQueueItem | MachineDeleteSessionCommand;
-}): MachineDeleteSessionCommand | null => {
-  if (!shouldQueueMachineDeleteSession(options.session)) {
-    return null;
-  }
-  const existing =
-    options.existing && typeof options.existing === 'object' && 'v' in options.existing
-      ? machineDeleteCommandToQueueItem(options.existing)
-      : options.existing;
-  const queueItem = mergeNeedToDeleteSessionQueueItem(
-    existing,
-    buildNeedToDeleteSessionQueueItem({
-      session: options.session,
-      machineMeta: options.machineMeta,
-      requestedAt: options.requestedAt,
-    })
-  );
-  const { isWorktree, requestedAt, ...rest } = queueItem;
-  return {
-    v: 1,
-    ...rest,
-    requestedAt: requestedAt ?? options.requestedAt,
-    ...(isWorktree === true ? { isWorktree: true } : {}),
-  };
 };
 
 export const buildMachineDeleteLocalProjectCommand = (options: {
@@ -214,6 +164,23 @@ export type ProviderSetupCancellation = {
   cancelledAt: number;
 };
 
+/**
+ * Record that the user removed a managed builtin provider on this machine.
+ *
+ * Startup auto-registration of builtin providers only knows whether a config is
+ * currently in the list; it cannot tell "never created" from "just removed by the
+ * user". Without this record a removed Kimi/Grok/Claude/Codex comes back on the
+ * next start. Re-adding a provider of the same type must clear the record --
+ * adding it explicitly retracts the earlier removal.
+ *
+ * The provider type lives in the key and the machine is the flock doc itself, so
+ * the value carries only the timestamp.
+ */
+export type BuiltinAgentOptOut = {
+  v: 1;
+  removedAt: number;
+};
+
 export type MachineFlockDotlodyPathKey = ['dotlodyPath'];
 export type MachineFlockArchiveSessionCommandKey = ['cmd', 'archiveSession', SessionId];
 export type MachineFlockDeleteSessionCommandKey = ['cmd', 'deleteSession', SessionId];
@@ -223,16 +190,34 @@ export type MachineFlockDeleteLocalProjectCommandKey = [
   LocalProjectId,
 ];
 export type MachineFlockLocalProjectKey = ['localProject', LocalProjectId];
+export type MachineFlockMemoryKey = ['memory', string, string];
 export type MachineFlockAgentConfigKey = ['agentConfig', AgentConfigId];
 export type MachineFlockProviderSetupKey = ['providerSetup', AgentConfigId];
 export type MachineFlockProviderSetupCancellationKey = ['providerSetupCancellation', AgentConfigId];
 export type MachineFlockAgentConfigIndexKey = ['agentConfigIndex', AgentConfigId];
 export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
-export type MachineFlockRateLimitKey = ['rateLimit', CliType, string];
+/** Per-model controls an agent config's adapter declared (`AcpModelCapabilities`). */
+export type MachineFlockAcpModelCapabilityKey = ['acpModelCapability', AgentConfigId];
+/** Which stored option list one model has (`AcpModelConfigOptions`). */
+export type MachineFlockAcpModelConfigOptionsKey = ['acpModelConfigOptions', AgentConfigId, string];
+/** One option list shared by every model of a config that reported it. */
+export type MachineFlockAcpModelConfigOptionsShapeKey = [
+  'acpModelConfigOptionsShape',
+  AgentConfigId,
+  string,
+];
+/** @deprecated Compatibility read for rate limits written before provider-scoped quotas. */
+export type MachineFlockLegacyRateLimitKey = ['rateLimit', CliType, string];
+export type MachineFlockProviderRateLimitKey = ['rateLimit', AgentConfigId, string, string];
+export type MachineFlockRateLimitKey =
+  | MachineFlockLegacyRateLimitKey
+  | MachineFlockProviderRateLimitKey;
+export type MachineFlockBuiltinAgentOptOutKey = ['builtinAgentOptOut', ManagedBuiltinAgentType];
 /** @deprecated Compatibility read/cleanup only. New writers must not store launch config per session. */
 export type MachineFlockSessionLaunchConfigKey = ['sessionLaunchConfig', SessionId];
 
 export type MachineFlockKey =
+  | MachineFlockMemoryKey
   | MachineFlockDotlodyPathKey
   | MachineFlockArchiveSessionCommandKey
   | MachineFlockDeleteSessionCommandKey
@@ -243,10 +228,15 @@ export type MachineFlockKey =
   | MachineFlockProviderSetupCancellationKey
   | MachineFlockAgentConfigIndexKey
   | MachineFlockAcpCapabilityKey
+  | MachineFlockAcpModelCapabilityKey
+  | MachineFlockAcpModelConfigOptionsKey
+  | MachineFlockAcpModelConfigOptionsShapeKey
   | MachineFlockRateLimitKey
+  | MachineFlockBuiltinAgentOptOutKey
   | MachineFlockSessionLaunchConfigKey;
 
 export type ParsedMachineFlockKey =
+  | { kind: 'memory'; key: MachineFlockMemoryKey; providerId: string; memoryId: string }
   | { kind: 'dotlodyPath'; key: MachineFlockDotlodyPathKey }
   | {
       kind: 'archiveSessionCommand';
@@ -286,10 +276,33 @@ export type ParsedMachineFlockKey =
       configId: AgentConfigId;
     }
   | {
+      kind: 'acpModelCapability';
+      key: MachineFlockAcpModelCapabilityKey;
+      configId: AgentConfigId;
+    }
+  | {
+      kind: 'acpModelConfigOptions';
+      key: MachineFlockAcpModelConfigOptionsKey;
+      configId: AgentConfigId;
+      modelId: string;
+    }
+  | {
+      kind: 'acpModelConfigOptionsShape';
+      key: MachineFlockAcpModelConfigOptionsShapeKey;
+      configId: AgentConfigId;
+      shapeId: string;
+    }
+  | {
       kind: 'rateLimit';
       key: MachineFlockRateLimitKey;
-      cliType: CliType;
+      agentConfigId: AgentConfigId | null;
+      cliType: string;
       limitId: string;
+    }
+  | {
+      kind: 'builtinAgentOptOut';
+      key: MachineFlockBuiltinAgentOptOutKey;
+      agentType: ManagedBuiltinAgentType;
     }
   | {
       kind: 'sessionLaunchConfig';
@@ -298,6 +311,11 @@ export type ParsedMachineFlockKey =
     };
 
 export const machineFlockKeys = {
+  memory: (providerId: string, memoryId: string): MachineFlockMemoryKey => [
+    'memory',
+    providerId,
+    memoryId,
+  ],
   dotlodyPath: (): MachineFlockDotlodyPathKey => ['dotlodyPath'],
   archiveSessionCommand: (sessionId: SessionId): MachineFlockArchiveSessionCommandKey => [
     'cmd',
@@ -335,10 +353,32 @@ export const machineFlockKeys = {
     'acpCapability',
     configId,
   ],
-  rateLimit: (cliType: CliType, limitId: string): MachineFlockRateLimitKey => [
+  acpModelCapability: (configId: AgentConfigId): MachineFlockAcpModelCapabilityKey => [
+    'acpModelCapability',
+    configId,
+  ],
+  acpModelConfigOptions: (
+    configId: AgentConfigId,
+    modelId: string
+  ): MachineFlockAcpModelConfigOptionsKey => ['acpModelConfigOptions', configId, modelId],
+  acpModelConfigOptionsShape: (
+    configId: AgentConfigId,
+    shapeId: string
+  ): MachineFlockAcpModelConfigOptionsShapeKey => ['acpModelConfigOptionsShape', configId, shapeId],
+  rateLimit: (
+    agentConfigId: AgentConfigId,
+    cliType: string,
+    limitId: string
+  ): MachineFlockProviderRateLimitKey => ['rateLimit', agentConfigId, cliType, limitId],
+  /** @deprecated Compatibility helper for rows written before provider-scoped quotas. */
+  legacyRateLimit: (cliType: CliType, limitId: string): MachineFlockLegacyRateLimitKey => [
     'rateLimit',
     cliType,
     limitId,
+  ],
+  builtinAgentOptOut: (agentType: ManagedBuiltinAgentType): MachineFlockBuiltinAgentOptOutKey => [
+    'builtinAgentOptOut',
+    agentType,
   ],
   /** @deprecated Compatibility read/cleanup only. New writers must not store launch config per session. */
   sessionLaunchConfig: (sessionId: SessionId): MachineFlockSessionLaunchConfigKey => [
@@ -405,6 +445,20 @@ export const parseMachineFlockKey = (
     };
   }
 
+  if (
+    key.length === 3 &&
+    key[0] === 'memory' &&
+    isNonEmptyString(key[1]) &&
+    isNonEmptyString(key[2])
+  ) {
+    return {
+      kind: 'memory',
+      key: machineFlockKeys.memory(key[1], key[2]),
+      providerId: key[1],
+      memoryId: key[2],
+    };
+  }
+
   if (key.length === 2 && key[0] === 'agentConfig' && isNonEmptyString(key[1])) {
     const agentConfigId = key[1] as AgentConfigId;
     return {
@@ -441,6 +495,45 @@ export const parseMachineFlockKey = (
     };
   }
 
+  if (key.length === 2 && key[0] === 'acpModelCapability' && isNonEmptyString(key[1])) {
+    const configId = key[1] as AgentConfigId;
+    return {
+      kind: 'acpModelCapability',
+      key: machineFlockKeys.acpModelCapability(configId),
+      configId,
+    };
+  }
+
+  if (
+    key.length === 3 &&
+    key[0] === 'acpModelConfigOptions' &&
+    isNonEmptyString(key[1]) &&
+    isNonEmptyString(key[2])
+  ) {
+    const configId = key[1] as AgentConfigId;
+    return {
+      kind: 'acpModelConfigOptions',
+      key: machineFlockKeys.acpModelConfigOptions(configId, key[2]),
+      configId,
+      modelId: key[2],
+    };
+  }
+
+  if (
+    key.length === 3 &&
+    key[0] === 'acpModelConfigOptionsShape' &&
+    isNonEmptyString(key[1]) &&
+    isNonEmptyString(key[2])
+  ) {
+    const configId = key[1] as AgentConfigId;
+    return {
+      kind: 'acpModelConfigOptionsShape',
+      key: machineFlockKeys.acpModelConfigOptionsShape(configId, key[2]),
+      configId,
+      shapeId: key[2],
+    };
+  }
+
   if (key.length === 2 && key[0] === 'acpCapability' && isNonEmptyString(key[1])) {
     const configId = key[1] as AgentConfigId;
     return {
@@ -453,9 +546,40 @@ export const parseMachineFlockKey = (
   if (key.length === 3 && key[0] === 'rateLimit' && isCliType(key[1]) && isNonEmptyString(key[2])) {
     return {
       kind: 'rateLimit',
-      key: machineFlockKeys.rateLimit(key[1], key[2]),
+      key: machineFlockKeys.legacyRateLimit(key[1], key[2]),
+      agentConfigId: null,
       cliType: key[1],
       limitId: key[2],
+    };
+  }
+
+  if (
+    key.length === 4 &&
+    key[0] === 'rateLimit' &&
+    isNonEmptyString(key[1]) &&
+    isNonEmptyString(key[2]) &&
+    isNonEmptyString(key[3])
+  ) {
+    const agentConfigId = key[1] as AgentConfigId;
+    return {
+      kind: 'rateLimit',
+      key: machineFlockKeys.rateLimit(agentConfigId, key[2], key[3]),
+      agentConfigId,
+      cliType: key[2],
+      limitId: key[3],
+    };
+  }
+
+  if (
+    key.length === 2 &&
+    key[0] === 'builtinAgentOptOut' &&
+    typeof key[1] === 'string' &&
+    isManagedBuiltinAgentType(key[1])
+  ) {
+    return {
+      kind: 'builtinAgentOptOut',
+      key: machineFlockKeys.builtinAgentOptOut(key[1]),
+      agentType: key[1],
     };
   }
 
@@ -472,6 +596,7 @@ export const parseMachineFlockKey = (
 };
 
 export type MachineFlockRow =
+  | { key: MachineFlockMemoryKey; value: MemoryAssociation }
   | { key: MachineFlockDotlodyPathKey; value: string }
   | { key: MachineFlockArchiveSessionCommandKey; value: MachineArchiveSessionCommand }
   | { key: MachineFlockDeleteSessionCommandKey; value: MachineDeleteSessionCommand }
@@ -488,7 +613,11 @@ export type MachineFlockRow =
     }
   | { key: MachineFlockAgentConfigIndexKey; value: AgentConfigListSummary }
   | { key: MachineFlockAcpCapabilityKey; value: AcpCapabilityCacheEntry }
+  | { key: MachineFlockAcpModelCapabilityKey; value: AcpModelCapabilities }
+  | { key: MachineFlockAcpModelConfigOptionsKey; value: AcpModelConfigOptions }
+  | { key: MachineFlockAcpModelConfigOptionsShapeKey; value: AcpModelConfigOptionsShape }
   | { key: MachineFlockRateLimitKey; value: RateLimit }
+  | { key: MachineFlockBuiltinAgentOptOutKey; value: BuiltinAgentOptOut }
   | { key: MachineFlockSessionLaunchConfigKey; value: SessionLaunchConfig };
 
 export type MachineFlockRowId = string & { __brand: 'MachineFlockRowId' };
@@ -519,6 +648,7 @@ export const serializeMachineFlockKey = (key: MachineFlockKey): MachineFlockRowI
   JSON.stringify(key) as MachineFlockRowId;
 
 export type MachineFlockRowFamily =
+  | 'memory'
   | 'dotlodyPath'
   | 'archiveSessionCommand'
   | 'deleteSessionCommand'
@@ -529,10 +659,15 @@ export type MachineFlockRowFamily =
   | 'providerSetupCancellation'
   | 'agentConfigIndex'
   | 'acpCapability'
+  | 'acpModelCapability'
+  | 'acpModelConfigOptions'
+  | 'acpModelConfigOptionsShape'
   | 'rateLimit'
+  | 'builtinAgentOptOut'
   | 'sessionLaunchConfig';
 
 const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly unknown[]> = {
+  memory: ['memory'],
   dotlodyPath: ['dotlodyPath'],
   archiveSessionCommand: ['cmd', 'archiveSession'],
   deleteSessionCommand: ['cmd', 'deleteSession'],
@@ -543,7 +678,11 @@ const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly 
   providerSetupCancellation: ['providerSetupCancellation'],
   agentConfigIndex: ['agentConfigIndex'],
   acpCapability: ['acpCapability'],
+  acpModelCapability: ['acpModelCapability'],
+  acpModelConfigOptions: ['acpModelConfigOptions'],
+  acpModelConfigOptionsShape: ['acpModelConfigOptionsShape'],
   rateLimit: ['rateLimit'],
+  builtinAgentOptOut: ['builtinAgentOptOut'],
   sessionLaunchConfig: ['sessionLaunchConfig'],
 };
 
@@ -611,6 +750,21 @@ const isMachineFlockAcpCapabilityRow = (
 ): row is Extract<MachineFlockRow, { key: MachineFlockAcpCapabilityKey }> =>
   row.key[0] === 'acpCapability';
 
+const isMachineFlockAcpModelCapabilityRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockAcpModelCapabilityKey }> =>
+  row.key[0] === 'acpModelCapability';
+
+const isMachineFlockAcpModelConfigOptionsRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockAcpModelConfigOptionsKey }> =>
+  row.key[0] === 'acpModelConfigOptions';
+
+const isMachineFlockAcpModelConfigOptionsShapeRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockAcpModelConfigOptionsShapeKey }> =>
+  row.key[0] === 'acpModelConfigOptionsShape';
+
 const isMachineFlockAgentConfigRow = (
   row: MachineFlockRow
 ): row is Extract<MachineFlockRow, { key: MachineFlockAgentConfigKey }> =>
@@ -630,13 +784,28 @@ const isMachineFlockRateLimitRow = (
   row: MachineFlockRow
 ): row is Extract<MachineFlockRow, { key: MachineFlockRateLimitKey }> => row.key[0] === 'rateLimit';
 
+function getProviderRateLimitKeys(
+  rows: MachineFlockRowMap,
+  agentConfigId: AgentConfigId
+): MachineFlockProviderRateLimitKey[] {
+  return Object.values(rows).flatMap((row) => {
+    if (!isMachineFlockRateLimitRow(row)) return [];
+    const parsed = parseMachineFlockKey(row.key);
+    return parsed?.kind === 'rateLimit' && parsed.agentConfigId === agentConfigId
+      ? [parsed.key as MachineFlockProviderRateLimitKey]
+      : [];
+  });
+}
+
+const isMachineFlockBuiltinAgentOptOutRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockBuiltinAgentOptOutKey }> =>
+  row.key[0] === 'builtinAgentOptOut';
+
 const isMachineFlockSessionLaunchConfigRow = (
   row: MachineFlockRow
 ): row is Extract<MachineFlockRow, { key: MachineFlockSessionLaunchConfigKey }> =>
   row.key[0] === 'sessionLaunchConfig';
-
-const getMachineFlockRateLimitEntryKey = (cliType: CliType, limitId: string): string =>
-  `${cliType}::${limitId.trim() || cliType}`;
 
 export function getMachineFlockLocalProjects(
   rows: MachineFlockRowMap
@@ -672,15 +841,113 @@ export function getMachineFlockDeleteLocalProjectIds(
   );
 }
 
+/**
+ * Row families a capability reader asks for, so per-model controls are never
+ * dropped by a reader that forgot the second family.
+ */
+export const ACP_CAPABILITY_ROW_FAMILIES = [
+  'acpCapability',
+  'acpModelCapability',
+  'acpModelConfigOptions',
+  'acpModelConfigOptionsShape',
+] as const;
+
+/**
+ * Merged entries keyed by the stored capability row and then by the stored
+ * declaration, so an unchanged pair keeps one object identity across the
+ * incremental row updates the renderer re-merges on.
+ */
+const mergedAcpCapabilityEntries = new WeakMap<
+  AcpCapabilityCacheEntry,
+  WeakMap<AcpModelCapabilities, AcpCapabilityCacheEntry>
+>();
+
+const withDeclaredModelControls = (
+  entry: AcpCapabilityCacheEntry,
+  declaration: AcpModelCapabilities
+): AcpCapabilityCacheEntry => {
+  let byDeclaration = mergedAcpCapabilityEntries.get(entry);
+  if (!byDeclaration) {
+    byDeclaration = new WeakMap();
+    mergedAcpCapabilityEntries.set(entry, byDeclaration);
+  }
+  let merged = byDeclaration.get(declaration);
+  if (!merged) {
+    merged = { ...entry, declaredModelControls: declaration.models };
+    byDeclaration.set(declaration, merged);
+  }
+  return merged;
+};
+
+// Readers rebuild the merged entry on every read; keep its identity while the
+// observed lists are unchanged so React consumers do not re-render.
+const observedAcpCapabilityEntries = new WeakMap<
+  AcpCapabilityCacheEntry,
+  { signature: string; merged: AcpCapabilityCacheEntry }
+>();
+
+const withObservedModelConfigOptions = (
+  entry: AcpCapabilityCacheEntry,
+  observed: Record<string, AcpConfigOptionSummary[]>
+): AcpCapabilityCacheEntry => {
+  const signature = JSON.stringify(
+    Object.keys(observed)
+      .sort()
+      .map((modelId) => [modelId, observed[modelId]])
+  );
+  const cached = observedAcpCapabilityEntries.get(entry);
+  if (cached?.signature === signature) return cached.merged;
+  const merged = { ...entry, observedModelConfigOptions: observed };
+  observedAcpCapabilityEntries.set(entry, { signature, merged });
+  return merged;
+};
+
+/**
+ * Capability entries by cache key. When the rows include the config's
+ * `acpModelCapability` row for the same source version, the entry carries its
+ * per-model controls as `declaredModelControls`, so every reader resolves effort
+ * and Fast for the selected model rather than the probed one. The config's
+ * `acpModelConfigOptions` rows are attached as `observedModelConfigOptions`
+ * whatever their source version: an older answer for a model is still closer
+ * than another model's snapshot, and the next answer replaces it.
+ */
 export function getMachineFlockAcpCapabilities(
   rows: MachineFlockRowMap
 ): Record<string, AcpCapabilityCacheEntry> {
   const capabilities: Record<string, AcpCapabilityCacheEntry> = {};
   for (const row of Object.values(rows)) {
-    if (!isMachineFlockAcpCapabilityRow(row)) {
-      continue;
+    if (isMachineFlockAcpCapabilityRow(row)) {
+      capabilities[getAcpCapabilityCacheKey(row.key[1])] = row.value;
     }
-    capabilities[getAcpCapabilityCacheKey(row.key[1])] = row.value;
+  }
+  for (const row of Object.values(rows)) {
+    if (!isMachineFlockAcpModelCapabilityRow(row)) continue;
+    const key = getAcpCapabilityCacheKey(row.key[1]);
+    const entry = capabilities[key];
+    if (entry && entry.sourceVersion === row.value.sourceVersion) {
+      capabilities[key] = withDeclaredModelControls(entry, row.value);
+    }
+  }
+  const shapes = new Map<string, AcpConfigOptionSummary[]>();
+  for (const row of Object.values(rows)) {
+    if (isMachineFlockAcpModelConfigOptionsShapeRow(row)) {
+      shapes.set(JSON.stringify([row.key[1], row.key[2]]), row.value.configOptions);
+    }
+  }
+  const observedByKey = new Map<string, Record<string, AcpConfigOptionSummary[]>>();
+  for (const row of Object.values(rows)) {
+    if (!isMachineFlockAcpModelConfigOptionsRow(row)) continue;
+    const key = getAcpCapabilityCacheKey(row.key[1]);
+    // A pointer whose shape has not synced yet is unknown, not an empty list.
+    const configOptions = shapes.get(JSON.stringify([row.key[1], row.value.shape]));
+    if (!capabilities[key] || !configOptions) continue;
+    const observed = observedByKey.get(key) ?? {};
+    observed[row.key[2]] = configOptions;
+    observedByKey.set(key, observed);
+  }
+  for (const [key, observed] of observedByKey) {
+    const entry = capabilities[key];
+    if (entry) capabilities[key] = withObservedModelConfigOptions(entry, observed);
   }
   return capabilities;
 }
@@ -733,13 +1000,14 @@ export function applyProviderSetupCancellationToFlock(
     prefixes: [
       machineFlockKeys.providerSetupCancellation(cancellation.id),
       machineFlockKeys.providerSetup(cancellation.id),
-      machineFlockKeys.agentConfig(cancellation.id),
     ],
+    families: ['agentConfig', 'builtinAgentOptOut', 'rateLimit'],
   });
   const existingCancellation = getMachineFlockProviderSetupCancellations(rows)[cancellation.id];
   const setup = getMachineFlockProviderSetups(rows)[cancellation.id];
   const config = getMachineFlockAgentConfigs(rows)[cancellation.id];
-  if (existingCancellation && !setup && !config) {
+  const rateLimitKeys = getProviderRateLimitKeys(rows, cancellation.id);
+  if (existingCancellation && !setup && !config && rateLimitKeys.length === 0) {
     return false;
   }
   if (!existingCancellation) {
@@ -749,7 +1017,16 @@ export function applyProviderSetupCancellationToFlock(
     flock.delete(machineFlockKeys.providerSetup(cancellation.id), nowMs);
   }
   if (config) {
+    // Cancelling a published setup is the user removing this provider, so it needs
+    // the same removal record as deleting it from the list.
+    const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
+    if (optOut) {
+      flock.set(optOut.key, optOut.value, nowMs);
+    }
     flock.delete(machineFlockKeys.agentConfig(cancellation.id), nowMs);
+  }
+  for (const rateLimitKey of rateLimitKeys) {
+    flock.delete(rateLimitKey, nowMs);
   }
   flock.commit();
   return true;
@@ -761,9 +1038,157 @@ export function getMachineFlockRateLimits(rows: MachineFlockRowMap): Record<stri
     if (!isMachineFlockRateLimitRow(row)) {
       continue;
     }
-    rateLimits[getMachineFlockRateLimitEntryKey(row.key[1], row.key[2])] = row.value;
+    const parsed = parseMachineFlockKey(row.key);
+    if (!parsed || parsed.kind !== 'rateLimit') continue;
+    rateLimits[getRateLimitEntryKey(parsed.cliType, parsed.limitId, parsed.agentConfigId)] =
+      row.value;
   }
   return rateLimits;
+}
+
+/** Managed builtin provider types the user removed on this machine, so they must not be auto-registered again. */
+export function getMachineFlockBuiltinAgentOptOuts(
+  rows: MachineFlockRowMap
+): Set<ManagedBuiltinAgentType> {
+  const optedOut = new Set<ManagedBuiltinAgentType>();
+  for (const row of Object.values(rows)) {
+    if (!isMachineFlockBuiltinAgentOptOutRow(row)) {
+      continue;
+    }
+    optedOut.add(row.key[1]);
+  }
+  return optedOut;
+}
+
+/** The managed builtin provider type this config points at; returns null for custom, registry, DeepSeek and anything else outside startup auto-registration. */
+export function getBuiltinAgentOptOutAgentType(
+  config: AgentConfigMeta
+): ManagedBuiltinAgentType | null {
+  if (config.cliType !== 'builtin' || !isManagedBuiltinAgentType(config.agentType)) {
+    return null;
+  }
+  return config.agentType;
+}
+
+/**
+ * Whether removing `config` should record a "user removed this provider type" opt-out.
+ *
+ * Only the last config of that type counts: while another config of the same type
+ * remains, nothing was really removed and startup auto-registration will not add
+ * anything back. An existing opt-out is never rewritten -- it carries a timestamp,
+ * so every rewrite broadcasts a change to every peer. A missing row is still
+ * recorded: the removal intent does not depend on the row being there.
+ */
+export function planBuiltinAgentOptOutForDeletedConfig(
+  rows: MachineFlockRowMap,
+  config: AgentConfigMeta,
+  nowMs: number
+): Extract<MachineFlockRow, { key: MachineFlockBuiltinAgentOptOutKey }> | null {
+  const agentType = getBuiltinAgentOptOutAgentType(config);
+  if (agentType === null) {
+    return null;
+  }
+  const key = machineFlockKeys.builtinAgentOptOut(agentType);
+  if (serializeMachineFlockKey(key) in rows) {
+    return null;
+  }
+  const remaining = Object.values(getMachineFlockAgentConfigs(rows)).some(
+    (other) => other.id !== config.id && getBuiltinAgentOptOutAgentType(other) === agentType
+  );
+  if (remaining) {
+    return null;
+  }
+  return {
+    key,
+    value: { v: 1, removedAt: nowMs },
+  };
+}
+
+/**
+ * The opt-out key that writing `config` must retract. Adding a builtin provider
+ * explicitly retracts the earlier removal; otherwise this machine keeps recording
+ * "the user does not want this provider" while the list plainly holds one.
+ * Returns null when there is no opt-out.
+ */
+export function findBuiltinAgentOptOutToRetract(
+  rows: MachineFlockRowMap,
+  config: AgentConfigMeta
+): MachineFlockBuiltinAgentOptOutKey | null {
+  const agentType = getBuiltinAgentOptOutAgentType(config);
+  if (agentType === null) {
+    return null;
+  }
+  const key = machineFlockKeys.builtinAgentOptOut(agentType);
+  return serializeMachineFlockKey(key) in rows ? key : null;
+}
+
+/** Write the agentConfig row and retract the same-type opt-out in one commit. Returns whether anything changed. */
+export function writeAgentConfigToFlock(
+  flock: MachineFlockWritableFlock,
+  config: AgentConfigMeta,
+  nowMs?: number
+): boolean {
+  const rows = readMachineFlockRowsFromFlock(flock, {
+    prefixes: [
+      machineFlockKeys.agentConfig(config.id),
+      ...(getBuiltinAgentOptOutAgentType(config) === null
+        ? []
+        : [MACHINE_FLOCK_ROW_FAMILY_PREFIXES.builtinAgentOptOut]),
+    ],
+  });
+  const key = machineFlockKeys.agentConfig(config.id);
+  const normalized = parseMachineFlockRow(key, config);
+  if (!normalized) {
+    return false;
+  }
+  const rowChanged = !machineFlockRowsEqual(rows[serializeMachineFlockKey(key)], normalized);
+  const retractKey = findBuiltinAgentOptOutToRetract(rows, config);
+  if (!rowChanged && !retractKey) {
+    return false;
+  }
+  if (rowChanged) {
+    flock.set(normalized.key, normalized.value, nowMs);
+  }
+  if (retractKey) {
+    flock.delete(retractKey, nowMs);
+  }
+  flock.commit();
+  return true;
+}
+
+/**
+ * Delete the agentConfig row and record an opt-out when needed, in one commit.
+ * The delete is a hard delete and leaves no trace of the row, so without a removal
+ * record for a managed builtin provider the next startup auto-registration only
+ * sees "not in the list", treats it as never created and adds it back.
+ * Returns whether anything changed.
+ */
+export function deleteAgentConfigFromFlock(
+  flock: MachineFlockWritableFlock,
+  config: AgentConfigMeta,
+  nowMs: number
+): boolean {
+  const rows = readMachineFlockRowsFromFlock(flock, {
+    families: ['agentConfig', 'builtinAgentOptOut', 'rateLimit'],
+  });
+  const key = machineFlockKeys.agentConfig(config.id);
+  const rowExists = serializeMachineFlockKey(key) in rows;
+  const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
+  const rateLimitKeys = getProviderRateLimitKeys(rows, config.id);
+  if (!rowExists && !optOut && rateLimitKeys.length === 0) {
+    return false;
+  }
+  if (optOut) {
+    flock.set(optOut.key, optOut.value, nowMs);
+  }
+  if (rowExists) {
+    flock.delete(key, nowMs);
+  }
+  for (const rateLimitKey of rateLimitKeys) {
+    flock.delete(rateLimitKey, nowMs);
+  }
+  flock.commit();
+  return true;
 }
 
 export function getMachineFlockSessionLaunchConfig(
@@ -784,13 +1209,13 @@ export function buildSessionLaunchConfig(
     return undefined;
   }
   const config: SessionLaunchConfig = {};
+  if (input.magpieGatewayUrl !== undefined)
+    config.magpieGatewayUrl = normalizeMagpieGateway(input.magpieGatewayUrl);
+  if (input.codexAuth) config.codexAuth = CodexAuthProfileSchema.parse(input.codexAuth);
   if (input.customAcp) {
     config.customAcp = input.customAcp;
   }
-  if (
-    input.runtimeOverrides &&
-    Object.values(input.runtimeOverrides).some((value) => value && value.trim().length > 0)
-  ) {
+  if (hasPersistedBuiltinRuntimeOverrides(input.runtimeOverrides)) {
     config.runtimeOverrides = input.runtimeOverrides;
   }
   if (input.env && Object.keys(input.env).length > 0) {
@@ -810,6 +1235,8 @@ export function mergeSessionLaunchConfig(
   fallback: SessionLaunchConfig | undefined
 ): SessionLaunchConfig | undefined {
   return buildSessionLaunchConfig({
+    codexAuth: primary?.codexAuth ?? fallback?.codexAuth,
+    magpieGatewayUrl: primary?.magpieGatewayUrl ?? fallback?.magpieGatewayUrl,
     customAcp: primary?.customAcp ?? fallback?.customAcp,
     runtimeOverrides: primary?.runtimeOverrides ?? fallback?.runtimeOverrides,
     env: primary?.env ?? fallback?.env,
@@ -824,6 +1251,40 @@ export function getSessionLaunchConfigLegacyFields(
   return normalizeSessionLaunchConfig(session);
 }
 
+/** Compare against the persisted reset, so repeated jitter cannot accumulate. */
+function rateLimitsEqualWithinClockJitter(previous: RateLimit, next: RateLimit): boolean {
+  if (
+    !Array.isArray(previous.windows) ||
+    !Array.isArray(next.windows) ||
+    !previous.windows.every(isRecord) ||
+    !next.windows.every(isRecord)
+  )
+    return false;
+  const { windows: previousWindows, ...previousFields } = previous;
+  const { windows: nextWindows, ...nextFields } = next;
+  if (JSON.stringify(previousFields) !== JSON.stringify(nextFields)) return false;
+  if (previousWindows.length !== nextWindows.length) return false;
+  // Windows form a multiset: equal durations may belong to different labels.
+  const sorted = (windows: RateLimit['windows']) =>
+    windows
+      .map(({ resetsAtEpochSeconds, ...fields }) => ({
+        core: JSON.stringify(fields),
+        reset: resetsAtEpochSeconds,
+        duration: fields.windowDurationSeconds,
+      }))
+      .sort((a, b) => a.core.localeCompare(b.core) || (a.reset ?? 0) - (b.reset ?? 0));
+  const oldWindows = sorted(previousWindows);
+  return sorted(nextWindows).every((window, index) => {
+    const old = oldWindows[index];
+    if (!old || old.core !== window.core) return false;
+    if (old.reset === window.reset) return true;
+    if (old.reset === null || window.reset === null) return false;
+    // Do not hide a complete rollover of a very short window.
+    const tolerance = window.duration === null ? 2 : Math.min(2, window.duration / 4);
+    return Math.abs(old.reset - window.reset) <= tolerance;
+  });
+}
+
 export function writeMachineFlockRowToFlock(
   flock: MachineFlockWritableFlock,
   row: MachineFlockRow,
@@ -836,12 +1297,112 @@ export function writeMachineFlockRowToFlock(
   const previous = readMachineFlockRowsFromFlock(flock, {
     prefixes: [normalized.key],
   })[serializeMachineFlockKey(normalized.key)];
-  if (machineFlockRowsEqual(previous, normalized)) {
+  if (
+    machineFlockRowsEqual(previous, normalized) ||
+    (previous &&
+      isMachineFlockRateLimitRow(previous) &&
+      isMachineFlockRateLimitRow(normalized) &&
+      rateLimitsEqualWithinClockJitter(previous.value, normalized.value))
+  ) {
     return false;
   }
-  flock.set(normalized.key, normalized.value, nowMs);
+  const persisted =
+    normalized.key[0] === 'agentConfig'
+      ? encodeCodexProfileConfig(normalized.value as AgentConfigMeta)
+      : normalized.key[0] === 'providerSetup'
+        ? {
+            ...(normalized.value as ProviderSetupTask),
+            config: encodeCodexProfileConfig((normalized.value as ProviderSetupTask).config),
+          }
+        : normalized.value;
+  flock.set(normalized.key, persisted, nowMs);
   flock.commit();
   return true;
+}
+
+/**
+ * Records each model's own option list for one config in a single commit.
+ * Identical lists share one shape row; a model points at its shape. A model
+ * whose stored list differs only in current values keeps its pointer, so a new
+ * selection never costs a write, and a shape no model points at is removed.
+ * Returns whether anything changed.
+ */
+export function writeAcpModelConfigOptionsToFlock(
+  flock: MachineFlockWritableFlock,
+  configId: AgentConfigId,
+  sourceVersion: string,
+  answers: Record<string, readonly AcpConfigOptionSummary[]>,
+  nowMs?: number
+): boolean {
+  const rows = readMachineFlockRowsFromFlock(flock, {
+    prefixes: [
+      ['acpModelConfigOptions', configId],
+      ['acpModelConfigOptionsShape', configId],
+    ],
+  });
+  const shapes = new Map<string, AcpConfigOptionSummary[]>();
+  const pointers = new Map<string, AcpModelConfigOptions>();
+  for (const row of Object.values(rows)) {
+    if (isMachineFlockAcpModelConfigOptionsShapeRow(row) && row.key[1] === configId) {
+      shapes.set(row.key[2], row.value.configOptions);
+    } else if (isMachineFlockAcpModelConfigOptionsRow(row) && row.key[1] === configId) {
+      pointers.set(row.key[2], row.value);
+    }
+  }
+  const shapeByStructure = new Map<string, string>();
+  for (const pointer of pointers.values()) {
+    const shape = shapes.get(pointer.shape);
+    if (pointer.sourceVersion !== sourceVersion || !shape) continue;
+    const structure = getAcpConfigOptionStructureKey(shape);
+    if (!shapeByStructure.has(structure)) shapeByStructure.set(structure, pointer.shape);
+  }
+  let changed = false;
+  for (const [modelId, answer] of Object.entries(answers)) {
+    const stored = toAcpModelConfigOptions(answer);
+    const structure = getAcpConfigOptionStructureKey(stored);
+    const current = pointers.get(modelId);
+    const currentShape = current ? shapes.get(current.shape) : undefined;
+    const sharedShape = shapeByStructure.get(structure);
+    if (
+      current?.sourceVersion === sourceVersion &&
+      currentShape &&
+      current.shape === sharedShape &&
+      getAcpConfigOptionStructureKey(currentShape) === structure
+    ) {
+      continue;
+    }
+    // Current selections are session state, not a distinct static shape.
+    // Reuse an already observed same-runtime shape even on a model's first answer.
+    const content = JSON.stringify(stored);
+    const baseId = sharedShape ?? getAcpConfigOptionsShapeId(stored);
+    let shapeId = baseId;
+    for (let suffix = 1; ; suffix += 1) {
+      const existing = shapes.get(shapeId);
+      if (!existing || shapeId === sharedShape || JSON.stringify(existing) === content) break;
+      shapeId = `${baseId}-${suffix}`;
+    }
+    if (!shapes.has(shapeId)) {
+      flock.set(
+        machineFlockKeys.acpModelConfigOptionsShape(configId, shapeId),
+        { version: 1, configOptions: stored },
+        nowMs
+      );
+      shapes.set(shapeId, stored);
+    }
+    shapeByStructure.set(structure, shapeId);
+    const pointer: AcpModelConfigOptions = { version: 1, sourceVersion, shape: shapeId };
+    flock.set(machineFlockKeys.acpModelConfigOptions(configId, modelId), pointer, nowMs);
+    pointers.set(modelId, pointer);
+    changed = true;
+  }
+  const referenced = new Set([...pointers.values()].map((pointer) => pointer.shape));
+  for (const shapeId of shapes.keys()) {
+    if (referenced.has(shapeId)) continue;
+    flock.delete(machineFlockKeys.acpModelConfigOptionsShape(configId, shapeId), nowMs);
+    changed = true;
+  }
+  if (changed) flock.commit();
+  return changed;
 }
 
 export function deleteMachineFlockRowFromFlock(
@@ -911,6 +1472,14 @@ export function parseMachineFlockRow(
   }
 
   switch (parsedKey.kind) {
+    case 'memory': {
+      const result = MemoryAssociationSchema.safeParse(value);
+      return result.success &&
+        result.data.providerId === parsedKey.providerId &&
+        result.data.memoryId === parsedKey.memoryId
+        ? { key: parsedKey.key, value: result.data }
+        : undefined;
+    }
     case 'dotlodyPath':
       return typeof value === 'string' && value.trim() ? { key: parsedKey.key, value } : undefined;
     case 'archiveSessionCommand': {
@@ -931,7 +1500,9 @@ export function parseMachineFlockRow(
     }
     case 'agentConfig': {
       const config = normalizeAgentConfigMeta(value);
-      return config ? { key: parsedKey.key, value: config } : undefined;
+      return config && config.id === parsedKey.agentConfigId
+        ? { key: parsedKey.key, value: config }
+        : undefined;
     }
     case 'providerSetup': {
       const setup = normalizeProviderSetupTask(value);
@@ -951,8 +1522,18 @@ export function parseMachineFlockRow(
     }
     case 'acpCapability':
       return isAcpCapabilityCacheEntry(value) ? { key: parsedKey.key, value } : undefined;
+    case 'acpModelCapability':
+      return isAcpModelCapabilities(value) ? { key: parsedKey.key, value } : undefined;
+    case 'acpModelConfigOptions':
+      return isAcpModelConfigOptions(value) ? { key: parsedKey.key, value } : undefined;
+    case 'acpModelConfigOptionsShape':
+      return isAcpModelConfigOptionsShape(value) ? { key: parsedKey.key, value } : undefined;
     case 'rateLimit':
       return isRecord(value) ? { key: parsedKey.key, value: value as RateLimit } : undefined;
+    case 'builtinAgentOptOut': {
+      const optOut = normalizeBuiltinAgentOptOut(value);
+      return optOut ? { key: parsedKey.key, value: optOut } : undefined;
+    }
     case 'sessionLaunchConfig': {
       const config = normalizeSessionLaunchConfig(value);
       return config ? { key: parsedKey.key, value: config } : undefined;
@@ -978,11 +1559,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
-
-const nonEmptyString = (value: string | undefined): string | undefined => {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-};
 
 const isMissing = (value: unknown): value is null | undefined =>
   value === undefined || value === null;
@@ -1037,6 +1613,15 @@ const normalizeSessionLaunchConfig = (value: unknown): SessionLaunchConfig | und
     return undefined;
   }
   const config: SessionLaunchConfig = {};
+  if (!isMissing(value.codexAuth)) {
+    const profile = CodexAuthProfileSchema.safeParse(value.codexAuth);
+    if (!profile.success) return undefined;
+    config.codexAuth = profile.data;
+  }
+  if (!isMissing(value.magpieGatewayUrl)) {
+    if (!isMagpieGatewayUrl(value.magpieGatewayUrl)) return undefined;
+    config.magpieGatewayUrl = value.magpieGatewayUrl;
+  }
   if (!isMissing(value.customAcp)) {
     if (!isCustomAcpLaunchSpec(value.customAcp)) {
       return undefined;
@@ -1055,11 +1640,7 @@ const normalizeSessionLaunchConfig = (value: unknown): SessionLaunchConfig | und
     if (!isBuiltinRuntimeOverrides(value.runtimeOverrides)) {
       return undefined;
     }
-    if (
-      Object.values(value.runtimeOverrides).some(
-        (override) => typeof override === 'string' && override.trim().length > 0
-      )
-    ) {
+    if (hasPersistedBuiltinRuntimeOverrides(value.runtimeOverrides)) {
       config.runtimeOverrides = value.runtimeOverrides;
     }
   }
@@ -1256,7 +1837,55 @@ const normalizeLocalProjectMeta = (value: unknown): LocalProjectMeta | undefined
   if (!isMissing(value.history)) {
     project.history = value.history as LocalProjectMeta['history'];
   }
+  if (typeof value.standaloneVisible === 'boolean') {
+    project.standaloneVisible = value.standaloneVisible;
+  }
+  // A malformed remote is dropped rather than rejecting the project.
+  if (
+    typeof value.githubRepoFullName === 'string' &&
+    /^[\w.-]+\/[\w.-]+$/.test(value.githubRepoFullName)
+  ) {
+    project.githubRepoFullName = value.githubRepoFullName;
+  }
+  if (typeof value.git === 'boolean') {
+    project.git = value.git;
+  }
+  if (value.defaultBranch === null) {
+    project.defaultBranch = null;
+  } else if (
+    typeof value.defaultBranch === 'string' &&
+    value.defaultBranch.trim().length > 0 &&
+    value.defaultBranch.length <= 1024
+  ) {
+    project.defaultBranch = value.defaultBranch.trim();
+  }
+  if (value.currentBranch === null) {
+    project.currentBranch = null;
+  } else if (
+    typeof value.currentBranch === 'string' &&
+    value.currentBranch.trim().length > 0 &&
+    value.currentBranch.length <= 1024
+  ) {
+    project.currentBranch = value.currentBranch.trim();
+  }
   return project;
+};
+
+const normalizeAgentSessionDefaults = (
+  value: unknown
+): AgentConfigMeta['sessionDefaults'] | undefined => {
+  if (!isRecord(value)) return undefined;
+  const configOptionValues: Record<string, string | boolean> = {};
+  if (isRecord(value.configOptionValues)) {
+    for (const [configId, optionValue] of Object.entries(value.configOptionValues)) {
+      if (!configId) continue;
+      if (typeof optionValue === 'string' || typeof optionValue === 'boolean')
+        configOptionValues[configId] = optionValue;
+    }
+  }
+  const modelId = isNonEmptyString(value.modelId) ? value.modelId : undefined;
+  if (!modelId && !Object.keys(configOptionValues).length) return undefined;
+  return { ...(modelId ? { modelId } : {}), configOptionValues };
 };
 
 const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined => {
@@ -1285,13 +1914,27 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
   if (typeof value.description === 'string') {
     config.description = value.description;
   }
+  if (!isMissing(value.magpieGatewayUrl)) {
+    if (!isMagpieGatewayUrl(value.magpieGatewayUrl)) return undefined;
+    config.magpieGatewayUrl = value.magpieGatewayUrl;
+  }
   if (!isMissing(value.customAcp)) {
     if (!isCustomAcpLaunchSpec(value.customAcp)) return undefined;
     config.customAcp = value.customAcp;
   }
   if (!isMissing(value.runtimeOverrides)) {
     if (!isBuiltinRuntimeOverrides(value.runtimeOverrides)) return undefined;
-    config.runtimeOverrides = value.runtimeOverrides;
+    const runtimeOverrides = { ...value.runtimeOverrides };
+    // piExtensions and piPath only apply to builtin Pi; a foreign key must not
+    // count as an override for other agent types.
+    if (config.agentType !== 'pi') {
+      delete runtimeOverrides.piExtensions;
+      delete runtimeOverrides.piPath;
+    }
+    if (config.agentType !== 'antigravity') {
+      delete runtimeOverrides.antigravitySkipPermissions;
+    }
+    config.runtimeOverrides = runtimeOverrides;
   }
   if (!isMissing(value.prompt)) {
     if (typeof value.prompt !== 'string') return undefined;
@@ -1304,6 +1947,26 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
   if (!isMissing(value.brandId)) {
     if (typeof value.brandId !== 'string') return undefined;
     config.brandId = value.brandId as AgentConfigMeta['brandId'];
+  }
+  if (!isMissing(value.sessionDefaults)) {
+    const sessionDefaults = normalizeAgentSessionDefaults(value.sessionDefaults);
+    if (sessionDefaults) config.sessionDefaults = sessionDefaults;
+  }
+
+  if (!isMissing(value.codexAuth)) {
+    const profile = CodexAuthProfileSchema.safeParse(value.codexAuth);
+    if (!profile.success) return undefined;
+    config.codexAuth = profile.data;
+    try {
+      if (
+        config.runtimeOverrides?.codexPath === CODEX_PROFILE_LEGACY_LAUNCH_GUARD &&
+        Object.keys(config.runtimeOverrides).length === 1
+      )
+        delete config.runtimeOverrides;
+      assertManagedCodexProfileConfig(config);
+    } catch {
+      return undefined;
+    }
   }
 
   return config;
@@ -1387,6 +2050,18 @@ const normalizeProviderSetupCancellation = (
   };
 };
 
+const normalizeBuiltinAgentOptOut = (value: unknown): BuiltinAgentOptOut | undefined => {
+  if (
+    !isRecord(value) ||
+    value.v !== 1 ||
+    typeof value.removedAt !== 'number' ||
+    !Number.isFinite(value.removedAt)
+  ) {
+    return undefined;
+  }
+  return { v: 1, removedAt: value.removedAt };
+};
+
 const normalizeAgentConfigListSummary = (value: unknown): AgentConfigListSummary | undefined => {
   if (
     !isRecord(value) ||
@@ -1424,3 +2099,15 @@ const isAcpCapabilityCacheEntry = (value: unknown): value is AcpCapabilityCacheE
   Array.isArray(value.modes) &&
   Array.isArray(value.models) &&
   typeof value.fetchedAt === 'number';
+import { encodeCodexProfileConfig, CODEX_PROFILE_LEGACY_LAUNCH_GUARD } from './codex-auth-profile';
+
+export function getMachineFlockMemories(
+  rows: MachineFlockRowMap,
+  machineId: MachineId
+): MemoryAssociation[] {
+  return Object.values(rows).flatMap((row) => {
+    if (row.key[0] !== 'memory') return [];
+    const parsed = MemoryAssociationSchema.safeParse(row.value);
+    return parsed.success && parsed.data.machineId === machineId ? [parsed.data] : [];
+  });
+}

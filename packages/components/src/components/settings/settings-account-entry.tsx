@@ -1,7 +1,82 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { duration, ease, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
+import { settingsSurface as surface } from './surface';
+
+// The desktop settings panel's icon-rail breakpoint; kept literal so StyleX resolves it.
+const NAV_RAIL = '@container desktop-settings (max-width: 720px)';
+
+const styles = stylex.create({
+  /**
+   * In the desktop panel's narrow band the entry is its avatar alone, centred
+   * in the icon column like every other rail row.
+   */
+  railRow: { justifyContent: { default: null, [NAV_RAIL]: 'center' } },
+  railLabel: { display: { default: null, [NAV_RAIL]: 'none' } },
+  /**
+   * On mobile the entry is a card of its own above the settings list, and the
+   * whole card is the row a person opens. It restates the card's fill under
+   * the pointer's, since a hover fill set elsewhere would replace the card's.
+   */
+  mobile: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    minWidth: 0,
+    paddingInline: space[4],
+    paddingBlock: space[3],
+    margin: 0,
+    borderWidth: 0,
+    backgroundColor: {
+      default: colors.elevatedBackground,
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+    },
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    textAlign: 'start',
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  mobileHero: {
+    height: '100%',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    textAlign: 'center',
+    paddingBlock: space[6],
+  },
+  mobileHeroText: { flexGrow: 0, width: '100%' },
+  mobileHeroName: { fontSize: '1.1em' },
+  mobileEmbedded: { boxShadow: 'none', borderRadius: 0 },
+  mobileText: { flexGrow: 1, minWidth: 0 },
+  mobileName: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95em',
+    fontWeight: 400,
+    color: colors.label,
+  },
+  mobileEmail: {
+    display: 'block',
+    marginTop: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  chevron: { flexShrink: 0, width: '16px', height: '16px', color: colors.tertiaryLabel },
+});
 
 type SettingsAccountUser = {
   id?: string | null;
@@ -14,48 +89,59 @@ export function SettingsAccountEntry({
   user,
   active = false,
   mobile = false,
+  hero = false,
+  embedded = false,
   onSelect,
 }: {
   user: SettingsAccountUser | null | undefined;
   active?: boolean;
   mobile?: boolean;
+  hero?: boolean;
+  embedded?: boolean;
   onSelect: () => void;
 }) {
   const { t } = useTranslation();
   if (!user) return null;
 
+  const name = user.name || user.email || t('settings.tabs.account');
+
+  if (mobile) {
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={active}
+        aria-label={t('settings.account.open', 'Open account settings')}
+        {...stylex.props(
+          surface.card,
+          styles.mobile,
+          hero && styles.mobileHero,
+          embedded && styles.mobileEmbedded
+        )}
+      >
+        <UserAvatar user={user} size={hero ? 'xlarge' : 'large'} />
+        <span {...stylex.props(styles.mobileText, hero && styles.mobileHeroText)}>
+          <span {...stylex.props(styles.mobileName, hero && styles.mobileHeroName)}>{name}</span>
+          {user.email ? <span {...stylex.props(styles.mobileEmail)}>{user.email}</span> : null}
+        </span>
+        {!hero ? <ChevronRight {...stylex.props(styles.chevron)} aria-hidden="true" /> : null}
+      </button>
+    );
+  }
+
+  // On desktop the entry is one row of the settings nav, so it is that row.
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={active}
       aria-label={t('settings.account.open', 'Open account settings')}
-      className={cn(
-        'flex w-full min-w-0 items-center text-start transition-colors',
-        mobile
-          ? 'gap-3 rounded-2xl border border-border/40 bg-card px-4 py-3 active:bg-muted/40'
-          : 'gap-2.5 rounded-md px-2.5 py-1 hover:bg-secondary/50',
-        !mobile && active && 'bg-secondary text-secondary-foreground'
-      )}
+      {...stylex.props(surface.listRow, styles.railRow, active && surface.listRowSelected)}
     >
-      <UserAvatar
-        user={user}
-        className={cn(
-          'shrink-0 text-xs',
-          mobile ? 'h-9 w-9' : 'h-6 w-6 text-[10px]'
-        )}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-foreground">
-          {user.name || user.email || t('settings.tabs.account')}
-        </span>
-        {mobile && user.email ? (
-          <span className="mt-0.5 block truncate text-xs text-muted-foreground">{user.email}</span>
-        ) : null}
+      <span {...stylex.props(surface.listRowAvatar)}>
+        <UserAvatar user={user} size="medium" />
       </span>
-      {mobile ? (
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
-      ) : null}
+      <span {...stylex.props(surface.listRowLabel, styles.railLabel)}>{name}</span>
     </button>
   );
 }

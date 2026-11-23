@@ -55,6 +55,62 @@ export function scopeQuotaAvailableAtMs(
   return nowMs + Math.ceil((deficit / config.bucketRefillPointsPerMinute) * 60_000);
 }
 
+/**
+ * Why a scope may not spend right now. `repo-cooldown` is repo-local; `frozen`
+ * and `bucket-empty` are scope-wide — every repo sharing that credential is
+ * blocked until `availableAtMs`, which is what lets a caller skip a whole
+ * scope without resolving each repo's credential first.
+ */
+export type PrPollScopeGateReason = 'repo-cooldown' | 'frozen' | 'bucket-empty';
+
+export type PrPollScopeGate =
+  | { gated: false; quota: PrPollScopeQuotaState }
+  | {
+      gated: true;
+      reason: PrPollScopeGateReason;
+      /** Earliest time the gate can open; always `> nowMs`. */
+      availableAtMs: number;
+      quota: PrPollScopeQuotaState;
+    };
+
+/**
+ * Can this scope spend one point on this repo now — and if not, when? Single
+ * source for both the pre-call gate and the "is a wake worth running" check,
+ * so an externally triggered wake cannot jump a gate the poll itself honours.
+ * `quota` is the refilled snapshot; refill is a pure time function, so storing
+ * it is optional (recomputing later yields the same value).
+ */
+export function evaluateScopeGate(args: {
+  quota: PrPollScopeQuotaState | undefined;
+  repoCooldown: PrPollRepoCooldownState | undefined;
+  nowMs: number;
+  config: PrPollerConfig;
+}): PrPollScopeGate {
+  const { repoCooldown, nowMs, config } = args;
+  const quota = refillScopeQuota(args.quota ?? fullScopeQuota(nowMs, config), nowMs, config);
+  if (repoCooldown && repoCooldown.nextRetryAtMs > nowMs) {
+    return {
+      gated: true,
+      reason: 'repo-cooldown',
+      availableAtMs: repoCooldown.nextRetryAtMs,
+      quota,
+    };
+  }
+  const frozenUntilMs = quota.frozenUntilMs;
+  if (frozenUntilMs !== undefined && frozenUntilMs > nowMs) {
+    return { gated: true, reason: 'frozen', availableAtMs: frozenUntilMs, quota };
+  }
+  if (quota.tokens < 1) {
+    return {
+      gated: true,
+      reason: 'bucket-empty',
+      availableAtMs: scopeQuotaAvailableAtMs(quota, nowMs, config),
+      quota,
+    };
+  }
+  return { gated: false, quota };
+}
+
 /** Spend points after a completed call; clamps at zero (cost is only known post-hoc). */
 export function spendScopeQuota(
   quota: PrPollScopeQuotaState,

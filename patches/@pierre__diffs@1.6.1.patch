@@ -1,0 +1,11 @@
+--- a/dist/constants.js
++++ b/dist/constants.js
+@@ -12,7 +12,7 @@
+ const UNIFIED_DIFF_FILE_BREAK_REGEX = /(?=^---\s+\S)/gm;
+ const FILE_CONTEXT_BLOB = /(?=^@@ )/gm;
+ const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: (.*))?/m;
+-const SPLIT_WITH_NEWLINES = /(?<=\n)/;
++const SPLIT_WITH_NEWLINES = { [Symbol.split](str) { const r = []; let s = 0; for (let i = 0; i < str.length; i++) { if (str[i] === '\n') { r.push(str.slice(s, i + 1)); s = i + 1; } } if (s < str.length) r.push(str.slice(s)); return r; } };
+ const FILENAME_HEADER_REGEX = /^(---|\+\+\+)\s+([^\t\r\n]+)/;
+ const INDEX_LINE_METADATA = /^index ([0-9a-f]+)\.\.([0-9a-f]+)(?: (\d+))?$/i;
+ const MERGE_CONFLICT_START_MARKER_REGEX = /^<{7,}(?:\s.*)?$/;

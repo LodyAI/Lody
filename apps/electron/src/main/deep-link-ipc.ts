@@ -11,7 +11,7 @@ type DeepLinkIpcRecord = {
 
 const IPC_FILE = path.join(
   os.tmpdir(),
-  `${desktopInstallationProfile.namespace}-deeplink-ipc.jsonl`
+  `${desktopInstallationProfile.desktopIpcNamespace}-deeplink-ipc.jsonl`
 )
 const POLL_INTERVAL_MS = 300
 const PROCESS_STARTED_AT = Date.now()

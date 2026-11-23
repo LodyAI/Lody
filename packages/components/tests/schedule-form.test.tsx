@@ -1,0 +1,600 @@
+// @vitest-environment jsdom
+import { act, type ComponentProps } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import i18next from 'i18next';
+import { initReactI18next } from 'react-i18next';
+import en from '../../../locales/en.json';
+import { ScheduledMessageTimeFields } from '../src/components/schedules/scheduled-message-time';
+import { ScheduleForm } from '../src/components/schedules/schedule-view';
+import { ScheduleMentionForm } from '../src/components/schedules/schedule-mention-form';
+import { evaluateSchedule, ScheduleDefinitionSchema, ScheduleAgentSchema } from '@lody/shared';
+
+import { ScheduleAgentControls } from '../src/components/schedules/schedule-agent-controls';
+import { composerHandle } from './composer-test-utils';
+
+vi.mock('../src/components/mentions/mention-project-file-source', async (original) => ({
+  ...(await original<object>()),
+  useMentionProjectFiles: () => ({
+    fileData: { entry: null, status: 'ready' },
+    initializeLazyDirectory: async () => undefined,
+    getKnownFileTokens: () => new Set<string>(),
+  }),
+}));
+vi.mock('../src/components/mentions/mention-skill-source', async (original) => ({
+  ...(await original<object>()),
+  useMentionProjectSkills: () => ({
+    skillState: { status: 'ready' },
+    skillItems: [],
+    knownSkillTokens: new Set<string>(),
+  }),
+}));
+vi.mock('../src/components/mentions/mention-session-source', async (original) => ({
+  ...(await original<object>()),
+  useSessionMentionItems: () => [
+    {
+      sessionId: 'sess_review',
+      title: 'Review changes',
+      slug: 'review-changes',
+      projectKey: 'chat',
+      activityAt: 1,
+    },
+  ],
+}));
+vi.mock('../src/components/mentions/mention-agent-role-source', async (original) => ({
+  ...(await original<object>()),
+  useAgentRoleMentionItems: () => [],
+}));
+
+// Exercise the schedule adapter with the composer's typed change contract.
+vi.mock('../src/components/sessions/desktop-run-config-menu', () => ({
+  DesktopRunConfigMenu: ({
+    onConfigOptionChange,
+  }: {
+    onConfigOptionChange: (id: string, value: string | boolean) => void;
+  }) => (
+    <>
+      <button onClick={() => onConfigOptionChange('plan_mode', false)}>Plan off</button>
+      <button onClick={() => onConfigOptionChange('select_flag', 'false')}>String choice</button>
+    </>
+  ),
+  DesktopPermissionModeButton: () => null,
+}));
+
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+/** Fixed clock: the preview and "next run" copy must not depend on the wall time. */
+const NOW = Date.parse('2026-09-06T09:12:00+08:00');
+
+describe('Schedule editor', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  let props: ComponentProps<typeof ScheduleForm>;
+  beforeAll(async () => {
+    await i18next.use(initReactI18next).init({
+      lng: 'en',
+      resources: { en: { translation: en } },
+      interpolation: { escapeValue: false },
+    });
+  });
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    props = {
+      initial: {
+        title: 'Daily review',
+        prompt: 'Review recent changes.',
+        trigger: { kind: 'cron', expression: '0 9 * * *', timeZone: 'Asia/Shanghai' },
+        misfire: 'run_once',
+        overlap: 'queue_one',
+      },
+      saving: false,
+      now: NOW,
+      timeZone: 'Asia/Shanghai',
+      onSave: vi.fn(),
+    };
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+  const render = () => act(() => root.render(<ScheduleForm {...props} />));
+  const button = () => container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  const submit = () =>
+    act(() => {
+      container
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+  /** The problem marks next to fields; each names its reason. */
+  const marks = () =>
+    [...container.querySelectorAll('[role="img"][aria-label]')].map((mark) =>
+      mark.getAttribute('aria-label')
+    );
+  const footer = () => container.querySelector(`#${button().getAttribute('aria-describedby')}`)!;
+  const field = (label: string) =>
+    container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
+  const type = (label: string, text: string) => {
+    const target = field(label) as HTMLElement;
+    if (target.hasAttribute('data-composer-editor')) return composerHandle(target).edit(text);
+    act(() => {
+      const element = field(label);
+      const setter = Object.getOwnPropertyDescriptor(
+        element instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype,
+        'value'
+      )!.set!;
+      setter.call(element, text);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+
+  it('selects a session from the mention menu without submitting and saves its identity', async () => {
+    props.initial = { ...props.initial, prompt: '' };
+    await act(async () => root.render(<ScheduleMentionForm {...props} />));
+    const input = composerHandle(field(en['schedules.prompt']) as HTMLElement);
+    input.focus();
+    input.edit('@session:review', 15);
+    await act(async () => {});
+    expect(document.body.textContent).toContain('Review changes');
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(input.value).toBe('@review-changes ');
+    expect(props.onSave).not.toHaveBeenCalled();
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[0]![0].prompt).toBe(
+      '[@Review changes](lody://session/sess_review) '
+    );
+  });
+
+  it('expands a selected session mention when saving and preserves it when reopened', async () => {
+    props.initial = { ...props.initial, prompt: '@review-changes' };
+    await act(async () => root.render(<ScheduleMentionForm {...props} />));
+    submit();
+    const saved = vi.mocked(props.onSave).mock.calls[0]![0];
+    expect(saved.prompt).toBe('[@Review changes](lody://session/sess_review)');
+    act(() => root.unmount());
+    root = createRoot(container);
+    props.initial = saved;
+    await act(async () => root.render(<ScheduleMentionForm {...props} />));
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[1]![0].prompt).toBe(saved.prompt);
+  });
+
+  it('preserves the absolute instant when the message time is displayed on another machine clock', async () => {
+    const at = '2026-11-01T09:30:00.000Z';
+    await act(async () =>
+      root.render(
+        <ScheduledMessageTimeFields
+          at={at}
+          now={NOW}
+          timeZone="America/Los_Angeles"
+          onChange={() => {
+            throw new Error('Display must not edit the instant');
+          }}
+        />
+      )
+    );
+    expect(container.querySelector('input')?.value).toBe('2026-11-01T01:30');
+    await act(async () =>
+      root.render(
+        <ScheduledMessageTimeFields
+          at={at}
+          now={NOW}
+          timeZone="Asia/Shanghai"
+          onChange={() => {
+            throw new Error('Display must not edit the instant');
+          }}
+        />
+      )
+    );
+    expect(container.querySelector('input')?.value).toBe('2026-11-01T17:30');
+  });
+
+  it('preserves typed composer changes in the saved Agent configuration', () => {
+    let value: NonNullable<ComponentProps<typeof ScheduleAgentControls>['value']> = {
+      agentConfigId: 'agent' as never,
+    };
+    const renderControls = () =>
+      act(() =>
+        root.render(
+          <ScheduleAgentControls
+            machine={undefined}
+            agentConfigs={[]}
+            value={value}
+            onChange={(next) => {
+              value = next;
+            }}
+          />
+        )
+      );
+    renderControls();
+    act(() => container.querySelectorAll('button')[0]!.click());
+    renderControls();
+    act(() => container.querySelectorAll('button')[1]!.click());
+    const saved = ScheduleAgentSchema.parse(value);
+    expect(saved.configOptionValues).toEqual({ plan_mode: false, select_flag: 'false' });
+  });
+
+  it('has no time zone picker; the rule is read on the target machine clock', () => {
+    props.timeZone = 'America/New_York';
+    props.clockName = 'Studio';
+    render();
+    expect(container.querySelector('[aria-label="Time zone"]')).toBeNull();
+    expect(container.textContent).toContain('Studio');
+    submit();
+    // Same wall time, moved onto the machine that runs it.
+    expect(vi.mocked(props.onSave).mock.calls[0]![0].trigger).toEqual({
+      kind: 'cron',
+      expression: '0 9 * * *',
+      timeZone: 'America/New_York',
+    });
+  });
+
+  it.each([
+    ['America/Los_Angeles', '2026-10-01T02:21', '2026-10-01T09:21:00.000Z', '2:21 AM'],
+    ['Asia/Singapore', '2026-10-01T02:21', '2026-09-30T18:21:00.000Z', '2:21 AM'],
+    ['America/Los_Angeles', '2026-10-01T23:21', '2026-10-02T06:21:00.000Z', '11:21 PM'],
+    ['America/Los_Angeles', '2026-03-08T02:30', '2026-03-08T10:30:00.000Z', '3:30 AM'],
+    ['America/Los_Angeles', '2026-11-01T01:30', '2026-11-01T08:30:00.000Z', '1:30 AM'],
+  ])('keeps Once input, preview, save and due slot on %s (%s)', (zone, input, at, time) => {
+    props.timeZone = zone;
+    props.clockName = 'Fixture machine';
+    props.now = Date.parse(at) - 86_400_000;
+    props.initial = {
+      ...props.initial,
+      trigger: { kind: 'once', at: new Date(Date.parse(at) - 60_000).toISOString() },
+    };
+    render();
+    type(en['schedules.repeat.runAt'], input);
+    const normalizedInput = input === '2026-03-08T02:30' ? '2026-03-08T03:30' : input;
+    expect(field(en['schedules.repeat.runAt']).value).toBe(normalizedInput);
+    const preview = container.querySelector('[aria-atomic="true"]')!;
+    expect(preview.textContent).toContain(time);
+    expect(preview.querySelector('[title]')?.getAttribute('title')).toBe(zone);
+    submit();
+    const trigger = vi.mocked(props.onSave).mock.calls[0]![0].trigger;
+    expect(trigger).toEqual({ kind: 'once', at });
+    const definition = ScheduleDefinitionSchema.parse({
+      scheduleId: 'fixture',
+      title: 'Fixture',
+      ownerId: 'owner',
+      machineId: 'machine',
+      enabled: true,
+      activationId: 'activation',
+      activeFrom: props.now,
+      trigger,
+      misfirePolicy: { kind: 'run_once' },
+      overlapPolicy: 'queue_one',
+      agent: { agentConfigId: 'agent' },
+      retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+      createdAt: props.now,
+      updatedAt: props.now,
+      createdBy: 'owner',
+    });
+    expect(evaluateSchedule(definition, undefined, Date.parse(at) - 1).due).toBeUndefined();
+    expect(evaluateSchedule(definition, undefined, Date.parse(at)).due).toEqual({
+      scheduledFor: Date.parse(at),
+      disposition: 'run',
+    });
+  });
+
+  it('keeps a Once instant when switching machines and reopening the saved form', () => {
+    const at = '2026-10-01T09:21:00.000Z';
+    props.initial = { ...props.initial, trigger: { kind: 'once', at } };
+    props.now = Date.parse('2026-09-30T00:00:00Z');
+    props.timeZone = 'America/Los_Angeles';
+    render();
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-10-01T02:21');
+    props.timeZone = 'Asia/Singapore';
+    render();
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-10-01T17:21');
+    expect(container.querySelector('[aria-atomic="true"]')!.textContent).toContain('5:21 PM');
+    submit();
+    const saved = vi.mocked(props.onSave).mock.calls[0]![0];
+    expect(saved.trigger).toBe(props.initial.trigger);
+    act(() => root.unmount());
+    root = createRoot(container);
+    props.initial = saved;
+    render();
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-10-01T17:21');
+  });
+
+  it('keeps a stored second DST-fold instant when saving an untouched Once field', () => {
+    const trigger = { kind: 'once', at: '2026-11-01T09:30:00.000Z' } as const;
+    props.initial = { ...props.initial, trigger };
+    props.timeZone = 'America/Los_Angeles';
+    props.now = Date.parse('2026-10-31T00:00:00Z');
+    render();
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-11-01T01:30');
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[0]![0].trigger).toBe(trigger);
+  });
+
+  it('switches Once to a periodic rule using the machine hour and keeps it through Manual', async () => {
+    props.initial = { ...props.initial, trigger: { kind: 'once', at: '2026-10-01T09:21:00.000Z' } };
+    props.timeZone = 'America/Los_Angeles';
+    props.now = Date.parse('2026-10-01T00:30:00Z');
+    render();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`[aria-label="${en['schedules.repeat.label']}"]`)!
+        .click();
+    });
+    await act(async () => {
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (item) => item.textContent === en['schedules.repeat.daily']
+      )!;
+      option.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      option.click();
+    });
+    expect(field(en['schedules.repeat.at']).value).toBe('02:21');
+    const tab = (name: string) =>
+      [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+        (entry) => entry.textContent === name
+      )!;
+    act(() => tab(en['schedules.trigger.manual']).click());
+    act(() => tab(en['schedules.trigger.timed']).click());
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[0]![0].trigger).toEqual({
+      kind: 'cron',
+      expression: '21 2 * * *',
+      timeZone: 'America/Los_Angeles',
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`[aria-label="${en['schedules.repeat.label']}"]`)!
+        .click();
+    });
+    await act(async () => {
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (item) => item.textContent === en['schedules.repeat.once']
+      )!;
+      option.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      option.click();
+    });
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-09-30T18:30');
+    expect(container.querySelector('[aria-atomic="true"]')!.textContent).toContain('6:30 PM');
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[1]![0].trigger).toEqual({
+      kind: 'once',
+      at: '2026-10-01T01:30:00.000Z',
+    });
+  });
+
+  it('rejects an invalid expression it was opened with', () => {
+    props.initial = {
+      ...props.initial,
+      trigger: { kind: 'cron', expression: 'invalid', timeZone: 'Asia/Shanghai' },
+    };
+    render();
+    expect(container.textContent).toContain(en['schedules.invalidTime']);
+    submit();
+    expect(props.onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('Time rules a person opens', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  let onSave: ReturnType<typeof vi.fn>;
+  beforeAll(async () => {
+    if (!i18next.isInitialized)
+      await i18next.use(initReactI18next).init({
+        lng: 'en',
+        resources: { en: { translation: en } },
+        interpolation: { escapeValue: false },
+      });
+  });
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    onSave = vi.fn();
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+  /**
+   * A fresh root per case: `initial` seeds uncontrolled editor state, so
+   * re-rendering the same root would keep the previous rule's picker.
+   */
+  const open = (
+    trigger: ComponentProps<typeof ScheduleForm>['initial']['trigger'],
+    timeZone = 'Asia/Shanghai'
+  ) => {
+    act(() => root.unmount());
+    container.replaceChildren();
+    root = createRoot(container);
+    act(() =>
+      root.render(
+        <ScheduleForm
+          now={NOW}
+          saving={false}
+          onSave={onSave}
+          timeZone={timeZone}
+          initial={{
+            title: 'Daily review',
+            prompt: 'Review recent changes.',
+            trigger,
+            misfire: 'run_once',
+            overlap: 'queue_one',
+          }}
+        />
+      )
+    );
+  };
+  const submit = () =>
+    act(() => {
+      container
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+  const repeatValue = () =>
+    container.querySelector(`[aria-label="${en['schedules.repeat.label']}"]`)!.textContent;
+
+  it('shows a rule it cannot name read-only, and re-emits it byte for byte', () => {
+    const trigger = {
+      kind: 'cron',
+      expression: '*/20 9-17 * * 1-5',
+      timeZone: 'Asia/Shanghai',
+    } as const;
+    open(trigger);
+    // No cron text box anywhere, and no picker either: only the summary and
+    // a Replace action.
+    expect(container.querySelector('input[type="text"]')).toBeNull();
+    expect(container.querySelector(`[aria-label="${en['schedules.repeat.label']}"]`)).toBeNull();
+    expect(container.textContent).toContain('*/20 9-17 * * 1-5');
+    expect(
+      [...container.querySelectorAll('button')].some(
+        (button) => button.textContent === en['schedules.repeat.replace']
+      )
+    ).toBe(true);
+    submit();
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0]![0].trigger).toEqual(trigger);
+  });
+
+  it('replaces an unsupported rule with a named one only on request', () => {
+    open({ kind: 'cron', expression: '*/20 9-17 * * 1-5', timeZone: 'Asia/Shanghai' });
+    act(() => {
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === en['schedules.repeat.replace'])!
+        .click();
+    });
+    expect(repeatValue()).toBe(en['schedules.repeat.daily']);
+    submit();
+    expect(onSave.mock.calls[0]![0].trigger).toEqual({
+      kind: 'cron',
+      expression: '0 9 * * *',
+      timeZone: 'Asia/Shanghai',
+    });
+  });
+
+  it('opens a manual task without a time rule, and saves it as manual', () => {
+    open({ kind: 'manual' });
+    expect(container.querySelector(`[aria-label="${en['schedules.repeat.label']}"]`)).toBeNull();
+    expect(container.textContent).toContain(en['schedules.trigger.manualHelp']);
+    expect(container.textContent).not.toContain(en['schedules.nextRuns']);
+    submit();
+    expect(onSave.mock.calls[0]![0].trigger).toEqual({ kind: 'manual' });
+  });
+
+  it('switches between manual and timed without losing the time rule', () => {
+    open({ kind: 'cron', expression: '30 7 * * 1-5', timeZone: 'Asia/Shanghai' });
+    const tab = (name: string) =>
+      [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+        (button) => button.textContent === name
+      )!;
+    act(() => tab(en['schedules.trigger.manual']).click());
+    expect(container.textContent).toContain(en['schedules.trigger.manualHelp']);
+    act(() => tab(en['schedules.trigger.timed']).click());
+    expect(repeatValue()).toBe(en['schedules.repeat.weekdays']);
+    submit();
+    // Untouched, so the stored spelling comes back exactly.
+    expect(onSave.mock.calls[0]![0].trigger).toEqual({
+      kind: 'cron',
+      expression: '30 7 * * 1-5',
+      timeZone: 'Asia/Shanghai',
+    });
+  });
+
+  it('re-emits a named rule unchanged when the person only edited the prompt', () => {
+    // `MON-FRI` is not how this editor spells the workweek, but re-saving an
+    // untouched rule must not rewrite it and invalidate its fingerprint.
+    const trigger = {
+      kind: 'cron',
+      expression: '0 9 * * MON-FRI',
+      timeZone: 'Asia/Shanghai',
+    } as const;
+    open(trigger);
+    composerHandle(
+      container.querySelector<HTMLElement>(`[aria-label="${en['schedules.prompt']}"]`)!
+    ).edit('Different prompt.');
+    submit();
+    expect(onSave.mock.calls[0]![0].trigger).toBe(trigger);
+    expect(onSave.mock.calls[0]![0].prompt).toBe('Different prompt.');
+  });
+
+  it('lets a person type a step the menu does not offer and saves it as an interval', async () => {
+    open({ kind: 'cron', expression: '*/15 * * * *', timeZone: 'Asia/Shanghai' });
+    const minutesField = () =>
+      container.querySelector<HTMLInputElement>(
+        `[aria-label="${en['schedules.repeat.customMinutes']}"]`
+      );
+    expect(minutesField()).toBeNull();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`[aria-label="${en['schedules.repeat.every']}"]`)!
+        .click();
+    });
+    await act(async () => {
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (item) => item.textContent === en['schedules.repeat.custom']
+      )!;
+      option.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      option.click();
+    });
+    // Choosing Custom keeps the current step until a new one is typed.
+    expect(minutesField()!.value).toBe('15');
+    await act(async () => {
+      const input = minutesField()!;
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '45');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.blur();
+    });
+    submit();
+    expect(onSave.mock.calls[0]![0].trigger).toEqual({
+      kind: 'interval',
+      everyMs: 45 * 60_000,
+      anchorAt: new Date(NOW).toISOString(),
+    });
+  });
+
+  it('accepts a custom step far beyond a day, as a proposal or the CLI may store', async () => {
+    open({ kind: 'interval', everyMs: 90 * 60_000, anchorAt: '2026-09-06T00:00:00.000Z' });
+    const minutesField = () =>
+      container.querySelector<HTMLInputElement>(
+        `[aria-label="${en['schedules.repeat.customMinutes']}"]`
+      )!;
+    expect(minutesField().value).toBe('90');
+    await act(async () => {
+      const input = minutesField();
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        '200000'
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.blur();
+    });
+    submit();
+    expect(onSave.mock.calls[0]![0].trigger).toEqual({
+      kind: 'interval',
+      everyMs: 200_000 * 60_000,
+      anchorAt: new Date(NOW).toISOString(),
+    });
+  });
+
+  it('reopens a typed step in the custom field rather than as a preset', () => {
+    open({ kind: 'interval', everyMs: 5 * 3_600_000, anchorAt: '2026-09-06T00:00:00.000Z' });
+    expect(repeatValue()).toBe(en['schedules.repeat.hours']);
+    expect(
+      container.querySelector<HTMLInputElement>(
+        `[aria-label="${en['schedules.repeat.customHours']}"]`
+      )!.value
+    ).toBe('5');
+    expect(
+      container.querySelector(`[aria-label="${en['schedules.repeat.every']}"]`)!.textContent
+    ).toBe(en['schedules.repeat.custom']);
+  });
+});

@@ -1,175 +1,180 @@
-/**
- * Small executable contract model for Operation/Delivery scheduling races.
- * It deliberately omits storage fields and models only state that can change a
- * safety or liveness decision. Tests exhaustively explore bounded traces.
- */
-export type OrchestrationModelState = {
-  operation: 'absent' | 'active' | 'finished';
-  targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
-  delivery: 'absent' | 'pending' | 'consumed';
-  activeTurn: 'none' | 'user' | 'delivery';
-  queuedUsers: number;
-  archived: boolean;
-  configurationAvailable: boolean;
-  completionTurnWrites: number;
-  chainDepth: number;
+/** Reduced current Inbox contract. SQLite and execution suites verify the real boundaries. */
+export type InboxModel = {
+  next: number;
+  queue: number[];
+  consumed: number[];
+  pending: number[];
+  paused: boolean;
+  human: boolean;
+  automation: boolean;
+  active: 'none' | 'human' | 'automatic' | 'automation';
+  batch: number[];
+  submitted: boolean;
+  receipts: number[][];
+  boundary: number[] | undefined;
 };
-
-export type OrchestrationModelAction =
-  | 'accept'
-  | 'materialize_fail'
-  | 'materialization_retry'
-  | 'materialize_success'
-  | 'finish'
-  | 'deadline'
-  | 'enqueue_user'
+export type InboxEvent =
+  | 'result'
+  | 'human'
+  | 'automation'
   | 'schedule'
-  | 'complete_turn'
-  | 'archive'
-  | 'restore'
-  | 'delete_configuration';
-
-export const initialOrchestrationModelState = (): OrchestrationModelState => ({
-  operation: 'absent',
-  targetInput: 'absent',
-  delivery: 'absent',
-  activeTurn: 'none',
-  queuedUsers: 0,
-  archived: false,
-  configurationAvailable: true,
-  completionTurnWrites: 0,
-  chainDepth: 0,
+  | 'submit'
+  | 'normal'
+  | 'stop'
+  | 'failed'
+  | 'restart'
+  | 'withdraw'
+  | 'duplicate_release';
+export const initialOrchestrationModelState = (): InboxModel => ({
+  next: 1,
+  queue: [],
+  consumed: [],
+  pending: [],
+  paused: false,
+  human: false,
+  automation: false,
+  active: 'none',
+  batch: [],
+  submitted: false,
+  receipts: [],
+  boundary: undefined,
 });
-
-export const stepOrchestrationModel = (
-  state: OrchestrationModelState,
-  action: OrchestrationModelAction
-): OrchestrationModelState => {
-  const next = { ...state };
-  switch (action) {
-    case 'accept':
-      if (next.operation === 'absent' && next.chainDepth < 5) {
-        next.operation = 'active';
-        next.targetInput = 'missing';
+export function stepOrchestrationModel(before: InboxModel, event: InboxEvent): InboxModel {
+  const s = structuredClone(before);
+  const consume = () => {
+    if (s.submitted) {
+      s.consumed.push(...s.batch);
+      s.queue = s.queue.filter((n) => !s.batch.includes(n));
+    }
+  };
+  const release = () => {
+    s.active = 'none';
+    s.batch = [];
+    s.submitted = false;
+  };
+  switch (event) {
+    case 'result':
+      if (s.next <= 3) {
+        s.queue.push(s.next++);
+        if (s.active === 'none' && !s.paused && !s.human) s.pending = [...s.queue];
       }
       break;
-    case 'materialize_fail':
-      if (next.operation === 'active' && next.targetInput === 'missing') {
-        next.targetInput = 'retry_scheduled';
-      }
+    case 'human':
+      s.human = true;
+      s.paused = false;
+      s.pending = [];
       break;
-    case 'materialization_retry':
-      if (next.operation === 'active' && next.targetInput === 'retry_scheduled') {
-        next.targetInput = 'missing';
-      }
-      break;
-    case 'materialize_success':
-      if (
-        next.operation === 'active' &&
-        (next.targetInput === 'missing' || next.targetInput === 'retry_scheduled')
-      ) {
-        next.targetInput = 'durable';
-      }
-      break;
-    case 'finish':
-      if (next.operation === 'active' && next.targetInput === 'durable') {
-        next.operation = 'finished';
-        next.delivery = 'pending';
-      }
-      break;
-    case 'deadline':
-      if (next.operation === 'active') {
-        next.operation = 'finished';
-        if (next.targetInput === 'retry_scheduled') next.targetInput = 'missing';
-        next.delivery = 'pending';
-      }
-      break;
-    case 'enqueue_user':
-      next.queuedUsers = Math.min(2, next.queuedUsers + 1);
+    case 'automation':
+      if (!s.paused) s.automation = true;
       break;
     case 'schedule':
-      if (next.archived || next.activeTurn !== 'none') break;
-      if (next.queuedUsers > 0) {
-        next.queuedUsers -= 1;
-        next.activeTurn = 'user';
-      } else if (next.delivery === 'pending') {
-        next.completionTurnWrites += 1;
-        next.delivery = 'consumed';
-        if (next.configurationAvailable) {
-          next.activeTurn = 'delivery';
-          next.chainDepth += 1;
-        }
+      if (s.active !== 'none' || s.paused) break;
+      if (s.human) {
+        s.active = 'human';
+        s.human = false;
+        s.batch = [...s.queue];
+        s.pending = [];
+        s.boundary = undefined;
+      } else if (s.automation) {
+        s.active = 'automation';
+        s.automation = false;
+        s.batch = [...s.queue];
+        s.pending = [];
+        s.boundary = undefined;
+      } else if (s.pending.length) {
+        s.active = 'automatic';
+        s.batch = [...s.queue];
+        s.pending = [];
+        s.boundary = undefined;
+        if (!s.batch.length) release();
       }
       break;
-    case 'complete_turn':
-      next.activeTurn = 'none';
+    case 'submit':
+      if (s.active === 'none' || s.submitted || s.paused) break;
+      if ((s.active === 'automatic' || s.active === 'automation') && s.human) break;
+      if (s.active === 'automatic' && !s.batch.length) break;
+      if (s.batch.length) s.receipts.push([...s.batch]);
+      s.submitted = true;
       break;
-    case 'archive':
-      next.archived = true;
+    case 'normal':
+      if (s.active === 'none' || !s.submitted) break;
+      consume();
+      s.boundary = [...s.queue];
+      s.pending = s.paused || s.human ? [] : [...s.queue];
+      release();
       break;
-    case 'restore':
-      next.archived = false;
+    case 'stop':
+      s.paused = true;
+      s.human = false;
+      s.automation = false;
+      s.pending = [];
+      consume();
+      release();
       break;
-    case 'delete_configuration':
-      next.configurationAvailable = false;
+    case 'failed':
+      if (s.active === 'none') break;
+      consume();
+      s.pending = [];
+      release();
       break;
+    case 'restart':
+      // The interrupted execution retires as unknown: never replayed, never blocking.
+      if (s.active !== 'none') {
+        consume();
+        s.pending = [];
+        release();
+      }
+      break;
+    case 'withdraw':
+      // An unverified human execution returns its input before submission.
+      if (s.active !== 'human' || s.submitted) break;
+      s.active = 'none';
+      s.batch = [];
+      s.human = true;
+      break;
+    case 'duplicate_release':
+      break; // duplicate release cannot create another intent
   }
-  return next;
-};
-
-export const assertOrchestrationModelSafety = (state: OrchestrationModelState): void => {
-  if (state.completionTurnWrites > 1) {
-    throw new Error('one Delivery created more than one visible completion Turn');
-  }
-  if (state.delivery === 'pending' && state.operation !== 'finished') {
-    throw new Error('a pending Delivery exists without a finished Operation');
-  }
-  if (state.operation === 'absent' && state.targetInput !== 'absent') {
-    throw new Error('target materialization exists before Operation acceptance');
-  }
-  if (state.operation === 'finished' && state.targetInput === 'retry_scheduled') {
-    throw new Error('a terminal Operation retained a materialization retry');
-  }
-  if (state.activeTurn === 'delivery' && state.delivery !== 'consumed') {
-    throw new Error('a Delivery continuation started before the Delivery was claimed');
-  }
-  if (state.chainDepth > 5) {
-    throw new Error('machine-originated chain exceeded the fixed depth cap');
-  }
-};
-
-export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationModelState[] => {
-  const actions: OrchestrationModelAction[] = [
-    'accept',
-    'materialize_fail',
-    'materialization_retry',
-    'materialize_success',
-    'finish',
-    'deadline',
-    'enqueue_user',
+  assertOrchestrationModelSafety(s);
+  return s;
+}
+export function assertOrchestrationModelSafety(s: InboxModel) {
+  const delivered = s.receipts.flat();
+  if (new Set(delivered).size !== delivered.length) throw new Error('Result submitted twice');
+  if (s.receipts.some((batch) => batch.length === 0)) throw new Error('Empty automatic batch');
+  if (s.paused && s.pending.length) throw new Error('Paused session has automatic intent');
+  if (s.pending.some((n) => !s.queue.includes(n)))
+    throw new Error('Intent does not own queued data');
+}
+export function enumerateOrchestrationModel(depth = 8) {
+  const actions: InboxEvent[] = [
+    'result',
+    'human',
+    'automation',
     'schedule',
-    'complete_turn',
-    'archive',
-    'restore',
-    'delete_configuration',
+    'submit',
+    'normal',
+    'stop',
+    'failed',
+    'restart',
+    'withdraw',
+    'duplicate_release',
   ];
   const initial = initialOrchestrationModelState();
-  const seen = new Map([[JSON.stringify(initial), initial]]);
+  const states = new Map([[JSON.stringify(initial), initial]]);
   let frontier = [initial];
-  for (let depth = 0; depth < maxDepth; depth += 1) {
-    const nextFrontier: OrchestrationModelState[] = [];
-    for (const state of frontier) {
-      for (const action of actions) {
-        const next = stepOrchestrationModel(state, action);
-        assertOrchestrationModelSafety(next);
-        const key = JSON.stringify(next);
-        if (!seen.has(key)) {
-          seen.set(key, next);
-          nextFrontier.push(next);
+  for (let d = 0; d < depth; d++) {
+    const next: InboxModel[] = [];
+    for (const state of frontier)
+      for (const event of actions) {
+        const s = stepOrchestrationModel(state, event),
+          key = JSON.stringify(s);
+        if (!states.has(key)) {
+          states.set(key, s);
+          next.push(s);
         }
       }
-    }
-    frontier = nextFrontier;
+    frontier = next;
   }
-  return [...seen.values()];
-};
+  return [...states.values()];
+}

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { getBasename } from '@/lib';
 import type { SessionFileProvider, SessionFileProviderEntry } from '@/lib/session-file-provider';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import {
   Command,
   CommandEmpty,
@@ -25,6 +26,35 @@ const QUICK_OPEN_VIRTUALIZE_THRESHOLD = 50;
 const QUICK_OPEN_ROW_ESTIMATE_PX = 52;
 const QUICK_OPEN_OVERSCAN = 8;
 const EMPTY_QUICK_OPEN_FALLBACK_PATHS: readonly string[] = [];
+
+const styles = stylex.create({
+  fileIcon: { width: '1rem', height: '1rem', flexShrink: 0 },
+  fileDetails: { minWidth: 0, flex: 1 },
+  basename: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+  },
+  path: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  empty: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    paddingInline: '12px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  virtualContainer: { position: 'relative', width: '100%' },
+});
 
 export function mapSessionFileProviderEntriesToQuickOpenItems(
   entries: readonly SessionFileProviderEntry[],
@@ -190,23 +220,23 @@ export function SessionFileQuickOpen({
 
   const renderItem = (item: SessionFileQuickOpenItem) => (
     <>
-      <FileIcon filePath={item.path} className="h-4 w-4 shrink-0" />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm">{getBasename(item.path)}</div>
-        <div className="truncate font-mono text-[11px] text-muted-foreground">{item.path}</div>
+      <FileIcon filePath={item.path} {...stylex.props(styles.fileIcon)} />
+      <div {...stylex.props(styles.fileDetails)}>
+        <div {...stylex.props(styles.basename)}>{getBasename(item.path)}</div>
+        <div {...stylex.props(styles.path)}>{item.path}</div>
       </div>
     </>
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-2xl">
-        <DialogTitle className="sr-only">
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content width="42rem" className="overflow-hidden p-0">
+        <Dialog.Title className="sr-only">
           {t('sessions.fileQuickOpen.title', 'Quick open file')}
-        </DialogTitle>
-        <DialogDescription className="sr-only">
+        </Dialog.Title>
+        <Dialog.Description className="sr-only">
           {t('sessions.fileQuickOpen.description', 'Search indexed files and open one.')}
-        </DialogDescription>
+        </Dialog.Description>
         <Command shouldFilter={false}>
           <CommandInput
             value={query}
@@ -219,15 +249,15 @@ export function SessionFileQuickOpen({
             viewportRef={listViewportRef}
           >
             <CommandEmpty>
-              <div className="flex items-center justify-center gap-2 px-3 text-muted-foreground">
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              <div {...stylex.props(styles.empty)}>
+                {loading ? <Spinner size="small" /> : null}
                 <span>{emptyLabel}</span>
               </div>
             </CommandEmpty>
             {items.length > 0 && shouldVirtualizeItems ? (
               <CommandGroup className="p-0">
                 <div
-                  className="relative w-full"
+                  {...stylex.props(styles.virtualContainer)}
                   style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
                 >
                   {virtualItems.map((virtualItem) => {
@@ -267,7 +297,7 @@ export function SessionFileQuickOpen({
             ) : null}
           </CommandList>
         </Command>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

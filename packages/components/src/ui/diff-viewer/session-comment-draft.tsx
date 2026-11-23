@@ -1,14 +1,55 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 
 import { UserAvatar } from '@/components/user-avatar';
-import { Button } from '@/ui/button';
-import { Textarea } from '@/ui/textarea';
-import { cn } from '@/lib/utils';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { Button } from '@lody/ui/button';
+import { Textarea } from '@lody/ui/textarea';
+import { withClassName } from '@/lib/stylex';
 import type { CommentAnchor, CommentUser } from './session-comment-types';
+
+const styles = stylex.create({
+  // The same card a GitHub thread beside the code is: a draft is a thread-to-be.
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    padding: space[3],
+    overflow: 'hidden',
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    color: colors.label,
+  },
+  header: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  author: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.9em',
+    fontWeight: 500,
+  },
+  destination: {
+    flexShrink: 0,
+    marginInlineStart: 'auto',
+    fontSize: '0.8em',
+    color: colors.tertiaryLabel,
+  },
+  field: { display: 'flex', flexDirection: 'column' },
+  footer: { display: 'flex', alignItems: 'center', gap: space[1.5] },
+  hint: {
+    display: { default: 'block', '@media (max-width: 640px)': 'none' },
+    fontSize: '0.75em',
+    color: colors.tertiaryLabel,
+  },
+  pushEnd: { marginInlineStart: 'auto' },
+});
 
 interface SessionCommentDraftProps {
   anchor: CommentAnchor;
@@ -67,13 +108,8 @@ export function SessionCommentDraft({
   );
 
   return (
-    <div
-      className={cn(
-        'rounded-lg border border-primary/30 bg-card shadow-md overflow-hidden',
-        className
-      )}
-    >
-      <div className="flex items-center gap-2 px-3 pt-2.5">
+    <div {...withClassName(stylex.props(styles.card), className)}>
+      <div {...stylex.props(styles.header)}>
         {currentUser && (
           <UserAvatar
             user={{
@@ -81,43 +117,46 @@ export function SessionCommentDraft({
               name: currentUser.name,
               image: currentUser.image,
             }}
-            className="h-5 w-5 shrink-0"
+            size="small"
           />
         )}
-        <span className="text-xs font-medium text-foreground truncate">
+        <span {...stylex.props(styles.author)}>
           {currentUser?.name ?? t('comments.anonymous', 'Anonymous')}
         </span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto h-5 w-5 shrink-0"
-          disabled={isSubmitting}
-          onClick={onCancel}
-        >
-          <X className="h-3 w-3" />
-        </Button>
+        <span {...stylex.props(styles.destination)}>
+          {t('comments.githubOnly', 'Posts to GitHub')}
+        </span>
       </div>
 
-      <div className="px-3 py-2">
+      <div {...stylex.props(styles.field)}>
         <Textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t('comments.placeholder', 'Leave a comment... (Markdown supported)')}
-          className="min-h-[64px] text-xs resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+          rows={3}
+          resize="none"
+          disabled={isSubmitting}
           autoFocus
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-border/40 px-3 py-2">
-        <span className="text-[11px] text-muted-foreground">
-          {t('comments.githubOnly', 'Posts to GitHub')}
-        </span>
-        <div className="flex-1" />
-        <span className="text-[10px] text-muted-foreground hidden sm:block">Ctrl+Enter</span>
+      <div {...stylex.props(styles.footer)}>
+        <span {...stylex.props(styles.hint)}>Ctrl+Enter</span>
+        <span {...stylex.props(styles.pushEnd)} />
         <Button
-          size="sm"
-          className="h-6 text-xs px-3"
+          type="button"
+          size="small"
+          variant="ghost"
+          disabled={isSubmitting}
+          onClick={onCancel}
+        >
+          {t('comments.cancel', 'Cancel')}
+        </Button>
+        <Button
+          type="button"
+          size="small"
+          variant="primary"
           disabled={!body.trim() || isSubmitting || !prLinked || !onSubmitToGitHub}
           onClick={() => void handleSubmit()}
         >

@@ -1,10 +1,18 @@
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACP_CAPABILITY_CACHE_VERSION } from '@lody/shared';
 import { getAcpCapabilitySourceVersion } from '../src/agent/setting';
-import type { LoroDocumentManager } from '../src/lib/loro/doc';
+import { LoroDocumentManager } from '../src/lib/loro/doc';
+import * as encryptedWorkspace from '../src/lib/e2ee/workspace-legacy';
+import type { MachineRuntimeOptions } from '../src/lib/machine-runtime';
+import { createTestCloudPort } from './test-cloud-port';
 import type { Logger } from '../src/utils/logger';
 
 const mocks = vi.hoisted(() => ({
+  runtimeOptions: [] as unknown[],
   initializeRuntime: vi.fn(async () => {}),
   cleanupRuntime: vi.fn(async () => {}),
   attachRemoteBridge: vi.fn(async () => {}),
@@ -29,6 +37,9 @@ vi.mock('@/pkg', () => ({
 
 vi.mock('@/lib/machine-runtime', () => ({
   MachineRuntime: class MockMachineRuntime {
+    constructor(options: unknown) {
+      mocks.runtimeOptions.push(options);
+    }
     initialize = mocks.initializeRuntime;
     cleanup = mocks.cleanupRuntime;
     attachRemoteBridge = mocks.attachRemoteBridge;
@@ -47,6 +58,7 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
@@ -67,6 +79,7 @@ const builtinCodexSourceVersion = getAcpCapabilitySourceVersion({
 describe('Lody.registerAgent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.runtimeOptions.length = 0;
     mocks.fetchAcpCapabilities.mockResolvedValue({
       modes: [],
       models: [],
@@ -146,6 +159,7 @@ describe('Lody.registerAgent', () => {
       onStreamsOnline: vi.fn(() => () => {}),
       waitForInitialMetaSync: vi.fn(async () => await waitForInitialMetaSync),
       syncMachineFlockDoc,
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig,
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => ({
@@ -160,7 +174,6 @@ describe('Lody.registerAgent', () => {
         fetchedAt: 0,
       })),
       updateAcpCapabilities: vi.fn(async () => {}),
-      applyTitleGenerationDefaults: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager;
 
     const { Lody } = await import('../src/lib/lody');
@@ -199,6 +212,7 @@ describe('Lody.registerAgent', () => {
       onStreamsOnline: vi.fn(() => () => {}),
       waitForInitialMetaSync: vi.fn(async () => false),
       syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig: vi.fn(async () => false),
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => ({
@@ -213,7 +227,6 @@ describe('Lody.registerAgent', () => {
         fetchedAt: 0,
       })),
       updateAcpCapabilities: vi.fn(async () => {}),
-      applyTitleGenerationDefaults: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager;
 
     const { Lody } = await import('../src/lib/lody');
@@ -246,6 +259,7 @@ describe('Lody.registerAgent', () => {
       hasCompletedInitialMetaSync: vi.fn(() => true),
       waitForInitialMetaSync: vi.fn(async () => true),
       syncMachineFlockDoc,
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig,
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => ({
@@ -260,7 +274,6 @@ describe('Lody.registerAgent', () => {
         fetchedAt: 0,
       })),
       updateAcpCapabilities: vi.fn(async () => {}),
-      applyTitleGenerationDefaults: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager;
 
     const { Lody } = await import('../src/lib/lody');
@@ -306,6 +319,47 @@ describe('Lody.registerAgent', () => {
     expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
 
+  it('recovers registration failures with backoff while later providers remain usable', async () => {
+    vi.useFakeTimers();
+    const rows = new Set<string>();
+    let fail = true;
+    const documentManager = {
+      hasCompletedInitialMetaSync: () => true,
+      syncMachineFlockDoc: async () => true,
+      getBuiltinAgentOptOuts: async () => new Set(),
+      hasAgentConfig: async (_type: string, agent: string) => rows.has(agent),
+      createAgentConfig: async (_type: string, agent: string) => {
+        if (agent === 'codex' && fail) throw new Error('temporary write failure');
+        rows.add(agent);
+        return agent;
+      },
+    } as unknown as LoroDocumentManager;
+    const { Lody } = await import('../src/lib/lody');
+    const lody = new Lody(
+      {
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1',
+        token: 'token',
+        userId: 'user-1',
+        machineId: 'machine-1',
+        machineName: 'machine',
+        builtinAgentConfigCliTypes: ['codex', 'claude'],
+      },
+      documentManager
+    );
+    mocks.initializeRuntime.mockRejectedValueOnce(new Error('temporary initialization failure'));
+    await lody.attachRemoteBridge();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rows.size).toBe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect([...rows]).toEqual(['claude']);
+    fail = false;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect([...rows]).toEqual(['claude', 'codex']);
+    await lody.cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('does not write static capabilities during builtin agent registration', async () => {
     const updateAcpCapabilities = vi.fn(async () => {});
     const getAcpCapabilities = vi.fn(async () => ({
@@ -323,11 +377,11 @@ describe('Lody.registerAgent', () => {
       hasCompletedInitialMetaSync: vi.fn(() => true),
       waitForInitialMetaSync: vi.fn(async () => true),
       syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig: vi.fn(async () => true),
       createAgentConfig: vi.fn(async () => 'agent-config-id'),
       getAcpCapabilities,
       updateAcpCapabilities,
-      applyTitleGenerationDefaults: vi.fn(async () => {}),
     } as unknown as LoroDocumentManager;
 
     const { Lody } = await import('../src/lib/lody');
@@ -350,4 +404,223 @@ describe('Lody.registerAgent', () => {
     expect(getAcpCapabilities).not.toHaveBeenCalled();
     expect(updateAcpCapabilities).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      label: 'legacy Pi on this machine',
+      cliType: 'registry',
+      agentType: 'pi-acp',
+      machineId: 'machine-1',
+      createsPi: false,
+    },
+    {
+      label: 'already migrated Pi',
+      cliType: 'builtin',
+      agentType: 'pi',
+      machineId: 'machine-1',
+      createsPi: false,
+    },
+    {
+      label: 'legacy Pi on another machine',
+      cliType: 'registry',
+      agentType: 'pi-acp',
+      machineId: 'machine-2',
+      createsPi: true,
+    },
+    {
+      label: 'another registry provider',
+      cliType: 'registry',
+      agentType: 'other',
+      machineId: 'machine-1',
+      createsPi: true,
+    },
+  ])(
+    'preserves provider identity during registration with $label',
+    async ({ cliType, agentType, machineId, createsPi }) => {
+      const existing = { id: 'existing', cliType, agentType, machineId, name: 'My provider' };
+      const rows = [{ ...existing }];
+      const documentManager = {
+        hasCompletedInitialMetaSync: () => true,
+        syncMachineFlockDoc: async () => true,
+        getBuiltinAgentOptOuts: async () => new Set(),
+        hasAgentConfig: async (type: string, agent: string, machine: string) =>
+          rows.some(
+            (row) => row.cliType === type && row.agentType === agent && row.machineId === machine
+          ),
+        createAgentConfig: async (type: string, agent: string, machine: string, name: string) => {
+          const id = `created-${agent}`;
+          rows.push({ id, cliType: type, agentType: agent, machineId: machine, name });
+          return id;
+        },
+      } as unknown as LoroDocumentManager;
+      const { Lody } = await import('../src/lib/lody');
+      const lody = new Lody(
+        {
+          logger: createSilentLogger(),
+          workspaceId: 'workspace-1',
+          token: 'token',
+          userId: 'user-1',
+          machineId: 'machine-1',
+          machineName: 'machine-name',
+        },
+        documentManager
+      );
+
+      await lody.registerAgent(['pi', 'codex']);
+      await lody.registerAgent(['pi', 'codex']);
+
+      expect(rows).toEqual([
+        existing,
+        ...(createsPi
+          ? [
+              {
+                id: 'created-pi',
+                cliType: 'builtin',
+                agentType: 'pi',
+                machineId: 'machine-1',
+                name: 'Pi',
+              },
+            ]
+          : []),
+        {
+          id: 'created-codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          machineId: 'machine-1',
+          name: 'Codex',
+        },
+      ]);
+    }
+  );
+
+  // A builtin provider the user removed on this machine must not come back through the next
+  // startup auto-registration. It is not in the list, but that is the result of the removal,
+  // not "never created".
+  it('does not recreate a builtin agent the user removed on this machine', async () => {
+    const hasAgentConfig = vi.fn(async () => false);
+    const createAgentConfig = vi.fn(async () => 'agent-config-id');
+    const documentManager = {
+      hasCompletedInitialMetaSync: vi.fn(() => true),
+      waitForInitialMetaSync: vi.fn(async () => true),
+      syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set(['kimi'])),
+      hasAgentConfig,
+      createAgentConfig,
+      getAcpCapabilities: vi.fn(async () => null),
+      updateAcpCapabilities: vi.fn(async () => {}),
+    } as unknown as LoroDocumentManager;
+
+    const { Lody } = await import('../src/lib/lody');
+    const lody = new Lody(
+      {
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1',
+        token: 'token',
+        userId: 'user-1',
+        machineId: 'machine-1',
+        machineName: 'machine-name',
+      },
+      documentManager
+    );
+
+    await lody.registerAgent(['kimi', 'codex']);
+    await flushMicrotasks();
+
+    // The removed type is not created.
+    expect(createAgentConfig).not.toHaveBeenCalledWith(
+      'builtin',
+      'kimi',
+      'machine-1',
+      expect.anything()
+    );
+    // Types that were never removed still register, proving the skip is per type and does not
+    // bail out of the whole loop.
+    expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
+  });
+});
+
+describe('Lody workspace cloud-port composition', () => {
+  it.each([undefined, 'plaintext', 'e2ee'] as const)(
+    'uses host Git credentials only in encrypted workspaces (mode=%s)',
+    async (contentMode) => {
+      const directory = mkdtempSync(join(tmpdir(), 'lody-execution-composition-'));
+      const hostedTokenManager = {
+        getCredentialPolicy: async () => ({ personalEnabled: true }),
+      };
+      const cloudPort = createTestCloudPort({
+        kind: 'cloud',
+        e2ee: {} as never,
+        githubTokens: {
+          createTokenManager: () => hostedTokenManager as never,
+        },
+      });
+      const native = vi
+        .spyOn(encryptedWorkspace, 'openCliE2eeWorkspaceLegacy')
+        .mockImplementation(async () => {
+          if (contentMode !== 'e2ee') throw new Error('ordinary workspace opened E2EE custody');
+          return { close: async () => {}, repositoryDirectory: directory } as never;
+        });
+      const documents = vi
+        .spyOn(LoroDocumentManager, 'create')
+        .mockResolvedValue({ sessions: new Map() } as LoroDocumentManager);
+      try {
+        const { Lody } = await import('../src/lib/lody');
+        const lody = await Lody.create({
+          logger: createSilentLogger(),
+          workspaceId: 'synthetic-workspace',
+          contentMode,
+          genesisHash: 'ab'.repeat(32),
+          token: 'synthetic-token',
+          userId: 'user-1',
+          machineId: 'synthetic-machine',
+          machineName: 'Synthetic',
+          cloudPort,
+          memoryPressure: {} as never,
+          machineLifecycleCapability: {
+            launchMode: 'foreground',
+            canRemoteRestart: false,
+            canRemoteUpgrade: false,
+            reason: 'not_daemon',
+          },
+        });
+        const runtime = mocks.runtimeOptions.at(-1) as MachineRuntimeOptions;
+        expect(readdirSync(directory)).toEqual([]);
+        const gate = runtime.handlerConfig.encryptedExecution;
+        if (contentMode === 'e2ee') {
+          if (!gate) throw new Error('Missing encrypted execution gate');
+          expect(
+            await Effect.runPromise(
+              gate.claim({
+                workspaceId: 'synthetic-workspace',
+                sessionId: 'session',
+                userTurnId: 'turn',
+                requesterUserId: 'user-1',
+              })
+            )
+          ).toEqual({ state: 'denied' });
+        } else {
+          expect(gate).toBeUndefined();
+          expect(readdirSync(directory)).toEqual([]);
+        }
+
+        // Invoke Lody's production factory and the real SessionManager policy
+        // method: a null broker means agent git/gh uses the host credentials.
+        const sessions = runtime.sessionManagerFactory();
+        expect(await sessions.resolveGitIdentityOptions('user-1')).toEqual({
+          preferMachineIdentity: true,
+          personalIdentityEnabled: contentMode !== 'e2ee',
+        });
+        expect(runtime.handlerConfig.cloudPort?.githubTokens).toBe(
+          contentMode === 'e2ee' ? null : cloudPort.githubTokens
+        );
+        expect(lody.options.cloudPort.githubTokens).toBe(
+          contentMode === 'e2ee' ? null : cloudPort.githubTokens
+        );
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+        native.mockRestore();
+        documents.mockRestore();
+      }
+    }
+  );
 });

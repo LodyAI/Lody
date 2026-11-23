@@ -40,6 +40,8 @@ const PR_FIELDS = `      number
       isDraft
       updatedAt
       headRefName
+      headRefOid
+      headRepository { nameWithOwner }
       mergeable
       mergeStateStatus
       commits(last: 1) {

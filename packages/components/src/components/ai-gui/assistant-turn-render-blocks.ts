@@ -79,6 +79,37 @@ const getToolFilePaths = (toolCall: ToolCallMessage): string[] => {
   return [...paths];
 };
 
+/**
+ * Whether a tool call is a shell-command step — the predicate behind the group
+ * header's `commandCount`, shared with the row renderer so every row counted in
+ * "Ran N commands" is the one that carries the "Ran" verb. `execute`/`bash`
+ * always qualify; other kinds qualify only when the call actually carried a
+ * command (a search's `terminal_command` pattern block does not make it one,
+ * and reads keep their own verb). Output alone does not: a Claude tool such as
+ * `TaskStop` or an MCP call returns a plain string, which history stores as
+ * `terminal_output`, and counting it made "Ran TaskStop" one of the commands.
+ */
+export const isCommandToolCall = (toolCall: ToolCallMessage): boolean => {
+  switch (toolCall.kind) {
+    case 'execute':
+    case 'bash':
+      return true;
+    case 'read':
+    case 'edit':
+    case 'write':
+    case 'delete':
+    case 'move':
+    case 'search':
+    case 'fetch':
+    case 'think':
+    case 'switch_mode':
+      return false;
+    default:
+      break;
+  }
+  return Boolean(toolCall.content?.some((block) => block.type === 'terminal_command'));
+};
+
 export const summarizeAssistantActivity = (
   entries: readonly AssistantActivityRenderItem[]
 ): AssistantActivitySummary => {
@@ -129,10 +160,7 @@ export const summarizeAssistantActivity = (
         fetchCount += 1;
         break;
       default: {
-        const hasTerminalContent = toolCall.content?.some(
-          (block) => block.type === 'terminal_command' || block.type === 'terminal_output'
-        );
-        if (hasTerminalContent) {
+        if (isCommandToolCall(toolCall)) {
           commandCount += 1;
         } else {
           otherCount += 1;
@@ -274,43 +302,44 @@ export const buildAssistantTurnRenderLayout = (
   const blocks = buildAssistantTurnRenderBlocksFromEntries(messageId, entries);
   const ranges = buildSegmentBlockRanges(blocks);
 
-  // Nothing folds while the turn streams, but the segment shape does not depend
-  // on that — keep it stable so only the fold state changes at turn end.
   const segments: AssistantTurnRenderSegment[] = ranges.map((blockRange, segmentIndex) => {
     const key = `segment:${messageId}:${segmentIndex}`;
-    if (!isTurnFinished) {
-      return { key, blockRange, workBlockKeys: new Set<string>(), firstWorkBlockIndex: -1 };
-    }
 
-    // The "keep the last item visible" rule is applied PER SEGMENT: each region
-    // has its own answer tail. Applied across the whole turn, the plan would be
-    // demoted to process output just because implementation followed it.
-    const segmentEntries = collectSegmentEntries(blocks, blockRange);
-    const segmentContents = segmentEntries.map((entry) => entry.content);
     const collapsibleItemIndexes = new Set<number>();
-    segmentEntries.forEach((entry, indexInSegment) => {
-      if (
-        shouldCollapseAssistantMessageItem({
-          content: entry.content,
-          index: indexInSegment,
-          items: segmentContents,
-          isTurnFinished,
-        })
-      ) {
-        collapsibleItemIndexes.add(entry.itemIndex);
-      }
-    });
-
+    if (isTurnFinished) {
+      const segmentEntries = collectSegmentEntries(blocks, blockRange);
+      const segmentContents = segmentEntries.map((entry) => entry.content);
+      segmentEntries.forEach((entry, index) => {
+        if (
+          shouldCollapseAssistantMessageItem({
+            content: entry.content,
+            index,
+            items: segmentContents,
+            isTurnFinished,
+          })
+        )
+          collapsibleItemIndexes.add(entry.itemIndex);
+      });
+    }
     const segmentWorkBlockKeys = new Set<string>();
     let firstWorkBlockIndex = -1;
     for (let index = blockRange[0]; index < blockRange[1]; index += 1) {
       const block = blocks[index];
       if (!block) continue;
-      if (block.kind === 'activity_group' || collapsibleItemIndexes.has(block.entry.itemIndex)) {
-        segmentWorkBlockKeys.add(block.key);
-        if (firstWorkBlockIndex === -1) {
-          firstWorkBlockIndex = index;
-        }
+      const isLiveCommentary =
+        !isTurnFinished &&
+        block.kind === 'content' &&
+        block.entry.content.type === 'text' &&
+        block.entry.content.messagePhase === 'commentary';
+      if (
+        block.kind !== 'activity_group' &&
+        !isLiveCommentary &&
+        !collapsibleItemIndexes.has(block.entry.itemIndex)
+      )
+        continue;
+      segmentWorkBlockKeys.add(block.key);
+      if (firstWorkBlockIndex === -1) {
+        firstWorkBlockIndex = index;
       }
     }
     return { key, blockRange, workBlockKeys: segmentWorkBlockKeys, firstWorkBlockIndex };

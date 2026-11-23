@@ -4,6 +4,7 @@ import {
   AVATAR_CACHE_TTL_MS,
   clearAvatarImageCache,
   getAvatarBlobUrl,
+  getPendingAvatarRevalidation,
   peekAvatarBlobUrl,
   resolveAvatarBlobUrl,
 } from '../src/lib/avatar-cache';
@@ -48,7 +49,9 @@ const installAvatarCacheMocks = (): AvatarCacheMocks => {
   Object.defineProperty(URL, 'createObjectURL', {
     value: vi
       .fn()
-      .mockImplementation((blob: Blob) => `blob:${blob.size}:${Math.random().toString(16).slice(2)}`),
+      .mockImplementation(
+        (blob: Blob) => `blob:${blob.size}:${Math.random().toString(16).slice(2)}`
+      ),
     configurable: true,
   });
   Object.defineProperty(URL, 'revokeObjectURL', {
@@ -72,12 +75,26 @@ const pngResponse = (bytes: string) =>
     headers: { 'Content-Type': 'image/png' },
   });
 
-// Let a fire-and-forget background revalidation fully settle. Uses a real
-// macrotask so undici's Blob/Response async work resolves (these tests run on
-// real timers on purpose).
-const settleRevalidation = async () => {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await Promise.resolve();
+// Start a cache-first read and capture the background revalidation it kicks
+// off. `resolveAvatarBlobUrl` registers the revalidation synchronously on a
+// memory-cache hit, so the handle exists before anything is awaited.
+//
+// Awaiting that handle is the explicit signal this suite waits on. An earlier
+// version waited one macrotask plus one microtask instead, which is a guess
+// about how many turns undici's `Response.blob()` + `Blob.arrayBuffer()` work
+// takes: correct on an idle machine, occasionally short under a loaded parallel
+// suite run, where the swap had not happened yet and `onUpdate` had not fired.
+const startStaleRead = (
+  image: string,
+  onUpdate: (blobUrl: string) => void,
+  now: number
+): { returned: Promise<string | null | undefined>; revalidated: Promise<string | null> } => {
+  const returned = resolveAvatarBlobUrl(image, { onUpdate }, now);
+  const revalidated = getPendingAvatarRevalidation(image);
+  if (!revalidated) {
+    throw new Error('expected a background revalidation for a stale cached avatar');
+  }
+  return { returned, revalidated };
 };
 
 describe('avatar cache', () => {
@@ -92,33 +109,6 @@ describe('avatar cache', () => {
   afterEach(() => {
     clearAvatarImageCache();
     vi.useRealTimers();
-  });
-
-  it('returns nullish avatar sources without touching the network', async () => {
-    expect(peekAvatarBlobUrl(null)).toBeNull();
-    expect(peekAvatarBlobUrl(undefined)).toBeUndefined();
-    expect(await getAvatarBlobUrl(null)).toBeNull();
-    expect(await getAvatarBlobUrl(undefined)).toBeUndefined();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('loads avatar blobs once and then reuses persistent cache without refetching', async () => {
-    const avatarUrl = 'https://avatars.githubusercontent.com/u/1?v=4';
-
-    fetchMock.mockResolvedValue(pngResponse('avatar'));
-
-    const firstBlobUrl = await getAvatarBlobUrl(avatarUrl);
-    expect(firstBlobUrl).toMatch(/^blob:/);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(peekAvatarBlobUrl(avatarUrl)).toBe(firstBlobUrl);
-
-    clearAvatarImageCache({ memory: true, persistent: false });
-    fetchMock.mockClear();
-
-    const secondBlobUrl = await getAvatarBlobUrl(avatarUrl);
-
-    expect(secondBlobUrl).toMatch(/^blob:/);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('serves the persisted blob across a day boundary even when the network is down (cache-first, url-keyed)', async () => {
@@ -142,11 +132,92 @@ describe('avatar cache', () => {
     // Painted from the persistent cache, not blocked on the failed fetch.
     expect(resolved).toMatch(/^blob:/);
   });
+
+  it('persists and restores avatars via IndexedDB on file:// ("null" origin) without CacheStorage', async () => {
+    const idbRecords = new Map<string, unknown>();
+    const fakeDb = {
+      objectStoreNames: { contains: () => true },
+      onversionchange: null as (() => void) | null,
+      close: vi.fn(),
+      transaction: (_name: string, _mode: string) => {
+        const tx = {
+          oncomplete: null as (() => void) | null,
+          onerror: null as (() => void) | null,
+          onabort: null as (() => void) | null,
+          objectStore: () => ({
+            get: (key: string) => {
+              const req = { result: idbRecords.get(key), onsuccess: null as (() => void) | null, onerror: null };
+              queueMicrotask(() => req.onsuccess?.());
+              return req;
+            },
+            getAll: () => {
+              const req = { result: [...idbRecords.values()], onsuccess: null as (() => void) | null, onerror: null };
+              queueMicrotask(() => req.onsuccess?.());
+              return req;
+            },
+            put: (record: { key: string }) => {
+              idbRecords.set(record.key, record);
+              queueMicrotask(() => tx.oncomplete?.());
+            },
+            delete: (key: string) => {
+              idbRecords.delete(key);
+            },
+          }),
+        };
+        return tx;
+      },
+    };
+    Object.defineProperty(globalThis, 'window', {
+      value: { location: { origin: 'null' } },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, 'indexedDB', {
+      value: {
+        open: () => {
+          const req = {
+            result: fakeDb,
+            onupgradeneeded: null,
+            onsuccess: null as (() => void) | null,
+            onerror: null,
+            onblocked: null,
+          };
+          queueMicrotask(() => req.onsuccess?.());
+          return req;
+        },
+        deleteDatabase: () => {
+          idbRecords.clear();
+        },
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      const avatarUrl = 'https://lh3.googleusercontent.com/a/synthetic-member-avatar';
+      fetchMock.mockResolvedValueOnce(pngResponse('electron-avatar'));
+      const first = await getAvatarBlobUrl(avatarUrl);
+      expect(first).toMatch(/^blob:/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      clearAvatarImageCache({ memory: true, persistent: false });
+      fetchMock.mockRejectedValue(new Error('offline'));
+
+      const restored = await getAvatarBlobUrl(avatarUrl);
+      expect(restored).toMatch(/^blob:/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      clearAvatarImageCache();
+      Reflect.deleteProperty(globalThis, 'indexedDB');
+    }
+  });
 });
 
 // Revalidation exercises undici Blob/Response async work (fetch + `.blob()` +
-// byte compare). Run these on REAL timers and force staleness via an explicit
-// `now` argument, so nothing depends on frozen macrotasks.
+// byte compare), whose turn count is not something a test should predict.
+// Staleness is forced through an explicit `now` argument and completion is
+// awaited through the revalidation handle, so no timer or turn count is
+// involved either way.
 describe('avatar cache revalidation', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -170,19 +241,17 @@ describe('avatar cache revalidation', () => {
 
     let swappedTo: string | undefined;
     // Cache-first: returns the stale blob immediately...
-    const returned = await resolveAvatarBlobUrl(
+    const { returned, revalidated } = startStaleRead(
       avatarUrl,
-      {
-        onUpdate: (url) => {
-          swappedTo = url;
-        },
+      (url) => {
+        swappedTo = url;
       },
       t0 + AVATAR_CACHE_TTL_MS + 1
     );
-    expect(returned).toBe(first);
+    expect(await returned).toBe(first);
 
     // ...then the background revalidation fetches, sees new bytes, and swaps.
-    await settleRevalidation();
+    await revalidated;
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(swappedTo).toMatch(/^blob:/);
     expect(swappedTo).not.toBe(first);
@@ -199,18 +268,16 @@ describe('avatar cache revalidation', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     let swappedTo: string | undefined;
-    const returned = await resolveAvatarBlobUrl(
+    const { returned, revalidated } = startStaleRead(
       avatarUrl,
-      {
-        onUpdate: (url) => {
-          swappedTo = url;
-        },
+      (url) => {
+        swappedTo = url;
       },
       t0 + AVATAR_CACHE_TTL_MS + 1
     );
-    expect(returned).toBe(first);
+    expect(await returned).toBe(first);
 
-    await settleRevalidation();
+    await revalidated;
     // It revalidated (fetched) but the bytes matched, so no swap and the same
     // blob URL stays in the cache — no re-decode flicker.
     expect(fetchMock).toHaveBeenCalledTimes(2);

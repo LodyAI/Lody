@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId, MachineViewMeta } from '@lody/shared';
+import { buildProjectRepositoryCopyIndex } from '../src/lib/project-group-launch';
 import type { MachineVisibilityAccess } from '../src/lib/visible-machine-index';
 import {
   buildVisibleLocalProjectIndex,
@@ -42,6 +43,31 @@ function machineAccess(overrides: Partial<MachineVisibilityAccess> = {}): Machin
 }
 
 describe('visible local project index', () => {
+  it('hides member-only entries without removing access or repository copies', () => {
+    const machine = machineMeta();
+    machine.localProjects![projectId] = {
+      ...machine.localProjects![projectId]!,
+      standaloneVisible: false,
+      githubRepoFullName: 'acme/api',
+    };
+    const args = {
+      rawMachines: new Map([[machineId, machine]]),
+      machineAccessByMachineId: new Map([[machineId, machineAccess()]]),
+      convexAccessRows: [],
+      currentUserId: 'user-1',
+      isLoading: false,
+    };
+    const result = buildVisibleLocalProjectIndex(args);
+    const key = getLocalProjectVisibilityKey(machineId, projectId);
+    expect(result.projects.size).toBe(0);
+    expect(result.accessByProjectKey.has(key)).toBe(true);
+    expect(result.registeredProjects.get(key)?.project.rootPath).toBe('/repo/lody');
+    expect(buildProjectRepositoryCopyIndex(result.registeredProjects.values()).size).toBe(1);
+    expect(
+      buildVisibleLocalProjectIndex({ ...args, includeMemberOnly: true }).projects.has(key)
+    ).toBe(true);
+  });
+
   it('synthesizes access for the current user projects without Convex rows', () => {
     const result = buildVisibleLocalProjectIndex({
       rawMachines: new Map([[machineId, machineMeta()]]),

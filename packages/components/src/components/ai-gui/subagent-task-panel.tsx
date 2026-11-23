@@ -1,191 +1,319 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, ChevronRight, CircleDashed, Loader2, X } from 'lucide-react';
-import type { MessageContent } from '@lody/shared';
-import { cn } from '@/lib/utils';
-import { Badge } from '@/ui/badge';
+import * as stylex from '@stylexjs/stylex';
+import { Ban, Check, ChevronRight, CircleDashed, CircleHelp, X } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
+import { Tabs } from '@lody/ui/tabs';
+import { Dialog } from '@/ui/dialog';
+import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
+import { withClassName } from '@/lib/stylex';
+import { styles } from './subagent-task-panel.stylex';
+import { dialogLayout, styles as detailStyles } from './subagent-task-detail.stylex';
+import { SubagentTaskDetail } from './subagent-task-detail';
+import {
+  actorOf,
+  durationOf,
+  groupOf,
+  isRunning,
+  latestActionOf,
+  LiveElapsed,
+  orderAsTree,
+  stateLabel,
+  stateOf,
+  type SubagentTask,
+  type TaskGroup,
+  type TaskState,
+} from './subagent-task-state';
 
-/**
- * Renders the subagent/background tasks a turn spawned as a single grouped
- * panel, instead of leaking each lifecycle event into the inline transcript.
- *
- * Tasks are persisted as first-class `subagent_task` history items (merged by
- * `taskId`); this panel is a pure view-layer aggregation — it reads those items
- * off the assistant entry and never mutates persisted history.
- */
+export { collectSubagentTasks, latestActionOf, type SubagentTask } from './subagent-task-state';
 
-export type SubagentTask = Extract<MessageContent, { type: 'subagent_task' }>;
+const SCROLLBAR = 'scrollbar-pro';
+// A body portal sits outside a mobile drawer's scroll lock and drag boundary.
+const drawerOf = (node: HTMLElement | null): HTMLElement | null =>
+  node?.closest<HTMLElement>('[data-vaul-drawer]') ?? null;
 
-const isRunning = (task: SubagentTask): boolean =>
-  task.status === 'in_progress' || task.status === 'pending';
-
-/**
- * Extract subagent tasks from an assistant entry's items, in first-seen order,
- * deduped by taskId. Ambient/housekeeping tasks (`skipTranscript`) are omitted
- * from the inline panel per the SDK's guidance.
- */
-export const collectSubagentTasks = (items: readonly MessageContent[]): SubagentTask[] => {
-  const byId = new Map<string, SubagentTask>();
-  for (const item of items) {
-    if (item.type !== 'subagent_task' || item.skipTranscript) continue;
-    byId.set(item.taskId, item);
-  }
-  return [...byId.values()];
+const SETTLED_TONE: Partial<Record<TaskState, 'danger' | 'muted'>> = {
+  failed: 'danger',
+  cancelled: 'muted',
+  unknown: 'muted',
 };
 
-const formatUsage = (usage: SubagentTask['usage']): string | null => {
-  if (!usage) return null;
-  const parts: string[] = [];
-  if (typeof usage.totalTokens === 'number') {
-    parts.push(
-      usage.totalTokens >= 1000
-        ? `${(usage.totalTokens / 1000).toFixed(1)}k tokens`
-        : `${usage.totalTokens} tokens`
-    );
-  }
-  if (typeof usage.toolUses === 'number') {
-    parts.push(`${usage.toolUses} ${usage.toolUses === 1 ? 'tool' : 'tools'}`);
-  }
-  return parts.length ? parts.join(' · ') : null;
-};
-
-const StatusIcon = ({ task }: { task: SubagentTask }) => {
-  if (task.status === 'completed') {
-    return <Check className="h-3.5 w-3.5 flex-none shrink-0 text-status-success" />;
-  }
-  if (task.status === 'failed') {
-    return <X className="h-3.5 w-3.5 flex-none shrink-0 text-status-danger" />;
-  }
-  if (task.status === 'pending') {
-    return <CircleDashed className="h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground" />;
-  }
-  return <Loader2 className="h-3.5 w-3.5 flex-none shrink-0 animate-spin text-muted-foreground" />;
-};
-
-const SubagentTaskRow = ({ task }: { task: SubagentTask }) => {
+function SubagentTaskRow({
+  task,
+  depth,
+  onOpen,
+}: {
+  task: SubagentTask;
+  depth: number;
+  onOpen: (taskId: string) => void;
+}) {
   const { t } = useTranslation();
+  const actor = actorOf(task, t);
+  const state = stateOf(task);
+  const running = isRunning(task);
+  const duration = durationOf(task);
+  const latest = latestActionOf(task, t);
+  const tone = SETTLED_TONE[state];
 
-  const actor =
-    task.actor ||
-    task.subagentType ||
-    task.workflowName ||
-    (task.taskType === 'local_bash'
-      ? t('sessions.subagentTasks.bashActor', 'Bash')
-      : t('sessions.subagentTasks.defaultActor', 'Task'));
-
-  // A summary that just wraps the description (the synthesized background-command
-  // "…description… completed" text) is noise next to the description column — drop it.
-  const description = task.description?.trim();
-  const summary = task.summary?.trim();
-  const meaningfulSummary =
-    summary && (!description || !summary.includes(description)) ? summary : undefined;
-
-  let action: string | null;
-  if (task.status === 'failed') {
-    action = task.error || t('sessions.subagentTasks.failed', 'Failed');
-  } else if (task.status === 'completed') {
-    action = meaningfulSummary || t('sessions.subagentTasks.done', 'Done');
-  } else if (task.lastToolName) {
-    action = t('sessions.subagentTasks.runningTool', 'Running {{tool}}', {
-      tool: task.lastToolName,
-    });
-  } else {
-    action = meaningfulSummary || t('sessions.subagentTasks.working', 'Working…');
-  }
-
-  const usageLabel = task.status === 'completed' ? formatUsage(task.usage) : null;
+  // The trailing word answers the question a reader has of a task in that state:
+  // how long so far, how long it took, or how it ended when that was not well.
+  // What it is doing is the second line's job, so the time never gives way to a
+  // tool name.
+  const meta = running ? (
+    typeof task.startedAtEpochSeconds === 'number' ? (
+      <LiveElapsed startedAtEpochSeconds={task.startedAtEpochSeconds} />
+    ) : null
+  ) : tone ? (
+    stateLabel(state, t)
+  ) : duration !== null ? (
+    formatDurationCompact(duration, getDurationUnitLabels(t))
+  ) : null;
 
   return (
-    <div className="flex flex-col gap-0.5 py-1">
-      <div className="flex min-w-0 items-center gap-1.5 text-[13px] leading-tight">
-        <StatusIcon task={task} />
-        <span className="shrink-0 font-medium text-foreground">{actor}</span>
+    <button
+      type="button"
+      aria-haspopup="dialog"
+      aria-label={task.description ? `${actor} · ${task.description}` : actor}
+      data-subagent-task-id={task.taskId}
+      onClick={() => onOpen(task.taskId)}
+      {...stylex.props(styles.row, depth === 1 && styles.depth1, depth >= 2 && styles.depth2)}
+    >
+      <span {...stylex.props(styles.line)}>
+        <TaskMark state={state} />
+        <span {...stylex.props(styles.actor)}>{actor}</span>
         {task.description ? (
           <>
-            <span className="shrink-0 text-muted-foreground/60">·</span>
-            <span
-              className="min-w-0 flex-1 truncate text-muted-foreground"
-              title={task.description}
-            >
-              {task.description}
+            <span aria-hidden="true" {...stylex.props(styles.dot)}>
+              ·
             </span>
+            <span {...stylex.props(styles.description)}>{task.description}</span>
           </>
-        ) : (
-          <span className="min-w-0 flex-1" />
-        )}
-        {task.isBackgrounded ? (
-          <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-medium">
-            {t('sessions.subagentTasks.background', 'Background')}
-          </Badge>
         ) : null}
-        {action ? (
-          <span
-            className={cn(
-              'max-w-[45%] shrink-0 truncate text-xs',
-              task.status === 'failed' ? 'text-status-danger' : 'text-muted-foreground'
-            )}
-            title={action}
-          >
-            {action}
-          </span>
+        {meta ? (
+          <span {...stylex.props(styles.meta, tone === 'danger' && styles.danger)}>{meta}</span>
         ) : null}
-      </div>
-      {usageLabel ? (
-        <span className="pl-5 text-[11px] font-mono tabular-nums text-muted-foreground/70">
-          {usageLabel}
+      </span>
+      {latest ? (
+        <span data-subagent-latest-action="" {...stylex.props(styles.latest)}>
+          {latest}
         </span>
       ) : null}
+    </button>
+  );
+}
+
+/** A task's state as a mark: live, done, failed, stopped, lost, or not started. */
+function TaskMark({ state }: { state: TaskState }) {
+  if (state === 'running') {
+    return (
+      <span {...stylex.props(styles.mark)}>
+        <Spinner size="small" />
+      </span>
+    );
+  }
+  const [Glyph, tone] =
+    state === 'completed'
+      ? [Check, styles.markDone]
+      : state === 'failed'
+        ? [X, styles.markFailed]
+        : state === 'cancelled'
+          ? [Ban, styles.markPending]
+          : state === 'unknown'
+            ? [CircleHelp, styles.markPending]
+            : [CircleDashed, styles.markPending];
+  return (
+    <span aria-hidden="true" {...stylex.props(styles.mark, tone)}>
+      <Glyph {...stylex.props(styles.glyph)} />
+    </span>
+  );
+}
+
+function TaskRows({
+  tasks,
+  onOpen,
+}: {
+  tasks: readonly SubagentTask[];
+  onOpen: (taskId: string) => void;
+}) {
+  const ordered = useMemo(() => orderAsTree(tasks), [tasks]);
+  return (
+    <div {...withClassName(stylex.props(styles.rows), SCROLLBAR)}>
+      {ordered.map(({ task, depth }, index) => (
+        <div key={task.taskId} {...stylex.props(index > 0 && styles.rowRuled)}>
+          <SubagentTaskRow task={task} depth={depth} onOpen={onOpen} />
+        </div>
+      ))}
     </div>
   );
-};
+}
 
-export const SubagentTaskPanel = ({ tasks }: { tasks: readonly SubagentTask[] }) => {
+/**
+ * A tab's label, with a spinner while any of its tasks is still live. The mark
+ * is cut to the label's cap height: at its usual size it outweighs the 13px
+ * label beside it and pulls the eye off the text's centre.
+ */
+function GroupTab({ group, tasks }: { group: TaskGroup; tasks: readonly SubagentTask[] }) {
   const { t } = useTranslation();
+  const running = tasks.some(isRunning);
+  const label =
+    group === 'subagents'
+      ? t('sessions.subagentTasks.subagentsTab', 'Subagents')
+      : t('sessions.subagentTasks.tasksTab', 'Tasks');
+  return (
+    <Tabs.Tab value={group} data-subagent-task-tab={group}>
+      {running ? <Spinner size="small" label={null} className="size-3" /> : null}
+      <span>{label}</span>
+    </Tabs.Tab>
+  );
+}
+
+export const SubagentTaskPanel = ({
+  tasks,
+  onCancel,
+  runCancellation = false,
+  renderHistory,
+  fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+}: {
+  tasks: readonly SubagentTask[];
+  fontSize?: ConversationFontSize;
+  onCancel?: (taskId: string) => Promise<void>;
+  /**
+   * The machine speaks subagent events v1, so a cancel can address a run.
+   * Stored run history shows whatever this says; only the live control waits on it.
+   */
+  runCancellation?: boolean;
+  /**
+   * The steps of a task's own run (`task.run.items`), for its detail dialog.
+   * The host owns the transcript renderers; the panel only places them.
+   */
+  renderHistory?: (task: SubagentTask) => ReactNode;
+}) => {
+  const { t } = useTranslation();
+  const groups = useMemo(() => {
+    const subagents: SubagentTask[] = [];
+    const others: SubagentTask[] = [];
+    for (const task of tasks) (groupOf(task) === 'tasks' ? others : subagents).push(task);
+    return { subagents, tasks: others };
+  }, [tasks]);
+  // Subagents first; a tab the reader chose stays chosen as the tasks change.
+  const [group, setGroup] = useState<TaskGroup>('subagents');
   const runningCount = useMemo(() => tasks.filter(isRunning).length, [tasks]);
   const hasRunning = runningCount > 0;
   const [userExpanded, setUserExpanded] = useState(false);
+  // One dialog for the group, pointed at a task id rather than a snapshot, so
+  // an open dialog follows the run as its item is replaced in history.
+  const [open, setOpen] = useState(false);
+  // The dialog keeps the last task it showed while it animates closed.
+  const [shownTaskId, setShownTaskId] = useState<string | null>(null);
+  // Opening focuses the transcript itself, not its first control: focusing the
+  // brief's Copy button scrolled a running task back to the top, away from the
+  // latest step. From there the arrow keys scroll the run.
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [drawer, setDrawer] = useState<HTMLElement | null>(null);
+  const shownTask = tasks.find((task) => task.taskId === shownTaskId) ?? null;
 
   if (tasks.length === 0) return null;
 
-  // While work is in flight the panel stays open (live status). Once every task
-  // has settled it collapses to a one-line summary the user can expand.
+  // While work is in flight the group stays open (live status). Once every task
+  // has settled it folds to its summary line, which opens it again.
   const expanded = hasRunning || userExpanded;
+  // Tabs only when there is something to tell apart: one kind stays one list.
+  const grouped = groups.subagents.length > 0 && groups.tasks.length > 0;
   const canToggle = !hasRunning;
 
-  const headerLabel = hasRunning
-    ? t('sessions.subagentTasks.waiting', { count: runningCount })
-    : t('sessions.subagentTasks.count', { count: tasks.length });
+  // Background-ness is stated once in the summary rather than badged per row.
+  const backgroundCount = tasks.filter((task) => task.isBackgrounded).length;
+  const allBackground = backgroundCount === tasks.length;
+  const headerLabel = allBackground
+    ? hasRunning
+      ? t('sessions.subagentTasks.waitingBackground', { count: runningCount })
+      : t('sessions.subagentTasks.countBackground', { count: tasks.length })
+    : hasRunning
+      ? t('sessions.subagentTasks.waiting', { count: runningCount })
+      : t('sessions.subagentTasks.count', { count: tasks.length });
+  const mixedBackgroundLabel =
+    !allBackground && backgroundCount > 0
+      ? t('sessions.subagentTasks.backgroundCount', { count: backgroundCount })
+      : null;
+
+  const openTask = (taskId: string) => {
+    setDrawer(drawerOf(panelRef.current));
+    setShownTaskId(taskId);
+    setOpen(true);
+  };
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card/40 px-2 py-1.5">
+    <div ref={panelRef} {...stylex.props(styles.panel)}>
       <button
         type="button"
-        className={cn(
-          'group flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-muted-foreground transition-colors',
-          canToggle ? 'cursor-pointer hover:text-foreground' : 'cursor-default'
-        )}
+        {...stylex.props(styles.header, canToggle && styles.headerToggle)}
         onClick={canToggle ? () => setUserExpanded((prev) => !prev) : undefined}
         aria-expanded={canToggle ? expanded : undefined}
       >
-        {hasRunning ? (
-          <Loader2 className="h-3.5 w-3.5 flex-none shrink-0 animate-spin" />
-        ) : (
-          <ChevronRight
-            className={cn(
-              'h-3.5 w-3.5 flex-none shrink-0 opacity-70 transition-transform duration-200 group-hover:opacity-100',
-              expanded ? 'rotate-90' : ''
-            )}
-          />
-        )}
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{headerLabel}</span>
+        <span {...stylex.props(styles.mark)}>
+          {canToggle ? (
+            <ChevronRight
+              aria-hidden="true"
+              {...stylex.props(styles.chevron, expanded && styles.chevronOpen)}
+            />
+          ) : (
+            <Spinner size="small" />
+          )}
+        </span>
+        <span>
+          {headerLabel}
+          {mixedBackgroundLabel ? ` · ${mixedBackgroundLabel}` : null}
+        </span>
       </button>
       {expanded ? (
-        <div className="scrollbar-pro mt-0.5 max-h-[22rem] divide-y divide-border/40 overflow-y-auto pl-1 pr-1">
-          {tasks.map((task) => (
-            <SubagentTaskRow key={task.taskId} task={task} />
-          ))}
-        </div>
+        grouped ? (
+          <div {...stylex.props(styles.tabs)}>
+            <Tabs.Root value={group} onValueChange={(value) => setGroup(value as TaskGroup)}>
+              <Tabs.List size="small">
+                <GroupTab group="subagents" tasks={groups.subagents} />
+                <GroupTab group="tasks" tasks={groups.tasks} />
+              </Tabs.List>
+              <Tabs.Panel value="subagents">
+                <TaskRows tasks={groups.subagents} onOpen={openTask} />
+              </Tabs.Panel>
+              <Tabs.Panel value="tasks">
+                <TaskRows tasks={groups.tasks} onOpen={openTask} />
+              </Tabs.Panel>
+            </Tabs.Root>
+          </div>
+        ) : (
+          <TaskRows tasks={tasks} onOpen={openTask} />
+        )
       ) : null}
+      <Dialog.Root open={open && shownTask !== null} onOpenChange={setOpen}>
+        <Dialog.Content
+          style={dialogLayout}
+          initialFocus={scrollerRef}
+          closeLabel={t('common.close', 'Close')}
+          data-subagent-task-dialog=""
+          data-vaul-no-drag=""
+          container={drawer ?? undefined}
+          backdropContent={
+            drawer ? (
+              <div data-vaul-no-drag="" {...stylex.props(detailStyles.backdropNoDrag)} />
+            ) : undefined
+          }
+        >
+          {shownTask ? (
+            <SubagentTaskDetail
+              key={shownTask.taskId}
+              task={shownTask}
+              onCancel={onCancel}
+              runCancellation={runCancellation}
+              scrollerRef={scrollerRef}
+              renderHistory={renderHistory}
+              fontSize={fontSize}
+            />
+          ) : null}
+        </Dialog.Content>
+      </Dialog.Root>
     </div>
   );
 };

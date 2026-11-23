@@ -1,12 +1,19 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
+import { usePostHog } from '@/lib/posthog-context';
 import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
 import {
   conversationFontSizeAtom,
-  CONVERSATION_FONT_SIZE_MAX,
-  CONVERSATION_FONT_SIZE_MIN,
+  DEFAULT_CONVERSATION_FONT_SIZE,
+  conversationWideModeAtom,
+  extendedCodeLanguagesEnabledAtom,
+  fontLigaturesEnabledAtom,
+  inlineMathEnabledAtom,
   interfaceFontFamilyAtom,
   normalizeConversationFontSize,
   normalizeTerminalFontSize,
@@ -17,15 +24,19 @@ import {
   type ConversationFontSize,
 } from '@/atoms';
 import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-settings';
-import { OptionSelector, type OptionSelectorOption } from '@/components/shared/option-selector';
+import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { buildInterfaceFontFamily, listSystemFontFamilies } from '@/lib/local-fonts';
-import { Input } from '@/ui/input';
+import { listSystemFontFamilies } from '@/lib/local-fonts';
+import { Combobox } from '@lody/ui/combobox';
+import { NumberField } from '@lody/ui/number-field';
+import { Switch } from '@lody/ui/switch';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
 import { CompactRow, CompactSection } from './compact-layout';
+import { buildConversationFontSizeChoices } from './conversation-font-size-options';
 import { PreviewSelect, type PreviewSelectOption } from './preview-select';
 
 export type SystemFontLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -37,6 +48,12 @@ export interface AppearanceSettingsViewProps {
   onThemeCancel: () => void;
   conversationFontSize: ConversationFontSize;
   onConversationFontSizeChange: (value: ConversationFontSize) => void;
+  conversationWideMode: boolean;
+  onConversationWideModeChange: (value: boolean) => void;
+  inlineMathEnabled: boolean;
+  onInlineMathEnabledChange: (value: boolean) => void;
+  extendedCodeLanguagesEnabled: boolean;
+  onExtendedCodeLanguagesEnabledChange: (value: boolean) => void;
   isElectron: boolean;
   interfaceFontFamily: string;
   onInterfaceFontFamilyChange: (value: string) => void;
@@ -47,6 +64,8 @@ export interface AppearanceSettingsViewProps {
   onSystemFontMenuOpen: () => void;
   terminalFontSize: number;
   onTerminalFontSizeChange: (value: number) => void;
+  fontLigaturesEnabled: boolean;
+  onFontLigaturesEnabledChange: (value: boolean) => void;
 }
 
 function buildSystemFontOptions(
@@ -54,7 +73,7 @@ function buildSystemFontOptions(
   selectedFamily: string,
   defaultLabel: string,
   defaultKey: string
-): OptionSelectorOption<string>[] {
+): SystemFontOption[] {
   const availableFamilies = families.some(
     (family) => family.toLowerCase() === selectedFamily.toLowerCase()
   )
@@ -69,6 +88,138 @@ function buildSystemFontOptions(
   ];
 }
 
+interface SystemFontOption {
+  value: string;
+  label: string;
+  key?: string;
+}
+
+/** Names shown in the default face: a list of fonts set in themselves is unreadable. */
+const DEFAULT_FACE = { fontFamily: 'var(--font-sans-default)' };
+
+const styles = stylex.create({
+  /** A picker takes a fixed column on a wide panel and the row on a narrow one. */
+  picker: { width: { default: '100%', '@media (min-width: 640px)': '220px' } },
+  stepper: { width: '112px' },
+  option: { display: 'flex', alignItems: 'center', gap: space[2] },
+  optionIcon: { width: '16px', height: '16px', flexShrink: 0 },
+  error: { color: colors.destructive },
+  /**
+   * A picture of the terminal in the terminal's own palette: it is the line of
+   * the card that shows what the two rows above it set.
+   */
+  /** A sample of the terminal, set in the rows' own column. */
+  terminal: {
+    overflow: 'hidden',
+    marginInline: space[4],
+    marginBlock: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: 'var(--terminal-background)',
+    color: 'var(--terminal-foreground)',
+  },
+  terminalBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    height: '24px',
+    paddingInline: space[3],
+    backgroundColor: 'color-mix(in oklab, var(--terminal-background), black 10%)',
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: 'color-mix(in oklab, var(--terminal-foreground) 60%, transparent)',
+  },
+  terminalBarIcon: { width: '12px', height: '12px', flexShrink: 0 },
+  terminalLine: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    height: '44px',
+    paddingInline: space[3],
+    lineHeight: 1.2,
+  },
+  terminalFace: (fontFamily: string, fontSize: string) => ({ fontFamily, fontSize }),
+  terminalPrompt: { flexShrink: 0, color: 'var(--terminal-ansi-green)' },
+  terminalCommand: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'inherit',
+  },
+  terminalCursor: {
+    flexShrink: 0,
+    width: '0.5em',
+    height: '1em',
+    backgroundColor: 'var(--terminal-cursor)',
+    opacity: 0.8,
+  },
+});
+
+/**
+ * A system font, picked from every installed family.
+ *
+ * It opens like the Selects above it — one kind of control down the column —
+ * and the list it opens starts with a search field, because it is every family
+ * on the machine. The first time the list opens is what loads the families.
+ */
+function SystemFontCombobox({
+  value,
+  options,
+  onChange,
+  onOpen,
+  searchPlaceholder,
+  emptyText,
+  'aria-label': ariaLabel,
+}: {
+  value: string;
+  options: SystemFontOption[];
+  onChange: (family: string) => void;
+  onOpen: () => void;
+  searchPlaceholder: string;
+  emptyText: string;
+  'aria-label': string;
+}) {
+  const selected = options.find((option) => option.value === value) ?? options[0] ?? null;
+  return (
+    <Combobox.Root
+      items={options}
+      value={selected}
+      itemToStringLabel={(option: SystemFontOption) => option.label}
+      isItemEqualToValue={(left: SystemFontOption, right: SystemFontOption) =>
+        left.value === right.value
+      }
+      onValueChange={(option: SystemFontOption | null) => {
+        if (option) onChange(option.value);
+      }}
+      onOpenChange={(open) => {
+        if (open) onOpen();
+      }}
+    >
+      <div {...stylex.props(styles.picker)}>
+        <Combobox.Button aria-label={ariaLabel} style={DEFAULT_FACE} />
+      </div>
+      <Combobox.Content
+        search={
+          <Combobox.Search
+            aria-label={searchPlaceholder}
+            placeholder={searchPlaceholder}
+            style={DEFAULT_FACE}
+          />
+        }
+        empty={<Combobox.Empty>{emptyText}</Combobox.Empty>}
+      >
+        {(option: SystemFontOption) => (
+          <Combobox.Item key={option.key ?? option.value} value={option}>
+            <span style={DEFAULT_FACE}>{option.label}</span>
+          </Combobox.Item>
+        )}
+      </Combobox.Content>
+    </Combobox.Root>
+  );
+}
+
 export function AppearanceSettingsView({
   theme,
   onThemePreview,
@@ -76,6 +227,12 @@ export function AppearanceSettingsView({
   onThemeCancel,
   conversationFontSize,
   onConversationFontSizeChange,
+  conversationWideMode,
+  onConversationWideModeChange,
+  inlineMathEnabled,
+  onInlineMathEnabledChange,
+  extendedCodeLanguagesEnabled,
+  onExtendedCodeLanguagesEnabledChange,
   isElectron,
   interfaceFontFamily,
   onInterfaceFontFamilyChange,
@@ -86,6 +243,8 @@ export function AppearanceSettingsView({
   onSystemFontMenuOpen,
   terminalFontSize,
   onTerminalFontSizeChange,
+  fontLigaturesEnabled,
+  onFontLigaturesEnabledChange,
 }: AppearanceSettingsViewProps) {
   const { t } = useTranslation();
 
@@ -93,31 +252,40 @@ export function AppearanceSettingsView({
     {
       value: 'light',
       label: (
-        <div className="flex items-center gap-2">
-          <Sun className="h-4 w-4" />
+        <span {...stylex.props(styles.option)}>
+          <Sun {...stylex.props(styles.optionIcon)} />
           <span>{t('settings.theme.light')}</span>
-        </div>
+        </span>
       ),
     },
     {
       value: 'dark',
       label: (
-        <div className="flex items-center gap-2">
-          <Moon className="h-4 w-4" />
+        <span {...stylex.props(styles.option)}>
+          <Moon {...stylex.props(styles.optionIcon)} />
           <span>{t('settings.theme.dark')}</span>
-        </div>
+        </span>
       ),
     },
     {
       value: 'system',
       label: (
-        <div className="flex items-center gap-2">
-          <Monitor className="h-4 w-4" />
+        <span {...stylex.props(styles.option)}>
+          <Monitor {...stylex.props(styles.optionIcon)} />
           <span>{t('settings.theme.system')}</span>
-        </div>
+        </span>
       ),
     },
   ];
+
+  const conversationFontSizeOptions = useMemo<PreviewSelectOption<string>[]>(
+    () =>
+      buildConversationFontSizeChoices().map(({ value, labelKey }) => ({
+        value,
+        label: t(labelKey),
+      })),
+    [t]
+  );
 
   const defaultFontLabel = t('settings.terminal.fontFamily.placeholder', 'Default');
   const interfaceFontOptions = useMemo(
@@ -145,7 +313,7 @@ export function AppearanceSettingsView({
     systemFontLoadState === 'loading' ? (
       <span>{t('settings.terminal.fontFamily.loading', 'Loading system fonts...')}</span>
     ) : systemFontLoadState === 'error' ? (
-      <span className="text-destructive">
+      <span {...stylex.props(styles.error)}>
         {t(
           'settings.terminal.fontFamily.unavailable',
           'System fonts could not be loaded. Reopen the menu to try again.'
@@ -157,94 +325,95 @@ export function AppearanceSettingsView({
     <div className={settingContainerClass}>
       <CompactSection>
         <CompactRow label={t('settings.theme.label')}>
-          <PreviewSelect
-            value={theme}
-            options={themeOptions}
-            onPreview={onThemePreview}
-            onCommit={onThemeCommit}
-            onCancel={onThemeCancel}
-            triggerClassName="w-full sm:w-[220px]"
-          />
+          <div {...stylex.props(styles.picker)}>
+            <PreviewSelect
+              aria-label={t('settings.theme.label')}
+              value={theme}
+              options={themeOptions}
+              onPreview={onThemePreview}
+              onCommit={onThemeCommit}
+              onCancel={onThemeCancel}
+            />
+          </div>
         </CompactRow>
         <CompactRow label={t('settings.language.label')}>
-          <LanguageSelector triggerClassName="w-full sm:w-[220px]" />
+          <div {...stylex.props(styles.picker)}>
+            <LanguageSelector />
+          </div>
         </CompactRow>
       </CompactSection>
 
-      <CompactSection>
+      <CompactSection title={t('settings.appearance.sections.text', 'Text')}>
         {isElectron ? (
           <CompactRow
             label={t('settings.interfaceFontFamily.label', 'Interface font')}
-            helper={
-              <span className="flex flex-col gap-0.5">
-                <span>
-                  {t(
-                    'settings.interfaceFontFamily.helper',
-                    'Choose an installed font for the interface and conversation content.'
-                  )}
-                </span>
-                {fontLoadStatus}
-              </span>
-            }
+            helper={fontLoadStatus}
           >
-            <OptionSelector
+            <SystemFontCombobox
               value={interfaceFontFamily}
               options={interfaceFontOptions}
-              onSelect={(option) => onInterfaceFontFamilyChange(option.value)}
-              placeholder={defaultFontLabel}
-              searchable
+              onChange={onInterfaceFontFamilyChange}
+              onOpen={onSystemFontMenuOpen}
+              aria-label={t('settings.interfaceFontFamily.label', 'Interface font')}
               searchPlaceholder={t(
                 'settings.terminal.fontFamily.searchPlaceholder',
                 'Search system fonts...'
               )}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
-              align="end"
-              className="w-full rounded-md border-input-border bg-input sm:w-[220px] hover:bg-input/80"
-              contentClassName="w-[320px]"
-              onOpenChange={(open) => {
-                if (open) onSystemFontMenuOpen();
-              }}
-              renderTriggerValue={(option) => (
-                <span
-                  className="truncate font-normal"
-                  style={{ fontFamily: buildInterfaceFontFamily(option?.value ?? '') }}
-                >
-                  {option?.label ?? interfaceFontFamily}
-                </span>
-              )}
-              renderOption={(option) => (
-                <span
-                  className="min-w-0 flex-1 truncate"
-                  style={{ fontFamily: buildInterfaceFontFamily(option.value) }}
-                >
-                  {option.label}
-                </span>
-              )}
             />
           </CompactRow>
         ) : null}
+        <CompactRow label={t('settings.conversationFontSize.label', 'Font size')}>
+          <div {...stylex.props(styles.picker)}>
+            <PreviewSelect
+              aria-label={t('settings.conversationFontSize.label', 'Font size')}
+              value={String(normalizeConversationFontSize(conversationFontSize))}
+              options={conversationFontSizeOptions}
+              onCommit={(value) => onConversationFontSizeChange(Number(value))}
+            />
+          </div>
+        </CompactRow>
+        <CompactRow label={t('settings.conversationWideMode.label', 'Full width')}>
+          <Switch
+            checked={conversationWideMode}
+            onCheckedChange={onConversationWideModeChange}
+            aria-label={t('settings.conversationWideMode.label', 'Full width')}
+          />
+        </CompactRow>
         <CompactRow
-          label={t('settings.conversationFontSize.label', 'Conversation font size')}
-          helper={t(
-            'settings.conversationFontSize.helper',
-            'Adjusts message body text in conversations.'
+          label={t('settings.inlineMath.label', 'Render inline math')}
+          info={t('settings.inlineMath.helper', 'Typeset $...$ and \\(...\\) in Markdown.')}
+        >
+          <Switch
+            checked={inlineMathEnabled}
+            onCheckedChange={onInlineMathEnabledChange}
+            aria-label={t('settings.inlineMath.label', 'Render inline math')}
+          />
+        </CompactRow>
+        <CompactRow
+          label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
+          info={t(
+            'settings.extendedCodeLanguages.helper',
+            'Adds syntax grammars for more code languages. Each grammar loads when first used and can slow that render.'
           )}
         >
-          <Input
-            type="number"
-            min={CONVERSATION_FONT_SIZE_MIN}
-            max={CONVERSATION_FONT_SIZE_MAX}
-            step={1}
-            value={conversationFontSize}
-            aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
-            className="w-24"
-            onChange={(event) => {
-              if (Number.isFinite(event.target.valueAsNumber)) {
-                onConversationFontSizeChange(
-                  normalizeConversationFontSize(event.target.valueAsNumber)
-                );
-              }
-            }}
+          <Switch
+            checked={extendedCodeLanguagesEnabled}
+            onCheckedChange={onExtendedCodeLanguagesEnabledChange}
+            aria-label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
+          />
+        </CompactRow>
+        <CompactRow
+          label={t('settings.fontLigatures.label', 'Font ligatures')}
+          info={t(
+            'settings.fontLigatures.helper',
+            'Applies to conversation, code, and tool output.'
+          )}
+        >
+          <Switch
+            checked={fontLigaturesEnabled}
+            onCheckedChange={onFontLigaturesEnabledChange}
+            aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
           />
         </CompactRow>
       </CompactSection>
@@ -255,90 +424,72 @@ export function AppearanceSettingsView({
             label={t('settings.terminal.fontFamily.label', 'Font')}
             helper={fontLoadStatus}
           >
-            <OptionSelector
+            <SystemFontCombobox
               value={terminalFontFamily}
               options={terminalFontOptions}
-              onSelect={(option) => onTerminalFontFamilyChange(option.value)}
-              placeholder={defaultFontLabel}
-              searchable
+              onChange={onTerminalFontFamilyChange}
+              onOpen={onSystemFontMenuOpen}
+              aria-label={t('settings.terminal.fontFamily.label', 'Font')}
               searchPlaceholder={t(
                 'settings.terminal.fontFamily.searchPlaceholder',
                 'Search system fonts...'
               )}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
-              align="end"
-              className="w-full rounded-md border-input-border bg-input sm:w-[220px] hover:bg-input/80"
-              contentClassName="w-[320px]"
-              onOpenChange={(open) => {
-                if (open) onSystemFontMenuOpen();
-              }}
-              renderTriggerValue={(option) => (
-                <span
-                  className="truncate font-normal"
-                  style={{ fontFamily: buildTerminalFontPreviewFamily(option?.value ?? '') }}
-                >
-                  {option?.label ?? terminalFontFamily}
-                </span>
-              )}
-              renderOption={(option) => (
-                <span
-                  className="min-w-0 flex-1 truncate"
-                  style={{ fontFamily: buildTerminalFontPreviewFamily(option.value) }}
-                >
-                  {option.label}
-                </span>
-              )}
             />
           </CompactRow>
           <CompactRow label={t('settings.terminal.fontSize.label', 'Font size')}>
-            <Input
-              type="number"
+            {/* A size somebody nudges, so the range owns the clamp and the steppers
+                rather than a bare number box parsing what was typed. */}
+            <NumberField.Root
+              {...stylex.props(styles.stepper)}
+              value={terminalFontSize}
               min={TERMINAL_FONT_SIZE_MIN}
               max={TERMINAL_FONT_SIZE_MAX}
               step={1}
-              value={terminalFontSize}
-              aria-label={t('settings.terminal.fontSize.label', 'Font size')}
-              className="w-24"
-              onChange={(event) => {
-                if (Number.isFinite(event.target.valueAsNumber)) {
-                  onTerminalFontSizeChange(normalizeTerminalFontSize(event.target.valueAsNumber));
-                }
+              onValueChange={(next) => {
+                if (next != null) onTerminalFontSizeChange(normalizeTerminalFontSize(next));
               }}
-            />
+            >
+              <NumberField.Group>
+                <NumberField.Input
+                  aria-label={t('settings.terminal.fontSize.label', 'Font size')}
+                />
+                <NumberField.Decrement
+                  aria-label={t('settings.terminal.fontSize.decrease', 'Decrease font size')}
+                />
+                <NumberField.Increment
+                  aria-label={t('settings.terminal.fontSize.increase', 'Increase font size')}
+                />
+              </NumberField.Group>
+            </NumberField.Root>
           </CompactRow>
           <div
             aria-label={t('settings.terminal.preview', 'Terminal preview')}
-            className="overflow-hidden border-t border-border/60 bg-[var(--terminal-background)] text-[var(--terminal-foreground)]"
+            {...stylex.props(styles.terminal)}
           >
-            <div className="flex h-6 items-center gap-1.5 border-b border-white/10 bg-black/10 px-3 text-[10px] text-[var(--terminal-foreground)]/60">
-              <SquareTerminal className="h-3 w-3" aria-hidden="true" />
+            <div {...stylex.props(styles.terminalBar)}>
+              <SquareTerminal {...stylex.props(styles.terminalBarIcon)} aria-hidden="true" />
               <span>lody</span>
             </div>
             <div
-              className="flex h-11 min-w-0 items-center gap-2 px-3"
-              style={{
-                fontFamily: buildTerminalFontPreviewFamily(terminalFontFamily),
-                fontSize: `${terminalFontSize}px`,
-                lineHeight: 1.2,
-              }}
+              {...stylex.props(
+                styles.terminalLine,
+                styles.terminalFace(
+                  buildTerminalFontPreviewFamily(terminalFontFamily),
+                  `${(terminalFontSize * conversationFontSize) / DEFAULT_CONVERSATION_FONT_SIZE}px`
+                )
+              )}
             >
-              <span className="shrink-0 text-[var(--terminal-ansi-green)]" aria-hidden="true">
+              <span {...stylex.props(styles.terminalPrompt)} aria-hidden="true">
                 $
               </span>
-              <code
-                className="min-w-0 truncate whitespace-nowrap"
-                style={{ fontFamily: 'inherit' }}
-              >
-                npx lody daemon start
-              </code>
-              <span
-                className="h-[1em] w-[0.5em] shrink-0 bg-[var(--terminal-cursor)] opacity-80"
-                aria-hidden="true"
-              />
+              <code {...stylex.props(styles.terminalCommand)}>npx lody daemon start</code>
+              <span {...stylex.props(styles.terminalCursor)} aria-hidden="true" />
             </div>
           </div>
         </CompactSection>
       ) : null}
+      <MobileAppIconSettings layout={isElectron ? 'desktop' : 'mobile'} />
     </div>
   );
 }
@@ -346,13 +497,33 @@ export function AppearanceSettingsView({
 function DesktopAppearanceSettings() {
   const { theme, setTheme, previewTheme } = useTheme();
   const [conversationFontSize, setConversationFontSize] = useAtom(conversationFontSizeAtom);
+  const [conversationWideMode, setConversationWideMode] = useAtom(conversationWideModeAtom);
+  const [inlineMathEnabled, setInlineMathEnabled] = useAtom(inlineMathEnabledAtom);
+  const [extendedCodeLanguagesEnabled, setExtendedCodeLanguagesEnabled] = useAtom(
+    extendedCodeLanguagesEnabledAtom
+  );
   const [interfaceFontFamily, setInterfaceFontFamily] = useAtom(interfaceFontFamilyAtom);
   const [terminalFontFamily, setTerminalFontFamily] = useAtom(terminalFontFamilyAtom);
   const [terminalFontSize, setTerminalFontSize] = useAtom(terminalFontSizeAtom);
+  const [fontLigaturesEnabled, setFontLigaturesEnabled] = useAtom(fontLigaturesEnabledAtom);
   const [systemFontFamilies, setSystemFontFamilies] = useState<string[]>([]);
   const [systemFontLoadState, setSystemFontLoadState] = useState<SystemFontLoadState>('idle');
   const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
   const savedThemeRef = useRef<Theme>(theme);
+  const postHog = usePostHog();
+
+  const handleConversationFontSizeChange = useCallback(
+    (next: ConversationFontSize) => {
+      if (next !== conversationFontSize) {
+        capturePostHogEvent(postHog, 'settings/font_size_changed', {
+          from: conversationFontSize,
+          to: next,
+        });
+      }
+      setConversationFontSize(next);
+    },
+    [conversationFontSize, postHog, setConversationFontSize]
+  );
 
   const handleThemePreview = useCallback(
     (value: Theme) => {
@@ -394,7 +565,13 @@ function DesktopAppearanceSettings() {
       onThemeCommit={handleThemeCommit}
       onThemeCancel={handleThemeCancel}
       conversationFontSize={conversationFontSize}
-      onConversationFontSizeChange={setConversationFontSize}
+      onConversationFontSizeChange={handleConversationFontSizeChange}
+      conversationWideMode={conversationWideMode}
+      onConversationWideModeChange={setConversationWideMode}
+      inlineMathEnabled={inlineMathEnabled}
+      onInlineMathEnabledChange={setInlineMathEnabled}
+      extendedCodeLanguagesEnabled={extendedCodeLanguagesEnabled}
+      onExtendedCodeLanguagesEnabledChange={setExtendedCodeLanguagesEnabled}
       isElectron={isElectron}
       interfaceFontFamily={interfaceFontFamily}
       onInterfaceFontFamilyChange={setInterfaceFontFamily}
@@ -405,6 +582,8 @@ function DesktopAppearanceSettings() {
       onSystemFontMenuOpen={handleSystemFontMenuOpen}
       terminalFontSize={terminalFontSize}
       onTerminalFontSizeChange={setTerminalFontSize}
+      fontLigaturesEnabled={fontLigaturesEnabled}
+      onFontLigaturesEnabledChange={setFontLigaturesEnabled}
     />
   );
 }

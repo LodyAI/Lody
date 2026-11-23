@@ -1,0 +1,655 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
+// @vitest-environment jsdom
+import { TestCloudPlatformProvider } from './test-platform';
+import { openReaderView, flushReaderChanges, writeStoredField } from './conversation-view-fixtures';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LoroMap } from 'loro-crdt';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import { resolveSessionAcpRuntimeConfig, resolveSessionConversationConfig } from '@lody/shared';
+import {
+  useConversationVersion,
+  useConversationIndexRows,
+  useConversationTail,
+  useTurnRange,
+} from '../src/hooks/use-conversation-view';
+import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-blocks';
+import {
+  createConversationSession,
+  createConversationViewFromReader,
+  collectConversationConfigSources,
+  type ConversationView,
+} from '../src/lib/conversation-view';
+import { buildSessionSearchResults, type SessionSearchBlock } from '../src/lib/session-chat-search';
+import {
+  buildFixtureHistory,
+  buildSessionDoc,
+  createManualIdle,
+  FIXTURE_SESSION_ID,
+  reimport,
+} from './conversation-view-fixtures';
+import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
+import { useSessionTurnFacts } from '../src/components/sessions/session-turn-facts';
+import { useSessionMcpSelection } from '../src/hooks/use-session-mcp-selection';
+import { FloatingPermissionRequest } from '../src/components/sessions/floating-permission-request';
+import { initI18n } from '../src/i18n';
+import {
+  buildAcpSessionConfigCandidates,
+  EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+} from '../src/lib/acp-session-config-selection';
+
+let root: Root;
+let container: HTMLDivElement;
+const views: ConversationView[] = [];
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  for (const view of views.splice(0)) view.dispose();
+  container.remove();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+async function openView(rounds: number, maxHydrated = 4) {
+  const doc = reimport(buildSessionDoc(buildFixtureHistory(rounds)));
+  const idle = createManualIdle();
+  const view = await openReaderView(doc, {
+    sessionId: FIXTURE_SESSION_ID,
+    maxHydrated,
+    tailKeep: 2,
+    scheduleIdle: idle.scheduleIdle,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  views.push(view);
+  return { doc, view, idle };
+}
+const flush = async () => {
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+};
+
+describe('conversation view React readers', () => {
+  it.each(['surface', 'document'] as const)(
+    'holds optional history work while %s is hidden and refreshes facts on return',
+    async (hiddenBy) => {
+      const doc = buildSessionDoc(buildFixtureHistory(30));
+      const data = createLoroSessionData({ doc, sessionId: FIXTURE_SESSION_ID });
+      const view = createConversationViewFromReader(data.history, {
+        sessionId: FIXTURE_SESSION_ID,
+        tailKeep: 2,
+        maxHydrated: 4,
+      });
+      views.push(view);
+      let facts!: ReturnType<typeof useSessionTurnFacts>;
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      function Probe({ visible }: { visible: boolean }) {
+        facts = useSessionTurnFacts(view, visible);
+        const rows = useConversationIndexRows(view, {
+          includeSummary: false,
+          enabled: visible && document.visibilityState !== 'hidden',
+        });
+        return (
+          <span data-rows={rows.length}>
+            {facts.ordered.find((fact) => fact.id === 'a-0')?.fileDiff?.length ?? 0}
+          </span>
+        );
+      }
+      try {
+        await act(async () => root.render(<Probe visible />));
+        await flush();
+        expect(facts.complete).toBe(true);
+        expect(view.turn(view.indexOf('a-0'))).toBeUndefined();
+        const retained = facts.ordered.find((fact) => fact.id === 'a-1');
+        await act(async () => {
+          if (hiddenBy === 'surface') root.render(<Probe visible={false} />);
+          else {
+            visibility.mockReturnValue('hidden');
+            document.dispatchEvent(new Event('visibilitychange'));
+          }
+        });
+        await act(async () => {
+          await writeStoredField(data, 'a-0', 'fileDiff', {
+            kind: 'set',
+            value: [{ filePath: 'changed-while-away.ts', add: 1, del: 0 }],
+          });
+        });
+        await flush();
+        await act(async () => root.render(<Probe visible={hiddenBy !== 'surface'} />));
+        expect(container.querySelector('span')?.getAttribute('data-rows')).toBe('60');
+        expect(view.turn(view.indexOf('a-0'))).toBeUndefined();
+        await act(async () => {
+          if (hiddenBy === 'surface') root.render(<Probe visible />);
+          else {
+            visibility.mockReturnValue('visible');
+            document.dispatchEvent(new Event('visibilitychange'));
+          }
+        });
+        await flush();
+        expect(facts.complete).toBe(true);
+        expect(container.textContent).toBe('1');
+        expect(facts.ordered.find((fact) => fact.id === 'a-1')).toBe(retained);
+        await act(async () => root.render(<Probe visible={false} />));
+        await act(async () => {
+          data.writer.append({
+            id: 'while-away',
+            role: 'user',
+            timestamp: 'synthetic',
+            items: [{ type: 'text', text: 'Synthetic update while away' }],
+          });
+          doc.commit();
+        });
+        await flush();
+        await act(async () => root.render(<Probe visible={false} />));
+        expect(container.querySelector('span')?.getAttribute('data-rows')).toBe('60');
+        await act(async () => root.render(<Probe visible />));
+        await flush();
+        expect(container.querySelector('span')?.getAttribute('data-rows')).toBe('61');
+      } finally {
+        visibility.mockRestore();
+        await act(async () => root.render(null));
+        view.dispose();
+        data.dispose();
+        doc.free();
+      }
+    }
+  );
+  it.each([false, true])(
+    'shows a synced Core question while older history is blocked (existing tool: %s)',
+    async (existingTool) => {
+      await initI18n('en');
+      const history = buildFixtureHistory(2);
+      const active = history.at(-1)!;
+      active.finished = false;
+      delete active.endedAt;
+      const source = buildSessionDoc(history);
+      const peer = reimport(source);
+      const idle = createManualIdle();
+      const session = createConversationSession(source, {
+        sessionId: FIXTURE_SESSION_ID,
+        scheduleIdle: idle.scheduleIdle,
+      });
+      const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc: peer });
+      let releaseOlder!: () => void;
+      const olderGate = new Promise<void>((resolve) => {
+        releaseOlder = resolve;
+      });
+      const view = createConversationViewFromReader(
+        {
+          ...data.history,
+          readTurnForDisplay: async (id) => {
+            if (id !== active.id) await olderGate;
+            return data.history.readTurnForDisplay(id);
+          },
+        },
+        {
+          sessionId: FIXTURE_SESSION_ID,
+          tailKeep: 1,
+          hydrateChunkSize: 1,
+          scheduleIdle: idle.scheduleIdle,
+          yieldToEventLoop: () => Promise.resolve(),
+        }
+      );
+      await flushReaderChanges();
+      views.push(view);
+      function QuestionSurface() {
+        const tail = useConversationTail(view, { extendToLastUserTurn: true });
+        const current = view.turn(view.turnCount - 1);
+        const text = current?.items.filter((item) => item.type === 'text').at(-1);
+        return (
+          <>
+            <output>{text?.type === 'text' ? text.text : ''}</output>
+            <FloatingPermissionRequest
+              sessionId={FIXTURE_SESSION_ID}
+              sessionStatus={{ type: 'requestPermission' }}
+              sessionHistory={
+                tail.availableTurns as Parameters<
+                  typeof FloatingPermissionRequest
+                >[0]['sessionHistory']
+              }
+            />
+          </>
+        );
+      }
+      try {
+        await act(async () => root.render(<QuestionSurface />));
+        await flush();
+        expect(container.textContent).not.toContain('Which storage should we use?');
+        createHistoryWriter(source).updateEntry(active.id, (entry) => {
+          entry.items.push({ type: 'text', text: 'Concurrent output is still arriving' });
+          return entry;
+        });
+        source.commit();
+        const result = await session.sessionData.commands.applyHistoryAction({
+          kind: 'permission-request',
+          requestId: 'question-request',
+          request: {
+            sessionId: 'acp-test',
+            toolCall: { toolCallId: existingTool ? 'tc-1' : 'synthetic-question', kind: 'think' },
+            options: [{ optionId: 'answer', name: 'Submit answers', kind: 'allow_once' }],
+            _meta: {
+              lody: {
+                elicitation: {
+                  version: 1,
+                  questions: [
+                    {
+                      id: 'question_0',
+                      header: 'Storage',
+                      question: 'Which storage should we use?',
+                      options: [{ label: 'SQLite' }, { label: 'Files' }],
+                      multiSelect: false,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        });
+        expect(result.matched).toBe(true);
+        await act(async () => {
+          peer.import(source.export({ mode: 'update', from: peer.version() }));
+          await flushReaderChanges();
+        });
+        await flush();
+        expect(container.querySelector('output')?.textContent).toBe(
+          'Concurrent output is still arriving'
+        );
+        expect(view.turn(0)).toBeUndefined();
+        expect(view.turn(view.turnCount - 1)?.finished).toBe(false);
+        expect(container.textContent).toContain('Which storage should we use?');
+        expect(container.textContent).toContain('SQLite');
+        expect(container.textContent).toContain('Files');
+        // Resolving unrelated old bodies neither unlocks nor duplicates the form.
+        await act(async () => {
+          releaseOlder();
+          await flushReaderChanges();
+        });
+        await flush();
+        expect(view.turn(0)).toBeDefined();
+        expect(container.textContent?.split('Which storage should we use?')).toHaveLength(2);
+      } finally {
+        releaseOlder();
+        view.dispose();
+        data.dispose();
+        session.dispose();
+      }
+    }
+  );
+
+  it('renders requested history and selected turns without promoting other cached bodies', async () => {
+    const { view } = await openView(150, 200);
+    let stream!: ReturnType<typeof useConversationStreamItems>;
+    function Probe() {
+      stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
+      return null;
+    }
+    await act(async () => root.render(<Probe />));
+    await flush();
+    const itemFor = (id: string) =>
+      stream.items.find((item) =>
+        item.type === 'message'
+          ? item.message.id === id
+          : item.type === 'placeholder' && item.row.id === id
+      );
+    await act(async () => stream.onVisibleTurnRangeChange({ from: 20, to: 28 }));
+    await flush();
+    expect(itemFor('a-10')?.type).toBe('message');
+    const selected = view.acquireRange(21, 22);
+    await selected.ready;
+    await act(async () => {
+      stream.onRetainedTurnIdsChange(new Set(['a-10']));
+      stream.onVisibleTurnRangeChange({ from: 100, to: 108 });
+    });
+    await flush();
+    expect(itemFor('a-10')?.type).toBe('message');
+    expect(itemFor('a-50')?.type).toBe('message');
+    expect(itemFor('a-149')?.type).toBe('message');
+    expect(itemFor('a-11')?.type).toBe('placeholder');
+    expect(view.isHydrated(23)).toBe(true);
+    await act(async () => stream.onRetainedTurnIdsChange(new Set()));
+    selected.release();
+    await flush();
+    expect(itemFor('a-10')?.type).toBe('placeholder');
+  });
+
+  it('loads a restored reading turn far from the tail before the first viewport report', async () => {
+    const { view } = await openView(150, 200);
+    let stream!: ReturnType<typeof useConversationStreamItems>;
+    function Probe() {
+      stream = useConversationStreamItems(view, FIXTURE_SESSION_ID, { initialFocusTurnId: 'a-40' });
+      return null;
+    }
+    await act(async () => root.render(<Probe />));
+    await flush();
+    const itemFor = (id: string) =>
+      stream.items.find((item) =>
+        item.type === 'message'
+          ? item.message.id === id
+          : item.type === 'placeholder' && item.row.id === id
+      );
+    expect(stream.initialWindowReady).toBe(true);
+    // The focus turn and its neighbours render as rows, not placeholders.
+    expect(itemFor('a-40')?.type).toBe('message');
+    expect(itemFor('a-45')?.type).toBe('message');
+    // Far from both the focus and the tail stays a placeholder.
+    expect(itemFor('a-5')?.type).toBe('placeholder');
+    // The first real report takes over from the focus (a round is a user and
+    // an assistant turn, so round 100 sits at turn index 201).
+    await act(async () => stream.onVisibleTurnRangeChange({ from: 200, to: 208 }));
+    await flush();
+    expect(itemFor('a-5')?.type).toBe('placeholder');
+    expect(itemFor('a-100')?.type).toBe('message');
+  });
+
+  it('keeps revealed content and its reading window while new turns land', async () => {
+    const { doc, view } = await openView(150);
+    const writer = createHistoryWriter(doc);
+    let stream!: ReturnType<typeof useConversationStreamItems>;
+    function Probe({ current }: { current: ConversationView }) {
+      stream = useConversationStreamItems(current, FIXTURE_SESSION_ID);
+      return (
+        <span style={{ visibility: stream.initialWindowReady ? 'visible' : 'hidden' }}>
+          Conversation
+        </span>
+      );
+    }
+    await act(async () => root.render(<Probe current={view} />));
+    await act(async () => stream.onVisibleTurnRangeChange({ from: 20, to: 28 }));
+    await flush();
+    const acquire = view.acquireRange.bind(view);
+    let releaseReady!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseReady = resolve;
+    });
+    vi.spyOn(view, 'acquireRange').mockImplementation((...args) => {
+      const lease = acquire(...args);
+      return { ...lease, ready: lease.ready.then(() => gate) };
+    });
+    for (let landed = 0; landed < 3; landed++) {
+      await act(async () => {
+        writer.append({ ...buildFixtureHistory(1)[0]!, id: `landed-${landed}` });
+        await flushReaderChanges();
+      });
+      await act(async () => root.render(<Probe current={view} />));
+      await flush();
+      expect(view.indexOf(`landed-${landed}`)).toBe(view.turnCount - 1);
+      expect(getComputedStyle(container.firstElementChild!).visibility).toBe('visible');
+      expect(view.isHydrated(20)).toBe(true);
+    }
+    await act(async () => releaseReady());
+  });
+
+  it.each([false, true])(
+    'requires a new source to load even with the same session id; previous ready=%s',
+    async (firstReady) => {
+      const { view: first } = await openView(30);
+      const { view: second } = await openView(31);
+      const releases: (() => void)[] = [];
+      for (const view of [first, second]) {
+        const acquire = view.acquireRange.bind(view);
+        const gate = new Promise<void>((resolve) => {
+          releases.push(resolve);
+        });
+        vi.spyOn(view, 'acquireRange').mockImplementation((...args) => {
+          const lease = acquire(...args);
+          return { ...lease, ready: lease.ready.then(() => gate) };
+        });
+      }
+      function Probe({ view }: { view: ConversationView }) {
+        const stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
+        return <span>{String(stream.initialWindowReady)}</span>;
+      }
+      await act(async () => root.render(<Probe view={first} />));
+      if (firstReady) {
+        await act(async () => releases[0]!());
+        expect(container.textContent).toBe('true');
+      }
+      await act(async () => root.render(<Probe view={second} />));
+      await act(async () => {
+        releases[0]!();
+      });
+      expect(container.textContent).toBe('false');
+      await act(async () => {
+        releases[1]!();
+      });
+      expect(container.textContent).toBe('true');
+    }
+  );
+
+  it('rehydrates a mounted viewport after same-length replacement and releases it on unmount', async () => {
+    const { doc, view, idle } = await openView(150);
+    function Probe() {
+      useConversationVersion(view);
+      useTurnRange(view, 20, 30);
+      return <span>{view.turn(20)?.id ?? 'placeholder'}</span>;
+    }
+    await act(async () => root.render(<Probe />));
+    await flush();
+    expect(container.textContent).toBe('u-10');
+    await act(async () => {
+      const list = doc.getList('history');
+      list.delete(20, 10);
+      for (let i = 0; i < 10; i++) {
+        const turn = list.insertContainer(20 + i, new LoroMap());
+        turn.set('id', `replacement-${i}`);
+        turn.set('role', 'assistant');
+      }
+      doc.commit();
+      await flushReaderChanges();
+      idle.runAll();
+    });
+    await flush();
+    expect(container.textContent).toBe('replacement-0');
+    for (let i = 20; i < 30; i++) expect(view.isHydrated(i)).toBe(true);
+    act(() => root.render(null));
+    expect(
+      Array.from({ length: view.turnCount }, (_, i) => view.isHydrated(i)).filter(Boolean).length
+    ).toBeLessThanOrEqual(4);
+  });
+
+  it('indexes bulk appends while search remains open and releases all history on close', async () => {
+    const { doc, view, idle } = await openView(1);
+    let blocks: SessionSearchBlock[] = [];
+    function Probe({ open }: { open: boolean }) {
+      blocks = useIncrementalSearchBlocks(view, open);
+      return null;
+    }
+    await act(async () => root.render(<Probe open />));
+    const peer = reimport(doc);
+    const writer = createHistoryWriter(peer);
+    for (const entry of buildFixtureHistory(51).slice(2)) writer.append(entry);
+    await act(async () => {
+      doc.import(peer.export({ mode: 'update', from: doc.version() }));
+      idle.runAll();
+    });
+    await flush();
+    expect(new Set(blocks.map((block) => block.messageId)).size).toBe(102);
+    expect(blocks.some((block) => block.messageId === 'u-1')).toBe(true);
+    await act(async () => root.render(<Probe open={false} />));
+    expect(blocks).toEqual([]);
+    expect(
+      Array.from({ length: view.turnCount }, (_, i) => view.isHydrated(i)).filter(Boolean).length
+    ).toBeLessThanOrEqual(4);
+  });
+
+  it('refreshes literal search text on streamed turn replacements and keeps settled blocks', async () => {
+    const { doc, view } = await openView(1);
+    let blocks: SessionSearchBlock[] = [];
+    function Probe({ open = true }: { open?: boolean }) {
+      blocks = useIncrementalSearchBlocks(view, open);
+      return null;
+    }
+    await act(async () => root.render(<Probe />));
+    const userBlock = blocks.find((block) => block.messageId === 'u-0');
+    const writer = createHistoryWriter(doc);
+    for (const source of ['QA_RESUMED', 'QA_RESUMED_OK —', '**QA_RESUMED_OK** —']) {
+      await act(async () => {
+        writer.updateEntry('a-0', (entry) => {
+          entry.items = [{ type: 'text', text: source }];
+          return entry;
+        });
+        doc.commit();
+        await flushReaderChanges();
+      });
+      await flush();
+      expect(blocks.find((block) => block.messageId === 'u-0')).toBe(userBlock);
+      expect(buildSessionSearchResults(blocks, 'QA_RESUMED_OK')).toHaveLength(
+        source === 'QA_RESUMED' ? 0 : 1
+      );
+      expect(buildSessionSearchResults(blocks, 'QARESUMEDOK')).toEqual([]);
+    }
+    await act(async () => root.render(<Probe open={false} />));
+    expect(blocks).toEqual([]);
+    await act(async () => root.render(<Probe />));
+    expect(buildSessionSearchResults(blocks, 'QA_RESUMED_OK')).toHaveLength(1);
+  });
+});
+
+vi.mock('../src/hooks/use-workspace-catalog', () => ({
+  useWorkspaceCatalog: () => ({
+    servers: CATALOG,
+    roles: [],
+    projectMcpDefaults: {},
+    loaded: true,
+    failed: false,
+    synced: true,
+  }),
+}));
+const CATALOG = [{ id: 'default-mcp', name: 'Default', enabledByDefault: true }];
+// Deterministic (manual idle, an explicit `yieldToEventLoop` gate, fake timers)
+// but genuinely CPU-heavy: 50 turns whose assistant bodies carry 400 items each,
+// mirrored and hydrated through React. It runs in ~2s idle, which leaves no room
+// under Vitest's 5s default when eight workers share the machine — the timeout
+// then reports as a test failure that says nothing about the behavior. The
+// explicit budget below removes that machine-load dependency; it is not covering
+// for a hang, since nothing here waits on wall-clock time.
+const MCP_SELECTION_HYDRATION_TIMEOUT_MS = 30_000;
+it.each([false, true])(
+  'preserves MCP selection and reported Plan exit while composer history hydrates: windowed=%s',
+  async (windowed) => {
+    const host = container;
+    const history = buildFixtureHistory(25);
+    for (const turn of history)
+      if (turn.role === 'assistant')
+        turn.items = Array.from({ length: 400 }, () => ({ type: 'text', text: 'body' }));
+    history[48]!.inputConfig = {
+      ...history[48]!.inputConfig,
+      agentRoleId: null,
+      mcpServerIds: [],
+      configOptionValues: { effort: 'high', plan_mode: true },
+    };
+    const doc = buildSessionDoc(history);
+    const idle = createManualIdle();
+    let resume!: () => void;
+    const gate = new Promise<void>((r) => (resume = r));
+    const session = createConversationSession(doc, {
+      sessionId: FIXTURE_SESSION_ID,
+      windowed,
+      scheduleIdle: idle.scheduleIdle,
+      yieldToEventLoop: () => gate,
+    });
+    const view = windowed
+      ? createConversationViewFromReader(
+          {
+            ...session.sessionData.history,
+            readTurnForDisplay: async (id) => {
+              if (id === history[48]!.id) await gate;
+              return session.sessionData.history.readTurnForDisplay(id);
+            },
+          },
+          {
+            sessionId: FIXTURE_SESSION_ID,
+            scheduleIdle: idle.scheduleIdle,
+            yieldToEventLoop: () => gate,
+          }
+        )
+      : session.history;
+    await flushReaderChanges();
+    const runtimeSnapshot = {
+      acpSessionId: 'synthetic-agent-session',
+      basedOnUserTurnId: history[48]!.id,
+      revision: 1,
+      configOptionValues: { effort: 'high', plan_mode: false },
+    };
+    let sent: readonly string[] | undefined;
+    let sentPlan: unknown;
+    let selected: readonly string[] = [];
+    let selectedPlan: unknown;
+    let legacyPlan: unknown;
+    let tailHasUserTurn = false;
+    function Stream() {
+      useConversationStreamItems(view, FIXTURE_SESSION_ID);
+      return null;
+    }
+    function Composer() {
+      const tail = useConversationTail(view, { extendToLastUserTurn: true });
+      const sources = collectConversationConfigSources(view, tail.from);
+      const config = resolveSessionConversationConfig(sources);
+      const runtimeConfig = resolveSessionAcpRuntimeConfig(sources, [], runtimeSnapshot);
+      selectedPlan = buildAcpSessionConfigCandidates({
+        edits: EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+        preferences: config,
+        runtimePreferences: runtimeConfig,
+      }).configOptionValues.plan_mode;
+      legacyPlan = buildAcpSessionConfigCandidates({
+        edits: EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+        preferences: config,
+        runtimePreferences: resolveSessionAcpRuntimeConfig(sources, [], undefined),
+      }).configOptionValues.plan_mode;
+      tailHasUserTurn = tail.turns.some((turn) => turn.id === runtimeSnapshot.basedOnUserTurnId);
+      useSessionTurnFacts(view);
+      selected = useSessionMcpSelection(config.mcpServerIds, { existingSession: true }).selectedIds;
+      return (
+        <>
+          <Stream />
+          <button
+            onClick={() => {
+              sent = [...selected];
+              sentPlan = selectedPlan;
+            }}
+          >
+            send
+          </button>
+        </>
+      );
+    }
+    try {
+      await act(async () =>
+        root.render(
+          <TestCloudPlatformProvider>
+            <Composer />
+          </TestCloudPlatformProvider>
+        )
+      );
+      await act(async () => vi.runAllTimersAsync());
+      act(() => host.querySelector('button')!.click());
+      const before = sent;
+      expect(sentPlan, 'send before body hydration keeps the reported Plan exit').toBe(false);
+      expect(legacyPlan, 'an older daemon without a snapshot keeps its turn config').toBe(true);
+      if (windowed) expect(tailHasUserTurn, 'exercise the unloaded body path').toBe(false);
+      resume();
+      await act(async () => {
+        await gate;
+        await Promise.resolve();
+        await vi.runAllTimersAsync();
+      });
+      expect(selected, 'after hydration').toEqual([]);
+      expect(selectedPlan, 'hydration must not change the reported Plan exit').toBe(false);
+      expect(before, 'send while range loading').toEqual([]);
+    } finally {
+      resume();
+      await act(async () => root.render(null));
+      if (view !== session.history) view.dispose();
+      session.history.dispose();
+      session.mirror.dispose();
+      doc.free();
+    }
+  },
+  MCP_SELECTION_HYDRATION_TIMEOUT_MS
+);

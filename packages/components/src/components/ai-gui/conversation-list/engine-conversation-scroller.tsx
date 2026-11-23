@@ -1,0 +1,662 @@
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+  useState,
+  type ReactElement,
+  type MouseEvent,
+} from 'react';
+import { flushSync } from 'react-dom';
+import {
+  ScrollController,
+  type ControllerCallbacks,
+  type ScrollHost,
+} from '@/lib/conversation-scroll/controller';
+import {
+  getSavedScrollState,
+  recordScrollEngineDiagnostic,
+  saveScrollState,
+} from '@/lib/conversation-scroll/saved-state';
+import { recordSessionRenderTrace, shortTraceId } from '@/lib/session-render-trace';
+import { scrollDebug } from '@/hooks/scroll-debug-log';
+import { useIsMobile } from '@/hooks/use-mobile';
+import type { ConversationRowComponent, ConversationScrollerProps } from './types';
+import { compensateConversationScroll } from './scroll-compensation';
+
+const isEditableTarget = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT');
+
+const isUpwardNavigationKey = (event: KeyboardEvent): boolean =>
+  event.key === 'PageUp' ||
+  event.key === 'Home' ||
+  event.key === 'ArrowUp' ||
+  (event.key === ' ' && event.shiftKey);
+
+const isNavigationKey = (event: KeyboardEvent): boolean =>
+  isUpwardNavigationKey(event) ||
+  event.key === 'PageDown' ||
+  event.key === 'End' ||
+  event.key === 'ArrowDown' ||
+  event.key === ' ';
+
+/**
+ * Whether input over `target` scrolls some element nested inside the
+ * viewport (a code block, a terminal) rather than the viewport itself.
+ */
+function inputScrollsNestedElement(
+  target: EventTarget | null,
+  viewport: Element,
+  upward: boolean
+): boolean {
+  let element = target instanceof Element ? target : null;
+  while (element && element !== viewport) {
+    if (element instanceof HTMLElement) {
+      const overflowY = getComputedStyle(element).overflowY;
+      if (
+        (overflowY === 'auto' || overflowY === 'scroll') &&
+        (upward
+          ? element.scrollTop > 0
+          : element.scrollHeight - element.clientHeight - element.scrollTop > 0)
+      )
+        return true;
+    }
+    element = element.parentElement;
+  }
+  return false;
+}
+
+const prefersReducedMotion = (): boolean => {
+  try {
+    return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+};
+
+const EngineRowItem = memo(function EngineRowItem({
+  Item,
+  rowKey,
+  index,
+  top,
+  register,
+  children,
+}: {
+  Item: ConversationRowComponent;
+  rowKey: string;
+  index: number;
+  top: number;
+  register: (element: HTMLElement | null, key: string) => void;
+  children: ReactElement;
+}) {
+  // Registered by key: indexes shift when rows are inserted above.
+  const ref = useCallback(
+    (element: HTMLElement | null) => register(element, rowKey),
+    [register, rowKey]
+  );
+  return (
+    <Item
+      ref={ref}
+      index={index}
+      style={{ position: 'absolute', top, left: 0, width: '100%', contain: 'layout style' }}
+    >
+      {children}
+    </Item>
+  );
+});
+
+/**
+ * The conversation list: rendered and scrolled by the conversation scroll engine
+ * (`lib/conversation-scroll`). The engine is the viewport's only
+ * programmatic writer and owns the rows container's height; this component
+ * renders the engine's plan and executes its commit protocol:
+ *
+ * - every commit's layout effect continues the engine's transaction;
+ * - a transaction that needs another commit re-renders synchronously (a state
+ *   update from a layout effect, or `flushSync` from an observer, a scroll
+ *   event or a command), so the first painted frame is already covered;
+ * - the viewport is never hidden (I7).
+ *
+ * Design: `.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md`.
+ */
+export function EngineConversationScroller({
+  sessionId,
+  rows,
+  rowMeta,
+  item,
+  keepMounted,
+  initialWindowReady,
+  hidden = false,
+  suppressAutoScrollRef,
+  onAtBottomChange,
+  onScroll,
+  onStateChange,
+  layoutKey,
+  viewportClassName,
+  viewportStyle,
+  trailing,
+  bufferSize,
+  handleRef,
+}: ConversationScrollerProps) {
+  const isMobile = useIsMobile();
+  const [, forceCommit] = useReducer((count: number) => count + 1, 0);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const spacerRef = useRef<HTMLDivElement | null>(null);
+  const rowElements = useRef(new Map<string, HTMLElement>());
+  const keyOfElement = useRef(new WeakMap<Element, string>());
+  const pendingDisclosureReveal = useRef<{ button: HTMLElement; rowKey: string } | null>(null);
+  const rowObserver = useRef<ResizeObserver | null>(null);
+  const inLayoutEffect = useRef(false);
+  const widthRef = useRef(0);
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  const [isSticky, setIsSticky] = useState(
+    () => getSavedScrollState(sessionId)?.intent.kind !== 'read'
+  );
+  const [revealed, setRevealed] = useState(false);
+  const lastReportedScroll = useRef<number | null>(null);
+
+  const latest = useRef({ onAtBottomChange, onScroll, suppressAutoScrollRef, layoutKey });
+  latest.current = { onAtBottomChange, onScroll, suppressAutoScrollRef, layoutKey };
+
+  const layoutVersion = (width: number) => `${Math.round(width)}|${latest.current.layoutKey}`;
+
+  const hostRef = useRef<ScrollHost | null>(null);
+  if (!hostRef.current) {
+    const viewport = () => viewportRef.current;
+    hostRef.current = {
+      readScrollTop: () => viewport()?.scrollTop ?? 0,
+      readScrollHeight: () => viewport()?.scrollHeight ?? 0,
+      readViewportHeight: () => viewport()?.clientHeight ?? 0,
+      readContentTop: () => {
+        const element = viewport();
+        const container = containerRef.current;
+        if (!element || !container) return 0;
+        return (
+          container.getBoundingClientRect().top -
+          element.getBoundingClientRect().top +
+          element.scrollTop
+        );
+      },
+      readPaddingBottom: () => {
+        const element = viewport();
+        return element ? parseFloat(getComputedStyle(element).paddingBottom) || 0 : 0;
+      },
+      // The scroll engine stores layout-space CSS pixels. A conversation can
+      // live under a transformed camera (the onboarding still does this), and
+      // getBoundingClientRect() reports the visually scaled height there. Use
+      // the untransformed border-box height so later rows keep their real gaps.
+      measure: (keys) => keys.map((key) => rowElements.current.get(key)?.offsetHeight),
+      // Older WebKit has no reliable end signal; retain immediate compensation
+      // there. Never infer a fling ending from an idle timer.
+      setContentShift:
+        typeof navigator !== 'undefined' &&
+        (/(?:iPhone|iPad|iPod)/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) &&
+        typeof document !== 'undefined' &&
+        'onscrollend' in document.documentElement
+          ? (px) => {
+              if (containerRef.current) containerRef.current.style.marginTop = `${-px}px`;
+            }
+          : undefined,
+      setExtent: (px) => {
+        if (containerRef.current) containerRef.current.style.height = `${Math.max(0, px)}px`;
+      },
+      setReplyRoom: (px) => {
+        if (spacerRef.current) spacerRef.current.style.height = `${Math.max(0, Math.round(px))}px`;
+      },
+      writeScrollTop: (value) => {
+        const element = viewport();
+        if (element) element.scrollTop = value;
+      },
+      scrollBy: (delta) => {
+        const element = viewport();
+        if (!element) return;
+        compensateConversationScroll(element, delta);
+      },
+      requestCommit: (sync) => {
+        if (sync && !inLayoutEffect.current) flushSync(forceCommit);
+        else forceCommit();
+      },
+      scheduleMicrotask: (callback) => queueMicrotask(callback),
+      isSuppressed: () => Boolean(latest.current.suppressAutoScrollRef?.current),
+      prefersReducedMotion,
+      requestFrame: (callback) => requestAnimationFrame(callback),
+      cancelFrame: (handle) => cancelAnimationFrame(handle),
+    };
+  }
+
+  const controllerRef = useRef<ScrollController | null>(null);
+  if (!controllerRef.current) {
+    const saved = getSavedScrollState(sessionId);
+    controllerRef.current = new ScrollController({
+      host: hostRef.current,
+      initialIntent: saved?.intent,
+      savedSizes: saved?.sizes ?? null,
+      layoutVersion: saved?.sizes?.layoutVersion ?? '',
+      initialViewportHeight: typeof window === 'undefined' ? 800 : window.innerHeight,
+      overscanPx: bufferSize,
+    });
+    scrollDebug('engine-mount', { sessionId, restored: saved?.intent.kind ?? 'none' });
+  }
+  const controller = controllerRef.current;
+  const callbacks: ControllerCallbacks = {
+    onStickyChange: (sticky) => {
+      setIsSticky(sticky);
+      latest.current.onAtBottomChange?.(sticky);
+    },
+    onFirstCycle: () => setRevealed(true),
+    onScroll: (offset) => {
+      // Same offset from a later commit must not setState: the view's
+      // `onScroll` lives in a layout effect (afterCommit) and a repeating
+      // update is React #185.
+      const previous = lastReportedScroll.current;
+      if (previous !== null && Math.abs(previous - offset) < 0.5) return;
+      lastReportedScroll.current = offset;
+      latest.current.onScroll?.(offset);
+    },
+    onDiagnostic: (diagnostic) => {
+      recordScrollEngineDiagnostic(sessionId, diagnostic);
+      scrollDebug('engine-cycle', { ...diagnostic });
+      if (
+        diagnostic.reason === 'update-loop' ||
+        !diagnostic.covered ||
+        diagnostic.pendingExternalMove
+      ) {
+        recordSessionRenderTrace(
+          `scroll-engine ${shortTraceId(sessionId)} ${diagnostic.reason} covered=${diagnostic.covered} pending=${diagnostic.pendingExternalMove} commits=${diagnostic.supplementaryCommits}${diagnostic.synchronousCommits === undefined ? '' : ` synchronous=${diagnostic.synchronousCommits} intent=${diagnostic.intent} target=${diagnostic.target} actual=${diagnostic.actual} anchor=${diagnostic.anchorKey} resolved=${diagnostic.resolvedKey}`}`
+        );
+      }
+    },
+    onMomentumEnd: (stats) => {
+      scrollDebug('engine-momentum', { ...stats });
+      recordSessionRenderTrace(
+        `scroll-engine ${shortTraceId(sessionId)} momentum compensations=${stats.compensations} interrupted=${stats.interruptions}`
+      );
+    },
+    onMinRowViolation: (key, height) => {
+      if (import.meta.env?.DEV) {
+        console.warn(
+          `[scroll-engine] row ${key} measured ${height}px, below the minimum row height`
+        );
+      }
+    },
+  };
+  controller.setCallbacks(callbacks);
+  controller.setHidden(hidden);
+  controller.syncRows(rowMeta, 1);
+  controller.setMustMount(keepMounted ?? []);
+  const plan = controller.plan();
+
+  // Persist on unmount: the next open of this session restores from it. The
+  // setup resumes the controller, so StrictMode's cleanup-then-setup on a live
+  // component does not leave it disposed. Declared first, so its setup
+  // runs before the commit effect below.
+  useLayoutEffect(() => {
+    controller.resume();
+    return () => {
+      saveScrollState(sessionId, {
+        formatVersion: 1,
+        intent: controller.savedIntent(),
+        sizes: controller.geometry.snapshot(),
+      });
+      controller.dispose();
+    };
+  }, [controller, sessionId]);
+
+  // Continue the engine's transaction after every commit, before paint.
+  useLayoutEffect(() => {
+    inLayoutEffect.current = true;
+    try {
+      if (!controller.afterCommit()) return;
+      const pending = pendingDisclosureReveal.current;
+      if (!pending) return;
+      if (!pending.button.isConnected) {
+        pendingDisclosureReveal.current = null;
+        return;
+      }
+      // A memoized tool leaf can commit its body after the list's own update.
+      // Its row resize will finish the check; a later toggle replaces this request.
+      if (pending.button.getAttribute('aria-expanded') !== 'true') return;
+      const row = rowElements.current.get(pending.rowKey);
+      const viewport = viewportRef.current;
+      if (!row || !viewport) return;
+      const body =
+        pending.button.dataset.conversationDisclosure === 'group'
+          ? row.nextElementSibling
+          : pending.button.nextElementSibling;
+      const detail =
+        pending.button.dataset.conversationDisclosure === 'group'
+          ? (body?.querySelector('[data-text-selectable]') ?? body)
+          : (body?.firstElementChild ?? body);
+      if (!detail) return;
+      pendingDisclosureReveal.current = null;
+      const viewportRect = viewport.getBoundingClientRect();
+      // Check the newly measured body, including spacing and removed tail padding.
+      if (detail.getBoundingClientRect().top < viewportRect.bottom - 0.5) return;
+      const scale = viewportRect.height / viewport.clientHeight;
+      if (!(scale > 0)) return;
+      const rowTop = row.getBoundingClientRect().top;
+      controller.preserveDisclosure(
+        pending.rowKey,
+        (pending.button.getBoundingClientRect().top - rowTop) / scale,
+        (detail.getBoundingClientRect().top - rowTop) / scale
+      );
+    } finally {
+      inLayoutEffect.current = false;
+    }
+  });
+
+  useLayoutEffect(() => {
+    onStateChange({ scrollElement, revealed, isSticky });
+  }, [isSticky, onStateChange, revealed, scrollElement]);
+
+  useLayoutEffect(() => {
+    handleRef.current = {
+      get scrollOffset() {
+        return controller.scrollOffset;
+      },
+      get contentOffset() {
+        return controller.contentOffset;
+      },
+      get scrollSize() {
+        return controller.scrollSize;
+      },
+      get viewportSize() {
+        return controller.viewportSize;
+      },
+      findItemIndex: (offset) => controller.findItemIndex(offset),
+      getItemOffset: (index) => controller.getItemOffset(index),
+      getItemSize: (index) => controller.getItemSize(index),
+      scrollRowToTop: (index, { smooth }) => controller.jumpToIndex(index, smooth),
+      scrollToBottom: () => controller.scrollToBottom(),
+      anchorToRow: (index) => controller.anchorToRow(index),
+      retargetAnchor: (index) => controller.retargetAnchor(index),
+    };
+    return () => {
+      handleRef.current = null;
+    };
+  }, [controller, handleRef]);
+
+  const registerRow = useCallback((element: HTMLElement | null, key: string) => {
+    const previous = rowElements.current.get(key);
+    if (previous && previous !== element) {
+      rowObserver.current?.unobserve(previous);
+      keyOfElement.current.delete(previous);
+      rowElements.current.delete(key);
+    }
+    if (element) {
+      rowElements.current.set(key, element);
+      keyOfElement.current.set(element, key);
+      rowObserver.current?.observe(element);
+    }
+  }, []);
+
+  // Row size changes that do not come from a commit (images, fonts, late
+  // highlighting). Sizes our own commits cause are equal and ignored.
+  useLayoutEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const resized: Array<{ key: string; height: number }> = [];
+      for (const entry of entries) {
+        const key = keyOfElement.current.get(entry.target);
+        if (!key) continue;
+        const height =
+          entry.borderBoxSize?.[0]?.blockSize ?? (entry.target as HTMLElement).offsetHeight;
+        resized.push({ key, height });
+      }
+      if (resized.length) controller.onRowsResized(resized);
+    });
+    rowObserver.current = observer;
+    for (const element of rowElements.current.values()) observer.observe(element);
+    return () => {
+      observer.disconnect();
+      rowObserver.current = null;
+    };
+  }, [controller]);
+
+  // Viewport height (composer, keyboard, dock) and width (layout version).
+  useLayoutEffect(() => {
+    const element = scrollElement;
+    if (!element || typeof ResizeObserver === 'undefined') return undefined;
+    let previous = { width: element.clientWidth, height: element.clientHeight };
+    widthRef.current = previous.width;
+    // A list mounted hidden has no width yet; showing it resizes the viewport.
+    if (previous.width > 0) controller.setLayoutVersion(layoutVersion(previous.width));
+    const observer = new ResizeObserver(() => {
+      const next = { width: element.clientWidth, height: element.clientHeight };
+      if (next.width === previous.width && next.height === previous.height) return;
+      previous = next;
+      widthRef.current = next.width;
+      controller.onViewportResized(layoutVersion(next.width));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controller, scrollElement]);
+
+  // The conversation font setting is part of the layout version.
+  const firstLayoutKey = useRef(true);
+  useLayoutEffect(() => {
+    if (firstLayoutKey.current) {
+      firstLayoutKey.current = false;
+      return;
+    }
+    controller.onViewportResized(layoutVersion(widthRef.current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controller, layoutKey]);
+
+  // Reader input and scroll events.
+  useLayoutEffect(() => {
+    const element = scrollElement;
+    if (!element) return undefined;
+    const ownerDocument = element.ownerDocument;
+    const onScrollEvent = () => controller.onScrollEvent();
+    const handleScrollEnd = () => {
+      controller.onScrollEnd();
+      saveScrollState(sessionId, {
+        formatVersion: 1,
+        intent: controller.savedIntent(),
+        sizes: controller.geometry.snapshot(),
+      });
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.defaultPrevented || event.deltaY === 0 || event.ctrlKey) return;
+      if (element.scrollHeight <= element.clientHeight) return;
+      // A code block or terminal scrolling inside a row is not the conversation.
+      if (inputScrollsNestedElement(event.target, element, event.deltaY < 0)) return;
+      if (!canScroll(event.deltaY < 0)) return;
+      controller.onReaderInput(event.deltaY < 0);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isNavigationKey(event) || isEditableTarget(event.target))
+        return;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (
+        event.key === ' ' &&
+        target instanceof Element &&
+        target.closest('button, [role="button"]')
+      )
+        return;
+      // Observe bubbling keys after row controls can prevent default. A body
+      // key can scroll this viewport after a click, but needs actual movement
+      // to confirm which scroll container the browser chose.
+      if (target !== ownerDocument.body && !element.contains(target)) return;
+      const upward = isUpwardNavigationKey(event);
+      if (inputScrollsNestedElement(target, element, upward)) return;
+      if (!canScroll(upward)) return;
+      controller.onReaderInput(upward, { confirmOnly: target === ownerDocument.body });
+    };
+    const canScroll = (upward: boolean) => {
+      // Passive wheel delivery can follow its native offset change. Accept
+      // either the last observed position or the live position as its origin.
+      const observed = controller.physicalScrollOffset;
+      return upward
+        ? Math.max(observed, element.scrollTop) > 0
+        : Math.min(observed, element.scrollTop) < element.scrollHeight - element.clientHeight;
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button === 0 && event.pointerType !== 'touch') controller.setPointerHeld(true);
+    };
+    const onPointerUp = () => controller.setPointerHeld(false);
+    let touchOrigin: { id: number; x: number; y: number } | null = null;
+    let touchScrolled = false;
+    const cancelTouch = () => {
+      touchOrigin = null;
+      touchScrolled = false;
+      controller.setTouchActive(false, false);
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        cancelTouch();
+        return;
+      }
+      touchOrigin = null;
+      touchScrolled = false;
+      const touch = event.touches[0]!;
+      touchOrigin = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+      controller.setTouchActive(true);
+    };
+    const observeTouch = (event: TouchEvent, touches: TouchList) => {
+      if (!touchOrigin || touches.length !== 1) {
+        cancelTouch();
+        return;
+      }
+      const touch = touches[0]!;
+      if (touch.identifier !== touchOrigin.id) {
+        cancelTouch();
+        return;
+      }
+      const dx = touch.clientX - touchOrigin.x;
+      const dy = touch.clientY - touchOrigin.y;
+      if (Math.abs(dy) <= Math.max(1, Math.abs(dx))) return;
+      if (element.scrollHeight <= element.clientHeight) return;
+      if (inputScrollsNestedElement(event.target, element, dy > 0)) return;
+      touchScrolled = true;
+      // Finger moving down scrolls the conversation up. Release on the input,
+      // before a streaming commit can overwrite the still-pending native offset.
+      if (dy > 0) controller.release('touch-up');
+    };
+    const onTouchMove = (event: TouchEvent) => observeTouch(event, event.touches);
+    const onTouchEnd = (event: TouchEvent) => {
+      // A fast swipe may have no delivered touchmove before its final position.
+      observeTouch(event, event.changedTouches);
+      controller.setTouchActive(false, touchScrolled);
+      touchOrigin = null;
+      touchScrolled = false;
+    };
+    const onOutsideInput = (event: Event) => {
+      if (event.target instanceof Node && !element.contains(event.target)) {
+        cancelTouch();
+        controller.resetReaderInput();
+      }
+    };
+    element.addEventListener('scroll', onScrollEvent, { passive: true });
+    element.addEventListener('scrollend', handleScrollEnd, { passive: true });
+    element.addEventListener('wheel', onWheel, { passive: true });
+    element.addEventListener('pointerdown', onPointerDown, { passive: true });
+    element.addEventListener('touchstart', onTouchStart, { passive: true });
+    element.addEventListener('touchmove', onTouchMove, { passive: true });
+    element.addEventListener('touchend', onTouchEnd, { passive: true });
+    element.addEventListener('touchcancel', cancelTouch, { passive: true });
+    ownerDocument.addEventListener('pointerup', onPointerUp, true);
+    ownerDocument.addEventListener('pointercancel', onPointerUp, true);
+    ownerDocument.addEventListener('keydown', onKeyDown);
+    ownerDocument.addEventListener('focusin', onOutsideInput, true);
+    ownerDocument.addEventListener('pointerdown', onOutsideInput, true);
+    ownerDocument.addEventListener('beforeinput', onOutsideInput, true);
+    return () => {
+      element.removeEventListener('scroll', onScrollEvent);
+      element.removeEventListener('scrollend', handleScrollEnd);
+      element.removeEventListener('wheel', onWheel);
+      element.removeEventListener('pointerdown', onPointerDown);
+      element.removeEventListener('touchstart', onTouchStart);
+      element.removeEventListener('touchmove', onTouchMove);
+      element.removeEventListener('touchend', onTouchEnd);
+      element.removeEventListener('touchcancel', cancelTouch);
+      ownerDocument.removeEventListener('pointerup', onPointerUp, true);
+      ownerDocument.removeEventListener('pointercancel', onPointerUp, true);
+      ownerDocument.removeEventListener('keydown', onKeyDown);
+      ownerDocument.removeEventListener('focusin', onOutsideInput, true);
+      ownerDocument.removeEventListener('pointerdown', onOutsideInput, true);
+      ownerDocument.removeEventListener('beforeinput', onOutsideInput, true);
+    };
+  }, [controller, scrollElement, sessionId]);
+
+  const setViewport = useCallback((element: HTMLDivElement | null) => {
+    viewportRef.current = element;
+    setScrollElement(element);
+  }, []);
+
+  const ready = initialWindowReady && revealed;
+  const preserveDisclosure = (event: MouseEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest<HTMLElement>('[data-conversation-disclosure]');
+    const viewport = viewportRef.current;
+    if (!button || !viewport || button.closest('[data-conversation-scroll-engine]') !== viewport)
+      return;
+    // Links inside a tool header open the file rather than toggling the body.
+    if (
+      event.target.closest('a, [role="button"]')?.closest('[data-conversation-disclosure]') ===
+      button
+    )
+      return;
+    let row: HTMLElement | null = button;
+    while (row && !keyOfElement.current.has(row)) row = row.parentElement;
+    if (!row) return;
+    const rowKey = keyOfElement.current.get(row)!;
+    const viewportRect = viewport.getBoundingClientRect();
+    const scale = viewport.clientHeight > 0 ? viewportRect.height / viewport.clientHeight : 1;
+    if (!(scale > 0)) return;
+    const rowRect = row.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    pendingDisclosureReveal.current =
+      isMobile && button.getAttribute('aria-expanded') === 'false' ? { button, rowKey } : null;
+    controller.preserveDisclosure(rowKey, (buttonRect.top - rowRect.top) / scale);
+  };
+  return (
+    <div
+      ref={setViewport}
+      data-message-selection-scroll=""
+      data-conversation-scroll-engine=""
+      data-window-session-stream-ready={ready ? sessionId : undefined}
+      className={viewportClassName}
+      style={viewportStyle}
+      onClickCapture={preserveDisclosure}
+    >
+      {/* The rows container: the engine sets its height (the scroll extent)
+          imperatively and it clips in the block direction, so no row can
+          change the scroll range behind the engine's back. It stays the
+          viewport's first child: the view measures item offsets from it. */}
+      <div
+        ref={containerRef}
+        style={{ position: 'relative', width: '100%', overflowY: 'clip', overflowAnchor: 'none' }}
+      >
+        {plan.indices.map((index, position) => {
+          const element = rows[index];
+          if (!element) return null;
+          return (
+            <EngineRowItem
+              key={plan.keys[position]}
+              rowKey={plan.keys[position]!}
+              Item={item}
+              index={index}
+              top={plan.offsets[position]!}
+              register={registerRow}
+            >
+              {element}
+            </EngineRowItem>
+          );
+        })}
+      </div>
+      <div ref={spacerRef} aria-hidden data-conversation-reply-room="" />
+      {trailing}
+    </div>
+  );
+}

@@ -1,23 +1,25 @@
+import cloudConfig from './electron.cloud.config'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
-import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
 import tailwindcss from '@tailwindcss/vite'
+import stylex from '@stylexjs/unplugin'
 import {
   loroCrdtBundlerAlias,
   loroCrdtWasmUrlWorkaround
 } from '../../packages/components/vite-wasm-workarounds'
-import { injectPreviewPublicBaseDomain } from '../../scripts/preview-public-base-domain.mjs'
 import { mermaidLazyBoundaryGuardPlugin } from '../../packages/components/vite-mermaid-lazy-boundary-guard'
 import {
   isMermaidRuntimeDependency,
-  rendererBundleAliasPlugin,
   rendererBundleAliases
 } from '../../packages/components/vite-renderer-bundle-aliases'
+import { stylexOptions } from '../../packages/ui/stylex-options'
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets'
+import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
+import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker'
 
 function getGitCommitHash(): string {
   try {
@@ -40,8 +42,7 @@ function getAppVersion(): string {
 
 const OSS_BUILD_MODE = 'oss'
 const OSS_BUILD_ENV: Record<string, string> = {
-  VITE_LODY_PLATFORM: 'local',
-  VITE_PREVIEW_PUBLIC_BASE_DOMAIN: 'local.invalid'
+  VITE_LODY_PLATFORM: 'local'
 }
 
 function applyEnvToProcess(env: Record<string, string>): void {
@@ -66,27 +67,20 @@ function buildViteEnvDefine(env: Record<string, string>): Record<string, string>
   return define
 }
 
-function previewPublicBaseDomainHtmlPlugin(baseDomain: string): Plugin {
-  return {
-    name: 'lody-preview-public-base-domain-html',
-    enforce: 'pre',
-    transformIndexHtml(html) {
-      return injectPreviewPublicBaseDomain(html, baseDomain)
-    }
-  }
-}
-
-export default defineConfig(({ mode }) => {
+export default defineConfig((context) => {
+  const platform = process.env.VITE_LODY_PLATFORM?.trim() || 'local'
+  if (!['local', 'cloud'].includes(platform))
+    throw new Error(`Unsupported VITE_LODY_PLATFORM: ${platform}`)
+  if (platform === 'cloud') return cloudConfig(context)
+  const { mode } = context
   const buildMode = mode || OSS_BUILD_MODE
   if (buildMode !== OSS_BUILD_MODE) {
     throw new Error(`The public Electron workspace only supports --mode ${OSS_BUILD_MODE}`)
   }
 
   const buildEnv = { ...OSS_BUILD_ENV }
-  const previewPublicBaseDomain = buildEnv.VITE_PREVIEW_PUBLIC_BASE_DOMAIN
   const viteEnvDefine = {
-    ...buildViteEnvDefine(buildEnv),
-    'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify(previewPublicBaseDomain)
+    ...buildViteEnvDefine(buildEnv)
   }
 
   // Build and preview are deterministic: do not inherit cloud or telemetry
@@ -97,10 +91,26 @@ export default defineConfig(({ mode }) => {
     main: {
       envDir: false,
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
-      define: viteEnvDefine,
+      define: { ...viteEnvDefine, __LODY_E2E_CLOCK_BUILD__: 'false' },
       build: {
+        lib: {
+          entry: {
+            index: resolve(__dirname, 'src/main/index.ts'),
+            'native-storage-smoke': resolve(__dirname, 'src/main/native-storage-smoke.mts')
+          }
+        },
         externalizeDeps: {
-          exclude: ['@lody/cli-supervisor', '@lody/shared', 'effect']
+          // E2EE's Node SQLite adapter cannot inline its dynamic addon loader.
+          include: ['better-sqlite3'],
+          exclude: [
+            '@devframes/agentic',
+            '@devframes/hub',
+            '@devframes/json-render',
+            '@lody/cli-supervisor',
+            '@lody/shared',
+            'devframe',
+            'effect'
+          ]
         }
       }
     },
@@ -150,7 +160,7 @@ export default defineConfig(({ mode }) => {
       },
       worker: {
         format: 'es',
-        plugins: () => [loroCrdtWasmUrlWorkaround(), wasm()]
+        plugins: () => [preservePdfWorkerExports(), loroCrdtWasmUrlWorkaround(), wasm()]
       },
       optimizeDeps: {
         exclude: ['@loro-dev/streams-crdt', '@loro-dev/streams-crdt/zstd']
@@ -160,19 +170,19 @@ export default defineConfig(({ mode }) => {
         cssMinify: true,
         sourcemap: false,
         rollupOptions: {
-          // Build both the main app (`index.html`) and the standalone recovery
-          // page (`recovery.html`). The recovery page is loaded by the main
-          // process when the main renderer fails (did-fail-load,
-          // render-process-gone, preload-error) so it cannot share a bundle
-          // with code paths that might themselves crash on boot.
+          // The recovery page is independent of the main renderer so it can
+          // load after a crash. PR images use a separate sandboxed document to
+          // avoid relaxing the main renderer's image policy.
           input: {
             index: resolve(__dirname, 'src/renderer/index.html'),
+            devbar: resolve(__dirname, 'src/renderer/devbar.html'),
+            prImage: resolve(__dirname, 'src/renderer/pr-image.html'),
             recovery: resolve(__dirname, 'src/renderer/recovery.html')
           },
           output: {
             onlyExplicitManualChunks: true,
             manualChunks(id) {
-              // Keep beautiful-mermaid (and elkjs) in the same guarded chunk.
+              // Keep the Pele diagram runtime in one guarded chunk.
               // Rejected: letting Rollup freely hoist these deps can mix
               // diagram-only runtime into ordinary renderer chunks.
               if (isMermaidRuntimeDependency(id)) {
@@ -185,16 +195,17 @@ export default defineConfig(({ mode }) => {
       },
       // Tailwind via Vite plugin so @fontsource url() assets are emitted by Vite.
       plugins: [
-        previewPublicBaseDomainHtmlPlugin(previewPublicBaseDomain),
         tailwindcss(),
+        stylex.vite(stylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),
         // The desktop app must work with no network, so the emoji picker's
         // dataset ships in the bundle instead of being fetched from a CDN.
         emojibaseAssetsPlugin(),
-        rendererBundleAliasPlugin(),
-        mermaidLazyBoundaryGuardPlugin()
+        mermaidLazyBoundaryGuardPlugin(),
+        // Paints the window's first frame before the renderer bundle has run.
+        bootShellPlugin()
       ]
     }
   }

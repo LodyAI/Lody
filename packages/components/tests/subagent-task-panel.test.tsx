@@ -1,0 +1,596 @@
+// @vitest-environment jsdom
+import { act, createElement, useState, type ReactNode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRoot, type Root } from 'react-dom/client';
+import {
+  SubagentTaskPanel,
+  collectSubagentTasks,
+  type SubagentTask,
+} from '../src/components/ai-gui/subagent-task-panel';
+import { SubagentRunMessageList } from '../src/components/ai-gui/subagent-run-history';
+import { SubagentRunHistory } from '../src/components/ai-gui/view';
+import { initI18n } from '../src/i18n';
+
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+type Run = NonNullable<SubagentTask['run']>;
+type RunItem = Run['items'][number];
+
+const run = (
+  state: Run['snapshot']['state'],
+  items: RunItem[] = [],
+  overrides: Partial<Run['snapshot']> = {},
+  progress?: Run['progress']
+): Run => ({
+  sessionId: 'root-acp',
+  snapshot: {
+    state,
+    support: {
+      stream: ['text', 'thought', 'tool'],
+      progress: true,
+      outputRead: 'none',
+      cancel: true,
+    },
+    ...overrides,
+  },
+  ...(progress ? { progress } : {}),
+  items,
+});
+
+const toolStep = (toolCallId: string, title: string): RunItem => ({
+  type: 'tool_call',
+  toolCallId,
+  title,
+  status: 'in_progress',
+});
+
+/** Stands in for the conversation's renderers: one line per step, in order. */
+const renderHistory = (subject: SubagentTask): ReactNode =>
+  subject.run?.items.map((item, index) => (
+    <p key={index} data-step="">
+      {item.type === 'tool_call' ? item.title : 'text' in item ? item.text : item.type}
+    </p>
+  ));
+
+const task = (overrides: Partial<SubagentTask>): SubagentTask => ({
+  type: 'subagent_task',
+  taskId: overrides.taskId ?? 'task-1',
+  status: 'completed',
+  actor: 'Claude task',
+  description: 'find skills',
+  ...overrides,
+});
+
+describe('SubagentTaskPanel', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  const render = (
+    tasks: SubagentTask[],
+    onCancel?: (taskId: string) => Promise<void>,
+    runCancellation?: boolean
+  ) =>
+    act(() =>
+      root.render(
+        createElement(SubagentTaskPanel, { tasks, onCancel, runCancellation, renderHistory })
+      )
+    );
+  const latestActions = () =>
+    Array.from(container.querySelectorAll('[data-subagent-latest-action]')).map(
+      (node) => node.textContent
+    );
+  const steps = () =>
+    Array.from(peek()?.querySelectorAll('[data-step]') ?? []).map((node) => node.textContent);
+
+  const peek = () => document.querySelector<HTMLElement>('[role="dialog"]');
+  const rowNamed = (name: string) =>
+    container.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
+
+  it('loads only the opened child and ignores a late result after switching tasks', async () => {
+    const first = Promise.withResolvers<Run>();
+    const second = Promise.withResolvers<Run>();
+    const reads: string[] = [];
+    const a = task({
+      taskId: 'a',
+      description: 'First child',
+      status: 'in_progress',
+      run: run('running', [{ type: 'text', text: 'Latest a' }]),
+      history: {
+        read: () => {
+          reads.push('a');
+          return first.promise;
+        },
+      },
+    });
+    const b = task({
+      taskId: 'b',
+      description: 'Second child',
+      status: 'in_progress',
+      run: run('running', [{ type: 'text', text: 'Latest b' }]),
+      history: {
+        read: () => {
+          reads.push('b');
+          return second.promise;
+        },
+      },
+    });
+    render([a, b]);
+    expect(reads).toEqual([]);
+    expect(latestActions()).toEqual(['Latest a', 'Latest b']);
+    await act(async () => rowNamed('Claude task · First child')?.click());
+    expect(reads).toEqual(['a']);
+    // Switching the selected task replaces the detail owner while the earlier
+    // asynchronous read is still pending.
+    render([b]);
+    await act(async () => rowNamed('Claude task · Second child')?.click());
+    expect(reads).toEqual(['a', 'b']);
+    await act(async () => {
+      second.resolve(run('running', [{ type: 'text', text: 'Full second transcript' }]));
+    });
+    expect(steps()).toEqual(['Full second transcript']);
+    await act(async () => {
+      first.resolve(run('running', [{ type: 'text', text: 'Stale first transcript' }]));
+    });
+    expect(steps()).toEqual(['Full second transcript']);
+  });
+
+  it('follows a deferred running transcript and retains content while refreshing without overriding reading position', async () => {
+    const first = Promise.withResolvers<Run>();
+    const next = Promise.withResolvers<Run>();
+    const subject = task({
+      status: 'in_progress',
+      run: run('running'),
+      history: { read: () => first.promise },
+    });
+    render([subject]);
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+    const scroller = peek()?.querySelector<HTMLDivElement>('.scrollbar-pro');
+    expect(scroller).toBeTruthy();
+    if (!scroller) throw new Error('Missing task scroller');
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, get: () => 1000 },
+      clientHeight: { configurable: true, get: () => 200 },
+    });
+    await act(async () =>
+      first.resolve(run('running', [{ type: 'text', text: 'Initial full transcript' }]))
+    );
+    expect(scroller.scrollTop).toBe(1000);
+    act(() => {
+      scroller.scrollTop = 0;
+      scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    const step = peek()?.querySelector('[data-step]');
+    render([{ ...subject, history: { read: () => next.promise } }]);
+    expect(steps()).toEqual(['Initial full transcript']);
+    expect(step?.isConnected).toBe(true);
+    await act(async () =>
+      next.resolve(run('running', [{ type: 'text', text: 'Updated full transcript' }]))
+    );
+    expect(steps()).toEqual(['Updated full transcript']);
+    expect(scroller.scrollTop).toBe(0);
+  });
+
+  it('retries a failed on-demand transcript read without presenting it as empty', async () => {
+    let fail = true;
+    const subject = task({
+      status: 'in_progress',
+      run: run('running'),
+      history: {
+        read: async () => {
+          if (fail) throw new Error('synthetic read failure');
+          return run('running', [{ type: 'text', text: 'Recovered transcript' }]);
+        },
+      },
+    });
+    render([subject]);
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+    expect(peek()?.textContent).not.toContain('No steps were received');
+    const retry = Array.from(peek()?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Retry'
+    );
+    expect(retry).toBeDefined();
+    fail = false;
+    await act(async () => retry?.click());
+    expect(steps()).toEqual(['Recovered transcript']);
+  });
+
+  it('splits subagents from other tasks into tabs only when a turn has both', async () => {
+    const shownIds = () =>
+      Array.from(container.querySelectorAll('[data-subagent-task-id]')).map((node) =>
+        node.getAttribute('data-subagent-task-id')
+      );
+    const tab = (group: string) =>
+      container.querySelector<HTMLElement>(`[data-subagent-task-tab="${group}"]`);
+    const agent = task({
+      taskId: 'agent',
+      actor: 'Explore',
+      taskKind: 'background',
+      isBackgrounded: true,
+      status: 'in_progress',
+      run: run('running'),
+    });
+    const doneAgent = task({ taskId: 'done-agent', subagentType: 'Plan', status: 'completed' });
+    const shell = task({ taskId: 'shell', actor: 'local_bash', status: 'completed' });
+    const monitor = task({ taskId: 'monitor', taskType: 'monitor_mcp', status: 'completed' });
+    const wakeup = task({ taskId: 'wakeup', taskKind: 'scheduled', status: 'pending' });
+
+    // One kind is one list, with no strip to choose from.
+    render([agent, doneAgent]);
+    expect(tab('subagents')).toBeNull();
+    expect(shownIds()).toEqual(['agent', 'done-agent']);
+    render([shell, { ...monitor, status: 'in_progress' }]);
+    expect(tab('tasks')).toBeNull();
+    expect(shownIds()).toEqual(['shell', 'monitor']);
+
+    // A backgrounded agent is still a subagent; Subagents is chosen first, and
+    // each tab marks whether anything on it is still running.
+    render([shell, agent, doneAgent, monitor]);
+    expect(shownIds()).toEqual(['agent', 'done-agent']);
+    expect(container.textContent).toContain('Waiting on 1 task');
+    expect(tab('subagents')?.textContent).toBe('Subagents');
+    expect(tab('subagents')?.querySelector('[data-slot="spinner"]')).not.toBeNull();
+    expect(tab('tasks')?.textContent).toBe('Tasks');
+    expect(tab('tasks')?.querySelector('[data-slot="spinner"]')).toBeNull();
+
+    await act(async () => tab('tasks')?.click());
+    expect(shownIds()).toEqual(['shell', 'monitor']);
+
+    // The chosen tab survives the tasks changing under it.
+    render([shell, agent, doneAgent, monitor, wakeup]);
+    expect(shownIds()).toEqual(['shell', 'monitor', 'wakeup']);
+    expect(tab('tasks')?.textContent).toBe('Tasks');
+    expect(tab('tasks')?.querySelector('[data-slot="spinner"]')).not.toBeNull();
+  });
+
+  it('links a Core background task to its full command while retaining its brief', async () => {
+    const command = 'pnpm install\npnpm run build --filter @lody/components 2>&1';
+    const background = task({
+      taskId: 'bash',
+      actor: 'local_bash',
+      taskKind: 'background',
+      toolUseId: 'bash-tool',
+      isBackgrounded: true,
+      description: 'Build the components',
+    });
+    // The task may precede the tool in retained history. Match ids, not labels.
+    const tasks = collectSubagentTasks([
+      background,
+      {
+        type: 'tool_call',
+        toolCallId: 'unrelated',
+        kind: 'execute',
+        status: 'completed',
+        content: [{ type: 'terminal_command', command: 'echo wrong-command' }],
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'bash-tool',
+        kind: 'execute',
+        status: 'completed',
+        content: [{ type: 'terminal_command', command }],
+      },
+    ]);
+    render(tasks);
+    act(() => container.querySelector<HTMLButtonElement>('[aria-expanded]')?.click());
+    expect(container.textContent).not.toContain('local_bash');
+    await act(async () => rowNamed('Bash · Build the components')?.click());
+
+    expect(peek()?.querySelector('[aria-label="Brief"]')?.textContent).toContain(
+      'Build the components'
+    );
+    expect(peek()?.querySelector('[aria-label="Command"] pre')?.textContent).toBe(command);
+    expect(peek()?.textContent).not.toContain('wrong-command');
+    expect(background).not.toHaveProperty('command');
+  });
+
+  it('keeps an unmatched Bash description as a brief and resolves a later tool update', async () => {
+    const background = task({
+      actor: 'local_bash',
+      toolUseId: 'bash-tool',
+      description: 'Build project',
+    });
+    render(
+      collectSubagentTasks([
+        background,
+        {
+          type: 'tool_call',
+          toolCallId: 'another-tool',
+          kind: 'execute',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'echo unrelated' }],
+        },
+      ])
+    );
+    act(() => container.querySelector<HTMLButtonElement>('[aria-expanded]')?.click());
+    await act(async () => rowNamed('Bash · Build project')?.click());
+    expect(peek()?.querySelector('[aria-label="Brief"]')?.textContent).toContain('Build project');
+    expect(peek()?.querySelector('[aria-label="Command"]')).toBeNull();
+
+    render(
+      collectSubagentTasks([
+        background,
+        {
+          type: 'tool_call',
+          toolCallId: 'bash-tool',
+          kind: 'execute',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'pnpm build' }],
+        },
+      ])
+    );
+    expect(peek()?.querySelector('[aria-label="Command"] pre')?.textContent).toBe('pnpm build');
+  });
+
+  it('links legacy Bash tasks without treating other task briefs as commands', () => {
+    const bash = task({ actor: undefined, taskType: 'local_bash', toolUseId: 'tool' });
+    const agent = task({ taskId: 'agent', actor: 'Explore', toolUseId: 'tool' });
+    const tasks = collectSubagentTasks([
+      bash,
+      agent,
+      {
+        type: 'tool_call',
+        toolCallId: 'tool',
+        kind: 'execute',
+        status: 'completed',
+        content: [{ type: 'terminal_command', command: '/bin/bash', args: ['-lc', 'pnpm test'] }],
+      },
+    ]);
+    expect(tasks[0]?.command).toBe('pnpm test');
+    expect(tasks[1]).not.toHaveProperty('command');
+  });
+
+  it("falls back to a run's progress when it streams no steps, and keeps a legacy summary", () => {
+    render([
+      task({
+        taskId: 'quiet',
+        status: 'in_progress',
+        run: run(
+          'running',
+          [],
+          { support: { stream: [], progress: true, outputRead: 'none', cancel: false } },
+          {
+            lastToolName: 'Grep',
+          }
+        ),
+      }),
+      task({ taskId: 'legacy', status: 'in_progress', summary: 'Reading the lockfile' }),
+    ]);
+    expect(latestActions()).toEqual(['Running Grep', 'Reading the lockfile']);
+  });
+
+  it('says why a run has no steps and when some were lost', async () => {
+    render([
+      task({
+        taskId: 'quiet',
+        status: 'completed',
+        run: run('completed', [], {
+          support: { stream: [], progress: false, outputRead: 'none', cancel: false },
+        }),
+      }),
+    ]);
+    act(() => container.querySelector<HTMLButtonElement>('[aria-expanded]')?.click());
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+    expect(peek()?.textContent).toContain('not its individual steps');
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    render([
+      task({
+        taskId: 'lossy',
+        status: 'failed',
+        run: run('failed', [toolStep('t1', 'Bash')], { outputIncomplete: true }),
+      }),
+    ]);
+    act(() => container.querySelector<HTMLButtonElement>('[aria-expanded]')?.click());
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+    expect(steps()).toEqual(['Bash']);
+    expect(peek()?.textContent).toContain('Some steps of this run were not received.');
+  });
+
+  it('reads cancelled and unknown from the run, and never waits on an unknown run', () => {
+    render([
+      // The legacy status the shared mapping keeps for these two is not the truth.
+      task({ taskId: 'c', status: 'failed', run: run('cancelled') }),
+      task({ taskId: 'u', status: 'in_progress', run: run('unknown') }),
+    ]);
+
+    const text = container.textContent ?? '';
+    expect(text).toContain('2 tasks');
+    expect(text).not.toContain('Waiting');
+    act(() => container.querySelector<HTMLButtonElement>('[aria-expanded]')?.click());
+    expect(container.textContent).toContain('Cancelled');
+    expect(container.textContent).toContain('Status unknown');
+    expect(container.textContent).not.toContain('Failed');
+  });
+
+  it('offers Cancel on a run only when both the machine and the run can address it', async () => {
+    const onCancel = vi.fn(async () => undefined);
+    const running = task({
+      taskId: 'r',
+      taskKind: 'subagent',
+      status: 'in_progress',
+      run: run('running'),
+    });
+    const cancelButton = () =>
+      Array.from(peek()?.querySelectorAll('button') ?? []).find(
+        (button) => button.textContent === 'Stop task'
+      );
+
+    render([running], onCancel, false);
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+    expect(cancelButton()).toBeUndefined();
+
+    render([running], onCancel, true);
+    expect(cancelButton()).toBeDefined();
+
+    render(
+      [
+        {
+          ...running,
+          run: run('running', [], {
+            support: { stream: [], progress: false, outputRead: 'none', cancel: false },
+          }),
+        },
+      ],
+      onCancel,
+      true
+    );
+    expect(cancelButton()).toBeUndefined();
+  });
+
+  it('hangs a nested run under the run that started it', () => {
+    render([
+      task({ taskId: 'parent', description: 'parent', status: 'in_progress', run: run('running') }),
+      task({
+        taskId: 'sibling',
+        description: 'sibling',
+        status: 'in_progress',
+        run: run('running'),
+      }),
+      task({
+        taskId: 'child',
+        description: 'child',
+        parentTaskId: 'parent',
+        status: 'in_progress',
+        run: run('running', [], { parentRunId: 'parent' }),
+      }),
+      task({ taskId: 'orphan', description: 'orphan', parentTaskId: 'gone', status: 'completed' }),
+    ]);
+    const order = Array.from(container.querySelectorAll('[data-subagent-task-id]')).map((node) =>
+      node.getAttribute('data-subagent-task-id')
+    );
+    expect(order).toEqual(['parent', 'child', 'sibling', 'orphan']);
+  });
+
+  it('groups child activity like a conversation and keeps prose visible when folded', () => {
+    const subject = task({
+      taskId: 'grouped',
+      run: run('completed', [
+        { type: 'text', text: 'Checking the configuration.' },
+        { ...toolStep('read', 'Read config.ts'), kind: 'read', status: 'completed' },
+        { ...toolStep('command', 'Run pnpm test'), kind: 'execute', status: 'completed' },
+        { type: 'text', text: 'The configuration is valid.' },
+      ]),
+    });
+    act(() =>
+      root.render(
+        <SubagentRunMessageList
+          task={subject}
+          renderItem={(item) => (
+            <p>{item.type === 'tool_call' ? item.title : 'text' in item ? item.text : item.type}</p>
+          )}
+          renderActivityHeader={({ summary, expanded, onExpandedChange }) => (
+            <button aria-expanded={expanded} onClick={() => onExpandedChange(!expanded)}>
+              {summary.readFileCount} files · {summary.commandCount} commands
+            </button>
+          )}
+        />
+      )
+    );
+    expect(container.textContent).toContain('1 files · 1 commands');
+    expect(container.textContent).toContain('Run pnpm test');
+    act(() => container.querySelector<HTMLButtonElement>('button')?.click());
+    expect(container.textContent).not.toContain('Run pnpm test');
+    expect(container.textContent).toContain('Checking the configuration.');
+    expect(container.textContent).toContain('The configuration is valid.');
+    act(() => container.querySelector<HTMLButtonElement>('button')?.click());
+    expect(container.textContent).toContain('Read config.ts');
+  });
+
+  it('uses real conversation command/output rendering and opens the original file target', async () => {
+    const command = 'printf "$HOME"';
+    const filePath = '/worktrees/child/src/config.ts';
+    const subject = task({
+      taskId: 'real-renderers',
+      run: run('completed', [
+        {
+          type: 'tool_call',
+          toolCallId: 'shell',
+          title: 'Run printf',
+          kind: 'execute',
+          status: 'completed',
+          content: [
+            { type: 'terminal_command', command },
+            { type: 'content', content: { type: 'text', text: command } },
+            { type: 'terminal_output', output: '\u001b[32mready\u001b[0m' },
+          ],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'file',
+          title: 'Read config.ts',
+          kind: 'read',
+          status: 'completed',
+          locations: [{ path: filePath }],
+        },
+      ]),
+    });
+    function History() {
+      const [openedPath, setOpenedPath] = useState('');
+      return (
+        <>
+          <SubagentRunHistory task={subject} fontSize={14} onFilePathClick={setOpenedPath} />
+          <output>{openedPath}</output>
+        </>
+      );
+    }
+    await act(async () => root.render(<History />));
+    const sheet = container.querySelector('[data-tool-detail-sheet]');
+    expect(sheet?.querySelector('code')?.textContent).toBe(command);
+    expect(
+      Array.from(sheet?.querySelectorAll('pre') ?? []).map((node) => node.textContent)
+    ).toEqual([command, 'ready']);
+    expect(container.querySelector('[data-search-block-id]')).toBeNull();
+    const file = Array.from(container.querySelectorAll('button')).find(
+      (button) =>
+        button.textContent?.startsWith('Read') && button.textContent?.includes('config.ts')
+    );
+    expect(file).toBeDefined();
+    act(() => file?.click());
+    expect(container.querySelector('output')?.textContent).toBe(filePath);
+  });
+
+  it('streams only the live tail and retains a folded activity group as output arrives', () => {
+    const first = { ...toolStep('command', 'Run pnpm test'), kind: 'execute' as const };
+    const draw = (items: RunItem[], state: Run['snapshot']['state'] = 'running') =>
+      act(() =>
+        root.render(
+          <SubagentRunMessageList
+            task={task({ taskId: 'live', run: run(state, items) })}
+            renderItem={(item, streaming) => (
+              <p data-streaming={streaming}>
+                {item.type === 'tool_call' ? item.title : 'text' in item ? item.text : item.type}
+              </p>
+            )}
+            renderActivityHeader={({ expanded, onExpandedChange }) => (
+              <button aria-expanded={expanded} onClick={() => onExpandedChange(!expanded)}>
+                Activity
+              </button>
+            )}
+          />
+        )
+      );
+    draw([first]);
+    expect(container.querySelector('[data-streaming="true"]')?.textContent).toBe('Run pnpm test');
+    act(() => container.querySelector<HTMLButtonElement>('button')?.click());
+    draw([first, { type: 'text', text: 'Done.' }]);
+    expect(container.textContent).not.toContain('Run pnpm test');
+    expect(container.querySelector('[data-streaming="true"]')?.textContent).toBe('Done.');
+    draw([first, { type: 'text', text: 'Done.' }], 'completed');
+    expect(container.querySelector('[data-streaming="true"]')).toBeNull();
+  });
+});

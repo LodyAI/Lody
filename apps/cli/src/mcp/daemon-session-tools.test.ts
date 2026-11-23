@@ -1,0 +1,2643 @@
+import { loadEnv } from '@/utils/const';
+import * as cloudCliPort from '@/lib/cloud-cli-port';
+import { ConvexHttpClient } from 'convex/browser';
+import { getFunctionName } from 'convex/server';
+import fs from 'node:fs/promises';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Effect } from 'effect';
+import { LoroRepo } from 'loro-repo';
+import { makePromiseRepoNetwork } from '@/lib/loro/promise-repo-network.test-support';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  getSessionRoomId,
+  getMachineFlockDocId,
+  getMachineRoomId,
+  getMachineFlockAgentConfigs,
+  machineFlockKeys,
+  writeAgentConfigToFlock,
+  writeMachineFlockRowToFlock,
+  getWorkspaceFlockDocId,
+  getProjectMcpKey,
+  workspaceFlockKeys,
+  listWorkspaceAgentRoles,
+  readWorkspaceFlockRowsFromFlock,
+  readMachineFlockRowsFromFlock,
+  SessionStatusFactory,
+  writeWorkspaceAgentRoleToFlock,
+  writeWorkspaceMcpServerToFlock,
+  type AgentConfigId,
+  type AgentRoleId,
+  type LocalProjectId,
+  type MachineId,
+  type McpServerId,
+  type SessionId,
+  type SessionMeta,
+  type WorkspaceId,
+} from '@lody/shared';
+import { bindTestPresenceApplication } from '../../tests/presence-application-fixture';
+import { resolveWorkspaceOrThrow, withWorkspaceManager } from '@/lib/command-runtime';
+import * as workspaceApi from '@/lib/workspace';
+import * as commandRuntime from '@/lib/command-runtime';
+import * as sessionCommands from '@/commands/session';
+import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
+import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
+import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
+import { LodyOperationStore, getLodyOperationStorePath } from '@/orchestration/operation-store';
+import { createSessionBackend } from '@/session/session-backend';
+import { LocalControlHandler } from '@/lib/local-control-handler';
+import { LoroDocumentManager, SessionDocument, TRANSIENT_DOC_ROOM_RETAIN_MS } from '@/lib/loro/doc';
+import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
+import {
+  createLocalSessionCommandEnvironment,
+  runWithDaemonWorkspace,
+  runWithSessionCommandEnvironment,
+  type DaemonWorkspace,
+  type DaemonWorkspaceAccess,
+} from '@/lib/session-command-environment';
+import type { Logger } from '@/utils/logger';
+import { executeDaemonSessionTool } from './daemon-session-tools';
+import { buildLodyMcpServer, runWithMcpSessionContext } from './lody-mcp-server';
+
+const createSilentLogger = (): Logger => ({
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  success: () => {},
+  debug: () => {},
+  trace: () => {},
+  setLevel: () => {},
+  setDebug: () => {},
+  child: () => createSilentLogger(),
+  close: async () => {},
+});
+
+function testSignal() {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const workspaceId = 'synthetic-cloud-workspace' as WorkspaceId;
+const machineId = 'synthetic-daemon-machine' as MachineId;
+const ownerUserId = 'synthetic-owner';
+
+describe('daemon-hosted Session tools in the cloud composition', () => {
+  let tempDir: string;
+  let originalEnv: NodeJS.ProcessEnv;
+  let presenceApplication: ReturnType<typeof bindTestPresenceApplication>;
+  let manager: LoroDocumentManager;
+  let sessionId: SessionId;
+  let daemon: DaemonWorkspace;
+
+  beforeEach(async () => {
+    vi.spyOn(cloudCliPort, 'canReadSessionForCliRequester').mockResolvedValue(true);
+    presenceApplication = bindTestPresenceApplication(createSilentLogger());
+    originalEnv = { ...process.env };
+    // This cloud fixture explicitly supplies its control-plane endpoint.
+    process.env.LODY_AUTH_URL = 'https://daemon-fixture.convex.cloud';
+    loadEnv();
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-daemon-tools-'));
+    process.env.LODY_DATA_DIR = path.join(tempDir, '.lody');
+    delete process.env.LODY_PLATFORM;
+    manager = await LoroDocumentManager.create(workspaceId, ownerUserId, createSilentLogger(), {
+      keepWorkspaceCatalogJoined: true,
+    });
+    await manager.registerMachine(machineId, {
+      id: machineId,
+      name: 'Daemon',
+      ownerUserId,
+    });
+    sessionId = await manager.createSession(machineId, 'custom', 'claude');
+    await manager.repo.flush();
+    daemon = {
+      workspaceId,
+      userId: ownerUserId,
+      machineId,
+      manager,
+      // A collaborator drives this Session on the owner's shared machine.
+      readInvocation: (id) => ({
+        type: 'session/active-invocation-context',
+        active: true,
+        sessionId: id,
+        requesterUserId: 'synthetic-collaborator',
+        sourceTurnId: 'synthetic-turn',
+        inputConfig: { cliType: 'custom', agentType: 'claude' },
+      }),
+    };
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    await manager.cleanUp({ fast: true });
+    await presenceApplication.closeLegacy();
+    process.env = originalEnv;
+    loadEnv();
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const context = () => ({
+    machineId,
+    workspaceId,
+    sessionId,
+    localControlSocketPath: undefined,
+    workdir: tempDir,
+  });
+
+  const createAuth = () => ({
+    token: 'synthetic-token',
+    userId: ownerUserId,
+    userName: 'Owner',
+    userEmail: 'owner@example.test',
+    machineId,
+    machineName: 'Daemon',
+  });
+
+  function admitSharedMachineManagement() {
+    // Keep ordinary cloud admission in the production path; only the service I/O is synthetic.
+    vi.spyOn(ConvexHttpClient.prototype, 'query').mockImplementation(async (reference, args) => {
+      if (getFunctionName(reference) !== 'machines:canDelegateMachineUseFromCliToken')
+        throw new Error('Unexpected cloud request in the management fixture');
+      const allowed =
+        args?.cliToken === 'synthetic-token' &&
+        args.workspaceId === workspaceId &&
+        args.machineId === machineId &&
+        [ownerUserId, 'synthetic-collaborator'].includes(args.requesterUserId);
+      return allowed ? { allowed: true } : { allowed: false, reason: 'not_visible' };
+    });
+  }
+
+  function createEnvironment() {
+    return createLocalSessionCommandEnvironment({
+      manager,
+      workspaceId,
+      machineId,
+      machineName: 'Daemon',
+      userId: ownerUserId,
+      host: {
+        readInvocation: (invocationSessionId) => ({
+          type: 'session/active-invocation-context',
+          active: true,
+          sessionId: invocationSessionId,
+          requesterUserId: ownerUserId,
+          sourceTurnId: 'synthetic-turn',
+          inputConfig: { cliType: 'custom', agentType: 'claude' },
+        }),
+        readLiveStatus: async () => {
+          throw new Error('No live-status query');
+        },
+        readActiveTurnId: () => undefined,
+        steerSession: async () => {
+          throw new Error('No steer');
+        },
+        cancelSession: async () => {
+          throw new Error('No cancellation');
+        },
+        dispatchSession: async () => {},
+      },
+    });
+  }
+
+  async function settleCatalogWait<T>(
+    run: () => Promise<T>,
+    duringWait?: () => Promise<void>
+  ): Promise<T> {
+    let started = testSignal();
+    let waiterTimeout = 0;
+    const ready = manager.catalogBaselineReady.bind(manager);
+    const observer = vi.spyOn(manager, 'catalogBaselineReady').mockImplementation((id, timeout) => {
+      const result = ready(id, timeout);
+      if (timeout > 0) {
+        waiterTimeout = timeout;
+        started.resolve();
+      }
+      return result;
+    });
+    const outcome = run().then(
+      (value) => () => value,
+      (error: unknown) => () => {
+        throw error;
+      }
+    );
+    try {
+      let onWait = duringWait;
+      while (await Promise.race([started.promise.then(() => true), outcome.then(() => false)])) {
+        started = testSignal();
+        // Each batch item starts its own waiter, potentially after real storage I/O.
+        // Advance that waiter's deadline only after it starts.
+        await onWait?.();
+        onWait = undefined;
+        await vi.advanceTimersByTimeAsync(duringWait ? 0 : waiterTimeout);
+      }
+      return (await outcome)();
+    } finally {
+      observer.mockRestore();
+    }
+  }
+
+  async function persistRemoteCatalogReceipt() {
+    const docId = getWorkspaceFlockDocId(workspaceId);
+    const { flock } = await manager.repo.openFlockDoc(docId);
+    await manager.repo.persistFlockDocNow(docId, flock);
+    // Inject at the real SDK cursor persistence boundary; the real Streams
+    // composition test separately verifies only remote receipt creates this.
+    await manager.repo.getReplicaCheckpointStore({ kind: 'flock', flockDocId: docId, flock }).save({
+      streamUrl: 'https://streams.synthetic.invalid/catalog',
+      nextOffset: '42',
+      serverLowerBoundVersion: {},
+      updatedAtMs: 1,
+    });
+  }
+
+  async function seedRoles() {
+    const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
+    const handle = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+    for (const userId of [ownerUserId, 'synthetic-collaborator']) {
+      writeWorkspaceAgentRoleToFlock(handle.flock, {
+        v: 1,
+        id: userId as AgentRoleId,
+        ownerUserId: userId,
+        visibility: 'private',
+        name: userId,
+        promptPrefix: 'Review carefully.',
+        machineId,
+        agentConfigId,
+        runConfig: {},
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    }
+    await manager.repo.flush();
+    return agentConfigId;
+  }
+
+  it('authors concurrent creates and loads startup MCP from the live daemon catalog during sync failure', async () => {
+    const agentConfigId = await seedRoles();
+    const agentConfig = await manager.getAgentConfigById(agentConfigId);
+    if (!agentConfig) throw new Error('Missing seeded Agent config');
+    const id = 'synthetic-mcp' as McpServerId;
+    const handle = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+    const entry = {
+      id,
+      name: 'Synthetic MCP',
+      transport: 'stdio' as const,
+      connection: { transport: 'stdio' as const, command: 'synthetic-command' },
+      enabledByDefault: true,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    writeWorkspaceMcpServerToFlock(handle.flock, entry);
+    await manager.repo.flush();
+    await waitForMcpCatalogBaseline(manager, workspaceId);
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('ECONNRESET'));
+    const resolve = (dispatchConfig = {}) =>
+      runWithDaemonWorkspace(daemon, () =>
+        sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+          manager,
+          workspaceId,
+          agentConfig,
+          dispatchConfig,
+        })
+      );
+    const configs = await Promise.all(Array.from({ length: 4 }, () => resolve()));
+    expect(configs.map((config) => config.mcpServerIds)).toEqual([[id], [id], [id], [id]]);
+    const select = await loadSessionMcpCatalog({
+      repo: manager.repo,
+      waitForCatalogBaseline: () => waitForMcpCatalogBaseline(manager, workspaceId),
+      workspaceId,
+      sessionId,
+      selectedIds: [id],
+      logger: createSilentLogger(),
+    });
+    expect(select(undefined)).toMatchObject({
+      servers: [{ name: 'Synthetic MCP', command: 'synthetic-command' }],
+      problems: [],
+    });
+    writeWorkspaceMcpServerToFlock(handle.flock, {
+      ...entry,
+      enabledByDefault: false,
+      updatedAt: 2,
+    });
+    expect((await resolve()).mcpServerIds).toEqual([]);
+    expect((await resolve(configs[0])).mcpServerIds).toEqual([id]);
+  });
+
+  it.each([
+    ['lody_session_create', false],
+    ['lody_session_create', false],
+    ['lody_session_create', true],
+    ['lody_session_create', true],
+  ] as const)(
+    'accepts %s from persisted defaults before any Streams baseline (configured=%s)',
+    async (tool, configured) => {
+      const agentConfigId = await seedRoles();
+      const id = 'persisted-default-mcp' as McpServerId;
+      if (configured) {
+        const handle = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+        writeWorkspaceMcpServerToFlock(handle.flock, {
+          id,
+          name: 'Persisted default MCP',
+          transport: 'stdio',
+          connection: { transport: 'stdio', command: 'synthetic-command' },
+          enabledByDefault: true,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }
+      await persistRemoteCatalogReceipt();
+      await manager.repo.flush();
+      await manager.cleanUp({ fast: true });
+      manager = await LoroDocumentManager.create(workspaceId, ownerUserId, createSilentLogger(), {
+        keepWorkspaceCatalogJoined: true,
+        streamsTokens: {} as never,
+      });
+      daemon.manager = manager;
+      vi.useFakeTimers();
+      expect(manager.hasPersistedWorkspaceCatalog()).toBe(true);
+      expect(await manager.catalogBaselineReady(getWorkspaceFlockDocId(workspaceId), 0)).toBe(
+        false
+      );
+      const agentConfig = await manager.getAgentConfigById(agentConfigId);
+      if (!agentConfig) throw new Error('Missing persisted Agent config');
+      const selected = await settleCatalogWait(() =>
+        runWithDaemonWorkspace(daemon, () =>
+          sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+            manager,
+            workspaceId,
+            agentConfig,
+            dispatchConfig: {},
+          })
+        )
+      );
+      expect(selected.mcpServerIds).toEqual(configured ? [id] : []);
+      const project = { kind: 'github' as const, repoFullName: 'synthetic/repo', branch: 'main' };
+      const projectKey = getProjectMcpKey(project);
+      if (!projectKey) throw new Error('Expected a project key');
+      const defaults = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+      defaults.flock.set(workspaceFlockKeys.projectMcpDefault(projectKey), { ids: [] });
+      defaults.flock.commit();
+      const projectDefault = await settleCatalogWait(() =>
+        runWithDaemonWorkspace(daemon, () =>
+          sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+            manager,
+            workspaceId,
+            agentConfig,
+            project,
+            dispatchConfig: {},
+          })
+        )
+      );
+      expect(projectDefault.mcpServerIds).toEqual([]);
+      const frozen = await runWithDaemonWorkspace(daemon, () =>
+        sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+          manager,
+          workspaceId,
+          agentConfig,
+          project,
+          dispatchConfig: selected,
+        })
+      );
+      expect(frozen.mcpServerIds).toEqual(configured ? [id] : []);
+
+      const explicit = await runWithDaemonWorkspace(daemon, () =>
+        sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+          manager,
+          workspaceId,
+          agentConfig,
+          dispatchConfig: { mcpServerIds: [] },
+        })
+      );
+      expect(explicit.mcpServerIds).toEqual([]);
+      const environment = createEnvironment();
+      vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+      const item = { prompt: 'Review synthetic code.', machineId, agentConfigId };
+      const create = () =>
+        runWithSessionCommandEnvironment(environment, () =>
+          executeDaemonSessionTool(
+            context(),
+            tool,
+            tool === 'lody_session_create'
+              ? { operationId: 'cold-defaults', ...item }
+              : { operationId: 'cold-defaults', items: [item, item] }
+          )
+        );
+      const recovered = await settleCatalogWait(create);
+      expect(JSON.parse(recovered.content[0]?.text ?? '{}')).toMatchObject({
+        id: 'cold-defaults',
+        state: 'active',
+        items: Array.from({ length: tool === 'lody_session_create' ? 1 : 2 }, () => ({
+          status: 'active',
+          inputDurable: true,
+        })),
+      });
+      expect(await manager.catalogBaselineReady(getWorkspaceFlockDocId(workspaceId), 0)).toBe(
+        false
+      );
+    }
+  );
+
+  it.each(['lody_session_create', 'lody_session_create'] as const)(
+    'rejects %s with no remote history before acceptance and recovers the same request after catch-up',
+    async (tool) => {
+      const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
+      await manager.repo.flush();
+      await manager.cleanUp({ fast: true });
+      manager = await LoroDocumentManager.create(workspaceId, ownerUserId, createSilentLogger(), {
+        keepWorkspaceCatalogJoined: true,
+        streamsTokens: {} as never,
+      });
+      daemon.manager = manager;
+      const environment = createEnvironment();
+      vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+      vi.useFakeTimers();
+      const item = { prompt: 'Review synthetic code.', machineId, agentConfigId };
+      const create = (explicit = false) =>
+        runWithSessionCommandEnvironment(environment, () =>
+          executeDaemonSessionTool(
+            context(),
+            tool,
+            tool === 'lody_session_create'
+              ? {
+                  operationId: explicit ? 'explicit-none' : 'fresh-defaults',
+                  ...item,
+                  ...(explicit ? { mcpServerIds: [] } : {}),
+                }
+              : {
+                  operationId: explicit ? 'explicit-none' : 'fresh-defaults',
+                  items: [item, item].map((entry) => ({
+                    ...entry,
+                    ...(explicit ? { mcpServerIds: [] } : {}),
+                  })),
+                }
+          )
+        );
+      expect(manager.hasPersistedWorkspaceCatalog()).toBe(false);
+      const failed = await settleCatalogWait(create);
+      expect(JSON.parse(failed.content[0]?.text ?? '{}')).toMatchObject({
+        ok: false,
+        error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+      });
+      const operations = await runWithSessionCommandEnvironment(environment, () =>
+        executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })
+      );
+      expect(JSON.parse(operations.content[0]?.text ?? '{}')).toMatchObject({ items: [] });
+      const localAgent = await manager.getAgentConfigById(agentConfigId);
+      if (!localAgent) throw new Error('Missing Agent');
+      // Schedule's daemon IPC entry has a reader owner but no Session ALS.
+      await expect(
+        settleCatalogWait(() =>
+          sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+            manager,
+            workspaceId,
+            agentConfig: localAgent,
+            dispatchConfig: {},
+          })
+        )
+      ).rejects.toMatchObject({ _tag: 'WorkspaceSyncUnavailableError' });
+      // Schedule create/edit use this same validation before repository.save.
+      await expect(
+        settleCatalogWait(() =>
+          runWithSessionCommandEnvironment(environment, () =>
+            sessionCommands.validateSessionCreateOptions({
+              manager,
+              auth: environment.auth,
+              workspace: { id: workspaceId, name: 'Synthetic' },
+              options: {
+                machine: machineId,
+                agentConfig: agentConfigId,
+                currentSessionId: sessionId,
+              },
+              skipMachineAvailabilityCheck: true,
+            })
+          )
+        )
+      ).rejects.toMatchObject({ _tag: 'WorkspaceSyncUnavailableError' });
+
+      // Locally authored rows cannot turn unknown remote defaults into known absence.
+      await seedRoles();
+      expect(manager.hasPersistedWorkspaceCatalog()).toBe(false);
+      const stillUnknown = await settleCatalogWait(create);
+      expect(JSON.parse(stillUnknown.content[0]?.text ?? '{}')).toMatchObject({
+        error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+      });
+      expect(JSON.parse((await create(true)).content[0]?.text ?? '{}')).toMatchObject({
+        id: 'explicit-none',
+        state: 'active',
+      });
+      const host = await LoroRepo.create({});
+      try {
+        const docId = getWorkspaceFlockDocId(workspaceId);
+        const remote = await host.openFlockDoc(docId);
+        const id = 'remote-default-mcp' as McpServerId;
+        writeWorkspaceMcpServerToFlock(remote.flock, {
+          id,
+          name: 'Remote default',
+          transport: 'stdio',
+          connection: { transport: 'stdio', command: 'synthetic-command' },
+          enabledByDefault: true,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        const network = makePromiseRepoNetwork();
+        await host.addTransport('streams', network.transport());
+        const room = await host.joinFlockDocRoom(docId);
+        const recovered = await settleCatalogWait(create, async () => {
+          await vi.advanceTimersByTimeAsync(200);
+          await manager.repo.addTransport('streams', network.transport());
+        });
+        expect(await manager.catalogBaselineReady(docId, 0)).toBe(true);
+        expect(JSON.parse(recovered.content[0]?.text ?? '{}')).toMatchObject({
+          id: 'fresh-defaults',
+          state: 'active',
+          items: Array.from({ length: tool === 'lody_session_create' ? 1 : 2 }, () => ({
+            inputDurable: true,
+          })),
+        });
+        const agentConfig = await manager.getAgentConfigById(agentConfigId);
+        if (!agentConfig) throw new Error('Missing Agent');
+        const selected = await runWithDaemonWorkspace(daemon, () =>
+          sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+            manager,
+            workspaceId,
+            agentConfig,
+            dispatchConfig: {},
+          })
+        );
+        expect(selected.mcpServerIds).toEqual([id]);
+        const operationStore = new LodyOperationStore(
+          getLodyOperationStorePath(machineId),
+          undefined,
+          { maintenance: false }
+        );
+        try {
+          expect(
+            operationStore.get(sessionId, 'fresh-defaults').frozenContinuationConfig
+              .targetDispatchConfigs
+          ).toEqual(
+            Array.from({ length: tool === 'lody_session_create' ? 1 : 2 }, () =>
+              expect.objectContaining({ mcpServerIds: [id] })
+            )
+          );
+        } finally {
+          operationStore.close();
+        }
+
+        room.unsubscribe();
+      } finally {
+        await host.destroy();
+      }
+    }
+  );
+
+  it.each(['metadata', 'flock'] as const)(
+    'reads daemon catalogs for the active user when %s synchronization fails',
+    async (failure) => {
+      const agentConfigId = await seedRoles();
+      vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+      vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug: 'synthetic',
+        role: 'owner',
+      });
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockImplementation(async (args) => ({
+        ...(args.delegatedRequester?.userId === 'synthetic-collaborator'
+          ? { allowed: true as const }
+          : { allowed: false as const, reason: 'not_visible' as const }),
+      }));
+      vi.spyOn(manager, 'syncMetaOrThrow').mockImplementation(async () => {
+        if (failure === 'metadata')
+          throw new Error(
+            'Workspace metadata sync failed (resource.discovery): Repository adapter operation failed'
+          );
+      });
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(
+        new Error('Flock sync unavailable')
+      );
+      for (const [name, args, expected] of [
+        [
+          'lody_catalog',
+          { action: 'agent_roles' },
+          { items: [{ id: 'synthetic-collaborator', machineId }] },
+        ],
+        [
+          'lody_catalog',
+          { action: 'agent_roles', arguments: { id: 'synthetic-collaborator' } },
+          { item: { promptPrefix: 'Review carefully.' } },
+        ],
+        ['lody_catalog', { action: 'agent_configs' }, { items: [{ id: agentConfigId }] }],
+      ] as const) {
+        const result = await runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), name, args)
+        );
+        expect(result.isError, JSON.stringify(result)).not.toBe(true);
+        expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject(expected);
+      }
+    }
+  );
+
+  function stubCreateOptionsReaders(
+    access: { allowed: true } | { allowed: false; reason: 'not_visible' } = { allowed: true }
+  ) {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+      id: workspaceId,
+      name: 'Synthetic',
+      slug: 'synthetic',
+      role: 'owner',
+    });
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue(access);
+  }
+
+  async function seedCreateOptionsCatalog(projectId: LocalProjectId) {
+    const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
+    const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+    writeMachineFlockRowToFlock(handle.flock, {
+      key: machineFlockKeys.localProject(projectId),
+      value: {
+        id: projectId,
+        name: 'Synthetic project',
+        rootPath: tempDir,
+        createdAtMs: 1,
+      },
+    });
+    await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+      agentConfigId,
+      project: { kind: 'local', localProjectId: projectId },
+    } satisfies Partial<SessionMeta>);
+    await manager.repo.flush();
+    return agentConfigId;
+  }
+
+  const readCreateOptions = (args: Record<string, unknown> = {}) =>
+    runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_create_options', args)
+    );
+
+  function rejectStreamsSync() {
+    const metaSync = vi
+      .spyOn(manager, 'syncMetaOrThrow')
+      .mockRejectedValue(new Error('ECONNRESET'));
+    const flockSync = vi
+      .spyOn(manager, 'syncFlockDocOrThrow')
+      .mockRejectedValue(new FlockSyncTimeoutError('Synthetic Streams timeout'));
+    return { metaSync, flockSync };
+  }
+
+  it('returns local create options without starting Streams sync', async () => {
+    const projectId = 'synthetic-project' as LocalProjectId;
+    const agentConfigId = await seedCreateOptionsCatalog(projectId);
+    const agentRoleId = 'synthetic-role' as AgentRoleId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), { agentRoleId });
+    await manager.repo.flush();
+    stubCreateOptionsReaders();
+    const { metaSync, flockSync } = rejectStreamsSync();
+
+    const result = await readCreateOptions();
+
+    expect(metaSync).not.toHaveBeenCalled();
+    expect(flockSync).not.toHaveBeenCalled();
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+      ok: true,
+      defaultAgentConfigId: agentConfigId,
+      agentConfigs: [{ id: agentConfigId }],
+      localProjects: [{ id: projectId, name: 'Synthetic project' }],
+      current: {
+        agentRoleId,
+        workContext: {
+          kind: 'local',
+          projectId,
+          localProjectName: 'Synthetic project',
+        },
+      },
+    });
+  });
+
+  it('returns retryable SYNC_UNAVAILABLE when the unready local replica cannot validate create options', async () => {
+    stubCreateOptionsReaders();
+    vi.spyOn(manager, 'catalogBaselineReady').mockResolvedValue(false);
+    const { metaSync, flockSync } = rejectStreamsSync();
+
+    const missingCatalog = JSON.parse((await readCreateOptions()).content[0]?.text ?? '{}');
+    expect(metaSync).not.toHaveBeenCalled();
+    expect(flockSync).not.toHaveBeenCalled();
+    expect(missingCatalog).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+
+    const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
+    await manager.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+      agentConfigId,
+      project: { kind: 'local', localProjectId: 'missing-project' as LocalProjectId },
+    } satisfies Partial<SessionMeta>);
+    await manager.repo.flush();
+    const missingProject = JSON.parse((await readCreateOptions()).content[0]?.text ?? '{}');
+    expect(missingProject).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+    expect(missingProject.error.message).toContain('missing-project');
+  });
+
+  it('returns an empty agent catalog once the daemon baseline is ready', async () => {
+    stubCreateOptionsReaders();
+    vi.spyOn(manager, 'catalogBaselineReady').mockResolvedValue(true);
+    const { metaSync, flockSync } = rejectStreamsSync();
+
+    const result = await readCreateOptions();
+
+    expect(metaSync).not.toHaveBeenCalled();
+    expect(flockSync).not.toHaveBeenCalled();
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    const options = JSON.parse(result.content[0]?.text ?? '{}');
+    expect(options).toMatchObject({
+      ok: true,
+      agentConfigs: [],
+      localProjects: [],
+      current: { workContext: { kind: 'chat' } },
+    });
+    expect(options.current).not.toHaveProperty('agentRoleId');
+  });
+
+  it('keeps an unauthorized machine denied without starting create-option sync', async () => {
+    await seedCreateOptionsCatalog('synthetic-project' as LocalProjectId);
+    stubCreateOptionsReaders({ allowed: false, reason: 'not_visible' });
+    const { metaSync, flockSync } = rejectStreamsSync();
+
+    const result = await readCreateOptions();
+
+    expect(metaSync).not.toHaveBeenCalled();
+    expect(flockSync).not.toHaveBeenCalled();
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'INTERNAL_ERROR', retryable: false },
+    });
+  });
+
+  it('lists and reads session status from the daemon replica without starting Streams sync', async () => {
+    stubCreateOptionsReaders();
+    const { metaSync, flockSync } = rejectStreamsSync();
+
+    const listed = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_list', {})
+    );
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+
+    expect(metaSync).not.toHaveBeenCalled();
+    expect(flockSync).not.toHaveBeenCalled();
+    expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: [expect.objectContaining({ id: sessionId })],
+    });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId, ok: true }],
+    });
+  });
+
+  it('links, lists and unlinks pull requests of the calling Session only, as agent records', async () => {
+    const call = (args: unknown) =>
+      runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(context(), 'lody_session_manage', args)
+      );
+    const decode = (result: { content: Array<{ text?: string }> }) =>
+      JSON.parse(result.content[0]?.text ?? '{}');
+    const readLinks = async () =>
+      Object.entries(
+        ((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta ?? {}) as Record<
+          string,
+          unknown
+        >
+      ).filter(([key]) => key.startsWith('prLink:'));
+    const url = 'https://github.com/owner/repo/pull/7';
+
+    const linked = await call({ action: 'pr_link', arguments: { url } });
+    expect(linked.isError, JSON.stringify(linked)).not.toBe(true);
+    expect(decode(linked)).toEqual({ linked: true, sessionId, url });
+    expect(await readLinks()).toEqual([
+      [`prLink:${url}`, expect.objectContaining({ k: 'l', o: 'a' })],
+    ]);
+    expect(decode(await call({ action: 'pr_list' })).items).toEqual([
+      expect.objectContaining({ kind: 'pending', url }),
+    ]);
+
+    // The target is always the calling Session: no argument can name another one.
+    await expect(
+      call({ action: 'pr_link', arguments: { url, sessionId: 'another-session' } })
+    ).rejects.toThrow();
+    const unsupported = await call({
+      action: 'pr_link',
+      arguments: { url: 'https://example.test/owner/repo/merge_requests/1' },
+    });
+    expect(unsupported.isError).toBe(true);
+    expect(decode(unsupported)).toEqual({ linked: false, reason: 'unsupported' });
+
+    const unlinked = await call({ action: 'pr_unlink', arguments: { url } });
+    expect(decode(unlinked)).toEqual({ linked: false, unlinked: true, sessionId, url });
+    expect(await readLinks()).toEqual([
+      [`prLink:${url}`, expect.objectContaining({ k: 'u', o: 'a' })],
+    ]);
+    expect(decode(await call({ action: 'pr_list' })).items).toEqual([]);
+  });
+
+  it('never runs a Session share over daemon IPC; it stays in the MCP process', async () => {
+    await expect(
+      runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(context(), 'lody_session_manage', {
+          action: 'share',
+          arguments: { requestId: 'share-1', purpose: 'Show the result' },
+        })
+      )
+    ).rejects.toThrow('Unsupported daemon Session tool call: lody_session_manage');
+  });
+
+  it('does not report an older failure after the newest user Turn succeeds', async () => {
+    stubCreateOptionsReaders();
+    const doc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'failed-user',
+      role: 'user',
+      status: 'failed',
+      timestamp: '2026-11-03T20:15:00.000Z',
+      items: [{ type: 'text', text: 'run the delegated work' }],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'failed-notice',
+      role: 'system',
+      timestamp: '2026-11-03T20:15:01.000Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your 5-hour limit · resets 6am (UTC)",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'recovered-user',
+      role: 'user',
+      status: 'handled',
+      timestamp: '2026-11-03T21:00:00.000Z',
+      items: [{ type: 'text', text: 'retry after the quota reset' }],
+      fileDiff: [],
+    } as never);
+
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    const item = JSON.parse(status.content[0]?.text ?? '{}').items[0];
+    expect(item).toMatchObject({ ok: true, sessionId });
+    expect(item.value).not.toHaveProperty('lastTurnFailure');
+  });
+
+  it('keeps bound owner history and archive usable without cloud configuration while other identities stay denied', async () => {
+    delete process.env.LODY_AUTH_URL;
+    delete process.env.LODY_AUTH_SITE_URL;
+    delete process.env.LODY_SERVER_URL;
+    loadEnv();
+    vi.mocked(cloudCliPort.canReadSessionForCliRequester).mockRestore();
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(workspaceApi, 'listWorkspacesForToken').mockRejectedValue(
+      new Error('Discovery is down')
+    );
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    daemon.readInvocation = (id) => ({
+      type: 'session/active-invocation-context',
+      active: true,
+      sessionId: id,
+      requesterUserId: ownerUserId,
+      sourceTurnId: 'owner-turn',
+      inputConfig: { cliType: 'custom', agentType: 'claude' },
+    });
+    daemon.readAccess = () => ({
+      status: 'authorized',
+      workspace: { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'owner' },
+    });
+    const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
+    await backend.appendHistoryTurn({
+      id: 'owner-local-context',
+      role: 'user',
+      timestamp: '2026-11-10T00:00:00Z',
+      items: [{ type: 'text', text: 'owner local history' }],
+      fileDiff: [],
+    } as never);
+    const call = (name: string, args: Record<string, unknown>) =>
+      runWithDaemonWorkspace(daemon, () => executeDaemonSessionTool(context(), name, args));
+    const read = await call('lody_session_history', { sessionId });
+    expect(read.isError, JSON.stringify(read)).not.toBe(true);
+    expect(read.content[0]?.text).toContain('owner local history');
+    const authorized = daemon.readAccess;
+    daemon.readAccess = () => ({ status: 'revoked' });
+    const revoked = await call('lody_session_manage', {
+      action: 'archive',
+      arguments: { sessionId },
+    });
+    expect(revoked.isError).toBe(true);
+    expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta.isArchived).toBe(
+      false
+    );
+    daemon.readAccess = authorized;
+    const archived = await call('lody_session_manage', {
+      action: 'archive',
+      arguments: { sessionId },
+    });
+    expect(archived.isError, JSON.stringify(archived)).not.toBe(true);
+    expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta.isArchived).toBe(
+      true
+    );
+    // Neither a different driving human nor a different target machine inherits native ownership.
+    const ownerInvocation = daemon.readInvocation;
+    daemon.readInvocation = (id) => ({
+      ...ownerInvocation(id),
+      requesterUserId: 'synthetic-collaborator',
+    });
+    const sharedReader = await call('lody_session_history', { sessionId });
+    expect(sharedReader.isError).toBe(true);
+    expect(sharedReader.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
+    expect(sharedReader.content[0]?.text).not.toContain('owner local history');
+    daemon.readInvocation = ownerInvocation;
+    const foreign = await manager.createSession(machineId, 'custom', 'claude');
+    await manager.repo.upsertDocMeta(getSessionRoomId(foreign), { machineId: 'foreign-machine' });
+    const remote = await call('lody_session_history', { sessionId: foreign });
+    expect(remote.isError).toBe(true);
+    expect(remote.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
+    expect(remote.content[0]?.text).not.toContain('owner local history');
+  });
+
+  it('reads the first history page when an agent runtime that forces every field fills cursor with null or blank text', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
+    await backend.appendHistoryTurn({
+      id: 'first-page-context',
+      role: 'user',
+      timestamp: '2026-11-10T00:00:00Z',
+      items: [{ type: 'text', text: 'first page context' }],
+      fileDiff: [],
+    } as never);
+    const call = async (args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), 'lody_session_history', { sessionId, ...args })
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+
+    const omitted = await call({});
+    expect(omitted.isError, omitted.text).toBe(false);
+    expect(omitted.text).toContain('first page context');
+    for (const direction of ['backward', 'forward'] as const) {
+      for (const cursor of [null, '', '   ']) {
+        const read = await call({ direction, cursor });
+        expect(read.isError, `${direction} ${JSON.stringify(cursor)}: ${read.text}`).toBe(false);
+        expect(JSON.parse(read.text).items).toEqual(JSON.parse(omitted.text).items);
+      }
+    }
+    const placeholder = await call({ cursor: 'none' });
+    expect(placeholder.isError).toBe(true);
+    expect(placeholder.text).toContain('CURSOR_INVALID');
+  });
+
+  it('reports the latest failed turn and marks its history entry', async () => {
+    stubCreateOptionsReaders();
+    const doc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'failed-user',
+      role: 'user',
+      status: 'failed',
+      timestamp: '2026-11-03T20:15:00.000Z',
+      items: [{ type: 'text', text: 'run the delegated work' }],
+      fileDiff: [],
+    } as never);
+    await backend.appendHistoryTurn({
+      id: 'failed-notice',
+      role: 'system',
+      timestamp: '2026-11-03T20:15:01.000Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your 5-hour limit · resets 6am (UTC)",
+          },
+        },
+      ],
+      fileDiff: [],
+    } as never);
+
+    const status = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_status_many', { sessionIds: [sessionId] })
+    );
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [
+        {
+          ok: true,
+          sessionId,
+          value: {
+            lastTurnFailure: {
+              reason: 'usage_limit',
+              detail: "You've hit your 5-hour limit · resets 6am (UTC)",
+              at: '2026-11-03T20:15:01.000Z',
+              resetAt: '2026-11-04T06:00:00.000Z',
+              turnId: 'failed-user',
+            },
+          },
+        },
+      ],
+    });
+
+    const history = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_history', { sessionId })
+    );
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    expect(JSON.parse(history.content[0]?.text ?? '{}').items).toContainEqual(
+      expect.objectContaining({
+        id: 'failed-user',
+        isError: true,
+        errorReason: 'usage_limit',
+      })
+    );
+  });
+
+  it.each(['synthetic', 'local'])(
+    'reads individual grants as the active human in a cloud workspace named %s, never as the daemon owner',
+    async (slug) => {
+      stubCreateOptionsReaders();
+      vi.mocked(commandRuntime.resolveWorkspaceOrThrow).mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug,
+        role: 'owner',
+      });
+      const backend = await createSessionBackend(await manager.getOrCreateSessionDoc(sessionId));
+      await backend.appendHistoryTurn({
+        id: 'private-context',
+        role: 'user',
+        timestamp: '2026-11-10T00:00:00.000Z',
+        items: [{ type: 'text', text: 'individual context' }],
+        fileDiff: [],
+      } as never);
+      let recipient = 'synthetic-collaborator';
+      vi.mocked(cloudCliPort.canReadSessionForCliRequester).mockImplementation(
+        async (input) =>
+          input.requester.userId === recipient &&
+          input.machineId === machineId &&
+          input.rootSessionId === sessionId
+      );
+      const read = () =>
+        runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), 'lody_session_history', { sessionId })
+        );
+      const granted = await read();
+      expect(granted.isError, JSON.stringify(granted)).not.toBe(true);
+      expect(JSON.parse(granted.content[0]?.text ?? '{}').items).toContainEqual(
+        expect.objectContaining({ id: 'private-context' })
+      );
+      recipient = ownerUserId;
+      const denied = await read();
+      expect(denied.isError).toBe(true);
+      expect(denied.content[0]?.text).toContain('SESSION_HISTORY_DENIED');
+      expect(denied.content[0]?.text).not.toContain('individual context');
+      daemon.readInvocation = (id) => ({
+        type: 'session/active-invocation-context',
+        active: true,
+        sessionId: id,
+        requesterUserId: ownerUserId,
+        sourceTurnId: 'owner-turn',
+        inputConfig: {},
+      });
+      expect((await read()).isError).not.toBe(true);
+    }
+  );
+
+  async function createRemoteSession() {
+    const otherMachineId = 'synthetic-other-machine' as MachineId;
+    await manager.registerMachine(otherMachineId, {
+      id: otherMachineId,
+      name: 'Other',
+      ownerUserId,
+    });
+    const remoteSessionId = await manager.createSession(otherMachineId, 'custom', 'claude');
+    await manager.repo.flush();
+    return remoteSessionId;
+  }
+
+  /** A joined Streams room whose first sync completes only when the test says so. */
+  function stubRemoteRoom(remoteSessionId: SessionId) {
+    const remoteRoomId = getSessionRoomId(remoteSessionId);
+    const joinDocRoom = manager.repo.joinDocRoom.bind(manager.repo);
+    const rooms: Array<{ released: boolean; firstSync: ReturnType<typeof testSignal> }> = [];
+    vi.spyOn(manager.repo, 'joinDocRoom').mockImplementation(async (roomId, ...rest) => {
+      if (roomId !== remoteRoomId) return await joinDocRoom(roomId, ...rest);
+      const tracked = { released: false, firstSync: testSignal() };
+      rooms.push(tracked);
+      const binding = {
+        status: 'joined' as const,
+        firstSyncedWithRemote: tracked.firstSync.promise,
+        onStatusChange: () => () => {},
+        waitUntilSynced: async () => {},
+      };
+      return {
+        subscription: () => binding,
+        unsubscribe: () => {
+          tracked.released = true;
+        },
+      } as unknown as Awaited<ReturnType<typeof joinDocRoom>>;
+    });
+    return rooms;
+  }
+
+  const callTool = (name: string, args: Record<string, unknown>) =>
+    runWithDaemonWorkspace(daemon, () => executeDaemonSessionTool(context(), name, args));
+
+  it("reads another Machine's Sessions without keeping their rooms joined", async () => {
+    // #2194: these reads joined other Machines' Session rooms for the life of
+    // the daemon, so a room that never synced kept retrying forever.
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    const cachedBefore = manager.getConnectedRoomCount();
+
+    // Status does not wait for the room, but keeps it while its first sync runs.
+    const status = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId: remoteSessionId, ok: true }],
+    });
+    expect(rooms.map((room) => room.released)).toEqual([false]);
+    rooms[0]!.firstSync.resolve();
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+
+    // History waits briefly for a synced room and releases it after the read.
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(2));
+    rooms[1]!.firstSync.resolve();
+    const history = await historyCall;
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    await vi.waitFor(() => expect(rooms[1]!.released).toBe(true));
+
+    const listed = await callTool('lody_session_list', {});
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id: remoteSessionId })]),
+    });
+    rooms[2]!.firstSync.resolve();
+    await vi.waitFor(() => expect(rooms[2]!.released).toBe(true));
+    // Only this Machine's own listed Session joined the shared cache.
+    expect(manager.getConnectedRoomCount()).toBe(cachedBefore + 1);
+  });
+
+  it('answers history from the replica when a remote first sync stalls, then releases the room', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(8_000);
+    const history = await historyCall;
+    // A stalled first sync is not a failed read.
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    expect(rooms[0]!.released).toBe(false);
+
+    // While that room is still retained, later reads answer without waiting again.
+    let settled = false;
+    const retained = callTool('lody_session_history', { sessionId: remoteSessionId }).then(
+      (result) => {
+        settled = true;
+        return result;
+      }
+    );
+    await vi.waitFor(() => expect(settled).toBe(true));
+    expect((await retained).isError).not.toBe(true);
+
+    await vi.advanceTimersByTimeAsync(TRANSIENT_DOC_ROOM_RETAIN_MS);
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+    // The next read joins again, so a recovered room can still reach the replica.
+    const again = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(3));
+    rooms[2]!.firstSync.resolve();
+    expect((await again).isError).not.toBe(true);
+  });
+
+  it('keeps a completed remote history read when its temporary wrapper cleanup fails', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    const destroy = SessionDocument.prototype.destroy;
+    vi.spyOn(SessionDocument.prototype, 'destroy').mockImplementationOnce(
+      async function (this: SessionDocument, options) {
+        await destroy.call(this, options);
+        throw new Error('Synthetic wrapper cleanup failure');
+      }
+    );
+
+    const historyCall = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(1));
+    rooms[0]!.firstSync.resolve();
+    const history = await historyCall;
+    expect(history.isError, JSON.stringify(history)).not.toBe(true);
+    await vi.waitFor(() => expect(rooms[0]!.released).toBe(true));
+    // The failure is not cached: the next read succeeds normally.
+    const again = callTool('lody_session_history', { sessionId: remoteSessionId });
+    await vi.waitFor(() => expect(rooms).toHaveLength(2));
+    rooms[1]!.firstSync.resolve();
+    expect((await again).isError).not.toBe(true);
+  });
+
+  it('isolates one unreadable Session from list and status siblings', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const original = new Error('Synthetic Session doc read failure');
+    const readTransiently = manager.readSessionDocTransiently.bind(manager);
+    let failing = true;
+    vi.spyOn(manager, 'readSessionDocTransiently').mockImplementation(async (id, read, options) => {
+      if (failing && id === remoteSessionId) throw original;
+      return await readTransiently(id, read, options);
+    });
+
+    const listed = await callTool('lody_session_list', {});
+    expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+    expect(JSON.parse(listed.content[0]?.text ?? '{}')).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: sessionId }),
+        expect.objectContaining({ id: remoteSessionId, executionState: 'idle' }),
+      ]),
+    });
+    const status = await callTool('lody_session_status_many', {
+      sessionIds: [sessionId, remoteSessionId],
+    });
+    expect(status.isError, JSON.stringify(status)).not.toBe(true);
+    expect(JSON.parse(status.content[0]?.text ?? '{}')).toMatchObject({
+      items: [
+        { sessionId, ok: true },
+        {
+          sessionId: remoteSessionId,
+          ok: false,
+          error: { code: 'INTERNAL_ERROR', message: expect.stringContaining(original.message) },
+        },
+      ],
+    });
+
+    // The failure is not cached once the doc is readable again.
+    failing = false;
+    const recovered = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(JSON.parse(recovered.content[0]?.text ?? '{}')).toMatchObject({
+      items: [{ sessionId: remoteSessionId, ok: true }],
+    });
+  });
+
+  it('reports unknown, not offline, for a remote Machine when presence cannot prove absence', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const otherMachineId = 'synthetic-other-machine' as MachineId;
+    // The incident shape: presence room not joined, Machine RPC unanswered.
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockRejectedValue(
+      new Error('timeout: Machine status request timed out')
+    );
+    const presence = vi.spyOn(manager, 'getMachinePresenceView');
+    const statusOf = async () => {
+      const result = await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      return JSON.parse(result.content[0]?.text ?? '{}').items[0].value;
+    };
+
+    presence.mockResolvedValue({ online: new Set(), synced: false });
+    expect(await statusOf()).toMatchObject({
+      machine: { state: 'unknown' },
+      actions: { chat: 'allowed' },
+    });
+
+    // A fresh heartbeat proves online even while the room recycles its live read.
+    presence.mockResolvedValue({ online: new Set([otherMachineId]), synced: false });
+    expect(await statusOf()).toMatchObject({
+      machine: { state: 'online' },
+      actions: { chat: 'allowed' },
+    });
+
+    // Only a joined room lacking the heartbeat blocks chat.
+    presence.mockResolvedValue({ online: new Set(), synced: true });
+    expect(await statusOf()).toMatchObject({
+      machine: { state: 'offline' },
+      actions: { chat: 'temporarily_blocked', reason: { code: 'MACHINE_OFFLINE' } },
+    });
+  });
+
+  it('releases a retained remote room when this Machine adopts the Session doc', async () => {
+    stubCreateOptionsReaders();
+    const remoteSessionId = await createRemoteSession();
+    const rooms = stubRemoteRoom(remoteSessionId);
+    await callTool('lody_session_status_many', { sessionIds: [remoteSessionId] });
+    expect(rooms.map((room) => room.released)).toEqual([false]);
+
+    // A live owner takes the doc over; the transient room must not linger.
+    await manager.getOrCreateSessionDoc(remoteSessionId);
+    expect(rooms[0]!.released).toBe(true);
+  });
+
+  it('keeps standalone discovery sync failures explicit and offline reads available', async () => {
+    await seedRoles();
+    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('Metadata unavailable'));
+    const args = { manager, auth: createAuth(), workspaceId };
+    await expect(createResourceDiscovery(args)).rejects.toThrow('Use --offline');
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('Flock unavailable'));
+    await expect((await createResourceDiscovery(args)).list('agent_role')).rejects.toThrow(
+      'Flock unavailable'
+    );
+    // With no machine access, the readable Role still remains listed as unavailable.
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({
+      allowed: false,
+      reason: 'not_visible',
+    });
+    const offline = await createResourceDiscovery({ ...args, offline: true });
+    expect((await offline.list('agent_role')).items).toMatchObject([{ id: ownerUserId }]);
+  });
+
+  it('reads the local daemon catalog without forcing synchronization', async () => {
+    await seedRoles();
+    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('Metadata unavailable'));
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('Flock unavailable'));
+    const environment = createLocalSessionCommandEnvironment({
+      manager,
+      workspaceId,
+      machineId,
+      machineName: 'Daemon',
+      userId: ownerUserId,
+      host: {
+        readInvocation: daemon.readInvocation,
+        readLiveStatus: async () => {
+          throw new Error('Unexpected live status');
+        },
+        readActiveTurnId: () => undefined,
+        steerSession: async () => {
+          throw new Error('Unexpected steer');
+        },
+        cancelSession: async () => {
+          throw new Error('Unexpected cancellation');
+        },
+        dispatchSession: async () => {
+          throw new Error('Unexpected dispatch');
+        },
+      },
+    });
+    await runWithSessionCommandEnvironment(environment, async () => {
+      const discovery = await createResourceDiscovery({
+        manager,
+        workspaceId,
+        auth: environment.auth,
+      });
+      expect((await discovery.list('agent_role')).items).toMatchObject([
+        { id: ownerUserId, machineId },
+      ]);
+    });
+  });
+
+  it.each(['local', 'cloud'] as const)(
+    'archives only contained Tabs through the %s daemon MCP entrypoint',
+    async (composition) => {
+      const root = {
+        ...(await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta,
+        id: sessionId,
+        isArchived: false,
+        status: SessionStatusFactory.running(),
+      } as SessionMeta;
+      const tab = { ...root, id: 'archive-tab' as SessionId, parentSessionId: sessionId };
+      const opened = {
+        ...root,
+        id: 'archive-opened' as SessionId,
+        openedBySessionId: sessionId,
+      };
+      const openedByTab = {
+        ...opened,
+        id: 'archive-opened-by-tab' as SessionId,
+        openedBySessionId: tab.id,
+        openedByRootSessionId: sessionId,
+      };
+      const independentTab = {
+        ...root,
+        id: 'archive-independent-tab' as SessionId,
+        parentSessionId: openedByTab.id,
+      };
+      const independentSessions = [opened, openedByTab, independentTab];
+      const sessions = [root, tab, ...independentSessions];
+      for (const session of sessions)
+        await manager.repo.upsertDocMeta(getSessionRoomId(session.id), session);
+
+      const environment = createLocalSessionCommandEnvironment({
+        manager,
+        workspaceId,
+        machineId,
+        machineName: 'Daemon',
+        userId: ownerUserId,
+        host: {
+          readInvocation: (id) => ({
+            type: 'session/active-invocation-context',
+            active: true,
+            sessionId: id,
+            requesterUserId: ownerUserId,
+            sourceTurnId: 'synthetic-turn',
+            inputConfig: { cliType: 'custom', agentType: 'claude' },
+          }),
+          readLiveStatus: async () => {
+            throw new Error('Archive must not request live status');
+          },
+          readActiveTurnId: () => undefined,
+          steerSession: async () => {
+            throw new Error('Archive must not steer a Session');
+          },
+          cancelSession: async () => {
+            throw new Error('Archive is observed, not a cancellation request');
+          },
+          dispatchSession: async () => {
+            throw new Error('Archive must not dispatch a Session');
+          },
+        },
+      });
+      if (composition === 'cloud') {
+        admitSharedMachineManagement();
+        vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+        vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+          id: workspaceId,
+          name: 'Synthetic',
+          slug: 'synthetic',
+          role: 'owner',
+        });
+      }
+      const sync = vi.spyOn(manager, 'syncMetaOrThrow');
+      sync.mockRejectedValueOnce(new Error('Synthetic metadata unavailable'));
+      vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+      const archive = () => {
+        const execute = () =>
+          executeDaemonSessionTool(context(), 'lody_session_manage', {
+            action: 'archive',
+            arguments: { sessionId },
+          });
+        return composition === 'local'
+          ? runWithSessionCommandEnvironment(environment, execute)
+          : runWithDaemonWorkspace(daemon, execute);
+      };
+
+      expect((await archive()).isError).toBe(true);
+      for (const session of sessions)
+        expect((await manager.repo.getDocMeta(getSessionRoomId(session.id)))?.meta).toEqual(
+          session
+        );
+
+      sync.mockResolvedValue();
+      // Repeated archive is idempotent and must not reach independently opened work.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = await archive();
+        expect(result.isError, JSON.stringify(result)).not.toBe(true);
+        expect(JSON.parse(result.content[0]?.text ?? '{}')).toEqual({
+          ok: true,
+          sessionId,
+          archivedChildSessionIds: [tab.id],
+        });
+      }
+      for (const session of [root, tab])
+        expect((await manager.repo.getDocMeta(getSessionRoomId(session.id)))?.meta).toMatchObject({
+          isArchived: true,
+          status: SessionStatusFactory.idle(),
+        });
+      for (const session of independentSessions)
+        expect((await manager.repo.getDocMeta(getSessionRoomId(session.id)))?.meta).toEqual(
+          session
+        );
+    }
+  );
+
+  it.each(['local', 'cloud'] as const)(
+    'isolates batch archive failures and preserves ordered outcomes in %s',
+    async (composition) => {
+      const first = await manager.createSession(machineId, 'custom', 'claude');
+      const second = await manager.createSession(machineId, 'custom', 'claude');
+      const root = (await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta as SessionMeta;
+      const tab = { ...root, id: 'batch-tab' as SessionId, parentSessionId: first };
+      const opened = { ...root, id: 'batch-opened' as SessionId, openedBySessionId: first };
+      for (const session of [tab, opened])
+        await manager.repo.upsertDocMeta(getSessionRoomId(session.id), session);
+      vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+      vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+      if (composition === 'cloud') {
+        admitSharedMachineManagement();
+        vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+        vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+          id: workspaceId,
+          name: 'Synthetic',
+          slug: 'synthetic',
+          role: 'owner',
+        });
+      }
+      const run = (args: unknown) => {
+        const execute = () =>
+          executeDaemonSessionTool(context(), 'lody_session_manage', {
+            action: 'archive',
+            arguments: args,
+          });
+        return composition === 'local'
+          ? runWithSessionCommandEnvironment(createEnvironment(), execute)
+          : runWithDaemonWorkspace(daemon, execute);
+      };
+      // Invalid batches must fail before archiving any target.
+      for (const args of [
+        {},
+        { sessionIds: [] },
+        { sessionId: first, sessionIds: [second] },
+        { sessionIds: [first, ` ${first} `] },
+        { sessionIds: [first, '  '] },
+        { sessionIds: [first, ...Array.from({ length: 20 }, (_, i) => `extra-${i}`)] },
+      ]) {
+        await expect(run(args)).rejects.toThrow();
+        expect((await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta?.isArchived).not.toBe(
+          true
+        );
+      }
+      vi.mocked(manager.syncMetaOrThrow).mockRejectedValueOnce(new Error('Synthetic sync failure'));
+      const partial = await run({ sessionIds: [first, second] });
+      expect(JSON.parse(partial.content[0]?.text ?? '{}')).toMatchObject({
+        items: [
+          { ok: false, sessionId: first },
+          { ok: true, sessionId: second },
+        ],
+      });
+      expect((await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta?.isArchived).not.toBe(
+        true
+      );
+      expect((await manager.repo.getDocMeta(getSessionRoomId(second)))?.meta?.isArchived).toBe(
+        true
+      );
+      const foreignSession = `lody://session/${opened.id}?workspace=another-workspace`;
+      const sessionIds = [first, 'missing-batch-session', foreignSession, second];
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const result = await run({ sessionIds });
+        expect(result.isError, JSON.stringify(result)).not.toBe(true);
+        expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+          items: [
+            { ok: true, sessionId: first, archivedChildSessionIds: [tab.id] },
+            {
+              ok: false,
+              sessionId: 'missing-batch-session',
+              error: { message: expect.any(String) },
+            },
+            { ok: false, sessionId: foreignSession, error: { message: expect.any(String) } },
+            { ok: true, sessionId: second, archivedChildSessionIds: [] },
+          ],
+        });
+      }
+      for (const id of [first, second, tab.id])
+        expect((await manager.repo.getDocMeta(getSessionRoomId(id)))?.meta).toMatchObject({
+          isArchived: true,
+          status: SessionStatusFactory.idle(),
+        });
+      expect((await manager.repo.getDocMeta(getSessionRoomId(opened.id)))?.meta).toEqual(opened);
+    }
+  );
+
+  it('serves bound Session tools from the daemon access verdict while workspace discovery is down', async () => {
+    admitSharedMachineManagement();
+    const list = vi
+      .spyOn(workspaceApi, 'listWorkspacesForToken')
+      .mockRejectedValue(new Error('Synthetic workspace discovery outage'));
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const authorized: DaemonWorkspaceAccess = {
+      status: 'authorized',
+      workspace: { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' },
+    };
+    let access: DaemonWorkspaceAccess = authorized;
+    const call = (name: string, args: Record<string, unknown>) =>
+      runWithDaemonWorkspace({ ...daemon, readAccess: () => access }, () =>
+        executeDaemonSessionTool(context(), name, args)
+      );
+    const text = (result: Awaited<ReturnType<typeof call>>) => result.content[0]?.text ?? '';
+
+    const listed = await call('lody_session_list', {});
+    expect(listed.isError, text(listed)).not.toBe(true);
+    expect(JSON.parse(text(listed))).toMatchObject({
+      items: [expect.objectContaining({ id: sessionId })],
+    });
+
+    // A confirmed revocation denies; it never falls back to cache or discovery.
+    access = { status: 'revoked' };
+    const denied = await call('lody_session_manage', {
+      action: 'archive',
+      arguments: { sessionId },
+    });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain('Workspace access was revoked');
+    expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta).toMatchObject({
+      isArchived: false,
+    });
+
+    // Restored access is used by the next call without restarting the daemon.
+    access = authorized;
+    const archived = await call('lody_session_manage', {
+      action: 'archive',
+      arguments: { sessionId },
+    });
+    expect(archived.isError, text(archived)).not.toBe(true);
+    expect(list).not.toHaveBeenCalled();
+
+    // Without a verdict the command still discovers, and keeps that failure visible.
+    access = { status: 'unknown' };
+    const undiscovered = await call('lody_session_list', {});
+    expect(undiscovered.isError).toBe(true);
+    expect(text(undiscovered)).toContain('Synthetic workspace discovery outage');
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves short Session ids, reports ambiguous prefixes and filters by pull request', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), name, args)
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+    const base = (await manager.repo.getDocMeta(getSessionRoomId(sessionId)))!.meta as SessionMeta;
+    const seed = async (id: string, extra: Partial<SessionMeta>) => {
+      await manager.repo.upsertDocMeta(getSessionRoomId(id as SessionId), {
+        ...base,
+        id: id as SessionId,
+        ...extra,
+      });
+    };
+    await seed('prefixunique-1111', {
+      title: 'Fix sharing',
+      branchName: 'fix/sharing',
+      pullRequests: [{ url: 'https://github.com/LodyAI/Lody/pull/4094', status: 'open' }],
+    });
+    await seed('prefixdup-aaaa', { title: 'First' });
+    await seed('prefixdup-bbbb', { title: 'Second' });
+
+    const status = await call('lody_session_status_many', {
+      sessionIds: ['prefixuniq', 'prefixdup'],
+    });
+    expect(status.isError, status.text).toBe(false);
+    expect(JSON.parse(status.text).items).toEqual([
+      expect.objectContaining({ ok: true, sessionId: 'prefixunique-1111' }),
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ code: 'SESSION_ID_AMBIGUOUS' }),
+      }),
+    ]);
+    expect(JSON.stringify(JSON.parse(status.text).items[1])).toContain('prefixdup-bbbb');
+
+    const history = await call('lody_session_history', { sessionId: 'prefixdup' });
+    expect(history.isError).toBe(true);
+    expect(history.text).toContain('SESSION_ID_AMBIGUOUS');
+
+    for (const pullRequest of [
+      { number: 4094 },
+      { url: 'https://github.com/lodyai/lody/pull/4094/' },
+    ]) {
+      const listed = await call('lody_session_list', { pullRequest });
+      expect(listed.isError, listed.text).toBe(false);
+      expect(JSON.parse(listed.text).items).toEqual([
+        expect.objectContaining({ id: 'prefixunique-1111', branch: 'fix/sharing' }),
+      ]);
+    }
+    const none = await call('lody_session_list', { pullRequest: { number: 409 } });
+    expect(JSON.parse(none.text).items).toEqual([]);
+  });
+
+  it('lists queued inputs and leaves them untouched when the target daemon cannot withdraw', async () => {
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const targetAccess = vi
+      .spyOn(sessionCommands, 'validateSessionChatTarget')
+      .mockImplementation(async (args) => {
+        if (args.delegatedRequester?.userId !== 'synthetic-collaborator')
+          throw new Error('Withdraw must check the invoking user');
+        return {} as never;
+      });
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await runWithDaemonWorkspace(
+        { ...daemon, readAccess: () => ({ status: 'authorized', workspace }) },
+        () => executeDaemonSessionTool(context(), name, args)
+      );
+      return { isError: result.isError === true, text: result.content[0]?.text ?? '' };
+    };
+    const targetId = await manager.createSession(machineId, 'custom', 'claude');
+    const doc = await manager.getOrCreateSessionDoc(targetId);
+    const backend = await createSessionBackend(doc, await doc.getMetaState());
+    await backend.appendHistoryTurn({
+      id: 'queued-1',
+      role: 'user',
+      status: 'pending',
+      author: { v: 1, kind: 'agent', sessionId, turnId: 'synthetic-turn', name: 'Codex' },
+      timestamp: '2026-11-03T01:00:00.000Z',
+      items: [{ type: 'text', text: 'Also run the edge-case suite before reporting.' }],
+      fileDiff: [],
+    } as never);
+
+    const listed = await call('lody_session_queue', { action: 'list', sessionId: targetId });
+    expect(listed.isError, listed.text).toBe(false);
+    expect(JSON.parse(listed.text).items).toEqual([
+      expect.objectContaining({
+        userTurnId: 'queued-1',
+        own: true,
+        sender: { kind: 'agent', sessionId },
+        preview: 'Also run the edge-case suite before reporting.',
+      }),
+    ]);
+
+    // The daemon fixture advertises no withdrawal capability, like an older release.
+    const withdrawn = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(JSON.parse(withdrawn.text)).toMatchObject({ outcome: 'error' });
+    const read = await backend.history.readTurn('queued-1');
+    expect(read.state === 'ready' ? read.turn.status : undefined).toBe(
+      JSON.parse(listed.text).items[0].status
+    );
+
+    // A capable remote daemon is asked as the invoking Turn's user, never the owner.
+    await manager.repo.upsertDocMeta(getMachineRoomId(machineId), {
+      protocolCapabilities: { sessionInputWithdraw: 1 },
+    } as never);
+    const asked: Array<Record<string, unknown>> = [];
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockImplementation(async (_args, run) =>
+      run({
+        requestSessionWithdrawInput: async (request: Record<string, unknown>) => {
+          asked.push(request);
+          return {
+            type: 'session/withdraw-input_response',
+            sessionId: targetId,
+            userTurnId: 'queued-1',
+            outcome: 'withdrawn',
+          };
+        },
+      } as never)
+    );
+    const remote = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(JSON.parse(remote.text)).toMatchObject({ outcome: 'withdrawn' });
+    expect(asked).toEqual([expect.objectContaining({ userId: 'synthetic-collaborator' })]);
+
+    // A user without access to the target is refused before anything is sent.
+    targetAccess.mockRejectedValue(new Error('Machine access denied for target'));
+    const denied = await call('lody_session_queue', {
+      action: 'withdraw',
+      sessionId: targetId,
+      userTurnId: 'queued-1',
+    });
+    expect(denied.isError).toBe(true);
+    expect(asked).toHaveLength(1);
+  });
+
+  it('binds daemon workspace resolution to the daemon identity and workspace', async () => {
+    const list = vi.spyOn(workspaceApi, 'listWorkspacesForToken');
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    let access: DaemonWorkspaceAccess = { status: 'authorized', workspace };
+    const auth = createAuth();
+    await runWithDaemonWorkspace({ ...daemon, readAccess: () => access }, async () => {
+      await expect(resolveWorkspaceOrThrow(auth)).resolves.toEqual(workspace);
+      await expect(resolveWorkspaceOrThrow(auth, 'synthetic')).resolves.toEqual(workspace);
+      // An explicit other workspace is refused, never replaced by the current one.
+      await expect(resolveWorkspaceOrThrow(auth, 'other-workspace')).rejects.toThrow(
+        'Daemon command workspace mismatch'
+      );
+      for (const other of [{ userId: 'other-user' }, { machineId: 'other-machine' as MachineId }])
+        await expect(resolveWorkspaceOrThrow({ ...auth, ...other }, workspaceId)).rejects.toThrow(
+          'restart the daemon'
+        );
+      access = { status: 'authorized', workspace: { ...workspace, id: 'other-workspace' } };
+      await expect(resolveWorkspaceOrThrow(auth, workspaceId)).rejects.toThrow(
+        'Daemon command workspace mismatch'
+      );
+      access = { status: 'unauthorized' };
+      await expect(resolveWorkspaceOrThrow(auth, workspaceId)).rejects.toThrow(
+        'CLI token is invalid or expired'
+      );
+    });
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it('executes a Session tool for another requester against the daemon replica', async () => {
+    const result = await runWithDaemonWorkspace(daemon, () =>
+      executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })
+    );
+    expect(result.isError).not.toBe(true);
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({ items: [] });
+  });
+
+  it('returns syncing uncertainty for a detached cold catalog and reads normally after its baseline', async () => {
+    await manager.cleanUp({ fast: true });
+    manager = await LoroDocumentManager.create(workspaceId, ownerUserId, createSilentLogger(), {
+      keepWorkspaceCatalogJoined: true,
+      streamsTokens: {
+        createTokenProvider: () => Effect.die(new Error('No real cloud token in this fixture')),
+        createTokenProviderLegacy: () => {
+          throw new Error('No real cloud token in this fixture');
+        },
+      },
+    });
+    daemon = { ...daemon, manager };
+    const remoteMachineId = 'cold-machine' as MachineId;
+    const id = getMachineFlockDocId(workspaceId, remoteMachineId);
+    await manager.repo.upsertDocMeta(getMachineRoomId(remoteMachineId), {
+      id: remoteMachineId,
+      name: 'Remote',
+      ownerUserId,
+    });
+    const roleDoc = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+    writeWorkspaceAgentRoleToFlock(roleDoc.flock, {
+      v: 1,
+      id: 'cold-role' as AgentRoleId,
+      name: 'Cold',
+      ownerUserId: 'synthetic-collaborator',
+      visibility: 'private',
+      machineId: remoteMachineId,
+      agentConfigId: 'cold-config' as AgentConfigId,
+      runConfig: { modelId: 'remote-model' },
+      revision: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const host = await LoroRepo.create({});
+    const network = makePromiseRepoNetwork();
+    let unsubscribe: (() => void) | undefined;
+    try {
+      const remote = await host.openFlockDoc(id);
+      writeAgentConfigToFlock(remote.flock, {
+        id: 'cold-config' as AgentConfigId,
+        machineId: remoteMachineId,
+        name: 'Remote',
+        description: '',
+        cliType: 'custom',
+        agentType: 'claude',
+        env: {},
+      });
+      await host.addTransport('streams', network.transport());
+      await host.joinMetaRoom();
+      await host.joinFlockDocRoom(id);
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+      const args = {
+        manager,
+        auth: createAuth(),
+        workspaceId,
+        delegatedRequester: { userId: 'synthetic-collaborator' },
+        initialCatalogWaitMs: 0,
+      };
+      const discovery = await runWithDaemonWorkspace(daemon, () => createResourceDiscovery(args));
+      expect(await discovery.list('agent_role')).toMatchObject({
+        sync: { state: 'syncing', retryable: true },
+        items: [{ availability: { state: 'unknown', reason: 'catalog_syncing' } }],
+      });
+      await expect(discovery.get('agent_config', 'cold-config')).rejects.toThrow('CATALOG_SYNCING');
+      const local = await manager.repo.openFlockDoc(id);
+      const received = testSignal();
+      unsubscribe = local.flock.subscribe(() => {
+        if (
+          getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(local.flock))[
+            'cold-config' as AgentConfigId
+          ]
+        )
+          received.resolve();
+      });
+      await manager.repo.addTransport('streams', network.transport());
+      await received.promise;
+      // A new request reads the same Promise replica; no forced catch-up is needed.
+      vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('No request sync'));
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('No request sync'));
+      const ready = await runWithDaemonWorkspace(daemon, () => createResourceDiscovery(args));
+      expect(await ready.get('agent_config', 'cold-config')).toMatchObject({
+        item: { id: 'cold-config', name: 'Remote' },
+      });
+    } finally {
+      unsubscribe?.();
+      await host.destroy();
+    }
+  });
+
+  it('validates Role creation against a cold remote config before publishing the review card', async () => {
+    const network = makePromiseRepoNetwork();
+    const host = await LoroRepo.create({});
+    try {
+      const remoteMachineId = 'remote-role-target' as MachineId;
+      const id = getMachineFlockDocId(workspaceId, remoteMachineId);
+      const room = await host.openFlockDoc(id);
+      writeAgentConfigToFlock(room.flock, {
+        id: 'remote-role-config' as AgentConfigId,
+        machineId: remoteMachineId,
+        name: 'Remote',
+        description: '',
+        cliType: 'custom',
+        agentType: 'claude',
+        env: {},
+      });
+      await host.addTransport('memory', network.transport());
+      await host.joinMetaRoom();
+      await host.joinFlockDocRoom(id);
+      await manager.repo.addTransport('memory', network.transport());
+      await manager.repo.upsertDocMeta(getMachineRoomId(remoteMachineId), {
+        id: remoteMachineId,
+        name: 'Remote',
+        ownerUserId,
+      });
+      const session = await manager.getOrCreateSessionDoc(sessionId, { historyBackend: 'loro' });
+      vi.spyOn(session, 'waitUntilSynced').mockResolvedValue(true);
+      vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+      vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug: 'synthetic',
+        role: 'owner',
+      });
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+      const result = await runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(context(), 'lody_agent_role', {
+          action: 'create',
+          arguments: {
+            requestId: 'cold-target',
+            name: 'Remote Role',
+            machineId: remoteMachineId,
+            agentConfigId: 'remote-role-config',
+          },
+        })
+      );
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({ pending: true });
+      const originalSync = manager.syncFlockDocOrThrow.bind(manager);
+      const originalFailure = new Error('Synthetic remote catalog outage');
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockImplementation((docId, options) =>
+        docId === id ? Promise.reject(originalFailure) : originalSync(docId, options)
+      );
+      const retry = await runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(context(), 'lody_agent_role', {
+          action: 'create',
+          arguments: {
+            requestId: 'cold-retry',
+            name: 'Retry Role',
+            machineId: remoteMachineId,
+            agentConfigId: 'remote-role-config',
+          },
+        })
+      );
+      expect(retry.isError).toBe(true);
+      expect(JSON.parse(retry.content[0]?.text ?? '{}')).toMatchObject({
+        ok: false,
+        error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+      });
+    } finally {
+      await host.destroy();
+    }
+  });
+
+  it.each([
+    ['create', 'metadata'],
+    ['create', 'workspace'],
+    ['create', 'target'],
+    ['update', 'metadata'],
+    ['update', 'workspace'],
+  ] as const)(
+    'keeps failed %s %s validation retryable without publishing a proposal',
+    async (action, failure) => {
+      const configId = await seedRoles();
+      const session = await manager.getOrCreateSessionDoc(sessionId, { historyBackend: 'loro' });
+      const backend = await createSessionBackend(session);
+      vi.spyOn(session, 'waitUntilSynced').mockResolvedValue(true);
+      vi.spyOn(manager, 'syncDocOrThrow').mockResolvedValue();
+      vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+      vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug: 'synthetic',
+        role: 'owner',
+      });
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+      let unavailable = true;
+      const original = new Error('Synthetic synchronization outage');
+      vi.spyOn(manager, 'syncMetaOrThrow').mockImplementation(async () => {
+        if (unavailable && failure === 'metadata') throw original;
+      });
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockImplementation(async (id) => {
+        if (
+          unavailable &&
+          id ===
+            (failure === 'target'
+              ? getMachineFlockDocId(workspaceId, machineId)
+              : getWorkspaceFlockDocId(workspaceId))
+        )
+          throw original;
+      });
+      const requestId = `${action}-${failure}`;
+      const args =
+        action === 'create'
+          ? { requestId, name: 'New role', machineId, agentConfigId: configId }
+          : { requestId, roleId: 'synthetic-collaborator', patch: { description: 'Updated' } };
+      const propose = () =>
+        runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), 'lody_agent_role', { action, arguments: args })
+        );
+      const failed = await propose();
+      expect(failed.isError).toBe(true);
+      expect(JSON.parse(failed.content[0]?.text ?? '{}')).toMatchObject({
+        error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+      });
+      expect(await backend.readTurn(`agent-role-proposal-${requestId}`)).toMatchObject({
+        state: 'missing',
+      });
+      unavailable = false;
+      expect(JSON.parse((await propose()).content[0]?.text ?? '{}')).toMatchObject({
+        pending: true,
+      });
+      expect(await backend.readTurn(`agent-role-proposal-${requestId}`)).toMatchObject({
+        state: 'ready',
+      });
+    }
+  );
+
+  it('hydrates a cold headless daemon and receives later Role changes without a discovery sync', async () => {
+    const docId = getWorkspaceFlockDocId(workspaceId);
+    const network = makePromiseRepoNetwork();
+    const host = await LoroRepo.create({});
+    const remote = await host.openFlockDoc(docId);
+    const remoteFlock = remote.flock;
+    const local = await manager.repo.openFlockDoc(docId);
+    const received = testSignal();
+    const updated = testSignal();
+    const reattached = testSignal();
+    const detach = local.flock.subscribe(() => {
+      const role = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(local.flock)).find(
+        (row) => row.id === 'remote-role'
+      );
+      if (role?.revision === 1) received.resolve();
+      if (role?.revision === 2) updated.resolve();
+      if (role?.revision === 3) reattached.resolve();
+    });
+    const detachCallbacks = [detach];
+    try {
+      writeWorkspaceAgentRoleToFlock(remoteFlock, {
+        v: 1,
+        id: 'remote-role' as AgentRoleId,
+        ownerUserId: 'synthetic-collaborator',
+        visibility: 'private',
+        name: 'Remote Role',
+        machineId,
+        agentConfigId: 'remote-config' as AgentConfigId,
+        runConfig: {},
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      await host.addTransport('memory', network.transport());
+      await host.joinMetaRoom();
+      await host.joinFlockDocRoom(docId);
+      await manager.repo.addTransport('memory', network.transport());
+      await received.promise;
+      const remoteMachineId = 'remote-machine' as MachineId;
+      const machineDocId = getMachineFlockDocId(workspaceId, remoteMachineId);
+      const machineRoom = await host.openFlockDoc(machineDocId);
+      const remoteConfig = {
+        id: 'remote-agent' as AgentConfigId,
+        machineId: remoteMachineId,
+        name: 'Remote Agent',
+        description: '',
+        cliType: 'custom' as const,
+        agentType: 'claude' as const,
+        env: {},
+      };
+      writeAgentConfigToFlock(machineRoom.flock, remoteConfig);
+      await host.joinFlockDocRoom(machineDocId);
+      await manager.repo.upsertDocMeta(getMachineRoomId(remoteMachineId), {
+        id: remoteMachineId,
+        name: 'Remote Machine',
+        ownerUserId,
+      });
+      const localMachine = await manager.repo.openFlockDoc(machineDocId);
+      const configReceived = testSignal();
+      const configUpdated = testSignal();
+      const detachMachine = localMachine.flock.subscribe(() => {
+        const config = getMachineFlockAgentConfigs(
+          readMachineFlockRowsFromFlock(localMachine.flock)
+        )[remoteConfig.id];
+        if (config?.name === 'Remote Agent') configReceived.resolve();
+        if (config?.name === 'Updated Agent') configUpdated.resolve();
+      });
+      detachCallbacks.push(detachMachine);
+      vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(new Error('No request sync'));
+      vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('No request sync'));
+      vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+      vi.spyOn(commandRuntime, 'resolveWorkspaceOrThrow').mockResolvedValue({
+        id: workspaceId,
+        name: 'Synthetic',
+        slug: 'synthetic',
+        role: 'owner',
+      });
+      vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+      const list = () =>
+        runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), 'lody_catalog', { action: 'agent_roles' })
+        );
+      expect(JSON.parse((await list()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: 'remote-role', revision: 1 },
+      ]);
+      const configs = () =>
+        runWithDaemonWorkspace(daemon, () =>
+          executeDaemonSessionTool(context(), 'lody_catalog', {
+            action: 'agent_configs',
+            arguments: {
+              machineId: remoteMachineId,
+            },
+          })
+        );
+      // A first read admits background reader interest; it never waits for catch-up.
+      await configs();
+      await configReceived.promise;
+      expect(JSON.parse((await configs()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: remoteConfig.id, name: 'Remote Agent' },
+      ]);
+      writeAgentConfigToFlock(machineRoom.flock, {
+        ...remoteConfig,
+        name: 'Updated Agent',
+      });
+      await configUpdated.promise;
+      expect(JSON.parse((await configs()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: remoteConfig.id, name: 'Updated Agent' },
+      ]);
+      const role = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(remoteFlock))[0];
+      if (!role) throw new Error('Missing Role');
+      writeWorkspaceAgentRoleToFlock(remoteFlock, {
+        ...role,
+        revision: 2,
+        name: 'Updated Role',
+        updatedAt: 2,
+      });
+      await updated.promise;
+      expect(JSON.parse((await list()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: 'remote-role', name: 'Updated Role', revision: 2 },
+      ]);
+      await manager.repo.removeTransport('memory');
+      writeWorkspaceAgentRoleToFlock(remoteFlock, {
+        ...role,
+        revision: 3,
+        name: 'Reattached Role',
+        updatedAt: 3,
+      });
+      // Cached results stay useful while detached; reattachment refreshes the same replica.
+      expect(JSON.parse((await list()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: 'remote-role', revision: 2 },
+      ]);
+      await manager.repo.addTransport('memory', network.transport());
+      await reattached.promise;
+      expect(JSON.parse((await list()).content[0]?.text ?? '{}').items).toMatchObject([
+        { id: 'remote-role', name: 'Reattached Role', revision: 3 },
+      ]);
+    } finally {
+      for (const unsubscribe of detachCallbacks) unsubscribe();
+      await host.destroy();
+    }
+  });
+
+  it('routes an MCP process Session tool to the daemon instead of executing it locally', async () => {
+    const handled: string[] = [];
+    const control = new LocalControlHandler({
+      machineId,
+      logger: createSilentLogger(),
+      dispatchSession: async () => {
+        throw new Error('Unexpected session control');
+      },
+      dispatchProject: async () => {
+        throw new Error('Unexpected project control');
+      },
+      dispatchMachineRpc: async (request) => {
+        if (request.method !== 'session/call-tool') throw new Error('Unexpected RPC');
+        handled.push(request.params.name);
+        return {
+          ok: true,
+          result: await runWithDaemonWorkspace(daemon, () =>
+            executeDaemonSessionTool(
+              { ...context(), sessionId: request.params.sessionId },
+              request.params.name,
+              request.params.arguments
+            )
+          ),
+        };
+      },
+    });
+    const socketPath =
+      process.platform === 'win32'
+        ? `\\\\.\\pipe\\lody-daemon-tools-${process.pid}`
+        : path.join(tempDir, 'control.sock');
+    const socketServer = http.createServer((request, response) => {
+      void (async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const result = await control.handle({
+          path: request.url ?? '',
+          rawBody: Buffer.concat(chunks).toString('utf8'),
+          requestId: 1,
+        });
+        response
+          .writeHead(result.status, { 'Content-Type': 'application/json' })
+          .end(JSON.stringify(result.payload));
+      })();
+    });
+    await new Promise<void>((resolve, reject) => {
+      socketServer.once('error', reject);
+      socketServer.listen(socketPath, resolve);
+    });
+    const mcpServer = buildLodyMcpServer();
+    const client = new Client({ name: 'daemon-tools-test', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await mcpServer.connect(serverTransport);
+      await client.connect(clientTransport);
+      const result = await runWithMcpSessionContext(
+        { ...context(), localControlSocketPath: socketPath },
+        () => client.callTool({ name: 'lody_operation', arguments: { action: 'list' } })
+      );
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      expect(handled).toEqual(['lody_operation']);
+    } finally {
+      await client.close();
+      await mcpServer.close();
+      await new Promise<void>((resolve, reject) =>
+        socketServer.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  });
+
+  it('lends the daemon replica to nested commands and refuses another workspace', async () => {
+    const auth = {
+      token: 'synthetic-token',
+      userId: ownerUserId,
+      userName: 'Owner',
+      userEmail: 'owner@example.test',
+      machineId,
+      machineName: 'Daemon',
+    };
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'owner' };
+    await runWithDaemonWorkspace(daemon, async () => {
+      expect(await withWorkspaceManager(auth, workspace, 'test', async (owner) => owner)).toBe(
+        manager
+      );
+      await expect(
+        withWorkspaceManager(auth, { ...workspace, id: 'other-workspace' }, 'test', async () => 1)
+      ).rejects.toThrow('Daemon command workspace mismatch');
+      await expect(
+        withWorkspaceManager({ ...auth, userId: 'other-user' }, workspace, 'test', async () => 1)
+      ).rejects.toThrow('restart the daemon');
+      await expect(
+        withWorkspaceManager(auth, workspace, 'test', async () => {
+          throw new Error('Synthetic command failure');
+        })
+      ).rejects.toThrow('Synthetic command failure');
+    });
+    // The borrowing command never cleans up the daemon's replica.
+    expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta).toMatchObject({
+      machineId,
+    });
+  });
+
+  it('delivers same-machine Cloud MCP session_chat locally without Streams sync while keeping remote, collaborator, and revoked guards strict', async () => {
+    const workspace = {
+      id: workspaceId,
+      name: 'Synthetic',
+      slug: 'synthetic',
+      role: 'owner' as const,
+    };
+    const requesterDoc = await manager.getOrCreateSessionDoc(sessionId, { historyBackend: 'loro' });
+    await requesterDoc.sessionData.commands.applyHistoryAction({
+      kind: 'upsert-turn',
+      turn: {
+        id: 'synthetic-turn',
+        role: 'user',
+        timestamp: '2026-11-21T06:00:00.000Z',
+        userId: ownerUserId,
+        author: { v: 1, kind: 'human', userId: ownerUserId },
+        items: [{ type: 'text', text: 'delegate work' }],
+        fileDiff: [],
+        status: 'processing',
+      },
+    });
+    const targetAgentConfigId = await manager.createAgentConfig(
+      'builtin',
+      'codex',
+      machineId,
+      'Local Codex'
+    );
+    const machineFlock = await manager.repo.openFlockDoc(
+      getMachineFlockDocId(workspaceId, machineId)
+    );
+    writeMachineFlockRowToFlock(machineFlock.flock, {
+      key: machineFlockKeys.acpCapability(targetAgentConfigId),
+      value: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        modes: [{ id: 'agent-auto-review', name: 'Auto' }],
+        models: [{ modelId: 'gpt-5', name: 'GPT-5' }],
+        fetchedAt: 1,
+      },
+    });
+    const targetSessionId = '33333333-3333-4333-8333-333333333333' as SessionId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(targetSessionId), {
+      id: targetSessionId,
+      workspaceId,
+      machineId,
+      userId: ownerUserId,
+      agentConfigId: targetAgentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      title: 'Local Target',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const seededTargetDoc = await manager.getOrCreateSessionDoc(targetSessionId, {
+      historyBackend: 'loro',
+    });
+    const seededTargetBackend = await createSessionBackend(seededTargetDoc);
+    await seededTargetBackend.applyHistoryAction({
+      kind: 'upsert-turn',
+      turn: {
+        id: 'prior-target-turn',
+        role: 'user',
+        timestamp: '2026-11-21T05:59:00.000Z',
+        userId: ownerUserId,
+        author: { v: 1, kind: 'human', userId: ownerUserId },
+        items: [{ type: 'text', text: 'earlier work' }],
+        fileDiff: [],
+        status: 'handled',
+        inputConfig: {
+          cliType: 'builtin',
+          agentType: 'codex',
+          modelId: 'gpt-5',
+          mcpServerIds: ['inherited-mcp'],
+        },
+      },
+    });
+    const remoteMachineId = 'remote-chat-machine' as MachineId;
+    const remoteTargetId = '44444444-4444-4444-8444-444444444444' as SessionId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(remoteTargetId), {
+      id: remoteTargetId,
+      workspaceId,
+      machineId: remoteMachineId,
+      userId: ownerUserId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      title: 'Remote Target',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(manager, 'syncMetaOrThrow').mockRejectedValue(
+      new Error('ECONNRESET: Streams offline')
+    );
+    vi.spyOn(manager, 'syncDocOrThrow').mockRejectedValue(new Error('ECONNRESET: Streams offline'));
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(
+      new Error('ECONNRESET: Streams offline')
+    );
+    const dispatched: Array<{
+      sessionId: SessionId;
+      inputId?: string;
+      modelId?: string;
+      mcpServerIds?: string[];
+    }> = [];
+    let accessVerdict:
+      | { status: 'authorized'; workspace: typeof workspace }
+      | { status: 'revoked' } = { status: 'authorized', workspace };
+    let drivingUserId = ownerUserId;
+    const cloudDaemon = {
+      ...daemon,
+      readInvocation: (id: SessionId) => ({
+        ...daemon.readInvocation(id),
+        requesterUserId: drivingUserId,
+      }),
+      readAccess: () => accessVerdict,
+      host: {
+        readActiveTurnId: () => undefined,
+        steerSession: async () => {
+          throw new Error('Unexpected steer');
+        },
+        dispatchSession: async (
+          targetId: SessionId,
+          input?: {
+            inputId: string;
+            userId: string;
+            config?: { modelId?: string; mcpServerIds?: string[] };
+          }
+        ) => {
+          dispatched.push({
+            sessionId: targetId,
+            inputId: input?.inputId,
+            modelId: input?.config?.modelId,
+            mcpServerIds: input?.config?.mcpServerIds,
+          });
+        },
+      },
+    };
+
+    const sent = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'local-cloud-chat-1',
+        sessionId: targetSessionId,
+        prompt: 'run local work',
+      })
+    );
+    expect(sent.isError, JSON.stringify(sent)).not.toBe(true);
+    const parsedSent = JSON.parse(sent.content[0]?.text ?? '{}');
+    expect(parsedSent).toMatchObject({
+      id: 'local-cloud-chat-1',
+      state: 'active',
+      items: [{ status: 'active', inputDurable: true, target: { sessionId: targetSessionId } }],
+    });
+    expect(dispatched).toEqual([
+      {
+        sessionId: targetSessionId,
+        inputId: parsedSent.items[0].target.userTurnId,
+        modelId: 'gpt-5',
+        mcpServerIds: ['inherited-mcp'],
+      },
+    ]);
+    const targetDoc = await manager.getOrCreateSessionDoc(targetSessionId);
+    const targetMeta = await targetDoc.getMetaState();
+    expect(targetMeta?.latestUserMsgId).toBe(parsedSent.items[0].target.userTurnId);
+
+    const retried = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'local-cloud-chat-1',
+        sessionId: targetSessionId,
+        prompt: 'run local work',
+      })
+    );
+    expect(retried.isError, JSON.stringify(retried)).not.toBe(true);
+    expect(JSON.parse(retried.content[0]?.text ?? '{}')).toMatchObject({
+      id: 'local-cloud-chat-1',
+      state: 'active',
+    });
+
+    const created = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_create', {
+        operationId: 'local-cloud-create-1',
+        prompt: 'start local child',
+        agentConfigId: targetAgentConfigId,
+        modelId: 'gpt-5',
+        useCurrentSessionAsParent: true,
+      })
+    );
+    expect(created.isError, JSON.stringify(created)).not.toBe(true);
+    const parsedCreated = JSON.parse(created.content[0]?.text ?? '{}');
+    expect(parsedCreated).toMatchObject({
+      id: 'local-cloud-create-1',
+      state: 'active',
+      items: [{ status: 'active', inputDurable: true }],
+    });
+    expect(dispatched.at(-1)).toMatchObject({
+      sessionId: parsedCreated.items[0].target.sessionId,
+      inputId: parsedCreated.items[0].target.userTurnId,
+      modelId: 'gpt-5',
+    });
+
+    const missingConfigResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_create', {
+        operationId: 'local-cloud-create-missing-config',
+        prompt: 'start with unseen config',
+        agentConfigId: 'unseen-remote-agent-config',
+        useCurrentSessionAsParent: true,
+      })
+    );
+    expect(missingConfigResult.isError).toBe(true);
+    expect(JSON.parse(missingConfigResult.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+
+    const missingModelResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_create', {
+        operationId: 'local-cloud-create-missing-model',
+        prompt: 'start with unseen model',
+        agentConfigId: targetAgentConfigId,
+        modelId: 'unseen-model-next',
+        useCurrentSessionAsParent: true,
+      })
+    );
+    expect(missingModelResult.isError).toBe(true);
+    expect(JSON.parse(missingModelResult.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+
+    const remoteResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'remote-cloud-chat-1',
+        sessionId: remoteTargetId,
+        prompt: 'run remote work',
+        mcpServerIds: [],
+      })
+    );
+    expect(remoteResult.isError).toBe(true);
+    expect(JSON.parse(remoteResult.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+
+    drivingUserId = 'collaborator-user-id';
+    const collaboratorResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'collaborator-cloud-chat-1',
+        sessionId: targetSessionId,
+        prompt: 'collaborator chat',
+        mcpServerIds: [],
+      })
+    );
+    expect(collaboratorResult.isError).toBe(true);
+    expect(JSON.parse(collaboratorResult.content[0]?.text ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+    });
+
+    drivingUserId = ownerUserId;
+    accessVerdict = { status: 'revoked' };
+    const revokedResult = await runWithDaemonWorkspace(cloudDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_session_chat', {
+        operationId: 'revoked-cloud-chat-1',
+        sessionId: targetSessionId,
+        prompt: 'should fail',
+        mcpServerIds: [],
+      })
+    );
+    expect(revokedResult.isError).toBe(true);
+  });
+
+  it('rejects calls outside the daemon workspace scope', async () => {
+    await expect(
+      executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })
+    ).rejects.toThrow('Session tool scope mismatch');
+    await expect(
+      runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(
+          { ...context(), workspaceId: 'other-workspace' },
+          'lody_operation',
+          { action: 'list' }
+        )
+      )
+    ).rejects.toThrow('Session tool scope mismatch');
+    await expect(
+      runWithDaemonWorkspace(daemon, () =>
+        executeDaemonSessionTool(
+          { ...context(), sessionId: 'missing-session' as SessionId },
+          'lody_operation',
+          { action: 'list' }
+        )
+      )
+    ).rejects.toThrow('Requester Session does not belong to this machine');
+    // A process outliving its Turn cannot keep using the Session's tools.
+    await expect(
+      runWithDaemonWorkspace(
+        {
+          ...daemon,
+          readInvocation: (id) => ({
+            type: 'session/active-invocation-context',
+            sessionId: id,
+            active: false,
+          }),
+        },
+        () => executeDaemonSessionTool(context(), 'lody_operation', { action: 'list' })
+      )
+    ).rejects.toThrow('Session tool requires an active Turn');
+  });
+});

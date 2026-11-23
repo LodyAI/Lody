@@ -1,30 +1,28 @@
-import { BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron'
+import { isTrustedProductRendererUrl } from './product-renderer-url'
+import { productWindows } from '../window-state'
 
-export function assertMainWindowSender(
-  event: IpcMainInvokeEvent,
-  getMainWindow: () => BrowserWindow | null
+export function assertProductWindowSender(
+  event: IpcMainInvokeEvent | IpcMainEvent,
+  channel?: string
 ): void {
-  const mainWindow = getMainWindow()
-  const senderUrl = event.senderFrame?.url
-  const devRendererUrl = process.env['ELECTRON_RENDERER_URL']
-  let hasAllowedUrl = false
-  try {
-    const parsedSender = new URL(senderUrl ?? '')
-    hasAllowedUrl = devRendererUrl
-      ? parsedSender.origin === new URL(devRendererUrl).origin
-      : parsedSender.protocol === 'file:' &&
-        parsedSender.pathname.endsWith('/out/renderer/index.html')
-  } catch {
-    hasAllowedUrl = false
-  }
+  const mainWindow = BrowserWindow.fromWebContents(event.sender)
+  const registered = mainWindow && productWindows.has(mainWindow)
+  const hasAllowedUrl = isTrustedProductRendererUrl(event.senderFrame?.url, {
+    mainDirectory: __dirname,
+    platform: process.platform,
+    devRendererUrl: process.env['ELECTRON_RENDERER_URL'],
+    channel
+  })
 
   if (
+    !registered ||
     !mainWindow ||
     mainWindow.isDestroyed() ||
     event.sender !== mainWindow.webContents ||
     event.senderFrame !== event.sender.mainFrame ||
     !hasAllowedUrl
   ) {
-    throw new Error('Rejected auth IPC from an untrusted renderer')
+    throw new Error('Rejected IPC from an untrusted renderer')
   }
 }

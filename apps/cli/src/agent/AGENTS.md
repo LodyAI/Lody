@@ -1,220 +1,131 @@
-# apps/cli/src/agent — Index
+# apps/cli/src/agent
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-ACP client side of the CLI (spawning and talking to coding agents). Protocol reference:
-context/acp-protocol.md; per-agent edit-payload
-quirks: context/acp-agent-edit-evidence.md;
-adapter source repos: [apps/cli/AGENTS.md](../../AGENTS.md). Where updates go after they
-arrive: context/message-flow.md "Upstream".
+ACP client side of the CLI. File map: [README.md](README.md).
+Protocol: context/acp-protocol.md; edit-payload quirks:
+context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AGENTS.md).
 
-- `agent-client.ts` — the ACP connection: initialize/session lifecycle, client
-  capabilities (fs, elicitation), permission/fs request handling, update callbacks.
-  Lody ACP extensions are consumed through `acp-extension-core`: capability discovery
-  lives at `agentCapabilities._meta.lody`, session metadata at `_meta.lody`, and custom
-  methods use the Core `_lody/...` names. Provider-specific and pre-Core readers belong
-  only in the central compatibility adapter and must not leak into session consumers;
-  normalized Core capabilities remain provider-neutral.
-  Builtin Grok must default `clientCapabilities.terminal` to false so its adapter
-  uses Grok's local terminal runner. Its ACP terminal request encodes a full shell
-  command line in `command` with empty `args`, which is not the executable-plus-argv
-  contract that Lody's sandboxed terminal manager preserves for other agents.
-  Config selected by the driving turn travels on every session establishment as
-  `_meta.lody.sessionConfig`; provider-specific startup translation belongs in the
-  ACP adapter. `session/set_config_option` remains the live-session switch, and a
-  successful selection becomes the startup state of a later replacement.
-  Goal snapshots use the Core `_meta.lody.goal` contract and epoch-second field names;
-  convert them to the durable millisecond fields at this boundary. Normalize `limited`
-  to the legacy durable `blocked` status.
-  The built-in `lody` MCP server has TWO transports. Agents whose initialize
-  response advertises `mcpCapabilities.http` get a shared HTTP endpoint served
-  by ONE host subprocess per daemon (`src/mcp/lody-mcp-http-host.ts`, supervised
-  by `src/mcp/lody-mcp-http-server.ts`); everything else keeps the per-session
-  stdio entry. INVARIANT: MCP tools must not run inside the daemon process —
-  they do synchronous SQLite work (`orchestration/operation-store.ts` restricts
-  that to subprocess boundaries) and one-shot workspace-manager work that would
-  stall the daemon event loop. The supervisor keeps token+port stable across
-  host restarts because sessions bake the endpoint into their MCP config at
-  creation; while the host is down, new sessions silently fall back to stdio.
-  HTTP security: loopback bind + bearer token, and on Linux the peer socket's
-  uid is proven via `/proc/net/tcp{,6}` (full four-tuple + ESTABLISHED) and an
-  unprovable peer is REJECTED — the token leaks through the agent runtime's
-  `/proc` cmdline there, so fail-open would void it. The host refuses to start
-  when `/proc/net/tcp` is unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio.
-  The stdio config remains an explicit environment allowlist, not ordinary
-  child-process inheritance. Keep the public CLI deployment endpoints
-  (`LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, `LODY_SERVER_URL`) in the stdio config so
-  cloud MCP session orchestration uses the same deployment as the daemon; local
-  platform assembly clears those values before agent startup, so a local child
-  cannot inherit Lody cloud endpoints (the HTTP host inherits the daemon's own
-  environment directly). Never add CLI credentials or other secrets to the
-  stdio config; MCP processes load the daemon owner's local credential through
-  the existing CLI auth path.
-  Builtin DeepSeek Harness mounts this stdio server per ACP session through the
-  extension's native `dsh-mcp-client` bridge. Keep passing the same config on
-  initial and replacement sessions; the bridge owns namespace collision handling
-  and releases the MCP child with `session/close` or Agent teardown.
-  The same session entry carries the driving Turn's `taskToolsEnabled` bit (HTTP header or
-  stdio allowlisted environment). Missing/false keeps the Lody MCP server itself mounted but
-  removes every `lody_task_*` tool; a replacement or restored ACP session must preserve that bit.
-  Workspace MCP resolution is TWO phases and must stay that way:
-  `loadExternalMcpServers` (catalog sync + document read) is invoked BEFORE
-  `initialize` so its remote round trip overlaps spawn and the handshake, and
-  the selector it resolves to applies the agent's advertised `http` capability
-  at `newSession`. Awaiting the load between `initialize` and `newSession` puts
-  a remote sync — up to its 5s budget — on the critical path of every session
-  establishment while the agent process sits idle.
-  Acknowledged steer is inject-or-refuse, and `AgentSteerNotDeliveredError` marks
-  ONLY the provable refusal: a local pre-write failure, or the agent's own
-  JSON-RPC `invalid request` answer. A closed connection, a dead agent process, or
-  an internal error may have left the prompt inside the live turn — the caller
-  re-sends an undelivered steer, so widening that classification sends the user's
-  message twice. The applied-waiter must also wait for the steer request's own
-  answer before giving up on the upstream turn's response: the Codex adapter drains
-  session notifications before refusing, so the turn's response routinely wins that
-  race and would otherwise mask the refusal.
-- `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
-  `newSession`/`loadSession` share `acp-session-start-gate.ts` (default 2,
-  `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Unbounded concurrent Codex starts
-  each spawn a lody.exe adapter, a Codex app-server, and a lody.exe MCP child;
-  they contend on `~/.codex` and freeze every in-flight session until Lody
-  restarts. Do not add another ACP start path that bypasses the gate.
-- `acp-session-start-gate.ts` — process-wide start semaphore used by
-  `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
-- `setting.ts` — launch resolution. Every builtin requires
-  `resolveACPProcessLaunchAsync()`: Claude/Codex/Kimi/Grok may install Lody-managed
-  native or Node-package runtimes, while DeepSeek Harness publishes an immutable
-  Cordis composition before its npx launch.
-- `deepseek-harness-runtime.ts` is the standard Harness-home (`DSH_HOME`, then `~/.dsh`),
-  atomic-config, and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It
-  publishes Lody's versioned ACP composition beside (without replacing) user Harness config and
-  launches the pinned explicit package closure through `dsh-acp-demo`; do not replace it with the
-  all-in-one `@deepseek-ai/dsh` package while that package's unpublished telemetry dependency makes
-  fresh installs fail. CLI production and dev builds copy the extension's pinned official presets
-  beside `deepseek-acp.js`; the generated roster also discovers `$DSH_HOME/.agent-presets`. The
-  adapter must
-  apply model and reasoning selection through the Agent-scoped request waterfall, permissions
-  through Harness permission presets, and `agent_preset` through `AgentPresets.mount/recompose`;
-  do not implement selectors as UI-only state. Presets may change only before the first prompt.
-  ACP stdio/HTTP MCP servers are mounted dynamically per Agent and therefore belong in the
-  extension adapter, not the immutable host composition.
-  Credentials remain in the agent config environment (`DEEPSEEK_API_KEY`, optional
-  `DEEPSEEK_BASE_URL`); never write them into the generated config. This is not a
-  managed runtime and must not enter runtime download, prefetch, override, or
-  interactive-auth flows.
-  Harness JSONL roots are single-encoding stores. Before publishing the profile,
-  inspect only the fixed artifact names: an empty or zstd root uses upstream's
-  `zstd`, a raw-only legacy root keeps `none`, and a mixed root fails with both
-  paths named. Detection and failure are read-only; never migrate, rename, or
-  delete user session artifacts during launch or cleanup.
-- `managed-agent-runtime.ts` — pinned Codex/Claude Code/Grok native and Kimi Node-package `.tar.zst`
-  artifacts, checksums, resumable downloads, the active installation profile's
-  `agent-binaries` layout, and best-effort `bin` symlinks for complete native CLIs.
-  Completed caches written before metadata schema v1 remain reusable through a separate strict
-  legacy schema; normalize their old `name`/`version`/`platform` fields in memory and infer only
-  the trusted runtime definition's command and host requirement. Do not loosen the current schema
-  or accept unknown legacy fields.
-  Codex version/archive pins come only from `codex-runtime-manifest.json`, which the
-  outer `mirror:agent-runtimes` operator command atomically refreshes from the exact
-  official GitHub Release when the adapter's `@openai/codex` dependency changes.
-  The CLI must reject a dependency/manifest version mismatch; never restore copied
-  Codex checksum constants alongside the manager.
-  Claude SDK/runtime archive pins likewise come only from
-  `claude-runtime-manifest.json`. The mirror derives its sources and integrity from
-  the adapter lockfile, regenerates all eight zstd archives after an SDK/runtime
-  version change, verifies the canonical production objects, and then atomically
-  updates the manifest. Do not duplicate Claude archive pins in the manager.
-  Grok launches the pinned `acp-extension-grok` compatibility adapter with an
-  official, unmodified R2-managed runtime in `GROK_PATH`. The submodule owns the
-  private-wire contract and minimum official version; it is never the source for
-  production runtime binaries.
-  Kimi is different: `packages/acp-extension-kimi` owns the Lody-maintained runtime
-  source and implements the shared `acp-extension-core` contract. Release automation must build
-  that isolated workspace into the minimal checksummed Node-package artifact; the
-  desktop still downloads the artifact and must not depend on the submodule workspace.
-  Custom methods stay capability-gated, use the `_lody/` namespace, and never carry
-  provider credentials or raw authentication output.
-  Its artifact base URL is injected from `CloudPort.runtimeArtifacts`; do not read
-  deployment environment or derive the channel inside the runtime manager. Local
-  and cloud process assembly share the public R2-backed default owned by
-  `@lody/platform`; `LODY_RUNTIME_BASE_URL` is an explicit mirror override. Repacked Node packages
-  intentionally do not publish a convenience link because non-ACP subcommands may be omitted.
-  Concurrent installs share one internal download but keep independent consumer leases;
-  cancelling one caller must not stop other consumers, while cancelling the last caller aborts
-  cancellable fetch, checksum, and extraction work. A fully validated install that has already
-  crossed the final complete-marker commit may remain as a safe cache hit even though that caller
-  observes cancellation. An immediate retry waits for an earlier aborted generation's scratch
-  cleanup before starting a new generation for the same artifact.
-- `acp-authentication.ts` — trusted builtin authentication lifecycle. Kimi runs
-  `acp --login`; Grok runs the official `login --device-auth`; Claude Code runs
-  the official `auth login --claudeai`
-  subscription flow; Codex always runs the official `login --device-auth`
-  ChatGPT flow so Web can complete authentication against a remote machine.
-  `acp-authentication-output.ts` incrementally converts bounded provider output
-  into allowlisted authorization URLs, device codes, expiry, and Claude's
-  optional browser-returned code input. Provider processes own credentials;
-  authorization data must never enter logs, chat, Flock, or config. Remote Web
-  transport stores only an ephemeral-ECDH/AES-GCM envelope in the 24-hour request
-  stream; the target machine keeps the recipient private key in memory and decrypts
-  immediately before stdin. Local UI and CLI state is in memory. Raw output progress remains only as a temporary
-  old-renderer compatibility field.
-  Claude capability refreshes first run its native status command so missing
-  credentials become structured auth-required state before adapter startup;
-  explicit environment-authenticated paths bypass the native status check and
-  remain under adapter validation. Grok and Codex authentication requirements come from
-  ACP session creation because `codex login status` cannot account for custom
-  model providers with `requires_openai_auth = false`. The per-agent slot covers async
-  launch preparation as well as the child process, so cancel and concurrent start cannot race spawn;
-  timeout/cancel terminate and release the slot for Retry.
-- `acp-binary-manager.ts` — registry binary-distribution agents. It follows the same
-  consumer-lease cancellation rule as managed runtimes: one shared install, abort only after
-  the last consumer leaves, and never reuse an aborted generation while it is cleaning up. Tar
-  and zip extraction must attach to the shared abort signal. ZIP cancellation destroys the
-  current yauzl endpoint, awaits the relay/output pipeline, and fences cleanup on the underlying
-  random-access reader's real close/error event. Do not await the yauzl endpoint itself: its
-  overridden `destroy()` does not settle. Network failures retain the URL plus nested transport
-  cause for diagnostics.
-- `npx-cache.ts` — npx cache isolation + poisoning detection/purge for resilient
-  registry launches. ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE`
-  to the active installation profile's `npm-cache` so user `~/.npm`
-  permission/corruption issues cannot stop
-  agent startup. Automatic `_npx`/`_cacache` cleanup is only allowed for that
-  Lody-owned cache, never arbitrary user npm caches.
-- `acp-capabilities.ts` / `acp-startup-monitor.ts` / `acp-analytics.ts` — capability
-  cache, startup health, analytics. Default managed builtin Codex/Claude/Kimi/Grok capabilities
-  come from `getStaticBuiltinAcpCapabilities()` in `@lody/shared` only for
-  `cliType: 'builtin'` without runtime overrides, so onboarding/settings/chat can
-  render mode/model/config options without spawning adapters or downloading
-  managed runtimes. DeepSeek's static entry mirrors the bundled adapter's model,
-  reasoning-effort, and permission selectors. Registry/custom agents and builtin
-  runtime overrides still need the actual ACP agent.
-  `machine/acp-capabilities-refresh` is always a real
-  runtime probe: it disables static builtin capabilities, goes through
-  `resolveRuntimeForLaunch()` for managed runtimes, then writes the machine capability
-  cache keyed by `agentConfigId` and the runtime version actually launched. The
-  resolver selects the pinned target, then the most recently installed reusable runtime,
-  and blocks on `ensureCurrentRuntime()` only when no runtime is installed.
-  `ManagedRuntimeUpdateCoordinator` serially downloads stale targets in the background
-  and never hot-swaps a running ACP process. Its cancellation signal crosses native auth status,
-  managed/registry download, and adapter startup; an aborted probe must not update the cache.
-  Requests and responses carry that id so configs
-  sharing a provider remain isolated. Real session creation also normalizes its `NewSessionResponse` through
-  `acp-capability-normalization.ts`; the session execution service schedules a
-  non-blocking cache update before the first prompt. Machine Flock writes ignore
-  `fetchedAt` when comparing entries, so unchanged runtime capabilities do not
-  commit or sync.
-- `login-shell-env.ts` — login-shell env capture for spawned agents.
-- Builtin Claude owns session title generation through ACP
-  `session_info_update`; `AgentClient` forwards those titles and `MessageHandler`
-  stores them only after `sanitizeLodyInternalInstructions`. It must not start
-  `title-generator.ts`'s isolated ACP session. Builtin Codex still uses the
-  isolated generator, but its adapter tags every pushed title with
-  `_meta.lody.titleSource`: accept only `explicit` thread names and ignore its
-  first-prompt `fallback`. Codex title-agent chunks require
-  `_meta.lody.messagePhase === 'final_answer'`; untyped chunks, provider error/warning
-  payloads, and internal-instruction tails are not title candidates. Each isolated
-  run owns and removes a unique temp directory, and concurrent session-title /
-  branch-name work reuses one in-flight result. The shared
-  `usesAcpProvidedSessionTitle()` predicate hides obsolete provider title
-  settings only for Claude. Other providers use `title-generator.ts` /
-  `response-utils.ts` for session titles.
+## `agent-client.ts`
+
+- Consume Core extensions via `agentCapabilities._meta.lody`, session `_meta.lody`, and
+  `_lody/...`. Provider compatibility stays in `lody-acp-extension.ts` and `antigravity-*.ts`; consumers stay neutral.
+- Grok Always Approve uses `allow_once`, never lasting grants; pending calls drain through
+  the durable permission flow on accepted config changes. Questions remain interactive.
+- Builtin Grok must default `clientCapabilities.terminal` to false.
+- ACP file reads map native `ENOENT` to `RequestError.resourceNotFound`; preserve
+  other failures and session validation rather than returning empty content.
+- Send the driving turn's model/config on session establishment as `_meta.lody.sessionConfig`;
+  provider-specific startup translation belongs in the ACP adapter. `session/set_config_option`
+  stays the live-session switch, and a successful selection becomes a later replacement's
+  startup state.
+- Cache session `_meta.lody.modelReasoningEfforts`; Codex `model[effort]` only.
+- Project config from setup, `set_config_option` responses, and `config_option_update`.
+  Present `configOptions` (including `[]`) replaces the snapshot; only omission falls back
+  to the requested value, updating both replacement startup state and `currentValue`.
+- Convert Core `_meta.lody.goal` epoch seconds to durable milliseconds here, and normalize
+  `limited` to the durable `blocked` status.
+- Keep both built-in `lody` MCP transports. INVARIANT: MCP tools must not run inside the
+  daemon process.
+- MCP HTTP: loopback bind plus bearer token; on Linux prove the peer socket's uid via
+  `/proc/net/tcp{,6}`, REJECT an unprovable peer, and refuse to start when it is
+  unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. Stdio forwards nonempty `LODY_PLATFORM`, `LODY_DATA_DIR`, `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL` and `LODY_SERVER_URL`. Discover control lazily unless `LODY_MCP_SOCKET_PATH` overrides it. Local assembly clears cloud endpoints before startup; never forward credentials or secrets.
+- Pass the same MCP config on initial and replacement DeepSeek Harness sessions.
+- Workspace MCP resolution starts before `initialize` to overlap the handshake.
+  Before the first remote baseline, complete selected rows may start locally with a
+  config warning. Missing selected rows preserve the typed cold error and may reload
+  once before provider-session establishment; still missing fails initialization.
+  Check completeness before preparing local authentication so a recheck cannot repeat it.
+- Acknowledged steer ends `applied`, `not-applied`, or `unknown`. Only adapter proof maps
+  `not-applied`; transport/process ambiguity stays `unknown`. Await the request answer even
+  after the turn response; Session execution never classifies provider errors.
+
+## Launch and runtimes
+
+- `acp-runner.ts`: spawn + initialize + `newSession`/`loadSession` go through
+  `acp-session-start-gate.ts` (default 2, `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Never bypass
+  that gate.
+- Builtins use `setting.ts`'s `resolveACPProcessLaunchAsync()`. [Codex profiles](../../../../specs/codex-account-profiles.md)
+  forbid upstream keys in shared/child env. Process records delay deletion, never
+  restrict same-profile concurrency.
+  Catalog scans skip unreadable profiles with one warning per file; selected-account validation stays strict.
+- `deepseek-harness-runtime.ts` is not managed: no download/prefetch/override/auth.
+  Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
+  npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.
+  DSH pins Node checked in child cwd; no Electron fallback.
+  Provider ID isolates homes; preserve user YAML/settings and legacy history:
+  [contract](../../../../specs/deepseek-harness-settings.md).
+  Credentials stay in env. Models/reasoning use the Agent request waterfall;
+  permissions use Harness presets. `agent_preset` uses `AgentPresets.mount/recompose`
+  only before the first prompt. Per-Agent ACP stdio/HTTP MCP belongs in the adapter.
+  Never modify JSONL; mixed roots fail naming both paths.
+- `managed-agent-runtime.ts`: native pins live only in `<name>-runtime-manifest.json`.
+  Treat version mismatches and metadata failing the current schema as misses; never weaken the schema.
+  Read Claude metadata from the adapter's installed SDK; the CLI dev SDK may differ.
+  Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
+  methods stay capability-gated. Inject the artifact base URL from
+  `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.
+  `LODY_RUNTIME_BASE_URL` is an explicit mirror override only.
+- Invalid caches remain unlaunchable; status reports absence with a warning. Repairs publish
+  verified generations without moving existing paths. Status, install and launch share selection:
+  filter base and completed generations by current pins and host compatibility, then rank them.
+  Cleanup preserves unreadable originals and generation trees while reader lifetimes are unknown.
+  Downloads stop after 60 seconds idle;
+  progressing transfers have no total deadline, and later calls resume retained partial bytes.
+- Install cancellation, here and in `acp-binary-manager.ts`: concurrent installs share one
+  download but keep independent consumer leases; cancelling one caller must not stop others, and
+  only the last aborts fetch, checksum, and extraction. An immediate retry waits for an aborted
+  generation's scratch cleanup and never reuses it meanwhile. Tar and ZIP extraction must attach
+  to the shared abort signal; ZIP cancellation destroys the yauzl endpoint, awaits the
+  relay/output pipeline, and fences cleanup on the reader's real close/error event — never await
+  the yauzl endpoint, whose `destroy()` does not settle.
+- Antigravity follows its [runtime contract](README.md#managed-antigravity).
+- Builtin Dimcode is user-installed.
+- `npx-cache.ts`: ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE` to the active
+  profile's `npm-cache`. Automatic `_npx`/`_cacache` cleanup is allowed ONLY for that Lody-owned
+  cache. Cold initialize timeout never authorizes clearing `_cacache`; whole-cache
+  recovery requires a corruption signature. [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
+
+## `acp-authentication.ts`
+
+- The per-agent slot is daemon-wide across workspace runtimes and covers preparation and the child; cancel/timeout wins through cleanup. Retain a child whose exit is unconfirmed until its exit event. Stop the process before success.
+- Authorization data must never enter logs, chat, Flock, or config; raw provider output and
+  secret defaults must never reach retained progress.
+- Claude capability refresh runs its native status command first so missing credentials surface
+  as structured auth-required state before adapter startup; explicit environment-authenticated
+  paths bypass it.
+- Protocol-authenticated providers advertise no terminal capability; only agent-driven methods run.
+  Reject deprecated `env_var`; `terminal` needs a real Machine RPC interactive bridge.
+  Keep method lists/elicitations on the original request, one pending interaction at a time.
+  Replies carry interaction ids and use encrypted remote authentication-input. Bound URL schemes, sizes,
+  ids, labels, options, and defaults before they enter progress, under a shared serialized-byte
+  budget for the form.
+- A protocol agent's `initialize` methods are the sign-in entry point; record them on the
+  Provider's capability row and let the reader pick one.
+- Machine RPC may name only a persisted Provider `configId`; the daemon freezes
+  machine/CLI/agent/launch/env/runtime fields before spawning, capability refresh included, and
+  later replies can never replace that launch target.
+
+## Capabilities and titles
+
+- Static builtin capabilities exclude runtime overrides. Cache probes by `agentConfigId`
+  and launched version; requests/responses carry that id. Only probes replace Provider
+  command previews; actual lists stay in Session control state. Aborted probes never
+  write, and updates never hot-swap ACP. Flock ignores `fetchedAt`.
+- Capability probes own unique temporary workdirs, never inherited cwd/projects. Remove
+  after shutdown even on failure/cancellation; removal errors never replace probe
+  outcomes. Keep provider homes unchanged.
+- Core `sessionTitle` v1 owns titles after init except builtin Codex.
+  Lody owns Codex titles/settings; never the adapter. Accept `generated`/`explicit`,
+  not `fallback`/`unset`. Untagged titles: only legacy managed Claude/Grok without overrides.
+  Strip internal instructions; keep user titles.
+  Isolated titles: accept absent phases; prefer final answers; discard commentary/pre-prompt
+  text; sanitize. [Rules](README.md#session-titles).
+- NEVER derive a git ref from prompt text: refs reach the remote and no filter proves a
+  prompt secret-free. Worktree sessions keep their allocated ref unless the agent renames it.
+
+## Shell
+
+LoginShellCache lives in the app root. Legacy binds it; no Promise cache/timer.
+Reader cancellation preserves siblings. Await disposal; replace only after release.
+[Decision](README.md#login-shell-cache).

@@ -34,7 +34,7 @@ import {
 /**
  * Persistent, push-capable link to the CLI data-plane server. The renderer wires
  * this to the Electron relay (send → IPC send, onMessage → IPC event); the
- * in-memory test harness wires it straight to a LocalLoroDataPlaneServer.
+ * in-memory test harness wires it straight to a LocalLoroDataPlaneServerLegacy.
  *
  * The link is a BROADCAST pipe: `onMessage` may deliver frames addressed to
  * other peers, other rooms, and other workspaces (the Electron relay fans every
@@ -119,6 +119,9 @@ type RoomState = {
   // concatenated with a later transfer's.
   docChunkAssembler: DocUpdateChunkAssembler | null;
   pendingJoinRequestId: string | null;
+  /** Timer for the currently sent join, retained through Flock reconciliation. */
+  joinAttemptTimer: unknown | null;
+  joinAttemptGeneration: number | null;
   firstSynced: Deferred<void>;
   syncedWaiters: Set<Deferred<void>>;
   unsubscribeLocal: () => void;
@@ -131,6 +134,11 @@ export type LocalLoroTransportAdapterOptions = {
   peerId?: string;
   connection: LocalLoroDataPlaneConnection;
   maxPayloadBytes?: number;
+  /** Bounded lifetime for one connected join attempt (defaults to 120 seconds). */
+  joinAttemptTimeoutMs?: number;
+  /** Injectable scheduling seam for deterministic lifecycle tests. */
+  scheduleTimeout?: (callback: () => void, delayMs: number) => unknown;
+  cancelTimeout?: (handle: unknown) => void;
 };
 
 export class LocalLoroTransportAdapter implements TransportAdapter {
@@ -138,6 +146,9 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   private readonly peerId: string;
   private readonly connection: LocalLoroDataPlaneConnection;
   private readonly maxPayloadBytes: number;
+  private readonly joinAttemptTimeoutMs: number;
+  private readonly scheduleTimeout: (callback: () => void, delayMs: number) => unknown;
+  private readonly cancelTimeout: (handle: unknown) => void;
   private readonly rooms = new Map<string, RoomState>();
   private readonly statusListeners = new Set<(status: TransportConnectionStatus) => void>();
   private readonly disposers: Array<() => void> = [];
@@ -148,6 +159,14 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     this.peerId = options.peerId ?? createPeerId();
     this.connection = options.connection;
     this.maxPayloadBytes = options.maxPayloadBytes ?? LOCAL_LORO_DATA_PLANE_MAX_PAYLOAD_BYTES;
+    this.joinAttemptTimeoutMs = options.joinAttemptTimeoutMs ?? 120_000;
+    if (!Number.isFinite(this.joinAttemptTimeoutMs) || this.joinAttemptTimeoutMs <= 0) {
+      throw new RangeError('joinAttemptTimeoutMs_must_be_a_positive_finite_number');
+    }
+    this.scheduleTimeout =
+      options.scheduleTimeout ?? ((callback, delayMs) => setTimeout(callback, delayMs));
+    this.cancelTimeout =
+      options.cancelTimeout ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
     this.disposers.push(this.connection.onMessage((message) => this.handleServerMessage(message)));
     this.disposers.push(
       this.connection.onStatusChange((connected) => this.handleConnectionStatus(connected))
@@ -216,7 +235,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   }
 
   async syncMeta(flock: FlockLike): Promise<TransportSyncResult> {
-    await this.ensureJoinedOnce({ scope: 'meta' }, flock, false);
+    await this.syncRoom({ scope: 'meta' }, flock, false);
     return { ok: true };
   }
 
@@ -225,7 +244,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   }
 
   async syncDoc(docId: string, doc: LoroDoc): Promise<TransportSyncResult> {
-    await this.ensureJoinedOnce({ scope: 'doc', docId }, doc, true);
+    await this.syncRoom({ scope: 'doc', docId }, doc, true);
     return { ok: true };
   }
 
@@ -234,7 +253,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   }
 
   async syncFlockDoc(flockDocId: string, flock: FlockLike): Promise<TransportSyncResult> {
-    await this.ensureJoinedOnce({ scope: 'flock-doc', flockDocId }, flock, false);
+    await this.syncRoom({ scope: 'flock-doc', flockDocId }, flock, false);
     return { ok: true };
   }
 
@@ -296,6 +315,8 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       flockFlushQueued: false,
       docChunkAssembler: null,
       pendingJoinRequestId: null,
+      joinAttemptTimer: null,
+      joinAttemptGeneration: null,
       firstSynced: createDeferred<void>(),
       syncedWaiters: new Set(),
       unsubscribeLocal: () => {},
@@ -308,19 +329,20 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     return this.subscriptionFor(state);
   }
 
-  private async ensureJoinedOnce(
+  private async syncRoom(
     room: LocalLoroDataPlaneRoom,
     target: LoroDoc | FlockLike,
     isDoc: boolean
   ): Promise<void> {
     const key = roomKey(room);
-    const existing = this.rooms.get(key);
-    if (existing) {
-      await existing.firstSynced.promise;
-      return;
-    }
-    const subscription = this.joinRoom(room, target, isDoc);
-    await subscription.firstSyncedWithRemote;
+    if (!this.rooms.has(key)) this.joinRoom(room, target, isDoc);
+    const state = this.rooms.get(key)!;
+    await state.firstSynced.promise;
+    // Live rooms upload only local events. An explicit sync must also export
+    // imported state the server lacks, e.g. operations recovered from another
+    // replica's storage; otherwise it would report success without sending.
+    this.flushLocal(state, { force: true });
+    if (!state.isDoc) await state.flockFlushChain;
   }
 
   private subscribeLocal(state: RoomState): () => void {
@@ -355,6 +377,11 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     if (!this.connection.isConnected()) {
       return;
     }
+    // A normal health sweep must not continually renew an already-sent join.
+    // Connection loss and recoverable failure explicitly invalidate it first.
+    if (state.pendingJoinRequestId) {
+      return;
+    }
     const requestId = `join:${this.peerId}:${++this.requestSeq}`;
     state.syncGeneration += 1;
     state.pendingJoinRequestId = requestId;
@@ -373,14 +400,71 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
         room: state.room,
         ...(haveVersion ? { haveVersion } : {}),
       });
-    } catch {
-      this.setRoomStatus(state, 'reconnecting');
+      this.startJoinAttemptDeadline(state, requestId, state.syncGeneration);
+    } catch (error) {
+      this.failRecoverably(state, 'join-send', error, state.syncGeneration, requestId);
     }
   }
 
-  private rejoinRoom(state: RoomState): void {
+  private rejoinRoom(state: RoomState, options: { supersedePending?: boolean } = {}): void {
+    if (state.pendingJoinRequestId && !options.supersedePending) {
+      return;
+    }
+    if (state.pendingJoinRequestId) {
+      this.clearJoinAttemptDeadline(state);
+      state.pendingJoinRequestId = null;
+      state.syncGeneration += 1;
+    }
     state.joined = false;
     this.sendJoin(state);
+  }
+
+  private startJoinAttemptDeadline(state: RoomState, requestId: string, generation: number): void {
+    this.clearJoinAttemptDeadline(state);
+    state.joinAttemptGeneration = generation;
+    state.joinAttemptTimer = this.scheduleTimeout(() => {
+      if (
+        state.closed ||
+        state.pendingJoinRequestId !== requestId ||
+        state.syncGeneration !== generation ||
+        state.joinAttemptGeneration !== generation
+      ) {
+        return;
+      }
+      this.failRecoverably(state, 'join-timeout', undefined, generation, requestId);
+    }, this.joinAttemptTimeoutMs);
+  }
+
+  private clearJoinAttemptDeadline(state: RoomState): void {
+    if (state.joinAttemptTimer !== null) {
+      this.cancelTimeout(state.joinAttemptTimer);
+    }
+    state.joinAttemptTimer = null;
+    state.joinAttemptGeneration = null;
+  }
+
+  /** Invalidate one attempt and expose a retryable error to the existing supervisor. */
+  private failRecoverably(
+    state: RoomState,
+    _phase: 'join-send' | 'join-timeout' | 'flock-reconcile' | 'flush',
+    _error?: unknown,
+    generation?: number,
+    requestId?: string
+  ): void {
+    if (
+      state.closed ||
+      state.terminalError ||
+      (generation !== undefined && state.syncGeneration !== generation) ||
+      (requestId !== undefined && state.pendingJoinRequestId !== requestId)
+    ) {
+      return;
+    }
+    this.clearJoinAttemptDeadline(state);
+    state.pendingJoinRequestId = null;
+    state.joined = false;
+    // Supersede all delayed exports/imports belonging to this failed attempt.
+    state.syncGeneration += 1;
+    this.setRoomStatus(state, 'error');
   }
 
   private sendLeave(room: LocalLoroDataPlaneRoom): void {
@@ -464,9 +548,9 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
         return;
       }
       this.flushLocalFlock(state);
-    } catch {
+    } catch (error) {
       // Stay dirty; a reconnect (or the next local edit) retries.
-      this.setRoomStatus(state, 'reconnecting');
+      this.failRecoverably(state, 'flush', error);
     }
   }
 
@@ -477,20 +561,19 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       return;
     }
     state.flockFlushQueued = true;
-    state.flockFlushChain = state.flockFlushChain
-      .then(() => {
-        state.flockFlushQueued = false;
-        return this.flushLocalFlockOnce(state);
-      })
-      .catch(() => {
-        // Stay dirty; a reconnect (or the next local edit) retries.
-        this.setRoomStatus(state, 'reconnecting');
+    state.flockFlushChain = state.flockFlushChain.then(() => {
+      state.flockFlushQueued = false;
+      const syncGeneration = state.syncGeneration;
+      return this.flushLocalFlockOnce(state, syncGeneration).catch((error) => {
+        // An export can finish after disconnect/rejoin. Only the generation
+        // that started this flush may turn the room into a recoverable error.
+        this.failRecoverably(state, 'flush', error, syncGeneration);
       });
+    });
   }
 
-  private async flushLocalFlockOnce(state: RoomState): Promise<void> {
+  private async flushLocalFlockOnce(state: RoomState, syncGeneration: number): Promise<void> {
     const flock = state.target as FlockLike;
-    const syncGeneration = state.syncGeneration;
     // Capture the frontier BEFORE exporting: entries landing in between are
     // re-sent by the next pass (idempotent) instead of silently skipped.
     const have = flock.version();
@@ -540,7 +623,11 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       // Connection liveness is the relay's concern, not the adapter's.
       return;
     }
-    if (message.type === 'presence' || message.type === 'machine-monitor') {
+    if (
+      message.type === 'presence' ||
+      message.type === 'machine-monitor' ||
+      message.type === 'prompt-suggestions'
+    ) {
       // Workspace-level ephemeral state is consumed by the runtime layer, not
       // the repo transport; ignore it here.
       return;
@@ -597,7 +684,11 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       // same recovery contract every other frame this transport sends already
       // has (see the F5b regression case), not a gap introduced here.
       if (message.status === 'disconnected' || message.status === 'error') {
-        this.rejoinRoom(state);
+        // The server has invalidated this room, so a queued reply for the
+        // pending request can no longer arrive. This is distinct from a
+        // routine reconnect sweep: supersede that doomed attempt immediately
+        // instead of waiting for its deadline before recovery can begin.
+        this.rejoinRoom(state, { supersedePending: true });
       }
       return;
     }
@@ -634,7 +725,6 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     serverVersion: string | undefined,
     payload: LocalLoroDataPlanePayload | undefined
   ): void {
-    state.pendingJoinRequestId = null;
     state.joined = true;
     // A (re)join restarts the catch-up stream; a partial chunk transfer from
     // before must never be concatenated with post-join frames.
@@ -644,8 +734,21 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
         state.serverVersion = VersionVector.decode(base64ToBytes(serverVersion));
       }
       if (payload) {
-        this.applyPayload(state, payload);
+        try {
+          this.applyPayload(state, payload);
+        } catch (error) {
+          this.failRecoverably(
+            state,
+            'flock-reconcile',
+            error,
+            state.syncGeneration,
+            state.pendingJoinRequestId ?? undefined
+          );
+          return;
+        }
       }
+      state.pendingJoinRequestId = null;
+      this.clearJoinAttemptDeadline(state);
       this.setRoomStatus(state, 'joined');
       state.firstSynced.resolve();
       // Join is the reconciliation point: up-sync whatever the server is
@@ -663,24 +766,28 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     const receivedBundle = payload && payload.kind === 'flock-json' ? payload.bundle : undefined;
     const syncGeneration = state.syncGeneration;
     void this.reconcileFlockAfterJoin(state, receivedBundle, syncGeneration)
-      .catch(() => {
-        if (state.syncGeneration === syncGeneration && state.joined) {
-          this.setRoomStatus(state, 'reconnecting');
-        }
-      })
-      .finally(() => {
+      .then(() => {
         if (
           state.closed ||
           state.syncGeneration !== syncGeneration ||
           !state.joined ||
-          !this.connection.isConnected()
+          state.terminalError
         ) {
           return;
         }
-        if (!state.terminalError) {
-          this.setRoomStatus(state, 'joined');
-        }
+        state.pendingJoinRequestId = null;
+        this.clearJoinAttemptDeadline(state);
+        this.setRoomStatus(state, 'joined');
         state.firstSynced.resolve();
+      })
+      .catch((error) => {
+        this.failRecoverably(
+          state,
+          'flock-reconcile',
+          error,
+          syncGeneration,
+          state.pendingJoinRequestId ?? undefined
+        );
       });
   }
 
@@ -718,6 +825,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     }
     if (message.requestId && state.pendingJoinRequestId === message.requestId) {
       state.pendingJoinRequestId = null;
+      this.clearJoinAttemptDeadline(state);
     }
     if (message.terminal) {
       this.markTerminal(state, message.code);
@@ -729,6 +837,8 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   }
 
   private markTerminal(state: RoomState, code: string): void {
+    this.clearJoinAttemptDeadline(state);
+    state.pendingJoinRequestId = null;
     state.terminalError = code;
     this.setRoomStatus(state, 'error');
     // Never leave waiters hanging on a room that will not converge.
@@ -767,6 +877,9 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     notify(this.statusListeners, this.getStatus());
     if (!connected) {
       for (const state of this.rooms.values()) {
+        this.clearJoinAttemptDeadline(state);
+        state.pendingJoinRequestId = null;
+        state.syncGeneration += 1;
         state.joined = false;
         // Frames of an in-flight chunked transfer are lost with the socket.
         state.docChunkAssembler = null;
@@ -815,7 +928,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
         // The only path allowed to retry a terminal room (R4: explicit, not a
         // reconnect loop).
         state.terminalError = null;
-        this.rejoinRoom(state);
+        this.rejoinRoom(state, { supersedePending: true });
       },
       get status() {
         return state.status;
@@ -837,6 +950,9 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
 
   private closeRoom(state: RoomState): void {
     state.closed = true;
+    this.clearJoinAttemptDeadline(state);
+    state.pendingJoinRequestId = null;
+    state.syncGeneration += 1;
     state.unsubscribeLocal();
     this.setRoomStatus(state, 'disconnected');
     this.resolveSyncedWaiters(state);

@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src https:; style-src 'unsafe-inline'; script-src 'sha256-fditaqSuT0kQ9Sf0dKBiQRan+AkfUh/zwPuEEUUOFkE='; base-uri 'none'; form-action 'none'"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+      img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+    </style>
+  </head>
+  <body>
+    <img alt="" referrerpolicy="no-referrer" />
+    <script>
+      const image = document.querySelector('img')
+      image.onload = () =>
+        parent.postMessage(
+          { kind: 'lody-pr-image-loaded', width: image.naturalWidth, height: image.naturalHeight },
+          '*'
+        )
+      image.onerror = () => parent.postMessage({ kind: 'lody-pr-image-error' }, '*')
+      try {
+        const url = new URL(decodeURIComponent(location.hash.slice(1)))
+        if (url.protocol !== 'https:' || url.username || url.password)
+          throw new Error('Invalid image URL')
+        image.src = url.href
+      } catch {
+        parent.postMessage({ kind: 'lody-pr-image-error' }, '*')
+      }
+    </script>
+  </body>
+</html>

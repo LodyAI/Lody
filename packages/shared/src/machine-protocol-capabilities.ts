@@ -8,12 +8,159 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  machineIdentityRestore: 'machineIdentityRestore',
+  multiRepoProject: 'multiRepoProject',
+  projectFolderSelection: 'projectFolderSelection',
+  projectFileRoots: 'projectFileRoots',
+  projectRepositoryMembers: 'projectRepositoryMembers',
+  operationInbox: 'operationInbox',
+  magpieImport: 'magpieImport',
+  dshProviderIsolation: 'dshProviderIsolation',
+  terminalNotifications: 'terminalNotifications',
+  memoryProviders: 'memoryProviders',
+  mcpToolDiscovery: 'mcpToolDiscovery',
+  mcpLocalAuthentication: 'mcpLocalAuthentication',
+  sorbetCredentials: 'sorbetCredentials',
+  sorbetCredentialsRemote: 'sorbetCredentialsRemote',
+  sorbetProviders: 'sorbetProviders',
+  sorbetProvidersRemote: 'sorbetProvidersRemote',
+  localProjectHistoryProvider: 'localProjectHistoryProvider',
+  codexAuthProfiles: 'codexAuthProfiles',
+  builtinPi: 'builtinPi',
+  subagentCancellation: 'subagentCancellation',
+  subagentEvents: 'subagentEvents',
+  acpAuthenticationInteractions: 'acpAuthenticationInteractions',
+  e2eeAcpInteraction: 'e2eeAcpInteraction',
+  e2eeSessionFork: 'e2eeSessionFork',
+  e2eeSessionEditAndResend: 'e2eeSessionEditAndResend',
+  e2eeRemoteControl: 'e2eeRemoteControl',
+  acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
+  localProjectCreateDirectory: 'localProjectCreateDirectory',
+  localProjectBranchListing: 'localProjectBranchListing',
   providerSetup: 'providerSetup',
+  schedules: 'schedules',
+  sessionAutomations: 'sessionAutomations',
+  remoteAutomationControl: 'remoteAutomationControl',
+  preparedSessionInput: 'preparedSessionInput',
+  messageQuotes: 'messageQuotes',
+  sessionInputAttachments: 'sessionInputAttachments',
+  localAttachmentDownload: 'localAttachmentDownload',
+  localFileResources: 'localFileResources',
+  fileDownload: 'fileDownload',
+  sessionDirectoryListing: 'sessionDirectoryListing',
+  markdownFileLinks: 'markdownFileLinks',
+  acpProtocolAuthentication: 'acpProtocolAuthentication',
+  previewControl: 'previewControl',
+  previewStopProcess: 'previewStopProcess',
+  androidEmulator: 'androidEmulator',
+  androidEmulatorQuality: 'androidEmulatorQuality',
+  androidEmulatorShutdown: 'androidEmulatorShutdown',
+  iosSimulator: 'iosSimulator',
+  iosSimulatorControls: 'iosSimulatorControls',
+  iosSimulatorExterior: 'iosSimulatorExterior',
+  iosSimulatorShutdown: 'iosSimulatorShutdown',
+  piExtensions: 'piExtensions',
+  antigravitySkipPermissions: 'antigravitySkipPermissions',
+  acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
+  acpModelOptionsRead: 'acpModelOptionsRead',
+  providerRateLimitsRefresh: 'providerRateLimitsRefresh',
+  codeCollabAllChangesScope: 'codeCollabAllChangesScope',
+  codeCollabDiffBlobs: 'codeCollabDiffBlobs',
+  sessionHistory: 'sessionHistory',
+  sessionHistoryIncremental: 'sessionHistoryIncremental',
+  sessionHistorySubscription: 'sessionHistorySubscription',
+  sessionHistoryInspection: 'sessionHistoryInspection',
+  sessionHistoryPatches: 'sessionHistoryPatches',
+  sessionInputAcceptance: 'sessionInputAcceptance',
+  sessionInputDispatch: 'sessionInputDispatch',
+  sessionCollaborationControl: 'sessionCollaborationControl',
+  bugReportClientLog: 'bugReportClientLog',
+  sessionLiveActivity: 'sessionLiveActivity',
+  machineDiskStatus: 'machineDiskStatus',
+  managedDaemonUpdates: 'managedDaemonUpdates',
+  sessionInputWithdraw: 'sessionInputWithdraw',
+  localProjectFileSearch: 'localProjectFileSearch',
+  localProjectSkillsFingerprint: 'localProjectSkillsFingerprint',
 } as const;
 
+export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
+/** Encrypted feature RPC accepts `session/fork` from the owner and shared members. */
+export const E2EE_SESSION_FORK_PROTOCOL_VERSION = 1;
+/** Encrypted feature RPC accepts `session/edit-and-resend` from the machine owner. */
+export const E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION = 1;
+/** Encrypted feature RPC accepts `E2EE_REMOTE_CONTROL_METHODS` (`e2ee-rpc.ts`). */
+export const E2EE_REMOTE_CONTROL_PROTOCOL_VERSION = 1;
+export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
+
+export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
+// v1 serves identity providers (Nowledge Mem). v2 adds account providers
+// (EverMe): sign-in, install and agent connect/disconnect requests.
+export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 2;
+const MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION = 1;
+export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
+export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
+export const SORBET_CREDENTIALS_PROTOCOL_VERSION = 1;
+export const SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION = 1;
+/** v2 (the page's minimum): list, create, delete, refresh, models. v3 adds update. */
+export const SORBET_PROVIDERS_PROTOCOL_VERSION = 3;
+export const SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION = 2;
+export const SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION = 3;
+/**
+ * The encrypted feature path forwards every `sorbet/providers-*` and `sorbet/models-list`
+ * method to the same owner-scoped handler, so the remote version tracks the local one.
+ */
+export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = SORBET_PROVIDERS_PROTOCOL_VERSION;
+export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
+
+export const E2EE_ACP_INTERACTION_PROTOCOL_VERSION = 1;
+export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
+/** `start` accepts the `methodId` the reader picked from the agent's advertised methods. */
+export const ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION = 1;
+export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
+export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
+export const LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION = 1;
+export const LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
+// v2 preserves ACP string/boolean values and reads legacy stringified booleans.
+const SCHEDULES_PROMPT_PROTOCOL_VERSION = 2;
+// v3 supports frozen full-message one-time schedules.
+const SCHEDULED_MESSAGES_PROTOCOL_VERSION = 3;
+export const SCHEDULES_PROTOCOL_VERSION = SCHEDULED_MESSAGES_PROTOCOL_VERSION;
+export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
+export const MESSAGE_QUOTES_PROTOCOL_VERSION = 1;
+export const SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION = 1;
+export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
+export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
+export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
+export const IOS_SIMULATOR_PROTOCOL_VERSION = 1;
+export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 2;
+export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
+/** `runtimeOverrides.antigravitySkipPermissions`; older strict schemas reject the field. */
+export const ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION = 1;
+export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
+/** `machine/acp-capabilities-refresh` accepts `readModelOptions` and reports `reading-model-options`. */
+export const ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION = 1;
+export const CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION = 1;
+export const CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION = 1;
+/** v4 adds purpose-bound member read/edit proofs; older strict payloads are incompatible. */
+export const SESSION_HISTORY_PROTOCOL_VERSION = 4;
+export const SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION = 1;
+export const SESSION_HISTORY_SUBSCRIPTION_PROTOCOL_VERSION = 1;
+export const SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION = 2;
+export const SESSION_HISTORY_PATCHES_PROTOCOL_VERSION = 1;
+export const SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION = 1;
+export const SESSION_INPUT_DISPATCH_PROTOCOL_VERSION = 1;
+/** `machine/bug-report` accepts an optional `clientLog` and merges it into the upload. */
+export const BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION = 1;
+/**
+ * `local-project/search-files` exists. An older daemon's strict request schema
+ * drops the unknown type without replying, so a caller must check before sending.
+ */
+export const LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION = 1;
+/** `local-project/list-skills` / `list-global-skills` accept `knownFingerprint`. */
+export const LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -35,6 +182,37 @@ export function machineSupportsProtocolCapability(
   return getMachineProtocolCapabilityVersion(machine, capability) >= minimumVersion;
 }
 
+export function machineSupportsMemoryProviders(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.memoryProviders,
+    MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the daemon understands account providers' sign-in, install and connect requests. */
+export function machineSupportsAccountMemoryProviders(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.memoryProviders,
+    MEMORY_PROVIDERS_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSubagentCancellation(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation,
+    SUBAGENT_CANCELLATION_PROTOCOL_VERSION
+  );
+}
+
 /**
  * The capability set this build advertises, and the checks that read it.
  *
@@ -42,10 +220,262 @@ export function machineSupportsProtocolCapability(
  * required version must never travel apart, because a mismatch fails silently
  * in the "supported" direction and there is no version fallback to catch it.
  */
+export const MULTI_REPO_PROJECT_PROTOCOL_VERSION = 1;
+export const PROJECT_FILE_ROOTS_PROTOCOL_VERSION = 1;
+export const PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION = 1;
+
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.machineIdentityRestore]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.codeCollabDiffBlobs]: CODE_COLLAB_DIFF_BLOBS_PROTOCOL_VERSION,
+  // `session/live-status` accepts `includeActivity` and may answer with `activity`.
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionLiveActivity]: 1,
+  // `machine/status` accepts `includeDisk` and may answer with `disk`.
+  [MACHINE_PROTOCOL_CAPABILITIES.machineDiskStatus]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.managedDaemonUpdates]: 1,
+  // Daemon answers `session/withdraw-input` for queued Agent inputs.
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputWithdraw]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers]:
+    PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.multiRepoProject]: MULTI_REPO_PROJECT_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.projectFileRoots]: PROJECT_FILE_ROOTS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.operationInbox]: OPERATION_INBOX_PROTOCOL_VERSION,
+  providerRateLimitsRefresh: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.magpieImport]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.dshProviderIsolation]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.terminalNotifications]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.memoryProviders]: MEMORY_PROVIDERS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.mcpToolDiscovery]: MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.mcpLocalAuthentication]: MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectHistoryProvider]:
+    LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.subagentEvents]: SUBAGENT_EVENTS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.codexAuthProfiles]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation]: SUBAGENT_CANCELLATION_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
+    ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationMethodSelection]:
+    ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.projectFolderSelection]: PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectCreateDirectory]:
+    LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing]:
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionAutomations]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.messageQuotes]: MESSAGE_QUOTES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localAttachmentDownload]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments]:
+    SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.fileDownload]: 1,
+  // `file/list-dir` lists one folder of the session's own workspace (its worktree when it has one).
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionDirectoryListing]:
+    SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.markdownFileLinks]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.previewStopProcess]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulator]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorShutdown]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.iosSimulator]: IOS_SIMULATOR_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls]: IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorShutdown]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
+    ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpModelOptionsRead]: ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.antigravitySkipPermissions]:
+    ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope]:
+    CODE_COLLAB_ALL_CHANGES_SCOPE_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistory]: SESSION_HISTORY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryPatches]: SESSION_HISTORY_PATCHES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental]:
+    SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistorySubscription]:
+    SESSION_HISTORY_SUBSCRIPTION_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection]:
+    SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance]: SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch]: SESSION_INPUT_DISPATCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog]: BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectFileSearch]:
+    LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectSkillsFingerprint]:
+    LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION,
 };
+
+/**
+ * Fits a local-project control request to what the target daemon understands:
+ * `knownFingerprint` is dropped for a daemon without it (the request still
+ * works, it just returns everything), and a file search the daemon cannot
+ * answer returns `null` so the caller never sends it.
+ */
+export function adaptLocalProjectControlRequestToMachine<
+  TRequest extends { type: string; knownFingerprint?: string },
+>(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  request: TRequest
+): TRequest | null {
+  if (
+    request.type === 'local-project/search-files' &&
+    !machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.localProjectFileSearch,
+      LOCAL_PROJECT_FILE_SEARCH_PROTOCOL_VERSION
+    )
+  ) {
+    return null;
+  }
+  if (
+    request.knownFingerprint !== undefined &&
+    !machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.localProjectSkillsFingerprint,
+      LOCAL_PROJECT_SKILLS_FINGERPRINT_PROTOCOL_VERSION
+    )
+  ) {
+    const { knownFingerprint: _dropped, ...rest } = request;
+    return rest as TRequest;
+  }
+  return request;
+}
+
+/**
+ * Whether `machine/bug-report` may carry `clientLog`. Its request schema is
+ * strict, so an older daemon rejects the whole report when the field is present.
+ */
+export function machineSupportsBugReportClientLog(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.bugReportClientLog,
+    BUG_REPORT_CLIENT_LOG_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSessionInputDispatch(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionInputDispatch,
+    SESSION_INPUT_DISPATCH_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSessionHistorySubscription(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return (
+    machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.sessionHistorySubscription,
+      SESSION_HISTORY_SUBSCRIPTION_PROTOCOL_VERSION
+    ) && machineSupportsSessionHistoryIncremental(machine)
+  );
+}
+
+export function machineSupportsSessionHistoryInspection(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryInspection,
+    SESSION_HISTORY_INSPECTION_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSessionInputAcceptance(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionInputAcceptance,
+    SESSION_INPUT_ACCEPTANCE_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon exposes the Roost-backed session history RPC. */
+export function machineSupportsSessionHistoryProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionHistory,
+    SESSION_HISTORY_PROTOCOL_VERSION
+  );
+}
+
+/** Negotiate only a new session's preference, before persisting its immutable choice. */
+export function resolveNewSessionHistoryBackend(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  options: {
+    requested?: import('./schema').SessionHistoryBackendKind;
+    preferred?: import('./schema').SessionHistoryBackendKind;
+  }
+): import('./schema').SessionHistoryBackendKind {
+  const backend = options.requested ?? options.preferred ?? 'loro';
+  if (backend !== 'roost' || machineSupportsSessionHistoryProtocol(machine)) return backend;
+  if (options.requested === 'roost') {
+    throw new Error('This machine does not support Roost session history. Update the machine.');
+  }
+  return 'loro';
+}
+
+export function machineSupportsSubagentEvents(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.subagentEvents,
+    SUBAGENT_EVENTS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the daemon supports the dedicated Quick Tunnel control handshake. */
+export function machineSupportsPreviewControlProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.previewControl,
+    PREVIEW_CONTROL_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon supports interactive Custom/Registry ACP authentication. */
+export function machineSupportsAcpAuthenticationInteractionsProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions,
+    ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * Whether `machine/acp-authenticate` accepts a `methodId` the reader picked
+ * before starting. Its request schema is strict, so an older daemon rejects the
+ * whole start when the field is present; callers omit it there and let the
+ * daemon show its own picker after the sign-in has started.
+ */
+export function machineSupportsAcpAuthenticationMethodSelectionProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationMethodSelection,
+    ACP_AUTHENTICATION_METHOD_SELECTION_PROTOCOL_VERSION
+  );
+}
 
 /** Whether the target daemon supports preflighted local-project worktree cleanup and results. */
 export function machineSupportsLocalProjectRemovalProtocol(
@@ -58,6 +488,16 @@ export function machineSupportsLocalProjectRemovalProtocol(
   );
 }
 
+export function machineSupportsLocalProjectBranchListing(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localProjectBranchListing,
+    LOCAL_PROJECT_BRANCH_LISTING_PROTOCOL_VERSION
+  );
+}
+
 /** Whether the target daemon can consume a durable `providerSetup` Flock row. */
 export function machineSupportsProviderSetupProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
@@ -66,5 +506,299 @@ export function machineSupportsProviderSetupProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.providerSetup,
     PROVIDER_SETUP_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * Whether the target daemon can run the baseline standard ACP `authenticate`
+ * exchange for a registry or custom agent. Interactive method/form/URL replies
+ * additionally require `acpAuthenticationInteractions`; older daemons answer
+ * "Authentication is not supported", so sign-in is not offered at all.
+ */
+export function machineSupportsAcpProtocolAuthentication(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication,
+    ACP_PROTOCOL_AUTHENTICATION_VERSION
+  );
+}
+
+export function machineSupportsLocalFileResourcesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localFileResources,
+    LOCAL_FILE_RESOURCES_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsPiExtensions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.piExtensions,
+    PI_EXTENSIONS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon launches builtin agy with `--dangerously-skip-permissions` on request. */
+export function machineSupportsAntigravitySkipPermissions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.antigravitySkipPermissions,
+    ANTIGRAVITY_SKIP_PERMISSIONS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon owns and runs machine-scheduled automation. */
+export function machineSupportsSchedulesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
+    SCHEDULES_PROMPT_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon accepts inert `prepared` user turns. */
+export function machineSupportsPreparedSessionInputProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput,
+    PREPARED_SESSION_INPUT_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsMessageQuotes(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.messageQuotes,
+    MESSAGE_QUOTES_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * Whether the target daemon may answer `machine/acp-capabilities-refresh` from
+ * its persisted entry, and therefore understands the `force` field that opts out.
+ *
+ * Both facts arrive together in one build, so they share one capability: a daemon
+ * that never caches is exactly a daemon that rejects `force`.
+ */
+export function machineSupportsAcpCapabilityRefreshCacheProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache,
+    ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * The `force` field to put in a `machine/acp-capabilities-refresh` request,
+ * spread into the request so an unsupported target gets no key at all.
+ *
+ * Omission is required, not cosmetic: a daemon without this capability parses the
+ * request with a strict schema, so a `force` key — even one whose value is
+ * `undefined` but present — makes it drop the RPC request without a reply or
+ * reject the local-control request outright. Omission is also the behavior a
+ * forced caller wants, because such a daemon has no cache and always probes.
+ */
+export function negotiatedAcpCapabilitiesRefreshForce(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  force: boolean | undefined
+): { force?: true } {
+  return force === true && machineSupportsAcpCapabilityRefreshCacheProtocol(machine)
+    ? { force: true }
+    : {};
+}
+
+/**
+ * The `readModelOptions` field to put in a `machine/acp-capabilities-refresh`
+ * request. Like `force`, it is omitted for a daemon that did not advertise
+ * `acpModelOptionsRead`: its strict request schema rejects the key.
+ */
+export function negotiatedAcpModelOptionsRead(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  readModelOptions: boolean | undefined
+): { readModelOptions?: true } {
+  return readModelOptions === true &&
+    machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.acpModelOptionsRead,
+      ACP_MODEL_OPTIONS_READ_PROTOCOL_VERSION
+    )
+    ? { readModelOptions: true }
+    : {};
+}
+
+export function machineSupportsIosSimulatorProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.iosSimulator,
+    IOS_SIMULATOR_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsIosSimulatorControls(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  minimumVersion = 1
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls,
+    minimumVersion
+  );
+}
+
+export function machineSupportsHistoryProviderSelection(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localProjectHistoryProvider,
+    LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsIosSimulatorExterior(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior,
+    1
+  );
+}
+
+export function machineSupportsMultiRepoProject(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.multiRepoProject,
+    MULTI_REPO_PROJECT_PROTOCOL_VERSION
+  );
+}
+
+/** Non-Git Project group members and root-aware file RPCs require this capability. */
+export function machineSupportsProjectFileRoots(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.projectFileRoots,
+    PROJECT_FILE_ROOTS_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * Project group repository Members (`preferLocal`): the daemon uses its own
+ * copy of the repository when it has one. Older daemons would clone instead.
+ */
+export function machineSupportsProjectRepositoryMembers(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.projectRepositoryMembers,
+    PROJECT_REPOSITORY_MEMBERS_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSessionHistoryIncremental(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryIncremental,
+    SESSION_HISTORY_INCREMENTAL_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsSessionHistoryPatches(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return (
+    machineSupportsSessionHistoryIncremental(machine) &&
+    machineSupportsProtocolCapability(
+      machine,
+      MACHINE_PROTOCOL_CAPABILITIES.sessionHistoryPatches,
+      SESSION_HISTORY_PATCHES_PROTOCOL_VERSION
+    )
+  );
+}
+
+/** Frozen input blocks must never be downgraded to a plain-text prompt. */
+export function machineSupportsScheduledMessagesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
+    SCHEDULED_MESSAGES_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsAndroidEmulatorProtocol(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulator,
+    1
+  );
+}
+
+export function machineSupportsAndroidEmulatorQuality(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorQuality,
+    1
+  );
+}
+
+export function machineSupportsPreviewStopProcess(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.previewStopProcess,
+    1
+  );
+}
+
+export function machineSupportsIosSimulatorShutdown(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorShutdown,
+    1
+  );
+}
+
+export function machineSupportsAndroidEmulatorShutdown(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.androidEmulatorShutdown,
+    1
   );
 }

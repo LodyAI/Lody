@@ -13,6 +13,20 @@ function isObjectRecord(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isLocalAttachment(value) {
+  return (
+    isObjectRecord(value) &&
+    value.type === 'local_attachment' &&
+    ['machineId', 'path', 'fileName', 'mimeType'].every(
+      (key) => typeof value[key] === 'string' && value[key].length > 0
+    ) &&
+    (value.kind === 'file' || value.kind === 'image') &&
+    typeof value.sizeBytes === 'number' &&
+    Number.isSafeInteger(value.sizeBytes) &&
+    value.sizeBytes >= 0
+  );
+}
+
 function isStringRecord(value) {
   if (!isObjectRecord(value)) {
     return false;
@@ -43,8 +57,53 @@ function isConfigOptionValueRecord(value) {
   );
 }
 
+function isOptionalPositiveInteger(value) {
+  return typeof value === 'undefined' || (Number.isInteger(value) && value > 0);
+}
+
 function isOptionalString(value) {
   return typeof value === 'undefined' || typeof value === 'string';
+}
+
+function isSessionHistoryWriteOperation(value) {
+  return (
+    value === 'append' ||
+    value === 'accept_input' ||
+    value === 'accept_input_and_dispatch' ||
+    value === 'replace' ||
+    value === 'respond_permission' ||
+    value === 'apply_action' ||
+    value === 'replace_editable_tail' ||
+    value === 'apply_import' ||
+    value === 'copy_history'
+  );
+}
+
+function isOptionalNonnegativeInteger(value) {
+  return (
+    typeof value === 'undefined' ||
+    (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+  );
+}
+
+function isSessionHistoryChange(value) {
+  if (value === null) return true;
+  if (!isObjectRecord(value)) return false;
+  if (value.kind === 'structure') {
+    return (
+      typeof value.from === 'number' &&
+      Number.isSafeInteger(value.from) &&
+      value.from >= 0 &&
+      typeof value.to === 'number' &&
+      Number.isSafeInteger(value.to) &&
+      value.to >= value.from
+    );
+  }
+  return (
+    value.kind === 'changed' &&
+    Array.isArray(value.ids) &&
+    value.ids.every((id) => typeof id === 'string' && id.trim().length > 0)
+  );
 }
 
 function isAcpAuthMethodSummary(value) {
@@ -56,6 +115,41 @@ function isAcpAuthMethodSummary(value) {
     isOptionalString(value.description) &&
     (typeof value.args === 'undefined' ||
       (Array.isArray(value.args) && value.args.every((arg) => typeof arg === 'string')))
+  );
+}
+
+function isAcpAuthenticationFormField(value) {
+  if (!isObjectRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    value.id.trim().length > 0 &&
+    (value.type === 'text' || value.type === 'secret' || value.type === 'select') &&
+    typeof value.label === 'string' &&
+    value.label.trim().length > 0 &&
+    isOptionalString(value.description) &&
+    typeof value.required === 'boolean' &&
+    isOptionalString(value.defaultValue) &&
+    (value.type !== 'secret' || typeof value.defaultValue === 'undefined') &&
+    (value.type !== 'select' ||
+      (Array.isArray(value.options) &&
+        value.options.length > 0 &&
+        value.options.every(
+          (option) =>
+            isObjectRecord(option) &&
+            typeof option.value === 'string' &&
+            typeof option.label === 'string'
+        )))
+  );
+}
+
+function isAcpAuthenticationForm(value) {
+  if (!isObjectRecord(value)) return false;
+  return (
+    isOptionalString(value.title) &&
+    isOptionalString(value.description) &&
+    Array.isArray(value.fields) &&
+    value.fields.length > 0 &&
+    value.fields.every(isAcpAuthenticationFormField)
   );
 }
 
@@ -125,9 +219,14 @@ function isPreviewConnection(value) {
   }
   return (
     typeof value.status === 'string' &&
-    isOptionalString(value.grantId) &&
+    ['creating', 'active', 'closed', 'failed'].includes(value.status) &&
+    isOptionalString(value.endpointId) &&
     isOptionalString(value.publicUrl) &&
-    isOptionalString(value.tunnelId) &&
+    (value.closedReason === undefined ||
+      (typeof value.closedReason === 'string' &&
+        ['idle_timeout', 'revoked', 'session_ended', 'replaced', 'runtime_lost'].includes(
+          value.closedReason
+        ))) &&
     (typeof value.target === 'undefined' || isPreviewTarget(value.target)) &&
     isOptionalString(value.approvedByUserId)
   );
@@ -354,12 +453,17 @@ function isACPSessionConfig(value) {
   }
   const { cliType, agentType } = normalizedTarget;
   // This dependency-free validator cannot import the ESM runtime table. Keep
-  // this literal aligned with ai.ts, the TS source, and their parity test.
+  // this literal aligned with the TS source and its Bub parity test when
+  // changing this feature.
   const isBuiltinAgentType =
+    agentType === 'antigravity' ||
     agentType === 'claude' ||
     agentType === 'codex' ||
     agentType === 'kimi' ||
-    agentType === 'deepseek';
+    agentType === 'deepseek' ||
+    agentType === 'bub' ||
+    agentType === 'dimcode' ||
+    agentType === 'sorbet';
   if (
     typeof value.prompt !== 'string' ||
     (cliType === 'builtin' && !isBuiltinAgentType) ||
@@ -423,6 +527,13 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
+  if (value.type === 'machine/dsh-providers') {
+    return (
+      typeof value.machineId === 'string' &&
+      Object.keys(value).every((key) => ['type', 'machineId'].includes(key))
+    );
+  }
+
   if (value.type === 'machine/status') {
     return typeof value.machineId === 'string' && typeof value.workspaceId === 'string';
   }
@@ -438,6 +549,10 @@ function isLocalSessionControlRequest(value) {
 
   if (value.type === 'machine/restart' || value.type === 'machine/upgrade') {
     return (
+      (value.restoreMachineId === undefined ||
+        (value.type === 'machine/restart' &&
+          typeof value.restoreMachineId === 'string' &&
+          value.restoreMachineId.trim().length > 0)) &&
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
       typeof value.requesterUserId === 'string' &&
@@ -452,16 +567,31 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
+  if (value.type === 'machine/provider-rate-limits-refresh') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      typeof value.configId === 'string' &&
+      value.configId.trim().length > 0 &&
+      Object.keys(value).every((key) =>
+        ['type', 'machineId', 'workspaceId', 'configId'].includes(key)
+      )
+    );
+  }
+
   if (value.type === 'machine/acp-capabilities-refresh') {
     return (
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
       typeof value.configId === 'string' &&
       value.configId.trim().length > 0 &&
-      isAgentConfigCliType(value.cliType) &&
-      typeof value.agentType === 'string' &&
-      value.agentType.trim().length > 0 &&
-      (typeof value.env === 'undefined' || isStringRecord(value.env))
+      (typeof value.force === 'undefined' || typeof value.force === 'boolean') &&
+      (typeof value.readModelOptions === 'undefined' || value.readModelOptions === true) &&
+      typeof value.cliType === 'undefined' &&
+      typeof value.agentType === 'undefined' &&
+      typeof value.customAcp === 'undefined' &&
+      typeof value.runtimeOverrides === 'undefined' &&
+      typeof value.env === 'undefined'
     );
   }
 
@@ -471,19 +601,59 @@ function isLocalSessionControlRequest(value) {
       typeof value.workspaceId === 'string' &&
       typeof value.requestId === 'string' &&
       value.requestId.trim().length > 0 &&
-      (value.action === 'start' || value.action === 'cancel' || value.action === 'submit-code') &&
-      (value.action === 'submit-code'
-        ? typeof value.authenticationRequestId === 'string' &&
-          value.authenticationRequestId.trim().length > 0 &&
-          typeof value.authorizationCode === 'string' &&
-          value.authorizationCode.trim().length > 0 &&
-          value.authorizationCode.length <= 4096
-        : typeof value.authenticationRequestId === 'undefined' &&
-          typeof value.authorizationCode === 'undefined') &&
-      isAgentConfigCliType(value.cliType) &&
-      typeof value.agentType === 'string' &&
-      value.agentType.trim().length > 0 &&
-      (typeof value.env === 'undefined' || isStringRecord(value.env))
+      value.requestId.length <= 1024 &&
+      (value.action === 'start' ||
+        value.action === 'cancel' ||
+        value.action === 'submit-code' ||
+        value.action === 'submit-input') &&
+      (value.action === 'start'
+        ? typeof value.configId === 'string' &&
+          value.configId.trim().length > 0 &&
+          (typeof value.methodId === 'undefined' ||
+            (typeof value.methodId === 'string' &&
+              value.methodId.trim().length > 0 &&
+              value.methodId.length <= 1024)) &&
+          typeof value.authenticationRequestId === 'undefined' &&
+          typeof value.authorizationCode === 'undefined' &&
+          typeof value.interactionId === 'undefined' &&
+          typeof value.authenticationInput === 'undefined'
+        : value.action === 'cancel'
+          ? typeof value.authenticationRequestId === 'string' &&
+            value.authenticationRequestId.trim().length > 0 &&
+            value.authenticationRequestId.length <= 1024 &&
+            typeof value.configId === 'undefined' &&
+            typeof value.authorizationCode === 'undefined' &&
+            typeof value.interactionId === 'undefined' &&
+            typeof value.authenticationInput === 'undefined'
+          : value.action === 'submit-code'
+            ? typeof value.authenticationRequestId === 'string' &&
+              value.authenticationRequestId.trim().length > 0 &&
+              value.authenticationRequestId.length <= 1024 &&
+              typeof value.authorizationCode === 'string' &&
+              value.authorizationCode.trim().length > 0 &&
+              value.authorizationCode.length <= 4096 &&
+              typeof value.configId === 'undefined' &&
+              typeof value.interactionId === 'undefined' &&
+              typeof value.authenticationInput === 'undefined'
+            : value.action === 'submit-input'
+              ? typeof value.authenticationRequestId === 'string' &&
+                value.authenticationRequestId.trim().length > 0 &&
+                value.authenticationRequestId.length <= 1024 &&
+                typeof value.interactionId === 'string' &&
+                value.interactionId.trim().length > 0 &&
+                value.interactionId.length <= 1024 &&
+                typeof value.authenticationInput === 'string' &&
+                value.authenticationInput.length > 0 &&
+                value.authenticationInput.length <= 65536 &&
+                typeof value.configId === 'undefined' &&
+                typeof value.authorizationCode === 'undefined'
+              : false) &&
+      typeof value.cliType === 'undefined' &&
+      typeof value.agentType === 'undefined' &&
+      typeof value.customAcp === 'undefined' &&
+      typeof value.runtimeOverrides === 'undefined' &&
+      typeof value.env === 'undefined' &&
+      (value.action === 'start' || typeof value.methodId === 'undefined')
     );
   }
 
@@ -496,16 +666,6 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
-  if (value.type === 'session/code-collab-host-start') {
-    return (
-      typeof value.machineId === 'string' &&
-      typeof value.workspaceId === 'string' &&
-      typeof value.sessionId === 'string' &&
-      typeof value.requestedByUserId === 'string' &&
-      value.requestedByUserId.trim().length > 0
-    );
-  }
-
   if (value.type === 'session/image-upload') {
     return (
       typeof value.machineId === 'string' &&
@@ -515,12 +675,73 @@ function isLocalSessionControlRequest(value) {
     );
   }
 
+  if (
+    value.type === 'session/image-prepare-local' ||
+    value.type === 'session/image-resolve-local'
+  ) {
+    if (
+      !['machineId', 'workspaceId', 'sessionId'].every(
+        (key) => typeof value[key] === 'string' && value[key].trim().length > 0
+      )
+    )
+      return false;
+    if (value.type === 'session/image-resolve-local') return isSessionImagePayload(value.image);
+    const source = value.source;
+    return (
+      typeof value.imageId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.imageId) &&
+      typeof value.fileName === 'string' &&
+      value.fileName.trim().length > 0 &&
+      typeof value.mimeType === 'string' &&
+      SESSION_IMAGE_ALLOWED_MIME_TYPES.has(value.mimeType) &&
+      isObjectRecord(source) &&
+      Object.keys(source).length === 1 &&
+      ((typeof source.path === 'string' && source.path.trim().length > 0) ||
+        (typeof source.base64 === 'string' &&
+          source.base64.length > 0 &&
+          source.base64.length <= 27962028))
+    );
+  }
+
+  if (value.type === 'session/attachment-prepare') {
+    if (
+      !['machineId', 'workspaceId', 'sessionId'].every(
+        (key) => typeof value[key] === 'string' && value[key].length > 0
+      )
+    )
+      return false;
+    return (
+      ['path', 'fileName', 'mimeType'].every(
+        (key) => typeof value[key] === 'string' && value[key].length > 0
+      ) &&
+      (value.kind === 'file' || value.kind === 'image')
+    );
+  }
+
   if (value.type === 'session/file-upload' || value.type === 'session/file-send-local') {
     return (
       typeof value.machineId === 'string' &&
       typeof value.sessionId === 'string' &&
       isWorkspaceId(value.workspaceId) &&
       isStringList(value.paths, { min: 1, max: SESSION_FILE_MAX_COUNT })
+    );
+  }
+
+  if (value.type === 'session/history-read' || value.type === 'session/history-subscription') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      typeof value.sessionId === 'string'
+    );
+  }
+
+  if (value.type === 'session/history-write') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      typeof value.sessionId === 'string' &&
+      isSessionHistoryWriteOperation(value.operation) &&
+      isObjectRecord(value.payload)
     );
   }
 
@@ -542,7 +763,17 @@ function isLocalSessionControlRequest(value) {
       typeof value.requestedByUserId === 'string' &&
       isPreviewTarget(value.target) &&
       isPreviewApproval(value.approval) &&
-      (typeof value.replaceExisting === 'undefined' || typeof value.replaceExisting === 'boolean')
+      (typeof value.restart === 'undefined' || typeof value.restart === 'boolean')
+    );
+  }
+
+  if (value.type === 'session/preview-status') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      typeof value.sessionId === 'string' &&
+      typeof value.requestedByUserId === 'string' &&
+      isOptionalString(value.renewEndpointId)
     );
   }
 
@@ -552,7 +783,8 @@ function isLocalSessionControlRequest(value) {
       typeof value.workspaceId === 'string' &&
       typeof value.sessionId === 'string' &&
       typeof value.requestedByUserId === 'string' &&
-      isOptionalString(value.reason)
+      isOptionalString(value.reason) &&
+      (value.stopProcess === undefined || typeof value.stopProcess === 'boolean')
     );
   }
 
@@ -651,6 +883,16 @@ function isLocalSessionControlResponse(value) {
     );
   }
 
+  if (value.type === 'machine/dsh-providers_response') {
+    return (
+      Array.isArray(value.providers) &&
+      value.providers.every(
+        (item) =>
+          isObjectRecord(item) && typeof item.id === 'string' && typeof item.name === 'string'
+      )
+    );
+  }
+
   if (value.type === 'machine/status_response') {
     return (
       typeof value.machineId === 'string' &&
@@ -689,6 +931,14 @@ function isLocalSessionControlResponse(value) {
       isOptionalString(value.error) &&
       (value.type === 'machine/restart_response' ||
         (isOptionalString(value.currentVersion) && isOptionalString(value.targetVersion)))
+    );
+  }
+
+  if (value.type === 'machine/provider-rate-limits-refresh_response') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.configId === 'string' &&
+      typeof value.success === 'boolean'
     );
   }
 
@@ -742,7 +992,10 @@ function isLocalSessionControlResponse(value) {
       typeof value.agentType === 'string' &&
       value.agentType.trim().length > 0 &&
       (value.status === 'starting' ||
+        value.status === 'auth-methods' ||
         value.status === 'authorization' ||
+        value.status === 'input-required' ||
+        value.status === 'runtime-download' ||
         value.status === 'output' ||
         value.status === 'authenticated' ||
         value.status === 'cancelled' ||
@@ -760,10 +1013,30 @@ function isLocalSessionControlResponse(value) {
           value.userCode.length <= 128)) &&
       (typeof value.acceptsAuthorizationCode === 'undefined' ||
         typeof value.acceptsAuthorizationCode === 'boolean') &&
+      (typeof value.authMethods === 'undefined' ||
+        (Array.isArray(value.authMethods) && value.authMethods.every(isAcpAuthMethodSummary))) &&
+      isOptionalString(value.interactionId) &&
+      isOptionalString(value.message) &&
+      (typeof value.form === 'undefined' || isAcpAuthenticationForm(value.form)) &&
       (typeof value.expiresInSeconds === 'undefined' ||
         (typeof value.expiresInSeconds === 'number' &&
           Number.isInteger(value.expiresInSeconds) &&
           value.expiresInSeconds > 0)) &&
+      isOptionalString(value.runtimeName) &&
+      (typeof value.runtimePhase === 'undefined' ||
+        value.runtimePhase === 'downloading' ||
+        value.runtimePhase === 'verifying' ||
+        value.runtimePhase === 'extracting' ||
+        value.runtimePhase === 'publishing' ||
+        value.runtimePhase === 'complete') &&
+      (typeof value.runtimePercent === 'undefined' ||
+        (typeof value.runtimePercent === 'number' &&
+          value.runtimePercent >= 0 &&
+          value.runtimePercent <= 100)) &&
+      (value.status !== 'runtime-download' ||
+        (typeof value.runtimeName === 'string' &&
+          value.runtimeName.trim().length > 0 &&
+          typeof value.runtimePhase === 'string')) &&
       isOptionalString(value.output) &&
       isOptionalString(value.error)
     );
@@ -818,7 +1091,8 @@ function isLocalSessionControlResponse(value) {
         value.status === 'installed' ||
         value.status === 'unsupported-platform' ||
         value.status === 'incompatible-host' ||
-        value.status === 'error') &&
+        value.status === 'error' ||
+        value.status === 'reading-model-options') &&
       (typeof value.downloadedBytes === 'undefined' ||
         (typeof value.downloadedBytes === 'number' &&
           Number.isInteger(value.downloadedBytes) &&
@@ -834,22 +1108,12 @@ function isLocalSessionControlResponse(value) {
       isOptionalString(value.current) &&
       isOptionalString(value.required) &&
       isOptionalString(value.command) &&
-      isOptionalString(value.error)
-    );
-  }
-
-  if (value.type === 'session/code-collab-host-start_response') {
-    return (
-      typeof value.sessionId === 'string' &&
-      typeof value.success === 'boolean' &&
-      (typeof value.status === 'undefined' ||
-        value.status === 'started' ||
-        value.status === 'already-running' ||
-        value.status === 'disabled' ||
-        value.status === 'failed' ||
-        value.status === 'stopped') &&
       isOptionalString(value.error) &&
-      isOptionalString(value.message)
+      isOptionalString(value.configId) &&
+      isOptionalString(value.modelId) &&
+      isOptionalString(value.modelName) &&
+      isOptionalPositiveInteger(value.modelIndex) &&
+      isOptionalPositiveInteger(value.modelCount)
     );
   }
 
@@ -902,6 +1166,35 @@ function isLocalSessionControlResponse(value) {
     );
   }
 
+  if (value.type === 'session/image-prepare-local_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      (typeof value.image === 'undefined' || isSessionImagePayload(value.image)) &&
+      (!value.success || isSessionImagePayload(value.image))
+    );
+  }
+
+  if (value.type === 'session/image-resolve-local_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      isOptionalString(value.path) &&
+      (!value.success || (typeof value.path === 'string' && value.path.trim().length > 0))
+    );
+  }
+
+  if (value.type === 'session/attachment-prepare_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalString(value.error) &&
+      (!value.success || isLocalAttachment(value.attachment))
+    );
+  }
+
   if (value.type === 'session/file-send-local_response') {
     return (
       typeof value.sessionId === 'string' &&
@@ -919,6 +1212,47 @@ function isLocalSessionControlResponse(value) {
     );
   }
 
+  if (value.type === 'session/history-read_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.success === 'boolean' &&
+      isOptionalNonnegativeInteger(value.historyRevision) &&
+      isOptionalNonnegativeInteger(value.historyCount) &&
+      (typeof value.historyChange === 'undefined' || isSessionHistoryChange(value.historyChange)) &&
+      (typeof value.pageTurns === 'undefined' || Array.isArray(value.pageTurns)) &&
+      (!value.success ||
+        (Object.hasOwn(value, 'result') &&
+          typeof value.historyRevision === 'number' &&
+          typeof value.historyCount === 'number')) &&
+      isOptionalString(value.error)
+    );
+  }
+
+  if (value.type === 'session/history-subscription_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.subscriptionId === 'string' &&
+      ((value.event === 'publication' && isObjectRecord(value.publication)) ||
+        (value.event === 'closed' && isOptionalString(value.error)))
+    );
+  }
+
+  if (value.type === 'session/history-write_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      isSessionHistoryWriteOperation(value.operation) &&
+      typeof value.success === 'boolean' &&
+      isOptionalNonnegativeInteger(value.historyRevision) &&
+      isOptionalNonnegativeInteger(value.historyCount) &&
+      (typeof value.historyChange === 'undefined' || isSessionHistoryChange(value.historyChange)) &&
+      (!value.success ||
+        (typeof value.historyRevision === 'number' &&
+          typeof value.historyCount === 'number' &&
+          typeof value.historyChange !== 'undefined')) &&
+      isOptionalString(value.error)
+    );
+  }
+
   if (value.type === 'session/preview-candidate-report_response') {
     return (
       typeof value.sessionId === 'string' &&
@@ -931,11 +1265,16 @@ function isLocalSessionControlResponse(value) {
 
   if (
     value.type === 'session/preview-create_response' ||
-    value.type === 'session/preview-revoke_response'
+    value.type === 'session/preview-revoke_response' ||
+    value.type === 'session/preview-status_response'
   ) {
     return (
       typeof value.sessionId === 'string' &&
       typeof value.success === 'boolean' &&
+      (value.expiresAt === undefined ||
+        (typeof value.expiresAt === 'number' &&
+          Number.isSafeInteger(value.expiresAt) &&
+          value.expiresAt >= 0)) &&
       (typeof value.connection === 'undefined' || isPreviewConnection(value.connection)) &&
       isOptionalString(value.error) &&
       isOptionalString(value.message)

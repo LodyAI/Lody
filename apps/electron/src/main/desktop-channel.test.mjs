@@ -1,0 +1,161 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import {
+  AUTO_LAUNCH_ARG,
+  getAutoLaunchQueryOptions,
+  getAutoLaunchRegistrationSettings,
+  resolveAutoLaunchEnabled,
+  shouldHideMainWindowOnAutoLaunch
+} from './auto-launch-policy.ts'
+import { getDesktopCallbackProtocol, resolveDesktopProfile } from './desktop-channel.ts'
+import { parseLocalPlatformSnapshot } from './local-platform-snapshot.ts'
+
+const cloud = {
+  platform: 'cloud',
+  namespace: 'lody',
+  dataDirectoryName: '.lody',
+  desktopProtocol: 'lody',
+  desktopProductName: 'Lody',
+  desktopAppId: 'ai.lody.desktop',
+  localCliHostPort: 17788
+}
+
+void test('Nightly separates desktop identity while retaining the shared CLI owner', () => {
+  const nightly = resolveDesktopProfile(cloud, 'nightly')
+  assert.equal(nightly.desktopProtocol, 'ai.lody.nightly')
+  assert.equal(getDesktopCallbackProtocol(nightly), 'ai.lody.nightly')
+  assert.equal(nightly.desktopUserDataName, 'Lody Nightly')
+  assert.equal(nightly.desktopAppId, 'ai.lody.desktop.nightly')
+  assert.equal(nightly.desktopIpcNamespace, 'lody-nightly')
+  assert.equal(nightly.namespace, cloud.namespace)
+  assert.equal(nightly.localCliHostPort, cloud.localCliHostPort)
+  assert.equal(nightly.dataDirectoryName, cloud.dataDirectoryName)
+  assert.equal(cloud.desktopProductName, 'Lody')
+})
+
+void test('Stable preserves existing desktop paths and local builds reject cloud channels', () => {
+  const stable = resolveDesktopProfile(cloud)
+  assert.equal(stable.desktopUserDataName, null)
+  assert.equal(stable.desktopProtocol, 'lody')
+  assert.equal(getDesktopCallbackProtocol(stable), 'ai.lody.stable')
+  assert.equal(stable.desktopIpcNamespace, 'lody')
+  assert.throws(() => resolveDesktopProfile(cloud, 'unknown'))
+  assert.throws(() => resolveDesktopProfile(cloud, 'local'))
+  const local = { ...cloud, platform: 'local', namespace: 'lody-oss', desktopProtocol: 'lody-oss' }
+  assert.equal(resolveDesktopProfile(local).releaseChannel, 'local')
+  assert.equal(getDesktopCallbackProtocol(local), 'lody-oss')
+  assert.throws(() => resolveDesktopProfile(local, 'nightly'))
+})
+
+const validCatalog = {
+  identity: { userId: 'local:user-1' },
+  workspaces: [
+    {
+      workspaceId: 'lw_workspace-1',
+      name: 'Lody',
+      slug: 'local',
+      role: 'owner',
+      state: 'active'
+    }
+  ]
+}
+
+void test('rejects identity drift and multiple active local workspaces', () => {
+  assert.throws(
+    () => parseLocalPlatformSnapshot({ ...validCatalog, identity: { userId: 'cloud-user' } }),
+    /invalid local user id/
+  )
+  assert.throws(
+    () =>
+      parseLocalPlatformSnapshot({
+        ...validCatalog,
+        workspaces: [...validCatalog.workspaces, { ...validCatalog.workspaces[0] }]
+      }),
+    /exactly one active workspace/
+  )
+})
+
+void test('uses one stable identity to register and query each login item', () => {
+  assert.deepEqual(getAutoLaunchQueryOptions('darwin'), { type: 'mainAppService' })
+  assert.deepEqual(getAutoLaunchRegistrationSettings('darwin', true), {
+    openAtLogin: true,
+    type: 'mainAppService'
+  })
+
+  const windowsQuery = { args: [AUTO_LAUNCH_ARG] }
+  assert.deepEqual(getAutoLaunchQueryOptions('win32'), windowsQuery)
+  assert.deepEqual(getAutoLaunchRegistrationSettings('win32', true), {
+    openAtLogin: true,
+    ...windowsQuery
+  })
+  assert.deepEqual(getAutoLaunchRegistrationSettings('win32', false), {
+    openAtLogin: false,
+    ...windowsQuery
+  })
+})
+
+void test('recognizes both current and legacy Windows login entries', () => {
+  assert.equal(
+    resolveAutoLaunchEnabled('win32', {
+      openAtLogin: true,
+      executableWillLaunchAtLogin: true
+    }),
+    true
+  )
+  assert.equal(
+    resolveAutoLaunchEnabled('win32', {
+      openAtLogin: false,
+      executableWillLaunchAtLogin: true
+    }),
+    true
+  )
+  assert.equal(
+    resolveAutoLaunchEnabled('win32', {
+      openAtLogin: false,
+      executableWillLaunchAtLogin: false
+    }),
+    false
+  )
+})
+
+const baseVisibilityInput = {
+  preferenceEnabled: true,
+  launchedAtLogin: true,
+  initialPath: '/',
+  hasInitialDeepLink: false
+}
+
+void test('hides only ordinary login launches with an explicit preference', () => {
+  assert.equal(shouldHideMainWindowOnAutoLaunch(baseVisibilityInput), true)
+  assert.equal(
+    shouldHideMainWindowOnAutoLaunch({
+      ...baseVisibilityInput,
+      preferenceEnabled: false
+    }),
+    false
+  )
+  assert.equal(
+    shouldHideMainWindowOnAutoLaunch({
+      ...baseVisibilityInput,
+      launchedAtLogin: false
+    }),
+    false
+  )
+})
+
+void test('always shows onboarding and deep-link launches', () => {
+  assert.equal(
+    shouldHideMainWindowOnAutoLaunch({
+      ...baseVisibilityInput,
+      initialPath: '/onboarding'
+    }),
+    false
+  )
+  assert.equal(
+    shouldHideMainWindowOnAutoLaunch({
+      ...baseVisibilityInput,
+      hasInitialDeepLink: true
+    }),
+    false
+  )
+})

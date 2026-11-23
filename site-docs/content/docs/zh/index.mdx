@@ -1,36 +1,48 @@
 ---
 title: 简介
-description: Lody 使用文档，涵盖桌面端与移动端使用、Agent 配置、会话协作与工作流说明。
+description: Lody 文档地图——从安装、第一次会话，到从 Codex / Claude Code 迁移，以及实战指南和功能列表。
 ---
 
 # Lody
 
-Lody.ai 让你可以在手机或电脑上并行使用你的 Coding Agents 并与团队共享。
+Lody.ai 让你在桌面端、移动端和浏览器里并行运行 coding agents，并与团队共享上下文。你可以使用
+Lody 内置的全部 Provider：Claude Code、Codex、Grok、Kimi Code、Devin、Pi、DeepSeek Harness、
+Bub、Dimcode；也可以使用自定义 ACP Agent 和
+[ACP Registry](https://agentclientprotocol.com/get-started/registry) 中的任意 CLI。
 
-- 当前支持 Claude Code、Codex、Grok、OpenCode、Kimi、自定义 ACP Agent，以及所有支持 [ACP Registry](https://agentclientprotocol.com/get-started/registry) 的 CLI，几乎涵盖了市面上所有的 Agent。
-- iOS 与 Android 原生应用，[手机](/zh/docs/mobile)也可以随时 vibe coding
-- 通过 Worktree 和多标签会话让 Coding 任务高效并行
-- 更好的 [GitHub 集成](/zh/docs/github)，自动绑定 PR，同步 CI 状态和 review 评论
-- 支持项目和会话文件浏览，并可在实时协作文件中直接编辑
-- 内置实时 UI [预览](/zh/docs/preview)，支持响应式视口和可发送给 Agent 的视觉标注
-- 对话完成时发送推送通知，不用担心忘记
-- [团队共享](/zh/docs/team) agent 设置和所有对话上下文，时刻保持信息一致
+Lody 从第一天起就是面向团队的 local-first 架构：不仅让 coding agent 随时随地更好用，也让数据、
+context 和协作过程在团队里真正流动起来。
 
-## 最新能力
+## 从这里开始
 
-- [对话 fork 支持](/zh/docs/session#fork-%E4%BC%9A%E8%AF%9D)：在同一个会话中 fork 出多个子对话，独立运行不同的任务。
-- [多标签会话](/zh/docs/session-tabs)：在同一个 session 中打开主对话、子对话、文件和 diff 标签。
-- [文件列表](/zh/docs/file-list)：浏览项目文件、打开会话文件、文件内搜索、预览 Markdown，并编辑实时协作文本文件。
-- [Diff 行评论](/zh/docs/diff-comments)：在差异行上添加 Markdown 评论，并同步到 GitHub PR Review。
-- [会话内搜索](/zh/docs/session-search)：搜索消息、工具调用、终端输出和 diff 内容。
-- [Daemon 模式](/zh/docs/cli#daemon-模式)：让 CLI 在后台常驻并自动恢复。
-- [图像输入](/zh/docs/image-input)：将图片作为会话上下文的一部分发送给 AI。
-- [Lody Preview](/zh/docs/preview)：打开实时 UI 预览，切换不同设备视口，并把视觉标注发送给 Agent。
-- [Claude & Codex 能力](/zh/docs/claude-codex-capabilities)：Steer 运行中的任务，并使用运行时提供的斜杠命令、提问、Fast Mode、图像生成和 Goal。
-- [CLI 类型支持](/zh/docs/cli-runtimes)：使用 ACP Registry 运行时，或填写你自己的 ACP 兼容启动命令。
-- [工作树](/zh/docs/worktrees)：隔离并行任务，并为项目配置 setup / cleanup 脚本。
-- [上下文、Token 与额度](/zh/docs/usage-and-quota)：在设置页查看上下文窗口余量、Token 花费和订阅额度。
+<Cards>
+  <Card href="/zh/docs/quickstart" title="安装并登录">
+    桌面端、移动端、浏览器，或在远程机器上使用 CLI。
+  </Card>
+  <Card href="/zh/docs/first-session" title="跑通第一次会话">
+    用一个小任务走完从提问到审阅结果的全过程——不需要 GitHub，也不需要并行。
+  </Card>
+  <Card href="/zh/docs/concepts" title="建立心智模型">
+    理解每个界面背后那几个对象，并附一份大白话术语表。
+  </Card>
+  <Card href="/zh/docs/from-codex-claude-code" title="从 Codex 或 Claude Code 过来">
+    哪些习惯可以保留、Lody 多了什么，以及一份迁移清单。
+  </Card>
+</Cards>
+
+## Lody 擅长什么
+
+- **并行推进工作。** 每个会话都有自己的 Git 工作树，Agent 之间不会互相覆盖文件。见[并行 Coding Agents](/zh/docs/parallel-agents)。
+- **使用你信任的 Agent。** Lody 内置多种 Provider，不止 Claude Code 和 Codex；ACP Registry 中的运行时和自定义 ACP 命令也都能用。见 [Agent Config](/zh/docs/quickstart) 和 [CLI 运行时类型](/zh/docs/cli-runtimes)。
+- **边跑边审阅。** 当轮 diff、行级评论，以及 GitHub PR review 同步。见[差异查看](/zh/docs/diff-viewer)和 [Diff 行评论](/zh/docs/diff-comments)。
+- **让一个 Agent 协调其他 Agent。** 用 [Agent 对话控制](/zh/docs/session-orchestration)和[多 Agent 协作](/zh/docs/agent-collaboration)拆分任务、委派工作并收集结果。
+- **让团队保持同步。** 用[会话交接](/zh/docs/session-handoff)把同事请进实时会话，而不是发一份聊天记录；团队能力见[团队功能](/zh/docs/team)。
+- **离开工位也能工作。** 在 iOS、Android 或任意浏览器里查看和指挥会话，见[移动端](/zh/docs/mobile)。
 
 ## 下一步
 
-[快速开始](/zh/docs/quickstart)查看哪些必要的基础设置。
+<Cards>
+  <Card href="/zh/docs/quickstart" title="安装 Lody" />
+  <Card href="/zh/docs/first-session" title="跑通第一次会话" />
+  <Card href="/zh/docs/concepts" title="阅读概念与术语表" />
+</Cards>

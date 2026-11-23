@@ -5,12 +5,12 @@ import { PanelLeftIcon } from 'lucide-react';
 
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Separator } from '@/ui/separator';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/ui/sheet';
-import { Skeleton } from '@/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Separator } from '@lody/ui/separator';
+import { Drawer } from '@lody/ui/drawer';
+import { Skeleton } from '@lody/ui/skeleton';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const SIDEBAR_COOKIE_NAME = 'sidebar_state';
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -105,7 +105,7 @@ function SidebarProvider({
 
   return (
     <SidebarContext.Provider value={contextValue}>
-      <TooltipProvider delayDuration={500}>
+      <Tooltip.Provider delay={500}>
         <div
           data-slot="sidebar-wrapper"
           style={
@@ -123,7 +123,7 @@ function SidebarProvider({
         >
           {children}
         </div>
-      </TooltipProvider>
+      </Tooltip.Provider>
     </SidebarContext.Provider>
   );
 }
@@ -159,26 +159,35 @@ function Sidebar({
 
   if (isMobile) {
     return (
-      <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
-        <SheetContent
+      <Drawer.Root
+        side={side === 'left' ? 'start' : 'end'}
+        open={openMobile}
+        onOpenChange={setOpenMobile}
+        {...props}
+      >
+        <Drawer.Content
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+          // The sidebar is its own surface with its own fill and its own
+          // scrolling column, so it takes the panel without the panel's padding
+          // and without the cross: the way out is the overlay or the trigger.
+          closeButton={false}
+          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0"
           style={
             {
               '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
             } as React.CSSProperties
           }
-          side={side}
+          side={side === 'left' ? 'start' : 'end'}
         >
-          <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
-          </SheetHeader>
+          <Drawer.Header className="sr-only">
+            <Drawer.Title>Sidebar</Drawer.Title>
+            <Drawer.Description>Displays the mobile sidebar.</Drawer.Description>
+          </Drawer.Header>
           <div className="flex h-full w-full flex-col">{children}</div>
-        </SheetContent>
-      </Sheet>
+        </Drawer.Content>
+      </Drawer.Root>
     );
   }
 
@@ -238,15 +247,16 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
       variant="ghost"
-      size="icon"
-      className={cn('size-7', className)}
+      size="small"
+      icon
+      className={cn(className)}
       onClick={(event) => {
         onClick?.(event);
         toggleSidebar();
       }}
       {...props}
     >
-      <PanelLeftIcon />
+      <PanelLeftIcon className="size-4" />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
@@ -329,7 +339,7 @@ function SidebarSeparator({ className, ...props }: React.ComponentProps<typeof S
     <Separator
       data-slot="sidebar-separator"
       data-sidebar="separator"
-      className={cn('bg-sidebar-border mx-2 w-auto', className)}
+      className={cn('mx-2 w-auto', className)}
       {...props}
     />
   );
@@ -470,7 +480,7 @@ function SidebarMenuButton({
 }: React.ComponentProps<'button'> & {
   asChild?: boolean;
   isActive?: boolean;
-  tooltip?: string | React.ComponentProps<typeof TooltipContent>;
+  tooltip?: string | React.ComponentProps<typeof Tooltip.Content>;
 } & VariantProps<typeof sidebarMenuButtonVariants>) {
   const Comp = asChild ? Slot : 'button';
   const { isMobile, state } = useSidebar();
@@ -497,15 +507,15 @@ function SidebarMenuButton({
   }
 
   return (
-    <Tooltip delayDuration={500}>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={500} render={button}/>
+      <Tooltip.Content
         side="right"
         align="center"
         hidden={state !== 'collapsed' || isMobile}
         {...tooltip}
       />
-    </Tooltip>
+    </Tooltip.Root>
   );
 }
 
@@ -579,9 +589,10 @@ function SidebarMenuSkeleton({
       className={cn('flex h-8 items-center gap-2 rounded-md px-2', className)}
       {...props}
     >
-      {showIcon && <Skeleton className="size-4 rounded-md" data-sidebar="menu-skeleton-icon" />}
+      {showIcon && <Skeleton width={16} height={16} data-sidebar="menu-skeleton-icon" />}
       <Skeleton
-        className="h-4 max-w-(--skeleton-width) flex-1"
+        height={16}
+        className="max-w-(--skeleton-width) flex-1"
         data-sidebar="menu-skeleton-text"
         style={
           {

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { CloudApi } from '@lody/cloud-api';
 import type { WorkspaceId } from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
@@ -15,10 +16,42 @@ import {
   LOCAL_PLATFORM_CAPABILITIES,
   PLATFORM_CAPABILITIES,
   type PlatformSessionState,
+  type E2eeMachineSharingRequests,
+  type E2eeMachineSharingReplies,
+  type E2eeMachineSharingHeadState,
+  type E2eeMachineSharingRemovedHead,
+  type E2eeMachineSharingVersion,
   DEFAULT_RUNTIME_ARTIFACTS_BASE_URL,
   resolveRuntimeArtifactsBaseUrl,
   resolvePlatformKind,
 } from '../src/index';
+
+it('keeps machine sharing tombstones and account display outside execution credentials', () => {
+  expectTypeOf<E2eeMachineSharingRequests['commit']>().toMatchTypeOf<{ generation: string }>();
+  expectTypeOf<E2eeMachineSharingReplies['readHead']>()
+    .exclude<null>()
+    .toMatchTypeOf<{ generation: string }>();
+  expectTypeOf<
+    E2eeMachineSharingRequests['commit']['expectedHead']
+  >().toEqualTypeOf<E2eeMachineSharingHeadState | null>();
+  expectTypeOf<E2eeMachineSharingRequests['commit']>().toMatchTypeOf<{ credential: string }>();
+  // Only an active head may inline its original; removal barriers never carry one.
+  expectTypeOf<E2eeMachineSharingReplies['readHead']>().toEqualTypeOf<
+    | (Extract<E2eeMachineSharingHeadState, { status: 'active' }> & {
+        version?: E2eeMachineSharingVersion;
+      })
+    | E2eeMachineSharingRemovedHead
+    | null
+  >();
+  expectTypeOf<
+    Extract<keyof Extract<E2eeMachineSharingReplies['readHead'], { status: 'removed' }>, 'version'>
+  >().toEqualTypeOf<never>();
+  expectTypeOf<
+    Extract<E2eeMachineSharingReplies['readRequest'], { status: 'removed' }>
+  >().toEqualTypeOf<E2eeMachineSharingRemovedHead>();
+  expectTypeOf<Extract<keyof E2eeMachineSharingRemovedHead, 'frameHex'>>().toEqualTypeOf<never>();
+  expectTypeOf<CloudApi['e2eeMachineSharing']['readHead']['_type']>().toEqualTypeOf<'action'>();
+});
 
 describe('resolvePlatformKind', () => {
   it('defaults to local when unset or blank', () => {

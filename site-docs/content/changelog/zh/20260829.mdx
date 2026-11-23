@@ -1,0 +1,22 @@
+---
+title: '20260829'
+version: 0.88.1
+date: 2026-08-29
+description: '`@` 提及菜单现在会按项目筛选会话，桌面端会先要求选择运行设备，再允许选择 Agent，并修复子标签页消息丢失、侧边面板重叠、新手引导数据隔离、终端环境变量和翻译问题。'
+---
+
+版本 0.88.1
+
+### ✨ 新功能
+
+- `@` 提及菜单中的会话现在默认只显示当前项目，并可临时切换到“所有项目”，让相关会话更容易找到（[#109](https://github.com/LodyAI/Lody/pull/109)）。
+- 桌面端现在会先要求选择运行设备，再允许选择 Agent，并提供清晰提示（[#151](https://github.com/LodyAI/Lody/pull/151)）。
+
+### 🐛 修复与改进
+
+- 修复子标签页首次发送可能丢失消息、持续显示“同步中”或无法关闭的问题（[#141](https://github.com/LodyAI/Lody/pull/141)）。
+- 修复侧边会话与文件、Diff 预览可能相互重叠的问题（[#135](https://github.com/LodyAI/Lody/pull/135)）。
+- 改善桌面端新手引导的数据隔离，避免演示流程意外访问真实工作区数据（[#136](https://github.com/LodyAI/Lody/pull/136)）。
+- 项目终端不再继承 Electron 启动和凭据代理使用的内部环境变量（[#122](https://github.com/LodyAI/Lody/pull/122)）。
+- 补全目标状态、任务保存和 Windows Git 诊断等中英文翻译，并恢复缺失的 Agent 名称（[#59](https://github.com/LodyAI/Lody/pull/59)）。
+- 感谢外部贡献者 [@27Aaron](https://github.com/27Aaron)、[@ImSingee](https://github.com/ImSingee) 和 [@natsustan](https://github.com/natsustan) 对本版本的公开贡献。

@@ -1,15 +1,20 @@
 import { useState, type ReactNode } from 'react';
 import {
+  ArchiveRestore,
   ChevronDown,
   File as FileIcon,
   FileDiff,
   FolderOpen,
   GitPullRequest,
-  Loader2,
+  Hand,
   MonitorPlay,
   Plus,
+  Smartphone,
   Undo2,
+  X,
 } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
+import { Badge } from '@lody/ui/badge';
 import { useTranslation } from 'react-i18next';
 import { getServerNow } from '@lody/shared';
 
@@ -17,6 +22,7 @@ import { ChatsIcon } from '@/components/icons/chats-icon';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 /**
  * Bottom sheet that replaces the mobile `SessionTabBar`. Opened by the header
@@ -26,9 +32,11 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/draw
  * to one.
  *
  * Each conversation row reads `[status] title elapsed`: the status slot is a
- * spinner while working, else an unread accent dot, else empty; elapsed is the
- * relative "Xm ago" of the last activity (task-list style). The component is
- * pure — the caller resolves running/unread/active/lastActivityAt (see
+ * warning-tone hand while the conversation is blocked on a permission request,
+ * else a spinner while working, else an unread accent dot, else empty; elapsed
+ * is the relative "Xm ago" of the last activity (task-list style). The
+ * component is pure — the caller resolves
+ * waitingPermission/running/unread/active/lastActivityAt (see
  * `session-detail.tsx` wiring) so the sheet stays trivially story-able.
  */
 export type ConversationTabEntry = {
@@ -37,25 +45,36 @@ export type ConversationTabEntry = {
   active: boolean;
   /** The session's main thread — pinned first, marked with a "Main" chip. */
   main?: boolean;
-  /** Working (or waiting on permission) → spinner. */
+  /** Working → spinner. A permission request also counts as working. */
   running: boolean;
+  /**
+   * Blocked on a permission request → hand, outranking the spinner. A child
+   * (subagent) tab is the case this exists for: it is the only place its
+   * "needs you" state surfaces while another tab is on screen.
+   */
+  waitingPermission?: boolean;
   /** Unread messages → accent dot. */
   unread: boolean;
   /** Last activity timestamp (ms) for the trailing relative time; null hides it. */
   lastActivityAt: number | null;
 };
 
-/** Archived child conversation, shown behind a collapsed disclosure row. */
+/** Closed conversation, shown behind a collapsed disclosure row. */
 export type ArchivedConversationEntry = {
   id: string;
   title: string;
   lastActivityAt: number | null;
+  running?: boolean;
+  waitingPermission?: boolean;
+  unread?: boolean;
+  /** An archived child of a live workspace: tapping restores it instead of reopening. */
+  restoresArchive?: boolean;
 };
 
 export type ViewerTabEntry = {
   id: string;
   label: string;
-  kind: 'file' | 'diff' | 'pr' | 'browser' | 'files';
+  kind: 'file' | 'diff' | 'pr' | 'browser' | 'ios-simulator' | 'android-emulator' | 'files';
   active: boolean;
 };
 
@@ -67,10 +86,12 @@ export type MobileSessionTabSheetProps = {
   archivedConversations?: ArchivedConversationEntry[];
   viewers: ViewerTabEntry[];
   onSelectConversation: (id: string) => void;
-  onNewConversation: () => void;
+  /** Omitted for a review-only (archived) workspace: no New Chat row. */
+  onNewConversation?: () => void;
   onSelectViewer: (id: string) => void;
-  /** Tapping an archived row restores it (and switches to it). */
+  /** Tapping a closed row reopens (or, for `restoresArchive`, restores) it and switches to it. */
   onRestoreConversation?: (id: string) => void;
+  onCloseConversation?: (id: string) => void;
 };
 
 /** Relative "Xm ago" of the last activity, task-list style; '' when unknown. */
@@ -104,6 +125,8 @@ const VIEWER_ICON: Record<ViewerTabEntry['kind'], typeof FileIcon> = {
   diff: FileDiff,
   pr: GitPullRequest,
   browser: MonitorPlay,
+  'ios-simulator': Smartphone,
+  'android-emulator': Smartphone,
   files: FolderOpen,
 };
 
@@ -117,9 +140,11 @@ export function MobileSessionTabSheet({
   onNewConversation,
   onSelectViewer,
   onRestoreConversation,
+  onCloseConversation,
 }: MobileSessionTabSheetProps) {
   const { t } = useTranslation();
   const title = t('sessions.tabs.sheetTitle', 'Tabs');
+  const maxHeight = useFoldAwareSheetHeight();
   // Collapsed by default on every open (content unmounts with the drawer).
   const [archivedOpen, setArchivedOpen] = useState(false);
   const showArchived = archivedConversations.length > 0 && onRestoreConversation != null;
@@ -131,38 +156,58 @@ export function MobileSessionTabSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent className="h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60">
+      <DrawerContent style={{ maxHeight }} className="h-auto! rounded-t-2xl border-border/60">
         <DrawerTitle className="sr-only">{title}</DrawerTitle>
         <DrawerDescription className="sr-only">{title}</DrawerDescription>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(16px+var(--safe-area-bottom,0px))] pt-3">
           <GroupLabel>{t('sessions.tabs.conversationsGroup', 'Conversations')}</GroupLabel>
           <GroupCard>
             {conversations.map((c) => (
-              <ConversationRow
-                key={c.id}
-                active={c.active}
-                running={c.running}
-                unread={c.unread}
-                label={c.title || t('sessions.untitled', 'Untitled')}
-                mainChip={c.main ? t('sessions.tabs.mainTab', 'Main') : null}
-                elapsed={formatRelativeTime(c.lastActivityAt, t)}
-                unreadLabel={t('sessions.unreadMessages', 'Unread messages')}
-                onSelect={() => select(() => onSelectConversation(c.id))}
-              />
+              <div key={c.id} className="flex items-center">
+                <div className="min-w-0 flex-1">
+                  <ConversationRow
+                    active={c.active}
+                    running={c.running}
+                    waitingPermission={c.waitingPermission === true}
+                    unread={c.unread}
+                    label={c.title || t('sessions.untitled', 'Untitled')}
+                    mainChip={c.main ? t('sessions.tabs.mainTab', 'Main') : null}
+                    elapsed={formatRelativeTime(c.lastActivityAt, t)}
+                    unreadLabel={t('sessions.unreadMessages', 'Unread messages')}
+                    waitingPermissionLabel={t(
+                      'sessions.waitingPermission',
+                      'Waiting for permission'
+                    )}
+                    onSelect={() => select(() => onSelectConversation(c.id))}
+                  />
+                </div>
+                {onCloseConversation && (
+                  <button
+                    type="button"
+                    className="shrink-0 p-3 text-muted-foreground"
+                    aria-label={t('sessions.tabs.closeTab', 'Close tab')}
+                    onClick={() => onCloseConversation(c.id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             ))}
-            <button
-              type="button"
-              onClick={() => select(onNewConversation)}
-              className={cn(
-                rowClassName,
-                'font-medium text-muted-foreground transition-colors hover:text-foreground'
-              )}
-            >
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                <Plus className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
-              </span>
-              <span>{t('sessions.tabs.newChat', 'New Chat')}</span>
-            </button>
+            {onNewConversation ? (
+              <button
+                type="button"
+                onClick={() => select(onNewConversation)}
+                className={cn(
+                  rowClassName,
+                  'font-medium text-muted-foreground transition-colors hover:text-foreground'
+                )}
+              >
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                  <Plus className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <span>{t('sessions.tabs.newChat', 'New Chat')}</span>
+              </button>
+            ) : null}
             {showArchived ? (
               <>
                 <button
@@ -182,7 +227,7 @@ export function MobileSessionTabSheet({
                     />
                   </span>
                   <span className="min-w-0 flex-1 truncate">
-                    {t('sessions.tabs.archivedCount', 'Archived ({{count}})', {
+                    {t('sessions.tabs.closedCount', 'Closed ({{count}})', {
                       count: archivedConversations.length,
                     })}
                   </span>
@@ -193,24 +238,50 @@ export function MobileSessionTabSheet({
                         key={a.id}
                         type="button"
                         onClick={() => select(() => onRestoreConversation(a.id))}
-                        aria-label={t('sessions.tabs.restoreTab', 'Restore tab')}
+                        aria-label={
+                          a.restoresArchive
+                            ? t('archive.restore', 'Restore session')
+                            : t('sessions.tabs.reopenTab', 'Reopen conversation')
+                        }
                         className={cn(
                           rowClassName,
                           'transition-colors hover:bg-muted-foreground/5'
                         )}
                       >
-                        <span className="h-4 w-4 shrink-0" />
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                          {a.waitingPermission ? (
+                            <Hand
+                              className="h-4 w-4 text-status-warning"
+                              aria-label={t('sessions.waitingPermission', 'Waiting for permission')}
+                            />
+                          ) : a.running ? (
+                            <Spinner className="h-4 w-4" />
+                          ) : a.unread ? (
+                            <span
+                              className="h-2 w-2 rounded-full bg-primary"
+                              aria-label={t('sessions.unreadMessages', 'Unread messages')}
+                            />
+                          ) : null}
+                        </span>
                         <span className="min-w-0 flex-1 truncate text-muted-foreground">
                           {a.title || t('sessions.untitled', 'Untitled')}
                         </span>
                         <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">
                           {formatRelativeTime(a.lastActivityAt, t)}
                         </span>
-                        <Undo2
-                          className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
-                          strokeWidth={1.8}
-                          aria-hidden="true"
-                        />
+                        {a.restoresArchive ? (
+                          <ArchiveRestore
+                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+                            strokeWidth={1.8}
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <Undo2
+                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+                            strokeWidth={1.8}
+                            aria-hidden="true"
+                          />
+                        )}
                       </button>
                     ))
                   : null}
@@ -266,21 +337,25 @@ function GroupCard({ children }: { children: ReactNode }) {
 function ConversationRow({
   active,
   running,
+  waitingPermission,
   unread,
   label,
   mainChip,
   elapsed,
   unreadLabel,
+  waitingPermissionLabel,
   onSelect,
 }: {
   active: boolean;
   running: boolean;
+  waitingPermission: boolean;
   unread: boolean;
   label: string;
   /** Localized "Main" badge text; null hides the chip. */
   mainChip?: string | null;
   elapsed: string;
   unreadLabel: string;
+  waitingPermissionLabel: string;
   onSelect: () => void;
 }) {
   return (
@@ -297,8 +372,12 @@ function ConversationRow({
       )}
     >
       <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-        {running ? (
-          <Loader2 className="h-4 w-4 animate-spin text-tab-active-accent" aria-hidden="true" />
+        {/* Precedence matches the mobile project screen and the desktop sidebar:
+            "this tab needs you" beats "this tab is busy" beats "unread". */}
+        {waitingPermission ? (
+          <Hand className="h-4 w-4 text-status-warning" aria-label={waitingPermissionLabel} />
+        ) : running ? (
+          <Spinner className="h-4 w-4 text-tab-active-accent" aria-hidden="true" />
         ) : unread ? (
           <span className="h-2 w-2 rounded-full bg-primary" aria-label={unreadLabel} />
         ) : null}
@@ -312,11 +391,7 @@ function ConversationRow({
         >
           {label}
         </span>
-        {mainChip ? (
-          <span className="shrink-0 rounded border border-border/70 px-1 py-px text-[0.62rem] font-medium leading-none text-muted-foreground">
-            {mainChip}
-          </span>
-        ) : null}
+        {mainChip ? <Badge>{mainChip}</Badge> : null}
       </span>
       {elapsed ? (
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{elapsed}</span>
@@ -384,6 +459,11 @@ function ViewerRow({
  *   - else working → hollow ring with a slow opacity "breathe" (a background
  *     agent is still running — ambient, nothing to do yet).
  * Shape (solid vs ring) carries the distinction so it survives reduced-motion.
+ *
+ * There is deliberately no third "waiting for approval" state here: a dot can
+ * only differ by color, and `--status-warning` resolves to `--primary` in
+ * VS Code-derived themes, so it would be the unread dot. The waiting hand lives
+ * in the sheet rows, where a glyph has room to be a glyph.
  */
 export function MobileSessionTabButton({
   hasUnread,

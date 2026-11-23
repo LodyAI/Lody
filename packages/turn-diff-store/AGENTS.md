@@ -39,14 +39,19 @@ Loro, Flock, session-schema, or network dependency.
 - SQLite uses WAL, `synchronous=FULL`, foreign keys, incremental auto-vacuum, gzip
   level 1 by default, and a single worker-owned connection. zstd level 1 is explicit
   opt-in only when every reader runtime supports it.
-- `better-sqlite3` requires Node >=22.14 / Node-API 10 and x64 or arm64; the SQLite
-  entry fails before loading the addon on unsupported runtimes.
+- Standalone Node supports 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x).
+  SQLite independently requires Node-API 10+ and x64/arm64; its entry fails before
+  loading an incompatible addon, including inside Electron.
 - Reads verify reconstructed snapshot SHA-256 and run selection + reconstruction in a
   short read transaction. Bounded reads check manifest `raw_size` before allocating,
   decompressing, or crossing the worker boundary. `PRAGMA application_id` owns new
   databases; only the exact legacy Loro fingerprint is accepted without that marker.
   Initialization classifies the complete `sqlite_master` schema while holding `BEGIN
 IMMEDIATE`; unowned lookalikes are never modified, and owned resets/version writes are atomic.
+- Descriptor and byte reads select an owner/path/side under retention before checking
+  the requested hash. A hash alone never authorizes a read. Read-only connections
+  require an existing, exactly recognized schema and perform no initialization,
+  migration, mutation or garbage collection.
 - The current pre-FastCDC Loro schema is intentionally replaced in place. Do not add
   a partial reader or mix the two schemas.
 

@@ -1,0 +1,422 @@
+// @vitest-environment jsdom
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { createStore, Provider, type PrimitiveAtom } from 'jotai';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentConfigMeta, LodyPresenceStateMap, SessionId, SessionMeta } from '@lody/shared';
+
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+const NOW_MS = Date.parse('2026-09-03T12:00:00.000Z');
+
+const testAtoms = await vi.hoisted(async () => {
+  const { atom } = await import('jotai');
+  return {
+    sessionsAtom: atom<SessionMeta[]>([]),
+    presenceStatesAtom: atom<LodyPresenceStateMap>({}),
+    presenceNowMsAtom: atom<number>(Date.parse('2026-09-03T12:00:00.000Z')),
+    agentConfigsAtom: atom<AgentConfigMeta[]>([]),
+    userAtom: atom<{ id: string } | null>({ id: 'user-1' }),
+    liveActivitiesEnabledAtom: atom<boolean>(true),
+    runtimeAtom: atom<{ workspaceId: string; contentMode?: string } | null>({
+      workspaceId: 'ws-1',
+      contentMode: 'plaintext',
+    }),
+    workspaceIdAtom: atom<string | null>('ws-1'),
+    nativeIOSAppShell: { value: true },
+  };
+});
+
+vi.mock('../src/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: testAtoms.runtimeAtom }));
+vi.mock('../src/atoms/doc-meta', () => ({ allActiveSessionsAtom: testAtoms.sessionsAtom }));
+vi.mock('../src/atoms/presence', () => ({
+  lodyPresenceStatesAtom: testAtoms.presenceStatesAtom,
+  lodyPresenceNowMsAtom: testAtoms.presenceNowMsAtom,
+}));
+vi.mock('../src/atoms/agents', () => ({ getAllAgentConfigAtom: testAtoms.agentConfigsAtom }));
+vi.mock('../src/atoms', () => ({
+  userAtom: testAtoms.userAtom,
+  iosLiveActivitiesEnabledAtom: testAtoms.liveActivitiesEnabledAtom,
+}));
+vi.mock('../src/hooks/use-resolved-workspace-scope', async () => {
+  const { useAtomValue } = await import('jotai');
+  return {
+    useResolvedWorkspaceScope: () => ({
+      workspaceId: useAtomValue(testAtoms.workspaceIdAtom),
+      enabled: true,
+    }),
+  };
+});
+vi.mock('../src/lib/native-platform', () => ({
+  isNativeIOSAppShell: () => testAtoms.nativeIOSAppShell.value,
+}));
+vi.mock('@lody/platform/react', () => ({ usePlatformCapability: () => true }));
+// Faithful to react-i18next: `t` and `i18n` hold a stable identity across renders
+// and are replaced only when the language or namespace changes.
+vi.mock('react-i18next', () => {
+  const t = (key: string, fallback?: unknown) => (typeof fallback === 'string' ? fallback : key);
+  const i18n = { language: 'en' };
+  return { useTranslation: () => ({ t, i18n }) };
+});
+
+import {
+  LIVE_ACTIVITY_SUMMARY_THROTTLE_MS,
+  useLodyLiveActivity,
+  type LodyLiveActivitySyncPayload,
+} from '../src/hooks/use-lody-live-activity';
+
+/** Mirrors the hook's private constant; every bridge call trails an emit by it. */
+const SYNC_DEBOUNCE_MS = 250;
+const ACTIVITY_ID_WS_1 = 'lody-conversations:v5:ws-1:user-1';
+
+type LiveActivityBridgeWindow = Window & {
+  __LODY_LIVE_ACTIVITY__?: {
+    syncConversationSummary: (payload: LodyLiveActivitySyncPayload) => Promise<unknown>;
+    endConversationSummary: (payload: { activityId: string }) => Promise<void>;
+  };
+};
+
+function Probe({ workspaceName }: { workspaceName: string }) {
+  useLodyLiveActivity({ workspaceName });
+  return null;
+}
+
+function session(id: string, overrides: Partial<SessionMeta> = {}): SessionMeta {
+  return {
+    id: id as SessionId,
+    machineId: 'machine-1',
+    userId: 'user-1',
+    createdAt: new Date(NOW_MS - 60_000).toISOString(),
+    cliType: 'builtin',
+    agentType: 'codex',
+    title: `Task ${id}`,
+    lastMessageAt: NOW_MS - 10_000,
+    status: { type: 'idle' },
+    ...overrides,
+  } as SessionMeta;
+}
+
+/** A fresh session presence entry — the only source of live status the hook reads. */
+function presence(sessionId: string, status: SessionMeta['status'], updatedAt: number) {
+  return {
+    [`session:${sessionId}`]: {
+      kind: 'session' as const,
+      sessionId: sessionId as SessionId,
+      machineId: 'machine-1',
+      instanceId: `instance-${sessionId}`,
+      status,
+      updatedAt,
+    },
+  } as unknown as LodyPresenceStateMap;
+}
+
+describe('useLodyLiveActivity summary throttling', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  let store: ReturnType<typeof createStore>;
+  let syncedPayloads: LodyLiveActivitySyncPayload[];
+  let endedActivityIds: string[];
+
+  const advance = async (ms: number) => {
+    await act(async () => {
+      vi.advanceTimersByTime(ms);
+    });
+  };
+
+  const setSessions = async (sessions: SessionMeta[]) => {
+    await act(async () => {
+      store.set(testAtoms.sessionsAtom as PrimitiveAtom<SessionMeta[]>, sessions);
+    });
+  };
+
+  const setPresence = async (states: LodyPresenceStateMap) => {
+    await act(async () => {
+      store.set(testAtoms.presenceStatesAtom as PrimitiveAtom<LodyPresenceStateMap>, states);
+      store.set(testAtoms.presenceNowMsAtom as PrimitiveAtom<number>, Date.now());
+    });
+  };
+
+  /**
+   * One `atoms/doc-meta` flush: a republished session array plus a republished
+   * agent-config array, the two inputs that stream in during a catch-up.
+   */
+  const metadataBatch = async (step: number, extra: SessionMeta[] = []) => {
+    await act(async () => {
+      store.set(testAtoms.sessionsAtom as PrimitiveAtom<SessionMeta[]>, [
+        session('a'),
+        ...extra,
+        ...Array.from({ length: step }, (_, index) => session(`b${index}`)),
+      ]);
+      store.set(testAtoms.agentConfigsAtom as PrimitiveAtom<AgentConfigMeta[]>, [
+        { id: `config-${step}`, name: `Config ${step}` } as AgentConfigMeta,
+      ]);
+    });
+  };
+
+  const mount = async (workspaceName = 'Workspace One') => {
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <Probe workspaceName={workspaceName} />
+        </Provider>
+      );
+    });
+  };
+
+  it('never publishes encrypted titles or commands and ends an existing activity on mode change', async () => {
+    await setSessions([session('secret', { title: 'Secret title', status: { type: 'running' } })]);
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads.length).toBeGreaterThan(0);
+    syncedPayloads.length = 0;
+    await act(async () => {
+      store.set(testAtoms.runtimeAtom, { workspaceId: 'ws-1', contentMode: 'e2ee' });
+    });
+    await setSessions([
+      session('secret', { title: 'Decrypted title', status: { type: 'requestPermission' } }),
+    ]);
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS + SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toEqual([]);
+    expect(endedActivityIds).toContain(ACTIVITY_ID_WS_1);
+  });
+
+  it('does not publish when mounted in an encrypted workspace', async () => {
+    store.set(testAtoms.runtimeAtom, { workspaceId: 'ws-1', contentMode: 'e2ee' });
+    await setSessions([session('secret', { title: 'Decrypted title' })]);
+    await mount();
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS + SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toEqual([]);
+    expect(endedActivityIds).toContain(ACTIVITY_ID_WS_1);
+  });
+
+  it.each([null, { workspaceId: 'other', contentMode: 'plaintext' }, { workspaceId: 'ws-1' }])(
+    'ends activity and blocks publication for unadmitted runtime %j',
+    async (runtime) => {
+      await mount();
+      await advance(SYNC_DEBOUNCE_MS);
+      expect(syncedPayloads.length).toBeGreaterThan(0);
+      syncedPayloads.length = 0;
+      await act(async () => store.set(testAtoms.runtimeAtom, runtime));
+      await setSessions([session('secret', { title: 'Decrypted title' })]);
+      await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS + SYNC_DEBOUNCE_MS);
+      expect(syncedPayloads).toEqual([]);
+      expect(endedActivityIds).toContain(ACTIVITY_ID_WS_1);
+    }
+  );
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    syncedPayloads = [];
+    endedActivityIds = [];
+    testAtoms.nativeIOSAppShell.value = true;
+    (window as LiveActivityBridgeWindow).__LODY_LIVE_ACTIVITY__ = {
+      syncConversationSummary: async (payload) => {
+        syncedPayloads.push(structuredClone(payload));
+        return {};
+      },
+      endConversationSummary: async ({ activityId }) => {
+        endedActivityIds.push(activityId);
+      },
+    };
+    store = createStore();
+    store.set(testAtoms.sessionsAtom as PrimitiveAtom<SessionMeta[]>, [session('a')]);
+    store.set(testAtoms.presenceStatesAtom as PrimitiveAtom<LodyPresenceStateMap>, {});
+    store.set(testAtoms.presenceNowMsAtom as PrimitiveAtom<number>, NOW_MS);
+    store.set(testAtoms.agentConfigsAtom as PrimitiveAtom<AgentConfigMeta[]>, []);
+    store.set(testAtoms.userAtom as PrimitiveAtom<{ id: string } | null>, { id: 'user-1' });
+    store.set(testAtoms.liveActivitiesEnabledAtom as PrimitiveAtom<boolean>, true);
+    store.set(testAtoms.workspaceIdAtom as PrimitiveAtom<string | null>, 'ws-1');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    delete (window as LiveActivityBridgeWindow).__LODY_LIVE_ACTIVITY__;
+    vi.useRealTimers();
+  });
+
+  it('promptly projects a permission request silently during a metadata burst', async () => {
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+    syncedPayloads.length = 0;
+
+    const pending = [session('b')];
+    for (let step = 1; step <= 6; step += 1) {
+      await metadataBatch(step, pending);
+      await advance(50);
+    }
+
+    // The request arrives while batches are still streaming in. Neither the
+    // throttle window nor the batches that keep coming may swallow it.
+    await setPresence(presence('b', { type: 'requestPermission' }, Date.now()));
+    for (let step = 7; step <= 12; step += 1) {
+      await metadataBatch(step, pending);
+      await advance(50);
+    }
+
+    const alertPayload = syncedPayloads.find((payload) => payload.statusCounts.permission > 0);
+    expect(alertPayload).toBeDefined();
+    expect(syncedPayloads.every((payload) => payload.permissionAlert === undefined)).toBe(true);
+    // The silent flush must include the session asking for permission.
+    expect(alertPayload?.items.map((item) => [item.id, item.status])).toContainEqual([
+      'b',
+      'permission',
+    ]);
+  });
+
+  it('keeps the summary current while a permission request is pending without adding alerts', async () => {
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+    await setPresence(presence('b', { type: 'requestPermission' }, Date.now()));
+    await setSessions([session('a'), session('b')]);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads.at(-1)?.statusCounts.permission).toBe(1);
+    syncedPayloads.length = 0;
+
+    // Other conversations continue progressing while this request is unanswered.
+    for (let step = 1; step <= 40; step += 1) {
+      await metadataBatch(step, [session('b')]);
+      await advance(50);
+    }
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads.at(-1)?.totalCount).toBe(42);
+    expect(syncedPayloads.at(-1)?.statusCounts.permission).toBe(1);
+    expect(syncedPayloads.every((payload) => payload.permissionAlert === undefined)).toBe(true);
+
+    // Answering the request clears its state in the ordinary summary.
+    await setPresence(presence('b', { type: 'running' }, Date.now()));
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    const resumed = syncedPayloads.at(-1);
+    expect(resumed?.permissionAlert).toBeUndefined();
+    expect(resumed?.statusCounts.permission).toBe(0);
+    expect(resumed?.statusCounts.running).toBe(1);
+  });
+
+  it('sends nothing while Live Activities are disabled and ends the existing activity', async () => {
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toHaveLength(1);
+    syncedPayloads.length = 0;
+
+    await act(async () => {
+      store.set(testAtoms.liveActivitiesEnabledAtom as PrimitiveAtom<boolean>, false);
+    });
+    expect(endedActivityIds).toEqual([ACTIVITY_ID_WS_1]);
+
+    for (let step = 1; step <= 20; step += 1) {
+      await metadataBatch(step);
+      await advance(100);
+    }
+    await setPresence(presence('a', { type: 'requestPermission' }, Date.now()));
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toHaveLength(0);
+
+    // Re-enabling resumes, carrying the state that accumulated while it was off.
+    await act(async () => {
+      store.set(testAtoms.liveActivitiesEnabledAtom as PrimitiveAtom<boolean>, true);
+    });
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toHaveLength(1);
+    expect(syncedPayloads[0]?.totalCount).toBe(21);
+  });
+
+  it('sends nothing on a host that is not a native iOS shell', async () => {
+    testAtoms.nativeIOSAppShell.value = false;
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+
+    for (let step = 1; step <= 10; step += 1) {
+      await metadataBatch(step);
+      await advance(100);
+    }
+    await setPresence(presence('a', { type: 'requestPermission' }, Date.now()));
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toEqual([]);
+  });
+
+  it('ends the previous activity and syncs the new workspace on a workspace switch', async () => {
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+    syncedPayloads.length = 0;
+
+    // Switch inside a closed throttle window: the new workspace must not wait it
+    // out, and must never ship the previous workspace's rows.
+    await setSessions([session('a'), session('b')]);
+    await advance(100);
+    await act(async () => {
+      store.set(testAtoms.workspaceIdAtom as PrimitiveAtom<string | null>, 'ws-2');
+      store.set(testAtoms.runtimeAtom, { workspaceId: 'ws-2', contentMode: 'plaintext' });
+      store.set(testAtoms.sessionsAtom as PrimitiveAtom<SessionMeta[]>, [session('z')]);
+    });
+    await advance(SYNC_DEBOUNCE_MS);
+
+    expect(endedActivityIds).toEqual([ACTIVITY_ID_WS_1]);
+    expect(syncedPayloads).toHaveLength(1);
+    expect(syncedPayloads[0]?.activityId).toBe('lody-conversations:v5:ws-2:user-1');
+    expect(syncedPayloads[0]?.items.map((item) => item.id)).toEqual(['z']);
+  });
+
+  it('cancels a pending summary on logout without sending the previous account payload', async () => {
+    await mount();
+    await act(async () => {
+      store.set(testAtoms.userAtom as PrimitiveAtom<{ id: string } | null>, null);
+    });
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads).toEqual([]);
+    expect(endedActivityIds).toEqual([ACTIVITY_ID_WS_1]);
+  });
+
+  it('publishes an empty summary when the last item is read so native can end it', async () => {
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+    await setSessions([session('a', { lastReadAt: NOW_MS })]);
+    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS);
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads.at(-1)).toMatchObject({
+      totalCount: 0,
+      items: [],
+      statusCounts: { permission: 0, question: 0, running: 0, unread: 0 },
+    });
+  });
+
+  it('does not retry a failed bridge update but permits later fresh state', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let rejectUpdate!: (reason: Error) => void;
+    const bridge = (window as LiveActivityBridgeWindow).__LODY_LIVE_ACTIVITY__!;
+    const sync = bridge.syncConversationSummary;
+    bridge.syncConversationSummary = (payload) => {
+      syncedPayloads.push(structuredClone(payload));
+      return new Promise((_, reject) => {
+        rejectUpdate = reject;
+      });
+    };
+    try {
+      await mount();
+      await advance(SYNC_DEBOUNCE_MS);
+      await act(async () => {
+        rejectUpdate(new Error('native unavailable'));
+      });
+      await advance(5_000);
+      expect(syncedPayloads).toHaveLength(1);
+      bridge.syncConversationSummary = sync;
+      await setSessions([session('b')]);
+      await advance(SYNC_DEBOUNCE_MS);
+      expect(syncedPayloads.at(-1)?.items.map((item) => item.id)).toEqual(['b']);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+});

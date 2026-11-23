@@ -1,38 +1,37 @@
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  buildSessionPreparationClaimKey,
-  buildSessionPreparationRequestKey,
-  buildSessionLaunchConfig,
-  normalizeSessionPreparationRunConfigForDedup,
+  encodeProjectPreparationProgress,
+  type ACPSessionId,
   type AgentConfigId,
+  type AgentConfigMeta,
   type LocalProjectId,
   type MachineId,
+  type McpServerId,
+  type RepoId,
   type SessionId,
-  type SessionLaunchConfig,
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
-import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
-import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
 
-import { getDefaultSessionWorkdir } from './session';
+import { getDefaultSessionWorkdir, Session } from './session';
 import { SessionManager, type ISession } from './session-manager';
 import { createNoopSessionSandbox } from './session-sandbox';
 import type { SessionConfig } from './types';
 import type { LoroDocumentManager } from '../lib/loro/doc';
 import type { Logger } from '../utils/logger';
 import { runWorktreeSetup } from './worktree/worktree-setup-runner';
-import { getWorktreeManager, type WorktreeInfo } from './worktree/worktree-manager';
-import { materializeSpeculativeWorktree } from './worktree/speculative-worktree';
 import {
-  SessionPreparationService,
-  type SessionPreparationResource,
-} from './session-preparation-service';
+  getWorktreeManager,
+  type GitCredentialBrokerAuth,
+  type WorktreeManagerSource,
+} from './worktree/worktree-manager';
 import { createLocalCloudPort } from '@lody/platform';
+import * as codexProfiles from '../agent/codex-profile-store';
 
 vi.mock('./worktree/worktree-setup-runner', () => ({
   runWorktreeSetup: vi.fn(async () => undefined),
@@ -47,6 +46,7 @@ vi.mock('./worktree/worktree-setup-config-store', () => ({
 const createLogger = (): Logger => {
   const logger: Logger = {
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
@@ -80,6 +80,7 @@ const createSessionDoc = (meta?: SessionMeta): FakeSessionDoc => ({
 
 const createWorkspaceDocument = (docs: Map<SessionId, FakeSessionDoc>) =>
   ({
+    getAgentConfigById: vi.fn(async () => null),
     getOrCreateSessionDoc: vi.fn(async (sessionId: SessionId) => {
       const existing = docs.get(sessionId);
       if (existing) {
@@ -133,34 +134,11 @@ const createSessionConfig = (
   agentCliType: 'builtin',
   agentType: 'codex',
   mcpServerIds: [],
-  taskToolsEnabled: false,
   assumeDocExisting: true,
   userName: 'Test User',
   userEmail: 'test@example.com',
   ...overrides,
 });
-
-const createPreparedTestCompatibility = (
-  launchSource: Partial<SessionLaunchConfig>,
-  mcpServerIds: SessionConfig['mcpServerIds'] = [],
-  configOptionValues?: SessionConfig['configOptionValues']
-) => ({
-  launch: buildSessionLaunchConfig(launchSource),
-  runConfig: normalizeSessionPreparationRunConfigForDedup({
-    mcpServerIds,
-    configOptionValues,
-    taskToolsEnabled: false,
-  }),
-});
-
-type PreparedTestResource = SessionPreparationResource & {
-  config: Pick<SessionConfig, 'mcpServerIds' | 'configOptionValues' | 'taskToolsEnabled'>;
-  compatibility: ReturnType<typeof createPreparedTestCompatibility>;
-  readCurrentLaunchConfig?: () => {
-    config: SessionLaunchConfig | undefined;
-    source: 'agent-config';
-  };
-};
 
 const deferred = <T>() => {
   let resolvePromise!: (value: T) => void;
@@ -172,21 +150,269 @@ const deferred = <T>() => {
 
 const createSessionInner = async (
   manager: SessionManager,
-  config: SessionConfig,
-  preparedWorktree?: WorktreeInfo
+  config: SessionConfig
 ): Promise<ISession> =>
   await (
     manager as unknown as {
-      createSessionInner(
-        config: SessionConfig,
-        preparedSession?: undefined,
-        preparedWorktree?: WorktreeInfo
-      ): Promise<ISession>;
+      createSessionInner(config: SessionConfig): Promise<ISession>;
     }
-  ).createSessionInner(config, undefined, preparedWorktree);
+  ).createSessionInner(config);
+
+describe('SessionManager repository Member credentials', () => {
+  it('keeps a GitHub-source local-copy session native and never enrolls its host worktree', async () => {
+    const temp = mkdtempSync(path.join(os.tmpdir(), 'repository-member-auth-'));
+    for (const key of Object.keys(process.env)) {
+      if (/^(GIT_|SSH_|LODY_GIT_)/.test(key)) vi.stubEnv(key, undefined);
+    }
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    vi.stubEnv('GIT_CONFIG_GLOBAL', os.devNull);
+    try {
+      const root = createLocalRepo(temp);
+      runGit(root, ['remote', 'add', 'origin', 'https://github.com/example/web.git']);
+      const workspaceDocument = createWorkspaceDocument(new Map());
+      const manager = new SessionManager(
+        createLogger(),
+        'token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        workspaceDocument,
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      vi.spyOn(manager, 'resolveLocalProjectRootPath').mockImplementation(async (id) =>
+        id === 'copy' ? root : temp
+      );
+      const phases: Array<{ phase: string; detail?: string }> = [];
+      const config = createSessionConfig({
+        onPresencePhase: (phase, detail) => phases.push({ phase, detail }),
+        sessionId: 'repo-member' as SessionId,
+        project: { kind: 'github', repoFullName: 'example/web' },
+        projectRun: {
+          id: '12345678-1234-4234-8234-123456789012' as never,
+          name: 'Group',
+          root: 'project-group-12345678-1234-4234-8234-123456789012',
+          members: {
+            ['docs' as keyof NonNullable<SessionConfig['projectRun']>['members']]: {
+              o: 1,
+              src: {
+                kind: 'local',
+                machineId: 'machine-1' as MachineId,
+                localProjectId: 'docs' as LocalProjectId,
+              },
+              placement: { kind: 'root', dir: 'docs' },
+              path: 'docs',
+              base: 'HEAD',
+            },
+            ['web' as keyof NonNullable<SessionConfig['projectRun']>['members']]: {
+              o: 0,
+              src: { kind: 'github', repoFullName: 'example/web', preferLocal: true },
+              placement: { kind: 'root', dir: 'web' },
+              path: 'web',
+              base: 'HEAD',
+              repositoryCheckout: {
+                kind: 'local',
+                machineId: 'machine-1' as MachineId,
+                localProjectId: 'copy' as LocalProjectId,
+              },
+            },
+          },
+        },
+      });
+      vi.spyOn(workspaceDocument, 'getOrCreateSessionDoc').mockResolvedValue({
+        getMetaState: async () => ({ projectRun: config.projectRun }),
+        setProjectRun: async (run: NonNullable<SessionConfig['projectRun']>) => {
+          config.projectRun = run;
+        },
+      } as never);
+      const internals = manager as unknown as {
+        prepareGitHubRepoSessionConfig(
+          config: SessionConfig
+        ): Promise<import('./session-credentials').SessionCredentials>;
+        ensureGitCredentialBrokerEnv(): Promise<never>;
+        resolveHostGitBrokerAuth(
+          source: WorktreeManagerSource,
+          config: SessionConfig,
+          credentials: import('./session-credentials').SessionCredentials
+        ): Promise<GitCredentialBrokerAuth | undefined>;
+      };
+      vi.spyOn(internals, 'ensureGitCredentialBrokerEnv').mockRejectedValue(
+        new Error('Unexpected broker enrollment')
+      );
+      const credentials = await internals.prepareGitHubRepoSessionConfig(config);
+      expect(phases).toContainEqual({
+        phase: 'git-clone',
+        detail: encodeProjectPreparationProgress({ step: 'resolve' }),
+      });
+      expect(credentials.mode).toBe('native');
+      expect(config.env).toBeUndefined();
+      const releasedManaged = {
+        mode: 'managed',
+        lease: { active: false },
+      } as unknown as import('./session-credentials').SessionCredentials;
+      expect(
+        await internals.resolveHostGitBrokerAuth(
+          { kind: 'local-shared', originalRootPath: root },
+          config,
+          releasedManaged
+        )
+      ).toBeUndefined();
+      await expect(
+        internals.resolveHostGitBrokerAuth(
+          { kind: 'github', repoUrl: 'https://github.com/example/managed.git' },
+          config,
+          releasedManaged
+        )
+      ).rejects.toMatchObject({ message: 'github_runtime_context_released' });
+      await credentials.release();
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('SessionManager ACP project identity', () => {
+  it.each([undefined, 'parent-session' as SessionId])(
+    'resolves the registered root for local worktree sessions, including child %s',
+    async (parentSessionId) => {
+      const manager = new SessionManager(
+        createLogger(),
+        'test-token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        createWorkspaceDocument(new Map()),
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const localProjectId = 'local-project' as LocalProjectId;
+      vi.spyOn(manager, 'resolveLocalProjectRootPath').mockImplementation(async (id) => {
+        if (id !== localProjectId) throw new Error('wrong project');
+        return '/registered-project';
+      });
+      const config = createSessionConfig({
+        sessionId: 'session-project' as SessionId,
+        parentSessionId,
+        project: { kind: 'local', localProjectId, useWorktree: true },
+        workdir: '/execution-worktree',
+      });
+      const session = new Session(config, createLogger(), '/execution-worktree');
+      const callbacks = (
+        manager as unknown as {
+          buildCreateAgentConfig(
+            session: Session,
+            config: SessionConfig,
+            launch: { command: string; args: string[] }
+          ): import('./session-manager').CreateAgentConfig;
+        }
+      ).buildCreateAgentConfig(session, config, { command: 'agent', args: [] });
+      expect(await callbacks.resolveWorktreeProject?.()).toEqual({
+        version: 1,
+        originProjectPath: '/registered-project',
+      });
+    }
+  );
+});
+
+describe('SessionManager Codex provider binding', () => {
+  it('requires the live provider before restoring a ready managed profile', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lody-codex-launch-binding-'));
+    const store = new codexProfiles.CodexProfileStore(root, {
+      get: async () => undefined,
+      set: async () => undefined,
+      delete: async () => undefined,
+    });
+    const storeSpy = vi.spyOn(codexProfiles, 'getCodexProfileStore').mockReturnValue(store);
+    try {
+      const provider: AgentConfigMeta = {
+        id: 'codex-provider' as AgentConfigId,
+        machineId: 'machine-1' as MachineId,
+        name: 'Work Codex',
+        description: undefined,
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: {},
+        codexAuth: {
+          mode: 'api-key',
+          profileId: '989f09cf-0e9a-43b9-a44a-35fa8740a8e4',
+          baseUrl: 'https://relay.example.invalid/v1',
+        },
+      };
+      const readyProfile = await store.resolve('workspace-1', provider, true);
+      if (!readyProfile) throw new Error('Expected a managed Codex profile');
+      await store.withApiKeyCandidate(readyProfile, 'synthetic-key', async () => undefined);
+
+      const workspaceDocument = createWorkspaceDocument(new Map());
+      const getProvider = vi.mocked(workspaceDocument.getAgentConfigById);
+      const manager = new SessionManager(
+        createLogger(),
+        'test-token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        workspaceDocument,
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const freezeProfile = async (config: SessionConfig) =>
+        await (
+          manager as unknown as { freezeCodexProfile(config: SessionConfig): Promise<void> }
+        ).freezeCodexProfile(config);
+      const restoredConfig = () =>
+        createSessionConfig({
+          sessionId: 'codex-restore' as SessionId,
+          agentConfigId: provider.id,
+          codexAuth: provider.codexAuth,
+        });
+
+      getProvider.mockResolvedValue(null);
+      await expect(freezeProfile(restoredConfig())).rejects.toThrow(
+        'This Codex provider account is no longer available'
+      );
+
+      getProvider.mockResolvedValue({ ...provider, codexAuth: undefined });
+      await expect(freezeProfile(restoredConfig())).rejects.toThrow(
+        'This Codex provider account is no longer available'
+      );
+
+      getProvider.mockResolvedValue(provider);
+      const validConfig = restoredConfig();
+      await freezeProfile(validConfig);
+      expect(validConfig.codexProfile).toMatchObject({
+        configId: provider.id,
+        profile: provider.codexAuth,
+      });
+      const profileFile = path.join(root, readyProfile.profile.profileId, 'profile.json');
+      const original = readFileSync(profileFile, 'utf8');
+      writeFileSync(profileFile, '{broken');
+      getProvider.mockResolvedValue({ ...provider, codexAuth: undefined });
+      await expect(freezeProfile({ ...restoredConfig(), codexAuth: undefined })).rejects.toThrow(
+        'This Codex provider account reference is missing'
+      );
+      await expect(
+        freezeProfile({
+          ...restoredConfig(),
+          agentConfigId: 'unrelated' as AgentConfigId,
+          codexAuth: undefined,
+        })
+      ).resolves.toBeUndefined();
+      getProvider.mockResolvedValue(provider);
+      await expect(freezeProfile(restoredConfig())).rejects.toThrow('metadata could not be read');
+      writeFileSync(profileFile, original);
+      await expect(freezeProfile(restoredConfig())).resolves.toBeUndefined();
+    } finally {
+      storeSpy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('SessionManager cleanup phases', () => {
-  it('stops session producers before closing the workspace document', async () => {
+  it('finishes independent cleanup after failures and retries failed owners', async () => {
     const workspaceDocument = createWorkspaceDocument(new Map());
     const manager = new SessionManager(
       createLogger(),
@@ -199,22 +425,40 @@ describe('SessionManager cleanup phases', () => {
         cloudPort: createTestCloudPort(),
       }
     );
-    const cleanupSessionsSpy = vi
-      .spyOn(manager as unknown as { cleanupSessions(): Promise<void> }, 'cleanupSessions')
-      .mockResolvedValue();
-
-    await manager.cleanUp({ keepWorkspaceDocumentOpen: true });
-
-    expect(cleanupSessionsSpy).toHaveBeenCalledTimes(1);
-    expect(workspaceDocument.cleanUp).not.toHaveBeenCalled();
-
-    await manager.cleanUp();
-
-    expect(cleanupSessionsSpy).toHaveBeenCalledTimes(2);
-    expect(workspaceDocument.cleanUp).toHaveBeenCalledTimes(1);
-    expect(cleanupSessionsSpy.mock.invocationCallOrder[1]).toBeLessThan(
-      vi.mocked(workspaceDocument.cleanUp).mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    const events: string[] = [];
+    let failing = true;
+    const resource =
+      (name: string, fails = false) =>
+      async () => {
+        events.push(name);
+        if (fails && failing) throw new Error(name);
+      };
+    const sessionId = 'cleanup-failure' as SessionId;
+    const session = await createSessionInner(manager, createSessionConfig({ sessionId }));
+    const terminate = session.terminate.bind(session);
+    session.terminate = async () => {
+      await resource('session', true)();
+      await terminate(true);
+    };
+    Object.assign(manager, {
+      mcpAuthentication: { close: resource('mcp', true) },
+      workspaceDocument: { cleanUp: resource('workspace') },
+      gitCredentialBroker: { shutdown: resource('broker', true) },
+      githubTokenManager: { shutdown: resource('token') },
+    });
+    await expect(manager.cleanUp({ keepWorkspaceDocumentOpen: true })).rejects.toBeInstanceOf(
+      AggregateError
     );
+    expect(events).toEqual(['session']);
+    events.length = 0;
+    await expect(manager.cleanUp()).rejects.toBeInstanceOf(AggregateError);
+    expect(events).toEqual(['session', 'mcp', 'workspace', 'broker', 'token']);
+    expect(manager.getSession(sessionId)).toBe(session);
+    failing = false;
+    events.length = 0;
+    await manager.cleanUp();
+    expect(events).toEqual(['session', 'mcp', 'workspace', 'broker']);
+    expect(manager.getSession(sessionId)).toBeNull();
   });
 });
 
@@ -230,6 +474,91 @@ describe('SessionManager child session workdir resolution', () => {
     vi.unstubAllEnvs();
     rmSync(tempHome, { recursive: true, force: true });
   });
+
+  it.each(['cold', 'parent'] as const)(
+    'keeps requester auth through %s GitHub worktree creation',
+    async (mode) => {
+      vi.stubEnv('LODY_DATA_DIR', tempHome);
+      const sourceDir = createLocalRepo(tempHome);
+      const repoId = `github---fixture---${mode}` as RepoId;
+      const repoUrl = pathToFileURL(sourceDir).href;
+      const sessionId = `github-${mode}-startup` as SessionId;
+      const parentId = 'github-parent-owner' as SessionId;
+      runGit(sourceDir, ['branch', 'session/parent-restore']);
+      const parentDoc = createSessionDoc({
+        id: parentId,
+        machineId: 'machine-1' as MachineId,
+        userId: 'user-1',
+        createdAt: '2026-06-20T00:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        project: { kind: 'github', repoFullName: 'fixture/repo', branch: 'main' },
+        isWorktree: true,
+        baseBranch: 'main',
+        branchName: 'session/parent-restore',
+      });
+      const manager = new SessionManager(
+        createLogger(),
+        'token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        createWorkspaceDocument(new Map([[parentId, parentDoc]])),
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const auth: GitCredentialBrokerAuth = {
+        workspaceId: 'workspace-1',
+        url: 'http://fixture.invalid',
+        token: 'fixture',
+        contextToken: 'frozen-requester',
+        transportEnv: {},
+      };
+      const internals = manager as unknown as {
+        resolveHostGitBrokerAuth(
+          source: WorktreeManagerSource,
+          config: SessionConfig
+        ): Promise<GitCredentialBrokerAuth>;
+      };
+      const authSpy = vi.spyOn(internals, 'resolveHostGitBrokerAuth').mockResolvedValue(auth);
+      const worktrees = getWorktreeManager({ repoId, repoUrl, logger: createLogger() });
+      const realCreate = worktrees.createWorktree.bind(worktrees);
+      const createSpy = vi
+        .spyOn(worktrees, 'createWorktree')
+        .mockImplementation(async (...args) => {
+          if (args[4] !== auth) throw new Error('requester auth was lost at the creation boundary');
+          return realCreate(...args);
+        });
+      try {
+        const session = await createSessionInner(
+          manager,
+          createSessionConfig({
+            sessionId,
+            repoId,
+            githubRepo: 'fixture/repo',
+            githubRepoUrl: repoUrl,
+            parentSessionId: mode === 'parent' ? parentId : undefined,
+            project: { kind: 'github', repoFullName: 'fixture/repo', branch: 'main' },
+            worktreeSetup: { scripts: { bash: 'echo fixture' } },
+          })
+        );
+        const workdir = session.getWorkdir();
+        if (!workdir) throw new Error('missing materialized worktree');
+        expect(runGit(workdir, ['rev-parse', 'HEAD'])).toBe(
+          runGit(sourceDir, ['rev-parse', 'HEAD'])
+        );
+        expect(workdir).toBe(
+          worktrees.getWorktreeHostPath(mode === 'parent' ? parentId : sessionId)
+        );
+        if (mode === 'parent')
+          expect(runGit(workdir, ['branch', '--show-current'])).toBe('session/parent-restore');
+      } finally {
+        createSpy.mockRestore();
+        authSpy.mockRestore();
+      }
+    }
+  );
 
   it('reuses the parent default chat workdir for chat-only child sessions', async () => {
     const parentSessionId = 'parent-session' as SessionId;
@@ -492,6 +821,64 @@ describe('SessionManager worktree setup', () => {
     rmSync(tempHome, { recursive: true, force: true });
   });
 
+  it('reports the setup step only once a script starts, and names the sandbox after it', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const temporary = Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' });
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map<SessionId, FakeSessionDoc>()),
+      {
+        sessionSandboxFactory: async () => {
+          throw temporary;
+        },
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const start = (sessionId: string) => {
+      const stages: string[] = [];
+      const config = createSessionConfig({
+        sessionId: sessionId as SessionId,
+        branch: 'main',
+        workdir: sourceDir,
+        project: {
+          kind: 'local',
+          localProjectId: 'local-project-1' as LocalProjectId,
+          branch: 'main',
+          useWorktree: true,
+        },
+      });
+      config.onStartStage = (stage) => stages.push(stage);
+      return { stages, run: () => createSessionInner(manager, config) };
+    };
+
+    // No script ran, so a failure after the worktree is not blamed on setup.
+    const withoutScript = start('setup-stage-none');
+    await expect(withoutScript.run()).rejects.toBe(temporary);
+    expect(withoutScript.stages).toEqual(['workdir', 'worktree', 'sandbox']);
+
+    const scriptFailure = new Error('setup script failed');
+    vi.mocked(runWorktreeSetup).mockImplementationOnce(async (options) => {
+      // The fixture doc has no history port; only the reported step matters here.
+      await Promise.resolve(
+        options.events?.onStart?.({
+          phase: 'setup',
+          shell: 'bash',
+          displayCommand: 'pnpm install',
+          command: 'bash',
+          args: [],
+          workdir: options.workdir,
+        })
+      ).catch(() => undefined);
+      throw scriptFailure;
+    });
+    const withScript = start('setup-stage-script');
+    await expect(withScript.run()).rejects.toBe(scriptFailure);
+    expect(withScript.stages).toEqual(['workdir', 'worktree', 'worktree-setup']);
+  });
+
   it('does not rerun setup or switch branches when restoring an existing local worktree', async () => {
     const sourceDir = createLocalRepo(tempHome);
     const sessionId = 'setup-resume-session' as SessionId;
@@ -536,216 +923,6 @@ describe('SessionManager worktree setup', () => {
     expect(resumedSession.getWorkdir()).toBe(workdir);
     expect(runGit(workdir, ['symbolic-ref', '--short', 'HEAD'])).toBe('user/switched-worktree');
     expect(runGit(workdir, ['status', '--porcelain'])).toContain('?? dirty.txt');
-  });
-
-  it('runs setup only after a speculative worktree is adopted by durable creation', async () => {
-    const sourceDir = createLocalRepo(tempHome);
-    const originalRootPath = normalizeLocalProjectRootPath(sourceDir);
-    const sessionId = 'setup-prepared-session' as SessionId;
-    const localProjectId = 'local-project-prepared' as LocalProjectId;
-    const repoId = deriveRepoIdFromLocalProjectPath(originalRootPath);
-    const logger = createLogger();
-    const docs = new Map<SessionId, FakeSessionDoc>();
-    const manager = new SessionManager(
-      logger,
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(docs),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
-      }
-    );
-    const worktreeManager = getWorktreeManager({
-      repoId,
-      source: {
-        kind: 'local-shared',
-        originalRootPath,
-      },
-      logger,
-    });
-    const preparedWorktree = await materializeSpeculativeWorktree({
-      preparationId: 'prepare-setup-session',
-      sessionId,
-      workspaceId: 'workspace-1' as WorkspaceId,
-      machineId: 'machine-1' as MachineId,
-      manager: worktreeManager,
-      managerConfig: {
-        repoId,
-        source: {
-          kind: 'local-shared',
-          originalRootPath,
-        },
-      },
-      baseBranch: 'main',
-      logger,
-    });
-
-    expect(runWorktreeSetup).not.toHaveBeenCalled();
-    await preparedWorktree.claim();
-
-    const session = await createSessionInner(
-      manager,
-      createSessionConfig({
-        sessionId,
-        branch: 'main',
-        workdir: sourceDir,
-        project: {
-          kind: 'local',
-          localProjectId,
-          branch: 'main',
-          useWorktree: true,
-        },
-      }),
-      preparedWorktree.info
-    );
-
-    expect(session.getWorkdir()).toBe(preparedWorktree.info.hostPath);
-    expect(runWorktreeSetup).toHaveBeenCalledTimes(1);
-    await preparedWorktree.dispose();
-    expect(existsSync(preparedWorktree.info.hostPath)).toBe(true);
-  });
-
-  it('retries setup after a durable create fails with a prepared worktree', async () => {
-    const sourceDir = createLocalRepo(tempHome);
-    const originalRootPath = normalizeLocalProjectRootPath(sourceDir);
-    const sessionId = 'setup-prepared-retry' as SessionId;
-    const localProjectId = 'local-project-prepared-retry' as LocalProjectId;
-    const repoId = deriveRepoIdFromLocalProjectPath(originalRootPath);
-    const logger = createLogger();
-    const manager = new SessionManager(
-      logger,
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(new Map()),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
-      }
-    );
-    const worktreeManager = getWorktreeManager({
-      repoId,
-      source: {
-        kind: 'local-shared',
-        originalRootPath,
-      },
-      logger,
-    });
-    const preparedWorktree = await materializeSpeculativeWorktree({
-      preparationId: 'prepare-setup-retry',
-      sessionId,
-      workspaceId: 'workspace-1' as WorkspaceId,
-      machineId: 'machine-1' as MachineId,
-      manager: worktreeManager,
-      managerConfig: {
-        repoId,
-        source: {
-          kind: 'local-shared',
-          originalRootPath,
-        },
-      },
-      baseBranch: 'main',
-      logger,
-    });
-    const config = createSessionConfig({
-      sessionId,
-      branch: 'main',
-      workdir: sourceDir,
-      project: {
-        kind: 'local',
-        localProjectId,
-        branch: 'main',
-        useWorktree: true,
-      },
-    });
-    vi.mocked(runWorktreeSetup).mockRejectedValueOnce(new Error('setup failed'));
-    await preparedWorktree.claim();
-
-    await expect(createSessionInner(manager, config, preparedWorktree.info)).rejects.toThrow(
-      'setup failed'
-    );
-    expect(runWorktreeSetup).toHaveBeenCalledTimes(1);
-    expect(existsSync(preparedWorktree.info.hostPath)).toBe(true);
-    expect(worktreeManager.hasWorktree(sessionId)).toBe(true);
-
-    vi.mocked(runWorktreeSetup).mockResolvedValue(undefined);
-    await expect(createSessionInner(manager, { ...config, resume: true })).resolves.toBeDefined();
-    expect(runWorktreeSetup).toHaveBeenCalledTimes(2);
-
-    await preparedWorktree.dispose();
-    expect(existsSync(preparedWorktree.info.hostPath)).toBe(true);
-  });
-
-  it('rebuilds a prepared worktree whose directory disappeared before adoption', async () => {
-    const sourceDir = createLocalRepo(tempHome);
-    const originalRootPath = normalizeLocalProjectRootPath(sourceDir);
-    const sessionId = 'setup-prepared-vanished' as SessionId;
-    const localProjectId = 'local-project-prepared-vanished' as LocalProjectId;
-    const repoId = deriveRepoIdFromLocalProjectPath(originalRootPath);
-    const logger = createLogger();
-    const manager = new SessionManager(
-      logger,
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(new Map()),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
-      }
-    );
-    const worktreeManager = getWorktreeManager({
-      repoId,
-      source: {
-        kind: 'local-shared',
-        originalRootPath,
-      },
-      logger,
-    });
-    const preparedWorktree = await materializeSpeculativeWorktree({
-      preparationId: 'prepare-setup-vanished',
-      sessionId,
-      workspaceId: 'workspace-1' as WorkspaceId,
-      machineId: 'machine-1' as MachineId,
-      manager: worktreeManager,
-      managerConfig: {
-        repoId,
-        source: {
-          kind: 'local-shared',
-          originalRootPath,
-        },
-      },
-      baseBranch: 'main',
-      logger,
-    });
-    await preparedWorktree.claim();
-
-    // The production failure: an unserialized late dispose (or a cross-process
-    // sweep) removed the materialized directory after preparation but before
-    // adoption. The prepared info then names a path that is not on disk; the
-    // session must rebuild it instead of starting against a dead workdir.
-    rmSync(preparedWorktree.info.hostPath, { recursive: true, force: true });
-
-    const session = await createSessionInner(
-      manager,
-      createSessionConfig({
-        sessionId,
-        branch: 'main',
-        workdir: sourceDir,
-        project: {
-          kind: 'local',
-          localProjectId,
-          branch: 'main',
-          useWorktree: true,
-        },
-      }),
-      preparedWorktree.info
-    );
-
-    expect(session.getWorkdir()).toBe(preparedWorktree.info.hostPath);
-    expect(existsSync(session.getWorkdir())).toBe(true);
   });
 });
 
@@ -836,7 +1013,7 @@ describe('SessionManager.requestSessionTerminate', () => {
 });
 
 describe('SessionManager durable create ownership', () => {
-  it('registers the pending session before preparation claim or cold-start work begins', async () => {
+  it('registers the pending session before startup work begins', async () => {
     const manager = new SessionManager(
       createLogger(),
       'token',
@@ -850,30 +1027,24 @@ describe('SessionManager durable create ownership', () => {
     );
     const sessionId = 'ownership-session' as SessionId;
     const created = deferred<ISession>();
-    const createFromPreparationOrCold = vi.fn(async () => await created.promise);
     (
       manager as unknown as {
-        createSessionFromPreparationOrCold: typeof createFromPreparationOrCold;
+        createSessionInnerWithAgent: () => Promise<ISession>;
       }
-    ).createSessionFromPreparationOrCold = createFromPreparationOrCold;
+    ).createSessionInnerWithAgent = async () => await created.promise;
 
     const result = manager.createSession(createSessionConfig({ sessionId }));
 
     expect(manager.getPendingSession(sessionId)).not.toBeNull();
-    expect(createFromPreparationOrCold).not.toHaveBeenCalled();
-    await Promise.resolve();
-    expect(createFromPreparationOrCold).toHaveBeenCalledTimes(1);
 
     const session = { sessionId } as ISession;
     created.resolve(session);
     await expect(result).resolves.toBe(session);
     expect(manager.getPendingSession(sessionId)).toBeNull();
   });
-});
 
-describe('SessionManager preparation compatibility', () => {
-  it('rejects a prepared session with different initial config option values', async () => {
-    const manager = new SessionManager(
+  const buildOwnershipManager = () =>
+    new SessionManager(
       createLogger(),
       'token',
       'machine-1' as MachineId,
@@ -884,335 +1055,372 @@ describe('SessionManager preparation compatibility', () => {
         cloudPort: createTestCloudPort(),
       }
     );
-    const sessionId = 'changed-grok-permission-cold-fallback' as SessionId;
-    const agentConfigId = 'agent-grok' as AgentConfigId;
-    const prepared = {
-      config: {
-        mcpServerIds: [],
-        configOptionValues: { permission_mode: 'always-approve' },
-        taskToolsEnabled: false,
-      },
-      compatibility: createPreparedTestCompatibility({}, [], { permission_mode: 'always-approve' }),
-      initialized: Promise.resolve(),
-      sessionReady: Promise.resolve(),
-      dispose: vi.fn(async () => undefined),
-    } satisfies PreparedTestResource;
-    const identity = {
-      requestedByUserId: 'user-1',
-      agentConfigId,
-      cliType: 'builtin' as const,
-      agentType: 'grok',
-    };
-    const internals = manager as unknown as {
-      preparationService: SessionPreparationService<PreparedTestResource>;
-      createSessionFromPreparationOrCold(config: SessionConfig): Promise<ISession>;
-      createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
-    };
-    internals.preparationService.start({
-      preparationId: 'prepare-grok-always-approve',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: buildSessionPreparationRequestKey(identity),
-      claimKey: buildSessionPreparationClaimKey(identity),
-      create: async () => prepared,
-    });
-    await vi.waitFor(() =>
-      expect(internals.preparationService.getState(sessionId)).toBe('session-ready')
-    );
-    const coldSession = { sessionId } as ISession;
-    const coldCreate = vi
-      .spyOn(internals, 'createSessionInnerWithAgent')
-      .mockResolvedValue(coldSession);
-    const durableConfig = createSessionConfig({
-      sessionId,
-      agentConfigId,
-      agentType: 'grok',
-      configOptionValues: { permission_mode: 'ask' },
-    });
 
-    await expect(internals.createSessionFromPreparationOrCold(durableConfig)).resolves.toBe(
-      coldSession
-    );
-    expect(prepared.dispose).toHaveBeenCalledTimes(1);
-    expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined);
-  });
-
-  it('waits for a published preparation to release its worktree when durable launch config is absent', async () => {
-    const manager = new SessionManager(
-      createLogger(),
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(new Map()),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
+  it('hands a retry a fresh create after a wedged one is abandoned', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'wedged-create-session' as SessionId;
+    const attempts: Array<ReturnType<typeof deferred<ISession>>> = [];
+    // A create wedged inside a managed-runtime install or ACP startup: the
+    // first attempt's promise is never resolved by this test.
+    const createInnerWithAgent = vi.fn(async () => {
+      const pending = deferred<ISession>();
+      attempts.push(pending);
+      return await pending.promise;
+    });
+    (
+      manager as unknown as {
+        createSessionInnerWithAgent: typeof createInnerWithAgent;
       }
-    );
-    const sessionId = 'missing-agent-config-cold-fallback' as SessionId;
-    const cleanup = deferred<void>();
-    const prepared = {
-      config: { mcpServerIds: [], taskToolsEnabled: false },
-      compatibility: createPreparedTestCompatibility({}),
-      initialized: Promise.resolve(),
-      sessionReady: Promise.resolve(),
-      dispose: vi.fn(async () => await cleanup.promise),
-    } satisfies PreparedTestResource;
-    const internals = manager as unknown as {
-      preparationService: SessionPreparationService<PreparedTestResource>;
-      createSessionFromPreparationOrCold(config: SessionConfig): Promise<ISession>;
-      createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
-    };
-    internals.preparationService.start({
-      preparationId: 'prepare-missing-agent-config',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'no-agent-config',
-      create: async () => prepared,
-    });
-    await vi.waitFor(() =>
-      expect(internals.preparationService.getState(sessionId)).toBe('session-ready')
-    );
-    const coldSession = { sessionId } as ISession;
-    const coldCreate = vi
-      .spyOn(internals, 'createSessionInnerWithAgent')
-      .mockResolvedValue(coldSession);
+    ).createSessionInnerWithAgent = createInnerWithAgent;
     const config = createSessionConfig({ sessionId });
 
-    const result = internals.createSessionFromPreparationOrCold(config);
-    await vi.waitFor(() => expect(prepared.dispose).toHaveBeenCalledTimes(1));
-    expect(coldCreate).not.toHaveBeenCalled();
+    void manager.createSession(config).catch(() => undefined);
+    await Promise.resolve();
+    const wedged = manager.getPendingSession(sessionId);
+    expect(wedged).not.toBeNull();
 
-    cleanup.resolve(undefined);
-    await expect(result).resolves.toBe(coldSession);
-    expect(coldCreate).toHaveBeenCalledWith(config, undefined);
+    // Deduplication hands a naive retry the very same wedged promise, so it
+    // would stall exactly like the first attempt.
+    void manager.createSession(config).catch(() => undefined);
+    await Promise.resolve();
+    expect(manager.getPendingSession(sessionId)).toBe(wedged);
+
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(true);
+    expect(manager.getPendingSession(sessionId)).toBeNull();
+
+    // The retry now reaches a genuinely new create and completes, which is the
+    // self-healing the stall watchdog promises.
+    const retry = manager.createSession(config);
+    await Promise.resolve();
+    expect(manager.getPendingSession(sessionId)).not.toBe(wedged);
+    const retrySession = {
+      sessionId,
+      terminate: vi.fn(async () => undefined),
+    } as unknown as ISession;
+    attempts[1]?.resolve(retrySession);
+    await expect(retry).resolves.toBe(retrySession);
   });
 
-  it('waits for an incompatible published preparation to release its worktree before cold start', async () => {
-    const manager = new SessionManager(
-      createLogger(),
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(new Map()),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
+  it('terminates a session that materializes from an abandoned create', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'late-create-session' as SessionId;
+    const created = deferred<ISession>();
+    const createInnerWithAgent = vi.fn(async () => await created.promise);
+    (
+      manager as unknown as {
+        createSessionInnerWithAgent: typeof createInnerWithAgent;
       }
-    );
-    const sessionId = 'changed-project-cold-fallback' as SessionId;
-    const agentConfigId = 'agent-1' as AgentConfigId;
-    const cleanup = deferred<void>();
-    const prepared = {
-      config: { mcpServerIds: [], taskToolsEnabled: false },
-      compatibility: createPreparedTestCompatibility({}),
-      initialized: Promise.resolve(),
-      sessionReady: Promise.resolve(),
-      dispose: vi.fn(async () => await cleanup.promise),
-    } satisfies PreparedTestResource;
-    const preparedIdentity = {
-      requestedByUserId: 'user-1',
-      agentConfigId,
-      cliType: 'builtin' as const,
-      agentType: 'codex',
-      project: {
-        kind: 'github' as const,
-        repoFullName: 'loro-dev/old-project',
-        branch: 'main',
-      },
-    };
-    const internals = manager as unknown as {
-      preparationService: SessionPreparationService<PreparedTestResource>;
-      createSessionFromPreparationOrCold(config: SessionConfig): Promise<ISession>;
-      createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
-    };
-    internals.preparationService.start({
-      preparationId: 'prepare-old-project',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: buildSessionPreparationRequestKey(preparedIdentity),
-      claimKey: buildSessionPreparationClaimKey(preparedIdentity),
-      create: async () => prepared,
-    });
-    await vi.waitFor(() =>
-      expect(internals.preparationService.getState(sessionId)).toBe('session-ready')
-    );
-    const coldSession = { sessionId } as ISession;
-    const coldCreate = vi
-      .spyOn(internals, 'createSessionInnerWithAgent')
-      .mockResolvedValue(coldSession);
-    const durableConfig = createSessionConfig({
-      sessionId,
-      agentConfigId,
-      project: {
-        kind: 'github',
-        repoFullName: 'loro-dev/new-project',
-        branch: 'main',
-      },
-    });
+    ).createSessionInnerWithAgent = createInnerWithAgent;
 
-    const result = internals.createSessionFromPreparationOrCold(durableConfig);
-    await vi.waitFor(() => expect(prepared.dispose).toHaveBeenCalledTimes(1));
-    expect(coldCreate).not.toHaveBeenCalled();
+    void manager.createSession(createSessionConfig({ sessionId })).catch(() => undefined);
+    await Promise.resolve();
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(true);
 
-    cleanup.resolve(undefined);
-    await expect(result).resolves.toBe(coldSession);
-    expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined);
+    // The abandoned create wins the race after nobody is waiting for it. Its
+    // Session was never handed to a caller, so it must not survive as an orphan.
+    const terminate = vi.fn(async () => undefined);
+    created.resolve({ sessionId, terminate } as unknown as ISession);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(terminate).toHaveBeenCalledWith(true);
   });
 
-  it('claims a preparation when empty launch settings are omitted by durable dispatch', async () => {
-    const manager = new SessionManager(
-      createLogger(),
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(new Map()),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
+  it('reaps a late orphan without unregistering or finalizing the retry that replaced it', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'orphan-after-replacement-session' as SessionId;
+    const config = createSessionConfig({ sessionId });
+    const managerTerminated: SessionId[] = [];
+    manager.on('terminated', (event: { sessionId: SessionId }) => {
+      managerTerminated.push(event.sessionId);
+    });
+
+    const orphanCreate = deferred<ISession>();
+    const replacementCreate = deferred<ISession>();
+    let attempt = 0;
+    (
+      manager as unknown as {
+        createSessionInnerWithAgent: () => Promise<ISession>;
       }
-    );
-    const sessionId = 'empty-launch-config' as SessionId;
-    const agentConfigId = 'agent-1' as AgentConfigId;
-    const prepared = {
-      config: { mcpServerIds: [], taskToolsEnabled: false },
-      compatibility: createPreparedTestCompatibility({ env: {} }),
-      initialized: Promise.resolve(),
-      sessionReady: Promise.resolve(),
-      dispose: vi.fn(async () => undefined),
-    } satisfies PreparedTestResource;
-    const internals = manager as unknown as {
-      preparationService: SessionPreparationService<PreparedTestResource>;
-      createSessionFromPreparationOrCold(config: SessionConfig): Promise<ISession>;
-      createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
-      finishPreparedSession(
-        config: SessionConfig,
-        resource: PreparedTestResource
-      ): Promise<ISession>;
-    };
-    internals.preparationService.start({
-      preparationId: 'prepare-empty-launch-config',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: JSON.stringify(['user-1', agentConfigId, 'builtin', 'codex', null]),
-      create: async () => prepared,
-    });
-    await vi.waitFor(() =>
-      expect(internals.preparationService.getState(sessionId)).toBe('session-ready')
-    );
+    ).createSessionInnerWithAgent = async () =>
+      await (++attempt === 1 ? orphanCreate.promise : replacementCreate.promise);
 
-    const adoptedSession = { sessionId } as ISession;
-    const finishPreparedSession = vi
-      .spyOn(internals, 'finishPreparedSession')
-      .mockResolvedValue(adoptedSession);
-    const coldCreate = vi
-      .spyOn(internals, 'createSessionInnerWithAgent')
-      .mockResolvedValue({ sessionId } as ISession);
-    const durableConfig = createSessionConfig({
-      sessionId,
-      agentConfigId,
-      env: undefined,
-    });
+    // Attempt 1 registers its Session (manager listeners attached) and then
+    // wedges in managed-runtime resolution or ACP startup — both of which run
+    // AFTER `createSessionInner` has published it.
+    void manager.createSession(config).catch(() => undefined);
+    await Promise.resolve();
+    const orphan = (await createSessionInner(manager, config)) as Session;
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(true);
 
-    await expect(internals.createSessionFromPreparationOrCold(durableConfig)).resolves.toBe(
-      adoptedSession
-    );
-    expect(finishPreparedSession).toHaveBeenCalledWith(durableConfig, prepared, undefined);
-    expect(coldCreate).not.toHaveBeenCalled();
+    // The retry publishes a healthy replacement under the same id and completes.
+    const retry = manager.createSession(config);
+    await Promise.resolve();
+    const replacement = await createSessionInner(manager, config);
+    replacementCreate.resolve(replacement);
+    await expect(retry).resolves.toBe(replacement);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+
+    // Only now does the orphan's wedged startup return.
+    const orphanTerminated = new Promise<void>((resolve) => {
+      orphan.once('terminated', () => resolve());
+    });
+    orphanCreate.resolve(orphan);
+    await orphanTerminated;
+    await Promise.resolve();
+
+    // The orphan is gone, but its death is invisible to the manager: the
+    // replacement stays registered, and MessageHandler never hears a
+    // `terminated` for this id that would finalize the replacement's live turn.
+    expect(manager.getSession(sessionId)).toBe(replacement);
+    expect(managerTerminated).toEqual([]);
   });
 
-  it('exposes a current prepared launch config and rejects a changed config', async () => {
-    const manager = new SessionManager(
-      createLogger(),
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(new Map()),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
-      }
-    );
-    const sessionId = 'prepared-launch-config' as SessionId;
-    const agentConfigId = 'agent-1' as AgentConfigId;
-    const preparedConfig = buildSessionLaunchConfig({ env: { PREPARED: '1' } });
-    let currentConfig = preparedConfig;
-    const prepared = {
-      config: { mcpServerIds: [], taskToolsEnabled: false },
-      compatibility: createPreparedTestCompatibility(preparedConfig ?? {}),
-      readCurrentLaunchConfig: () => ({ config: currentConfig, source: 'agent-config' }),
-      initialized: Promise.resolve(),
-      sessionReady: Promise.resolve(),
-      dispose: vi.fn(async () => undefined),
-    } satisfies PreparedTestResource;
-    const internals = manager as unknown as {
-      preparationService: SessionPreparationService<PreparedTestResource>;
+  it('does not forward an old runtime exit as the replacement runtime death', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'runtime-generation-events' as SessionId;
+    const config = createSessionConfig({ sessionId });
+    const exits: string[] = [];
+    manager.on('exit', () => exits.push('exit'));
+    manager.on('terminated', () => exits.push('terminated'));
+    const previous = (await createSessionInner(manager, config)) as Session;
+    const replacement = await createSessionInner(manager, config);
+    previous.emit('exit', { sessionId, exitCode: 0 });
+    await previous.terminate(true);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+    expect(exits).toEqual([]);
+    await replacement.terminate(true);
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(exits).toEqual(['terminated']);
+  });
+
+  it('keeps a failed Session registered until independent cleanup succeeds', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'retained-cleanup' as SessionId;
+    const session = await createSessionInner(manager, createSessionConfig({ sessionId }));
+    const original = session.terminate.bind(session);
+    const failure = new Error('synthetic retained-resource failure');
+    session.terminate = async () => {
+      throw failure;
     };
-    internals.preparationService.start({
-      preparationId: 'prepare-launch-config',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: JSON.stringify(['user-1', agentConfigId, 'builtin', 'codex', null]),
-      create: async () => prepared,
-    });
-    await vi.waitFor(() =>
-      expect(internals.preparationService.getState(sessionId)).toBe('session-ready')
+    await expect(manager.cleanUp({ keepWorkspaceDocumentOpen: true })).rejects.toBeInstanceOf(
+      AggregateError
     );
-    const sessionMeta = {
-      id: sessionId,
-      machineId: 'machine-1' as MachineId,
-      userId: 'user-1',
-      createdAt: '2026-07-19T00:00:00.000Z',
-      agentConfigId,
-      cliType: 'builtin',
-      agentType: 'codex',
-    } satisfies SessionMeta;
+    expect(manager.getSession(sessionId)).toBe(session);
+    session.terminate = original;
+    await manager.cleanUp({ keepWorkspaceDocumentOpen: true });
+    expect(manager.getSession(sessionId)).toBeNull();
+  });
 
-    expect(
-      manager.getPreparedSessionLaunchConfig({ sessionMeta, requesterUserId: 'user-1' })
-    ).toEqual({ config: preparedConfig });
+  it('reports no entry to abandon when the create already settled', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'settled-create-session' as SessionId;
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(false);
+  });
 
-    currentConfig = buildSessionLaunchConfig({ env: { PREPARED: 'changed' } });
-    expect(
-      manager.getPreparedSessionLaunchConfig({ sessionMeta, requesterUserId: 'user-1' })
-    ).toBeNull();
-    expect(internals.preparationService.getState(sessionId)).toBe('session-ready');
+  it('stops waiting on a wedged create instead of hanging teardown', async () => {
+    vi.useFakeTimers();
+    try {
+      const manager = buildOwnershipManager();
+      const sessionId = 'wedged-terminate-session' as SessionId;
+      (
+        manager as unknown as {
+          pendingSessionCreates: Map<SessionId, Promise<ISession>>;
+        }
+      ).pendingSessionCreates.set(sessionId, new Promise<ISession>(() => {}));
+
+      const result = manager.requestSessionTerminate(sessionId);
+      let settled = false;
+      void result.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      // Teardown gives the create its deadline and then detaches, rather than
+      // waiting on a promise that will never settle.
+      await vi.advanceTimersByTimeAsync(300_000);
+      await expect(result).resolves.toBe('terminated');
+      expect(manager.getPendingSession(sessionId)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
-describe('SessionManager preparation resource accounting', () => {
-  it('counts a retiring preparation and cold fallback with the same session id separately', async () => {
+describe('SessionManager failed agent creation', () => {
+  let tempHome: string;
+
+  beforeEach(() => {
+    tempHome = mkdtempSync(path.join(os.tmpdir(), 'lody-session-manager-'));
+    vi.stubEnv('HOME', tempHome);
+    vi.stubEnv('LODY_LOCKS_DIR', path.join(tempHome, 'locks'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it('delivers startup usage in order only after a successful session creation', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const sessionId = 'startup-usage' as SessionId;
+    const doc = { ...createSessionDoc(), setACPSessionId: vi.fn(async () => undefined) };
     const manager = new SessionManager(
       createLogger(),
       'token',
       'machine-1' as MachineId,
       'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(new Map()),
+      createWorkspaceDocument(new Map([[sessionId, doc]])),
       {
         sessionSandboxFactory: async () => createNoopSessionSandbox(),
         cloudPort: createTestCloudPort(),
       }
     );
-    const sessionId = 'overlapping-session' as SessionId;
-    const durableApplyLimits = vi.fn(async () => undefined);
-    const preparationApplyLimits = vi.fn(async () => undefined);
-    const internals = manager as unknown as {
-      sessions: Map<SessionId, ISession>;
-      preparationSessions: Map<SessionId, ISession>;
-      rebalanceSessionSandboxes(): Promise<void>;
+    const events: Array<{ acpSessionId: ACPSessionId; usage: { sessionId: string } }> = [];
+    manager.on('onUsageUpdate', (event) => events.push(event));
+    const row = (n: number) => ({
+      sessionId: 'native',
+      usage: { inputTokens: n, outputTokens: 0, cacheReadInputTokens: 0 },
+    });
+    const start = vi.spyOn(Session.prototype, 'createAgent');
+    start.mockImplementationOnce(async (callbacks) => {
+      callbacks.onUsageUpdate(row(1));
+      throw new Error('startup failed');
+    });
+    start.mockImplementationOnce(async (callbacks) => {
+      callbacks.onUsageUpdate(row(2), 'native:scope:one');
+      callbacks.onUsageUpdate(row(3));
+      expect(events).toEqual([]);
+      return 'native';
+    });
+    const config = createSessionConfig({
+      sessionId,
+      agentCliType: 'custom',
+      agentType: 'synthetic',
+      customAcp: { command: 'never-started', args: [] },
+      workdir: sourceDir,
+    });
+    await expect(manager.createSession(config)).rejects.toThrow('startup failed');
+    expect(events).toEqual([]);
+    await manager.createSession(config);
+    expect(events).toEqual([
+      { sessionId, acpSessionId: 'native', usage: row(2), accountingId: 'native:scope:one' },
+      { sessionId, acpSessionId: 'native', usage: row(3), accountingId: undefined },
+    ]);
+    await manager.terminateSession(sessionId, true);
+  });
+
+  it('rejects a replacement native conversation before changing the durable resume pointer', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const sessionId = 'strict-native-resume' as SessionId;
+    let persisted = 'native-original';
+    const doc = {
+      ...createSessionDoc(),
+      setACPSessionId: async (id: ACPSessionId) => {
+        persisted = id;
+      },
     };
-    internals.sessions.set(sessionId, {
-      sessionId,
-      applyExecutionPlaneLimits: durableApplyLimits,
-    } as unknown as ISession);
-    internals.preparationSessions.set(sessionId, {
-      sessionId,
-      applyExecutionPlaneLimits: preparationApplyLimits,
-    } as unknown as ISession);
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map([[sessionId, doc]])),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    vi.spyOn(Session.prototype, 'createAgent').mockResolvedValue('native-replacement');
+    await expect(
+      manager.createSession(
+        createSessionConfig({
+          sessionId,
+          agentCliType: 'custom',
+          agentType: 'synthetic',
+          customAcp: { command: 'never-started', args: [] },
+          workdir: sourceDir,
+        }),
+        { resumeSessionId: 'native-original' as ACPSessionId, requireExactResume: true }
+      )
+    ).rejects.toThrow('AUTOMATION_NATIVE_RESUME_UNCONFIRMED');
+    expect(persisted).toBe('native-original');
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(manager.getPendingSession(sessionId)).toBeNull();
+  });
 
-    await internals.rebalanceSessionSandboxes();
+  it('publishes no lifecycle events for an instance whose agent never started', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const sessionId = 'agent-start-failed' as SessionId;
+    const docs = new Map<SessionId, FakeSessionDoc>();
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(docs),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const terminated = vi.fn();
+    const exit = vi.fn();
+    manager.on('terminated', terminated);
+    manager.on('exit', exit);
+    const config = createSessionConfig({
+      sessionId,
+      agentCliType: 'custom',
+      agentType: 'custom-agent',
+      customAcp: { command: 'agent', args: [] },
+      workdir: sourceDir,
+    });
+    const createAgent = vi
+      .spyOn(Session.prototype, 'createAgent')
+      .mockRejectedValueOnce(
+        new Error('[ACP_RESUME_UNSUPPORTED] agent_did_not_advertise_resume_or_loadSession')
+      );
 
-    expect(durableApplyLimits).toHaveBeenCalledTimes(1);
-    expect(preparationApplyLimits).toHaveBeenCalledTimes(1);
+    // The resume attempt fails after the instance was registered. A consumer
+    // that treats `terminated` as "the session running this turn died" would
+    // finalize the live turn here and lose the replacement agent's output.
+    await expect(
+      manager.createSession(config, { resumeSessionId: 'acp-old' as ACPSessionId })
+    ).rejects.toThrow('ACP_RESUME_UNSUPPORTED');
+    expect(createAgent).toHaveBeenCalledTimes(1);
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(terminated).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+
+    // The replacement under the same id is a normal live session: it is the
+    // one in the map and its termination still reaches consumers.
+    createAgent.mockResolvedValueOnce('acp-replacement');
+    const sessionDoc = docs.get(sessionId) as FakeSessionDoc & {
+      setACPSessionId?: (id: ACPSessionId) => Promise<void>;
+    };
+    sessionDoc.setACPSessionId = vi.fn(async () => undefined);
+    const replacement = await manager.createSession(config);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+    expect(terminated).not.toHaveBeenCalled();
+
+    await manager.retireSessionForReconfiguration(replacement);
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(terminated).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    createAgent.mockResolvedValueOnce('acp-memory');
+    const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+    const mcpServerIds = ['server-a' as McpServerId];
+    const reconfigured = await manager.createSession({ ...config, memory, mcpServerIds });
+    expect(reconfigured.getMcpServerIds?.()).toEqual(mcpServerIds);
+    expect(reconfigured.getMemoryBinding?.()).toEqual(memory);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
+    manager.detachSession(replacement);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
+    await replacement.terminate(true);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
+    await manager.terminateSession(sessionId, true);
+    expect(terminated).toHaveBeenCalledTimes(1);
+    expect(terminated).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));
+    expect(manager.getSession(sessionId)).toBeNull();
   });
 });

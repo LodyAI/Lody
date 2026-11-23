@@ -23,9 +23,18 @@
  * overrides the auto left margin from `mx-auto` and pins that row to the
  * pane edge. Indent with padding or an inner wrapper instead.
  */
-/** Horizontal inset shared by header, stream rows, context strip, composer. */
-export const CONVERSATION_GUTTER_X_CLASS = 'px-3 sm:px-4';
+/** Horizontal inset shared by stream rows, context strip, composer. */
+export const CONVERSATION_GUTTER_X_CLASS = 'px-[14px] sm:px-[18px]';
 
-// 46rem (736px): the common chat-column measure — max-w-3xl (48rem) minus 1rem
-// side padding. Wide enough for code blocks, narrow enough to stay readable.
-export const CONVERSATION_CONTENT_WIDTH_CLASS = `mx-auto w-full max-w-[46rem] ${CONVERSATION_GUTTER_X_CLASS}`;
+// 768px of content (48rem), plus the gutter on each side: the column caps the
+// CONTENT box, so the max width adds the per-breakpoint gutter (14px / 18px).
+// Wide enough for code blocks, narrow enough to stay readable.
+export const CONVERSATION_CONTENT_WIDTH_CLASS = `mx-auto w-full max-w-[calc(48rem+28px)] sm:max-w-[calc(48rem+36px)] ${CONVERSATION_GUTTER_X_CLASS}`;
+
+/**
+ * Full-width variant (`conversationWideModeAtom`): the cap on the CONTENT box
+ * drops and the column spans the pane. `ConversationColumn` owns its responsive
+ * side padding, reserving room for the outline rail on desktop. `mx-auto`
+ * stays so a re-capped nested column (none today) would still centre.
+ */
+export const CONVERSATION_CONTENT_WIDTH_WIDE_CLASS = 'mx-auto w-full';

@@ -2,37 +2,32 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, ChevronDown, ChevronUp, Loader2, Plus, Trash2, XCircle } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { CheckCircle2, ChevronDown, ChevronUp, Copy, Plus, Trash2, XCircle } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
+  hasEmptyModelSelectOption,
+  isManagedBuiltinAgentType,
   type AgentBrandId,
   type BuiltinAgentType,
   type ManagedBuiltinAgentType,
-  type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
-  type CustomAcpLaunchSpec,
   type MachineId,
   type MachineAcpBinaryProgressMessage,
   type MachineViewMeta,
   type ProviderSetupTask,
 } from '@lody/shared';
-import { toast } from 'sonner';
-import { Button } from '@/ui/button';
-import { Badge } from '@/ui/badge';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
+import { Button } from '@lody/ui/button';
+import { Badge } from '@lody/ui/badge';
+import { Tooltip } from '@lody/ui/tooltip';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { AlertDialog } from '@/ui/dialog';
+import { withClassName } from '@/lib/stylex';
 import {
   cmdCreateAgentConfigAtom,
   cmdCreateProviderSetupAtom,
@@ -46,12 +41,14 @@ import {
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { localMachineIdAtom, localProbeAttemptedAtom } from '@/atoms/local-probe';
+import type { DesktopOnboardingProviderSelection } from '@/atoms/onboarding';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { useMachineAcpBinaryActions } from '@/hooks/use-machine-acp-binary-actions';
 import { useProviderSetupRuntimeProgress } from '@/hooks/use-provider-setup-runtime-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { AgentReadinessMark } from '@/components/shared/agent-readiness-mark';
 import { REGISTRY_AGENT_ICON_SVGS } from '@/components/icons/registry-agent-icons';
 import {
   AgentConfigDialog,
@@ -65,6 +62,7 @@ import {
 import { labelForAgent } from '@/components/settings/provider-row';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { ProviderSetupRow } from '@/components/settings/provider-setup-row';
+import { ProviderProgressButton } from '@/components/settings/provider-progress-button';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
 import type { TourConfigurationState } from '../tour/tour-app';
@@ -72,11 +70,136 @@ import {
   resolveInitialOnboardingProviderStatus,
   type OnboardingProviderStatus,
 } from '../provider-status';
+import { collectErrorBoundaryEnvironment } from '@/lib/error-boundary-report';
+import { writeTextToClipboard } from '@/lib/clipboard';
+import { buildProviderWaitReport } from '../provider-wait-report';
 import {
+  agentRuntimeReadinessFromActivity,
   createProviderTestRunRegistry,
   providerTestActivityFromProgress,
+  providerWaitEscalation,
+  type AgentRuntimeReadiness,
   type ProviderTestActivity,
+  type ProviderWaitEscalation,
 } from '../provider-test-state';
+import { useBuiltinRuntimeReadiness } from '../use-builtin-runtime-readiness';
+import { useOnboardingAnalytics } from '../onboarding-analytics';
+import { onboardingSurface as surface } from './surface';
+
+// Marks the chosen row, not focus: it stays whatever the input modality.
+const ROW_RING = `0 0 0 2px ${colors.accent}, ${shadow.card}`;
+
+const styles = stylex.create({
+  scroller: {
+    maxHeight: 'calc(4 * 4.25rem + 0.75rem * 3)',
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    marginInline: '-4px',
+    marginBlock: '-4px',
+    paddingInline: '4px',
+    paddingBlock: '4px',
+  },
+  rows: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  /**
+   * An agent is a choice on the card rung. The slots below are rem, not the
+   * package's px steps, because `ProviderSetupRow` states the same columns in
+   * rem and the two kinds of row share one grid.
+   */
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    minWidth: 0,
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    transitionProperty: 'background-color, box-shadow',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  rowHover: {
+    backgroundColor: {
+      default: colors.elevatedBackground,
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+    },
+  },
+  /** Only selection marks a row; the ring takes the round corner. */
+  rowSelected: { boxShadow: ROW_RING, cornerShape: corner.round },
+  select: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    alignItems: 'center',
+    gap: space[3],
+    minWidth: 0,
+    margin: 0,
+    paddingBlock: space[3],
+    paddingInline: space[3],
+    borderWidth: 0,
+    borderStyle: 'none',
+    outlineStyle: 'none',
+    backgroundColor: 'transparent',
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`,
+    },
+    borderStartStartRadius: radius.large,
+    borderEndStartRadius: radius.large,
+    cornerShape: corner.round,
+    color: colors.label,
+    fontFamily: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  selectDisabled: { opacity: 0.45, cursor: 'not-allowed' },
+  statusSlot: { display: 'flex', flexShrink: 0, justifyContent: 'flex-end', minWidth: '5rem' },
+  cluster: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
+    paddingBlock: space[3],
+    paddingInlineEnd: space[3],
+  },
+  editSlot: { display: 'flex', flexShrink: 0, justifyContent: 'center', width: '3rem' },
+  actionSlot: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[1],
+    width: '5rem',
+  },
+  /** Layout only: the progress pill fills its slot, as it does in a setup row. */
+  fillSlot: { width: '100%' },
+  authPanel: {
+    flexBasis: '100%',
+    paddingBottom: space[3],
+    paddingInlineStart: '3.25rem',
+    paddingInlineEnd: space[3],
+  },
+  showcase: { display: 'flex', flexDirection: 'column', gap: space[3], paddingTop: space[2] },
+  wall: { display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: space[1] },
+  /** A brand at rest is a monochrome mark on the region fill. */
+  chipMark: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 4%)`,
+    color: colors.secondaryLabel,
+  },
+  /** A tooltip is one ink; its title and its sentence differ by weight alone. */
+  tipTitle: { fontWeight: 600 },
+  tipDetail: { marginTop: space[1], overflowWrap: 'anywhere' },
+});
 
 export type ProviderTestStatus = OnboardingProviderStatus | 'needs-auth';
 
@@ -134,8 +257,10 @@ function presetShowcase(presetId: string, label: string, brandId: AgentBrandId):
  * prefill share one source of truth.
  */
 const FEATURED_SHOWCASE_AGENTS: ShowcaseAgent[] = [
+  builtinShowcase('antigravity', 'Antigravity'),
   builtinShowcase('kimi', 'Kimi'),
   builtinShowcase('grok', 'Grok'),
+  builtinShowcase('devin', 'Devin'),
   registryShowcase('amp-acp', 'Amp'),
   registryShowcase('cursor', 'Cursor'),
   registryShowcase('opencode', 'OpenCode'),
@@ -182,7 +307,13 @@ export interface ProvidersScreenViewProps {
   testActivities?: Record<string, ProviderTestActivity>;
   /** Latest failed probe detail, kept available after its toast disappears. */
   failureReasons?: Record<string, string>;
-  selectedConfigId?: string | null;
+  /**
+   * Readiness of the managed built-in runtimes the background prefetch warms.
+   * Passed in rather than read from a runtime atom so this half stays
+   * presentational and story-renderable.
+   */
+  runtimeReadiness?: Partial<Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>>;
+  selectedProviderId?: string | null;
   /** True when the local machine record has not yet arrived. */
   noLocalMachine: boolean;
   localMachineId?: MachineId | null;
@@ -205,7 +336,7 @@ export interface ProvidersScreenViewProps {
   onBack: () => void;
   /** Defer provider setup and jump to the next step. */
   onSkip: () => void;
-  onNext: (agentConfigId: string) => void;
+  onNext: (selection: DesktopOnboardingProviderSelection) => void;
 }
 
 export function ProvidersScreenView({
@@ -214,7 +345,8 @@ export function ProvidersScreenView({
   testStatuses,
   testActivities = {},
   failureReasons = {},
-  selectedConfigId,
+  runtimeReadiness = {},
+  selectedProviderId,
   noLocalMachine,
   localMachineId = null,
   localMachine,
@@ -232,8 +364,18 @@ export function ProvidersScreenView({
 }: ProvidersScreenViewProps) {
   const { t } = useTranslation();
   const canProceed = !noLocalMachine && configs.length + setups.length > 0;
-  const resolvedSelectedConfigId = selectedConfigId ?? configs[0]?.id ?? setups[0]?.id ?? null;
-  const previewConfig = configs.find((config) => config.id === resolvedSelectedConfigId);
+  const resolvedSelectedProviderId = selectedProviderId ?? configs[0]?.id ?? setups[0]?.id ?? null;
+  const previewConfig = configs.find((config) => config.id === resolvedSelectedProviderId);
+  const previewSetup = setups.find((setup) => setup.id === resolvedSelectedProviderId);
+  const selectedProvider: DesktopOnboardingProviderSelection | null = previewConfig
+    ? { kind: 'agentConfig', agentConfigId: previewConfig.id, agentName: previewConfig.name }
+    : previewSetup
+      ? {
+          kind: 'providerSetup',
+          providerSetupId: previewSetup.id,
+          agentName: previewSetup.config.name,
+        }
+      : null;
   const previewStatus = previewConfig ? testStatuses[previewConfig.id] : undefined;
   const previewActivity = previewConfig ? testActivities[previewConfig.id] : undefined;
   const previewAgentStatus: TourConfigurationState['agentStatus'] = noLocalMachine
@@ -257,7 +399,7 @@ export function ProvidersScreenView({
       title={t('onboarding.providers.title', 'Connect a coding agent')}
       description={t(
         'onboarding.providers.description',
-        'Add a provider now. Runtime downloads continue in the background, and Lody asks you to sign in when ready.'
+        'Add an Agent now. Lody will continue setup and let you know if anything needs your attention.'
       )}
       previewIdentity={
         previewConfig
@@ -279,35 +421,30 @@ export function ProvidersScreenView({
       }}
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="lg"
-            onClick={onSkip}
-            className="text-muted-foreground hover:text-foreground"
-          >
+        <div {...stylex.props(surface.actions)}>
+          <Button variant="ghost" size="large" onClick={onSkip}>
             {t('onboarding.providers.skip', 'Skip for now')}
           </Button>
           <OnboardingNextButton
-            onClick={() => resolvedSelectedConfigId && onNext(resolvedSelectedConfigId)}
-            disabled={!canProceed || resolvedSelectedConfigId === null}
+            onClick={() => selectedProvider && onNext(selectedProvider)}
+            disabled={!canProceed || selectedProvider === null}
           />
         </div>
       }
     >
-      <div className="flex flex-col gap-3">
+      <div {...stylex.props(surface.stack)}>
         {noLocalMachine ? (
-          <div className="flex items-center gap-3 rounded-lg border border-dashed border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+          <div {...stylex.props(surface.message, surface.messageInline, surface.messageNeutral)}>
+            <Spinner size="small" />
             {t('onboarding.providers.waitingMachine', 'Waiting for the local agent to connect…')}
           </div>
         ) : null}
 
         {configs.length > 0 || setups.length > 0 ? (
-          // Cap at ~4 rows; longer lists scroll. -mx-1/px-1 keeps focus rings
-          // visible without clipping at the scroll edge.
-          <div className="scrollbar-pro -mx-1 max-h-[calc(4*4.25rem+0.75rem*3)] overflow-y-auto overscroll-contain px-1">
-            <div className="flex flex-col gap-3">
+          // Cap at ~4 rows; longer lists scroll. The scroller's negative margin
+          // and matching padding keep shadows and rings from clipping at its edge.
+          <div {...withClassName(stylex.props(styles.scroller), 'scrollbar-pro')}>
+            <div {...stylex.props(styles.rows)}>
               {setups.map((setup) => (
                 <ProviderSetupRow
                   key={setup.id}
@@ -321,8 +458,14 @@ export function ProvidersScreenView({
                 {configs.map((config) => {
                   const status: ProviderTestStatus = testStatuses[config.id] ?? 'untested';
                   const activity = testActivities[config.id];
-                  const activityPercent = getProviderTestActivityPercent(activity);
-                  const selected = config.id === resolvedSelectedConfigId;
+                  const selected = config.id === resolvedSelectedProviderId;
+                  // 'needs-auth' stays ready on purpose: that agent arrived, it
+                  // is waiting on the user, and the row's panel says so.
+                  const rowReadiness: AgentRuntimeReadiness =
+                    agentRuntimeReadinessFromActivity(activity) ??
+                    (status === 'failed'
+                      ? { readiness: 'cold', percent: null }
+                      : { readiness: 'ready', percent: null });
                   return (
                     <motion.div
                       key={config.id}
@@ -331,103 +474,105 @@ export function ProvidersScreenView({
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }}
                       transition={{ duration: 0.25 }}
-                      className={cn(
-                        // Hover lives on the row, not the inner edit button,
-                        // so highlighting feels like one unit even though
-                        // Test/Delete are separate click targets.
-                        'group flex flex-wrap items-center gap-3 rounded-lg border transition-colors',
-                        selected
-                          ? 'border-primary bg-primary/[0.06] ring-2 ring-primary/15'
-                          : status === 'passed'
-                            ? 'border-primary/40 bg-primary/[0.04] hover:bg-primary/[0.07]'
-                            : 'border-border/60 bg-card/40 hover:border-border hover:bg-hover/40'
-                      )}
+                      // Hover lives on the row, not the inner select button, so
+                      // highlighting reads as one unit even though Edit, Test and
+                      // Delete are separate click targets. Only selection marks
+                      // the row: a passed row used to carry the same wash, which
+                      // made the selection indistinguishable from status. Status
+                      // lives in the badge column alone.
+                      {...stylex.props(styles.row, selected ? styles.rowSelected : styles.rowHover)}
                     >
                       <button
                         type="button"
                         disabled={noLocalMachine}
-                        className={cn(
-                          'flex min-w-0 flex-1 items-center gap-3 rounded-l-lg py-3 pl-3 text-left',
-                          'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
-                          'disabled:cursor-not-allowed disabled:opacity-60'
-                        )}
                         aria-pressed={selected}
                         aria-label={t('onboarding.providers.selectConfig', 'Select {{name}}', {
                           name: config.name,
                         })}
                         onClick={() => (onSelect ? onSelect(config) : onEdit(config))}
+                        {...stylex.props(styles.select, noLocalMachine && styles.selectDisabled)}
                       >
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/40">
-                          <AgentIcon
-                            cliType={config.cliType}
-                            agentType={config.agentType}
-                            brandId={config.brandId}
-                            env={config.env}
-                            className="h-5 w-5"
-                          />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium">{config.name}</div>
-                          <div className="truncate text-xs text-muted-foreground">
+                        {/* The mark carries the work, so the row needs no second
+                            activity element. A published config reads as ready
+                            unless a request is running on it or it failed:
+                            dimming an agent the user already has, because we
+                            have not probed it, is the anxiety this replaces. */}
+                        <AgentReadinessMark
+                          cliType={config.cliType}
+                          agentType={config.agentType}
+                          brandId={config.brandId}
+                          env={config.env}
+                          readiness={rowReadiness.readiness}
+                          percent={rowReadiness.percent}
+                          size="md"
+                        />
+                        <span {...stylex.props(surface.textColumn)}>
+                          <span {...stylex.props(surface.title)}>{config.name}</span>
+                          <span {...stylex.props(surface.detail)}>
                             {labelForAgent(config.cliType, config.agentType)}
-                          </div>
-                        </div>
+                          </span>
+                        </span>
                         {/* Sibling of the two-line text column, so the badge
                             centres against the whole row instead of riding the
-                            name's baseline. */}
-                        <ProviderStatusBadge
-                          status={status}
-                          activity={activity}
-                          failureReason={failureReasons[config.id]}
-                        />
+                            name's baseline. The column is fixed and its
+                            contents end-aligned: every badge then shares one
+                            edge and one gutter to the actions, whatever word it
+                            happens to carry. */}
+                        <span {...stylex.props(styles.statusSlot)}>
+                          <ProviderStatusBadge
+                            status={status}
+                            activity={activity}
+                            failureReason={failureReasons[config.id]}
+                          />
+                        </span>
                       </button>
-                      <div className="flex shrink-0 items-center gap-1 pr-3">
-                        <Button variant="ghost" size="sm" onClick={() => onEdit(config)}>
-                          {t('common.edit', 'Edit')}
-                        </Button>
-                        {status !== 'needs-auth' ? (
-                          <Button
-                            variant={
-                              activity ? 'outline' : status === 'passed' ? 'ghost' : 'outline'
-                            }
-                            size="sm"
-                            className={cn(
-                              'relative min-w-[4.5rem] overflow-hidden',
-                              activity && 'disabled:opacity-100'
-                            )}
-                            disabled={Boolean(activity) || noLocalMachine}
-                            onClick={() => onTest(config)}
-                          >
-                            {activityPercent !== null ? (
-                              <span
-                                aria-hidden="true"
-                                className="absolute inset-y-0 left-0 border-r border-primary/30 bg-primary/20 transition-[width] duration-300"
-                                style={{ width: `${activityPercent}%` }}
-                              />
-                            ) : null}
-                            <span className="relative z-10 tabular-nums">
-                              {activity
-                                ? activityPercent !== null
-                                  ? `${activityPercent}%`
-                                  : t('onboarding.providers.workingAction', 'Working')
-                                : status === 'passed'
-                                  ? t('onboarding.providers.retest', 'Re-test')
-                                  : t('onboarding.providers.test', 'Test')}
-                            </span>
+                      {/* Fixed-width slots, not intrinsic ones. Test/Re-test,
+                          the progress pill and the needs-auth row all differ in
+                          width, and an intrinsic cluster passed that difference
+                          leftward: the badge and the name column landed at a
+                          different x in every row, and jumped again the moment a
+                          test started. A control keeps its own size inside its
+                          slot; the slot is what never moves. */}
+                      <div {...stylex.props(styles.cluster)}>
+                        <div {...stylex.props(styles.editSlot)}>
+                          <Button variant="ghost" size="small" onClick={() => onEdit(config)}>
+                            {t('common.edit', 'Edit')}
                           </Button>
-                        ) : null}
+                        </div>
+                        <div {...stylex.props(styles.actionSlot)}>
+                          {activity ? (
+                            <ProviderActivityAction activity={activity} config={config} />
+                          ) : status !== 'needs-auth' ? (
+                            // Keep the same visual role after success. Changing
+                            // the action to a ghost made the verified row read
+                            // as a hole in this fixed-width column.
+                            <Button
+                              variant="secondary"
+                              size="small"
+                              disabled={noLocalMachine}
+                              onClick={() => onTest(config)}
+                            >
+                              {status === 'passed'
+                                ? t('onboarding.providers.retest', 'Re-test')
+                                : t('onboarding.providers.test', 'Test')}
+                            </Button>
+                          ) : null}
+                        </div>
                         <Button
                           variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          size="small"
                           aria-label={t('common.delete', 'Delete')}
+                          icon
+                          tone="destructive"
                           onClick={() => onDelete(config)}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 {...stylex.props(surface.icon16)} />
                         </Button>
                       </div>
+                      {/* Indented to the agent's name, not the card edge: the
+                          panel belongs to the agent named above it. */}
                       {status === 'needs-auth' ? (
-                        <div className="basis-full px-3 pb-3">
+                        <div {...stylex.props(styles.authPanel)}>
                           <AcpAuthenticationPanel
                             machineId={localMachineId}
                             configId={config.id}
@@ -449,35 +594,81 @@ export function ProvidersScreenView({
           </div>
         ) : null}
 
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="large"
           disabled={noLocalMachine}
           onClick={() => onAdd()}
-          className={cn(
-            'group flex items-center justify-center gap-2 rounded-lg border-2 border-dashed py-4 text-sm font-medium transition-all',
-            'border-border/60 text-muted-foreground hover:border-primary/60 hover:bg-primary/[0.04] hover:text-foreground',
-            'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-            'disabled:opacity-50 disabled:hover:border-border/60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground'
-          )}
         >
-          <Plus className="h-4 w-4 transition-transform group-hover:rotate-90" />
+          <Plus {...stylex.props(surface.icon16)} />
           {configs.length + setups.length === 0
-            ? t('onboarding.providers.addFirst', 'Add your first provider')
-            : t('onboarding.providers.addAnother', 'Add another provider')}
-        </button>
+            ? t('onboarding.providers.addFirst', 'Add your first Agent')
+            : t('onboarding.providers.addAnother', 'Add another Agent')}
+        </Button>
 
         {!noLocalMachine && !canProceed ? (
-          <p className="text-center text-xs text-muted-foreground/80">
+          <p {...stylex.props(surface.hint, surface.hintCentered)}>
             {t(
               'onboarding.providers.needTested',
-              'Add a provider to continue, or skip and configure later.'
+              'Add an Agent to continue, or skip and configure later.'
             )}
           </p>
         ) : null}
 
-        <AgentShowcase disabled={noLocalMachine} onPick={onAdd} />
+        <AgentShowcase
+          disabled={noLocalMachine}
+          onPick={onAdd}
+          runtimeReadiness={runtimeReadiness}
+        />
       </div>
     </OnboardingShell>
+  );
+}
+
+/**
+ * The glyph inside a showcase chip.
+ *
+ * Only the managed built-in runtimes the background prefetch warms get the
+ * readiness treatment, and they light up from monochrome to full brand colour
+ * as each one lands. The rest keep the wall's resting monochrome look, because
+ * nothing is being prepared for them and a dimmed mark would imply otherwise.
+ */
+function ShowcaseChipMark({
+  agent,
+  runtimeReadiness,
+}: {
+  agent: ShowcaseAgent;
+  runtimeReadiness: Partial<Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>>;
+}) {
+  const warmed =
+    agent.pick.kind === 'builtin' && isManagedBuiltinAgentType(agent.pick.agentType)
+      ? runtimeReadiness[agent.pick.agentType]
+      : undefined;
+
+  if (warmed) {
+    return (
+      <AgentReadinessMark
+        cliType={agent.icon.cliType}
+        agentType={agent.icon.agentType}
+        brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
+        readiness={warmed.readiness}
+        percent={warmed.percent}
+        size="sm"
+        surface="avatar"
+      />
+    );
+  }
+
+  return (
+    <span {...stylex.props(styles.chipMark)}>
+      <AgentIcon
+        cliType={agent.icon.cliType}
+        agentType={agent.icon.agentType}
+        brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
+        className={stylex.props(surface.icon14).className}
+      />
+    </span>
   );
 }
 
@@ -490,9 +681,11 @@ export function ProvidersScreenView({
 function AgentShowcase({
   disabled,
   onPick,
+  runtimeReadiness,
 }: {
   disabled: boolean;
   onPick: (pick: ShowcasePick) => void;
+  runtimeReadiness: Partial<Record<ManagedBuiltinAgentType, AgentRuntimeReadiness>>;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -502,66 +695,46 @@ function AgentShowcase({
     : FEATURED_SHOWCASE_AGENTS;
 
   return (
-    <div className="flex flex-col gap-3 pt-2">
-      <div className="flex items-center gap-3" aria-hidden>
-        <div className="h-px flex-1 bg-border/70" />
-        <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground/70">
-          {t('onboarding.providers.moreLabel', 'Plus many more coding agents')}
-        </span>
-        <div className="h-px flex-1 bg-border/70" />
-      </div>
-      <div className="flex flex-wrap justify-center gap-2">
+    <div {...stylex.props(styles.showcase)}>
+      <p aria-hidden {...stylex.props(surface.hint, surface.hintCentered)}>
+        {t('onboarding.providers.moreLabel', 'Plus many more coding agents')}
+      </p>
+      <div {...stylex.props(styles.wall)}>
         {visible.map((agent) => (
-          <button
+          <Button
             key={showcasePickKey(agent.pick)}
             type="button"
+            variant="ghost"
+            shape="pill"
             disabled={disabled}
             title={agent.label}
             onClick={() => onPick(agent.pick)}
-            className={cn(
-              'group/chip inline-flex items-center gap-1.5 rounded-full border py-1 pl-1 pr-3',
-              'border-border/50 bg-card/30 text-xs font-medium text-muted-foreground',
-              'transition-all hover:border-primary/40 hover:bg-primary/[0.06] hover:text-foreground',
-              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-              'disabled:pointer-events-none disabled:opacity-50'
-            )}
           >
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted/50 text-foreground/70 transition-colors group-hover/chip:bg-background group-hover/chip:text-foreground">
-              <AgentIcon
-                cliType={agent.icon.cliType}
-                agentType={agent.icon.agentType}
-                brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
-                className="h-3.5 w-3.5"
-              />
-            </span>
+            <ShowcaseChipMark agent={agent} runtimeReadiness={runtimeReadiness} />
             {agent.label}
-          </button>
+          </Button>
         ))}
 
         {moreCount > 0 ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            shape="pill"
             aria-expanded={expanded}
             onClick={() => setExpanded((v) => !v)}
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full border border-dashed py-1 pl-3 pr-2.5',
-              'border-border/70 bg-transparent text-xs font-medium text-muted-foreground',
-              'transition-all hover:border-primary/50 hover:text-foreground',
-              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
-            )}
           >
             {expanded ? (
               <>
                 {t('onboarding.providers.showLess', 'Show less')}
-                <ChevronUp className="h-3.5 w-3.5" />
+                <ChevronUp {...stylex.props(surface.icon14)} />
               </>
             ) : (
               <>
                 {t('onboarding.providers.showMore', '+{{count}} more', { count: moreCount })}
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown {...stylex.props(surface.icon14)} />
               </>
             )}
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>
@@ -571,7 +744,7 @@ function AgentShowcase({
 interface ProvidersScreenProps {
   onBack: () => void;
   onSkip: () => void;
-  onNext: (agentConfigId: string) => void;
+  onNext: (selection: DesktopOnboardingProviderSelection) => void;
   onManagedRuntimeSelected: (agentType: ManagedBuiltinAgentType) => void;
 }
 
@@ -582,6 +755,7 @@ export function ProvidersScreen({
   onManagedRuntimeSelected,
 }: ProvidersScreenProps) {
   const { t } = useTranslation();
+  const analytics = useOnboardingAnalytics();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
@@ -621,6 +795,7 @@ export function ProvidersScreen({
     [allSetups, localMachineId]
   );
   useProviderSetupRuntimeProgress(runtime, workspaceId, localSetups);
+  const runtimeReadiness = useBuiltinRuntimeReadiness(localMachineId);
 
   const [dialogMode, setDialogMode] = useState<AgentConfigDialogMode | null>(null);
   const dialogOpen = dialogMode !== null;
@@ -629,7 +804,7 @@ export function ProvidersScreen({
   const [testActivities, setTestActivities] = useState<Record<string, ProviderTestActivity>>({});
   const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
   const testRunsRef = useRef(createProviderTestRunRegistry());
-  const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AgentConfigMeta | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -638,9 +813,9 @@ export function ProvidersScreen({
       ...localConfigs.map((config) => config.id),
       ...localSetups.map((setup) => setup.id),
     ]);
-    if (selectedConfigId && availableIds.has(selectedConfigId as AgentConfigId)) return;
-    setSelectedConfigId(localConfigs[0]?.id ?? localSetups[0]?.id ?? null);
-  }, [localConfigs, localSetups, selectedConfigId]);
+    if (selectedProviderId && availableIds.has(selectedProviderId as AgentConfigId)) return;
+    setSelectedProviderId(localConfigs[0]?.id ?? localSetups[0]?.id ?? null);
+  }, [localConfigs, localSetups, selectedProviderId]);
 
   const setStatus = (id: AgentConfigId, status: ProviderTestStatus) =>
     setTestStatuses((prev) => ({ ...prev, [id]: status }));
@@ -669,9 +844,13 @@ export function ProvidersScreen({
     [clearTestActivity]
   );
 
+  // Detach, never abort: leaving this step stops the screen from committing a
+  // result it can no longer show, but the machine keeps working. The refresh
+  // writes durable capabilities, so a recovery that outlives the step still
+  // finishes the job the user asked for.
   useEffect(
     () => () => {
-      testRunsRef.current.invalidateAll();
+      testRunsRef.current.detachAll();
     },
     []
   );
@@ -715,6 +894,15 @@ export function ProvidersScreen({
         const services = getIpcServices();
         const restart = services ? services.cli.restart.bind(services.cli) : undefined;
         if (!restart) {
+          console.error(
+            '[onboarding] Local agent restart is unavailable while waiting for provider setup'
+          );
+          analytics.capture('onboarding/operation_failed', {
+            step: 'providers',
+            operation: 'local_agent_recovery',
+            failure_code: 'restart_unavailable',
+            retryable: true,
+          });
           toast.error(
             t(
               'onboarding.providers.localAgentUnreachable',
@@ -724,14 +912,33 @@ export function ProvidersScreen({
           return;
         }
 
+        const restartStartedAtMs = analytics.now();
+        analytics.capture('onboarding/operation_started', {
+          step: 'providers',
+          operation: 'local_agent_restart',
+        });
         void restart()
           .then((result) => {
             if (cancelled) return;
             if (!result.ok) {
               throw new Error(result.error || 'restart_failed');
             }
+            analytics.capture('onboarding/operation_succeeded', {
+              step: 'providers',
+              operation: 'local_agent_restart',
+              duration_ms: analytics.durationSince(restartStartedAtMs),
+            });
             secondTimeoutId = window.setTimeout(() => {
               if (cancelled) return;
+              console.error(
+                '[onboarding] Local agent remained unreachable after an automatic restart'
+              );
+              analytics.capture('onboarding/operation_failed', {
+                step: 'providers',
+                operation: 'local_agent_recovery',
+                failure_code: 'local_agent_unreachable',
+                retryable: true,
+              });
               toast.error(
                 t(
                   'onboarding.providers.localAgentUnreachable',
@@ -742,6 +949,14 @@ export function ProvidersScreen({
           })
           .catch((error) => {
             if (cancelled) return;
+            console.error('[onboarding] Failed to restart the local agent:', error);
+            analytics.capture('onboarding/operation_failed', {
+              step: 'providers',
+              operation: 'local_agent_restart',
+              failure_code: 'local_agent_restart_failed',
+              duration_ms: analytics.durationSince(restartStartedAtMs),
+              retryable: true,
+            });
             toast.error(
               t(
                 'onboarding.providers.localAgentUnreachable',
@@ -758,16 +973,12 @@ export function ProvidersScreen({
       if (firstTimeoutId !== null) window.clearTimeout(firstTimeoutId);
       if (secondTimeoutId !== null) window.clearTimeout(secondTimeoutId);
     };
-  }, [localMachine, localProbeAttempted, t]);
+  }, [analytics, localMachine, localProbeAttempted, t]);
 
   const refreshCapabilities = useCallback(
     async (args: {
+      machineId: MachineId;
       configId: AgentConfigId;
-      cliType: AgentConfigCliType;
-      agentType: string;
-      customAcp?: CustomAcpLaunchSpec;
-      runtimeOverrides?: AgentConfigMeta['runtimeOverrides'];
-      env?: Record<string, string>;
       signal?: AbortSignal;
       onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
     }) => {
@@ -777,14 +988,12 @@ export function ProvidersScreen({
       const response = await runtime.requestMachineAcpCapabilitiesRefresh(
         {
           type: 'machine/acp-capabilities-refresh',
-          machineId: localMachineId,
+          machineId: args.machineId,
           workspaceId,
           configId: args.configId,
-          cliType: args.cliType,
-          agentType: args.agentType,
-          customAcp: args.customAcp,
-          runtimeOverrides: args.runtimeOverrides,
-          env: args.env,
+          // Onboarding's provider test exists to prove the agent really starts,
+          // so it never accepts a cached answer.
+          force: true,
         },
         { signal: args.signal, onProgress: args.onProgress }
       );
@@ -803,7 +1012,11 @@ export function ProvidersScreen({
       }
       // The machine flock doc only syncs once per session; force a re-sync so
       // the freshly probed capabilities surface without a reload.
-      await resyncMachineFlockRows(runtime, localMachineId);
+      await resyncMachineFlockRows(runtime, args.machineId, {
+        refreshedCapability: response.capability
+          ? { configId: response.configId, value: response.capability }
+          : undefined,
+      });
       return response;
     },
     [localMachineId, runtime, t, workspaceId]
@@ -816,34 +1029,74 @@ export function ProvidersScreen({
   const handleTest = useCallback(
     (config: AgentConfigMeta) => {
       const run = testRunsRef.current.start(config.id);
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', {
+        step: 'providers',
+        operation: 'agent_test',
+      });
       setTestActivities((prev) => ({
         ...prev,
-        [config.id]: { phase: 'checking-runtime' },
+        [config.id]: { phase: 'checking-runtime', startedAtMs: Date.now() },
       }));
       void (async () => {
         try {
           const response = await refreshCapabilities({
+            machineId: config.machineId,
             configId: config.id,
-            cliType: config.cliType,
-            agentType: config.agentType,
-            customAcp: config.customAcp,
-            runtimeOverrides: config.runtimeOverrides,
-            env: config.env,
             signal: run.signal,
             onProgress: (progress) => {
               if (!testRunsRef.current.isCurrent(config.id, run)) return;
               setTestActivities((prev) => ({
                 ...prev,
-                [config.id]: providerTestActivityFromProgress(progress),
+                [config.id]: {
+                  ...providerTestActivityFromProgress(progress),
+                  // Elapsed time belongs to the request, not to the stage it
+                  // happens to be in, so it survives every phase change.
+                  ...(prev[config.id]?.startedAtMs !== undefined
+                    ? { startedAtMs: prev[config.id]?.startedAtMs }
+                    : {}),
+                },
               }));
             },
           });
           if (!testRunsRef.current.finish(config.id, run)) return;
           clearTestActivity(config.id);
           clearFailureReason(config.id);
-          setStatus(config.id, response.authRequired ? 'needs-auth' : 'passed');
+          const emptyModelCatalog =
+            !response.authRequired && hasEmptyModelSelectOption(response.capability?.configOptions);
+          setStatus(
+            config.id,
+            response.authRequired ? 'needs-auth' : emptyModelCatalog ? 'failed' : 'passed'
+          );
+          if (emptyModelCatalog) {
+            setFailureReasons((prev) => ({
+              ...prev,
+              [config.id]: t(
+                'settings.agent.provider.emptyModelCatalog',
+                'Provider responded but reported no usable models — try testing again'
+              ),
+            }));
+          }
+          analytics.capture('onboarding/operation_succeeded', {
+            step: 'providers',
+            operation: 'agent_test',
+            result: response.authRequired
+              ? 'needs_auth'
+              : emptyModelCatalog
+                ? 'degraded_empty_model_catalog'
+                : 'passed',
+            duration_ms: analytics.durationSince(startedAtMs),
+          });
         } catch (error) {
           if (!testRunsRef.current.finish(config.id, run)) return;
+          console.error(`[onboarding] Failed to test Agent ${config.name}:`, error);
+          analytics.capture('onboarding/operation_failed', {
+            step: 'providers',
+            operation: 'agent_test',
+            failure_code: 'agent_test_failed',
+            duration_ms: analytics.durationSince(startedAtMs),
+            retryable: true,
+          });
           clearTestActivity(config.id);
           const failureReason = error instanceof Error ? error.message : String(error);
           setFailureReasons((prev) => ({ ...prev, [config.id]: failureReason }));
@@ -857,12 +1110,20 @@ export function ProvidersScreen({
         }
       })();
     },
-    [clearFailureReason, clearTestActivity, refreshCapabilities, t]
+    [analytics, clearFailureReason, clearTestActivity, refreshCapabilities, t]
   );
 
   const handleDialogSubmit = useCallback(
     async (payload: AgentConfigSubmitPayload) => {
       if (!localMachineId || !dialogMode) return;
+      const operation =
+        dialogMode.kind === 'edit'
+          ? 'agent_config_update'
+          : payload.backgroundSetup
+            ? 'agent_setup_create'
+            : 'agent_config_create';
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', { step: 'providers', operation });
       try {
         if (dialogMode.kind === 'create') {
           const config: AgentConfigMeta = {
@@ -884,7 +1145,7 @@ export function ProvidersScreen({
           } else {
             await createConfig(config);
           }
-          setSelectedConfigId(config.id);
+          setSelectedProviderId(config.id);
         } else {
           invalidateTestRun(dialogMode.config.id);
           await updateConfig({
@@ -900,13 +1161,27 @@ export function ProvidersScreen({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
+            sessionDefaults: dialogMode.config.sessionDefaults,
           });
           // Editing can change credentials or the launch command; keep Test as
           // an explicit optional action instead of treating save as verification.
           clearFailureReason(dialogMode.config.id);
           setStatus(dialogMode.config.id, 'untested');
         }
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'providers',
+          operation,
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
+        console.error('[onboarding] Failed to save Agent configuration:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'providers',
+          operation,
+          failure_code: `${operation}_failed`,
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(
           dialogMode.kind === 'create'
             ? t('agents.createConfigError', 'Failed to create configuration')
@@ -916,6 +1191,7 @@ export function ProvidersScreen({
       }
     },
     [
+      analytics,
       clearFailureReason,
       createConfig,
       createSetup,
@@ -929,34 +1205,78 @@ export function ProvidersScreen({
 
   const handleRetrySetup = useCallback(
     async (setup: ProviderSetupTask) => {
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', {
+        step: 'providers',
+        operation: 'agent_setup_retry_request',
+        attempt: setup.attempt + 1,
+      });
       try {
         await retrySetup(setup.id);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'providers',
+          operation: 'agent_setup_retry_request',
+          attempt: setup.attempt + 1,
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
+        console.error('[onboarding] Failed to retry Agent setup:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'providers',
+          operation: 'agent_setup_retry_request',
+          failure_code: 'agent_setup_retry_failed',
+          attempt: setup.attempt + 1,
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(t('settings.agent.setup.retryFailed', 'Could not retry provider setup'), {
           description: error instanceof Error ? error.message : String(error),
         });
         throw error;
       }
     },
-    [retrySetup, t]
+    [analytics, retrySetup, t]
   );
 
   const handleDeleteSetup = useCallback(
     async (setup: ProviderSetupTask) => {
+      const startedAtMs = analytics.now();
+      analytics.capture('onboarding/operation_started', {
+        step: 'providers',
+        operation: 'agent_setup_cancel',
+      });
       try {
         await deleteSetup(setup.id);
+        analytics.capture('onboarding/operation_succeeded', {
+          step: 'providers',
+          operation: 'agent_setup_cancel',
+          duration_ms: analytics.durationSince(startedAtMs),
+        });
       } catch (error) {
+        console.error('[onboarding] Failed to cancel Agent setup:', error);
+        analytics.capture('onboarding/operation_failed', {
+          step: 'providers',
+          operation: 'agent_setup_cancel',
+          failure_code: 'agent_setup_cancel_failed',
+          duration_ms: analytics.durationSince(startedAtMs),
+          retryable: true,
+        });
         toast.error(t('settings.agent.setup.deleteFailed', 'Could not cancel provider setup'), {
           description: error instanceof Error ? error.message : String(error),
         });
         throw error;
       }
     },
-    [deleteSetup, t]
+    [analytics, deleteSetup, t]
   );
 
   const handleConfirmDelete = async () => {
     if (!pendingDelete) return;
+    const startedAtMs = analytics.now();
+    analytics.capture('onboarding/operation_started', {
+      step: 'providers',
+      operation: 'agent_config_delete',
+    });
     try {
       setDeleting(true);
       invalidateTestRun(pendingDelete.id);
@@ -967,7 +1287,20 @@ export function ProvidersScreen({
         return rest;
       });
       setPendingDelete(null);
+      analytics.capture('onboarding/operation_succeeded', {
+        step: 'providers',
+        operation: 'agent_config_delete',
+        duration_ms: analytics.durationSince(startedAtMs),
+      });
     } catch (error) {
+      console.error('[onboarding] Failed to delete Agent configuration:', error);
+      analytics.capture('onboarding/operation_failed', {
+        step: 'providers',
+        operation: 'agent_config_delete',
+        failure_code: 'agent_config_delete_failed',
+        duration_ms: analytics.durationSince(startedAtMs),
+        retryable: true,
+      });
       toast.error(t('agents.deleteConfigError', 'Failed to delete configuration'), {
         description: error instanceof Error ? error.message : String(error),
       });
@@ -984,12 +1317,13 @@ export function ProvidersScreen({
         testStatuses={testStatuses}
         testActivities={testActivities}
         failureReasons={failureReasons}
-        selectedConfigId={selectedConfigId}
+        runtimeReadiness={runtimeReadiness}
+        selectedProviderId={selectedProviderId}
         noLocalMachine={!localMachine}
         localMachineId={localMachineId}
         localMachine={localMachine}
         onEdit={(config) => setDialogMode({ kind: 'edit', config })}
-        onSelect={(config) => setSelectedConfigId(config.id)}
+        onSelect={(config) => setSelectedProviderId(config.id)}
         onTest={handleTest}
         onAuthenticated={(config) => {
           clearFailureReason(config.id);
@@ -1047,48 +1381,178 @@ export function ProvidersScreen({
           machine={localMachine}
           onSubmit={handleDialogSubmit}
           onRefreshCapabilities={refreshCapabilities}
+          onScanPiExtensions={
+            runtime
+              ? ({ machineId, configId }) =>
+                  runtime.requestMachinePiExtensions(machineId, { configId })
+              : undefined
+          }
           onCheckBinaryStatus={checkBinaryStatus}
           onInstallBinary={installBinary}
           onManagedRuntimeSelected={onManagedRuntimeSelected}
         />
       ) : null}
 
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('agents.deleteConfigConfirm', 'Delete Configuration')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('agents.deleteConfigConfirmDescription', {
                 name: pendingDelete?.name ?? '',
                 defaultValue:
                   'Are you sure you want to delete "{{name}}"? This action cannot be undone.',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <Button
               disabled={deleting}
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 void handleConfirmDelete();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
-              {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {deleting && <Spinner size="small" />}
               {t('common.delete', 'Delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
+  );
+}
+
+/** Seconds since `startedAtMs`, ticking only while one is supplied. */
+function useElapsedSeconds(startedAtMs: number | null): number {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (startedAtMs === null) {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+    const tick = (): void =>
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [startedAtMs]);
+  return elapsedSeconds;
+}
+
+/**
+ * The escalation tier a row's wait has reached, and the seconds behind it.
+ *
+ * The badge and the action both read this, so the tone the row takes and the
+ * number it shows can never disagree about which tier the wait is in. Only a
+ * denominator-free stage escalates: a download already answers "how much
+ * longer" with a percentage, and a runtime that has failed is not waiting.
+ */
+function useProviderWaitEscalation(activity: ProviderTestActivity | undefined): {
+  escalation: ProviderWaitEscalation;
+  elapsedSeconds: number;
+} {
+  const percent = getProviderTestActivityPercent(activity);
+  const measurable =
+    activity !== undefined && percent === null && activity.phase !== 'runtime-failed';
+  const elapsedSeconds = useElapsedSeconds(measurable ? (activity.startedAtMs ?? null) : null);
+  return { escalation: providerWaitEscalation(elapsedSeconds), elapsedSeconds };
+}
+
+/**
+ * The in-flight action for a row.
+ *
+ * A download has a denominator, so the button fills and reads as a percentage.
+ * Every other stage — the ACP handshake above all — has none, and inventing one
+ * would be a lie. Once the wait is `measured` it reports elapsed time instead,
+ * which is what turns an open-ended wait into a wait the user can measure. The
+ * badge beside it names the stage, so the two together read as "Starting · 14s"
+ * — and, once the wait is `exceptional`, as "Taking longer · 74s".
+ */
+function ProviderActivityAction({
+  activity,
+  config,
+}: {
+  activity: ProviderTestActivity;
+  config: AgentConfigMeta;
+}) {
+  const { t } = useTranslation();
+  const percent = getProviderTestActivityPercent(activity);
+  const runtimeFailed = activity.phase === 'runtime-failed';
+  const { escalation, elapsedSeconds } = useProviderWaitEscalation(activity);
+  const label = (() => {
+    if (percent !== null) return `${percent}%`;
+    // Never label an already-failed runtime as ongoing work while the durable
+    // reason is still in flight.
+    if (runtimeFailed) return t('onboarding.providers.failedAction', 'Failed');
+    if (escalation !== 'normal') {
+      return t('onboarding.providers.workingSeconds', '{{seconds}}s', {
+        seconds: elapsedSeconds,
+      });
+    }
+    return t('onboarding.providers.workingAction', 'Working');
+  })();
+
+  const handleCopyReport = useCallback(() => {
+    const report = buildProviderWaitReport({
+      agentName: config.name,
+      cliType: config.cliType,
+      agentType: config.agentType,
+      phase: activity.phase,
+      elapsedSeconds,
+      percent,
+      environment: collectErrorBoundaryEnvironment(),
+    });
+    void writeTextToClipboard(report).then((ok) => {
+      if (ok) {
+        toast.success(t('onboarding.providers.slowWaitCopied', 'Setup details copied'));
+        return;
+      }
+      // Copying can be blocked (insecure context, no gesture). Say so rather
+      // than leaving the user believing they have something to paste.
+      console.error('[onboarding] Could not copy provider setup details to the clipboard');
+      toast.error(t('onboarding.providers.slowWaitCopyFailed', 'Could not copy setup details'), {
+        description: report,
+      });
+    });
+  }, [activity.phase, config, elapsedSeconds, percent, t]);
+
+  // The escalation's real ask is "tell someone". A wait this long ends in the
+  // chat, and the three things we would have to ask for there — which stage,
+  // how long, which build — are the three things the user cannot see. So the
+  // exceptional tier hands them one block to paste. It is also the tier's only
+  // pointer-independent affordance: the tooltip beside it is hover-only.
+  const copyable = !runtimeFailed && escalation === 'exceptional';
+  const copyLabel = t('onboarding.providers.slowWaitCopy', 'Copy setup details');
+
+  // The escalation turns the pill itself into the copy control rather than
+  // adding a button beside it. A second control here would widen this row's
+  // action cluster past every other row's, so the status column and the name
+  // column would slide sideways for exactly the row already asking for
+  // attention. It stays a real focusable button, so the affordance survives
+  // without a pointer.
+  return (
+    <ProviderProgressButton
+      percent={percent}
+      label={label}
+      className={stylex.props(styles.fillSlot).className}
+      {...(copyable
+        ? {
+            icon: <Copy {...stylex.props(surface.icon14)} />,
+            ariaLabel: copyLabel,
+            title: copyLabel,
+            onClick: handleCopyReport,
+          }
+        : {})}
+    />
   );
 }
 
@@ -1098,6 +1562,12 @@ function getProviderTestActivityPercent(activity?: ProviderTestActivity): number
     : null;
 }
 
+/**
+ * Every provider status is one `Badge`, and the tone says which kind it is. The
+ * geometry is the primitive's — one height, one padding, one corner — which is
+ * what this column needed when it was five hand-built chips that read as five
+ * different controls stacked on top of each other.
+ */
 function ProviderStatusBadge({
   status,
   activity,
@@ -1108,8 +1578,9 @@ function ProviderStatusBadge({
   failureReason?: string;
 }) {
   const { t } = useTranslation();
+  const { escalation } = useProviderWaitEscalation(activity);
   if (activity) {
-    const label = (() => {
+    const stageLabel = (() => {
       switch (activity.phase) {
         case 'checking-runtime':
           return t('onboarding.providers.activityChecking', 'Checking');
@@ -1123,27 +1594,59 @@ function ProviderStatusBadge({
           return t('onboarding.providers.activityInstalling', 'Installing');
         case 'probing-provider':
           return t('onboarding.providers.activityStarting', 'Starting');
+        case 'runtime-failed':
+          return t('onboarding.providers.activityRuntimeFailed', 'Runtime failed');
       }
 
       const unreachablePhase: never = activity.phase;
       throw new Error(`Unknown provider test activity phase: ${String(unreachablePhase)}`);
     })();
-    return (
+    // A runtime that already reported a failure must not keep wearing the
+    // in-progress tone; the final response still owns the durable reason.
+    const runtimeFailed = activity.phase === 'runtime-failed';
+    // Second escalation. The row stops naming the stage as if this were a
+    // normal run and says what is actually true — the wait left the usual
+    // range — in the amber this screen already uses for "needs your
+    // attention, but nothing has failed". No new progress is invented, and
+    // the elapsed counter beside it keeps the wait measurable.
+    const exceptional = !runtimeFailed && escalation === 'exceptional';
+    // Request-scoped, exactly like the counter beside it. The badge no longer
+    // names a stage here on purpose: the timer measures the whole setup, so a
+    // sentence about the current stage would attach the elapsed number to work
+    // that may have started a second ago. The stage still travels — in the
+    // copyable report, where it is diagnostic data rather than a claim.
+    const slowDetail = t(
+      'onboarding.providers.slowWaitDetail',
+      'Agent setup is still running. A first run may have to download and unpack the agent. You can continue — Lody keeps working on this in the background.'
+    );
+    const badge = (
       <Badge
-        variant="outline"
-        className="shrink-0 whitespace-nowrap border-primary/35 bg-primary/8 text-[10px] text-primary"
+        // The badge is not focusable, so the tooltip is a hover-only detail.
+        // The acknowledgement itself must reach assistive tech regardless.
+        aria-label={exceptional ? slowDetail : undefined}
+        tone={runtimeFailed ? 'danger' : exceptional ? 'warning' : 'running'}
       >
-        {label}
+        {exceptional ? t('onboarding.providers.activitySlow', 'Taking longer') : stageLabel}
       </Badge>
+    );
+    if (!exceptional) return badge;
+    return (
+      <Tooltip.Provider delay={200}>
+        <Tooltip.Root>
+          <Tooltip.Trigger render={badge} />
+          <Tooltip.Content side="top">
+            <div {...stylex.props(styles.tipTitle)}>
+              {t('onboarding.providers.slowWaitTitle', 'This is taking longer than usual')}
+            </div>
+            <div {...stylex.props(styles.tipDetail)}>{slowDetail}</div>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     );
   }
   if (status === 'passed') {
     return (
-      <Badge
-        variant="outline"
-        className="shrink-0 gap-1 whitespace-nowrap border-primary/40 bg-primary/10 text-[10px] text-primary"
-      >
-        <CheckCircle2 className="h-2.5 w-2.5" />
+      <Badge tone="success" icon={<CheckCircle2 {...stylex.props(surface.iconFill)} />}>
         {t('onboarding.providers.statusPassed', 'Verified')}
       </Badge>
     );
@@ -1151,7 +1654,6 @@ function ProviderStatusBadge({
   if (status === 'failed') {
     const badge = (
       <Badge
-        variant="outline"
         aria-label={
           failureReason
             ? t('onboarding.providers.failureReasonA11y', 'Failed: {{reason}}', {
@@ -1159,43 +1661,29 @@ function ProviderStatusBadge({
               })
             : undefined
         }
-        className="shrink-0 gap-1 whitespace-nowrap border-destructive/40 text-[10px] text-destructive"
+        tone="danger"
+        icon={<XCircle {...stylex.props(surface.iconFill)} />}
       >
-        <XCircle className="h-2.5 w-2.5" />
         {t('onboarding.providers.statusFailed', 'Failed')}
       </Badge>
     );
     if (!failureReason) return badge;
     return (
-      <TooltipProvider delayDuration={200}>
-        <Tooltip>
-          <TooltipTrigger asChild>{badge}</TooltipTrigger>
-          <TooltipContent side="top" className="max-w-80 px-3 py-2">
-            <div className="font-medium">
+      <Tooltip.Provider delay={200}>
+        <Tooltip.Root>
+          <Tooltip.Trigger render={badge} />
+          <Tooltip.Content side="top">
+            <div {...stylex.props(styles.tipTitle)}>
               {t('onboarding.providers.failureReasonTitle', 'Why it failed')}
             </div>
-            <div className="mt-1 break-words text-xs text-muted-foreground">{failureReason}</div>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+            <div {...stylex.props(styles.tipDetail)}>{failureReason}</div>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     );
   }
   if (status === 'needs-auth') {
-    return (
-      <Badge
-        variant="outline"
-        className="shrink-0 whitespace-nowrap text-[10px] text-amber-600 dark:text-amber-400"
-      >
-        {t('onboarding.providers.statusNeedsAuth', 'Sign in')}
-      </Badge>
-    );
+    return <Badge tone="warning">{t('onboarding.providers.statusNeedsAuth', 'Sign in')}</Badge>;
   }
-  return (
-    <Badge
-      variant="outline"
-      className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground"
-    >
-      {t('onboarding.providers.statusUntested', 'Untested')}
-    </Badge>
-  );
+  return <Badge>{t('onboarding.providers.statusUntested', 'Untested')}</Badge>;
 }

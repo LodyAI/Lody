@@ -1,9 +1,11 @@
-import { execFile } from 'child_process';
+import { toShared } from '@/platform/process-options';
 import { readFileSync } from 'fs';
 import os from 'os';
-import { promisify } from 'util';
 
-const execFileAsync = promisify(execFile);
+import { READ_ONLY_ABANDON_POLICY } from '@lody/shared/node/process';
+
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 const DARWIN_MEMORY_PROBE_TIMEOUT_MS = 1_000;
 
 /**
@@ -260,16 +262,17 @@ async function probeWindowsMemoryStatus(): Promise<WindowsMemoryStatus | null> {
   ].join('; ');
 
   try {
-    const { stdout } = await execFileAsync(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+    const { stdout } = await runCommandTextLegacy(
       {
-        encoding: 'utf8',
+        command: 'powershell.exe',
+        args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
         timeout: WINDOWS_MEMORY_PROBE_TIMEOUT_MS,
-        windowsHide: true,
-      }
+        abandonPolicy: READ_ONLY_ABANDON_POLICY,
+        check: 'exit-0',
+      },
+      toShared()
     );
-    return parseWindowsMemoryStatus(String(stdout ?? ''), os.totalmem());
+    return parseWindowsMemoryStatus(stdout, os.totalmem());
   } catch {
     return null;
   }
@@ -523,15 +526,17 @@ async function getDarwinMemoryPressureLevel(): Promise<DarwinMemoryPressureLevel
   }
 
   try {
-    const { stdout } = await execFileAsync(
-      'sysctl',
-      ['-n', 'kern.memorystatus_vm_pressure_level'],
+    const { stdout } = await runCommandTextLegacy(
       {
-        encoding: 'utf8',
+        command: 'sysctl',
+        args: ['-n', 'kern.memorystatus_vm_pressure_level'],
         timeout: DARWIN_MEMORY_PROBE_TIMEOUT_MS,
-      }
+        abandonPolicy: READ_ONLY_ABANDON_POLICY,
+        check: 'exit-0',
+      },
+      toShared()
     );
-    return parseDarwinPressureLevel(String(stdout ?? ''));
+    return parseDarwinPressureLevel(stdout);
   } catch {
     return null;
   }
@@ -570,11 +575,17 @@ async function getDarwinAvailableMemoryBytes(): Promise<number | null> {
   }
 
   try {
-    const { stdout } = await execFileAsync('vm_stat', [], {
-      encoding: 'utf8',
-      timeout: DARWIN_MEMORY_PROBE_TIMEOUT_MS,
-    });
-    const parsed = parseDarwinAvailableMemoryBytes(String(stdout ?? ''));
+    const { stdout } = await runCommandTextLegacy(
+      {
+        command: 'vm_stat',
+        args: [],
+        timeout: DARWIN_MEMORY_PROBE_TIMEOUT_MS,
+        abandonPolicy: READ_ONLY_ABANDON_POLICY,
+        check: 'exit-0',
+      },
+      toShared()
+    );
+    const parsed = parseDarwinAvailableMemoryBytes(stdout);
     if (parsed !== null) {
       return Math.max(parsed, os.freemem());
     }

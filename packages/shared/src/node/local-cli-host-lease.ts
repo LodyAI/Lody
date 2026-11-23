@@ -1,3 +1,8 @@
+import { z } from 'zod';
+import {
+  ManagedDaemonUpgradeOptionsSchema,
+  type ManagedDaemonUpgradeOptions,
+} from '../daemon-update';
 import crypto from 'node:crypto';
 import net from 'node:net';
 import os from 'node:os';
@@ -6,6 +11,9 @@ import type { PlatformKind } from '../platform-kind';
 
 const HOST_TCP_ADDRESS = '127.0.0.1';
 const HOST_REQUEST_TIMEOUT_MS = 800;
+const E2E_HOST_PORT_ENV = 'LODY_E2E_LOCAL_CLI_HOST_PORT';
+const E2E_HOST_PIPE_ENV = 'LODY_E2E_LOCAL_CLI_HOST_PIPE';
+const E2E_HOST_PIPE_PATTERN = /^\\\\\.\\pipe\\lody-e2e-[A-Za-z0-9-]{1,80}$/u;
 
 export type LocalCliHostMode = 'daemon' | 'electron' | 'foreground';
 
@@ -28,7 +36,17 @@ export type LocalCliHostLease = {
 
 export type LocalCliHostLeaseResult =
   | { status: 'acquired'; lease: LocalCliHostLease }
-  | { status: 'occupied'; record: LocalCliHostRecord | null };
+  | {
+      status: 'occupied';
+      record: LocalCliHostRecord | null;
+      /**
+       * The endpoint exists but refused this process (EPERM/EACCES). On Windows
+       * this is a host started under another token — elevated, another user or
+       * a service session — whose default pipe DACL denies us; retrying cannot
+       * change it.
+       */
+      accessDenied?: true;
+    };
 
 type AcquireLocalCliHostLeaseOptions = {
   instanceId: string;
@@ -38,6 +56,11 @@ type AcquireLocalCliHostLeaseOptions = {
   shutdownControl?: {
     token: string;
     onRequest: () => void;
+    onUpgrade?: (request: {
+      requestId: string;
+      targetVersion: string;
+      upgrade: ManagedDaemonUpgradeOptions;
+    }) => Promise<void>;
   };
 };
 
@@ -56,15 +79,44 @@ function getUserPipeSuffix(): string {
     .slice(0, 16);
 }
 
+function getE2eHostPort(): number | null {
+  if (process.env.LODY_E2E !== '1') return null;
+  const rawPort = process.env[E2E_HOST_PORT_ENV]?.trim();
+  if (!rawPort) return null;
+  if (!/^\d+$/u.test(rawPort)) {
+    throw new Error(`${E2E_HOST_PORT_ENV} must be an integer between 1024 and 65535`);
+  }
+  const port = Number(rawPort);
+  if (!Number.isSafeInteger(port) || port < 1024 || port > 65_535) {
+    throw new Error(`${E2E_HOST_PORT_ENV} must be an integer between 1024 and 65535`);
+  }
+  return port;
+}
+
+export function getE2eHostPipe(nodePlatform = process.platform): string | null {
+  if (nodePlatform !== 'win32' || process.env.LODY_E2E !== '1') return null;
+  const pipe = process.env[E2E_HOST_PIPE_ENV]?.trim();
+  if (!pipe) return null;
+  if (!E2E_HOST_PIPE_PATTERN.test(pipe)) {
+    throw new Error(`${E2E_HOST_PIPE_ENV} must use the \\\\.\\pipe\\lody-e2e-<id> namespace`);
+  }
+  return pipe;
+}
+
 export function getLocalCliHostEndpoint(platform?: PlatformKind): LocalCliHostEndpoint {
   const profile = getInstallationProfile(platform);
   if (process.platform === 'win32') {
     return {
       kind: 'pipe',
-      path: `\\\\.\\pipe\\${profile.namespace}-agent-host-${getUserPipeSuffix()}`,
+      path:
+        getE2eHostPipe() ?? `\\\\.\\pipe\\${profile.namespace}-agent-host-${getUserPipeSuffix()}`,
     };
   }
-  return { kind: 'tcp', host: HOST_TCP_ADDRESS, port: profile.localCliHostPort };
+  return {
+    kind: 'tcp',
+    host: HOST_TCP_ADDRESS,
+    port: getE2eHostPort() ?? profile.localCliHostPort,
+  };
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -104,19 +156,34 @@ function listen(server: net.Server, endpoint: LocalCliHostEndpoint): void {
   }
 }
 
+type HostProbe = { record: LocalCliHostRecord | null; accessDenied: boolean };
+
+function isAccessDenied(error: NodeJS.ErrnoException): boolean {
+  // libuv reports Win32 ERROR_ACCESS_DENIED on a pipe connect as EPERM; a Unix
+  // socket the caller may not open fails with EACCES.
+  return error.code === 'EPERM' || error.code === 'EACCES';
+}
+
 export async function inspectLocalCliHost(
   endpoint: LocalCliHostEndpoint = getLocalCliHostEndpoint(),
   timeoutMs = HOST_REQUEST_TIMEOUT_MS
 ): Promise<LocalCliHostRecord | null> {
+  return (await probeLocalCliHost(endpoint, timeoutMs)).record;
+}
+
+async function probeLocalCliHost(
+  endpoint: LocalCliHostEndpoint,
+  timeoutMs = HOST_REQUEST_TIMEOUT_MS
+): Promise<HostProbe> {
   return await new Promise((resolve) => {
     const socket = connect(endpoint);
     let buffer = '';
     let settled = false;
-    const finish = (record: LocalCliHostRecord | null) => {
+    const finish = (record: LocalCliHostRecord | null, accessDenied = false) => {
       if (settled) return;
       settled = true;
       socket.destroy();
-      resolve(record);
+      resolve({ record, accessDenied });
     };
     socket.setTimeout(timeoutMs, () => finish(null));
     socket.on('data', (chunk) => {
@@ -133,9 +200,15 @@ export async function inspectLocalCliHost(
         finish(null);
       }
     });
-    socket.once('error', () => finish(null));
+    socket.once('error', (error: NodeJS.ErrnoException) => finish(null, isAccessDenied(error)));
     socket.once('end', () => finish(null));
   });
+}
+
+function occupiedBy(probe: HostProbe): LocalCliHostLeaseResult {
+  return probe.accessDenied
+    ? { status: 'occupied', record: probe.record, accessDenied: true }
+    : { status: 'occupied', record: probe.record };
 }
 
 function isShutdownRequest(
@@ -149,6 +222,17 @@ function isShutdownRequest(
     typeof record.token === 'string'
   );
 }
+
+const HostUpgradeRequestSchema = z
+  .object({
+    type: z.literal('lody/host-upgrade'),
+    instanceId: z.string().min(1),
+    token: z.string().min(1),
+    requestId: z.string().min(1),
+    targetVersion: z.string().min(1),
+    upgrade: ManagedDaemonUpgradeOptionsSchema,
+  })
+  .strict();
 
 function tokensEqual(actual: string, expected: string): boolean {
   const actualBytes = Buffer.from(actual);
@@ -196,6 +280,23 @@ async function createListeningHost(
         value = JSON.parse(line);
       } catch {
         socket.end(`${JSON.stringify({ ok: false, error: 'invalid_request' })}\n`);
+        return;
+      }
+      const upgrade = HostUpgradeRequestSchema.safeParse(value);
+      if (
+        upgrade.success &&
+        record.mode === 'daemon' &&
+        shutdownControl?.onUpgrade &&
+        upgrade.data.instanceId === record.instanceId &&
+        tokensEqual(upgrade.data.token, shutdownControl.token)
+      ) {
+        void shutdownControl.onUpgrade(upgrade.data).then(
+          () => socket.end(`${JSON.stringify({ ok: true })}\n`),
+          (error) =>
+            socket.end(
+              `${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : 'upgrade_failed' })}\n`
+            )
+        );
         return;
       }
       if (
@@ -249,9 +350,9 @@ export async function acquireLocalCliHostLease(
   const endpoint = options.endpoint ?? getLocalCliHostEndpoint();
   throwIfAborted(options.signal);
 
-  const observed = await inspectLocalCliHost(endpoint);
+  const observed = await probeLocalCliHost(endpoint);
   throwIfAborted(options.signal);
-  if (observed) return { status: 'occupied', record: observed };
+  if (observed.record || observed.accessDenied) return occupiedBy(observed);
 
   const record: LocalCliHostRecord = {
     version: 1,
@@ -262,7 +363,7 @@ export async function acquireLocalCliHostLease(
   };
   const listening = await createListeningHost(endpoint, record, options.shutdownControl);
   if (!listening) {
-    return { status: 'occupied', record: await inspectLocalCliHost(endpoint) };
+    return occupiedBy(await probeLocalCliHost(endpoint));
   }
   if (options.signal?.aborted) {
     await closeListeningHost(listening);
@@ -283,14 +384,35 @@ export async function acquireLocalCliHostLease(
   };
 }
 
-export async function requestLocalCliHostShutdown(options: {
+type HostControlOptions = {
   instanceId: string;
   token: string;
   expectedPid?: number;
   expectedMode?: LocalCliHostMode;
   endpoint?: LocalCliHostEndpoint;
   timeoutMs?: number;
-}): Promise<{ ok: true; record: LocalCliHostRecord } | { ok: false; error: string }> {
+};
+
+export async function requestLocalCliHostShutdown(options: HostControlOptions) {
+  return requestLocalCliHostControl(options);
+}
+export async function requestLocalCliHostUpgrade(
+  options: HostControlOptions & {
+    requestId: string;
+    targetVersion: string;
+    upgrade: ManagedDaemonUpgradeOptions;
+  }
+) {
+  return requestLocalCliHostControl(options, {
+    requestId: options.requestId,
+    targetVersion: options.targetVersion,
+    upgrade: options.upgrade,
+  });
+}
+async function requestLocalCliHostControl(
+  options: HostControlOptions,
+  upgrade?: { requestId: string; targetVersion: string; upgrade: ManagedDaemonUpgradeOptions }
+): Promise<{ ok: true; record: LocalCliHostRecord } | { ok: false; error: string }> {
   const endpoint = options.endpoint ?? getLocalCliHostEndpoint();
   const timeoutMs = options.timeoutMs ?? HOST_REQUEST_TIMEOUT_MS;
   return await new Promise((resolve) => {
@@ -338,7 +460,8 @@ export async function requestLocalCliHostShutdown(options: {
           }
           socket.write(
             `${JSON.stringify({
-              type: 'lody/host-shutdown',
+              type: upgrade ? 'lody/host-upgrade' : 'lody/host-shutdown',
+              ...(upgrade ?? {}),
               instanceId: options.instanceId,
               token: options.token,
             })}\n`

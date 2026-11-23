@@ -1,0 +1,1008 @@
+// @vitest-environment jsdom
+import { act, Component, createRef, StrictMode, useState, type ReactElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { SessionId } from '@lody/shared';
+import { EngineConversationScroller } from '../src/components/ai-gui/conversation-list/engine-conversation-scroller';
+
+import type {
+  ConversationListHandle,
+  ConversationRowComponentProps,
+  ConversationScrollerState,
+} from '../src/components/ai-gui/conversation-list/types';
+import { clearSavedScrollStates } from '../src/lib/conversation-scroll/saved-state';
+import type { EngineRow } from '../src/lib/conversation-scroll/types';
+import { createFrameHarness, type FrameHarness } from './support/scroll-frame-harness';
+import { ForceDesktopLayoutProvider, ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
+
+class RecoveryBoundary extends Component<
+  { children: ReactElement },
+  { error: Error | null; retry: number }
+> {
+  override state = { error: null as Error | null, retry: 0 };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override render() {
+    if (this.state.error) {
+      return (
+        <button
+          data-loop-error={this.state.error.name}
+          onClick={() => this.setState(({ retry }) => ({ error: null, retry: retry + 1 }))}
+        >
+          Retry
+        </button>
+      );
+    }
+    return <StrictMode key={this.state.retry}>{this.props.children}</StrictMode>;
+  }
+}
+
+/**
+ * The engine's React adapter under browser-ordered scroll events and
+ * ResizeObserver deliveries (see the frame harness), with real React commits.
+ * The scenario that left the removed Virtua path hidden for good must leave
+ * this one covered, with the reader's row where it was. Reader input is
+ * dispatched as real events; tests assert the mode and the position.
+ */
+
+const VIEWPORT = 400;
+const ROW = 100;
+
+function Row({ index, ...props }: ConversationRowComponentProps) {
+  return <div {...props} data-virtual-index={index} />;
+}
+
+const meta = (key: string, turnIndex: number): EngineRow => ({
+  key,
+  turnId: key.split('.')[0]!,
+  turnIndex,
+  itemIndex: key.includes('.') ? Number(key.split('.')[1]) : null,
+  itemIdentity: null,
+  firstItemIndex: key.includes('.') ? Number(key.split('.')[1]) : null,
+  placeholder: false,
+  fixed: null,
+  estimate: ROW,
+});
+
+type Ctx = {
+  harness: FrameHarness;
+  host: HTMLElement;
+  root: ReturnType<typeof createRoot>;
+  handle: { current: ConversationListHandle | null };
+  state: { current: ConversationScrollerState | null };
+  /** Every offset the list reported through `onScroll`. */
+  scrolls: number[];
+  setKeys: (keys: string[]) => void;
+  publishDisclosure: () => void;
+  viewport: () => HTMLElement;
+  settle: () => Promise<void>;
+};
+
+let offsetParentDescriptor: PropertyDescriptor | undefined;
+
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  offsetParentDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent');
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+    configurable: true,
+    get() {
+      return this.parentElement;
+    },
+  });
+  vi.stubGlobal('requestAnimationFrame', () => 0);
+  vi.stubGlobal('cancelAnimationFrame', () => {});
+  clearSavedScrollStates();
+});
+
+afterEach(() => {
+  if (offsetParentDescriptor)
+    Object.defineProperty(HTMLElement.prototype, 'offsetParent', offsetParentDescriptor);
+  vi.unstubAllGlobals();
+});
+
+function mount(
+  sessionId: SessionId,
+  initialKeys: string[],
+  harnessToReuse?: FrameHarness,
+  {
+    strict = false,
+    suppress,
+    hidden,
+    scaledRects = false,
+    rowHeights = new Map<string, number>(),
+    feedback = false,
+    tickOnScroll = false,
+    oscillatingFeedback,
+    disclosure,
+    mobile = false,
+    deferDisclosure = false,
+  }: {
+    strict?: boolean;
+    suppress?: { current: boolean };
+    /** The tab is inactive: `display: none`, so every offset and size reads 0. */
+    hidden?: { current: boolean };
+    /** A transformed ancestor scales visual rects while layout sizes stay in CSS pixels. */
+    scaledRects?: boolean;
+    rowHeights?: Map<string, number>;
+    /** A view whose state flips whenever it is told the offset is 0. */
+    feedback?: boolean;
+    /** A view that setStates on every onScroll, like the top-fade flag. */
+    tickOnScroll?: boolean;
+    oscillatingFeedback?: { current: boolean };
+    disclosure?: { key: string; headerOffset: number; headerHeight: number };
+    mobile?: boolean;
+    deferDisclosure?: boolean;
+  } = {}
+): Ctx {
+  let keys = initialKeys;
+  const px = (value: string | undefined) => parseFloat(value ?? '0') || 0;
+  const isHidden = () => hidden?.current === true;
+  let attached: HTMLDivElement | null = null;
+  const harness: FrameHarness =
+    harnessToReuse ??
+    createFrameHarness({
+      viewportHeight: () => (isHidden() ? 0 : VIEWPORT),
+      scrollHeightOf: (viewport) => {
+        if (isHidden()) return 0;
+        const container = viewport.firstElementChild as HTMLElement | null;
+        const spacer = container?.nextElementSibling as HTMLElement | null;
+        return (
+          px(container?.style.height) + px(container?.style.marginTop) + px(spacer?.style.height)
+        );
+      },
+      sizeOf: (element) => {
+        const el = element as HTMLElement;
+        if (isHidden()) return 0;
+        if (el.hasAttribute('data-message-selection-scroll')) return VIEWPORT;
+        if (el.hasAttribute('data-virtual-index'))
+          return (
+            rowHeights.get(el.querySelector<HTMLElement>('[data-row-key]')?.dataset.rowKey ?? '') ??
+            ROW
+          );
+        return undefined;
+      },
+      rectOf: (element, scrollTop) => {
+        const el = element as HTMLElement;
+        // Retry can restore fully measured rows without a supplementary commit.
+        // Give that new DOM node browser geometry before its first layout effect,
+        // rather than installing it later through the parent's state notification.
+        if (oscillatingFeedback) {
+          const viewport = el.closest<HTMLDivElement>('[data-message-selection-scroll]');
+          if (viewport && viewport !== attached) {
+            attached = viewport;
+            harness.attachViewport(viewport);
+          }
+        }
+        if (isHidden()) return { top: 0, height: 0 };
+        if (
+          (el.hasAttribute('data-conversation-disclosure') ||
+            el.hasAttribute('data-disclosure-detail')) &&
+          disclosure
+        ) {
+          const row = el.closest<HTMLElement>('[data-virtual-index]')!;
+          return {
+            top:
+              px(row.style.top) -
+              scrollTop +
+              disclosure.headerOffset +
+              (el.hasAttribute('data-disclosure-detail') ? disclosure.headerHeight : 0),
+            height: el.hasAttribute('data-disclosure-detail') ? 800 : disclosure.headerHeight,
+          };
+        }
+        if (el.hasAttribute('data-message-selection-scroll')) return { top: 0, height: VIEWPORT };
+        if (
+          el.parentElement?.hasAttribute('data-message-selection-scroll') &&
+          !el.hasAttribute('data-conversation-reply-room')
+        )
+          return { top: px(el.style.marginTop) - scrollTop, height: px(el.style.height) };
+        if (el.hasAttribute('data-virtual-index'))
+          return {
+            top: px(el.parentElement?.style.marginTop) + px(el.style.top) - scrollTop,
+            height: scaledRects
+              ? ROW / 4
+              : (rowHeights.get(
+                  el.querySelector<HTMLElement>('[data-row-key]')?.dataset.rowKey ?? ''
+                ) ?? ROW),
+          };
+        return undefined;
+      },
+    });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const handle = createRef<ConversationListHandle>() as { current: ConversationListHandle | null };
+  const state: Ctx['state'] = { current: null };
+  const onStateChange = (next: ConversationScrollerState) => {
+    state.current = next;
+    if (next.scrollElement && next.scrollElement !== attached) {
+      attached = next.scrollElement;
+      harness.attachViewport(next.scrollElement);
+    }
+  };
+  const scrolls: number[] = [];
+  let publishDisclosure = () => {};
+  function List({ listKeys }: { listKeys: string[] }) {
+    // Stands in for the view's position-derived state (hydration window,
+    // outline): at offset 0 it changes the rows, which commits the list again.
+    const [flipped, setFlipped] = useState(false);
+    const [, setTick] = useState(0);
+    const [expanded, setExpanded] = useState(false);
+    publishDisclosure = () => {
+      if (!disclosure) return;
+      rowHeights.set(disclosure.key, expanded ? ROW : 900);
+      setExpanded(!expanded);
+    };
+    const shown = flipped ? ['flipped', ...listKeys] : listKeys;
+    return (
+      <EngineConversationScroller
+        sessionId={sessionId}
+        rows={shown.map((key): ReactElement => (
+          <div key={key} data-row-key={key}>
+            {disclosure?.key === key ? (
+              <>
+                <button
+                  data-conversation-disclosure="inline"
+                  aria-expanded={expanded}
+                  onClick={() => {
+                    if (!deferDisclosure) publishDisclosure();
+                  }}
+                >
+                  Synthetic command
+                </button>
+                {expanded ? <div data-disclosure-detail="">Synthetic detail</div> : null}
+              </>
+            ) : (
+              key
+            )}
+          </div>
+        ))}
+        rowMeta={shown.map((key, index) => meta(key, index))}
+        item={Row}
+        initialWindowReady
+        hidden={isHidden()}
+        onScroll={(offset) => {
+          scrolls.push(offset);
+          if (feedback && offset === 0) setFlipped((value) => !value);
+          if (tickOnScroll) setTick((n) => n + 1);
+          if (oscillatingFeedback?.current) setFlipped((value) => !value);
+        }}
+        suppressAutoScrollRef={suppress}
+        onStateChange={onStateChange}
+        layoutKey="14"
+        bufferSize={800}
+        handleRef={handle}
+      />
+    );
+  }
+  const render = () => {
+    const contents = <List listKeys={keys} />;
+    const list = mobile ? (
+      <ForceMobileLayoutProvider force>{contents}</ForceMobileLayoutProvider>
+    ) : (
+      <ForceDesktopLayoutProvider>{contents}</ForceDesktopLayoutProvider>
+    );
+    root.render(
+      oscillatingFeedback ? (
+        <RecoveryBoundary>{list}</RecoveryBoundary>
+      ) : strict ? (
+        <StrictMode>{list}</StrictMode>
+      ) : (
+        list
+      )
+    );
+  };
+  act(render);
+  return {
+    harness,
+    host,
+    root,
+    handle,
+    state,
+    scrolls,
+    viewport: () => host.firstElementChild as HTMLElement,
+    setKeys(next) {
+      keys = next;
+      act(render);
+    },
+    publishDisclosure() {
+      act(publishDisclosure);
+    },
+    async settle() {
+      for (let i = 0; i < 30; i++) {
+        let delivered = false;
+        await act(async () => {
+          delivered = harness.frame();
+          await Promise.resolve();
+        });
+        if (!delivered) return;
+      }
+      throw new Error('frames did not settle');
+    },
+  };
+}
+
+function unmount(ctx: Ctx, restoreHarness = true) {
+  act(() => ctx.root.unmount());
+  ctx.host.remove();
+  if (restoreHarness) ctx.harness.restore();
+}
+
+const rowKeys = (count: number) => Array.from({ length: count }, (_, i) => `r${i}`);
+
+const expandAbove = (keys: string[], n: number) =>
+  keys.flatMap((key) => (key === 'r5' ? Array.from({ length: n }, (_, i) => `r5.${i}`) : [key]));
+
+function mountedKeys(ctx: Ctx): string[] {
+  return [...ctx.viewport().querySelectorAll<HTMLElement>('[data-row-key]')].map(
+    (el) => el.dataset.rowKey!
+  );
+}
+
+function screenTopOf(ctx: Ctx, key: string): number | null {
+  const row = ctx.viewport().querySelector<HTMLElement>(`[data-row-key="${key}"]`)?.parentElement;
+  if (!row) return null;
+  return (parseFloat(row.style.top) || 0) - ctx.harness.scrollTop;
+}
+
+function keysOnScreen(keys: string[], scrollTop: number): string[] {
+  const first = Math.floor(scrollTop / ROW);
+  const last = Math.ceil((scrollTop + VIEWPORT) / ROW) - 1;
+  return keys.slice(first, last + 1);
+}
+
+it.each([
+  { mobile: false, headerOffset: 80, shift: 0 },
+  { mobile: true, headerOffset: 79, shift: 0 },
+  { mobile: true, headerOffset: 80, shift: 96 },
+])(
+  'holds a toggled command header (mobile=$mobile, offset=$headerOffset)',
+  async ({ mobile, headerOffset, shift }) => {
+    const ctx = mount(`disclosure-${mobile}-${headerOffset}` as SessionId, rowKeys(60), undefined, {
+      mobile,
+      disclosure: { key: 'r59', headerOffset, headerHeight: 20 },
+    });
+    try {
+      await ctx.settle();
+      const button = ctx
+        .viewport()
+        .querySelector<HTMLButtonElement>('[data-conversation-disclosure]')!;
+      const before = button.getBoundingClientRect().top;
+      act(() => {
+        button.focus();
+        button.click();
+      });
+      await ctx.settle();
+      expect(button.getAttribute('aria-expanded')).toBe('true');
+      expect(button.getBoundingClientRect().top).toBe(before - shift);
+      expect(ctx.state.current?.isSticky).toBe(false);
+      expect(document.activeElement).toBe(button);
+      act(() => button.click());
+      await ctx.settle();
+      expect(button.getAttribute('aria-expanded')).toBe('false');
+      expect(button.getBoundingClientRect().top).toBe(before - shift);
+      act(() => ctx.handle.current?.scrollToBottom());
+      await ctx.settle();
+      expect(ctx.state.current?.isSticky).toBe(true);
+      expect(
+        ctx.viewport().querySelector<HTMLElement>('[data-conversation-reply-room]')?.style.height
+      ).toBe('0px');
+    } finally {
+      unmount(ctx);
+    }
+  }
+);
+
+it('reveals mobile details that commit after the list captured the click', async () => {
+  const ctx = mount('deferred-mobile-disclosure' as SessionId, rowKeys(60), undefined, {
+    mobile: true,
+    deferDisclosure: true,
+    disclosure: { key: 'r59', headerOffset: 80, headerHeight: 20 },
+  });
+  try {
+    await ctx.settle();
+    const button = ctx
+      .viewport()
+      .querySelector<HTMLButtonElement>('[data-conversation-disclosure]')!;
+    const before = button.getBoundingClientRect().top;
+    act(() => button.click());
+    await ctx.settle();
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(button.getBoundingClientRect().top).toBe(before);
+    ctx.publishDisclosure();
+    await ctx.settle();
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.getBoundingClientRect().top).toBe(before - 96);
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('opens at the real bottom and never hides the viewport', async () => {
+  const keys = rowKeys(60);
+  const ctx = mount('engine-open' as SessionId, keys);
+  try {
+    await ctx.settle();
+    expect(ctx.viewport().style.visibility).toBe('');
+    expect(ctx.harness.scrollTop).toBe(60 * ROW - VIEWPORT);
+    expect(ctx.state.current?.isSticky).toBe(true);
+    expect(ctx.state.current?.revealed).toBe(true);
+    expect(mountedKeys(ctx)).toEqual(
+      expect.arrayContaining(keysOnScreen(keys, ctx.harness.scrollTop))
+    );
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('restores a reading position and keeps it covered when rows far beyond the overscan expand above it', async () => {
+  const sessionId = 'engine-restore' as SessionId;
+  const keys = rowKeys(60);
+  const first = mount(sessionId, keys);
+  await first.settle();
+  await act(async () => {
+    first.handle.current?.scrollRowToTop(30, { smooth: false, offset: 0 });
+  });
+  await first.settle();
+  expect(screenTopOf(first, 'r30')).toBe(0);
+  expect(first.state.current?.isSticky).toBe(false);
+  unmount(first, false);
+
+  // Reopen, and before any frame the placeholder above becomes fourteen rows.
+  const ctx = mount(sessionId, keys, first.harness);
+  try {
+    const expanded = expandAbove(keys, 14);
+    ctx.setKeys(expanded);
+    await ctx.settle();
+    expect(screenTopOf(ctx, 'r30')).toBe(0);
+    const onScreen = keysOnScreen(expanded, ctx.harness.scrollTop);
+    expect(mountedKeys(ctx)).toEqual(expect.arrayContaining(onScreen));
+    expect(ctx.viewport().style.visibility).toBe('');
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('returns to following with the handle and keeps the latest row on screen as it grows', async () => {
+  const keys = rowKeys(40);
+  const ctx = mount('engine-follow' as SessionId, keys);
+  try {
+    await ctx.settle();
+    await act(async () => {
+      ctx.handle.current?.scrollRowToTop(5, { smooth: false, offset: 0 });
+    });
+    await ctx.settle();
+    expect(ctx.state.current?.isSticky).toBe(false);
+    await act(async () => {
+      ctx.handle.current?.scrollToBottom();
+    });
+    await ctx.settle();
+    expect(ctx.state.current?.isSticky).toBe(true);
+    ctx.setKeys([...keys, 'r40', 'r41']);
+    await ctx.settle();
+    expect(ctx.harness.scrollTop).toBe(42 * ROW - VIEWPORT);
+    expect(mountedKeys(ctx)).toContain('r41');
+  } finally {
+    unmount(ctx);
+  }
+});
+
+// ---- Reader input -----------------------------------------------------------
+// Real events on the mounted DOM; the observable result is the mode (the
+// sticky state) and whether new rows at the end move the viewport.
+
+const BOTTOM = (count: number) => count * ROW - VIEWPORT;
+
+/** Append two rows; a following viewport moves to the new end, a reading one stays. */
+async function appendRows(ctx: Ctx, keys: string[]): Promise<string[]> {
+  const next = [...keys, `r${keys.length}`, `r${keys.length + 1}`];
+  ctx.setKeys(next);
+  await ctx.settle();
+  return next;
+}
+
+async function openFollowing(name: string, options?: Parameters<typeof mount>[3]) {
+  const keys = rowKeys(40);
+  const ctx = mount(name as SessionId, keys, undefined, options);
+  await ctx.settle();
+  expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+  expect(ctx.state.current?.isSticky).toBe(true);
+  return { ctx, keys };
+}
+
+function rowElement(ctx: Ctx, key: string): HTMLElement {
+  return ctx.viewport().querySelector<HTMLElement>(`[data-row-key="${key}"]`)!;
+}
+
+it('an upward wheel over the conversation stops following; the reader stays put as rows arrive', async () => {
+  const { ctx, keys } = await openFollowing('engine-wheel-up');
+  try {
+    await act(async () => {
+      rowElement(ctx, 'r38').dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -120, bubbles: true })
+      );
+    });
+    ctx.harness.nativeScrollTo(BOTTOM(40) - 120);
+    await ctx.settle();
+    expect(ctx.state.current?.isSticky).toBe(false);
+    await appendRows(ctx, keys);
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(40) - 120);
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('an upward wheel scrolling a nested code block or terminal keeps following', async () => {
+  const { ctx, keys } = await openFollowing('engine-wheel-nested');
+  try {
+    const nested = document.createElement('pre');
+    nested.style.overflowY = 'auto';
+    Object.defineProperty(nested, 'scrollTop', { configurable: true, value: 40 });
+    const line = document.createElement('span');
+    nested.append(line);
+    rowElement(ctx, 'r38').append(nested);
+    await act(async () => {
+      line.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+    });
+    // A downward wheel and a pinch zoom are not the reader leaving the end either.
+    await act(async () => {
+      rowElement(ctx, 'r38').dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true }));
+      rowElement(ctx, 'r38').dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, bubbles: true })
+      );
+    });
+    expect(ctx.state.current?.isSticky).toBe(true);
+    await appendRows(ctx, keys);
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(42));
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('an upward navigation key in the conversation stops following; typing and other controls do not', async () => {
+  const { ctx, keys } = await openFollowing('engine-keys');
+  // The composer and a menu outside the list, and an edit box inside a row.
+  const composer = document.createElement('textarea');
+  const menu = document.createElement('button');
+  document.body.append(composer, menu);
+  const editor = document.createElement('textarea');
+  rowElement(ctx, 'r38').append(editor);
+  try {
+    await act(async () => {
+      for (const target of [composer, menu, editor]) {
+        target.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+        target.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      }
+    });
+    expect(ctx.state.current?.isSticky).toBe(true);
+    const grown = await appendRows(ctx, keys);
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(42));
+
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+      ctx.harness.frame();
+    });
+    expect(ctx.state.current?.isSticky).toBe(true);
+    ctx.harness.nativeScrollTo(BOTTOM(42) - 400);
+    await ctx.settle();
+    expect(ctx.state.current?.isSticky).toBe(false);
+    await appendRows(ctx, grown);
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(42) - 400);
+  } finally {
+    composer.remove();
+    menu.remove();
+    editor.remove();
+    unmount(ctx);
+  }
+});
+
+it.each(['edge wheel', 'body key', 'cancelled key', 'button space', 'idle wheel', 'idle key'])(
+  '%s leaves no input evidence for later unowned movement',
+  async (input) => {
+    const { ctx } = await openFollowing(`engine-no-scroll-${input}`);
+    try {
+      if (input === 'idle key') {
+        await act(async () => ctx.handle.current!.scrollRowToTop(30, { smooth: false }));
+        await ctx.settle();
+      }
+      await act(async () => {
+        if (input.includes('wheel'))
+          ctx.viewport().dispatchEvent(
+            new WheelEvent('wheel', {
+              deltaY: input === 'edge wheel' ? 120 : -120,
+              bubbles: true,
+            })
+          );
+        else {
+          let target = input === 'body key' ? document.body : rowElement(ctx, 'r38');
+          if (input === 'button space') {
+            const button = document.createElement('button');
+            target.append(button);
+            target = button;
+          }
+          if (input === 'cancelled key')
+            target.addEventListener('keydown', (event) => event.preventDefault(), { once: true });
+          target.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: input === 'button space' ? ' ' : input === 'idle key' ? 'End' : 'PageUp',
+              shiftKey: input === 'button space',
+              bubbles: true,
+              cancelable: true,
+            })
+          );
+        }
+      });
+      // No movement or scrollend. Expiry follows the native animation-start frame.
+      await ctx.settle();
+      if (input === 'idle wheel' || input === 'idle key') {
+        // Reading remains deliberate. Unowned arrival at the
+        // exact bottom must not restore it from expired wheel/key evidence.
+        ctx.harness.nativeScrollTo(BOTTOM(40) - 100);
+        await ctx.settle();
+        ctx.harness.nativeScrollTo(BOTTOM(40));
+        await ctx.settle();
+        expect(ctx.state.current?.isSticky).toBe(false);
+      } else {
+        ctx.harness.nativeScrollTo(BOTTOM(40) - 100);
+        await ctx.settle();
+        expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+        expect(ctx.state.current?.isSticky).toBe(true);
+      }
+    } finally {
+      unmount(ctx);
+    }
+  }
+);
+
+it('an upward move with no pointer or touch is corrected back to the end', async () => {
+  const { ctx } = await openFollowing('engine-unowned-move');
+  try {
+    ctx.harness.nativeScrollTo(BOTTOM(40) - 300);
+    await ctx.settle();
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+    expect(ctx.state.current?.isSticky).toBe(true);
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it.each(['up', 'down'])(
+  'recognizes a %s wheel delivered after its native offset',
+  async (direction) => {
+    const { ctx } = await openFollowing(`engine-offset-first-${direction}`);
+    try {
+      if (direction === 'down') {
+        await act(async () => ctx.handle.current!.scrollRowToTop(30, { smooth: false }));
+        await ctx.settle();
+      }
+      const target = direction === 'up' ? 0 : BOTTOM(40);
+      ctx.harness.nativeScrollTo(target);
+      await act(async () =>
+        ctx.viewport().dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: direction === 'up' ? -4000 : 1200,
+            bubbles: true,
+          })
+        )
+      );
+      await ctx.settle();
+      expect(ctx.harness.scrollTop).toBe(target);
+      expect(ctx.state.current?.isSticky).toBe(direction === 'down');
+    } finally {
+      unmount(ctx);
+    }
+  }
+);
+
+it.each(['wheel', 'delayed wheel', 'key', 'delayed key', 'touch'])(
+  'downward %s input re-arms only after a near-edge scroll ends',
+  async (input) => {
+    const { ctx } = await openFollowing(`engine-down-${input}`);
+    try {
+      await act(async () => ctx.handle.current!.scrollRowToTop(30, { smooth: false }));
+      await ctx.settle();
+      await act(async () => {
+        const viewport = ctx.viewport();
+        if (input === 'wheel' || input === 'delayed wheel')
+          viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true }));
+        else if (input === 'key' || input === 'delayed key')
+          viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+        else {
+          viewport.dispatchEvent(touch('touchstart', [[100, 140]]));
+          viewport.dispatchEvent(touch('touchend', [[100, 100]]));
+        }
+      });
+      if (input.startsWith('delayed')) {
+        // Compositor-driven wheel/key motion can follow multiple callbacks.
+        await act(async () => {
+          for (let frame = 0; frame < 3; frame++) ctx.harness.frame();
+        });
+      }
+      ctx.harness.nativeScrollTo(BOTTOM(40) - 3);
+      await ctx.settle();
+      expect(ctx.state.current?.isSticky).toBe(false);
+      expect(ctx.harness.scrollTop).toBe(BOTTOM(40) - 3);
+      await act(async () => ctx.viewport().dispatchEvent(new Event('scrollend')));
+      await ctx.settle();
+      expect(ctx.state.current?.isSticky).toBe(true);
+      expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+    } finally {
+      unmount(ctx);
+    }
+  }
+);
+
+it.each(['focus', 'typing', 'pointer'])(
+  'composer %s clears old conversation momentum before browser movement',
+  async (input) => {
+    const { ctx, keys } = await openFollowing('engine-composer-focus');
+    const composer = document.createElement('textarea');
+    document.body.append(composer);
+    try {
+      if (input !== 'focus') await act(async () => composer.focus());
+      await act(async () => {
+        ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]]));
+        ctx.viewport().dispatchEvent(touch('touchend', [[100, 140]]));
+      });
+      ctx.harness.nativeScrollTo(BOTTOM(40) - 100);
+      await ctx.settle();
+      await act(async () => {
+        if (input === 'focus') composer.focus();
+        else
+          composer.dispatchEvent(
+            new Event(input === 'typing' ? 'beforeinput' : 'pointerdown', { bubbles: true })
+          );
+      });
+      ctx.harness.nativeScrollTo(BOTTOM(40) - 3);
+      await ctx.settle();
+      await act(async () => ctx.viewport().dispatchEvent(new Event('scrollend')));
+      await ctx.settle();
+      expect(ctx.state.current?.isSticky).toBe(false);
+      await appendRows(ctx, keys);
+      expect(ctx.harness.scrollTop).toBe(BOTTOM(40) - 3);
+    } finally {
+      composer.remove();
+      unmount(ctx);
+    }
+  }
+);
+
+it.each([
+  { userAgent: 'Mozilla/5.0 (iPhone) AppleWebKit/605.1.15', platform: 'iPhone', maxTouchPoints: 5 },
+  {
+    userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15',
+    platform: 'MacIntel',
+    maxTouchPoints: 5,
+  },
+])(
+  'keeps $platform touch momentum offsets while history grows and restores the origin on scrollend',
+  async (device) => {
+    vi.stubGlobal('navigator', { ...device, vendor: 'Apple Computer, Inc.' });
+    const scrollEndDescriptor = Object.getOwnPropertyDescriptor(
+      document.documentElement,
+      'onscrollend'
+    );
+    Object.defineProperty(document.documentElement, 'onscrollend', {
+      configurable: true,
+      value: null,
+    });
+    const rowHeights = new Map<string, number>();
+    const ctx = mount(
+      'engine-ios-origin' as SessionId,
+      Array.from({ length: 80 }, (_, i) => `t${i}`),
+      undefined,
+      { rowHeights }
+    );
+    try {
+      await ctx.settle();
+      act(() => ctx.handle.current!.scrollRowToTop(40, { smooth: false, offset: 0 }));
+      await ctx.settle();
+      await act(() => ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]])));
+      ctx.harness.nativeScrollTo(ctx.harness.scrollTop - 120);
+      await ctx.settle();
+      await act(() => ctx.viewport().dispatchEvent(touch('touchend', [[100, 160]])));
+      const top = ctx.harness.scrollTop;
+      const row = () =>
+        ctx.viewport().querySelector<HTMLElement>('[data-row-key="t40"]')!.parentElement!;
+      const line = row().getBoundingClientRect().top;
+      const writes = ctx.harness.writes.length;
+      rowHeights.set('t35', 300);
+      await ctx.settle();
+      expect(ctx.harness.scrollTop).toBe(top);
+      expect(ctx.harness.writes.length).toBe(writes);
+      expect(row().getBoundingClientRect().top).toBe(line);
+      expect((ctx.viewport().firstElementChild as HTMLElement).style.marginTop).toBe('-200px');
+      expect(ctx.handle.current!.scrollOffset).toBe(top + 200);
+      expect(ctx.handle.current!.scrollSize).toBe(8200);
+      expect(ctx.scrolls.at(-1)).toBe(top + 200);
+      // Catch the old fling: a touch alone must not absorb its pending shift.
+      await act(() => ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]])));
+      rowHeights.set('t35', 400);
+      await ctx.settle();
+      expect(ctx.harness.scrollTop).toBe(top);
+      expect(ctx.harness.writes.length).toBe(writes);
+      expect(row().getBoundingClientRect().top).toBe(line);
+      await act(() => ctx.viewport().dispatchEvent(touch('touchend', [[100, 160]])));
+      expect(ctx.handle.current!.scrollOffset).toBe(top + 300);
+      const reports = ctx.scrolls.length;
+      await act(() => ctx.viewport().dispatchEvent(new Event('scrollend')));
+      await ctx.settle();
+      expect(ctx.harness.scrollTop).toBe(top + 300);
+      expect(ctx.scrolls.length).toBe(reports);
+      expect(row().getBoundingClientRect().top).toBe(line);
+      expect((ctx.viewport().firstElementChild as HTMLElement).style.marginTop).toBe('0px');
+    } finally {
+      unmount(ctx);
+      if (scrollEndDescriptor)
+        Object.defineProperty(document.documentElement, 'onscrollend', scrollEndDescriptor);
+      else delete (document.documentElement as unknown as Record<string, unknown>).onscrollend;
+    }
+  }
+);
+
+it.each([
+  [
+    'a held scrollbar thumb',
+    (viewport: HTMLElement) =>
+      viewport.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true })),
+    () => document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true })),
+  ],
+  [
+    'a touch pan',
+    (viewport: HTMLElement) => viewport.dispatchEvent(touch('touchstart', [[100, 100]])),
+    (viewport: HTMLElement) => viewport.dispatchEvent(touch('touchend', [[100, 140]])),
+  ],
+])('an upward move under %s stops following', async (_name, press, lift) => {
+  const { ctx, keys } = await openFollowing(`engine-held-${_name}`);
+  try {
+    await act(async () => press(ctx.viewport()));
+    ctx.harness.nativeScrollTo(BOTTOM(40) - 300);
+    await ctx.settle();
+    await act(async () => lift(ctx.viewport()));
+    expect(ctx.state.current?.isSticky).toBe(false);
+    await appendRows(ctx, keys);
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(40) - 300);
+  } finally {
+    unmount(ctx);
+  }
+});
+
+function touch(type: string, points: Array<[number, number]>) {
+  const contacts = points.map(([clientX, clientY], identifier) => ({
+    identifier,
+    clientX,
+    clientY,
+  })) as Touch[];
+  return new TouchEvent(type, {
+    bubbles: true,
+    touches: type === 'touchend' || type === 'touchcancel' ? [] : contacts,
+    changedTouches: contacts,
+  });
+}
+
+it.each(['move', 'end'])(
+  'an upward touch %s releases before a delayed scroll or streaming commit',
+  async (delivery) => {
+    const { ctx, keys } = await openFollowing(`engine-touch-${delivery}`);
+    try {
+      await act(async () => {
+        ctx.viewport().dispatchEvent(touch('touchstart', [[100, 100]]));
+        ctx.viewport().dispatchEvent(touch(`touch${delivery}`, [[100, 140]]));
+      });
+      expect(ctx.state.current?.isSticky).toBe(false);
+      // New output can commit before the native scroll event reaches JavaScript.
+      await appendRows(ctx, keys);
+      expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+      if (delivery === 'move') {
+        await act(async () => ctx.viewport().dispatchEvent(touch('touchend', [[100, 140]])));
+      }
+      for (let step = 1; step <= 4; step++) {
+        const offset = BOTTOM(40) - 60 - step * 12;
+        ctx.harness.nativeScrollTo(offset);
+        await ctx.settle();
+        expect(ctx.harness.scrollTop).toBe(offset);
+      }
+    } finally {
+      unmount(ctx);
+    }
+  }
+);
+
+it.each([
+  ['tap', [[100, 100]]],
+  ['downward pan', [[100, 60]]],
+  ['horizontal pan', [[160, 110]]],
+  [
+    'pinch',
+    [
+      [100, 140],
+      [160, 160],
+    ],
+  ],
+  ['nested scroller', [[100, 140]]],
+  ['nested downward pan', [[100, 60]]],
+  ['cancelled touch', [[100, 140]]],
+] as const)('%s does not release conversation following', async (name, points) => {
+  const { ctx, keys } = await openFollowing(`engine-touch-${name}`);
+  try {
+    const nested = document.createElement('div');
+    nested.style.overflowY = 'auto';
+    nested.scrollTop = 80;
+    Object.defineProperty(nested, 'scrollHeight', { value: 400 });
+    Object.defineProperty(nested, 'clientHeight', { value: 100 });
+    rowElement(ctx, 'r38').append(nested);
+    const target = name.startsWith('nested') ? nested : ctx.viewport();
+    await act(async () => {
+      target.dispatchEvent(touch('touchstart', [[100, 100]]));
+      if (name !== 'cancelled touch') {
+        target.dispatchEvent(
+          touch(
+            'touchmove',
+            points.map(([x, y]) => [x, y])
+          )
+        );
+      }
+      target.dispatchEvent(
+        touch(
+          name === 'cancelled touch' ? 'touchcancel' : 'touchend',
+          points.map(([x, y]) => [x, y])
+        )
+      );
+    });
+    expect(ctx.state.current?.isSticky).toBe(true);
+    if (name !== 'downward pan') {
+      // Non-scroll touches must not leave stale momentum evidence behind.
+      ctx.harness.nativeScrollTo(BOTTOM(40) - 60);
+      await ctx.settle();
+      expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+      expect(ctx.state.current?.isSticky).toBe(true);
+    }
+    await appendRows(ctx, keys);
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(42));
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('a suppression (selection, a jump, search) stops following at the next change', async () => {
+  const suppress = { current: false };
+  const { ctx, keys } = await openFollowing('engine-suppressed', { suppress });
+  try {
+    suppress.current = true;
+    await appendRows(ctx, keys);
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+    expect(ctx.state.current?.isSticky).toBe(false);
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('a hidden tab reports no offset, so a view feeding it back cannot loop; shown again, it reads where it was', async () => {
+  const hidden = { current: false };
+  const { ctx, keys } = await openFollowing('engine-hidden', { hidden, feedback: true });
+  try {
+    await act(async () => {
+      ctx.handle.current?.scrollRowToTop(20, { smooth: false, offset: 0 });
+    });
+    await ctx.settle();
+    expect(screenTopOf(ctx, 'r20')).toBe(0);
+    const reported = ctx.scrolls.length;
+
+    // Switching tabs hides this one (dropping its offset) while it streams on.
+    hidden.current = true;
+    ctx.harness.nativeScrollTo(0);
+    const grown = [...keys, 'r40', 'r41'];
+    ctx.setKeys(grown);
+    await ctx.settle();
+    expect(ctx.scrolls.length).toBe(reported);
+
+    hidden.current = false;
+    ctx.setKeys(grown);
+    await ctx.settle();
+    expect(screenTopOf(ctx, 'r20')).toBe(0);
+    expect(ctx.state.current?.isSticky).toBe(false);
+    expect(ctx.scrolls.at(-1)).toBe(ctx.harness.scrollTop);
+  } finally {
+    unmount(ctx);
+  }
+});

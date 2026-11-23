@@ -1,0 +1,206 @@
+# sessions — directory index
+
+What each file in this directory is responsible for. Binding rules live in
+[AGENTS.md](AGENTS.md); the long-form explanations it links to live under
+[`.agents/docs/`](../../../../../.agents/docs/) with the `sessions-` prefix.
+
+Session control event meanings and retired request events are described in the
+[auth/session analytics draft](../../../../../specs/auth-session-analytics.md).
+
+## Page shell and tabs
+
+The navigation-sidebar, terminal-dock and right-panel toggles reuse
+`CuidaSidebarExpandOutline` from `@lody/ui` in 16px boxes. The terminal glyph is
+rotated -90 degrees and the right-panel glyph 180 degrees so the filled strip
+marks the panel's edge; their buttons and toggle behavior stay shared.
+
+The header's Full width row owns keyboard navigation; its trailing switch stays
+outside the tab order. Pointer opening focuses the menu surface without
+highlighting an action, while keyboard opening and arrow navigation focus rows.
+Both the row and the switch toggle the preference without dismissing the menu.
+
+`ask-user-question-card.tsx` owns interactive and read-only question presentation,
+including distinct short headers, independent optional notes and secret masking. Its dedicated
+`AskUserQuestionCard` stories cover editing, replay, multiple questions and legacy
+replacement answers. The [answer notes Spec](../../../../../specs/ask-question-answer-notes.md)
+describes the shared parsing and persistence boundary. Question text renders as
+Markdown without loading images; this also renders the plan-review detail carried
+in a DSH form. See the [DSH question decision](../../../../../.agents/notes/implemented/feature/2026-09-20-dsh-user-questions.md).
+
+| File                                         | Responsibility                                                              |
+| -------------------------------------------- | --------------------------------------------------------------------------- |
+| `session-detail.tsx`                         | Outer session shell: top tabs, side panel, session-switch reset, tab closer |
+| `desktop-session-detail-layout.tsx`          | Desktop two-column layout and the side-panel expand/collapse animation      |
+| `session-conversation-page.tsx`              | Shared full-page composition used by `SessionConversationPage.stories.tsx`  |
+| `session-tab-bar.tsx`                        | Desktop merged top row: session tab pills, status slot, drag sources        |
+| `adaptive-tab-strip.tsx`                     | Width sharing for the tab pills                                             |
+| `session-side-panel-tab-bar.tsx`             | Right-panel tab strip (fixed panels, side chats, viewers)                   |
+| `session-tab-close-target.ts`                | Resolve the focused tab or last-tab window close target                     |
+| `session-list-rows.ts`                       | Sidebar/tab row derivation, including child grouping by parent              |
+| `child-tab-empty-state.tsx`                  | Suggestions shown in an empty child tab                                     |
+| `session-not-found.tsx`                      | Missing-session surface                                                     |
+| `session-mention-drop-layer.tsx`             | Drop target that turns a dragged tab into a mention                         |
+| `session-pin.tsx`, `session-pin-context.tsx` | Pinned content above the stream                                             |
+| `session-search-context.tsx`                 | In-conversation search context                                              |
+
+## Conversation surface and composer
+
+`PermissionPrompt` keeps short answers directly clickable. A long shown answer
+moves its family into a compact menu trigger; selecting an original option in
+that menu submits the answer. A short answer and its chevron use `ButtonGroup`;
+menus prefer opening above the bottom-of-chat controls. Full provider labels
+wrap left-aligned within the popup, including paths without spaces. The [presentation decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-15-permission-option-wrapping.md)
+records the label budget, interaction trade-off, and verification limits.
+
+| File                                                            | Responsibility                                                                                                                                                                                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session-chat-interface.tsx`                                    | Conversation surface: stream, header variants, read receipts, launchers                                                                                                                                                                                 |
+| [`chat-share-image-dialog.tsx`](chat-share-image-dialog.tsx)    | Selected-message card styling, historical metadata, PNG export, and local image copying; [draft contract](../../../../../specs/chat-share-image.md)                                                                                                     |
+| `draft-session-chat-interface.tsx`                              | Draft variant of the conversation surface                                                                                                                                                                                                               |
+| `session-chat-input-area.tsx`                                   | Composer: attachments, run-config footer, [upload waiting](../../../../../specs/composer-send-during-upload.md), submit, [archived workspace restore](../../../../../.agents/notes/implemented/feature/2026-11-03-archived-session-composer-restore.md) |
+| `message-queue/`                                                | Queued turns and edit-operation ownership ([scope AGENTS.md](message-queue/AGENTS.md))                                                                                                                                                                  |
+| `session-message-submit-route.ts`                               | Capability-gated send, regular queue, and native steer routing                                                                                                                                                                                          |
+| `desktop-run-config-menu.tsx`                                   | Desktop run-config dropdown + permission-mode button                                                                                                                                                                                                    |
+| `recent-run-config-menu-group.tsx`                              | "Recently used" run-config entries                                                                                                                                                                                                                      |
+| `composer-agent-role-panel.tsx`, `agent-role-detail-pane.tsx`   | Agent Role selection and the single Role detail pane                                                                                                                                                                                                    |
+| `floating-permission-request.tsx`, `ask-user-question-card.tsx` | Permission/question queue, draft continuity, and answer recovery                                                                                                                                                                                        |
+| `notification-permission-prompt.tsx`                            | Notification permission ask                                                                                                                                                                                                                             |
+| `session-fork-destination-menu.tsx`                             | Fork target choice (shared workspace tab vs. new worktree)                                                                                                                                                                                              |
+| `rename-session-dialog.tsx`                                     | Session rename dialog                                                                                                                                                                                                                                   |
+
+## Info bar, status, and session actions
+
+The related-session tree keeps each root and its contained Tabs together on one
+horizontally scrolling row. Pills retain the agent logo, live status and full title
+in their hover title; visible titles are capped at 16ch. Each row hides its scrollbar
+and fades only the edges with more content. Only opened-by relations create child
+rows; Tab navigation retains both the root and exact Tab ids.
+
+`session-machine-info.tsx` shows a monitor icon and machine name on desktop,
+or a compact icon button on mobile. Tap/click (also hover on desktop) opens its
+owner, device and connection details. A machine-only info bar has no raised
+background. The
+[draft Spec](../../../../../specs/composer-machine-owner.md) and
+[decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-composer-machine-info-card.md)
+record the presentation, which still awaits visual review.
+In narrow mobile bars the private-access badge keeps its lock and sharing action,
+with the full access description in its accessible name/title.
+
+| File                                                                         | Responsibility                                                                                       |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `session-info-bar.tsx`, `session-info-chips.tsx`, `info-chip.tsx`            | Canonical cluster + fixed stage bar above the composer                                               |
+| `session-machine-info.tsx`                                                   | Execution target and its on-demand ownership details                                                 |
+| `session-info-action-state.ts`                                               | Which repository action the context stage offers                                                     |
+| `session-status-strip.tsx`                                                   | Priority-ordered connection/machine status (story coverage only)                                     |
+| `session-syncing-indicator.tsx`                                              | Catch-up spinner pinned to the bar's right edge                                                      |
+| `session-goal-banner.tsx`, `session-goal-control.ts`                         | Goal actions reused by the goal chip                                                                 |
+| `session-plan-bar.tsx`, `session-tasklist-mapping.ts`                        | Plan/tasklist presentation                                                                           |
+| `scheduled-tasks-panel.tsx`                                                  | Scheduled task list reused by the schedule chip                                                      |
+| `session-usage-popover.tsx`                                                  | Context and subscription usage ([display contract](../../../../../specs/session-usage-indicator.md)) |
+| `pull-request-badge.tsx`, `pr-merge-button.tsx`, `pr-merge-method.ts`        | PR identity and merge split-button                                                                   |
+| `pr-tab-container.tsx`, `pr-tab-view.tsx`                                    | PR side-panel tab                                                                                    |
+| `create-pr-prompt.ts`, `session-pr-prompts.ts`, `session-pr-agent-action.ts` | Agent prompts behind Create PR / Fix CI / Resolve Conflicts                                          |
+| `diff-pr-analytics.ts`                                                       | Analytics for diff and PR surfaces                                                                   |
+| `use-capacity-auto-retry.ts`                                                 | Capacity-error retry behaviour                                                                       |
+
+## File, diff, and browser surfaces
+
+Opening Changes reads the complete paged Branch list through the file provider.
+The list and composer share its totals; file diff bodies load when opened.
+
+| File                                                                                                                                      | Responsibility                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `session-changes-sidebar.tsx`                                                                                                             | All Changes panel                                                                        |
+| `session-mobile-diff-drawer.tsx`, `session-mobile-diff-drawer-content.tsx`                                                                | Mobile changes list/diff navigation and enclosing-session modal containment              |
+| `session-conversation-diff-panel.tsx`, `session-conversation-diff-types.ts`                                                               | Conversation/turn diff page                                                              |
+| `use-session-conversation-diff-data.ts`, `use-session-all-changes-diff-data.ts`, `use-session-diff-summary.ts`, `session-diff-summary.ts` | Diff data and summary derivation                                                         |
+| `use-diff-focus-scroll.ts`, `use-diff-viewport.ts`                                                                                        | Focused-hunk navigation, visible diff bodies, and scroll anchoring                       |
+| `session-file-content-view.tsx`, `session-monaco-text-viewer.tsx`                                                                         | File viewer and its Monaco editor window                                                 |
+| `session-file-image-preview.tsx`, `session-file-binary-preview.tsx`, `session-file-pdf-preview.tsx`, `session-file-pdf-thumbnails.tsx`    | Image, PDF, and other binary previews; virtual thumbnail navigation                      |
+| `session-file-office-preview.tsx`, `session-file-{docx,xlsx,pptx}-renderer.tsx`, `session-file-office-frame.tsx`                          | Idle-loaded, read-only Office previews with worker-backed format engines                 |
+| `session-file-csv-preview.tsx`, `session-file-csv.worker.ts`                                                                              | Virtual CSV/TSV table and worker-backed search                                           |
+| `session-file-diff-notice-card.tsx`, `session-file-error-state.tsx`                                                                       | File notices and the error card that offers file actions                                 |
+| `session-file-actions-menu.tsx`                                                                                                           | Shared file-action menu rendering                                                        |
+| `session-file-quick-open.tsx`                                                                                                             | Quick open over the file index                                                           |
+| `components/`                                                                                                                             | File tree ([scope AGENTS.md](components/AGENTS.md))                                      |
+| `session-browser-panel.tsx`, `session-browser-toolbar.tsx`, `session-browser-resume-state.ts`                                             | Session Browser panel, address bar, and resume state                                     |
+| `session-browser-panel-view.tsx`, `preview-connection-status.tsx`                                                                         | Shared Browser presentation and connection/recovery UI; used by production and Storybook |
+| `public-browser-surface.tsx`                                                                                                              | Public engine host (Electron `WebContentsView`)                                          |
+| `managed-preview-surface.tsx`, `managed-preview-frame-cache.ts`                                                                           | Managed Preview host, bounded speculative frame, and opened-page LRU                     |
+| `session-preview-preload.tsx`                                                                                                             | Event-driven remote page preparation for the visible conversation                        |
+| `static-html-preview-document.ts`, `session-html-attachment-action.ts`                                                                    | Static `srcdoc` document policy for complete HTML text                                   |
+
+## Long-form explanations
+
+- [Session tabs, top bar, and `?tab` routing](../../../../../.agents/docs/sessions-tabs-routing.md)
+- [Side panel, side chats, opened sessions, browser mount](../../../../../.agents/docs/sessions-side-panel.md)
+- [Browser engines, Managed Preview, HTML viewer, annotations](../../../../../.agents/docs/sessions-browser.md)
+- [Conversation surface](../../../../../.agents/docs/sessions-surface.md)
+- [Run config and Agent Roles](../../../../../.agents/docs/sessions-run-config.md)
+- [Live status and dispatch](../../../../../.agents/docs/sessions-live-status.md)
+- [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
+- [Session status slot](../../../../../.agents/docs/sessions-auto-review.md)
+- [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
+- [Render-cost invariants](../../../../../.agents/docs/sessions-render-cost.md)
+- [Stories and Storybook fidelity](../../../../../.agents/docs/sessions-stories.md)
+
+## Binary previews
+
+An open session chat can accept text selections, spreadsheet cell ranges and
+annotated screenshot regions from supported document/image previews.
+`document-selection-surface.tsx` owns preparation, cancellation and the floating
+selection composer. Screenshot actions occupy the existing reading toolbar; native
+text selection opens feedback beside the source and preserves its highlight.
+Empty feedback dismisses outside; typed feedback stays anchored through scrolling.
+Cmd/Ctrl+I focuses its comment, Cmd/Ctrl+Enter stages it, and Escape cancels.
+PDF rotation is in More and PDF/CSV search opens beneath the toolbar.
+`document-selection-editor.tsx` owns screenshot previews and comments. The
+existing-image attachment lightbox centers the image over the session, with a floating
+toolbar for drawing tools and colors;
+rectangle and text marks can carry notes, which are rendered into the image and
+included in the attachment's chat context. Undo removes the last mark. Crops preserve display pixel density within the 4 MP output budget; their CSS
+preview size and markup stroke size remain independent of that density. PDF pages
+are captured in page coordinates to preserve centering and crop edges, and cross-page regions compose those page patches.
+Source context is staged as an expandable text reference and screenshots as
+ordinary image attachments, awaiting the user's send. The session composer also
+offers markup on existing image drafts, replacing their pixels only after acceptance.
+Accepted image markup is encoded as JPEG on a white background, reducing quality
+when necessary to fit the 5 MiB image limit. Attachments sent without accepting
+markup keep their original format; document selection captures continue to use PNG.
+See the [document-selection decision](../../../../../.agents/notes/implemented/feature/2026-10-17-document-selection-and-image-markup.md)
+and [markup workspace update](../../../../../.agents/notes/implemented/feature/2026-10-31-image-markup-workspace.md),
+and the [JPEG markup decision](../../../../../.agents/notes/implemented/bug-fix/2026-11-03-image-markup-jpeg.md).
+
+`session-file-binary-preview.tsx` renders supported images, videos, PDFs, DOCX, XLSX, and
+PPTX, and otherwise shows a binary notice. The [PDF viewer](session-file-pdf-preview.tsx) reads local
+resources in 64 KiB byte ranges, keeps page canvases within an 8-megapixel budget,
+and provides page and thumbnail navigation, rotation, fit and percentage zoom,
+and expandable text search. Thumbnail canvases mount only for visible rows.
+The PDF.js scroll container is absolutely positioned within the viewer surface.
+The [Office entry](session-file-office-preview.tsx) defers a bounded 25 MiB read
+and imports only the active format engine at idle; its parsers use workers and
+its viewers are read-only. [CSV/TSV](session-file-csv-preview.tsx) uses a worker
+and virtualized table, while the file viewer retains its editable Source tab.
+Local files receive Open in default
+app and Reveal callbacks from `useSessionFileActions`, shared with the More menu.
+Failures log the requested and resolved paths locally and offer Copy error details
+with a reason-specific next step. See the
+[file action spec](../../../../../specs/local-file-link-actions.md).
+
+Binary previews share `SessionFileNoticeCard` with unavailable-file states, including
+the same card spacing, full-width actions and Copy file path callback.
+
+The [video viewer](session-file-video-preview.tsx) uses the shared custom
+[video player](../shared/video-player.tsx) (play/pause, scrubbing progress bar,
+time, volume, playback rate, fullscreen) for browser-decodable WebM, MP4/M4V,
+MOV, and OGV. It consumes authorized bytes or resource URLs, pauses and releases
+the player when inactive, and preserves file actions on failure. Both
+conversation video attachments and the mobile project browser share this player.
+
+## Usage reset time
+
+Each reported reset time in `SessionUsagePopover` has an `ArrowLeftRight` button
+that toggles that row between relative time (the default) and a local date/time
+formatted in the product language. Missing reset timestamps show neither a time
+nor a toggle. The choice lasts while the row is mounted; see the
+[decision](../../../../../.agents/notes/implemented/feature/2026-10-10-usage-reset-time-toggle.md).

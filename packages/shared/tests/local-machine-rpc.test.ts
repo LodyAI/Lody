@@ -1,233 +1,192 @@
 import { describe, expect, it } from 'vitest';
 import {
   LocalMachineRpcResponseSchema,
+  LocalMachineRpcRequestSchema,
   safeParseLocalMachineRpcRequest,
 } from '../src/local-machine-rpc';
+import { isE2eeFeatureMethod } from '../src/e2ee-rpc';
 
 describe('local Machine RPC', () => {
-  it.each([
-    {
-      method: 'session/fork',
-      params: {
-        sourceSessionId: 'session-1',
-        sourceTurnId: 'assistant-1',
-        targetSessionId: 'session-side-1',
-        requestedByUserId: 'user-1',
-        targetPlacement: 'side-panel',
-      },
-    },
-    {
-      method: 'session/dispatch-turn',
-      params: {
-        sessionId: 'session-1',
-        userTurnId: 'turn-1',
-        userId: 'user-1',
-        timestamp: '2026-07-13T00:00:00.000Z',
-        inputConfig: { prompt: 'hello' },
-      },
-    },
-    {
-      method: 'session/steer',
-      params: {
-        sessionId: 'session-1',
-        expectedTurnId: 'assistant:turn-0',
-        userTurnId: 'turn-1',
-        userId: 'user-1',
-        timestamp: '2026-07-13T00:00:00.000Z',
-        inputConfig: { prompt: 'guide' },
-      },
-    },
-    {
-      method: 'session/prepare',
-      params: {
-        preparationId: 'prepare-1',
-        sessionId: 'session-1',
-        requestedByUserId: 'user-1',
-        agentConfigId: 'config-1',
-        cliType: 'builtin',
-        agentType: 'codex',
-        project: {
-          kind: 'local',
-          localProjectId: 'project-1',
-          useWorktree: false,
+  it('bounds Sorbet credential identifiers and excludes unexpected fields', () => {
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'sorbet/credentials-logout',
+      params: { configId: 'config', providerId: 'openai' },
+    };
+    expect(LocalMachineRpcRequestSchema.safeParse(request).success).toBe(true);
+    for (const providerId of ['', 'a'.repeat(1025)]) {
+      expect(
+        LocalMachineRpcRequestSchema.safeParse({
+          ...request,
+          params: { ...request.params, providerId },
+        }).success
+      ).toBe(false);
+    }
+    for (const providerId of ['提供商 / 帐号', '../provider', 'a'.repeat(1024)]) {
+      expect(
+        LocalMachineRpcRequestSchema.safeParse({
+          ...request,
+          params: { ...request.params, providerId },
+        }).success
+      ).toBe(true);
+      expect(
+        LocalMachineRpcResponseSchema.safeParse({
+          ok: true,
+          result: { type: 'sorbet/credentials-list', credentials: [{ providerId, type: 'oauth' }] },
+        }).success
+      ).toBe(true);
+    }
+    expect(
+      LocalMachineRpcResponseSchema.safeParse({
+        ok: true,
+        result: {
+          type: 'sorbet/credentials-list',
+          credentials: [{ providerId: 'openai', type: 'oauth', token: 'secret' }],
         },
-        runConfig: {
-          modeId: 'agent',
-          modelId: 'gpt-5',
-          configOptionValues: {
-            effort: 'high',
-            fast: true,
-          },
-        },
-      },
-    },
-    {
-      method: 'session/prepare-cancel',
-      params: {
-        preparationId: 'prepare-1',
-        sessionId: 'session-1',
-        requestedByUserId: 'user-1',
-      },
-    },
-    {
-      method: 'session/preview-endpoint-acquire',
-      params: {
-        sessionId: 'session-1',
-        requestedByUserId: 'user-1',
-        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-      },
-    },
-    {
-      method: 'session/preview-endpoint-release',
-      params: { sessionId: 'session-1', endpointId: 'endpoint-1' },
-    },
-    {
-      method: 'file/preview-local',
-      params: { v: 3, sessionId: 'session-1', path: '/Users/me/Documents/notes.md' },
-    },
-  ])('accepts $method requests', ({ method, params }) => {
-    const result = safeParseLocalMachineRpcRequest(
-      JSON.stringify({
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method,
-        params,
-      })
-    );
-
-    expect(result).toEqual({
-      success: true,
-      data: {
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method,
-        params,
-      },
-    });
+      }).success
+    ).toBe(false);
+  });
+  it('accepts custom endpoints that discover models from the server', () => {
+    const provider = {
+      name: 'Gateway',
+      protocol: 'openai-completions',
+      baseUrl: 'https://example.test/v1',
+      models: [],
+    };
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'sorbet/providers-create',
+      params: { configId: 'config', provider },
+    };
+    expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+    const response = {
+      ok: true,
+      result: { type: 'sorbet/providers-create', provider: { ...provider, id: 'endpoint' } },
+    };
+    expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
   });
 
-  it('accepts session terminate requests', () => {
-    const result = safeParseLocalMachineRpcRequest(
-      JSON.stringify({
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method: 'session/terminate',
-        params: { sessionId: 'session-1' },
-        timeoutMs: 5_000,
-      })
-    );
-
-    expect(result).toEqual({
-      success: true,
-      data: {
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method: 'session/terminate',
-        params: { sessionId: 'session-1' },
-        timeoutMs: 5_000,
+  it('edits a stored endpoint without letting the client rewrite its models', () => {
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'sorbet/providers-update',
+      params: {
+        configId: 'config',
+        providerId: 'endpoint',
+        provider: { name: 'Gateway', protocol: 'openai-responses', baseUrl: 'https://e.test' },
       },
-    });
+    };
+    expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+    expect(
+      LocalMachineRpcRequestSchema.safeParse({
+        ...request,
+        params: { ...request.params, provider: { ...request.params.provider, models: [] } },
+      }).success
+    ).toBe(false);
+    expect(isE2eeFeatureMethod('sorbet/providers-update')).toBe(true);
   });
 
-  it('rejects extra terminate request fields', () => {
-    const result = safeParseLocalMachineRpcRequest(
-      JSON.stringify({
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method: 'session/terminate',
-        params: { sessionId: 'session-1', pid: 123 },
-      })
-    );
-
-    expect(result.success).toBe(false);
+  it('retains selected roots across file RPC parsing and defaults legacy requests to main at dispatch', () => {
+    for (const [method, params] of [
+      ['code-collab/get-file-index', { sessionId: 's' }],
+      ['code-collab/open-text', { sessionId: 's', path: 'a.txt' }],
+      ['code-collab/lsp-definition', { sessionId: 's', path: 'a.txt' }],
+      ['code-collab/lsp-references', { sessionId: 's', path: 'a.txt' }],
+      ['file/preview', { v: 3, sessionId: 's', path: 'a.txt' }],
+    ] as const) {
+      const request = { machineId: 'm', workspaceId: 'w', method, params };
+      expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+      const rooted = { ...request, params: { ...params, rootId: 'member:docs' } };
+      expect(LocalMachineRpcRequestSchema.parse(rooted)).toEqual(rooted);
+      expect(
+        LocalMachineRpcRequestSchema.safeParse({
+          ...request,
+          params: { ...params, rootId: '../host' },
+        }).success
+      ).toBe(false);
+    }
   });
 
-  it('rejects draft content and environment variables in session preparation', () => {
-    const result = safeParseLocalMachineRpcRequest(
-      JSON.stringify({
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          prompt: 'private draft',
-          env: { API_KEY: 'secret' },
-        },
-      })
-    );
-
-    expect(result.success).toBe(false);
-  });
-
-  it('drops sensitive ACP option values from session preparation', () => {
-    const result = safeParseLocalMachineRpcRequest(
-      JSON.stringify({
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          runConfig: {
-            configOptionValues: {
-              effort: 'high',
-              api_key: 'private',
-              authToken: 'private',
-            },
-          },
-        },
-      })
-    );
-
-    expect(result).toMatchObject({
-      success: true,
-      data: {
-        params: {
-          runConfig: {
-            configOptionValues: {
-              effort: 'high',
-            },
-          },
-        },
-      },
-    });
-  });
-
-  it('requires acquired preview endpoints to identify their bound target', () => {
+  it('accepts a registered local member reference and validates the path-free probe result', () => {
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'project/probe-local-member',
+      params: { localProjectId: 'local' },
+    };
+    expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+    expect(
+      LocalMachineRpcRequestSchema.safeParse({
+        ...request,
+        params: { ...request.params, rootPath: '/host' },
+      }).success
+    ).toBe(false);
     const response = {
       ok: true,
       result: {
-        type: 'session/preview-endpoint-acquire_response',
-        sessionId: 'session-1',
-        success: true,
-        endpoint: {
-          endpointId: 'endpoint-1',
-          kind: 'local-proxy',
-          viewerUrl: 'http://127.0.0.1:64000/?__lody_local_preview_token=token',
-          target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-          capabilities: { visualAnnotation: true, shareable: false },
-          createdAt: 1,
-        },
+        type: 'project/probe-local-member',
+        repoFullName: 'acme/api',
+        isGit: true,
+        submodules: [{ path: 'proto', url: '../proto.git', repoFullName: 'acme/proto' }],
       },
     };
-
-    expect(LocalMachineRpcResponseSchema.safeParse(response).success).toBe(true);
-    const endpointWithoutTarget = {
-      ...response,
-      result: {
-        ...response.result,
-        endpoint: { ...response.result.endpoint, target: undefined },
-      },
-    };
-    expect(LocalMachineRpcResponseSchema.safeParse(endpointWithoutTarget).success).toBe(false);
+    expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
+    expect(
+      LocalMachineRpcResponseSchema.safeParse({
+        ok: true,
+        result: { ...response.result, rootPath: '/host' },
+      }).success
+    ).toBe(false);
   });
+  it('allows Pi discovery by saved config reference but never caller launch inputs', () => {
+    const request = {
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      method: 'machine/pi-extensions',
+      params: { configId: 'pi-config' },
+    };
+    expect(safeParseLocalMachineRpcRequest(JSON.stringify(request)).success).toBe(true);
+    for (const fields of [
+      { command: 'pi' },
+      { env: { NODE_OPTIONS: '--require untrusted' } },
+      { path: '/untrusted' },
+    ]) {
+      expect(
+        safeParseLocalMachineRpcRequest(
+          JSON.stringify({ ...request, params: { ...request.params, ...fields } })
+        ).success
+      ).toBe(false);
+    }
+    const response = {
+      ok: true,
+      result: {
+        success: true,
+        discovery: { version: 1, agentDir: '/fixture', extensions: [], warnings: [] },
+      },
+    };
+    expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
+  });
+});
+
+it('accepts typed memory operations and rejects caller-provided commands', () => {
+  const request = {
+    machineId: 'machine',
+    workspaceId: 'workspace',
+    method: 'machine/memory',
+    params: {
+      action: 'create',
+      providerId: 'nowledge-mem',
+      input: { id: 'reviewer', name: 'Reviewer' },
+    },
+  };
+  expect(LocalMachineRpcRequestSchema.safeParse(request).success).toBe(true);
+  expect(
+    LocalMachineRpcRequestSchema.safeParse({
+      ...request,
+      params: { ...request.params, command: 'other' },
+    }).success
+  ).toBe(false);
 });

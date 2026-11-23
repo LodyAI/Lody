@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MachineId, SessionHistoryInput, SessionMeta } from '@lody/shared';
 import {
   findNextDispatchableUserTurn,
+  isActivationAwaitingHistory,
   resolveSessionCancelAction,
   resolveSessionDispatchAction,
   type SessionDispatchSnapshot,
@@ -48,9 +49,36 @@ const snap = (overrides: Partial<SessionDispatchSnapshot> = {}): SessionDispatch
   ...overrides,
 });
 
-// ── resolveSessionDispatchAction ────────────────────────────────────────────
-
 describe('resolveSessionDispatchAction', () => {
+  it('never replays consumed steer processing after restart, but still dispatches the newer input', () => {
+    const consumed = {
+      ...pendingTurn('B'),
+      status: 'processing' as const,
+      inputConfig: { _lodyDeliveryKind: 'steer' as const },
+    };
+    expect(
+      findNextDispatchableUserTurn([consumed, pendingTurn('C')], {
+        ...baseMeta,
+        latestUserMsgId: 'C',
+        processingUserMsgId: 'B',
+      })?.id
+    ).toBe('C');
+  });
+
+  it('uses the exact refused-steer activation without repointing a newer producer input', () => {
+    const guide = { ...pendingTurn('B'), status: 'pending_apply' as const };
+    const meta = {
+      ...baseMeta,
+      latestUserMsgId: 'C',
+      steerTurnStatuses: { B: 'pending' as const },
+    };
+    expect(findNextDispatchableUserTurn([guide, pendingTurn('C')], meta)?.id).toBe('B');
+    expect(
+      findNextDispatchableUserTurn([{ ...guide, status: 'handled' }, pendingTurn('C')], meta)?.id
+    ).toBe('C');
+    expect(meta.latestUserMsgId).toBe('C');
+  });
+
   it('returns noop when meta.machineId does not match', () => {
     const action = resolveSessionDispatchAction(
       snap({ meta: { ...baseMeta, machineId: 'other' as MachineId } }),
@@ -85,6 +113,18 @@ describe('resolveSessionDispatchAction', () => {
       MACHINE
     );
     expect(action).toEqual({ type: 'noop', reason: 'active-session' });
+  });
+
+  it('keeps a session whose previous turn has an unconfirmed release blocked, not stale', () => {
+    const action = resolveSessionDispatchAction(
+      snap({
+        meta: { ...baseMeta, status: { type: 'initializing' } },
+        hasActiveTurn: true,
+        releaseBlocked: { reason: 'Inbox resource acquisition remains incomplete' },
+      }),
+      MACHINE
+    );
+    expect(action).toEqual({ type: 'noop', reason: 'release-blocked' });
   });
 
   it('returns reset-stale-status when status is running with no in-memory session', () => {
@@ -158,8 +198,6 @@ describe('resolveSessionDispatchAction', () => {
   });
 });
 
-// ── resolveSessionCancelAction ──────────────────────────────────────────────
-
 describe('resolveSessionCancelAction', () => {
   it('returns noop when meta is undefined', () => {
     const action = resolveSessionCancelAction(undefined, undefined, MACHINE);
@@ -217,15 +255,59 @@ describe('resolveSessionCancelAction', () => {
   });
 });
 
-// ── findNextDispatchableUserTurn ─────────────────────────────────────────────
-
 describe('findNextDispatchableUserTurn', () => {
+  it.each(['handled', 'failed', 'canceled'] as const)(
+    'uses the last duplicate when its status is %s',
+    (status) => {
+      const history = [pendingTurn('duplicate'), { ...handledTurn('duplicate'), status }];
+      expect(findNextDispatchableUserTurn(history, baseMeta)).toBeNull();
+      expect(isActivationAwaitingHistory(history, 'duplicate')).toBe(false);
+      const next = pendingTurn('next');
+      expect(findNextDispatchableUserTurn([...history, next], baseMeta)).toEqual(next);
+    }
+  );
+
+  it('keeps chronological dispatch order among the last copies of each turn', () => {
+    const first = pendingTurn('first');
+    const last = pendingTurn('duplicate');
+    const older = handledTurn('duplicate');
+    const history = [older, first, last];
+    expect(findNextDispatchableUserTurn(history, baseMeta)).toEqual(first);
+    expect(findNextDispatchableUserTurn([older, last], baseMeta)).toEqual(last);
+    expect(isActivationAwaitingHistory(history, 'duplicate')).toBe(true);
+  });
+
   it('returns null for empty history', () => {
     expect(findNextDispatchableUserTurn([], baseMeta)).toBeNull();
   });
 
   it('skips non-user roles', () => {
     const entry = { ...pendingTurn('t-1'), role: 'assistant' } as SessionHistoryInput;
+    expect(findNextDispatchableUserTurn([entry], baseMeta)).toBeNull();
+  });
+
+  it('does not dispatch operation progress system entries', () => {
+    const entry: SessionHistoryInput = {
+      id: 'operation-progress:session-1:op-1',
+      role: 'system',
+      timestamp: new Date().toISOString(),
+      userId: 'user-1',
+      items: [
+        {
+          type: 'operation_progress',
+          operationId: 'op-1',
+          operationKind: 'session_create',
+          items: [
+            {
+              target: { sessionId: 'created-session', userTurnId: 'created-turn' },
+              status: 'created',
+            },
+          ],
+        },
+      ],
+      fileDiff: [],
+      finished: true,
+    };
     expect(findNextDispatchableUserTurn([entry], baseMeta)).toBeNull();
   });
 

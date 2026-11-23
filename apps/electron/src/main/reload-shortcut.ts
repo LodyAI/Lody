@@ -20,7 +20,6 @@ export function isRendererReloadShortcut(
     primaryModifier &&
     !secondaryModifier &&
     !input.alt &&
-    !input.shift &&
     !input.isAutoRepeat
   )
 }

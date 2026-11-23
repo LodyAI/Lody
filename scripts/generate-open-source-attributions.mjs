@@ -15,6 +15,32 @@ const NO_ATTRIBUTION_LICENSE_TOKENS = new Set(['0BSD', 'CC0-1.0', 'UNLICENSE', '
 
 const VENDORED_ATTRIBUTIONS = [
   {
+    id: 'vendored-vscode-fuzzy-scorer',
+    kind: 'vendored',
+    scope: 'vendored-source',
+    name: 'Visual Studio Code fuzzy scorer',
+    license: 'MIT',
+    homepage:
+      'https://github.com/microsoft/vscode/blob/a92c2f9316d5454e35bb4c2958fdc0f23bc87d5d/src/vs/base/common/fuzzyScorer.ts',
+    author: 'Microsoft Corporation',
+    description: 'Vendored fuzzy scoring algorithm used for mention candidate matching.',
+    assets: ['Fuzzy scorer'],
+    noticePath: 'packages/components/src/components/mentions/vscode-fuzzy-score.LICENSE.txt',
+  },
+  {
+    id: 'vendored-virtua',
+    kind: 'vendored',
+    scope: 'vendored-source',
+    name: 'Virtua',
+    license: 'MIT',
+    homepage: 'https://github.com/inokawa/virtua/tree/0.52.7',
+    author: 'inokawa',
+    description:
+      'Keyed list layout from Virtua, adapted for the conversation scroll engine (packages/components/src/lib/conversation-scroll/keyed-layout).',
+    assets: ['Virtua list layout and size cache'],
+    noticePath: 'packages/components/src/lib/conversation-scroll/keyed-layout/LICENSE',
+  },
+  {
     id: 'bundled-theme-vscode-defaults',
     kind: 'vendored',
     scope: 'bundled-theme',
@@ -185,6 +211,39 @@ const VENDORED_ATTRIBUTIONS = [
     description: 'Vendored file and folder icons used across Lody file views.',
     assets: ['File icons', 'Folder icons'],
     noticePath: 'packages/components/src/components/icons/file-icons/LICENSE',
+  },
+  {
+    id: 'compiled-curve25519-dalek',
+    kind: 'vendored',
+    scope: 'compiled-webassembly',
+    name: 'curve25519-dalek and subtle',
+    license: 'BSD-3-Clause',
+    homepage: 'https://github.com/dalek-cryptography/curve25519-dalek',
+    author: 'Isis Lovecruft, Henry de Valence and dalek-cryptography contributors',
+    description: 'Compiled into the strict Ed25519 WebAssembly verifier of @lody/e2ee-core.',
+    assets: ['curve25519-dalek 4.1.3', 'subtle 2.6.1'],
+    noticePath: 'packages/e2ee-core/wasm/ed25519-strict/licenses/BSD-3-Clause.txt',
+  },
+  {
+    id: 'compiled-rustcrypto-sha2',
+    kind: 'vendored',
+    scope: 'compiled-webassembly',
+    name: 'RustCrypto SHA-2 and support crates',
+    license: 'MIT',
+    homepage: 'https://github.com/RustCrypto/hashes',
+    author: 'RustCrypto Developers and crate authors',
+    description: 'Compiled into the strict Ed25519 WebAssembly verifier of @lody/e2ee-core.',
+    assets: [
+      'sha2 0.10.9',
+      'digest 0.10.7',
+      'block-buffer 0.10.4',
+      'crypto-common 0.1.7',
+      'cpufeatures 0.2.17',
+      'generic-array 0.14.7',
+      'typenum 1.20.1',
+      'cfg-if 1.0.5',
+    ],
+    noticePath: 'packages/e2ee-core/wasm/ed25519-strict/licenses/MIT.txt',
   },
 ];
 

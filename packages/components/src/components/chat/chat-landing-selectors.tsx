@@ -1,16 +1,10 @@
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
-import {
-  ShieldCheck,
-  Compass,
-  GitBranch,
-  Loader2,
-  PenLine,
-  ShieldOff,
-  Eye,
-  Monitor,
-} from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { ShieldCheck, Compass, GitBranch, PenLine, ShieldOff, Eye, Monitor } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import { AcpSessionSelect, OptionSelector, type AcpSessionSelectOption } from '@/components/shared';
+import { composerSurface } from '@/components/shared/composer-surface';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import type {
   AcpConfigOptionSelector,
@@ -23,51 +17,25 @@ import { useOnlineMachines } from '@/hooks/use-online-machines';
 
 export type ChatLandingTone = 'light' | 'dark';
 
-const modeIconClassName = 'h-3.5 w-3.5';
-
-/**
- * Shared icon size for agent config logos in compact selectors.
- * The Button component now only applies a default icon size when children do
- * not provide explicit sizing.
- */
-export const agentIconClassName = 'h-3 w-3 shrink-0 opacity-80';
+const MODE_ICON_STROKE_WIDTH = 1.5;
 
 /**
  * Get icon for permission mode
  */
 export const getModeIcon = (modeId: string | null): ReactNode => {
+  const glyph = stylex.props(composerSurface.glyph14);
   switch (modeId) {
     case 'plan':
-      return <Compass className={modeIconClassName} />;
+      return <Compass {...glyph} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     case 'acceptEdits':
-      return <PenLine className={modeIconClassName} />;
+      return <PenLine {...glyph} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     case 'dontAsk':
-      return <ShieldOff className={modeIconClassName} />;
+      return <ShieldOff {...glyph} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     case 'read-only':
-      return <Eye className={modeIconClassName} />;
+      return <Eye {...glyph} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     default:
-      return <ShieldCheck className={modeIconClassName} />;
+      return <ShieldCheck {...glyph} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
   }
-};
-
-/**
- * Get selector tag class name based on tone (no border, muted text).
- */
-export const getSelectorTagClassName = (_tone: ChatLandingTone): string => {
-  return cn(
-    'w-auto h-6 px-2 gap-1 rounded-[4px] [&_span]:text-xs [&_span]:leading-tight',
-    'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-  );
-};
-
-/**
- * Bordered variant for selectors with icons (e.g. agent config with OpenAI/Claude icons).
- */
-export const getCompactSelectorTagClassName = (_tone: ChatLandingTone): string => {
-  return cn(
-    'w-auto h-6 px-2 gap-1 rounded-[4px] border [&_span]:text-xs [&_span]:leading-tight',
-    'border-input-border/70 bg-input/80 text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-  );
 };
 
 export interface ModeSelectorProps {
@@ -88,8 +56,6 @@ export function ModeSelector({
   tone,
   disabled = false,
 }: ModeSelectorProps) {
-  const selectorTagClassName = getSelectorTagClassName(tone);
-
   if (options.length === 0) {
     return null;
   }
@@ -97,6 +63,7 @@ export function ModeSelector({
   return (
     <AcpSessionSelect
       tone={tone}
+      variant="compact"
       value={value}
       onChange={onChange}
       options={options}
@@ -104,8 +71,11 @@ export function ModeSelector({
       disabled={disabled || options.length === 0}
       align="start"
       icon={getModeIcon(value)}
-      className={cn(selectorTagClassName, 'max-w-[12rem]')}
-      ariaLabel="Permission mode"
+      // Icon only (every mode has one): the mode's name is the tooltip. A label
+      // such as "Bypass permissions" otherwise took most of the control row.
+      iconOnly
+      ariaLabel="Mode"
+      triggerTitle="Mode"
     />
   );
 }
@@ -193,7 +163,6 @@ export interface BranchSelectorProps {
   value: string | null;
   onChange: (value: string) => void;
   options: AcpSessionSelectOption[];
-  tone: ChatLandingTone;
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
@@ -202,6 +171,13 @@ export interface BranchSelectorProps {
   loadingText?: string;
   className?: string;
   contentClassName?: string;
+  hasMore?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onSearchQueryChange?: (query: string) => void;
+  remoteSearchable?: boolean;
+  disableClientFilter?: boolean;
+  onReachEnd?: () => void;
+  footer?: ReactNode;
 }
 
 /**
@@ -211,7 +187,6 @@ export function BranchSelector({
   value,
   onChange,
   options,
-  tone,
   placeholder = 'Branch',
   searchPlaceholder,
   emptyText,
@@ -220,48 +195,67 @@ export function BranchSelector({
   loadingText = 'Loading branches...',
   className,
   contentClassName,
+  hasMore = false,
+  onOpenChange,
+  onSearchQueryChange,
+  remoteSearchable = false,
+  disableClientFilter = false,
+  onReachEnd,
+  footer,
 }: BranchSelectorProps) {
+  const showTriggerLoading = loading && options.length === 0 && !value;
   return (
     <OptionSelector
       value={value}
       onSelect={(option) => onChange(option.value)}
       options={options}
       placeholder={placeholder}
-      disabled={disabled || loading || options.length === 0}
+      disabled={disabled || showTriggerLoading || (!remoteSearchable && options.length === 0)}
       align="start"
       side="top"
       avoidCollisions={false}
-      tone={tone}
       placeholderIcon={GitBranch}
-      searchable={!loading && options.length > 6}
+      searchable={remoteSearchable || (!showTriggerLoading && (hasMore || options.length > 6))}
       searchPlaceholder={searchPlaceholder}
-      emptyText={emptyText}
-      className={cn('h-6 gap-1 rounded-md border-none bg-transparent px-1', className)}
+      emptyText={loading && options.length === 0 ? loadingText : emptyText}
+      onOpenChange={onOpenChange}
+      onQueryChange={onSearchQueryChange}
+      disableClientFilter={disableClientFilter}
+      onReachEnd={hasMore ? onReachEnd : undefined}
+      footer={footer}
+      appearance="toolbar"
+      size="sm"
+      className={className}
       contentClassName={cn(
         // Branch names get long (feat/…); give the desktop list more room. The 100vw
         // term keeps narrow mobile surfaces viewport-bound.
-        'min-w-[20rem] max-w-[min(36rem,calc(100vw-2rem))] p-1',
+        'min-w-[20rem] max-w-[min(36rem,calc(100vw-2rem))]',
         contentClassName
       )}
       renderTriggerValue={(option) => (
         <>
-          {loading ? (
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+          {showTriggerLoading ? (
+            <Spinner size="small" label={null} />
           ) : (
-            <GitBranch className="h-4 w-4 shrink-0" />
+            <GitBranch {...stylex.props(composerSurface.glyph16)} aria-hidden="true" />
           )}
-          <span className="truncate font-normal">
-            {loading ? loadingText : (option?.label ?? placeholder ?? '')}
+          <span {...stylex.props(composerSurface.truncate)}>
+            {showTriggerLoading ? loadingText : (option?.label ?? value ?? placeholder ?? '')}
           </span>
         </>
       )}
       renderOption={(option) => (
-        <div className="flex min-w-0 flex-col">
-          <span className="whitespace-normal break-words leading-snug">{option.label}</span>
-          {option.description && (
-            <span className="line-clamp-2 text-xs text-muted-foreground">{option.description}</span>
+        <span
+          {...stylex.props(
+            composerSurface.rowText,
+            !!option.description && composerSurface.rowTextStacked
           )}
-        </div>
+        >
+          <span {...stylex.props(composerSurface.rowLabelWrap)}>{option.label}</span>
+          {option.description && (
+            <span {...stylex.props(composerSurface.rowDescription)}>{option.description}</span>
+          )}
+        </span>
       )}
       showChevron={false}
     />
@@ -271,7 +265,6 @@ export function BranchSelector({
 export interface MachineSelectorProps {
   value: MachineId | null;
   onChange: (machineId: MachineId) => void;
-  tone: ChatLandingTone;
   disabled?: boolean;
   /**
    * When true, the selector renders a loading placeholder instead of being
@@ -291,7 +284,6 @@ export interface MachineSelectorProps {
 export function MachineSelector({
   value,
   onChange,
-  tone,
   disabled = false,
   loading = false,
   className,
@@ -299,8 +291,6 @@ export function MachineSelector({
 }: MachineSelectorProps) {
   const { t } = useTranslation();
   const onlineMachines = useOnlineMachines(allowedMachineIds);
-  const selectorTagClassName = getSelectorTagClassName(tone);
-
   const machineOptions = useMemo<OptionSelectorOption<string>[]>(() => {
     return onlineMachines.map((m) => ({
       value: m.id,
@@ -324,29 +314,35 @@ export function MachineSelector({
       placeholderIcon={Monitor}
       disabled={disabled || loading || machineOptions.length === 0}
       align="start"
-      tone={tone}
       searchable={!loading && machineOptions.length > 5}
       searchPlaceholder={t('chat.machineSelector.searchPlaceholder', 'Search machines')}
       emptyText={t('chat.machineSelector.emptyText', 'No machines online')}
-      className={cn(selectorTagClassName, 'max-w-[160px]', className)}
+      appearance="toolbar"
+      size="sm"
+      className={cn('max-w-[160px]', className)}
       contentClassName="w-56"
       renderTriggerValue={(option) => (
-        <div className="flex min-w-0 items-center gap-1.5" title={option?.label}>
+        <>
           {loading ? (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin opacity-70" />
+            <Spinner size="small" label={null} />
           ) : (
-            <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            <Monitor
+              {...stylex.props(composerSurface.glyph14, composerSurface.hint)}
+              aria-hidden="true"
+            />
           )}
-          <span className="truncate text-sm font-medium">
+          <span {...stylex.props(composerSurface.truncate)} title={option?.label}>
             {loading ? loadingText : (option?.label ?? placeholder)}
           </span>
-        </div>
+        </>
       )}
       renderOption={(option) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <Monitor className="h-4 w-4 shrink-0 opacity-70" />
-          <span className="truncate text-sm">{option.label}</span>
-        </div>
+        <>
+          <span {...stylex.props(composerSurface.rowIcon)}>
+            <Monitor {...stylex.props(composerSurface.glyph16)} aria-hidden="true" />
+          </span>
+          <span {...stylex.props(composerSurface.rowLabel)}>{option.label}</span>
+        </>
       )}
     />
   );

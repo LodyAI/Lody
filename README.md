@@ -145,13 +145,51 @@ We want the entire workspace—not only conversations—to become local-first. L
 
 Lody is still moving toward full local-first support.
 
+## Releases
+
+Pushing a stable `vX.Y.Z` tag creates a draft PR synchronizing every
+`apps/*/package.json` version on the default branch, followed by a GitHub Release
+with generated changelog notes. No installers or auto-update files are built or
+uploaded. The original tag is not moved; version synchronization takes effect
+on the default branch after the PR is merged. GitHub Actions must be allowed to
+create pull requests in repository settings. Bot-created PRs may require a maintainer
+action to trigger CI. Existing releases and their assets are preserved on reruns.
+
 ## Repository
 
 - `apps/cli` — Connect machines and run coding agents
 - `apps/electron` — Lody desktop app
+- [`apps/mobile`](apps/mobile/README.md) — New native iOS and Android clients
+- [`apps/mobile-capacitor`](apps/mobile-capacitor/README.md) — Capacitor cloud client for iOS and Android
+- `packages/client-e2ee` — Shared browser/mobile cloud E2EE composition
 - `packages/components` — Shared workspace UI
+- `packages/ui` — Base UI primitives and StyleX design tokens
 - `packages/platform` — Platform capabilities and integrations
 - `packages/shared` — Shared schemas, protocols, and utilities
+- `packages/cloud-api` — Optional-cloud protocol names and DTOs
+- `packages/e2ee-core` — End-to-end encryption library: signed ledger, key delivery, services and adapters ([reading guide](packages/e2ee-core/README.md)). Product hosts: [workspace bootstrap](.agents/docs/e2ee-workspace-bootstrap.md)
+- `packages/e2ee-client` — Personal-device E2EE host
+- `packages/e2ee-machine-sharing` — Machine-service sharing policy
+- `packages/e2ee-lab` — Local adversarial consumers and persistence probes for `@lody/e2ee-core`
+- `packages/turn-diff-store` — Local content-addressed turn snapshots
+- `packages/loro-streams-rpc` — RPC over Loro Streams
+- `packages/iroh-native` — Native iroh transport for encrypted-workspace RPC ([rules](packages/iroh-native/AGENTS.md))
+- `packages/acp-extension-{core,kimi,pi}` — ACP extension submodule workspaces. Kimi and Pi stay outside the root pnpm graph
 - `site-docs` — Website, documentation, and blog
+- [`skills`](skills/lody-cli/SKILL.md) — Agent skills for Lody users, such as `lody-cli`
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) to get started with development.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and the community PR size policy.
+
+## Mobile and upstream credit
+
+Lody’s new native mobile clients live in [apps/mobile](apps/mobile/README.md).
+They are under active development and keep independent iOS and Android build
+toolchains; see the mobile README for setup and current scope.
+
+The iOS client is built directly on **[Innei’s lody-ios](https://github.com/Innei/lody-ios)**.
+We thank [Innei](https://github.com/Innei) and the upstream contributors for the
+native app, chat experience, application architecture, and Loro/Flock protocol
+runtime that made this work possible. Android also reuses a provenance-tracked
+snapshot of that runtime. This is substantial foundational work, not merely
+inspiration. Upstream licenses, notices, and additional acknowledgements are
+preserved in the [mobile credits](apps/mobile/README.md#credits-and-origins).

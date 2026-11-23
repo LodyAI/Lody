@@ -19,9 +19,10 @@ import { useEffect, useMemo, useRef, type CSSProperties, type RefObject } from '
  *   - focus moving between fields while the keyboard is already up.
  *
  * Web is a no-op because the native shell does not dispatch this event there.
- * Android keeps `--native-keyboard-height` at `0px` because the WebView resizes, but
- * the native shell still dispatches `lody:keyboard-resize`; this hook may recenter
- * after that resize.
+ * Android keeps `--native-keyboard-height` at `0px`; its native shell still
+ * dispatches `lody:keyboard-resize`, so this hook may recenter on that event.
+ * Shells can resize the WebView or overlay the keyboard. Non-iOS side drawers
+ * handle both through the live viewport inset in `ui/drawer.tsx`.
  *
  * Listeners are bound to `window` / `document` (not the container) and read
  * `containerRef.current` lazily at event time, so the hook works even when the
@@ -108,8 +109,10 @@ export type KeyboardAwareSheet = {
  * together, which is exactly why they should not be three things to remember:
  * sheets that copied two of the three exist, and they misbehave on iOS.
  *
- * All of it is inert on web and Android, where the WebView resizes itself and
- * `--native-keyboard-height` stays `0px`; iOS Capacitor is where it matters.
+ * The CSS keyboard lift is zero on web and Android because
+ * `--native-keyboard-height` stays `0px`; it is used by iOS Capacitor.
+ * Android can still recenter fields through the native resize event. This
+ * bottom-sheet helper is separate from side-drawer viewport handling.
  *
  * The lift is deliberately NOT transitioned: the sheet's height is driven by
  * `scrollStyle`'s `maxHeight`, which reacts to the keyboard var instantly, so

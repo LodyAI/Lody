@@ -1,20 +1,22 @@
-import { mkdtemp, mkdir, rm, readFile, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  storeLocalSessionImage,
+  listLocalSessionImages,
+  readLocalSessionImage,
+  readLocalSessionImageReceipt,
+  writeLocalSessionImageReceipt,
   cleanupBackfilledSessionFileBlobs,
   copyIntoSessionFileBlobStore,
-  getDraftSessionFileBlobMaxAgeMs,
-  getSessionFileBlobAgeMs,
   getSessionFileBlobDir,
   getSessionFileBlobPath,
   getSessionFileBlobStoreUsage,
   listPendingLocalSessionFiles,
   markSessionFileBlobBackfilled,
-  readSessionFileBlobBackfillMarker,
-  removeSessionFileBlob,
+  readSessionFileBlobBackfillReceipt,
   sessionFileBlobExists,
   writeSessionFileBlobBackfillMarker,
 } from './session-file-blob-store';
@@ -65,18 +67,6 @@ describe('session file blob store', () => {
     return p;
   };
 
-  it('lays out blobs under the local installation data directory', () => {
-    const dir = getSessionFileBlobDir({ workspaceId: 'ws', sessionId: 'sess', homeDir });
-    expect(dir).toBe(join(homeDir, '.lody-oss', 'session-files', 'ws', 'sess'));
-    const file = getSessionFileBlobPath({
-      workspaceId: 'ws',
-      sessionId: 'sess',
-      fileId: 'file-1',
-      homeDir,
-    });
-    expect(file).toBe(join(dir, 'file-1'));
-  });
-
   it('rejects path-traversal identifiers', () => {
     expect(() =>
       getSessionFileBlobPath({ workspaceId: 'ws', sessionId: 'sess', fileId: '../escape', homeDir })
@@ -86,7 +76,7 @@ describe('session file blob store', () => {
     ).toThrow();
   });
 
-  it('copies bytes into the store and is idempotent on re-copy', async () => {
+  it('stores attachment bytes with private file and directory permissions', async () => {
     const source = await makeSource('a.txt', 'hello');
     const args = {
       workspaceId: 'ws',
@@ -101,48 +91,6 @@ describe('session file blob store', () => {
     expect(await readFile(dest, 'utf8')).toBe('hello');
     expect((await stat(getSessionFileBlobDir(args))).mode & 0o777).toBe(0o700);
     expect((await stat(dest)).mode & 0o777).toBe(0o600);
-    expect(
-      await sessionFileBlobExists({
-        workspaceId: 'ws',
-        sessionId: 'sess',
-        fileId: 'file-1',
-        homeDir,
-      })
-    ).toBe(true);
-
-    // Re-copy with different content overwrites (same fileId).
-    const source2 = await makeSource('a2.txt', 'world!');
-    await copyIntoSessionFileBlobStore({ ...args, sourcePath: source2 });
-    expect(await readFile(dest, 'utf8')).toBe('world!');
-  });
-
-  it('removes blobs idempotently', async () => {
-    const source = await makeSource('a.txt', 'hello');
-    await copyIntoSessionFileBlobStore({
-      workspaceId: 'ws',
-      sessionId: 'sess',
-      fileId: 'file-1',
-      sourcePath: source,
-      homeDir,
-    });
-    await removeSessionFileBlob({
-      workspaceId: 'ws',
-      sessionId: 'sess',
-      fileId: 'file-1',
-      homeDir,
-    });
-    expect(
-      await sessionFileBlobExists({
-        workspaceId: 'ws',
-        sessionId: 'sess',
-        fileId: 'file-1',
-        homeDir,
-      })
-    ).toBe(false);
-    // Second removal does not throw.
-    await expect(
-      removeSessionFileBlob({ workspaceId: 'ws', sessionId: 'sess', fileId: 'file-1', homeDir })
-    ).resolves.toBeUndefined();
   });
 
   it('lists pending blobs across sessions and skips .part temp files', async () => {
@@ -178,54 +126,93 @@ describe('session file blob store', () => {
     expect(pending).toHaveLength(2);
   });
 
-  it('round-trips the backfill marker and keeps it out of the pending scan (R5.3)', async () => {
-    const source = await makeSource('a.txt', 'hello');
-    const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'file-1', homeDir };
+  it('retains file and image backfill receipts for restart adoption', async () => {
+    const source = await makeSource('private.txt', 'hello');
+    const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'encrypted-local', homeDir };
+    const encryption = {
+      v: 1 as const,
+      key: '12'.repeat(32),
+      resourceId: '34'.repeat(16),
+      kind: 'file' as const,
+      sizeBytes: 5,
+      fileName: 'private.txt',
+      mimeType: 'text/plain',
+      parts: ['relay-1'],
+    };
     await copyIntoSessionFileBlobStore({ ...args, sourcePath: source });
-
-    expect(await readSessionFileBlobBackfillMarker(args)).toBeNull();
-    await writeSessionFileBlobBackfillMarker({ ...args, relayFileId: 'relay-1' });
-    expect(await readSessionFileBlobBackfillMarker(args)).toBe('relay-1');
-
-    // The `.r2meta` sidecar must not surface as a pending blob.
-    const pending = await listPendingLocalSessionFiles({ workspaceId: 'ws', homeDir });
-    expect(pending).toEqual([{ sessionId: 'sess', fileId: 'file-1' }]);
-
-    // Finalizing the backfill clears the marker.
+    await writeSessionFileBlobBackfillMarker({ ...args, relayFileId: 'relay-1', encryption });
+    expect(await readSessionFileBlobBackfillReceipt(args)).toEqual({
+      relayFileId: 'relay-1',
+      encryption,
+    });
+    expect(await sessionFileBlobExists(args)).toBe(true);
     await markSessionFileBlobBackfilled(args);
-    expect(await readSessionFileBlobBackfillMarker(args)).toBeNull();
-  });
+    expect(await readSessionFileBlobBackfillReceipt(args)).toBeNull();
 
-  it('removeSessionFileBlob also clears the backfill marker', async () => {
-    const source = await makeSource('a.txt', 'hello');
-    const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'file-1', homeDir };
-    await copyIntoSessionFileBlobStore({ ...args, sourcePath: source });
-    await writeSessionFileBlobBackfillMarker({ ...args, relayFileId: 'relay-1' });
-
-    await removeSessionFileBlob(args);
-    expect(await readSessionFileBlobBackfillMarker(args)).toBeNull();
-    expect(await sessionFileBlobExists(args)).toBe(false);
-  });
-
-  it('reports blob age for draft reclamation (R5.4)', async () => {
-    const source = await makeSource('a.txt', 'hello');
-    const args = { workspaceId: 'ws', sessionId: 'sess', fileId: 'file-1', homeDir };
-    await copyIntoSessionFileBlobStore({ ...args, sourcePath: source });
-
-    expect(await getSessionFileBlobAgeMs(args)).toBeGreaterThanOrEqual(0);
+    const scope = { ...args, accountId: 'account', machineId: 'machine' };
+    const image = await storeLocalSessionImage(
+      scope,
+      {
+        imageId: '11111111-1111-4111-8111-111111111111',
+        localImageId: '11111111-1111-4111-8111-111111111111',
+        machineId: scope.machineId,
+        storageSessionId: scope.sessionId,
+        transport: 'local',
+        mimeType: 'image/png',
+        sizeBytes: 5,
+      },
+      Buffer.from('image')
+    );
     expect(
-      await getSessionFileBlobAgeMs({
-        workspaceId: 'ws',
-        sessionId: 'sess',
-        fileId: 'missing',
-        homeDir,
-      })
-    ).toBeNull();
+      await storeLocalSessionImage(
+        scope,
+        { ...image, mimeType: 'image/jpeg', sizeBytes: 11 },
+        Buffer.from('replacement')
+      )
+    ).toEqual(image);
+    const local = await readLocalSessionImage(scope, {
+      ...image,
+      mimeType: 'image/jpeg',
+      sizeBytes: 11,
+    });
+    expect(local.image).toEqual(image);
+    expect(local.bytes.toString()).toBe('image');
+    const receipt = { ...image, transport: 'r2' as const, imageId: 'uploaded-image' };
+    await writeLocalSessionImageReceipt(scope, receipt);
+    // Cloud publication remains adoptable without reopening the local bytes.
+    await rm(local.path);
+    expect(await readLocalSessionImageReceipt(scope, image.localImageId!)).toEqual(receipt);
+    await expect(
+      readLocalSessionImageReceipt({ ...scope, accountId: 'another-account' }, image.localImageId!)
+    ).rejects.toThrow('Local image reference mismatch');
+    await expect(readLocalSessionImage(scope, image)).rejects.toMatchObject({ code: 'ENOENT' });
 
-    // Backdate the blob well past the draft retention window.
-    const old = new Date(Date.now() - getDraftSessionFileBlobMaxAgeMs() - 60_000);
-    await utimes(getSessionFileBlobPath(args), old, old);
-    expect(await getSessionFileBlobAgeMs(args)).toBeGreaterThan(getDraftSessionFileBlobMaxAgeMs());
+    const original = await makeSource('original.png', 'original');
+    const reference = await storeLocalSessionImage(
+      scope,
+      {
+        ...image,
+        imageId: '22222222-2222-4222-8222-222222222222',
+        localImageId: '22222222-2222-4222-8222-222222222222',
+      },
+      original
+    );
+    const registered = await readLocalSessionImage(scope, reference);
+    expect(registered.path).toBe(original);
+    expect(registered.bytes.toString()).toBe('original');
+    expect(
+      await sessionFileBlobExists({ ...scope, fileId: `image-${reference.localImageId}` })
+    ).toBe(false);
+    expect(await listLocalSessionImages(scope)).toContainEqual({
+      sessionId: scope.sessionId,
+      image: reference,
+    });
+    await writeFile(original, 'edited');
+    expect((await readLocalSessionImage(scope, reference)).bytes.toString()).toBe('edited');
+    await cleanupBackfilledSessionFileBlobs({ homeDir });
+    expect(await readFile(original, 'utf8')).toBe('edited');
+    await rm(original);
+    await expect(readLocalSessionImage(scope, reference)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('rejects new writes when the local blob quota is full', async () => {
@@ -310,10 +297,5 @@ describe('session file blob store', () => {
       cleanupBackfilledSessionFileBlobs({ homeDir, now: 10_000, retainMs: 1_000 })
     ).resolves.toBe(1);
     expect((await getSessionFileBlobStoreUsage({ homeDir })).usedBytes).toBe(0);
-  });
-
-  it('returns no pending blobs for an empty/absent workspace', async () => {
-    await mkdir(join(homeDir, '.lody-oss'), { recursive: true });
-    expect(await listPendingLocalSessionFiles({ workspaceId: 'ws', homeDir })).toEqual([]);
   });
 });

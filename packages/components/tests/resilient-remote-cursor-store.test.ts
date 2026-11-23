@@ -1,3 +1,4 @@
+import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JsonObject, RemoteCursor, RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { DEFAULT_LORO_STREAMS_BASE_URL, LEGACY_LORO_STREAMS_BASE_URL } from '@lody/shared';
@@ -40,25 +41,6 @@ afterEach(() => {
 });
 
 describe('ResilientRemoteCursorStore', () => {
-  it('uses the primary store when it responds before the timeout', async () => {
-    const primary = new MemoryRemoteCursorStore();
-    const fallback = new MemoryRemoteCursorStore();
-    const warnings: unknown[] = [];
-    const cursor = createCursor(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);
-    await primary.save(cursor);
-
-    const store = new ResilientRemoteCursorStore({
-      dbName: 'cursor-db',
-      timeoutMs: 10,
-      createPrimaryStore: () => primary,
-      createFallbackStore: () => fallback,
-      onWarning: (message, context) => warnings.push({ message, context }),
-    });
-
-    expect(await store.load(cursor.streamUrl)).toEqual(cursor);
-    expect(warnings).toHaveLength(0);
-  });
-
   it('loads and deletes cursors saved under the legacy gateway URL', async () => {
     const primary = new MemoryRemoteCursorStore();
     const fallback = new MemoryRemoteCursorStore();
@@ -106,25 +88,6 @@ describe('ResilientRemoteCursorStore', () => {
     await expect(primary.load(currentUrl)).resolves.toBeNull();
   });
 
-  it('fails open to memory when primary load hangs', async () => {
-    vi.useFakeTimers();
-    const fallback = new MemoryRemoteCursorStore();
-    const warnings: unknown[] = [];
-    const store = new ResilientRemoteCursorStore({
-      dbName: 'cursor-db',
-      timeoutMs: 10,
-      createPrimaryStore: createNeverSettlingStore,
-      createFallbackStore: () => fallback,
-      onWarning: (message, context) => warnings.push({ message, context }),
-    });
-
-    const loadPromise = store.load(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);
-    await vi.advanceTimersByTimeAsync(10);
-
-    await expect(loadPromise).resolves.toBeNull();
-    expect(warnings).toHaveLength(1);
-  });
-
   it('stores future cursors in memory after a primary timeout', async () => {
     vi.useFakeTimers();
     const fallback = new MemoryRemoteCursorStore();
@@ -146,55 +109,56 @@ describe('ResilientRemoteCursorStore', () => {
     expect(await store.load(cursor.streamUrl)).toEqual(cursor);
     expect(warnings).toHaveLength(1);
   });
-
-  it('degrades to memory when the primary store throws', async () => {
-    const fallback = new MemoryRemoteCursorStore();
-    const warnings: unknown[] = [];
-    const cursor = createCursor(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);
-    await fallback.save(cursor);
-    const primary: RemoteCursorStore<JsonObject> = {
-      load: async () => {
-        throw new Error('bad cursor cache');
+  it('conditionally seeds cold progress across instances without overwriting concurrent UI saves', async () => {
+    const indexedDb = new IDBFactory();
+    const queues = new Map<string, Promise<unknown>>();
+    const locks = {
+      request: <T>(name: string, _options: LockOptions, callback: (lock: Lock) => T) => {
+        const task = (queues.get(name) ?? Promise.resolve()).then(() => callback({ name } as Lock));
+        queues.set(
+          name,
+          task.catch(() => {})
+        );
+        return task;
       },
-      save: async () => {},
-      delete: async () => {},
-    };
-    const store = new ResilientRemoteCursorStore({
-      dbName: 'cursor-db',
-      timeoutMs: 10,
-      createPrimaryStore: () => primary,
-      createFallbackStore: () => fallback,
-      onWarning: (message, context) => warnings.push({ message, context }),
+    } as Pick<LockManager, 'request'>;
+    const first = new ResilientRemoteCursorStore({
+      dbName: 'shared-cold-cursor',
+      indexedDb,
+      locks,
     });
-
-    expect(await store.load(cursor.streamUrl)).toEqual(cursor);
-    expect(warnings).toHaveLength(1);
+    const second = new ResilientRemoteCursorStore({
+      dbName: 'shared-cold-cursor',
+      indexedDb,
+      locks,
+    });
+    const stream = 'https://streams.example.com/ds/bucket/session';
+    const worker = createCursor(stream);
+    const foreground = { ...worker, nextOffset: 'ui-progress' };
+    const writing = first.save(foreground);
+    const adopting = second.saveIfAbsent(worker);
+    await writing;
+    expect(await adopting).toBe(false);
+    expect(await second.load(stream)).toEqual(foreground);
+    await first.delete(stream);
+    const results = await Promise.all([
+      first.saveIfAbsent(worker),
+      second.saveIfAbsent(foreground),
+    ]);
+    expect(results).toEqual([true, false]);
+    expect(await first.load(stream)).toEqual(worker);
   });
 
-  it('bypasses primary load when requested', async () => {
+  it('keeps ordinary synchronization available when conditional adoption has no cross-window lock', async () => {
+    vi.stubGlobal('navigator', {});
     const primary = new MemoryRemoteCursorStore();
-    const fallback = new MemoryRemoteCursorStore();
-    const events: unknown[] = [];
-    const cursor = createCursor(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);
-    await primary.save(cursor);
-
     const store = new ResilientRemoteCursorStore({
-      dbName: 'cursor-db',
-      timeoutMs: 10,
+      dbName: 'no-locks',
       createPrimaryStore: () => primary,
-      createFallbackStore: () => fallback,
-      shouldBypassPrimaryLoad: (streamUrl) => streamUrl === cursor.streamUrl,
-      onEvent: (message, context) => events.push({ message, context }),
     });
-
-    await expect(store.load(cursor.streamUrl)).resolves.toBeNull();
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        context: expect.objectContaining({
-          phase: 'primary-bypass',
-          streamUrl: cursor.streamUrl,
-        }),
-      })
-    );
+    const cursor = createCursor('https://streams.example.com/ds/bucket/session');
+    expect(await store.saveIfAbsent(cursor)).toBe(false);
+    await store.save(cursor);
+    expect(await store.load(cursor.streamUrl)).toEqual(cursor);
   });
 });

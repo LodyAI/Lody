@@ -1,0 +1,1011 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 70;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		CA249F1769C6E58272BA942A /* LodyIrohPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04218C2A81FC07CCE7681A6D /* LodyIrohPlugin.swift */; };
+		D00270010000000000000001 /* LodyViewportLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00270010000000000000002 /* LodyViewportLayout.swift */; };
+		047532A0A84D311730EE6BCE /* Pods_OneSignalNotificationServiceExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AB06513C13505F9FCD9716D8 /* Pods_OneSignalNotificationServiceExtension.framework */; };
+		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
+		3500B0852F80D5BD008C293D /* OneSignalNotificationServiceExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3500B07E2F80D5BD008C293D /* OneSignalNotificationServiceExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
+		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
+		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
+		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
+		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
+		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		7AE784DD4D06347A68FB7288 /* Pods_LodyLiveActivityWidget.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EBD2C61685514EABB4A0DB52 /* Pods_LodyLiveActivityWidget.framework */; };
+		A084ECDBA7D38E1E42DFC39D /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */; };
+		B0D1A0000000000000000001 /* LodyBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000010 /* LodyBridgeViewController.swift */; };
+		B0D1A0000000000000000002 /* LodyLiveActivityPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000011 /* LodyLiveActivityPlugin.swift */; };
+		B0D1A0000000000000000003 /* LodyConversationLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000012 /* LodyConversationLiveActivityAttributes.swift */; };
+		B0D1A0000000000000000004 /* LodyConversationLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000012 /* LodyConversationLiveActivityAttributes.swift */; };
+		B0D1A0000000000000000005 /* LodyLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000013 /* LodyLiveActivityWidget.swift */; };
+		B0D1A0000000000000000006 /* LodyLiveActivityWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000015 /* LodyLiveActivityWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B0D1A0000000000000000007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000016 /* Assets.xcassets */; };
+		B0D1A0000000000000000008 /* LodyLiveActivityPermissionActionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000017 /* LodyLiveActivityPermissionActionStore.swift */; };
+		B0D1A0000000000000000009 /* LodyLiveActivityPermissionActionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000017 /* LodyLiveActivityPermissionActionStore.swift */; };
+		B0D1A000000000000000000A /* LodyLiveActivityPermissionResponseIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000018 /* LodyLiveActivityPermissionResponseIntent.swift */; };
+		B0D1A000000000000000000B /* LodyLiveActivityPermissionResponseIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000018 /* LodyLiveActivityPermissionResponseIntent.swift */; };
+		B0D1A0000000000000000060 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000063 /* Localizable.strings */; };
+		B0D1A0000000000000000064 /* LodyLiveActivityLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000066 /* LodyLiveActivityLocalization.swift */; };
+		B0D1A0000000000000000065 /* LodyLiveActivityLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000066 /* LodyLiveActivityLocalization.swift */; };
+		B0D1A0000000000000000067 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = B0D1A0000000000000000063 /* Localizable.strings */; };
+		B0D1A00000000000000000A1 /* LodyStartupTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A00000000000000000A2 /* LodyStartupTheme.swift */; };
+		B0D1A00000000000000000A3 /* LodyStartupThemePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A00000000000000000A4 /* LodyStartupThemePlugin.swift */; };
+		B0D1A00000000000000000B3 /* LodyNativeResetPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A00000000000000000B4 /* LodyNativeResetPlugin.swift */; };
+		B0D1A00000000000000000B5 /* LodyNativeResetCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A00000000000000000B6 /* LodyNativeResetCredentials.swift */; };
+		B0D1B0000000000000000001 /* LodyHomeWidgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1B0000000000000000010 /* LodyHomeWidgetStore.swift */; };
+		B0D1B0000000000000000002 /* LodyHomeWidgetPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1B0000000000000000011 /* LodyHomeWidgetPlugin.swift */; };
+		B0D1B0000000000000000003 /* LodyHomeWidgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1B0000000000000000010 /* LodyHomeWidgetStore.swift */; };
+		B0D1B0000000000000000004 /* LodyHomeScreenWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1B0000000000000000012 /* LodyHomeScreenWidget.swift */; };
+		B0D1B0000000000000000005 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B0D1B0000000000000000013 /* PrivacyInfo.xcprivacy */; };
+		B0D1B0000000000000000006 /* LodyWidgetAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1B0000000000000000014 /* LodyWidgetAppearance.swift */; };
+		B0D1C0000000000000000001 /* LodyTokenUsageWidgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1C0000000000000000010 /* LodyTokenUsageWidgetStore.swift */; };
+		B0D1C0000000000000000002 /* LodyTokenUsageWidgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1C0000000000000000010 /* LodyTokenUsageWidgetStore.swift */; };
+		B0D1C0000000000000000003 /* LodyTokenUsageWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1C0000000000000000011 /* LodyTokenUsageWidget.swift */; };
+		B0D1D0000000000000000001 /* LodyProviderQuotaWidgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1D0000000000000000010 /* LodyProviderQuotaWidgetStore.swift */; };
+		B0D1D0000000000000000002 /* LodyProviderQuotaWidgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1D0000000000000000010 /* LodyProviderQuotaWidgetStore.swift */; };
+		B0D1D0000000000000000003 /* LodyProviderQuotaWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1D0000000000000000011 /* LodyProviderQuotaWidget.swift */; };
+		B0D1A00000000000000000F2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B0D1A00000000000000000F1 /* PrivacyInfo.xcprivacy */; };
+		B0D1A00000000000000000F3 /* LodyAppStoreReviewPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A00000000000000000F4 /* LodyAppStoreReviewPlugin.swift */; };
+		B0D1A00000000000000000F5 /* LodyAppIconPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1A00000000000000000F6 /* LodyAppIconPlugin.swift */; };
+		B0D1A00000000000000000F7 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F646AFBBC6E044ABA9F8835B /* SceneDelegate.swift */; };
+		E2EEB0000000000000000001 /* LodyKekCustody.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2EEB0000000000000000002 /* LodyKekCustody.swift */; };
+		E2EEB0000000000000000003 /* LodyKeychainKekStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2EEB0000000000000000004 /* LodyKeychainKekStorage.swift */; };
+		E2EEB0000000000000000005 /* LodyKekPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2EEB0000000000000000006 /* LodyKekPlugin.swift */; };
+		E2EEB0000000000000000007 /* LodyKekCallQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2EEB0000000000000000008 /* LodyKekCallQueue.swift */; };
+		EA5510000000000000000001 /* LodyPasskeyCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA5510000000000000000002 /* LodyPasskeyCodec.swift */; };
+		EA5510000000000000000003 /* LodyPasskeyCallQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA5510000000000000000004 /* LodyPasskeyCallQueue.swift */; };
+		EA5510000000000000000005 /* LodyPasskeyCeremony.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA5510000000000000000006 /* LodyPasskeyCeremony.swift */; };
+		EA5510000000000000000007 /* LodyPasskeyPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA5510000000000000000008 /* LodyPasskeyPlugin.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		3500B0832F80D5BD008C293D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3500B07D2F80D5BD008C293D;
+			remoteInfo = OneSignalNotificationServiceExtension;
+		};
+		B0D1A0000000000000000050 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B0D1A0000000000000000030;
+			remoteInfo = LodyLiveActivityWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		3500B08A2F80D5BD008C293D /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				3500B0852F80D5BD008C293D /* OneSignalNotificationServiceExtension.appex in Embed Foundation Extensions */,
+				B0D1A0000000000000000006 /* LodyLiveActivityWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		04218C2A81FC07CCE7681A6D /* LodyIrohPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyIrohPlugin.swift; sourceTree = "<group>"; };
+		D00270010000000000000002 /* LodyViewportLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyViewportLayout.swift; sourceTree = "<group>"; };
+		1EAC507A67FD42C79A2C4562 /* Pods-OneSignalNotificationServiceExtension.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-OneSignalNotificationServiceExtension.debug.xcconfig"; path = "Pods/Target Support Files/Pods-OneSignalNotificationServiceExtension/Pods-OneSignalNotificationServiceExtension.debug.xcconfig"; sourceTree = "<group>"; };
+		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
+		3500B0792F80D577008C293D /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		3500B07E2F80D5BD008C293D /* OneSignalNotificationServiceExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OneSignalNotificationServiceExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
+		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		504EC3071FED79650016851F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		504EC30C1FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		504EC30E1FED79650016851F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
+		9790B6079CB73B6EA2319814 /* Pods-OneSignalNotificationServiceExtension.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-OneSignalNotificationServiceExtension.release.xcconfig"; path = "Pods/Target Support Files/Pods-OneSignalNotificationServiceExtension/Pods-OneSignalNotificationServiceExtension.release.xcconfig"; sourceTree = "<group>"; };
+		AB06513C13505F9FCD9716D8 /* Pods_OneSignalNotificationServiceExtension.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_OneSignalNotificationServiceExtension.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
+		B0D1A0000000000000000010 /* LodyBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyBridgeViewController.swift; sourceTree = "<group>"; };
+		B0D1A0000000000000000011 /* LodyLiveActivityPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyLiveActivityPlugin.swift; sourceTree = "<group>"; };
+		B0D1A0000000000000000012 /* LodyConversationLiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyConversationLiveActivityAttributes.swift; sourceTree = "<group>"; };
+		B0D1A0000000000000000013 /* LodyLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyLiveActivityWidget.swift; sourceTree = "<group>"; };
+		B0D1A0000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B0D1A0000000000000000015 /* LodyLiveActivityWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LodyLiveActivityWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0D1A0000000000000000016 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B0D1A0000000000000000017 /* LodyLiveActivityPermissionActionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyLiveActivityPermissionActionStore.swift; sourceTree = "<group>"; };
+		B0D1A0000000000000000018 /* LodyLiveActivityPermissionResponseIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyLiveActivityPermissionResponseIntent.swift; sourceTree = "<group>"; };
+		B0D1A0000000000000000019 /* LodyLiveActivityWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LodyLiveActivityWidget.entitlements; sourceTree = "<group>"; };
+		B0D1A0000000000000000061 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		B0D1A0000000000000000062 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		B0D1A0000000000000000066 /* LodyLiveActivityLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyLiveActivityLocalization.swift; sourceTree = "<group>"; };
+		B0D1A00000000000000000A2 /* LodyStartupTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyStartupTheme.swift; sourceTree = "<group>"; };
+		B0D1A00000000000000000A4 /* LodyStartupThemePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyStartupThemePlugin.swift; sourceTree = "<group>"; };
+		B0D1A00000000000000000B4 /* LodyNativeResetPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyNativeResetPlugin.swift; sourceTree = "<group>"; };
+		B0D1A00000000000000000B6 /* LodyNativeResetCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyNativeResetCredentials.swift; sourceTree = "<group>"; };
+		B0D1B0000000000000000010 /* LodyHomeWidgetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyHomeWidgetStore.swift; sourceTree = "<group>"; };
+		B0D1B0000000000000000011 /* LodyHomeWidgetPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyHomeWidgetPlugin.swift; sourceTree = "<group>"; };
+		B0D1B0000000000000000012 /* LodyHomeScreenWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyHomeScreenWidget.swift; sourceTree = "<group>"; };
+		B0D1B0000000000000000014 /* LodyWidgetAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyWidgetAppearance.swift; sourceTree = "<group>"; };
+		B0D1C0000000000000000010 /* LodyTokenUsageWidgetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyTokenUsageWidgetStore.swift; sourceTree = "<group>"; };
+		B0D1C0000000000000000011 /* LodyTokenUsageWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyTokenUsageWidget.swift; sourceTree = "<group>"; };
+		B0D1D0000000000000000010 /* LodyProviderQuotaWidgetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyProviderQuotaWidgetStore.swift; sourceTree = "<group>"; };
+		B0D1D0000000000000000011 /* LodyProviderQuotaWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyProviderQuotaWidget.swift; sourceTree = "<group>"; };
+		B0D1B0000000000000000013 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B0D1A00000000000000000F1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B0D1A00000000000000000F4 /* LodyAppStoreReviewPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyAppStoreReviewPlugin.swift; sourceTree = "<group>"; };
+		B0D1A00000000000000000F6 /* LodyAppIconPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyAppIconPlugin.swift; sourceTree = "<group>"; };
+		B97AC529C99D0C14F886B119 /* Pods-LodyLiveActivityWidget.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-LodyLiveActivityWidget.debug.xcconfig"; path = "Pods/Target Support Files/Pods-LodyLiveActivityWidget/Pods-LodyLiveActivityWidget.debug.xcconfig"; sourceTree = "<group>"; };
+		EBD2C61685514EABB4A0DB52 /* Pods_LodyLiveActivityWidget.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_LodyLiveActivityWidget.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		F646AFBBC6E044ABA9F8835B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+		F76704BEEF05023421F6C544 /* Pods-LodyLiveActivityWidget.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-LodyLiveActivityWidget.release.xcconfig"; path = "Pods/Target Support Files/Pods-LodyLiveActivityWidget/Pods-LodyLiveActivityWidget.release.xcconfig"; sourceTree = "<group>"; };
+		FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
+		E2EEB0000000000000000002 /* LodyKekCustody.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyKekCustody.swift; sourceTree = "<group>"; };
+		E2EEB0000000000000000004 /* LodyKeychainKekStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyKeychainKekStorage.swift; sourceTree = "<group>"; };
+		E2EEB0000000000000000006 /* LodyKekPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyKekPlugin.swift; sourceTree = "<group>"; };
+		E2EEB0000000000000000008 /* LodyKekCallQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyKekCallQueue.swift; sourceTree = "<group>"; };
+		EA5510000000000000000002 /* LodyPasskeyCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyPasskeyCodec.swift; sourceTree = "<group>"; };
+		EA5510000000000000000004 /* LodyPasskeyCallQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyPasskeyCallQueue.swift; sourceTree = "<group>"; };
+		EA5510000000000000000006 /* LodyPasskeyCeremony.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyPasskeyCeremony.swift; sourceTree = "<group>"; };
+		EA5510000000000000000008 /* LodyPasskeyPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyPasskeyPlugin.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3500B0862F80D5BD008C293D /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3500B07D2F80D5BD008C293D /* OneSignalNotificationServiceExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		3500B07F2F80D5BD008C293D /* OneSignalNotificationServiceExtension */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (3500B0862F80D5BD008C293D /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = OneSignalNotificationServiceExtension; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3500B07B2F80D5BD008C293D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				047532A0A84D311730EE6BCE /* Pods_OneSignalNotificationServiceExtension.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		504EC3011FED79650016851F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A084ECDBA7D38E1E42DFC39D /* Pods_App.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B0D1A0000000000000000032 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7AE784DD4D06347A68FB7288 /* Pods_LodyLiveActivityWidget.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		27E2DDA53C4D2A4D1A88CE4A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */,
+				AB06513C13505F9FCD9716D8 /* Pods_OneSignalNotificationServiceExtension.framework */,
+				EBD2C61685514EABB4A0DB52 /* Pods_LodyLiveActivityWidget.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		504EC2FB1FED79650016851F = {
+			isa = PBXGroup;
+			children = (
+				504EC3061FED79650016851F /* App */,
+				3500B07F2F80D5BD008C293D /* OneSignalNotificationServiceExtension */,
+				B0D1A0000000000000000020 /* LodyLiveActivityWidget */,
+				504EC3051FED79650016851F /* Products */,
+				7F8756D8B27F46E3366F6CEA /* Pods */,
+				27E2DDA53C4D2A4D1A88CE4A /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		504EC3051FED79650016851F /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				504EC3041FED79650016851F /* App.app */,
+				3500B07E2F80D5BD008C293D /* OneSignalNotificationServiceExtension.appex */,
+				B0D1A0000000000000000015 /* LodyLiveActivityWidget.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		504EC3061FED79650016851F /* App */ = {
+			isa = PBXGroup;
+			children = (
+				3500B0792F80D577008C293D /* App.entitlements */,
+				50379B222058CBB4000EE86E /* capacitor.config.json */,
+				504EC3071FED79650016851F /* AppDelegate.swift */,
+				F646AFBBC6E044ABA9F8835B /* SceneDelegate.swift */,
+				B0D1A0000000000000000010 /* LodyBridgeViewController.swift */,
+				D00270010000000000000002 /* LodyViewportLayout.swift */,
+				B0D1A0000000000000000011 /* LodyLiveActivityPlugin.swift */,
+				B0D1A00000000000000000F4 /* LodyAppStoreReviewPlugin.swift */,
+				B0D1A00000000000000000A2 /* LodyStartupTheme.swift */,
+				B0D1A00000000000000000A4 /* LodyStartupThemePlugin.swift */,
+				B0D1A00000000000000000B4 /* LodyNativeResetPlugin.swift */,
+				EA5510000000000000000002 /* LodyPasskeyCodec.swift */,
+				EA5510000000000000000004 /* LodyPasskeyCallQueue.swift */,
+				EA5510000000000000000006 /* LodyPasskeyCeremony.swift */,
+				EA5510000000000000000008 /* LodyPasskeyPlugin.swift */,
+				E2EEB0000000000000000006 /* LodyKekPlugin.swift */,
+				04218C2A81FC07CCE7681A6D /* LodyIrohPlugin.swift */,
+				E2EEB0000000000000000008 /* LodyKekCallQueue.swift */,
+				E2EEB0000000000000000004 /* LodyKeychainKekStorage.swift */,
+				E2EEB0000000000000000002 /* LodyKekCustody.swift */,
+				B0D1A00000000000000000B6 /* LodyNativeResetCredentials.swift */,
+				B0D1B0000000000000000010 /* LodyHomeWidgetStore.swift */,
+				B0D1B0000000000000000011 /* LodyHomeWidgetPlugin.swift */,
+				B0D1C0000000000000000010 /* LodyTokenUsageWidgetStore.swift */,
+				B0D1D0000000000000000010 /* LodyProviderQuotaWidgetStore.swift */,
+				B0D1A00000000000000000F6 /* LodyAppIconPlugin.swift */,
+				B0D1A0000000000000000012 /* LodyConversationLiveActivityAttributes.swift */,
+				B0D1A0000000000000000017 /* LodyLiveActivityPermissionActionStore.swift */,
+				B0D1A0000000000000000066 /* LodyLiveActivityLocalization.swift */,
+				504EC30B1FED79650016851F /* Main.storyboard */,
+				504EC30E1FED79650016851F /* Assets.xcassets */,
+				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
+				504EC3131FED79650016851F /* Info.plist */,
+				B0D1A00000000000000000F1 /* PrivacyInfo.xcprivacy */,
+				2FAD9762203C412B000D30F8 /* config.xml */,
+				50B271D01FEDC1A000F3C39B /* public */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		7F8756D8B27F46E3366F6CEA /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */,
+				AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */,
+				1EAC507A67FD42C79A2C4562 /* Pods-OneSignalNotificationServiceExtension.debug.xcconfig */,
+				9790B6079CB73B6EA2319814 /* Pods-OneSignalNotificationServiceExtension.release.xcconfig */,
+				B97AC529C99D0C14F886B119 /* Pods-LodyLiveActivityWidget.debug.xcconfig */,
+				F76704BEEF05023421F6C544 /* Pods-LodyLiveActivityWidget.release.xcconfig */,
+			);
+			name = Pods;
+			sourceTree = "<group>";
+		};
+		B0D1A0000000000000000020 /* LodyLiveActivityWidget */ = {
+			isa = PBXGroup;
+			children = (
+				B0D1A0000000000000000013 /* LodyLiveActivityWidget.swift */,
+				B0D1B0000000000000000012 /* LodyHomeScreenWidget.swift */,
+				B0D1C0000000000000000011 /* LodyTokenUsageWidget.swift */,
+				B0D1D0000000000000000011 /* LodyProviderQuotaWidget.swift */,
+				B0D1B0000000000000000014 /* LodyWidgetAppearance.swift */,
+				B0D1B0000000000000000013 /* PrivacyInfo.xcprivacy */,
+				B0D1A0000000000000000018 /* LodyLiveActivityPermissionResponseIntent.swift */,
+				B0D1A0000000000000000014 /* Info.plist */,
+				B0D1A0000000000000000019 /* LodyLiveActivityWidget.entitlements */,
+				B0D1A0000000000000000016 /* Assets.xcassets */,
+				B0D1A0000000000000000063 /* Localizable.strings */,
+			);
+			path = LodyLiveActivityWidget;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		3500B07D2F80D5BD008C293D /* OneSignalNotificationServiceExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3500B0872F80D5BD008C293D /* Build configuration list for PBXNativeTarget "OneSignalNotificationServiceExtension" */;
+			buildPhases = (
+				AFA50CEFF8BD95286364A54D /* [CP] Check Pods Manifest.lock */,
+				3500B07A2F80D5BD008C293D /* Sources */,
+				3500B07B2F80D5BD008C293D /* Frameworks */,
+				3500B07C2F80D5BD008C293D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				3500B07F2F80D5BD008C293D /* OneSignalNotificationServiceExtension */,
+			);
+			name = OneSignalNotificationServiceExtension;
+			productName = OneSignalNotificationServiceExtension;
+			productReference = 3500B07E2F80D5BD008C293D /* OneSignalNotificationServiceExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		504EC3031FED79650016851F /* App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */;
+			buildPhases = (
+				6634F4EFEBD30273BCE97C65 /* [CP] Check Pods Manifest.lock */,
+				504EC3001FED79650016851F /* Sources */,
+				504EC3011FED79650016851F /* Frameworks */,
+				504EC3021FED79650016851F /* Resources */,
+				9592DBEFFC6D2A0C8D5DEB22 /* [CP] Embed Pods Frameworks */,
+				3500B08A2F80D5BD008C293D /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3500B0842F80D5BD008C293D /* PBXTargetDependency */,
+				B0D1A0000000000000000051 /* PBXTargetDependency */,
+			);
+			name = App;
+			productName = App;
+			productReference = 504EC3041FED79650016851F /* App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B0D1A0000000000000000030 /* LodyLiveActivityWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B0D1A0000000000000000040 /* Build configuration list for PBXNativeTarget "LodyLiveActivityWidget" */;
+			buildPhases = (
+				BFE79A2638C9180325B66638 /* [CP] Check Pods Manifest.lock */,
+				B0D1A0000000000000000031 /* Sources */,
+				B0D1A0000000000000000032 /* Frameworks */,
+				B0D1A0000000000000000033 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LodyLiveActivityWidget;
+			productName = LodyLiveActivityWidget;
+			productReference = B0D1A0000000000000000015 /* LodyLiveActivityWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		504EC2FC1FED79650016851F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 0920;
+				TargetAttributes = {
+					3500B07D2F80D5BD008C293D = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					504EC3031FED79650016851F = {
+						CreatedOnToolsVersion = 9.2;
+						LastSwiftMigration = 1100;
+						ProvisioningStyle = Automatic;
+					};
+					B0D1A0000000000000000030 = {
+						CreatedOnToolsVersion = 26.3;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */;
+			compatibilityVersion = "Xcode 8.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				"zh-Hans",
+				Base,
+			);
+			mainGroup = 504EC2FB1FED79650016851F;
+			productRefGroup = 504EC3051FED79650016851F /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				504EC3031FED79650016851F /* App */,
+				3500B07D2F80D5BD008C293D /* OneSignalNotificationServiceExtension */,
+				B0D1A0000000000000000030 /* LodyLiveActivityWidget */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3500B07C2F80D5BD008C293D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		504EC3021FED79650016851F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */,
+				50B271D11FEDC1A000F3C39B /* public in Resources */,
+				504EC30F1FED79650016851F /* Assets.xcassets in Resources */,
+				B0D1A00000000000000000F2 /* PrivacyInfo.xcprivacy in Resources */,
+				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
+				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
+				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
+				B0D1A0000000000000000067 /* Localizable.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B0D1A0000000000000000033 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0D1A0000000000000000007 /* Assets.xcassets in Resources */,
+				B0D1A0000000000000000060 /* Localizable.strings in Resources */,
+				B0D1B0000000000000000005 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		6634F4EFEBD30273BCE97C65 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-App-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		9592DBEFFC6D2A0C8D5DEB22 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-App/Pods-App-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		AFA50CEFF8BD95286364A54D /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-OneSignalNotificationServiceExtension-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		BFE79A2638C9180325B66638 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-LodyLiveActivityWidget-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3500B07A2F80D5BD008C293D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		504EC3001FED79650016851F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0D1A0000000000000000001 /* LodyBridgeViewController.swift in Sources */,
+				D00270010000000000000001 /* LodyViewportLayout.swift in Sources */,
+				B0D1A0000000000000000002 /* LodyLiveActivityPlugin.swift in Sources */,
+				B0D1A00000000000000000F3 /* LodyAppStoreReviewPlugin.swift in Sources */,
+				B0D1A00000000000000000A1 /* LodyStartupTheme.swift in Sources */,
+				B0D1A00000000000000000A3 /* LodyStartupThemePlugin.swift in Sources */,
+				B0D1A00000000000000000B3 /* LodyNativeResetPlugin.swift in Sources */,
+				EA5510000000000000000001 /* LodyPasskeyCodec.swift in Sources */,
+				EA5510000000000000000003 /* LodyPasskeyCallQueue.swift in Sources */,
+				EA5510000000000000000005 /* LodyPasskeyCeremony.swift in Sources */,
+				EA5510000000000000000007 /* LodyPasskeyPlugin.swift in Sources */,
+				E2EEB0000000000000000005 /* LodyKekPlugin.swift in Sources */,
+				CA249F1769C6E58272BA942A /* LodyIrohPlugin.swift in Sources */,
+				E2EEB0000000000000000007 /* LodyKekCallQueue.swift in Sources */,
+				E2EEB0000000000000000003 /* LodyKeychainKekStorage.swift in Sources */,
+				E2EEB0000000000000000001 /* LodyKekCustody.swift in Sources */,
+				B0D1A00000000000000000B5 /* LodyNativeResetCredentials.swift in Sources */,
+				B0D1B0000000000000000001 /* LodyHomeWidgetStore.swift in Sources */,
+				B0D1B0000000000000000002 /* LodyHomeWidgetPlugin.swift in Sources */,
+				B0D1C0000000000000000001 /* LodyTokenUsageWidgetStore.swift in Sources */,
+				B0D1D0000000000000000001 /* LodyProviderQuotaWidgetStore.swift in Sources */,
+				B0D1A00000000000000000F5 /* LodyAppIconPlugin.swift in Sources */,
+				B0D1A0000000000000000003 /* LodyConversationLiveActivityAttributes.swift in Sources */,
+				B0D1A0000000000000000008 /* LodyLiveActivityPermissionActionStore.swift in Sources */,
+				B0D1A0000000000000000064 /* LodyLiveActivityLocalization.swift in Sources */,
+				B0D1A000000000000000000B /* LodyLiveActivityPermissionResponseIntent.swift in Sources */,
+				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				B0D1A00000000000000000F7 /* SceneDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B0D1A0000000000000000031 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0D1A0000000000000000004 /* LodyConversationLiveActivityAttributes.swift in Sources */,
+				B0D1A0000000000000000009 /* LodyLiveActivityPermissionActionStore.swift in Sources */,
+				B0D1A0000000000000000065 /* LodyLiveActivityLocalization.swift in Sources */,
+				B0D1A0000000000000000005 /* LodyLiveActivityWidget.swift in Sources */,
+				B0D1B0000000000000000003 /* LodyHomeWidgetStore.swift in Sources */,
+				B0D1B0000000000000000004 /* LodyHomeScreenWidget.swift in Sources */,
+				B0D1B0000000000000000006 /* LodyWidgetAppearance.swift in Sources */,
+				B0D1C0000000000000000002 /* LodyTokenUsageWidgetStore.swift in Sources */,
+				B0D1C0000000000000000003 /* LodyTokenUsageWidget.swift in Sources */,
+				B0D1D0000000000000000002 /* LodyProviderQuotaWidgetStore.swift in Sources */,
+				B0D1D0000000000000000003 /* LodyProviderQuotaWidget.swift in Sources */,
+				B0D1A000000000000000000A /* LodyLiveActivityPermissionResponseIntent.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		3500B0842F80D5BD008C293D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3500B07D2F80D5BD008C293D /* OneSignalNotificationServiceExtension */;
+			targetProxy = 3500B0832F80D5BD008C293D /* PBXContainerItemProxy */;
+		};
+		B0D1A0000000000000000051 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B0D1A0000000000000000030 /* LodyLiveActivityWidget */;
+			targetProxy = B0D1A0000000000000000050 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		504EC30B1FED79650016851F /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				504EC30C1FED79650016851F /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+		504EC3101FED79650016851F /* LaunchScreen.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				504EC3111FED79650016851F /* Base */,
+			);
+			name = LaunchScreen.storyboard;
+			sourceTree = "<group>";
+		};
+		B0D1A0000000000000000063 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				B0D1A0000000000000000061 /* en */,
+				B0D1A0000000000000000062 /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		3500B0882F80D5BD008C293D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1EAC507A67FD42C79A2C4562 /* Pods-OneSignalNotificationServiceExtension.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_ENTITLEMENTS = OneSignalNotificationServiceExtension/OneSignalNotificationServiceExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YTRMX32C99;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OneSignalNotificationServiceExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = OneSignalNotificationServiceExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.lody.mobile.OneSignalNotificationServiceExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		3500B0892F80D5BD008C293D /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 9790B6079CB73B6EA2319814 /* Pods-OneSignalNotificationServiceExtension.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_ENTITLEMENTS = OneSignalNotificationServiceExtension/OneSignalNotificationServiceExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YTRMX32C99;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = OneSignalNotificationServiceExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = OneSignalNotificationServiceExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.lody.mobile.OneSignalNotificationServiceExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		504EC3141FED79650016851F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				MTL_ENABLE_DEBUG_INFO = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		504EC3151FED79650016851F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		504EC3171FED79650016851F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconBlue;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YTRMX32C99;
+				INFOPLIST_FILE = App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.104.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
+				PRODUCT_BUNDLE_IDENTIFIER = ai.lody.mobile;
+				LODY_PASSKEY_ENABLED = NO;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		504EC3181FED79650016851F /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */;
+			buildSettings = {
+				APS_ENVIRONMENT = production;
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconBlue;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YTRMX32C99;
+				INFOPLIST_FILE = App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.104.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.lody.mobile;
+				LODY_PASSKEY_ENABLED = NO;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B0D1A0000000000000000041 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B97AC529C99D0C14F886B119 /* Pods-LodyLiveActivityWidget.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_ENTITLEMENTS = LodyLiveActivityWidget/LodyLiveActivityWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YTRMX32C99;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LodyLiveActivityWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Lody Activity";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 0.55.2;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.lody.mobile.LodyLiveActivityWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B0D1A0000000000000000042 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = F76704BEEF05023421F6C544 /* Pods-LodyLiveActivityWidget.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CODE_SIGN_ENTITLEMENTS = LodyLiveActivityWidget/LodyLiveActivityWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YTRMX32C99;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LodyLiveActivityWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Lody Activity";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 0.55.2;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.lody.mobile.LodyLiveActivityWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3500B0872F80D5BD008C293D /* Build configuration list for PBXNativeTarget "OneSignalNotificationServiceExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3500B0882F80D5BD008C293D /* Debug */,
+				3500B0892F80D5BD008C293D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				504EC3141FED79650016851F /* Debug */,
+				504EC3151FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				504EC3171FED79650016851F /* Debug */,
+				504EC3181FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B0D1A0000000000000000040 /* Build configuration list for PBXNativeTarget "LodyLiveActivityWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B0D1A0000000000000000041 /* Debug */,
+				B0D1A0000000000000000042 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 504EC2FC1FED79650016851F /* Project object */;
+}

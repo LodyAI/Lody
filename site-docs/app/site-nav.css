@@ -143,7 +143,16 @@
 }
 
 /* Mobile menu primitives — hidden on desktop, revealed at <= 768px. */
+.site-nav__mobile {
+  display: none;
+}
+
+.site-nav__toggle::-webkit-details-marker {
+  display: none;
+}
+
 .site-nav__toggle {
+  list-style: none;
   display: none;
   align-items: center;
   justify-content: center;
@@ -180,6 +189,10 @@
     display: none;
   }
 
+  .site-nav__mobile {
+    display: block;
+  }
+
   .site-nav__toggle {
     display: inline-flex;
   }
@@ -193,7 +206,7 @@
   }
 
   /* When open: bar + panel read as one frosted sheet (no hard double-band). */
-  .site-nav[data-open='true'] {
+  .site-nav:has(.site-nav__mobile[open]) {
     border-bottom-color: transparent;
     background: hsl(var(--landing-surface-1, 0 0% 100%) / 0.88);
     -webkit-backdrop-filter: saturate(1.25) blur(18px);
@@ -228,7 +241,7 @@
       visibility 0.22s ease;
   }
 
-  .site-nav__menu[data-open='true'] {
+  .site-nav__mobile[open] .site-nav__menu {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;

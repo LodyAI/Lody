@@ -1,13 +1,45 @@
 import { describe, expect, it } from 'vitest';
+import { createPlanModeConfigOption } from 'acp-extension-core';
 
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
+  getStaticBuiltinAcpCapabilities,
+  resolveAcpConfigOptionsForModel,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
   type AcpCapabilityCacheEntry,
 } from '../src';
+import {
+  classifyPermissionModeFace,
+  getBuiltinDefaultModeId,
+  getManagedBuiltinRuntimeByAgentType,
+  getManagedBuiltinRuntimeByRuntimeName,
+  hasBuiltinRuntimeOverrideValues,
+  isBuiltinAgentType,
+  isManagedBuiltinAgentType,
+  supportsBuiltinProviderSetup,
+} from '../src/ai';
 
-/** Codex-shaped agent: reasoning effort, a boolean fast toggle, and collaboration mode. */
+describe('builtin independent Plan preflight', () => {
+  it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
+    'dispatches boolean Plan for %s without selecting a permission mode',
+    (agentType) => {
+      const capability = getStaticBuiltinAcpCapabilities('builtin', agentType);
+      expect(capability?.configOptions.find((option) => option.id === 'plan_mode')).toEqual({
+        ...createPlanModeConfigOption(false),
+        options: [],
+      });
+      expect(summarizeAgentRunConfigCapabilities(capability).planMode).toBe(true);
+      for (const planMode of [true, false]) {
+        expect(resolveAgentRunConfigSelection({ planMode }, capability)).toEqual({
+          configOptionValues: { plan_mode: planMode },
+        });
+      }
+    }
+  );
+});
+
+/** Legacy Codex agent: reasoning effort, a boolean fast toggle, and collaboration mode. */
 const codexCapability = (): AcpCapabilityCacheEntry => ({
   cliType: 'builtin',
   agentType: 'codex',
@@ -160,10 +192,24 @@ describe('agent run config selection', () => {
     });
   });
 
-  it('rejects a plan-mode option that is not the collaboration_mode select', () => {
-    /* Codex publishes exactly one plan shape. An on/off option under some other
-       id is not plan mode, so the request must fail loudly rather than run with
-       planning silently off. */
+  it.each([false, true])('dispatches Core plan_mode=%s without changing permissions', (enabled) => {
+    const capability = codexCapability();
+    capability.configOptions = [{ ...createPlanModeConfigOption(false), options: [] }];
+    expect(summarizeAgentRunConfigCapabilities(capability).planMode).toBe(true);
+    expect(resolveAgentRunConfigSelection({ planMode: enabled }, capability)).toEqual({
+      configOptionValues: { plan_mode: enabled },
+    });
+  });
+
+  it('prefers Core planning when both generations are advertised', () => {
+    const capability = codexCapability();
+    capability.configOptions?.push({ ...createPlanModeConfigOption(false), options: [] });
+    expect(resolveAgentRunConfigSelection({ planMode: true }, capability)).toEqual({
+      configOptionValues: { plan_mode: true },
+    });
+  });
+
+  it('rejects unknown plan option identities', () => {
     const other = codexCapability();
     other.configOptions = other.configOptions?.map((option) =>
       option.id === 'collaboration_mode'
@@ -222,26 +268,6 @@ describe('agent run config selection', () => {
     );
     expect(resolveAgentRunConfigSelection({}, undefined)).toEqual({});
     expect(resolveAgentRunConfigSelection(undefined, codexCapability())).toEqual({});
-  });
-
-  it('summarizes what a caller may choose per agent', () => {
-    expect(summarizeAgentRunConfigCapabilities(codexCapability())).toEqual({
-      models: [
-        { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
-        { id: 'gpt-5.4-mini', name: 'GPT-5.4-Mini' },
-      ],
-      reasoningEffortValues: ['low', 'medium', 'high'],
-      measuredForModelId: 'gpt-5.6-sol',
-      fastMode: true,
-      planMode: true,
-    });
-    expect(summarizeAgentRunConfigCapabilities(claudeCapability()).planMode).toBe(true);
-    expect(summarizeAgentRunConfigCapabilities(undefined)).toEqual({
-      models: [],
-      reasoningEffortValues: [],
-      fastMode: false,
-      planMode: false,
-    });
   });
 
   it('reports effort per model when the agent published the breakdown', () => {
@@ -345,11 +371,348 @@ describe('agent run config selection', () => {
       fetchedAt: 1,
     };
     expect(summarizeAgentRunConfigCapabilities(legacy)).toEqual({
+      modes: legacy.modes,
+      configOptions: [],
       models: [{ id: 'k2', name: 'Kimi K2' }],
       reasoningEffortValues: [],
       fastMode: false,
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
+  });
+
+  it('discovers all advertised option ids without categories or current values', () => {
+    const summary = summarizeAgentRunConfigCapabilities({
+      modes: [{ id: 'default', name: 'Agent' }],
+      models: [],
+      configOptions: [
+        {
+          id: 'permission_mode',
+          name: 'Permission',
+          type: 'select',
+          currentValue: 'ask',
+          options: [
+            { value: 'ask', name: 'Ask' },
+            { value: 'always-approve', name: 'Always approve' },
+          ],
+        },
+        { id: 'custom_toggle', name: 'Custom', type: 'boolean', currentValue: true, options: [] },
+        {
+          id: 'interaction',
+          name: 'Interaction',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'default',
+          options: [{ value: 'plan', name: 'Plan' }],
+        },
+      ],
+    });
+    expect(summary.modes).toEqual([
+      { id: 'default', name: 'Agent' },
+      { id: 'plan', name: 'Plan' },
+    ]);
+    expect(summary.configOptions).toEqual([
+      {
+        id: 'permission_mode',
+        name: 'Permission',
+        type: 'select',
+        options: [
+          { value: 'ask', name: 'Ask' },
+          { value: 'always-approve', name: 'Always approve' },
+        ],
+      },
+      { id: 'custom_toggle', name: 'Custom', type: 'boolean', options: [] },
+      {
+        id: 'interaction',
+        name: 'Interaction',
+        category: 'mode',
+        type: 'select',
+        options: [{ value: 'plan', name: 'Plan' }],
+      },
+    ]);
+  });
+});
+
+describe('MCP run config against declared per-model controls', () => {
+  // A Claude probe that ran on model-a: no effort option, no Fast option.
+  const probedClaudeCapability = (): AcpCapabilityCacheEntry => ({
+    cliType: 'builtin',
+    agentType: 'claude',
+    modes: [],
+    models: [
+      { modelId: 'model-a', name: 'A' },
+      { modelId: 'model-b', name: 'B' },
+    ],
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'model-a',
+        options: [
+          { value: 'model-a', name: 'A' },
+          { value: 'model-b', name: 'B' },
+        ],
+      },
+    ],
+    declaredModelControls: {
+      'model-a': { fastMode: false },
+      'model-b': { effortValues: ['low', 'high'], fastMode: true },
+    },
+    fetchedAt: 1,
+  });
+
+  it("maps effort and Fast onto the adapter's own ids for the target model", () => {
+    const resolution = resolveAgentRunConfigSelection(
+      { modelId: 'model-b', reasoningEffort: 'default', fastMode: true },
+      probedClaudeCapability()
+    );
+    expect(resolution.configOptionValues).toEqual({ effort: 'default', fast: true });
+    expect(resolution.validatedConfigIds).toEqual(expect.arrayContaining(['effort', 'fast']));
+    expect(summarizeAgentRunConfigCapabilities(probedClaudeCapability()).models).toEqual([
+      { id: 'model-a', name: 'A', reasoningEffortValues: [] },
+      { id: 'model-b', name: 'B', reasoningEffortValues: ['default', 'low', 'high'] },
+    ]);
+  });
+
+  it('rejects what the target model declares it does not have', () => {
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'model-a', reasoningEffort: 'low' },
+        probedClaudeCapability()
+      )
+    ).toThrow(/does not offer a reasoning effort/);
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'model-a', fastMode: true },
+        probedClaudeCapability()
+      )
+    ).toThrow(/does not offer fast mode/);
+    expect(
+      resolveAgentRunConfigSelection(
+        { modelId: 'model-a', fastMode: false },
+        probedClaudeCapability()
+      ).configOptionValues
+    ).toBeUndefined();
+  });
+});
+
+describe('observed per-model option lists', () => {
+  const thoughtLevel = (values: string[], currentValue = values[0] ?? '') => ({
+    id: 'thought_level',
+    name: 'Thinking',
+    category: 'thought_level',
+    type: 'select' as const,
+    currentValue,
+    options: values.map((value) => ({ value, name: value })),
+  });
+  const modelSelect = (currentValue: string) => ({
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select' as const,
+    currentValue,
+    options: ['swe-2-high', 'fusion', 'adaptive'].map((value) => ({ value, name: value })),
+  });
+  const fast = {
+    id: 'fast',
+    name: 'Fast',
+    type: 'boolean' as const,
+    currentValue: false,
+    options: [],
+  };
+  // Probed on swe-2-high (medium/high/max), as in LodyAI/Lody#1215.
+  const capability: AcpCapabilityCacheEntry = {
+    cliType: 'builtin',
+    agentType: 'devin',
+    modes: [],
+    models: [],
+    fetchedAt: 1,
+    configOptions: [modelSelect('swe-2-high'), thoughtLevel(['medium', 'high', 'max'])],
+    observedModelConfigOptions: {
+      fusion: [thoughtLevel(['low', 'medium', 'high', 'xhigh', 'max']), fast],
+      adaptive: [],
+    },
+  };
+
+  it('composes the target model’s own options and keeps the snapshot’s model selector', () => {
+    expect(
+      resolveAcpConfigOptionsForModel(
+        capability.configOptions,
+        capability.observedModelConfigOptions,
+        'fusion'
+      )
+    ).toEqual({
+      source: 'observed',
+      configOptions: [
+        modelSelect('swe-2-high'),
+        thoughtLevel(['low', 'medium', 'high', 'xhigh', 'max']),
+        fast,
+      ],
+    });
+    expect(
+      resolveAcpConfigOptionsForModel(
+        capability.configOptions,
+        capability.observedModelConfigOptions,
+        'swe-2-high'
+      ).source
+    ).toBe('snapshot');
+    expect(resolveAcpConfigOptionsForModel(capability.configOptions, {}, 'fusion')).toEqual({
+      source: 'borrowed',
+      configOptions: capability.configOptions,
+    });
+  });
+
+  it('validates effort and Fast against the target model’s observed list', () => {
+    expect(
+      resolveAgentRunConfigSelection(
+        { modelId: 'fusion', reasoningEffort: 'low', fastMode: true },
+        capability
+      )
+    ).toEqual({
+      modelId: 'fusion',
+      configOptionValues: { thought_level: 'low', fast: true },
+      validatedConfigIds: ['thought_level', 'fast'],
+    });
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'fusion', reasoningEffort: 'ultra' }, capability)
+    ).toThrow('Invalid reasoning effort for model fusion: ultra.');
+    // The agent reported no effort and no Fast for this model.
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'adaptive', reasoningEffort: 'low' }, capability)
+    ).toThrow('Model adaptive does not offer a reasoning effort option.');
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'adaptive', fastMode: true }, capability)
+    ).toThrow('Model adaptive does not offer fast mode.');
+  });
+
+  it('lists each observed model’s effort values for discovery', () => {
+    expect(summarizeAgentRunConfigCapabilities(capability).models).toEqual([
+      { id: 'swe-2-high', name: 'swe-2-high' },
+      {
+        id: 'fusion',
+        name: 'fusion',
+        reasoningEffortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      { id: 'adaptive', name: 'adaptive', reasoningEffortValues: [] },
+    ]);
+  });
+});
+
+describe('builtin agent static contracts', () => {
+  it('waits for a live probe before advertising DeepSeek or Bub endpoint-dependent options', () => {
+    const deepseek = getStaticBuiltinAcpCapabilities('builtin', 'deepseek');
+    expect(deepseek?.models).toEqual([]);
+    expect(deepseek?.configOptions.map((option) => option.id)).toEqual([
+      'plan_mode',
+      'mode',
+      'agent_preset',
+    ]);
+    expect(getStaticBuiltinAcpCapabilities('builtin', 'bub')).toBeUndefined();
+    expect(getBuiltinDefaultModeId('builtin', 'bub')).toBeUndefined();
+  });
+
+  it('accepts Sorbet into the verification queue without treating it as a managed runtime', () => {
+    expect(isBuiltinAgentType('sorbet')).toBe(true);
+    expect(isManagedBuiltinAgentType('sorbet')).toBe(false);
+    expect(supportsBuiltinProviderSetup('sorbet')).toBe(true);
+    expect(supportsBuiltinProviderSetup('unknown')).toBe(false);
+  });
+
+  it('maps Grok and Kimi builtins to managed runtimes, approval faces, defaults, and override invalidation', () => {
+    expect(isBuiltinAgentType('grok')).toBe(true);
+    expect(getManagedBuiltinRuntimeByAgentType('grok')).toEqual({
+      runtimeName: 'grok-build',
+      agentType: 'grok',
+      displayName: 'Grok',
+    });
+    expect(getManagedBuiltinRuntimeByRuntimeName('grok-build')?.agentType).toBe('grok');
+    expect(classifyPermissionModeFace('always-approve')).toEqual({
+      kind: 'full-access',
+      tone: 'warning',
+      render: 'icon',
+    });
+    expect(hasBuiltinRuntimeOverrideValues({ grokPath: ' /opt/grok ' })).toBe(true);
+    expect(
+      getStaticBuiltinAcpCapabilities('builtin', 'grok', { grokPath: '/opt/grok' })
+    ).toBeUndefined();
+
+    expect(isBuiltinAgentType('kimi')).toBe(true);
+    expect(getManagedBuiltinRuntimeByAgentType('kimi')?.runtimeName).toBe('kimi-code');
+    expect(getManagedBuiltinRuntimeByRuntimeName('kimi-code')?.agentType).toBe('kimi');
+    expect(getStaticBuiltinAcpCapabilities('builtin', 'kimi')?.models).toEqual([]);
+    expect(classifyPermissionModeFace('yolo')).toEqual({
+      kind: 'full-access',
+      tone: 'warning',
+      render: 'icon',
+    });
+    expect(getBuiltinDefaultModeId('builtin', 'codex')).toBe('agent-auto-review');
+    expect(getBuiltinDefaultModeId('builtin', 'claude')).toBe('auto');
+    expect(getBuiltinDefaultModeId('builtin', 'kimi')).toBe('auto');
+    expect(getBuiltinDefaultModeId('registry', 'codex')).toBeUndefined();
+    expect(getBuiltinDefaultModeId('builtin', 'other')).toBeUndefined();
+    expect(hasBuiltinRuntimeOverrideValues({ kimiPath: ' /opt/kimi ' })).toBe(true);
+    expect(
+      getStaticBuiltinAcpCapabilities('builtin', 'kimi', { kimiPath: '/opt/kimi' })
+    ).toBeUndefined();
+  });
+});
+
+describe('multi-tier speed options', () => {
+  const capability = {
+    cliType: 'builtin' as const,
+    agentType: 'codex',
+    modes: [{ id: 'agent', name: 'Agent' }],
+    models: [
+      { modelId: 'gpt-6.2-sol', name: '6.2 Sol' },
+      { modelId: 'gpt-6.2-astra', name: '6.2 Astra' },
+      { modelId: 'slow-model', name: 'Slow' },
+    ],
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select' as const,
+        currentValue: 'gpt-6.2-sol',
+        options: [
+          { value: 'gpt-6.2-sol', name: '6.2 Sol' },
+          { value: 'gpt-6.2-astra', name: '6.2 Astra' },
+          { value: 'slow-model', name: 'Slow' },
+        ],
+      },
+      {
+        id: 'fast-mode',
+        name: 'Speed',
+        category: 'model_config',
+        type: 'select' as const,
+        currentValue: 'off',
+        options: [
+          { value: 'off', name: 'Standard' },
+          { value: 'fast', name: 'Fast' },
+          { value: 'ultrafast', name: 'Ultrafast' },
+        ],
+      },
+    ],
+    declaredModelControls: {
+      'gpt-6.2-sol': { fastMode: true, speedTiers: ['fast', 'ultrafast'] },
+      'gpt-6.2-astra': { fastMode: true },
+      'slow-model': { fastMode: false },
+    },
+  };
+
+  it('maps semantic fastMode boolean onto a multi-tier speed select', () => {
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', fastMode: true }, capability)
+        .configOptionValues
+    ).toEqual({ 'fast-mode': 'fast' });
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', fastMode: false }, capability)
+        .configOptionValues
+    ).toEqual({ 'fast-mode': 'off' });
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'slow-model', fastMode: true }, capability)
+    ).toThrow('Model slow-model does not offer fast mode.');
   });
 });

@@ -1,0 +1,434 @@
+# `src/hooks` — background
+
+Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
+the reasoning behind them so the rules can stay short. It explains only the hooks
+that carry an invariant — the directory itself is the list of hooks.
+
+## Workspace sync diagnostics
+
+`useWorkspaceSyncStuckReport` observes readiness without changing sync or retry
+ownership. One continuous wait for a route target reports once, even as its blocker
+or connection changes; recovery ends that episode so a new wait can report again.
+Its exception carries only fixed operation/stage/failure/handling/retry diagnostics.
+A rejected initial metadata scan has no scheduled retry; other retry states and
+unproven causes remain `unknown`. Restricted capture and transport reprojection
+preserve those fields through `@lody/platform/telemetry`, rejecting unknown values
+and excluding workspace content and raw error metadata. Existing analytics also
+omit workspace IDs and raw error names; detailed local diagnostics remain local.
+
+## Electron state snapshots
+
+`use-electron-updater-state.ts` and `use-electron-cli-daemon.ts` subscribe before
+requesting their initial IPC snapshot. The snapshot seeds a subscription only
+until its first push: a late initial response cannot replace live update progress
+or daemon readiness. Cleanup retires that subscription's response and listener;
+a later mount starts its own initial read. The main process remains the state
+owner; renderer observation neither restarts a process nor retries an update.
+
+## Explicit plaintext copies
+
+`use-plaintext-copy.tsx` borrows the existing runtime admission and mode atom for
+transcript and PNG exports. Each encrypted export asks again before capture. Its
+one in-memory choice binds the account, routed workspace, runtime, genesis and
+selected source; guards recheck before output after asynchronous reads/capture.
+The final output also re-enters the captured runtime's admission gate, preserving
+C1 even when retirement precedes publication of the replacement UI state.
+Export reads verify that the selected history is the view owned by the captured
+runtime's current Session store. A loading replacement may still display an old
+view, which cannot be relabeled as a source in the replacement workspace. PNG
+snapshots carry the runtime returned by their actual reader through selection.
+Local exports reuse the retained E2EE account selector during uncertain offline
+authentication. Confirmed logout or a different live account still rejects the
+copy. This local identity never authorizes static publication or another cloud API.
+Cancellation or scope changes retire only that export, retain selection and never
+clear drafts. Ordinary/local exports retain their existing flow. PNG output uses
+the existing Blob, Electron or native byte-save path; native staging cleanup and
+OS cancellation stay with that adapter, with no new key or file-path bridge.
+Native PNG export stages an isolated cache file and distinguishes OS handoff from
+cancellation; it never falls back to a browser download
+([native sharing decision](../../../../.agents/notes/implemented/bug-fix/2026-10-07-native-share-image-save.md)).
+An abandoned UI waiter does not await obsolete capture/reads or prevent a new
+copy. The raw operation still observes rejection and drains its own cleanup;
+late continuations must pass the retired source guard before any further output.
+
+## Session submission
+
+`use-session-actions.ts` binds admission, analytics, and Jotai observations to
+`lib/session-submission.ts`. The latter owns the ordinary Promise entry points
+for creation, initial history, continuation, dispatch, and guide. It has no React
+lifetime or second writer. `lib/session-send-admission.ts` is the one admission for
+every user message. A ready send is written at once as local commits (creation
+meta, turn or queue row, activation); Repo persistence runs independently. The dispatch/steer RPC in
+`lib/session-send-delivery.ts` is a best-effort fast path, because the CLI starts
+pending turns from synchronized history. A send whose attachments are still
+preparing, or one queued behind such a send in the same conversation, is held
+only in the runtime's in-memory `pendingSends` and written when ready. Nothing
+persists it: closing the page mid-upload loses it, and the page asks first.
+Archive and delete cancel held sends of their targets and join in-flight writes.
+See the [attachment draft Spec](../../../../specs/session-files.md).
+
+| Area                   | Entry point                                                                                                        | Responsibility                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Session lifecycle      | [`use-session-actions.ts`](use-session-actions.ts)                                                                 | Bind operation targets and writes to one workspace runtime.                                |
+| Composer configuration | [`use-session-pending-config.ts`](use-session-pending-config.ts)                                                   | Bridge frozen held-send configuration to history/queue without consuming next-draft edits. |
+| Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)                               | Reconcile owned Roles after matching runtime probes.                                       |
+| Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication.                                   |
+
+## MCP default readiness
+
+`use-session-mcp-selection.ts` allows default-derived sends after the local catalog
+loads in every composition; remote catch-up does not gate sending. Unreadable
+snapshots stay errors. The shared room retries with capped backoff while borrowed,
+and the notice offers retry or an explicit one-send `[]` without changing defaults.
+Successful one-send opt-out keeps a renderer-local recovery entry scoped to runtime
+and session, so a promoted composer ignores that turn's `[]` and resumes its project
+defaults once readable. The common new-turn sender gates implicit selections while defaults are unread,
+reports loading/read failure with recovery actions, and consumes recovery after
+acceptance for both shortcuts and the composer. Every acceptance invalidates older
+recovery toast actions; each opt-out action can run only once, including before
+its send settles. Explicit ids, including `[]`,
+bypass default resolution. Explicit menu `[]` remains a normal durable selection. No extra history field, schema version or
+daemon capability is introduced. Recovery does not cross renderer reload, runtime
+replacement or devices; those readers retain the historical `[]` behavior.
+Existing conversations remain usable. See the
+[availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-mcp-defaults-send-gate.md).
+
+## Session ACP catalogs
+
+`use-session-acp-selector-context.ts` owns the Provider subscription for persisted
+and draft composers. It resolves the exact bound id through the shared Provider
+atom and passes its current runtime overrides to models and the initial command
+preview. Missing or mismatched Providers expose no Provider catalog; extension
+changes invalidate old capabilities until a matching probe arrives.
+
+Before an Agent starts, `use-available-commands.ts` displays the Provider probe's
+commands. Once the Session reports `acpRuntimeConfig.availableCommands`, its own
+list wins, including an empty list. Provider refreshes cannot replace that list.
+Commands remain scoped to the same ACP runtime across turns; a replacement runtime
+reports its own list. See the [command ownership decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-session-command-catalogs.md).
+
+## Avatar sources
+
+`use-stable-avatar-src.ts` resolves cached avatars from `lib/avatar-cache.ts`
+(URL-keyed memory map backed by IndexedDB `lody:avatar-image-cache` with
+CacheStorage migration/fallback and a synchronous `lody:avatar-cache-index`
+key set). On a new page or Electron `file://` window, persisted URLs hold off
+emitting a remote image request while the local blob resolves in milliseconds;
+truly cold URLs paint immediately while filling the cache, and active workspace
+members warm their cached blobs when the directory loads. Only used avatars are
+decoded; startup restoration does not decode the entire persistent cache. The
+cache entry retains the off-DOM image for the same lifetime as its blob URL.
+Source changes select the current URL synchronously, including delayed profile
+arrival and image removal, while background callbacks remain tied to their source.
+First paint and cache reads never await decoding. Fully cold images and genuinely absent
+profile data can still show a fallback. Evidence and limits:
+[avatar continuity](../../../../.agents/notes/implemented/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
+
+## Cloud query recovery
+
+`use-recoverable-convex-query.ts` owns the authenticated query adapter. Each client,
+session and semantic query shares one watch and three retries after 1, 2 and 4 seconds.
+All consumers release the failed watch before a new one starts, which waits for a
+server update rather than reading the SDK's cached error. Opaque server failures
+return loading during bounded recovery; application errors and exhausted failures throw to the nearest
+boundary. Auth expiry continues through the central supervisor and retains only a
+matching committed snapshot. Brief success and temporary auth skips do not replenish
+attempts; 30 seconds of continuously observed success resets the budget. Skipped or
+unmounted queries stop retries, and session/query identity fences callbacks and results.
+Public queries and local-only clients keep their existing behavior.
+See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
+
+`providers/cloud-platform-api.ts` also admits imperative queries, subscriptions,
+and React action/mutation commands through the same authenticated Convex state.
+Structured `unauthenticated` failures report to the existing supervisor and stop
+new protected requests. Imperative subscriptions release their watches while auth
+is unavailable and resume for the same session after recovery. Confirmed logout or
+account replacement retires those subscriptions; provider cleanup stops their
+watches. Reattachment does not treat an old SDK-cached auth rejection as a fresh
+server rejection. Commands preserve their rejected result and never replay.
+Intentionally public operations stay available without authentication.
+
+`CloudPlatformProvider` also wraps standalone login without authenticated Convex
+context. Its optional authenticated child owns organization queries and E2EE email
+inbox hosts. The shared router supplies that context; standalone login must still
+render without it.
+
+Authentication recovery status is presented separately from query retries:
+`AuthenticatedConvexProvider` owns its budget and actions; `AuthRecoveryEntryProvider`
+places a nonmodal icon beside the existing sidebar workspace control through
+`AuthRecoveryEntrySlot`. No status row is added; composer and footer geometry stay
+unchanged. Details open on request and leave drafts and page focus intact. See the
+[UI decision](../../../../.agents/notes/implemented/feature/2026-10-25-nonblocking-auth-recovery.md)
+for placement and verification limits.
+
+## Session lifecycle
+
+`use-session-actions.ts` reads archive, restore, and archived-root deletion targets
+through `WorkspaceRuntime.readSessionOperationTargets`. The runtime owns source
+readiness and the Repo snapshot; the hook checks runtime identity before writing
+through its captured writer. UI projection lag cannot change the target set.
+Later-created Sessions fall outside that snapshot, and accepted writes are not
+rolled back after a later failure. Exact deletion and ordinary Tab close bypass
+discovery. The [relation Spec](../../../../specs/session-relations.md) owns cascade
+and failure semantics.
+
+## Default conversation draft
+
+`use-empty-session-draft.ts` materializes the empty conversation URL sentinel only
+after metadata hydration. It reuses an existing local draft or inserts one before
+selecting its URL; replayed effects must not create duplicate drafts. It never owns
+mobile viewer selection or creates a shared Session.
+
+## Horizontal wheel scrolling
+
+`use-horizontal-wheel-scroll.ts` is the one owner for converting a plain vertical
+mouse wheel into horizontal movement. It uses a non-passive native listener because
+React delegates wheel events passively, and releases native horizontal gestures,
+browser zoom, nested content selected by the caller, and movement at either edge.
+Compact tab strips use this behavior so their delta-mode normalization and edge
+handling cannot drift.
+
+## Workspace membership refresh
+
+The cross-domain Better Auth `updateSession()` action returns `void`: it notifies
+the session store synchronously. Chaining `.then()` crashes after a successful
+ownership transfer, before organization permissions refresh. The membership hook
+therefore calls it directly and separately notifies `$activeOrgSignal`. Its tests
+use the plugin's actual action so a Promise-returning mock cannot hide this error.
+
+## Conversation scrolling
+
+The conversation viewport is owned by the conversation scroll engine
+(`lib/conversation-scroll`, rules in its `AGENTS.md`), which replaced
+`use-sticky-scroll.ts` and the Virtua list after seven fixes to the same blank-pane
+class. Why and how: the
+[scroll-engine note](../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md).
+`scroll-debug-log.ts` still keeps a geometry-only timeline
+(`window.__lodyScrollLog.dump()`; console output with
+`localStorage['lody:debug-scroll'] = '1'`), and the engine keeps an always-on cycle
+log (`window.__lodyScrollEngineLog.dump()`).
+
+`use-conversation-stream-items.ts` keys readiness and the visible hydration range by
+the view itself, so turns landing in the same conversation never reset an off-tail
+reading window. A new view, even with the same session id, must pass initial
+loading again. Before the first viewport report, the window is the
+retained tail plus the turn of the engine's restored reading anchor, so a restored
+position opens on real rows instead of placeholders.
+
+Paged histories acquire a directory lease through the saved turn ID before
+reporting initial readiness. Search and complete index/fact consumers acquire the
+whole directory through the same cancellable page loader. They do not depend on
+the user scrolling back manually; bodies still follow their existing leases and
+are released after a fact chunk, preview, or search completes.
+
+The rendered body set belongs to the reading window, the retained 40-turn tail,
+and native text selection. Other consumers may hydrate the same cache for facts,
+search or outline previews, but those bodies remain placeholders in the stream.
+Keeping the entry tail leased prevents the first narrower viewport report from
+making already displayed rows evictable. Selection publishes retained turn IDs
+before a scroll-driven window change; releasing selection removes that exception.
+A loaded user predecessor still supplies assistant configuration even when its
+own rendered row is a placeholder. See the
+[background hydration decision](../../../../.agents/notes/implemented/bug-fix/2026-09-22-background-hydration-render-window.md).
+
+## `useWorkspaceBadge`
+
+`createWorkspaceBadgeAtom` binds the workspace-local account and owned machine IDs
+from the visible access index, then derives an absolute count from active-session metadata
+and fresh presence, sharing the sidebar's parent/child activity summary. The elected
+workspace window publishes changes immediately, reasserts the snapshot every 30 seconds,
+and reconciles on focus or visibility restoration. The interval reads the current atom
+and never restarts because the count changed; failed IPC gets another opportunity even
+when the authoritative count stays zero. Main replaces contributions, and removes stale
+ones on renderer crash/reload or window close. See the
+[desktop window contract](../../../../specs/desktop-windows.md).
+
+## `useStableSession`
+
+A single HTTP 401 can be a stale response, so it is verified once against the
+current credential; only a second 401 for the unchanged local token proves the
+session is gone. Native login writes its Capacitor credential and the local token
+non-atomically, so `nativeSignInInProgressAtom` fences the window between the first
+sign-in request and successful page replacement. Timeouts, 5xx, and
+`Client disconnected` are transport failures: signing out on them would eject a user
+whose session is fine.
+
+## Workspace catalog hooks
+
+`use-agent-role-schema-reconciliation.ts` runs from the ready workspace shell's
+window owner. It silently reconciles owned Roles after fresh, matching runtime
+probes, without requiring the Role editor. Repeated startup is idempotent; offline
+targets and failed probes remain retryable. See the
+[reconciliation Spec](../../../../specs/agent-role-schema-reconciliation.md).
+
+The workspace catalog is ONE small document, but a consumer mounts for every visible
+session plus every hidden child tab and side chat, so per-mount leases multiply room
+joins and duplicate row maps for a single list — the same problem
+`use-machine-flock-rows.ts` ref-counts away. The shared snapshot is also
+identity-stable across mounts, which is what lets the selection and composer-menu
+memos built on it actually hit.
+
+Catalog `upsert`/`remove` resolve on durability because a dialog that awaited the
+upload sat open for the whole round trip, and the row it had already written showed
+up in the catalog underneath it — so the open create form reported its own name as
+taken (`resolveAgentRoleNameCheckExemption`) moments before closing on success.
+
+Hiding a private Agent Role in the UI is not an access check, and an availability
+rule copied into a component is one that can drift into a silent fallback; both stay
+in the shared `listAccessibleAgentRoles` / `resolveAgentRoleAvailability` helpers.
+
+## `use-session-doc.ts`
+
+Session history snapshots are state, not an event log. Rendering every intermediate
+ACP/CRDT snapshot can queue minutes of React work behind a long active turn and
+retain every obsolete history tree, so history-only bursts coalesce to the latest
+snapshot once per animation frame while control state stays synchronous.
+
+## `use-app-store-review-prompt.ts`
+
+The stored list of the newest 50 completed-turn timestamps answers the whole
+threshold — if the oldest of the newest N is already outside the window then fewer
+than N are inside it — and its last element doubles as the watermark that makes a
+repeated history scan idempotent. That replaced v1's list of up to 512
+`sessionId:turnId` strings re-serialized on every completed turn, and it is why the
+recording effect can pass the whole outcomes array instead of diffing against a
+per-mount observed set.
+
+Because that watermark is a stored timestamp, no stored time may be in the future:
+turn times come from the agent machine's clock and `nowMs` from the phone's, so a
+stored future value would swallow every genuinely newer turn until real time caught
+up. Future input is deferred rather than lost (the next history update re-scans the
+session), and stored future times are dropped so a phone clock corrected backwards
+heals on the next turn. The scheme under-counts by design: a session opened older
+than the watermark does not backfill, which can never manufacture eligibility.
+
+StoreKit already caps the sheet at three per device per 365 days, so a second rate
+limiter here only makes the prompt unreachable — exactly what v1's active-day and
+72h-any-failure gates did. StoreKit reports nothing back and every gate is
+device-local, so `mobile/app_store_review_prompt_requested` / `_blocked` are the only
+evidence that the path works at all. A candidate turn arrives on every completed
+turn, so an undeduplicated `blocked` event would be among the noisiest in the
+product, while deduplicating on the user alone would let the first gate mask the
+rest.
+
+## Code Collab file-index hooks
+
+Owner-session resources are borrowed from the workspace-owned Effect `ScopedCache`
+so that opening, scanning, subscribing, and joining happen once per session rather
+than once per React mount. A recreated cache resource restarts its local revision
+counter, which is why resource identity is part of provider memoization.
+Local-machine RPC snapshots seed the shared resource before it becomes visible, so
+first paint stays local while later Flock events remain deduplicated.
+
+## `use-safe-area-insets.ts`
+
+`DropdownMenuContent` and `PopoverContent` run this hook even when closed, so a
+session switch mounts hundreds of subscribers. A per-instance `getComputedStyle`
+would force a full-document style recalculation after the commit dirtied style.
+
+## `use-keyboard-navigation.ts`
+
+A session switch renders synchronously for longer than the key repeat interval, so a
+held shortcut would otherwise queue renders nobody sees. The one-navigation-per-
+painted-frame rule is a frame budget, not a time-based debounce.
+
+## `use-lody-live-activity.ts`
+
+`atoms/doc-meta` republishes the session and agent-config arrays once per flushed
+batch, so a cold start reset the 250ms timer before it ever fired while every batch
+still paid for a full summary rebuild — hence the leading-edge throttle on the input,
+anchored to the last emit. The permission candidate is a fresh object per scan, so
+depending on it re-runs the payload memo every render.
+
+The 250ms bridge debounce coalesces the render requesting a flush with its committed
+snapshot. Permission candidates only accelerate that snapshot; they never add an
+alert. Ordinary Push owns reminders. The previous alert-key Set and early return
+were removed because they both duplicated reminders and froze other conversations
+while one request was pending. The optional bridge alert field remains for legacy
+native clients, but this hook never sends it.
+
+`iosLiveActivitiesEnabledAtom` defaults to true, so without the native-shell check
+every desktop build would rebuild a summary it can never show. The activity id is
+derived outside that gate so the disable and unmount paths can still end an activity
+the payload no longer describes.
+
+## Public PR reads
+
+`use-github-pr-identity.ts` keeps hosted repository identity separate from public
+read access. When a session association is unresolved, an anonymous GitHub metadata
+request may establish a public repository ID for details, reviews and diffs. It
+never grants write access or mints a token. An existing numeric ID must still match;
+redirects, private repositories and failed probes retain the recoverable error.
+Public details do not hydrate or write authenticated caches; review caches and
+in-flight detail reads use a separate public key. Public CI polling runs every
+five minutes without the fast mergeability loop; manual refresh remains available.
+
+Every detail slice read bypasses the browser HTTP cache, because GitHub's
+`max-age=60` would otherwise satisfy it with a stale response recorded as fresh.
+These details feed only the PR tab and the CI run list. PR summaries come from session
+metadata ([read model](../../../../.agents/notes/implemented/architecture/2026-11-02-session-pr-read-model.md)).
+Merge and ready-for-review resolve `true` only when they landed; then
+`use-awaited-pr-status.ts` keeps the action pending until that metadata status agrees,
+for at most 15 seconds.
+
+## Schedule Registry recovery
+
+`useScheduleRegistrySync` owns one subscription in the workspace shell. Its local
+snapshot stays visible if opening or first sync fails; an empty cold scan is not
+shown as an authoritative empty list until the selected transport first syncs.
+Failures include a stage and sanitized error in the client log. Three automatic
+retries wait 1, 3 and 10 seconds; browser `online` and the list's Retry action can
+also restart acquisition. A remote failure closes only the room: the readable
+local document and its change subscription stay live, including after retries
+are exhausted. Local changes preserve the warning and do not mark a retry active.
+Only successful first sync clears the sync warning. An initial local scan failure
+releases the unusable observer so the next attempt can reopen it. Workspace changes
+or unmount release both subscriptions and retire pending results.
+
+## Read-only session actions and containment
+
+Sidebar pin/unread actions use `useSessionActions`' checked preference path, while
+read-only rows omit management controls. The action layer still refuses management
+writes and rechecks preference access after asynchronous reads.
+
+`isContainedSession` owns read-grant inheritance, history tab projection, deep-link
+selection and sharing-target resolution. It accepts direct same-machine containment:
+the existing sparse default is a Tab, and `side-panel` is the supported override.
+Unknown placements and nested/cross-machine links do not inherit. Opener provenance
+alone grants nothing; malformed parent links do not redirect a sharing mutation away
+from the current session. This client check cannot authenticate a forged otherwise
+valid containment relation or provide an authoritative session-to-machine binding.
+
+## Live member directory
+
+`useWorkspaceMembers` reads the capability-gated `workspaceMembers:list` descriptor
+through the existing shared authenticated query source. Convex dependency updates
+replace the whole directory on member joins, departures, replacements and profile
+changes. The response contains only account ID, display name (email fallback) and
+avatar; it is never a membership or sharing authority. Unsupported/local assemblies
+retain their existing organization projection.
+
+The directory query key includes the expected account, which the server compares
+with its authenticated user before any directory read. This prevents an old-account
+SDK cache from being accepted under a new account.
+
+Same-account/workspace labels survive optional-query failures, component remounts,
+and cold page reloads through `lib/workspace-sender-identity.ts` (`clear-local-cache.ts`
+clears both display caches). `useWorkspaceSenderProfile` resolves human message
+senders from live `auth:getUserById`, then the same-scope retained sender profile,
+member directory, and matching current user, so virtualized scroll and send-to-history
+handoff do not drop sender names or avatars while queries reconnect; explicit `null`
+responses clear deleted accounts. The sharing panel
+shows a local retry using the query owner's bounded retry budget, shared across all
+mounted consumers; no polling or second watch owner is added. Account, workspace or
+API changes discard retained labels. Team/public sharing and grant writes keep their
+independent permission checks even while labels are unavailable.
+
+## Local project script loading
+
+`useLocalProjectsAdmin(worktreeProjectKey)` keeps project listing and sharing independent
+of script reads. The default `null` key issues no script RPC. Desktop passes the
+project key while its Worktree tab is visible; mobile passes it when the script
+sheet or inline editor opens. Each visited project refreshes setup and cleanup once
+per hook mount, retaining persisted values during background refresh and on refresh
+failure. Offline remote projects remain unprobed.

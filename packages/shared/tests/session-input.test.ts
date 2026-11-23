@@ -1,28 +1,32 @@
+import { encodeSessionFilePath } from '../src/project-path';
 import { describe, expect, it } from 'vitest';
 
 import { Loro } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import {
-  buildInitialSessionTurnInputConfig,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
-  extractPromptPreviewFromInputBlocks,
   historyItemsToInputBlocks,
   inputBlocksToHistoryItems,
-  normalizeSessionInputBlocks,
+  resolveSessionAuthoredText,
+  resolveSessionExecutionInputBlocks,
+  resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
-  resolveSessionTaskToolsEnabled,
 } from '../src/session-input';
 import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
-import { sessionDocSchema } from '../src/schema';
+import { turnExecutionDigest } from '../src/e2ee-execution-intent';
+import { buildInitialHistoryEntry, buildInitialSessionMetaPatch } from '../src/session-bootstrap';
+import { sessionDocSchema } from '../src/session-doc-schemas';
+import type { SessionDoc, SessionHistoryInput } from '../src/schema';
 import type {
   CommentReferencePayload,
-  MessageContent,
+  MachineId,
   SessionFilePayload,
   SessionId,
+  SessionInputBlock,
   VisualAnnotationReferencePayload,
 } from '../src/ai';
-import type { SessionDoc, SessionHistoryInput } from '../src/schema';
+import type { AgentRoleId, McpServerId } from '../src/ids';
 
 const commentReference: CommentReferencePayload = {
   source: 'lody',
@@ -117,6 +121,64 @@ const localFilePayload: SessionFilePayload = {
 };
 
 describe('session-input helpers', () => {
+  it('executes frozen instructions once while preserving every structured attachment', () => {
+    const attachments: SessionInputBlock[] = [
+      { type: 'image', imageId: 'image-1', mimeType: 'image/png', sizeBytes: 128 },
+      r2FilePayload,
+      { type: 'comment_reference', ...commentReference },
+      { type: 'visual_annotation_reference', ...visualAnnotationReference },
+    ];
+    const raw: SessionInputBlock[] = [
+      {
+        type: 'text',
+        text: 'Review @src/a.ts',
+        spans: [{ start: 7, end: 16, kind: 'file', label: '@src/a.ts', target: 'src/a.ts' }],
+      },
+      ...attachments,
+    ];
+    const config = buildSessionTurnInputConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      inputBlocks: raw,
+      prompt: 'CONFIG_INSTRUCTION\n\nROLE_INSTRUCTION\n\nReview @src/a.ts',
+    });
+    const expected = [...attachments, { type: 'text', text: config.prompt }];
+    expect(resolveSessionExecutionInputBlocks(config)).toEqual(expected);
+    expect(resolveSessionExecutionInputBlocks({ ...config, inputBlocks: expected })).toEqual(
+      expected
+    );
+    expect(config.inputBlocks).toEqual(raw);
+    expect(inputBlocksToHistoryItems(raw)[0]).toMatchObject(raw[0]);
+  });
+
+  it('resolves authored text without the composed Config/Role execution prompt', () => {
+    const prompt = 'CONFIG_INSTRUCTION\n\nROLE_INSTRUCTION\n\nReview @src/a.ts';
+    expect(
+      resolveSessionAuthoredText({
+        prompt,
+        inputBlocks: [{ type: 'text', text: '  Review @src/a.ts ' }, r2FilePayload],
+      })
+    ).toBe('Review @src/a.ts');
+    expect(resolveSessionAuthoredText({ prompt, inputBlocks: [r2FilePayload] })).toBe('');
+    expect(resolveSessionAuthoredText({ prompt: ' legacy task ' })).toBe('legacy task');
+    expect(resolveSessionAuthoredText({})).toBe('');
+  });
+
+  it('distinguishes an absent legacy prompt from explicit empty execution text', () => {
+    const inputBlocks: SessionInputBlock[] = [{ type: 'text', text: 'legacy task' }, r2FilePayload];
+    expect(resolveSessionExecutionInputBlocks({ inputBlocks })).toEqual(inputBlocks);
+    expect(resolveSessionExecutionInputBlocks({ inputBlocks, prompt: '' })).toEqual([
+      r2FilePayload,
+    ]);
+    expect(resolveSessionExecutionInputBlocks({ prompt: 'only text' })).toEqual([
+      { type: 'text', text: 'only text' },
+    ]);
+    expect(
+      resolveSessionExecutionInputBlocks({ inputBlocks: [r2FilePayload], prompt: '' })
+    ).toEqual([r2FilePayload]);
+    expect(resolveSessionExecutionInputBlocks({ prompt: '' })).toEqual([]);
+  });
+
   it('uses only the latest persisted user conversation config', () => {
     const history = [
       {
@@ -161,224 +223,93 @@ describe('session-input helpers', () => {
     });
   });
 
-  it('uses only the latest durable queued config when the queue is non-empty', () => {
+  it('inherits the latest explicit Role across legacy or non-composer Turns', () => {
+    const history = [
+      {
+        id: 'turn-role',
+        role: 'user',
+        inputConfig: { agentRoleId: 'role-reviewer', agentRoleRevision: 7 },
+      },
+      {
+        id: 'turn-programmatic',
+        role: 'user',
+        inputConfig: { prompt: 'continue automatically' },
+      },
+    ];
+    expect(resolveSessionConversationConfig(history)).toMatchObject({
+      sourceConfigKey: 'history:turn-programmatic',
+      agentRoleId: 'role-reviewer',
+      agentRoleRevision: 7,
+    });
+
     expect(
-      resolveSessionConversationConfig(
-        [
-          {
-            id: 'turn-1',
-            role: 'user',
-            inputConfig: {
-              modeId: 'ask',
-              modelId: 'model-a',
-              configOptionValues: { approval: 'prompt', fast_mode: false },
-            },
-          },
-        ],
-        [
-          {
-            $cid: 'queue-1',
-            acpSessionConfig: {
-              modelId: 'model-b',
-              configOptionValues: { approval: 'never' },
-            },
-          },
-        ]
-      )
-    ).toEqual({
-      sourceConfigKey: 'queue:queue-1',
-      modelId: 'model-b',
-      configOptionValues: { approval: 'never' },
+      resolveSessionConversationConfig([
+        ...history,
+        { id: 'turn-none', role: 'user', inputConfig: { agentRoleId: null } },
+      ])
+    ).toMatchObject({
+      sourceConfigKey: 'history:turn-none',
+      agentRoleId: null,
     });
   });
 
-  it('resolves the frozen Task tool gate with legacy inputs disabled', () => {
-    expect(
-      resolveSessionTaskToolsEnabled([
-        {
-          id: 'turn-1',
-          role: 'user',
-          inputConfig: {
-            prompt: 'create a task',
-            cliType: 'builtin',
-            agentType: 'codex',
-            taskToolsEnabled: true,
-          },
-        },
-      ])
-    ).toBe(true);
-    expect(
-      resolveSessionTaskToolsEnabled([
-        {
-          id: 'legacy-turn',
-          role: 'user',
-          inputConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-        },
-      ])
-    ).toBe(false);
-  });
-
-  it('ignores invalid and unconfigured history when resolving conversation config', () => {
-    expect(
-      resolveSessionConversationConfig([
-        {
-          id: 'turn-1',
-          role: 'user',
-          inputConfig: { modeId: 'ask', modelId: 'model-a' },
-        },
-        {
-          id: 'turn-2',
-          role: 'user',
-          inputConfig: { cliType: 'invalid' },
-        },
-      ])
-    ).toEqual({});
-  });
-
-  it('normalizes text blocks and falls back to the prompt when needed', () => {
-    expect(
-      normalizeSessionInputBlocks(
-        [
-          { type: 'text', text: '  hello  ' },
-          { type: 'text', text: '   ' },
-          {
-            type: 'image',
-            imageId: 'img-1',
-            mimeType: 'image/png',
-            sizeBytes: 128,
-          },
-        ],
-        'ignored'
-      )
-    ).toEqual([
-      { type: 'text', text: 'hello' },
-      {
-        type: 'image',
-        imageId: 'img-1',
-        mimeType: 'image/png',
-        sizeBytes: 128,
-      },
-    ]);
-
-    expect(normalizeSessionInputBlocks(undefined, '  fallback prompt  ')).toEqual([
-      { type: 'text', text: 'fallback prompt' },
-    ]);
-  });
-
-  it('extracts prompt previews from normalized text blocks', () => {
-    expect(
-      extractPromptPreviewFromInputBlocks([
-        { type: 'text', text: ' first ' },
-        {
-          type: 'image',
-          imageId: 'img-1',
-          mimeType: 'image/png',
-          sizeBytes: 128,
-        },
-        { type: 'text', text: ' second ' },
-      ])
-    ).toBe('first\n\nsecond');
-  });
-
-  it('converts between input blocks and history items without keeping unrelated message content', () => {
-    const inputBlocks = [
-      { type: 'text', text: '  hello  ' },
-      {
-        type: 'image',
-        imageId: 'img-1',
-        mimeType: 'image/png',
-        sizeBytes: 128,
-        width: 10,
-        height: 20,
-      },
-      { type: 'text', text: '   ' },
-    ] as const;
-
-    expect(inputBlocksToHistoryItems(inputBlocks)).toEqual([
-      { type: 'text', text: 'hello' },
-      {
-        type: 'image',
-        text: undefined,
-        imageId: 'img-1',
-        mimeType: 'image/png',
-        sizeBytes: 128,
-        width: 10,
-        height: 20,
-      },
-    ]);
-
-    expect(
-      historyItemsToInputBlocks([
-        { type: 'text', text: '  hello  ' },
-        { type: 'plan', entries: [] },
-        {
-          type: 'image',
-          imageId: 'img-1',
-          mimeType: 'image/png',
-          sizeBytes: 128,
-          width: 10,
-          height: 20,
-        },
-        { type: 'system_notice', name: 'resume_from_external_chat_history' },
-      ])
-    ).toEqual([
-      { type: 'text', text: 'hello' },
-      {
-        type: 'image',
-        imageId: 'img-1',
-        mimeType: 'image/png',
-        sizeBytes: 128,
-        width: 10,
-        height: 20,
-      },
-    ]);
-  });
-
-  it('converts visual annotation references between input blocks and history items', () => {
-    const inputBlocks = [
-      { type: 'visual_annotation_reference' as const, ...visualAnnotationReference },
+  it('resolves ACP runtime config only for the latest accepted user turn', () => {
+    const history = [
+      { id: 'turn-1', role: 'user' as const },
+      { id: 'assistant-1', role: 'assistant' as const },
+      { id: 'turn-2', role: 'user' as const },
     ];
 
-    expect(inputBlocksToHistoryItems(inputBlocks)).toEqual([
-      {
-        type: 'visual_annotation_reference',
-        text: undefined,
-        ...visualAnnotationReference,
-      },
-    ]);
+    expect(
+      resolveSessionAcpRuntimeConfig(history, [], {
+        acpSessionId: 'acp-2',
+        basedOnUserTurnId: 'turn-2',
+        revision: 3,
+        modeId: 'default',
+        modelId: 'gpt-5.6-sol',
+        configOptionValues: { collaboration_mode: 'default', fast_mode: true },
+      })
+    ).toEqual({
+      sourceConfigKey: 'runtime:acp-2:3',
+      modeId: 'default',
+      modelId: 'gpt-5.6-sol',
+      configOptionValues: { collaboration_mode: 'default', fast_mode: true },
+    });
 
     expect(
-      historyItemsToInputBlocks([
-        {
-          type: 'visual_annotation_reference',
-          ...visualAnnotationReference,
-        },
-      ])
-    ).toEqual(inputBlocks);
+      resolveSessionAcpRuntimeConfig(history, [], {
+        acpSessionId: 'acp-1',
+        basedOnUserTurnId: 'turn-1',
+        revision: 9,
+        modeId: 'default',
+      })
+    ).toBeNull();
   });
 
-  it('round-trips r2 file blocks through history items', () => {
-    const inputBlocks = [r2FilePayload];
+  it('does not let runtime state override a frozen queued turn', () => {
+    expect(
+      resolveSessionAcpRuntimeConfig([{ id: 'turn-1', role: 'user' }], [{ $cid: 'queue-1' }], {
+        acpSessionId: 'acp-1',
+        basedOnUserTurnId: 'turn-1',
+        revision: 1,
+        configOptionValues: { collaboration_mode: 'default' },
+      })
+    ).toBeNull();
+  });
 
-    const historyItems = inputBlocksToHistoryItems(inputBlocks);
-    expect(historyItems).toEqual([
-      {
-        type: 'file',
-        text: undefined,
-        fileId: 'file-r2-1',
-        fileName: 'report.pdf',
-        mimeType: 'application/pdf',
-        sizeBytes: 4096,
-        sha256: 'a'.repeat(64),
-        textPreview: false,
-        sourcePath: 'artifacts/report.pdf',
-        transport: 'r2',
-        uploadedAt: 1_700_000_000_000,
-      },
-    ]);
-
-    // r2 transport carries no machineId; it must not leak back in.
-    expect(historyItemsToInputBlocks(historyItems)).toEqual(inputBlocks);
+  it('round trips member file provenance without accepting malformed root keys', () => {
+    const sourcePath = encodeSessionFilePath({
+      rootId: 'member:docs',
+      relativePath: 'reports/a.pdf',
+    });
+    const payload = SessionFileBlockSchema.parse({ ...r2FilePayload, sourcePath });
+    expect(historyItemsToInputBlocks(inputBlocksToHistoryItems([payload]))).toEqual([payload]);
+    expect(
+      SessionFileBlockSchema.safeParse({
+        ...r2FilePayload,
+        sourcePath: '\0lody-root:member:docs/../secret',
+      }).success
+    ).toBe(false);
   });
 
   it('accepts only workspace-relative agent upload provenance', () => {
@@ -388,96 +319,6 @@ describe('session-input helpers', () => {
       expect(SessionFileBlockSchema.safeParse({ ...r2FilePayload, sourcePath }).success).toBe(
         false
       );
-    }
-  });
-
-  it('round-trips local file blocks (with machineId) through history items', () => {
-    const inputBlocks = [localFilePayload];
-
-    const historyItems = inputBlocksToHistoryItems(inputBlocks);
-    expect(historyItems).toEqual([
-      {
-        type: 'file',
-        text: undefined,
-        fileId: 'file-local-1',
-        fileName: 'notes.txt',
-        mimeType: 'text/plain',
-        sizeBytes: 256,
-        sha256: 'b'.repeat(64),
-        textPreview: true,
-        transport: 'local',
-        machineId: 'machine-1',
-        uploadedAt: 1_700_000_100_000,
-      },
-    ]);
-
-    expect(historyItemsToInputBlocks(historyItems)).toEqual(inputBlocks);
-  });
-
-  it('persists file user history entries and flips transport local -> r2 in place', () => {
-    const doc = new Loro();
-    const mirror = new Mirror({
-      doc,
-      schema: sessionDocSchema,
-      initialState: {
-        session: { id: 'session-1' as SessionId },
-        history: [],
-        mq: [],
-      } satisfies Partial<SessionDoc>,
-      throwOnValidationError: true,
-    });
-    const entry: SessionHistoryInput = {
-      id: 'h1',
-      role: 'user',
-      items: inputBlocksToHistoryItems([localFilePayload]) as MessageContent[],
-      timestamp: '2026-04-13T00:00:00.000Z',
-      status: 'pending',
-      read: false,
-      userId: 'user-1',
-      fileDiff: [],
-      finished: true,
-    };
-
-    try {
-      expect(() => {
-        mirror.setState((prev) => ({ ...prev, history: [entry] }));
-      }).not.toThrow();
-
-      const persisted = mirror.getState().history[0]?.items?.[0] as
-        | (MessageContent & SessionFilePayload)
-        | undefined;
-      expect(persisted?.type).toBe('file');
-      expect(persisted?.transport).toBe('local');
-      expect(persisted?.machineId).toBe('machine-1');
-
-      // CLI backfill completes: overwrite only `transport` (and drop machineId)
-      // on the same history item. This must be a single-field LoroMap update,
-      // not a full item rewrite, so concurrent edits to the turn survive.
-      mirror.setState((prev) => ({
-        ...prev,
-        history: prev.history.map((turn) =>
-          turn.id !== 'h1'
-            ? turn
-            : {
-                ...turn,
-                items: turn.items?.map((item) =>
-                  item.type === 'file' ? { ...item, transport: 'r2', machineId: undefined } : item
-                ),
-              }
-        ),
-      }));
-
-      const updated = mirror.getState().history[0]?.items?.[0] as
-        | (MessageContent & SessionFilePayload)
-        | undefined;
-      expect(updated?.type).toBe('file');
-      expect(updated?.transport).toBe('r2');
-      expect(updated?.machineId).toBeUndefined();
-      // Unrelated fields are untouched by the single-field overwrite.
-      expect(updated?.fileId).toBe('file-local-1');
-      expect(updated?.sha256).toBe('b'.repeat(64));
-    } finally {
-      mirror.dispose();
     }
   });
 
@@ -529,311 +370,299 @@ describe('session-input helpers', () => {
       ],
     });
   });
-
-  it('keeps visual annotation references in normalized turn input config', () => {
-    expect(
-      normalizeSessionTurnInputConfig({
-        prompt: 'fix the visual target',
-        cliType: 'builtin',
-        agentType: 'codex',
-        inputBlocks: [
-          { type: 'visual_annotation_reference' as const, ...visualAnnotationReference },
-        ],
-      })
-    ).toEqual({
-      prompt: 'fix the visual target',
+  it('omits redundant plain single-text inputBlocks in pending user turns while preserving E2EE digests', () => {
+    const plainBlocks: SessionInputBlock[] = [{ type: 'text', text: 'Synthetic oversized prompt' }];
+    const plainConfig = buildSessionTurnInputConfig({
+      inputBlocks: plainBlocks,
       cliType: 'builtin',
       agentType: 'codex',
-      inputBlocks: [{ type: 'visual_annotation_reference', ...visualAnnotationReference }],
     });
+    const compacted = buildPendingUserHistoryEntry({
+      userId: 'user-1',
+      inputBlocks: plainBlocks,
+      timestamp: '2026-08-12T00:00:00.000Z',
+      inputConfig: plainConfig,
+    });
+    expect(compacted?.inputConfig?.inputBlocks).toBeUndefined();
+    expect(compacted?.inputConfig?.prompt).toBe('Synthetic oversized prompt');
+    expect(turnExecutionDigest({ inputConfig: compacted?.inputConfig })).toBe(
+      turnExecutionDigest({ inputConfig: plainConfig })
+    );
+    expect(resolveSessionAuthoredText(compacted?.inputConfig ?? {})).toBe(
+      'Synthetic oversized prompt'
+    );
+    expect(resolveSessionExecutionInputBlocks(compacted?.inputConfig ?? {})).toEqual(
+      resolveSessionExecutionInputBlocks(plainConfig)
+    );
+
+    // Keep inputBlocks when Role/Config instructions make prompt differ from authored text.
+    const composedConfig = buildSessionTurnInputConfig({
+      inputBlocks: plainBlocks,
+      prompt: 'ROLE_INSTRUCTIONS\n\nSynthetic oversized prompt',
+      cliType: 'builtin',
+      agentType: 'codex',
+    });
+    expect(
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        inputBlocks: plainBlocks,
+        timestamp: '2026-08-12T00:00:00.000Z',
+        inputConfig: composedConfig,
+      })?.inputConfig?.inputBlocks
+    ).toEqual(plainBlocks);
+
+    // Keep inputBlocks when spans or attachments exist.
+    const spannedBlocks: SessionInputBlock[] = [
+      {
+        type: 'text',
+        text: 'Check @src/a.ts',
+        spans: [{ start: 6, end: 15, kind: 'file', label: '@src/a.ts', target: 'src/a.ts' }],
+      },
+    ];
+    expect(
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        inputBlocks: spannedBlocks,
+        timestamp: '2026-08-12T00:00:00.000Z',
+        inputConfig: buildSessionTurnInputConfig({
+          inputBlocks: spannedBlocks,
+          cliType: 'builtin',
+          agentType: 'codex',
+        }),
+      })?.inputConfig?.inputBlocks
+    ).toEqual(spannedBlocks);
+
+    const attachmentBlocks: SessionInputBlock[] = [r2FilePayload, { type: 'text', text: 'check' }];
+    expect(
+      buildPendingUserHistoryEntry({
+        userId: 'user-1',
+        inputBlocks: attachmentBlocks,
+        timestamp: '2026-08-12T00:00:00.000Z',
+        inputConfig: buildSessionTurnInputConfig({
+          inputBlocks: attachmentBlocks,
+          cliType: 'builtin',
+          agentType: 'codex',
+        }),
+      })?.inputConfig?.inputBlocks
+    ).toEqual(attachmentBlocks);
+  });
+});
+
+it('freezes a memory identity in turn input and restores the same identity from history', () => {
+  const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const inputConfig = buildSessionTurnInputConfig({
+    prompt: 'Review this',
+    cliType: 'builtin',
+    agentType: 'codex',
+    memory,
+  });
+  const doc = new Loro();
+  const mirror = new Mirror({
+    doc,
+    schema: sessionDocSchema,
+    initialState: {
+      session: { id: 'memory-session' as SessionId },
+      history: [],
+      mq: [],
+    } satisfies Partial<SessionDoc>,
+    throwOnValidationError: true,
+  });
+  mirror.setState((prev) => ({
+    ...prev,
+    history: [{ id: 'memory-turn', role: 'user', inputConfig }],
+  }));
+  expect(
+    normalizeSessionTurnInputConfig(mirror.getState().history[0]?.inputConfig)?.memory
+  ).toEqual(memory);
+  mirror.dispose();
+  expect(
+    resolveSessionConversationConfig([{ id: 'turn-1', role: 'user', inputConfig }]).memory
+  ).toEqual(memory);
+  expect(
+    resolveSessionConversationConfig([
+      { id: 'turn-1', role: 'user', inputConfig },
+      {
+        id: 'turn-2',
+        role: 'user',
+        inputConfig: buildSessionTurnInputConfig({
+          prompt: 'Continue',
+          cliType: 'builtin',
+          agentType: 'codex',
+          agentRoleId: null,
+        }),
+      },
+    ]).memory
+  ).toBeUndefined();
+});
+
+it('retains local-only attachments across history and frozen execution input', () => {
+  const input = {
+    type: 'local_attachment' as const,
+    path: '/tmp/image.png',
+    machineId: 'machine',
+    kind: 'image' as const,
+    fileName: 'image.png',
+    mimeType: 'image/png',
+    sizeBytes: 10,
+  };
+  const items = inputBlocksToHistoryItems([input, { type: 'text', text: 'inspect' }]);
+  expect(historyItemsToInputBlocks(items)).toEqual([input, { type: 'text', text: 'inspect' }]);
+  expect(normalizeSessionTurnInputConfig({ inputBlocks: [input] })?.inputBlocks).toEqual([input]);
+  expect(() =>
+    normalizeSessionTurnInputConfig({
+      prompt: 'must not execute alone',
+      inputBlocks: [{ ...input, path: '' }],
+    })
+  ).toThrow();
+});
+
+describe('session bootstrap helpers', () => {
+  it('returns null when there is no effective initial user input', () => {
+    const entry = buildInitialHistoryEntry({
+      userId: 'user-1',
+      timestamp: '2026-04-19T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      prompt: '   ',
+      inputBlocks: [{ type: 'text', text: '   ' }],
+    });
+
+    expect(entry).toBeNull();
   });
 
-  it('builds a normalized session turn input config', () => {
-    expect(
-      buildSessionTurnInputConfig({
-        inputBlocks: [
-          { type: 'text', text: '  hello  ' },
-          {
-            type: 'image',
-            imageId: 'img-1',
-            mimeType: 'image/png',
-            sizeBytes: 128,
-          },
-        ],
-        cliType: 'builtin',
-        agentType: 'codex',
-        configOptionValues: {},
-      })
-    ).toEqual({
-      prompt: 'hello',
-      inputBlocks: [
-        { type: 'text', text: 'hello' },
-        {
-          type: 'image',
-          imageId: 'img-1',
-          mimeType: 'image/png',
-          sizeBytes: 128,
-        },
-      ],
+  it('does not persist an unresolved local branch selector as baseBranch', () => {
+    const patch = buildInitialSessionMetaPatch({
+      sessionId: 'session-local' as SessionId,
+      machineId: 'machine-1' as MachineId,
+      userId: 'user-1',
       cliType: 'builtin',
       agentType: 'codex',
-      modeId: undefined,
-      modelId: undefined,
-      configOptionValues: undefined,
-      mcpServerIds: undefined,
-      issuePRMentions: undefined,
-      resume: undefined,
+      createdAt: '2026-08-02T00:00:00.000Z',
+      project: {
+        kind: 'local',
+        localProjectId: 'project-1' as never,
+        branch: 'lody:branch:remote:origin:foo',
+        useWorktree: true,
+      },
     });
+
+    expect(patch.project).toMatchObject({ branch: 'lody:branch:remote:origin:foo' });
+    expect(patch).not.toHaveProperty('baseBranch');
+  });
+});
+
+describe('session MCP selection CRDT round-trip', () => {
+  const userTurn = (
+    turnId: string,
+    mcpServerIds: McpServerId[] | undefined
+  ): SessionHistoryInput => ({
+    id: turnId,
+    role: 'user',
+    items: [{ type: 'text', text: turnId }],
+    timestamp: '2026-08-12T00:00:00.000Z',
+    status: 'pending',
+    read: false,
+    userId: 'user-1',
+    fileDiff: [],
+    finished: true,
+    inputConfig: {
+      prompt: turnId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      ...(mcpServerIds === undefined ? {} : { mcpServerIds }),
+    },
   });
 
-  it('builds an initial session input config only for valid prompt and cli type', () => {
-    expect(
-      buildInitialSessionTurnInputConfig({
-        prompt: '  hello  ',
-        cliType: 'builtin',
-        agentType: 'codex',
-      })
-    ).toEqual({
-      prompt: 'hello',
-      inputBlocks: [{ type: 'text', text: 'hello' }],
-      cliType: 'builtin',
-      agentType: 'codex',
-      modeId: undefined,
-      modelId: undefined,
-      configOptionValues: undefined,
-      mcpServerIds: undefined,
-      issuePRMentions: undefined,
-      resume: undefined,
+  const roundTrip = (history: SessionHistoryInput[], mq: SessionDoc['mq'] = []) => {
+    const sourceDoc = new Loro();
+    const source = new Mirror({
+      doc: sourceDoc,
+      schema: sessionDocSchema,
+      initialState: {
+        session: { id: 'session-1' as SessionId },
+        history: [],
+        mq: [],
+      } satisfies Partial<SessionDoc>,
+      throwOnValidationError: true,
     });
+    source.setState((previous) => ({ ...previous, history, mq }));
 
+    const targetDoc = new Loro();
+    targetDoc.import(sourceDoc.export({ mode: 'snapshot' }));
+    const target = new Mirror({
+      doc: targetDoc,
+      schema: sessionDocSchema,
+      throwOnValidationError: true,
+    });
+    const state = target.getState();
+    source.dispose();
+    target.dispose();
+    return state;
+  };
+
+  it('keeps an explicit empty selection distinct from an absent selection', () => {
+    const explicitEmpty = roundTrip([userTurn('turn-empty', [])]);
+    const absent = roundTrip([userTurn('turn-absent', undefined)]);
+    expect(resolveSessionConversationConfig(explicitEmpty.history, explicitEmpty.mq)).toMatchObject(
+      {
+        mcpServerIds: [],
+      }
+    );
     expect(
-      buildInitialSessionTurnInputConfig({
-        prompt: 'hello',
-        cliType: 'invalid',
-        agentType: 'codex',
-      })
+      resolveSessionConversationConfig(absent.history, absent.mq).mcpServerIds
     ).toBeUndefined();
   });
 
-  it('builds pending user history entries only when user id and effective items exist', () => {
-    expect(
-      buildPendingUserHistoryEntry({
-        userId: ' user-1 ',
-        inputBlocks: [
-          { type: 'text', text: '  hello  ' },
-          {
-            type: 'image',
-            imageId: 'img-1',
-            mimeType: 'image/png',
-            sizeBytes: 128,
+  it('prefers the latest queued selection over history', () => {
+    const state = roundTrip(
+      [userTurn('turn-history', ['history-server'] as McpServerId[])],
+      [
+        {
+          $cid: 'queue-1',
+          text: 'queued',
+          timestamp: '2026-08-12T00:00:01.000Z',
+          acpSessionConfig: {
+            prompt: 'queued',
+            cliType: 'builtin',
+            agentType: 'codex',
+            mcpServerIds: ['queued-server'] as McpServerId[],
           },
-        ],
-        timestamp: '2026-03-24T00:00:00.000Z',
-        inputConfig: {
-          prompt: 'hello',
-          cliType: 'builtin',
-          agentType: 'codex',
         },
-      })
-    ).toEqual({
-      userId: 'user-1',
-      role: 'user',
-      items: [
-        { type: 'text', text: 'hello' },
-        {
-          type: 'image',
-          text: undefined,
-          imageId: 'img-1',
-          mimeType: 'image/png',
-          sizeBytes: 128,
-        },
-      ],
-      timestamp: '2026-03-24T00:00:00.000Z',
-      status: 'pending',
-      inputConfig: {
-        prompt: 'hello',
-        cliType: 'builtin',
-        agentType: 'codex',
-      },
-      read: false,
-      fileDiff: [],
-      finished: true,
-    });
-
-    expect(
-      buildPendingUserHistoryEntry({
-        userId: undefined,
-        inputBlocks: [{ type: 'text', text: 'hello' }],
-        timestamp: '2026-03-24T00:00:00.000Z',
-      })
-    ).toBeNull();
-
-    expect(
-      buildPendingUserHistoryEntry({
-        userId: 'user-1',
-        inputBlocks: [{ type: 'text', text: '   ' }],
-        timestamp: '2026-03-24T00:00:00.000Z',
-      })
-    ).toBeNull();
+      ]
+    );
+    const resolved = resolveSessionConversationConfig(state.history, state.mq);
+    expect(resolved.mcpServerIds).toEqual(['queued-server']);
   });
 
-  it('builds guide history entries as pending application', () => {
-    expect(
-      buildPendingUserHistoryEntry({
-        userId: 'user-1',
-        inputBlocks: [{ type: 'text', text: 'change direction' }],
-        timestamp: '2026-07-11T00:00:00.000Z',
-        status: 'pending_apply',
-      })
-    ).toMatchObject({
-      role: 'user',
-      status: 'pending_apply',
-      read: false,
-    });
-  });
-
-  it('persists comment-only user history entries through the session doc schema', () => {
-    const doc = new Loro();
-    const mirror = new Mirror({
-      doc,
-      schema: sessionDocSchema,
-      initialState: {
-        session: { id: 'session-1' as SessionId },
-        history: [],
-        mq: [],
-      } satisfies Partial<SessionDoc>,
-      throwOnValidationError: true,
-    });
-    const entry: SessionHistoryInput = {
-      id: 'h1',
-      role: 'user',
-      items: [
-        {
-          type: 'comment_reference',
-          ...commentReference,
-        } satisfies MessageContent,
-      ],
-      timestamp: '2026-04-13T00:00:00.000Z',
-      status: 'pending',
-      read: false,
-      userId: 'user-1',
-      fileDiff: [],
-      finished: true,
+  it('round-trips Agent Role identity and explicit None through Loro', () => {
+    const historyTurn = userTurn('turn-role', undefined);
+    historyTurn.inputConfig = {
+      ...historyTurn.inputConfig,
+      agentRoleId: 'role-reviewer' as AgentRoleId,
+      agentRoleRevision: 6,
     };
-
-    try {
-      expect(() => {
-        mirror.setState((prev) => ({
-          ...prev,
-          history: [entry],
-        }));
-      }).not.toThrow();
-      expect(mirror.getState().history[0]?.items?.[0]?.type).toBe('comment_reference');
-    } finally {
-      mirror.dispose();
-    }
-  });
-
-  it('persists visual annotation reference user history entries through the session doc schema', () => {
-    const doc = new Loro();
-    const mirror = new Mirror({
-      doc,
-      schema: sessionDocSchema,
-      initialState: {
-        session: { id: 'session-1' as SessionId },
-        history: [],
-        mq: [],
-      } satisfies Partial<SessionDoc>,
-      throwOnValidationError: true,
+    const withRole = roundTrip([historyTurn]);
+    expect(resolveSessionConversationConfig(withRole.history, withRole.mq)).toMatchObject({
+      agentRoleId: 'role-reviewer',
+      agentRoleRevision: 6,
     });
-    const entry: SessionHistoryInput = {
-      id: 'h1',
-      role: 'user',
-      items: [
+
+    const withNone = roundTrip(
+      [historyTurn],
+      [
         {
-          type: 'visual_annotation_reference',
-          ...visualAnnotationReference,
-        } satisfies MessageContent,
-      ],
-      timestamp: '2026-04-13T00:00:00.000Z',
-      status: 'pending',
-      read: false,
-      userId: 'user-1',
-      fileDiff: [],
-      finished: true,
-    };
-
-    try {
-      expect(() => {
-        mirror.setState((prev) => ({
-          ...prev,
-          history: [entry],
-        }));
-      }).not.toThrow();
-      expect(mirror.getState().history[0]?.items?.[0]?.type).toBe('visual_annotation_reference');
-    } finally {
-      mirror.dispose();
-    }
-  });
-
-  it('normalizes mirrored config option maps without carrying the Loro container id', () => {
-    const doc = new Loro();
-    const mirror = new Mirror({
-      doc,
-      schema: sessionDocSchema,
-      initialState: {
-        session: { id: 'session-1' as SessionId },
-        history: [],
-        mq: [],
-      } satisfies Partial<SessionDoc>,
-      throwOnValidationError: true,
-    });
-    const entry: SessionHistoryInput = {
-      id: 'h1',
-      role: 'user',
-      items: [{ type: 'text', text: 'hello' }],
-      timestamp: '2026-04-13T00:00:00.000Z',
-      status: 'pending',
-      read: false,
-      userId: 'user-1',
-      fileDiff: [],
-      finished: true,
-      inputConfig: {
-        prompt: 'hello',
-        cliType: 'builtin',
-        agentType: 'codex',
-        configOptionValues: {
-          approval: 'never',
-          fast_mode: true,
+          $cid: 'queue-none',
+          text: 'queued',
+          timestamp: '2026-08-12T00:00:01.000Z',
+          acpSessionConfig: {
+            prompt: 'queued',
+            cliType: 'builtin',
+            agentType: 'codex',
+            agentRoleId: null,
+          },
         },
-      },
-    };
-
-    try {
-      mirror.setState((prev) => ({
-        ...prev,
-        history: [entry],
-      }));
-
-      const mirroredInputConfig = mirror.getState().history[0]?.inputConfig;
-      const mirroredValues = mirroredInputConfig?.configOptionValues as
-        | Record<string, unknown>
-        | undefined;
-
-      expect(mirroredValues?.approval).toBe('never');
-      expect(mirroredValues?.$cid).toEqual(expect.stringContaining(':Map'));
-      expect(Object.prototype.propertyIsEnumerable.call(mirroredValues, '$cid')).toBe(false);
-      expect(normalizeSessionTurnInputConfig(mirroredInputConfig)).toEqual({
-        prompt: 'hello',
-        cliType: 'builtin',
-        agentType: 'codex',
-        configOptionValues: {
-          approval: 'never',
-          fast_mode: true,
-        },
-      });
-    } finally {
-      mirror.dispose();
-    }
+      ]
+    );
+    expect(resolveSessionConversationConfig(withNone.history, withNone.mq).agentRoleId).toBeNull();
   });
 });

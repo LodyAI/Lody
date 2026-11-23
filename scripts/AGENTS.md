@@ -10,17 +10,49 @@ maintenance commands here.
   direction. Shared frontend features use platform descriptors; CLI runtime
   roots consume injected ports and do not construct cloud SDK clients.
 - Keep the allowlist small and limited to deliberate adapter/composition files.
+  Capacitor staging commands may build/sync the client; they never deploy a service.
   A new violation should normally be fixed at its dependency boundary, not
   appended to the allowlist.
 - `check-code-collab-imports.mjs` protects Code Collab ownership boundaries.
+- `check-legacy-cloud-access.mjs` requires the shared admission wrappers for legacy
+  cloud query/mutation/action references. New endpoints in its protected protocol
+  families inherit the rule. Keep non-React/control exceptions exact and reasoned;
+  `--inventory` prints every current client entry and protection.
+- `check-comment-ratchet.mjs` bans comment growth: per-scope counted comment
+  lines may only shrink against `comment-ratchet-baseline.json`; tighten with
+  `--update`, never to permit new prose comments. JSDoc and tool directives are
+  exempt. The audit procedure lives in `.agents/skills/delete-comment`.
 - `check-public-boundary.mjs` rejects closed product paths, private workspace
   dependencies/imports, unresolved `workspace:` dependencies, closed-path
   documentation, internal absolute paths in any publishable text, and captured
   transcript fixtures.
+- `check-local-loro-writer-boundary.mjs` protects native writer execution/platform
+  boundaries and the single CLI repo unloader; behavior suites prove its effects.
+- Root `specs/` and the `.agents/` tree may contain public client and protocol
+  documentation and may be linked from other documents. Root `docs/` stays a
+  closed path. Their contents still undergo the same private-path, internal-path,
+  and hosted-preset checks as other public text.
 
 ## Generated artifacts
 
-- `generate-acp-registry.mjs` produces the public ACP registry.
+- `docs/main.mjs` (exposed through `pnpm run docs <command>`) provides document queues and scoped content-hash
+  review. Errors fail `check`; warnings, such as an `AGENTS.md` above 90% of its word
+  ceiling in `docs/agents-budgets.json` or a run-log phrase in a changed note, never do.
+  Owner-link and note-hygiene errors apply only to notes added or changed against the base. Status, check, and diff are read-only; only explicit `confirm` writes a
+  topic record. Confirmation requires recoverable committed inputs and evidence,
+  never changes Spec approval, and never auto-refreshes a stale baseline.
+  Await Git subprocesses throughout the command chain and retain Buffer output.
+  Only no-index content comparison accepts exit code 1; launch errors, signals,
+  other nonzero exits, and output truncation must fail with diagnostics.
+  `docs/anchors.mjs` uses TypeScript to hash declarations below `@dec:`
+  markers. Check both directions against adjacent `.anchors.json` records;
+  unrelated declarations must not invalidate the reviewed block.
+
+- `generate-acp-registry.mjs` produces the public ACP registry and its bundled,
+  generation-time-validated SVG icon map. Use `--icons-only` when refreshing
+  icons without also updating Provider versions.
+  Antigravity ACP, Devin, Dimcode, Kimi and Kimi Code are excluded from discovery, including local
+  fallback entries; keep builtin icons and persisted-provider launch compatibility.
   `generate-open-source-attributions.mjs` produces the in-app attribution
   bundle and root `THIRD_PARTY_NOTICES.md`. Generated output must come only
   from public repository inputs.
@@ -35,6 +67,17 @@ maintenance commands here.
 
 ## Install ownership
 
+- Root lint retains explicit product/build boundary rules only. Generic correctness
+  rules and the Effect lint patch toolchain are removed.
+
+- `package-pi-runtime.mjs` builds a frozen isolated Pi dependency closure, including
+  all supported optional platform packages. Windows Job binaries must be supplied
+  from successful CI for the exact source gitlink. Exclude pnpm installation metadata
+  from artifacts; it includes builder paths and timestamps. Validate the installed
+  closure with the adapter smoke and compare deterministic archive bytes.
+  Preserve relative dependency symlinks; reject absolute, escaping, or dangling
+  links. Exclude install-time `.bin` shims from the direct-entry runtime bundle.
+
 - `guard-nested-workspace-install.mjs` runs before a public-root install. If an
   ancestor lockfile already owns public package importers, fail with an explicit
   parent-root instruction; never allow two pnpm virtual stores to write links
@@ -43,3 +86,11 @@ maintenance commands here.
 Keep tests deterministic and side-effect-contained. Temporary files must use a
 dedicated temporary directory and cleanup must never target the repository root
 or a user data directory.
+
+`security-undici-probe.mjs` runs a synthetic loopback response in an isolated
+client process; its root script tests must observe natural child exit after a
+caught fetch rejection. Do not mask uncaught errors or force successful exit.
+
+The documentation link scan excludes native Lexical Markdown fixtures under
+`apps/mobile/ios/packages/lexical-swift/Fixtures/`: their literal links are test
+data. Mobile READMEs and development documentation remain checked.

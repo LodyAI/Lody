@@ -40,6 +40,13 @@ export function isMac(): boolean {
   return p === 'mac' || p === 'ios';
 }
 
+export function getHotkeyPlatform(): 'mac' | 'windows' | 'linux' {
+  const platform = getPlatform();
+  if (platform === 'mac' || platform === 'ios') return 'mac';
+  if (platform === 'win') return 'windows';
+  return 'linux';
+}
+
 // Test-only: reset module-cached platform/runtime for tests that mock window globals.
 export function __resetPlatformCacheForTests(): void {
   cachedPlatform = null;

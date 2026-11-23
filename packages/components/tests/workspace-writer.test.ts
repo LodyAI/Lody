@@ -1,12 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
+import { createSessionMirror } from '@lody/shared/session-mirror';
+import { describe, expect, it } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
+import { LoroDoc } from 'loro-crdt';
 import {
-  createPreviewVisualComment,
-  createPreviewVisualCommentDoc,
-  type MinimalVisualAnnotationAnchor,
-  type PreviewVisualCommentDocInput,
-} from '@lody/shared';
+  type SessionMeta,
+  type MinimalVisualAnnotationAnchor} from '@lody/shared';
+
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
+import { persistReconciledAgentRole } from '../src/lib/agent-role-schema-reconciliation';
+import {
+  AGENT_ROLE_VERSION,
+  workspaceFlockKeys,
+  type AgentRole,
+  type AcpCapabilityCacheEntry} from '@lody/shared';
 
 const anchor: MinimalVisualAnnotationAnchor = {
   version: 1,
@@ -34,79 +40,199 @@ const anchor: MinimalVisualAnnotationAnchor = {
 };
 
 describe('createDirectWorkspaceWriter', () => {
-  it('puts a Flock row only when the key is absent in the same synchronous transaction', async () => {
-    const flock = new Flock('workspace-writer-test');
+  it('publishes the control version after enqueue, edit, reorder and removal', async () => {
+    const doc = new LoroDoc();
+    const mirror = createSessionMirror({
+      doc,
+      initialState: { session: { id: 'session-1' as never }, history: [] },
+    });
+    let meta: Partial<SessionMeta> = {};
     const writer = createDirectWorkspaceWriter({
       repo: {
-        openFlockDoc: vi.fn(async () => ({ flock })),
+        upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+        },
       } as never,
-      acquireSessionStore: vi.fn(async () => {
+      acquireSessionStore: async () => ({ doc, setState: mirror.setState }) as never,
+      releaseSessionStoreRef: () => {},
+      acquirePreviewVisualCommentStore: async () => {
         throw new Error('not used');
-      }),
-      releaseSessionStoreRef: vi.fn(),
-      acquirePreviewVisualCommentStore: vi.fn(async () => {
-        throw new Error('not used');
-      }),
-      releasePreviewVisualCommentStoreRef: vi.fn(),
+      },
+      releasePreviewVisualCommentStoreRef: () => {},
     });
-
-    const results = await Promise.all([
-      writer.flockRowPutIfAbsent('flock-1', ['localProject', 'project-1'], { name: 'first' }),
-      writer.flockRowPutIfAbsent('flock-1', ['localProject', 'project-1'], { name: 'second' }),
-    ]);
-    expect(results).toEqual([
-      { inserted: true, value: { name: 'first' } },
-      { inserted: false, value: { name: 'first' } },
-    ]);
-    expect(flock.get(['localProject', 'project-1'])).toEqual({ name: 'first' });
+    const mutate = async (action: () => Promise<void>) => {
+      const receiver = doc.fork();
+      await action();
+      const receipt = meta.messageQueueUpdateVersion;
+      if (!receipt) throw new Error('Queue update is missing its causal receipt');
+      expect(receipt.updatedAt).toBe(meta.messageQueueUpdatedAt);
+      const observed = () =>
+        receipt.frontiers.every(
+          ({ peer, counter }) => (receiver.version().get(peer) ?? 0) > counter
+        );
+      expect(observed()).toBe(false);
+      receiver.import(doc.export({ mode: 'update', from: receiver.version() }));
+      expect(observed()).toBe(true);
+      expect(receiver.toJSON().mq).toEqual(doc.toJSON().mq);
+    };
+    try {
+      await mutate(() =>
+        writer.enqueueSessionMessage('session-1', {
+          task: 'one',
+          userTurnId: 'one',
+          timestamp: '2026-10-27T00:00:00.000Z',
+        })
+      );
+      await mutate(() =>
+        writer.enqueueSessionMessage('session-1', {
+          task: 'two',
+          userTurnId: 'two',
+          timestamp: '2026-10-27T00:00:00.000Z',
+        })
+      );
+      const [first, second] = mirror.getState().mq ?? [];
+      if (!first || !second) throw new Error('Missing queued messages');
+      await mutate(() => writer.updateSessionMessage('session-1', first.$cid, { task: 'edited' }));
+      await mutate(() => writer.reorderSessionMessages('session-1', [second.$cid, first.$cid]));
+      expect(mirror.getState().mq?.map((row) => row.task)).toEqual(['two', 'edited']);
+      await mutate(() => writer.removeSessionMessage('session-1', first.$cid));
+      await mutate(() => writer.removeSessionMessage('session-1', second.$cid));
+      expect(mirror.getState().mq).toEqual([]);
+    } finally {
+      mirror.dispose();
+    }
   });
 
-  it('applies the shared preview-comment mutation to the renderer store', async () => {
-    const state = createPreviewVisualCommentDoc(
-      'session-1' as never
-    ) as PreviewVisualCommentDocInput;
-    const setState = vi.fn((updater: (draft: PreviewVisualCommentDocInput) => void) => {
-      updater(state);
-    });
-    const writer = createDirectWorkspaceWriter({
-      repo: {} as never,
-      acquireSessionStore: vi.fn(async () => {
-        throw new Error('not used');
-      }),
-      releaseSessionStoreRef: vi.fn(),
-      acquirePreviewVisualCommentStore: vi.fn(async () => ({ setState }) as never),
-      releasePreviewVisualCommentStoreRef: vi.fn(),
-    });
-    const comment = createPreviewVisualComment({
-      id: 'comment-1',
-      turnId: 'turn-1',
-      body: 'Persist me',
-      anchor,
-      authorId: 'user-1',
-      createdAt: 1_000,
-    });
-
-    await writer.mutatePreviewVisualComments('session-1' as never, { kind: 'create', comment });
-    expect(state.turns['turn-1']).toMatchObject({
-      comments: [expect.objectContaining({ id: 'comment-1', body: 'Persist me' })],
-    });
-  });
-
-  it('rejects when the underlying store write fails so send paths surface the error', async () => {
-    const writer = createDirectWorkspaceWriter({
-      repo: {} as never,
-      acquireSessionStore: vi.fn(async () => {
-        throw new Error('store unavailable');
-      }),
-      releaseSessionStoreRef: vi.fn(),
-      acquirePreviewVisualCommentStore: vi.fn(async () => {
-        throw new Error('not used');
-      }),
-      releasePreviewVisualCommentStoreRef: vi.fn(),
-    });
-
-    await expect(writer.appendSessionTurn('session-1', { id: 'turn-1' })).rejects.toThrow(
-      'store unavailable'
+  it.each(['unchanged', 'edited', 'deleted', 'cancelled', 'other-owner', 'write-failure'] as const)(
+    'reconciles the durable role without overwriting intervening changes: %s',
+    async (scenario) => {
+      const flock = new Flock('role-reconciliation');
+      const role: AgentRole = {
+        v: AGENT_ROLE_VERSION,
+        id: 'role' as never,
+        machineId: 'machine' as never,
+        agentConfigId: 'config' as never,
+        ownerUserId: 'owner',
+        visibility: 'private',
+        name: 'Reviewer',
+        runConfig: { configOptionValues: { retired: 'value' } },
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const key = workspaceFlockKeys.agentRole(role.id);
+      flock.set(key, role as never);
+      flock.commit();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const repo = {
+        openFlockDoc: async () => {
+          await gate;
+          if (scenario === 'write-failure') throw new Error('storage unavailable');
+          return { flock, syncOnce: async () => {} };
+        },
+      };
+      const writer = createDirectWorkspaceWriter({ repo } as never);
+      const runtime = { repo, writer, workspaceId: 'workspace' } as never;
+      const capability: AcpCapabilityCacheEntry = {
+        cliType: 'builtin',
+        agentType: 'codex',
+        provenance: 'runtime',
+        fetchedAt: 2,
+        modes: [],
+        models: [],
+        configOptions: [],
+      };
+      const pending = persistReconciledAgentRole(
+        runtime,
+        role,
+        capability,
+        scenario === 'other-owner' ? 'someone-else' : 'owner',
+        3,
+        () => scenario !== 'cancelled'
+      );
+      if (scenario === 'edited')
+        flock.set(key, { ...role, name: 'New name', revision: 2 } as never);
+      if (scenario === 'deleted') flock.delete(key);
+      flock.commit();
+      const before = flock.get(key);
+      release();
+      if (scenario === 'write-failure')
+        await expect(pending).rejects.toThrow('storage unavailable');
+      else await pending;
+      if (scenario === 'unchanged') {
+        expect(flock.get(key)).toEqual({
+          ...role,
+          runConfig: { configOptionValues: {} },
+          revision: 2,
+          updatedAt: 3,
+        });
+        await persistReconciledAgentRole(runtime, role, capability, 'owner', 4, () => true);
+        expect(flock.get(key)).toMatchObject({ revision: 2, updatedAt: 3 });
+      } else expect(flock.get(key)).toEqual(before);
+    }
+  );
+});
+it('persists machine memory associations through the real Flock writer without touching provider identities', async () => {
+  const { linkMemoryAssociation, editMemoryAssociation, unlinkMemoryAssociation } =
+    await import('../src/lib/memory-association-write');
+  const {
+    getMachineFlockMemories,
+    readMachineFlockRowsFromFlock,
+    getMachineFlockDocId,
+    isMemoryIdentityMissing,
+  } = await import('@lody/shared');
+  const flocks = new Map<string, Flock>();
+  const repo = {
+    openFlockDoc: async (id: string) => {
+      let flock = flocks.get(id);
+      if (!flock) {
+        flock = new Flock(id);
+        flocks.set(id, flock);
+      }
+      return {
+        flock,
+        syncOnce: async () => {
+          throw new Error('offline upload');
+        },
+      };
+    },
+  };
+  const writer = createDirectWorkspaceWriter({ repo } as never);
+  const runtime = { repo, writer, workspaceId: 'workspace' } as never;
+  const entry = {
+    machineId: 'machine-a',
+    providerId: 'nowledge-mem',
+    memoryId: 'reviewer',
+    name: 'Reviewer',
+    description: 'Code review lessons',
+  };
+  await linkMemoryAssociation(runtime, entry);
+  const read = async (machine: string) =>
+    getMachineFlockMemories(
+      readMachineFlockRowsFromFlock(
+        (await repo.openFlockDoc(getMachineFlockDocId('workspace' as never, machine as never)))
+          .flock
+      ),
+      machine as never
     );
-  });
+  expect(await read('machine-a')).toEqual([entry]);
+  expect(await read('machine-b')).toEqual([]);
+  await editMemoryAssociation(runtime, { ...entry, name: 'My reviewer' });
+  await linkMemoryAssociation(runtime, entry);
+  expect(await read('machine-a')).toEqual([{ ...entry, name: 'My reviewer' }]);
+  expect(
+    isMemoryIdentityMissing(entry, { type: 'machine/memory', status: 'ready', memories: [] })
+  ).toBe(true);
+  expect(
+    isMemoryIdentityMissing(entry, { type: 'machine/memory', status: 'error', memories: [] })
+  ).toBe(false);
+  await linkMemoryAssociation(runtime, { ...entry, machineId: 'machine-b' });
+  await unlinkMemoryAssociation(runtime, 'machine-a' as never, entry);
+  expect(await read('machine-a')).toEqual([]);
+  expect(await read('machine-b')).toEqual([{ ...entry, machineId: 'machine-b' }]);
+  await expect(editMemoryAssociation(runtime, entry)).rejects.toThrow('no longer exists');
+  expect(await read('machine-a')).toEqual([]);
 });

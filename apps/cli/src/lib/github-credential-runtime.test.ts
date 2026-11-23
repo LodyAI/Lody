@@ -1,0 +1,157 @@
+import vm from 'node:vm';
+import { describe, expect, it } from 'vitest';
+import { githubCredentialRuntime } from './github-credential-runtime';
+
+function harness(
+  options: {
+    nativeRepositories?: string[];
+    personal?: string;
+    app?: string;
+    owner?: boolean;
+    offline?: boolean;
+  } = {}
+) {
+  const events: string[] = [];
+  const logs: string[] = [];
+  const context = vm.runInNewContext(
+    githubCredentialRuntime +
+      '\n({ readCredentialPolicy, selectGitHubCredential, githubCredentials, readCredentialContext })',
+    {
+      getContext: () => ({
+        contextToken: 'fixture',
+        allowLocalAuth: options.owner ?? true,
+        nativeRepositories: options.nativeRepositories,
+      }),
+      requestBroker: async (_endpoint: string, body: { source: 'personal' | 'app' }) => {
+        events.push(body.source);
+        if (options.offline)
+          throw Object.assign(new Error('SECRET'), { cause: { code: 'ECONNREFUSED' } });
+        const token = options[body.source];
+        return Response.json(
+          token
+            ? { token, tokenSource: body.source }
+            : { available: false, reason: 'personal_auth_missing' }
+        );
+      },
+      console: { error: (message: string) => logs.push(message) },
+    }
+  );
+  const local = async () => {
+    events.push('local');
+    return { token: 'machine' };
+  };
+  return { context, events, logs, local };
+}
+
+describe('ordered GitHub credentials', () => {
+  it('uses only native credentials for a resolved-local member in a mixed runtime', async () => {
+    const h = harness({ personal: 'personal', app: 'app', nativeRepositories: ['org/local'] });
+    const local = await h.context.selectGitHubCredential(
+      'ORG/LOCAL',
+      h.context.readCredentialPolicy(),
+      h.local,
+      true
+    );
+    const managed = await h.context.selectGitHubCredential(
+      'org/managed',
+      h.context.readCredentialPolicy(),
+      h.local,
+      true
+    );
+    expect(local).toEqual({ token: 'machine', source: 'local' });
+    expect(managed).toEqual({ token: 'personal', source: 'personal' });
+    await expect(
+      h.context.selectGitHubCredential(
+        'org/local',
+        h.context.readCredentialPolicy(),
+        async () => null,
+        true
+      )
+    ).rejects.toMatchObject({ code: 'credentials_exhausted' });
+  });
+  it('uses authorized machine credentials while the broker is offline', async () => {
+    const h = harness({ offline: true });
+    const selected = await h.context.selectGitHubCredential(
+      'org/repo',
+      h.context.readCredentialPolicy(),
+      h.local,
+      true
+    );
+    expect(selected.source).toBe('local');
+    expect(h.events).toEqual(['personal', 'local']);
+    expect(h.logs.join('\n')).toContain('ECONNREFUSED');
+    expect(h.logs.join('\n')).not.toContain('SECRET');
+  });
+  it('skips machine credentials for another owner and uses repository App credentials', async () => {
+    const h = harness({ owner: false, app: 'repository-app' });
+    const selected = await h.context.selectGitHubCredential(
+      'org/repo',
+      h.context.readCredentialPolicy(),
+      h.local,
+      true
+    );
+    expect(selected).toEqual({ token: 'repository-app', source: 'app' });
+    expect(h.events).toEqual(['personal', 'app']);
+  });
+  it('does not retry a rejected credential and advances after native access failure', async () => {
+    const h = harness({ personal: 'revoked', app: 'app' });
+    const selected = await h.context.selectGitHubCredential(
+      'org/repo',
+      h.context.readCredentialPolicy(),
+      h.local,
+      true,
+      undefined,
+      async (candidate: { source: string }) => {
+        if (candidate.source === 'personal')
+          throw Object.assign(new Error('SECRET'), { code: 'access_denied', status: 403 });
+        return true;
+      }
+    );
+    expect(selected.source).toBe('local');
+    expect(h.events).toEqual(['personal', 'local']);
+    expect(h.logs.join('\n')).toContain('"status":403');
+    expect(h.logs.join('\n')).not.toContain('SECRET');
+  });
+  it('permits anonymous reads last, even with both managed providers down', async () => {
+    const h = harness({ owner: false, offline: true });
+    const selected = await h.context.selectGitHubCredential(
+      'public/tool',
+      h.context.readCredentialPolicy(),
+      h.local,
+      false,
+      async () => true
+    );
+    expect(selected.source).toBe('anonymous');
+    expect(h.events).toEqual(['personal', 'app']);
+  });
+  it('exhausts a failed write with source-specific causes and no anonymous identity', async () => {
+    const h = harness({ owner: false, offline: true });
+    await expect(
+      h.context.selectGitHubCredential(
+        'org/repo',
+        h.context.readCredentialPolicy(),
+        h.local,
+        true,
+        async () => true
+      )
+    ).rejects.toMatchObject({
+      code: 'credentials_exhausted',
+      failures: [
+        { source: 'personal', stage: 'acquire', code: 'ECONNREFUSED' },
+        { source: 'app', stage: 'acquire', code: 'ECONNREFUSED' },
+      ],
+    });
+  });
+  it('rejects missing or malformed host context instead of trusting environment ownership', () => {
+    const h = harness();
+    expect(() =>
+      h.context.readCredentialContext({ readFileSync: () => '{}' }, '/broker', {
+        LODY_GIT_CRED_CONTEXT_TOKEN: 'old',
+        LODY_ALLOW_LOCAL_AUTH: 'true',
+      })
+    ).toThrow('context_invalid');
+    expect(() =>
+      h.context.readCredentialContext({}, '/broker', { LODY_ALLOW_LOCAL_AUTH: 'true' })
+    ).toThrow('context_missing');
+  });
+});

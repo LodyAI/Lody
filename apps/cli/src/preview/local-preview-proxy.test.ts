@@ -1,10 +1,29 @@
 import http, { type AddressInfo } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
-import type { PreviewTarget, SessionId } from '@lody/shared';
+import { brotliCompressSync, gzipSync } from 'node:zlib';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { previewTestLookup } from './preview-test-lookup';
+import { WebSocket, WebSocketServer } from 'ws';
+import {
+  DEFAULT_PREVIEW_RESOURCE_LIMITS,
+  type PreviewResourceLimits,
+  type PreviewTarget,
+  type SessionId,
+} from '@lody/shared';
 import { LocalPreviewProxyManager } from './local-preview-proxy';
+import { verifyPreviewTunnelRoundTrip } from './preview-tunnel-readiness';
+
+const previousDispatcher = getGlobalDispatcher();
+const viewerDispatcher = new Agent({ connect: { lookup: previewTestLookup } });
+beforeAll(() => setGlobalDispatcher(viewerDispatcher));
+afterAll(async () => {
+  setGlobalDispatcher(previousDispatcher);
+  await viewerDispatcher.close();
+});
 
 const createLogger = () => ({
   debug: () => {},
+  trace: () => {},
   info: () => {},
   warn: () => {},
   error: () => {},
@@ -14,7 +33,33 @@ const createLogger = () => ({
   close: () => {},
 });
 
-const listenHtmlServer = async (): Promise<{
+const listenTestLoopback = (
+  server: http.Server,
+  host: '127.0.0.1' | '::1',
+  port: number
+): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      const address = server.address();
+      if (!address || typeof address === 'string') return reject(new Error('Missing test port'));
+      resolve(address.port);
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen({ port, host, ...(host === '::1' ? { ipv6Only: true } : {}) });
+  });
+
+const listenTestIPv4 = (server: http.Server, port: number): Promise<number> =>
+  listenTestLoopback(server, '127.0.0.1', port);
+
+const listenHtmlServer = async (
+  checkFetchMetadata = false
+): Promise<{
   server: http.Server;
   target: PreviewTarget;
   requestUrls: string[];
@@ -24,6 +69,18 @@ const listenHtmlServer = async (): Promise<{
   const styleReferers: Array<string | undefined> = [];
   const server = http.createServer((request, response) => {
     requestUrls.push(request.url ?? '');
+    // Astro's dev server permits navigations but rejects cross-site subresources.
+    if (
+      checkFetchMetadata &&
+      request.headers['sec-fetch-site'] === 'cross-site' &&
+      !['navigate', 'nested-navigate', 'websocket'].includes(
+        String(request.headers['sec-fetch-mode'])
+      )
+    ) {
+      response.writeHead(403, { 'content-type': 'text/plain' });
+      response.end('Cross-origin request blocked');
+      return;
+    }
     if (request.url?.startsWith('/external-redirect')) {
       response.writeHead(302, { location: 'https://example.com/outside' });
       response.end();
@@ -71,6 +128,69 @@ const listenHtmlServer = async (): Promise<{
   };
 };
 
+type ObservedClose = { code: number; reason: string };
+
+const listenWebSocketServer = async (
+  protocol?: string
+): Promise<{
+  server: http.Server;
+  target: PreviewTarget;
+  nextUpstreamSocket: () => Promise<WebSocket>;
+}> => {
+  const upstreamSockets: WebSocket[] = [];
+  const pendingSockets: Array<(socket: WebSocket) => void> = [];
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<html><body>socket</body></html>');
+  });
+  const webSocketServer = new WebSocketServer({
+    server,
+    handleProtocols: protocol ? () => protocol : undefined,
+  });
+  webSocketServer.on('connection', (socket) => {
+    upstreamSockets.push(socket);
+    pendingSockets.shift()?.(socket);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    server,
+    target: { protocol: 'http', host: '127.0.0.1', port: address.port },
+    nextUpstreamSocket: () =>
+      new Promise<WebSocket>((resolve) => {
+        const existing = upstreamSockets[0];
+        if (existing) {
+          resolve(existing);
+          return;
+        }
+        pendingSockets.push(resolve);
+      }),
+  };
+};
+
+const openBrowserSocket = async (viewerUrl: string, protocols?: string[]): Promise<WebSocket> => {
+  const socketUrl = new URL(viewerUrl);
+  socketUrl.protocol = 'ws:';
+  socketUrl.pathname = '/socket';
+  const socket = new WebSocket(socketUrl, protocols, { lookup: previewTestLookup });
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  return socket;
+};
+
+const observeClose = (socket: WebSocket): Promise<ObservedClose> =>
+  new Promise((resolve) => {
+    socket.once('close', (code, reason) => resolve({ code, reason: reason.toString('utf8') }));
+  });
+
 describe('LocalPreviewProxyManager', () => {
   const servers: http.Server[] = [];
   const managers: LocalPreviewProxyManager[] = [];
@@ -85,6 +205,262 @@ describe('LocalPreviewProxyManager', () => {
           })
       )
     );
+  });
+
+  async function fixture(
+    listener: http.RequestListener,
+    limits: Partial<PreviewResourceLimits> = {}
+  ) {
+    const server = http.createServer(listener);
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    return manager.acquire({
+      sessionId: 'session-http-boundary' as SessionId,
+      target: { protocol: 'http', host: '127.0.0.1', port: address.port },
+      resourceLimits: { ...DEFAULT_PREVIEW_RESOURCE_LIMITS, ...limits },
+    });
+  }
+
+  it.each([
+    ['gzip', 'text/html'],
+    ['br', 'application/json'],
+  ])('decodes actual %s %s responses without stale encoding or length', async (encoding, type) => {
+    const html = type === 'text/html';
+    const original = html ? '<html><body>compressed preview</body></html>' : '{"value":"preview"}';
+    const compressed = (encoding === 'gzip' ? gzipSync : brotliCompressSync)(original);
+    let upstreamHeaders: http.IncomingHttpHeaders | undefined;
+    const endpoint = await fixture((request, response) => {
+      upstreamHeaders = request.headers;
+      response.writeHead(200, {
+        'content-type': type,
+        'content-encoding': encoding,
+        'content-length': compressed.length,
+        etag: '"before-injection"',
+      });
+      response.end(compressed);
+    });
+    const response = await fetch(endpoint.viewerUrl, {
+      headers: {
+        'accept-encoding': 'gzip, br',
+        'if-none-match': '"cached"',
+        'if-modified-since': 'Tue, 05 May 2026 00:00:00 GMT',
+        referer: 'https://attacker.example/app',
+      },
+    });
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(upstreamHeaders?.['accept-encoding']).toBe('identity');
+    expect(upstreamHeaders?.['if-none-match']).toBeUndefined();
+    expect(upstreamHeaders?.['if-modified-since']).toBeUndefined();
+    expect(upstreamHeaders?.referer).toBeUndefined();
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    if (html) {
+      expect(body).toContain('compressed preview');
+      expect(body).toContain('data-lody-visual-annotation-runtime="true"');
+      expect(response.headers.get('etag')).toBeNull();
+      expect(response.headers.get('content-length')).toBe(String(Buffer.byteLength(body)));
+    } else {
+      expect(body).toBe(original);
+      expect(response.headers.get('content-length')).toBeNull();
+    }
+  });
+
+  it.each([
+    ['HEAD', 200],
+    ['GET', 304],
+  ] as const)(
+    'preserves bodyless %s/%s responses without injecting HTML',
+    async (method, status) => {
+      let upstreamMethod: string | undefined;
+      const endpoint = await fixture((request, response) => {
+        upstreamMethod = request.method;
+        response.writeHead(status, {
+          'content-type': 'text/html',
+          'content-length': '123',
+          etag: '"unchanged"',
+        });
+        response.end();
+      });
+      const response = await fetch(endpoint.viewerUrl, { method });
+      expect(upstreamMethod).toBe(method);
+      expect(response.status).toBe(status);
+      expect(await response.text()).toBe('');
+      expect(response.headers.get('x-lody-preview-runtime')).toBeNull();
+      expect(response.headers.get('etag')).toBe('"unchanged"');
+      expect(response.headers.get('cache-control')).toBe('no-store');
+    }
+  );
+
+  it('forwards a binary upload at the limit and explicitly rejects an oversized upload before the origin', async () => {
+    const received: Buffer[] = [];
+    const endpoint = await fixture(
+      (request, response) => {
+        const chunks: Buffer[] = [];
+        request.on('data', (chunk: Buffer) => chunks.push(chunk));
+        request.on('end', () => {
+          const body = Buffer.concat(chunks);
+          received.push(body);
+          response.writeHead(200, { 'content-type': 'application/octet-stream' });
+          response.end(body);
+        });
+      },
+      { maxRequestBodyBytes: 3 }
+    );
+    const bytes = Buffer.from([0, 128, 255]);
+    const accepted = await fetch(endpoint.viewerUrl, { method: 'POST', body: bytes });
+    expect(accepted.status).toBe(200);
+    expect(Buffer.from(await accepted.arrayBuffer())).toEqual(bytes);
+    const rejected = await fetch(endpoint.viewerUrl, {
+      method: 'POST',
+      body: Buffer.from([0, 128, 255, 1]),
+    });
+    expect(rejected.status).toBe(502);
+    expect(await rejected.text()).toContain('Preview request body exceeds 3 byte limit');
+    expect(received).toEqual([bytes]);
+  });
+
+  it('cancels an unfinished origin response when its streamed body exceeds the limit', async () => {
+    let overflow: () => void = () => {
+      throw new Error('Origin has not started');
+    };
+    let originClosed: () => void = () => {
+      throw new Error('Fixture not initialized');
+    };
+    const closed = new Promise<void>((resolve) => {
+      originClosed = resolve;
+    });
+    const endpoint = await fixture(
+      (_request, response) => {
+        response.on('close', originClosed);
+        overflow = () => {
+          response.write(Buffer.from([255]));
+        };
+        response.writeHead(200, { 'content-type': 'application/octet-stream' });
+        response.write(Buffer.from([0, 1, 128]));
+        // Stay open: rejecting the viewer must cancel upstream, not wait for EOF.
+      },
+      { maxResponseBodyBytes: 3 }
+    );
+    const response = await fetch(endpoint.viewerUrl);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Missing streaming body');
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(first.value).toEqual(Uint8Array.from([0, 1, 128]));
+    overflow();
+    await expect(reader.read()).rejects.toThrow();
+    await closed;
+  });
+
+  it.each(['navigate', 'nested-navigate', 'cors', 'no-cors'])(
+    'preserves dev-server navigation access and subresource rejection for %s',
+    async (mode) => {
+      const { server, target, requestUrls } = await listenHtmlServer(true);
+      servers.push(server);
+      const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+      managers.push(manager);
+      const endpoint = await manager.acquire({
+        sessionId: 'session-fetch-metadata' as SessionId,
+        target,
+      });
+      // fetch() cannot simulate browser navigation: it overwrites Sec-Fetch-Mode.
+      const request = (url: string) =>
+        new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+          http
+            .get(
+              url,
+              {
+                lookup: previewTestLookup,
+                headers: {
+                  'Sec-Fetch-Site': 'cross-site',
+                  'Sec-Fetch-Mode': mode,
+                  'Sec-Fetch-Dest': 'iframe',
+                },
+              },
+              (response) => {
+                let body = '';
+                response.setEncoding('utf8');
+                response.on('data', (chunk: string) => {
+                  body += chunk;
+                });
+                response.on('error', reject);
+                response.on('end', () => resolve({ status: response.statusCode, body }));
+              }
+            )
+            .on('error', reject);
+        });
+
+      const unauthorized = await request(new URL('/', endpoint.viewerUrl).toString());
+      expect(unauthorized.status).toBe(403);
+      expect(unauthorized.body).toContain('token is missing or invalid');
+      expect(requestUrls).toEqual([]);
+
+      const result = await request(endpoint.viewerUrl);
+      if (mode === 'navigate' || mode === 'nested-navigate') {
+        expect(result.status).toBe(200);
+        expect(result.body).toContain('data-testid="cta"');
+      } else {
+        expect(result.status).toBe(403);
+        expect(result.body).toBe('Cross-origin request blocked');
+      }
+    }
+  );
+
+  it('maps only the bound viewer Origin while preserving upstream HTTP and WS cross-site rejection', async () => {
+    let localOrigin = '';
+    const server = http.createServer((request, response) => {
+      response.writeHead(request.headers.origin === localOrigin ? 200 : 403);
+      response.end(JSON.stringify({ origin: request.headers.origin ?? null }));
+    });
+    servers.push(server);
+    const websocketServer = new WebSocketServer({
+      server,
+      verifyClient: (info) => info.origin === localOrigin,
+    });
+    server.on('close', () => websocketServer.close());
+    websocketServer.on('connection', (socket) => socket.close());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    localOrigin = `http://127.0.0.1:${address.port}`;
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'session-bound-origin' as SessionId;
+    const endpoint = await manager.acquire({
+      sessionId,
+      target: { protocol: 'http', host: '127.0.0.1', port: address.port },
+      remote: true,
+    });
+    const viewerOrigin = 'https://origin-fixture.trycloudflare.com';
+    manager.bindViewerOrigin(sessionId, viewerOrigin);
+    for (const origin of [
+      viewerOrigin,
+      'https://other.trycloudflare.com',
+      `${viewerOrigin}.evil.test`,
+      'null',
+      undefined,
+    ]) {
+      const headers = origin ? { origin } : {};
+      const response = await fetch(endpoint.viewerUrl, { method: 'POST', headers });
+      expect(response.status, origin).toBe(origin === viewerOrigin ? 200 : 403);
+      expect(await response.json()).toEqual({
+        origin: origin === viewerOrigin ? localOrigin : (origin ?? null),
+      });
+      const url = new URL(endpoint.viewerUrl);
+      url.protocol = 'ws:';
+      const socket = new WebSocket(url, { headers, lookup: previewTestLookup });
+      const opened = await new Promise<boolean>((resolve) => {
+        socket.once('open', () => resolve(true));
+        socket.once('error', () => resolve(false));
+      });
+      expect(opened, origin).toBe(origin === viewerOrigin);
+      socket.terminate();
+    }
   });
 
   it('serves local preview HTML through an annotated ephemeral proxy endpoint', async () => {
@@ -126,14 +502,29 @@ describe('LocalPreviewProxyManager', () => {
     const unauthenticatedAssetResponse = await fetch(assetUrl);
     expect(unauthenticatedAssetResponse.status).toBe(403);
 
+    const referer = new URL(endpoint.viewerUrl);
+    referer.pathname = '/DownloadPage.vue';
+    referer.search = `?vue&type=style&index=0&lang.css&${referer.search.slice(1)}`;
+    referer.hash = 'section';
     const refererAuthorizedAssetResponse = await fetch(assetUrl, {
       headers: {
-        referer: endpoint.viewerUrl,
+        referer: referer.href,
       },
     });
     expect(refererAuthorizedAssetResponse.status).toBe(200);
     expect(await refererAuthorizedAssetResponse.text()).toContain('rgb(1, 2, 3)');
-    expect(styleReferers).toEqual([`http://127.0.0.1:${target.port}/`]);
+    expect(styleReferers).toEqual([
+      `http://127.0.0.1:${target.port}/DownloadPage.vue?vue&type=style&index=0&lang.css#section`,
+    ]);
+
+    // Validate the actual forwarding marker on an unannotated response, not a
+    // synthetic header fixture. The same check guards cloud tunnel readiness.
+    await expect(
+      verifyPreviewTunnelRoundTrip({
+        publicUrl: endpoint.viewerUrl,
+        target: { ...target, path: '/@tanstack-start/styles.css?routes=__root__%2C%2F' },
+      })
+    ).resolves.toBeUndefined();
 
     const reactRefreshUrl = new URL('/@react-refresh', endpoint.viewerUrl);
     const moduleChainAssetResponse = await fetch(reactRefreshUrl, {
@@ -141,8 +532,14 @@ describe('LocalPreviewProxyManager', () => {
         referer: new URL('/src/main.tsx', endpoint.viewerUrl).toString(),
       },
     });
-    expect(moduleChainAssetResponse.status).toBe(200);
-    expect(await moduleChainAssetResponse.text()).toContain('RefreshRuntime');
+    expect(moduleChainAssetResponse.status).toBe(403);
+    const cookie = response.headers.get('set-cookie')?.split(';')[0];
+    expect(cookie).toBeTruthy();
+    const cookieAuthorizedAsset = await fetch(reactRefreshUrl, {
+      headers: { cookie: cookie ?? '' },
+    });
+    expect(cookieAuthorizedAsset.status).toBe(200);
+    expect(await cookieAuthorizedAsset.text()).toContain('RefreshRuntime');
 
     const viteStyleUrl = new URL(
       '/DownloadPage.vue?vue&type=style&index=0&lang.css',
@@ -166,6 +563,52 @@ describe('LocalPreviewProxyManager', () => {
     await expect(fetch(endpoint.viewerUrl)).rejects.toThrow();
   });
 
+  it('keeps module requests authenticated for two loopback previews sharing a cookie jar', async () => {
+    const { server, target } = await listenHtmlServer();
+    servers.push(server);
+    const upstreamCookies: Array<string | undefined> = [];
+    server.prependListener('request', (request) => upstreamCookies.push(request.headers.cookie));
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoints = [];
+    const cookies = new Map<string, string>();
+    for (const sessionId of ['first-preview', 'second-preview']) {
+      const endpoint = await manager.acquire({ sessionId: sessionId as SessionId, target });
+      endpoints.push(endpoint);
+      const page = await fetch(endpoint.viewerUrl);
+      expect(page.status).toBe(200);
+      await page.text();
+      const setCookie = page.headers.get('set-cookie') ?? '';
+      // These attributes allow Chromium to retain credentials in a cross-site
+      // iframe, including when ordinary third-party cookies are blocked.
+      expect(setCookie).toContain('; Path=/; HttpOnly; Secure; SameSite=None; Partitioned');
+      const pair = setCookie.split(';')[0] ?? '';
+      const separator = pair.indexOf('=');
+      cookies.set(pair.slice(0, separator), pair.slice(separator + 1));
+    }
+    const cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join('; ');
+    for (const endpoint of endpoints) {
+      const resource = new URL('/@react-refresh', endpoint.viewerUrl);
+      const referer = new URL('/src/nested-module.js', endpoint.viewerUrl).href;
+      const response = await fetch(resource, { headers: { cookie, referer } });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('RefreshRuntime');
+      const denied = await fetch(resource, { headers: { referer } });
+      expect(denied.status).toBe(403);
+      await denied.text();
+      // Another endpoint's cookie cannot authenticate this listener.
+      const ownToken = new URL(endpoint.viewerUrl).searchParams.get('__lody_preview_token');
+      const foreignCookies = [...cookies]
+        .filter(([, value]) => value !== ownToken)
+        .map(([name, value]) => `${name}=${value}`)
+        .join('; ');
+      const crossed = await fetch(resource, { headers: { cookie: foreignCookies, referer } });
+      expect(crossed.status).toBe(403);
+      await crossed.text();
+    }
+    expect(upstreamCookies).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
   it('keeps one session-owned proxy endpoint until it is explicitly released', async () => {
     const { server, target } = await listenHtmlServer();
     servers.push(server);
@@ -184,16 +627,415 @@ describe('LocalPreviewProxyManager', () => {
 
     expect(second.endpointId).toBe(first.endpointId);
     const secondViewerUrl = new URL(second.viewerUrl);
-    const localToken = secondViewerUrl.searchParams.get('__lody_local_preview_token');
+    const localToken = secondViewerUrl.searchParams.get('__lody_preview_token');
     expect(localToken).not.toBeNull();
     expect(secondViewerUrl).toMatchObject({
       pathname: '/DownloadPage.vue',
-      search: `?vue&type=style&index=0&lang.css&__lody_local_preview_token=${localToken}`,
+      search: `?vue&type=style&index=0&lang.css&__lody_preview_token=${localToken}`,
       hash: '#members',
     });
 
     await manager.release(sessionId, first.endpointId);
     await expect(fetch(second.viewerUrl)).rejects.toThrow();
+  });
+
+  it('isolates application cookies across endpoints and forwards them over HTTP and WebSocket', async () => {
+    const observed: string[] = [];
+    const server = http.createServer((request, response) => {
+      const cookie = request.headers.cookie ?? '';
+      observed.push(cookie);
+      if (request.url?.startsWith('/login')) {
+        response.writeHead(200, {
+          'content-type': 'text/html',
+          'content-security-policy': "default-src 'self'; frame-ancestors 'none'",
+          'set-cookie': [
+            `session=${request.url?.includes('two') ? 'two' : 'one'}; Domain=localhost; Path=/; HttpOnly; SameSite=Strict`,
+            'other=value; Path=/; Expires=Wed, 21 Oct 2037 07:28:00 GMT',
+          ],
+        });
+        response.end('<html><body>login</body></html>');
+      } else if (
+        request.method === 'POST' &&
+        request.headers.origin !== `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+      ) {
+        response.writeHead(403).end('foreign origin');
+      } else {
+        response.writeHead(cookie.includes('session=') ? 200 : 403).end(cookie);
+      }
+    });
+    const wsServer = new WebSocketServer({ noServer: true });
+    server.on('upgrade', (request, socket, head) => {
+      observed.push(request.headers.cookie ?? '');
+      if (!/^session=(one|two); other=value$/.test(request.headers.cookie ?? '')) {
+        socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+        return;
+      }
+      wsServer.handleUpgrade(request, socket, head, (client) => client.close());
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    servers.push(server);
+    const target: PreviewTarget = {
+      protocol: 'http',
+      host: '127.0.0.1',
+      port: (server.address() as AddressInfo).port,
+    };
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoints = await Promise.all(
+      ['one', 'two'].map((id) =>
+        manager.acquire({
+          sessionId: id as SessionId,
+          target: { ...target, path: `/login?${id}` },
+          visualAnnotation: false,
+        })
+      )
+    );
+    const jars: string[][] = [];
+    for (const endpoint of endpoints) {
+      const response = await fetch(endpoint.viewerUrl);
+      expect(response.headers.get('content-security-policy')).toBe("default-src 'self'");
+      const cookies = response.headers.getSetCookie();
+      expect(cookies).toHaveLength(3);
+      expect(cookies[0]).toContain('HttpOnly');
+      expect(cookies[0]).not.toMatch(/domain=/i);
+      expect(cookies[0]).toContain('Secure; SameSite=None; Partitioned');
+      expect(cookies[0]).not.toContain('SameSite=Strict');
+      expect(cookies[1]).toContain('Expires=Wed, 21 Oct 2037 07:28:00 GMT');
+      jars.push(cookies.map((cookie) => cookie.split(';')[0] ?? ''));
+      await response.text();
+    }
+    expect(new URL(endpoints[0]?.viewerUrl ?? '').hostname).not.toBe(
+      new URL(endpoints[1]?.viewerUrl ?? '').hostname
+    );
+    expect(jars[0]?.[0]).not.toEqual(jars[1]?.[0]);
+    const allCookies = jars.flat().join('; ');
+    for (const [index, endpoint] of endpoints.entries()) {
+      const url = new URL('/asset.js', endpoint.viewerUrl);
+      const response = await fetch(url, { headers: { cookie: allCookies } });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(`session=${index === 0 ? 'one' : 'two'}; other=value`);
+      const foreign = await fetch(url, {
+        method: 'POST',
+        headers: { cookie: allCookies, origin: 'https://foreign.example' },
+      });
+      expect(foreign.status).toBe(403);
+      await foreign.text();
+      const socketUrl = new URL('/ws', endpoint.viewerUrl);
+      socketUrl.protocol = 'ws:';
+      const socket = new WebSocket(socketUrl, {
+        lookup: previewTestLookup,
+        headers: { cookie: allCookies },
+      });
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', resolve);
+        socket.once('error', reject);
+      });
+      socket.terminate();
+    }
+    expect(
+      observed.every((cookie) => !cookie.includes('lody_preview') && !cookie.includes('lody_app_'))
+    ).toBe(true);
+    wsServer.close();
+  });
+
+  it('reuses local cookie names when a session reopens the same target', async () => {
+    const { server, target } = await listenHtmlServer();
+    servers.push(server);
+    server.prependListener('request', (_request, response) => {
+      response.setHeader('set-cookie', 'session=app-value; Path=/; Max-Age=3600');
+    });
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'reopened-preview' as SessionId;
+    const first = await manager.acquire({ sessionId, target });
+    const firstPage = await fetch(first.viewerUrl);
+    const firstCookies = firstPage.headers.getSetCookie().map((value) => value.split(';')[0] ?? '');
+    await firstPage.text();
+    await manager.release(sessionId, first.endpointId);
+    const second = await manager.acquire({ sessionId, target });
+    expect(second.endpointId).not.toBe(first.endpointId);
+    expect(new URL(second.viewerUrl).hostname).toBe(new URL(first.viewerUrl).hostname);
+    const oldTokenRequest = await fetch(new URL('/asset', second.viewerUrl), {
+      headers: { cookie: firstCookies.join('; ') },
+    });
+    expect(oldTokenRequest.status).toBe(403);
+    await oldTokenRequest.text();
+    const secondPage = await fetch(second.viewerUrl);
+    const secondCookies = secondPage.headers
+      .getSetCookie()
+      .map((value) => value.split(';')[0] ?? '');
+    await secondPage.text();
+    expect(secondCookies.map((pair) => pair.split('=')[0])).toEqual(
+      firstCookies.map((pair) => pair.split('=')[0])
+    );
+    expect(secondCookies[1]).not.toEqual(firstCookies[1]);
+    const forwarded: Array<string | undefined> = [];
+    server.prependListener('request', (request) => forwarded.push(request.headers.cookie));
+    const response = await fetch(new URL('/asset', second.viewerUrl), {
+      headers: { cookie: `${firstCookies[0]}; ${secondCookies[1]}` },
+    });
+    expect(response.status).toBe(200);
+    const refreshedCookies = response.headers.getSetCookie();
+    expect(refreshedCookies).toHaveLength(2);
+    expect(refreshedCookies[0]).toContain('session=app-value');
+    expect(refreshedCookies[1]?.split(';')[0]).toBe(secondCookies[1]);
+    await response.text();
+    expect(forwarded).toEqual(['session=app-value']);
+    const other = await listenHtmlServer();
+    servers.push(other.server);
+    other.server.prependListener('request', (_request, otherResponse) => {
+      otherResponse.setHeader('set-cookie', 'session=other; Path=/');
+    });
+    const otherEndpoint = await manager.acquire({ sessionId, target: other.target });
+    const otherPage = await fetch(otherEndpoint.viewerUrl);
+    expect(otherPage.headers.getSetCookie()[0]?.split('=')[0]).not.toEqual(
+      firstCookies[0]?.split('=')[0]
+    );
+    await otherPage.text();
+  });
+
+  it('accepts a large browser cookie jar while forwarding only the current application cookies', async () => {
+    const { server, target } = await listenHtmlServer();
+    servers.push(server);
+    const received: Array<string | undefined> = [];
+    server.prependListener('request', (request, response) => {
+      received.push(request.headers.cookie);
+      response.setHeader('set-cookie', 'session=active; Path=/');
+    });
+    const wsServer = new WebSocketServer({ noServer: true });
+    server.on('upgrade', (request, socket, head) => {
+      received.push(request.headers.cookie);
+      wsServer.handleUpgrade(request, socket, head, (client) => client.close());
+    });
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoint = await manager.acquire({ sessionId: 'large-cookie-jar' as SessionId, target });
+    const page = await fetch(endpoint.viewerUrl);
+    const cookies = page.headers.getSetCookie().map((value) => value.split(';')[0] ?? '');
+    await page.text();
+    const staleCookies = Array.from(
+      { length: 180 },
+      (_, index) => `lody_app_old${index}_session=${'x'.repeat(3500)}`
+    ).join('; ');
+    const response = await fetch(new URL('/asset', endpoint.viewerUrl), {
+      headers: { cookie: `${staleCookies}; ${cookies.join('; ')}` },
+    });
+    expect(response.status).toBe(200);
+    await response.text();
+    const socketUrl = new URL('/ws', endpoint.viewerUrl);
+    socketUrl.protocol = 'ws:';
+    const socket = new WebSocket(socketUrl, {
+      lookup: previewTestLookup,
+      headers: { cookie: `${staleCookies}; ${cookies.join('; ')}` },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+    socket.terminate();
+    expect(received).toEqual([undefined, 'session=active', 'session=active']);
+    wsServer.close();
+    const tooLarge = await fetch(endpoint.viewerUrl, {
+      headers: { cookie: `oversized=${'x'.repeat(1024 * 1024)}` },
+    });
+    expect(tooLarge.status).toBe(431);
+    await tooLarge.text();
+  });
+
+  it('owns both loopback families for HTTP and WebSocket until release', async () => {
+    const upstream = await listenWebSocketServer();
+    servers.push(upstream.server);
+    const ipv6Probe = http.createServer();
+    const ipv6Available = await new Promise<boolean>((resolve, reject) => {
+      ipv6Probe.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRNOTAVAIL' || error.code === 'EAFNOSUPPORT') resolve(false);
+        else reject(error);
+      });
+      ipv6Probe.listen(0, '::1', () => ipv6Probe.close(() => resolve(true)));
+    });
+    if (!ipv6Available) return;
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'dual-loopback' as SessionId;
+    const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+    const port = Number(new URL(endpoint.viewerUrl).port);
+    const intruder = http.createServer();
+    const bound = await new Promise<string>((resolve) => {
+      intruder.once('error', (error: NodeJS.ErrnoException) => resolve(error.code ?? 'unknown'));
+      intruder.listen(port, '::1', () => intruder.close(() => resolve('bound')));
+    });
+    expect(bound).toBe('EADDRINUSE');
+    const ipv6 = new URL(endpoint.viewerUrl);
+    ipv6.hostname = '[::1]';
+    const response = await fetch(ipv6);
+    expect(response.status).toBe(200);
+    await response.text();
+    const denied = new URL(ipv6);
+    denied.search = '';
+    expect((await fetch(denied)).status).toBe(403);
+    const socketUrl = new URL(ipv6);
+    socketUrl.protocol = 'ws:';
+    socketUrl.pathname = '/socket';
+    const socket = new WebSocket(socketUrl);
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+    const closed = observeClose(socket);
+    await manager.release(sessionId, endpoint.endpointId);
+    await closed;
+    await expect(fetch(ipv6)).rejects.toThrow();
+    const ipv4 = new URL(ipv6);
+    ipv4.hostname = '127.0.0.1';
+    await expect(fetch(ipv4)).rejects.toThrow();
+  });
+
+  it('retries on an occupied IPv6 port before publishing the local viewer', async () => {
+    const occupied = http.createServer((_request, response) => response.end('unrelated'));
+    const available = await new Promise<boolean>((resolve, reject) => {
+      occupied.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRNOTAVAIL' || error.code === 'EAFNOSUPPORT') resolve(false);
+        else reject(error);
+      });
+      occupied.listen(0, '::1', () => resolve(true));
+    });
+    if (!available) return;
+    servers.push(occupied);
+    const address = occupied.address();
+    if (!address || typeof address === 'string') throw new Error('Missing IPv6 port');
+    const upstream = await listenHtmlServer();
+    servers.push(upstream.server);
+    const boundIPv4Ports: number[] = [];
+    const manager = new LocalPreviewProxyManager({
+      logger: createLogger(),
+      initialLocalPort: address.port,
+      listen: async (server, host, port) => {
+        const bound = await listenTestLoopback(server, host, port);
+        if (host === '127.0.0.1') boundIPv4Ports.push(bound);
+        return bound;
+      },
+    });
+    managers.push(manager);
+    const endpoint = await manager.acquire({
+      sessionId: 'ipv6-conflict' as SessionId,
+      target: upstream.target,
+    });
+    expect(boundIPv4Ports[0]).toBe(address.port);
+    expect(boundIPv4Ports.at(-1)).toBe(Number(new URL(endpoint.viewerUrl).port));
+    expect(Number(new URL(endpoint.viewerUrl).port)).not.toBe(address.port);
+    expect((await fetch(endpoint.viewerUrl)).status).toBe(200);
+    const original = await fetch(`http://[::1]:${address.port}/`);
+    expect(await original.text()).toBe('unrelated');
+  });
+
+  it.each(['EADDRNOTAVAIL', 'EAFNOSUPPORT'])(
+    'keeps IPv4 available when IPv6 is unavailable with %s',
+    async (code) => {
+      const upstream = await listenHtmlServer();
+      servers.push(upstream.server);
+      const manager = new LocalPreviewProxyManager({
+        logger: createLogger(),
+        listen: (server, host, port) => {
+          if (host === '::1')
+            return Promise.reject(Object.assign(new Error('IPv6 unavailable'), { code }));
+          return listenTestIPv4(server, port);
+        },
+      });
+      managers.push(manager);
+      const sessionId = 'without-ipv6' as SessionId;
+      const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+      const ipv4 = new URL(endpoint.viewerUrl);
+      ipv4.hostname = '127.0.0.1';
+      expect((await fetch(ipv4)).status).toBe(200);
+      await manager.release(sessionId, endpoint.endpointId);
+      await expect(fetch(ipv4)).rejects.toThrow();
+    }
+  );
+
+  it('cleans up the IPv4 listener on a non-retryable IPv6 failure and allows a later acquire', async () => {
+    const upstream = await listenHtmlServer();
+    servers.push(upstream.server);
+    const originalError = Object.assign(new Error('IPv6 bind denied'), { code: 'EACCES' });
+    let failedPort = 0;
+    let failIPv6 = true;
+    const manager = new LocalPreviewProxyManager({
+      logger: createLogger(),
+      listen: async (server, host, port) => {
+        if (host === '::1' && failIPv6) throw originalError;
+        const bound = await listenTestLoopback(server, host, port);
+        if (host === '127.0.0.1' && failIPv6) failedPort = bound;
+        return bound;
+      },
+    });
+    managers.push(manager);
+    const sessionId = 'ipv6-failure' as SessionId;
+    await expect(manager.acquire({ sessionId, target: upstream.target })).rejects.toBe(
+      originalError
+    );
+    expect(failedPort).toBeGreaterThan(0);
+    const probe = http.createServer();
+    expect(await listenTestIPv4(probe, failedPort)).toBe(failedPort);
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    failIPv6 = false;
+    const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+    expect((await fetch(endpoint.viewerUrl)).status).toBe(200);
+  });
+
+  it('bounds repeated IPv6 port conflicts and releases each IPv4 reservation', async () => {
+    const upstream = await listenHtmlServer();
+    servers.push(upstream.server);
+    const conflict = Object.assign(new Error('IPv6 occupied'), { code: 'EADDRINUSE' });
+    const reserved: number[] = [];
+    const manager = new LocalPreviewProxyManager({
+      logger: createLogger(),
+      listen: async (server, host, port) => {
+        if (host === '::1') throw conflict;
+        const selected = await listenTestIPv4(server, port);
+        reserved.push(selected);
+        return selected;
+      },
+    });
+    managers.push(manager);
+    await expect(
+      manager.acquire({ sessionId: 'all-conflict' as SessionId, target: upstream.target })
+    ).rejects.toBe(conflict);
+    expect(reserved.length).toBeGreaterThan(1);
+    expect(reserved.length).toBeLessThanOrEqual(8);
+    for (const port of new Set(reserved)) {
+      const probe = http.createServer();
+      expect(await listenTestIPv4(probe, port)).toBe(port);
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+    }
+  });
+
+  it('loads a nested module after a path-relative redirect on a remote endpoint', async () => {
+    const server = http.createServer((request, response) => {
+      if (request.url === '/build/import.js')
+        response.writeHead(302, { location: './chunks/entry.mjs?v=2' }).end();
+      else if (request.url === '/build/chunks/entry.mjs?v=2')
+        response.writeHead(200, { 'content-type': 'text/javascript' }).end('export default 42');
+      else response.writeHead(404).end();
+    });
+    servers.push(server);
+    const port = await listenTestIPv4(server, 0);
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'relative-remote-module' as SessionId;
+    const endpoint = await manager.acquire({
+      sessionId,
+      target: { protocol: 'http', host: '127.0.0.1', port, path: '/build/import.js' },
+      remote: true,
+    });
+    const viewer = manager.bindViewerOrigin(sessionId, 'https://test-preview.trycloudflare.com');
+    const redirect = await fetch(endpoint.viewerUrl, { redirect: 'manual' });
+    expect(redirect.status).toBe(302);
+    const location = new URL(redirect.headers.get('location')!);
+    expect(location.origin).toBe(new URL(viewer.viewerUrl).origin);
+    const asset = await fetch(new URL(location.pathname + location.search, endpoint.viewerUrl), {
+      headers: { referer: viewer.viewerUrl },
+    });
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toBe('export default 42');
   });
 
   it('rejects redirects that leave the bound target origin', async () => {
@@ -210,5 +1052,279 @@ describe('LocalPreviewProxyManager', () => {
 
     expect(response.status).toBe(502);
     expect(await response.text()).toContain('Preview proxy error');
+  });
+
+  it('isolates local and remote capabilities and never trusts a bare matching origin', async () => {
+    const { server, target, requestUrls } = await listenHtmlServer();
+    servers.push(server);
+    server.prependListener('request', (_request, response) => {
+      response.setHeader('set-cookie', ['app_session=private', 'app_other=private']);
+      response.setHeader('x-preview-values', ['first', 'second']);
+    });
+    const local = new LocalPreviewProxyManager({ logger: createLogger() });
+    const remote = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(local, remote);
+    const sessionId = 'session-isolation' as SessionId;
+    const localEndpoint = await local.acquire({ sessionId, target });
+    const remoteEndpoint = await remote.acquire({ sessionId, target, remote: true });
+    const publicEndpoint = remote.bindViewerOrigin(
+      sessionId,
+      'https://test-preview.trycloudflare.com'
+    );
+    const response = await fetch(remoteEndpoint.viewerUrl);
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(response.headers.get('set-cookie')).toContain('Secure; SameSite=None; Partitioned');
+    expect(response.headers.getSetCookie()).toHaveLength(3);
+    expect(
+      response.headers.getSetCookie().filter((value) => value.includes('private'))
+    ).toHaveLength(2);
+    expect(response.headers.get('x-preview-values')).toBe('first, second');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const bare = new URL('/', remoteEndpoint.viewerUrl);
+    for (const headers of [
+      { origin: new URL(publicEndpoint.viewerUrl).origin },
+      { referer: new URL('/module.js', publicEndpoint.viewerUrl).href },
+      { referer: localEndpoint.viewerUrl },
+      { cookie: 'lody_preview=%ZZ' },
+    ]) {
+      const denied = await fetch(bare, { headers });
+      expect(denied.status).toBe(403);
+      await denied.text();
+    }
+    const crossed = new URL(remoteEndpoint.viewerUrl);
+    crossed.search = new URL(localEndpoint.viewerUrl).search;
+    expect((await fetch(crossed)).status).toBe(403);
+    expect(requestUrls).toEqual(['/']);
+    const asset = await fetch(new URL('/asset.js', remoteEndpoint.viewerUrl), {
+      headers: { referer: publicEndpoint.viewerUrl },
+    });
+    expect(asset.status).toBe(200);
+    await asset.text();
+    await remote.closeSession(sessionId, 'revoked');
+    const stillLocal = await fetch(localEndpoint.viewerUrl);
+    expect(stillLocal.status).toBe(200);
+    await stillLocal.text();
+  });
+
+  it('streams the first response chunk before EOF and cancels the upstream when the viewer leaves', async () => {
+    let upstreamClosed: () => void = () => {
+      throw new Error('Fixture not initialized');
+    };
+    const closed = new Promise<void>((resolve) => {
+      upstreamClosed = resolve;
+    });
+    const server = http.createServer((_request, response) => {
+      response.on('close', upstreamClosed);
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.write('first chunk');
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoint = await manager.acquire({
+      sessionId: 'session-streaming' as SessionId,
+      target: { protocol: 'http', host: '127.0.0.1', port: address.port },
+    });
+    const response = await fetch(endpoint.viewerUrl);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Missing streaming response');
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value)).toBe('first chunk');
+    expect(first.done).toBe(false);
+    await reader.cancel();
+    await closed;
+  });
+});
+
+describe('LocalPreviewProxyManager WebSocket close forwarding', () => {
+  const servers: http.Server[] = [];
+  const managers: LocalPreviewProxyManager[] = [];
+  const sockets: WebSocket[] = [];
+  const uncaught: unknown[] = [];
+  // An unsendable close code makes `ws` throw from a TCP callback, which crashes the CLI
+  // rather than failing any single call. Capture that here so the tests below can fail on
+  // the real error instead of waiting out a timeout for a close that never arrives.
+  let failOnUncaught: Promise<never>;
+  let rejectOnUncaught: (error: unknown) => void;
+  const recordUncaught = (error: unknown) => {
+    uncaught.push(error);
+    rejectOnUncaught(error);
+  };
+
+  beforeEach(() => {
+    uncaught.length = 0;
+    failOnUncaught = new Promise<never>((_resolve, reject) => {
+      rejectOnUncaught = reject;
+    });
+    failOnUncaught.catch(() => {});
+    process.on('uncaughtException', recordUncaught);
+  });
+
+  afterEach(async () => {
+    process.off('uncaughtException', recordUncaught);
+    // A socket left open by a failing test would otherwise keep its server from closing.
+    for (const socket of sockets.splice(0)) {
+      socket.terminate();
+    }
+    await Promise.allSettled(managers.splice(0).map((manager) => manager.closeAll('test cleanup')));
+    await Promise.allSettled(
+      servers.splice(0).map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.close(() => resolve());
+          })
+      )
+    );
+    expect(uncaught).toEqual([]);
+  });
+
+  const acquireProxiedSocket = async (sessionId: string) => {
+    const upstream = await listenWebSocketServer();
+    servers.push(upstream.server);
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoint = await manager.acquire({
+      sessionId: sessionId as SessionId,
+      target: upstream.target,
+    });
+    const browserSocket = await openBrowserSocket(endpoint.viewerUrl);
+    const upstreamSocket = await upstream.nextUpstreamSocket();
+    sockets.push(browserSocket, upstreamSocket);
+    return { browserSocket, upstreamSocket };
+  };
+
+  const awaitClose = (socket: WebSocket): Promise<ObservedClose> =>
+    Promise.race([observeClose(socket), failOnUncaught]);
+
+  it('keeps the upstream subprotocol and text/binary frame shape, then revokes both sockets', async () => {
+    const upstream = await listenWebSocketServer('second');
+    servers.push(upstream.server);
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'session-ws-protocol' as SessionId;
+    const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+    const browser = await openBrowserSocket(endpoint.viewerUrl, ['first', 'second']);
+    const local = await upstream.nextUpstreamSocket();
+    sockets.push(browser, local);
+    expect(browser.protocol).toBe('second');
+    expect(local.protocol).toBe('second');
+    for (const binary of [false, true]) {
+      const received = new Promise<{ bytes: Buffer; binary: boolean }>((resolve) => {
+        local.once('message', (bytes, isBinary) => {
+          if (!Buffer.isBuffer(bytes)) throw new Error('Expected binaryType=nodebuffer');
+          resolve({ bytes, binary: isBinary });
+        });
+      });
+      const bytes = binary ? Buffer.from([0, 255, 128, 1]) : Buffer.from('text');
+      browser.send(bytes, { binary });
+      expect(await received).toEqual({ bytes, binary });
+    }
+    const browserClosed = awaitClose(browser);
+    const localClosed = awaitClose(local);
+    await manager.release(sessionId, endpoint.endpointId);
+    expect(await browserClosed).toEqual({ code: 1006, reason: '' });
+    expect(await localClosed).toEqual({ code: 1006, reason: '' });
+  });
+
+  it('rejects an unauthenticated WS handshake after an authenticated page visit', async () => {
+    const upstream = await listenWebSocketServer();
+    servers.push(upstream.server);
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoint = await manager.acquire({
+      sessionId: 'session-ws-auth' as SessionId,
+      target: upstream.target,
+    });
+    const page = await fetch(endpoint.viewerUrl);
+    expect(page.status).toBe(200);
+    await page.text();
+    const address = new URL(endpoint.viewerUrl);
+    address.search = '';
+    address.protocol = 'ws:';
+    const denied = new WebSocket(address, {
+      lookup: previewTestLookup,
+      headers: { origin: new URL(endpoint.viewerUrl).origin },
+    });
+    sockets.push(denied);
+    const error = await new Promise<Error>((resolve) => denied.once('error', resolve));
+    expect(error.message).toContain('403');
+    const authorized = new WebSocket(address, {
+      lookup: previewTestLookup,
+      headers: { cookie: page.headers.get('set-cookie')?.split(';')[0] ?? '' },
+    });
+    sockets.push(authorized);
+    await new Promise<void>((resolve, reject) => {
+      authorized.once('open', resolve);
+      authorized.once('error', reject);
+    });
+    const local = await upstream.nextUpstreamSocket();
+    sockets.push(local);
+    const received = new Promise<string>((resolve) =>
+      local.once('message', (bytes) => resolve(bytes.toString()))
+    );
+    authorized.send('cookie-authenticated hot reload');
+    expect(await received).toBe('cookie-authenticated hot reload');
+  });
+
+  it('mirrors an abnormal upstream close to the browser instead of throwing', async () => {
+    const { browserSocket, upstreamSocket } = await acquireProxiedSocket(
+      'session-preview-ws-upstream-abnormal'
+    );
+    const browserClosed = awaitClose(browserSocket);
+
+    // Destroys the TCP connection without sending a Close frame, so the proxy observes 1006.
+    upstreamSocket.terminate();
+
+    expect(await browserClosed).toEqual({ code: 1006, reason: '' });
+  });
+
+  it('mirrors a status-less upstream close to the browser', async () => {
+    const { browserSocket, upstreamSocket } = await acquireProxiedSocket(
+      'session-preview-ws-upstream-no-status'
+    );
+    const browserClosed = awaitClose(browserSocket);
+
+    // An empty Close frame, so the proxy observes 1005.
+    upstreamSocket.close();
+
+    expect(await browserClosed).toEqual({ code: 1005, reason: '' });
+  });
+
+  it('mirrors an abnormal browser close to the upstream socket instead of throwing', async () => {
+    const { browserSocket, upstreamSocket } = await acquireProxiedSocket(
+      'session-preview-ws-browser-abnormal'
+    );
+    const upstreamClosed = awaitClose(upstreamSocket);
+
+    browserSocket.terminate();
+
+    expect(await upstreamClosed).toEqual({ code: 1006, reason: '' });
+  });
+
+  it('mirrors a status-less browser close to the upstream socket', async () => {
+    const { browserSocket, upstreamSocket } = await acquireProxiedSocket(
+      'session-preview-ws-browser-no-status'
+    );
+    const upstreamClosed = awaitClose(upstreamSocket);
+
+    browserSocket.close();
+
+    expect(await upstreamClosed).toEqual({ code: 1005, reason: '' });
+  });
+
+  it('forwards a sendable close code and reason in both directions', async () => {
+    const fromUpstream = await acquireProxiedSocket('session-preview-ws-code-upstream');
+    const browserClosed = awaitClose(fromUpstream.browserSocket);
+    fromUpstream.upstreamSocket.close(4001, 'upstream done');
+    expect(await browserClosed).toEqual({ code: 4001, reason: 'upstream done' });
+
+    const fromBrowser = await acquireProxiedSocket('session-preview-ws-code-browser');
+    const upstreamClosed = awaitClose(fromBrowser.upstreamSocket);
+    fromBrowser.browserSocket.close(4002, 'browser done');
+    expect(await upstreamClosed).toEqual({ code: 4002, reason: 'browser done' });
   });
 });

@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { addDiscoveryOptions, runDiscoveryList, type DiscoveryCommandOptions } from './discovery';
 import path from 'node:path';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
@@ -30,6 +31,12 @@ type AddProjectOptions = CommonOptions & {
   allWorkspaces?: boolean;
 };
 
+type ListProjectOptions = CommonOptions &
+  DiscoveryCommandOptions & {
+    workspace?: string;
+    machine?: string;
+  };
+
 type SelectableProject = {
   workspaceId: WorkspaceId;
   workspaceName: string;
@@ -37,6 +44,13 @@ type SelectableProject = {
   name: string;
   rootPath: string;
 };
+
+export function shouldUseRemoteProjectCatalog(options: {
+  workspace?: string;
+  machine?: string;
+}): boolean {
+  return Boolean(options.workspace?.trim() || options.machine?.trim());
+}
 
 function setDebugIfEnabled(options: CommonOptions): void {
   if (options.debug) {
@@ -346,11 +360,27 @@ const projectDeleteCommand = new Command('delete')
     }
   });
 
-const projectListCommand = new Command('list')
+const projectListCommand = addDiscoveryOptions(new Command('list'))
   .description('List local projects')
+  .option('--workspace <selector>', 'Remote workspace id, slug, or name')
+  .option('--machine <selector>', 'Remote machine id or name')
+  .option('--kind <kind>', 'Workspace catalog: local or github')
+  .option('--catalog', 'List the current workspace project catalog across machines')
   .option('--json', 'Output machine-readable JSON')
   .option('-d, --debug', 'enable debug output')
-  .action(async (options: CommonOptions) => {
+  .action(async (options: ListProjectOptions & { catalog?: boolean }) => {
+    if (
+      options.catalog ||
+      options.kind ||
+      options.query ||
+      options.limit ||
+      options.cursor ||
+      options.allPages ||
+      shouldUseRemoteProjectCatalog(options)
+    ) {
+      await runDiscoveryList('project', options);
+      return;
+    }
     setDebugIfEnabled(options);
 
     const machineId = resolveMachineIdOrExit();
@@ -358,57 +388,56 @@ const projectListCommand = new Command('list')
       type: 'local-project/list',
       machineId,
     });
-
-    if (options.json) {
-      process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
-      if (!response.ok) {
-        process.exit(1);
-      }
-      return;
-    }
-
-    const logger = getLogger('project');
-    if (!response.ok) {
-      printProjectControlError('list projects', response);
-      process.exit(1);
-    }
-    if (response.type !== 'local-project/list') {
-      logger.error(`Unexpected response type: ${response.type}`);
-      process.exit(1);
-    }
-
-    const rows = response.result.workspaces
-      .flatMap((workspace) =>
-        workspace.projects.map((project) => [
-          workspace.workspaceName,
-          project.name,
-          project.rootPath,
-        ])
-      )
-      .sort((left, right) => {
-        const workspaceCompare = String(left[0]).localeCompare(String(right[0]));
-        if (workspaceCompare !== 0) {
-          return workspaceCompare;
-        }
-        const projectCompare = String(left[1]).localeCompare(String(right[1]));
-        if (projectCompare !== 0) {
-          return projectCompare;
-        }
-        return String(left[2]).localeCompare(String(right[2]));
-      });
-
-    if (rows.length === 0) {
-      logger.info('No local projects found.');
-      return;
-    }
-
-    console.log(
-      renderTerminalTable(
-        [{ header: 'Workspace' }, { header: 'Project' }, { header: 'Path' }],
-        rows
-      )
-    );
+    renderProjectListResponse(response, options);
   });
+
+function renderProjectListResponse(
+  response: LocalProjectControlResponse,
+  options: CommonOptions
+): void {
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
+    if (!response.ok) {
+      process.exit(1);
+    }
+    return;
+  }
+
+  const logger = getLogger('project');
+  if (!response.ok) {
+    printProjectControlError('list projects', response);
+    process.exit(1);
+  }
+  if (response.type !== 'local-project/list') {
+    logger.error(`Unexpected response type: ${response.type}`);
+    process.exit(1);
+  }
+
+  const rows = response.result.workspaces
+    .flatMap((workspace) =>
+      workspace.projects.map((project) => [workspace.workspaceName, project.name, project.rootPath])
+    )
+    .sort((left, right) => {
+      const workspaceCompare = String(left[0]).localeCompare(String(right[0]));
+      if (workspaceCompare !== 0) {
+        return workspaceCompare;
+      }
+      const projectCompare = String(left[1]).localeCompare(String(right[1]));
+      if (projectCompare !== 0) {
+        return projectCompare;
+      }
+      return String(left[2]).localeCompare(String(right[2]));
+    });
+
+  if (rows.length === 0) {
+    logger.info('No local projects found.');
+    return;
+  }
+
+  console.log(
+    renderTerminalTable([{ header: 'Workspace' }, { header: 'Project' }, { header: 'Path' }], rows)
+  );
+}
 
 export const projectCommand = new Command('project')
   .description('Manage local projects')

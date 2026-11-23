@@ -1,10 +1,12 @@
 import path from 'node:path';
 import { Command } from 'commander';
-import { getSessionRoomId, getTaskRoomId, type WorkspaceId } from '@lody/shared';
-import { listWorkspaceTaskIds } from '@/lib/task-doc';
+import { getSessionRoomId, type WorkspaceId } from '@lody/shared';
+import { getScheduleRegistryFlockDocId, getScheduleRoomId } from '@lody/shared';
+import { listWorkspaceScheduleIds } from '@/lib/schedules/schedule-documents';
 import {
   getAuthContextOrThrow,
   listAliveSessionMetas,
+  listWorkspaceCandidates,
   resolveWorkspaceOrThrow,
   runOneShotCommand,
   syncDocForRead,
@@ -14,7 +16,8 @@ import {
 } from '@/lib/command-runtime';
 import { exportWorkspaceData } from '@/lib/session-export';
 import { mapWithConcurrency } from '@/lib/session-export/concurrency';
-import { listWorkspacesForToken, type WorkspaceSummary } from '@/lib/workspace';
+import type { WorkspaceSummary } from '@/lib/workspace';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 
 type ExportOptions = Pick<CommonCommandOptions, 'workspace' | 'debug'> & {
   images?: boolean;
@@ -48,13 +51,27 @@ async function syncWorkspaceSessionsForExport(
     );
   });
 
+  if (
+    !workspaceSupports(
+      { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'schedules'
+    )
+  )
+    return;
+
   // This reconciles visible index rows with repo existence, repairing a missing
   // projection row without reviving an explicit index tombstone.
   const workspaceId = workspace.id as WorkspaceId;
-  const taskIds = await listWorkspaceTaskIds(manager, workspaceId).catch(() => []);
-  await mapWithConcurrency(taskIds, EXPORT_SYNC_CONCURRENCY, async (taskId) => {
-    await syncDocForRead(manager, getTaskRoomId(taskId), `export:${workspace.id}:${taskId}`);
+  await manager.syncFlockDocOrThrow(getScheduleRegistryFlockDocId(workspaceId), {
+    reason: 'export:schedules:registry',
   });
+  await mapWithConcurrency(
+    await listWorkspaceScheduleIds(manager, workspaceId),
+    EXPORT_SYNC_CONCURRENCY,
+    async (id) => {
+      await syncDocForRead(manager, getScheduleRoomId(id), `export:schedule:${id}`);
+    }
+  );
 }
 
 export const exportCommand = new Command('export')
@@ -73,9 +90,10 @@ export const exportCommand = new Command('export')
         throw new Error('Pass either --workspace or --all-workspace, not both.');
       }
 
+      const offline = { offline: options.offline };
       const workspaces = options.allWorkspace
-        ? await listWorkspacesForToken(auth.token)
-        : [await resolveWorkspaceOrThrow(auth, options.workspace)];
+        ? await listWorkspaceCandidates(auth, offline)
+        : [await resolveWorkspaceOrThrow(auth, options.workspace, offline)];
 
       let totalSessions = 0;
       const warnings: string[] = [];

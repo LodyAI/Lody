@@ -9,9 +9,10 @@ import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
  * with a text composer. This hook makes every option reachable without the mouse:
  *
  *   - Arrow keys do 2D spatial navigation: ↑/↓ move between rows (nearest column),
- *     ←/→ move within a row. The highlight follows the real layout because we focus
- *     the actual element and mirror it onto `[data-qs-active]`. Arrows ONLY act when
- *     focus is already inside `rootRef`, so they never hijack the sidebar / page.
+ *     ←/→ move within a row, then yield at the horizontal edge so the shell can switch
+ *     FocusScope. The highlight follows the real layout because we focus the actual
+ *     element and mirror it onto `[data-qs-active]`. Arrows ONLY act when focus is
+ *     already inside `rootRef`, so they never hijack the sidebar / page.
  *   - Esc steps out: from the composer → onto the first option (focus-move mode); from
  *     an option → blur + clear the highlight (exit focus-move mode entirely). After that
  *     exit, an arrow key re-enters focus-move mode (landing back on the option you left),
@@ -205,10 +206,20 @@ export function useChatLandingKeyboardNav(
       //   - in the composer → exit input mode onto the first option (focus-move mode);
       //   - on a focused option → exit focus-move mode entirely (blur + drop highlight).
       if (event.key === 'Escape') {
+        // A modal may open without moving focus out of the composer immediately. Let its
+        // own Escape handler run instead of consuming the key in this capture listener.
+        if (
+          document.querySelector(
+            '[role="dialog"][data-open], [role="alertdialog"][data-open], [aria-modal="true"]'
+          )
+        ) {
+          return;
+        }
         if (dropdownOpen) return;
         if (!active || !root.contains(active)) return;
         const options = collectOptions(root);
-        if (active.tagName === 'TEXTAREA') {
+        // The composer: its plain textarea, or the mention editor.
+        if (active.tagName === 'TEXTAREA' || active.hasAttribute('data-lody-composer-input')) {
           event.preventDefault();
           event.stopImmediatePropagation();
           if (options.length > 0) {
@@ -270,10 +281,14 @@ export function useChatLandingKeyboardNav(
       }
 
       const neighbor = spatialNeighbor(active, options, direction);
-      event.preventDefault(); // swallow either way so the window never scrolls
       if (neighbor) {
+        event.preventDefault();
         event.stopImmediatePropagation();
         focusOption(neighbor);
+      } else if (direction === 'up' || direction === 'down') {
+        // Vertical boundaries stay inside this 2D list. Horizontal boundaries
+        // deliberately yield so the shell can switch FocusScope.
+        event.preventDefault();
       }
     };
 

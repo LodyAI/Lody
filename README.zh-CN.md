@@ -145,13 +145,43 @@ Lody 为 Agent 提供创建或复用其他对话、读取状态和历史、追�
 
 Lody 仍在走向完整的 local-first 支持。
 
+## 加入社区
+
+欢迎加入 Lody 中文用户群，与团队和其他用户交流、反馈问题、了解新功能。
+
+<p align="center">
+  <img src="./packages/components/src/assets/community-feishu-qr.png" alt="Lody 飞书用户群二维码" width="220" />
+</p>
+<p align="center">
+  使用飞书扫描上方二维码加入群聊，或加入我们的 <a href="https://discord.gg/E8mZtMu38s">Discord</a>。
+</p>
+
 ## 仓库结构
 
 - `apps/cli` — 连接机器并运行 Coding Agents
 - `apps/electron` — Lody 桌面应用
+- [`apps/mobile-capacitor`](apps/mobile-capacitor/README.md) — iOS 与 Android 的 Capacitor 云端客户端
+- `packages/client-e2ee` — 浏览器与移动端共享的云端 E2EE 组合层
 - `packages/components` — 工作空间共享 UI
+- `packages/ui` — Base UI 基础组件与 StyleX 设计令牌
 - `packages/platform` — 平台能力与集成
 - `packages/shared` — 共享 Schema、协议与工具
+- `packages/e2ee-core` — 端到端加密库：签名账本、密钥投递、服务与适配器（[中文导读](packages/e2ee-core/README.zh.md)）。产品宿主见 [工作区引导](.agents/docs/e2ee-workspace-bootstrap.zh.md)
+- `packages/e2ee-client` — 个人设备 E2EE 宿主
+- `packages/e2ee-machine-sharing` — 机器服务共享策略
+- `packages/turn-diff-store` — 本地按内容寻址的回合快照
 - `site-docs` — 官网、文档与博客
+- [`skills`](skills/lody-cli/SKILL.md) — 面向 Lody 用户的 Agent 技能，例如 `lody-cli`
 
-如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)（含社区 PR 规模限制）。
+
+## 新移动端与上游致谢
+
+Lody 的新原生移动端方案位于 [apps/mobile](apps/mobile/README.md)，包含 iOS 和
+Android 客户端，目前仍在开发中。两端保留独立构建工具链，安装和验证步骤见移动端 README。
+
+iOS 客户端直接基于 **[Innei 的 lody-ios](https://github.com/Innei/lody-ios)**。
+感谢 [Innei](https://github.com/Innei) 及上游贡献者构建的原生应用、聊天体验、应用架构和
+Loro/Flock 协议运行时。Android 也复用了具有来源记录的运行时快照。这些工作是本方案的
+重要基础，而不只是设计灵感。原有许可证、版权声明及其他项目致谢均予以保留，详见
+[移动端来源与致谢](apps/mobile/README.md#credits-and-origins)。

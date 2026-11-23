@@ -1,17 +1,22 @@
+import { isMagpieGatewayUrl } from '@lody/shared';
 import { atom } from 'jotai';
 import {
   AGENT_CONFIG_DOC_PREFIX,
+  assertManagedCodexProfileConfig,
+  encodeCodexProfileConfig,
   getMachineFlockAgentConfigs,
   getMachineFlockProviderSetups,
   getMachineFlockDocId,
   getServerNow,
   hasBuiltinRuntimeOverrideValues,
   isAgentBrandId,
-  isManagedBuiltinAgentType,
+  supportsBuiltinProviderSetup,
   isBuiltinRuntimeOverrides,
   isCustomAcpLaunchSpec,
   isLoroRepoDocDeleted,
   machineFlockKeys,
+  findBuiltinAgentOptOutToRetract,
+  planBuiltinAgentOptOutForDeletedConfig,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
   type AgentBrandId,
@@ -45,16 +50,25 @@ export async function writeAgentConfigToMachineFlock(
 ): Promise<MachineFlockRowMap> {
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, config.machineId);
   const key = machineFlockKeys.agentConfig(config.id);
-  await runtime.writer.flockRowPut(flockDocId, key, config);
+  assertManagedCodexProfileConfig(config);
+  await runtime.writer.flockRowPut(flockDocId, key, encodeCodexProfileConfig(config));
   // The write goes through the writer seam (in local-first mode the CLI is the
   // sole author and the row syncs back into the local mirror asynchronously).
   // Read back the current rows from the local mirror and overlay the just-written
   // row so the optimistic jotai cache reflects it immediately in both modes.
   const handle = await runtime.repo.openFlockDoc(flockDocId);
-  return {
+  const rows: MachineFlockRowMap = {
     ...readMachineFlockRowsFromFlock(handle.flock),
     [serializeMachineFlockKey(key)]: { key, value: config },
   };
+  // Adding a builtin provider explicitly retracts the earlier removal. Check the
+  // local mirror first so the steady state (no opt-out) costs no extra writer round trip.
+  const optOutKey = findBuiltinAgentOptOutToRetract(rows, config);
+  if (optOutKey) {
+    await runtime.writer.flockRowDelete(flockDocId, optOutKey);
+    delete rows[serializeMachineFlockKey(optOutKey)];
+  }
+  return rows;
 }
 
 async function deleteAgentConfigFromMachineFlock(
@@ -63,9 +77,18 @@ async function deleteAgentConfigFromMachineFlock(
 ): Promise<MachineFlockRowMap> {
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, config.machineId);
   const key = machineFlockKeys.agentConfig(config.id);
-  await runtime.writer.flockRowDelete(flockDocId, key);
   const handle = await runtime.repo.openFlockDoc(flockDocId);
-  const rows = { ...readMachineFlockRowsFromFlock(handle.flock) };
+  const rows: MachineFlockRowMap = { ...readMachineFlockRowsFromFlock(handle.flock) };
+  // The delete is a hard delete and leaves no trace of the row, so a managed builtin
+  // provider needs its own removal record; otherwise the next CLI startup only sees
+  // "not in the list", treats it as never created and adds it back. Record first, then
+  // delete, so an interruption cannot degrade into "removed but not remembered".
+  const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, getServerNow());
+  if (optOut) {
+    await runtime.writer.flockRowPut(flockDocId, optOut.key, optOut.value);
+    rows[serializeMachineFlockKey(optOut.key)] = optOut;
+  }
+  await runtime.writer.flockRowDelete(flockDocId, key);
   delete rows[serializeMachineFlockKey(key)];
   return rows;
 }
@@ -76,7 +99,11 @@ async function writeProviderSetupToMachineFlock(
 ): Promise<MachineFlockRowMap> {
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, setup.machineId);
   const key = machineFlockKeys.providerSetup(setup.id);
-  await runtime.writer.flockRowPut(flockDocId, key, setup);
+  assertManagedCodexProfileConfig(setup.config);
+  await runtime.writer.flockRowPut(flockDocId, key, {
+    ...setup,
+    config: encodeCodexProfileConfig(setup.config),
+  });
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   return {
     ...readMachineFlockRowsFromFlock(handle.flock),
@@ -103,11 +130,8 @@ async function cancelProviderSetupInMachineFlock(
 
   // The durable marker is the cancellation accept boundary. The target CLI can
   // reconcile both rows from it even if either best-effort cleanup is interrupted.
+  // Nothing is read from the mirror before it, so the boundary is never delayed.
   await runtime.writer.flockRowPut(flockDocId, cancellationKey, cancellation);
-  await Promise.allSettled([
-    runtime.writer.flockRowDelete(flockDocId, setupKey),
-    runtime.writer.flockRowDelete(flockDocId, configKey),
-  ]);
 
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   const rows: MachineFlockRowMap = {
@@ -118,6 +142,23 @@ async function cancelProviderSetupInMachineFlock(
       value: cancellation,
     },
   };
+  // Once the setup is published as an agentConfig, cancelling is the user removing this
+  // provider and needs the same removal record as deleting it from the list, or the next
+  // CLI startup adds it back.
+  const publishedConfigs = getMachineFlockAgentConfigs(rows);
+  const optOut =
+    setup.id in publishedConfigs
+      ? planBuiltinAgentOptOutForDeletedConfig(rows, publishedConfigs[setup.id], cancelledAt)
+      : null;
+  if (optOut) {
+    await runtime.writer.flockRowPut(flockDocId, optOut.key, optOut.value);
+    rows[serializeMachineFlockKey(optOut.key)] = optOut;
+  }
+  await Promise.allSettled([
+    runtime.writer.flockRowDelete(flockDocId, setupKey),
+    runtime.writer.flockRowDelete(flockDocId, configKey),
+  ]);
+
   delete rows[serializeMachineFlockKey(setupKey)];
   delete rows[serializeMachineFlockKey(configKey)];
   return rows;
@@ -126,7 +167,6 @@ async function cancelProviderSetupInMachineFlock(
 /**
  * Agent config meta as persisted before the machine-association refactor.
  * Exposed for the one-shot migration in `useAgentConfigMigration` only.
- * See docs/backward-compatibility.md BC-AGENT-CONFIG-MACHINE-ASSOCIATION.
  */
 export type LegacyAgentConfigMeta = Omit<AgentConfigMeta, 'machineId'>;
 
@@ -138,6 +178,7 @@ type ParsedConfigRaw = {
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   env: Record<string, string>;
   prompt: string;
   titleGeneration?: TitleGenerationConfig;
@@ -185,6 +226,7 @@ function parseAgentConfigRaw(roomId: string, raw: unknown): ParsedConfigRaw | nu
     agentType,
     customAcp,
     runtimeOverrides,
+    magpieGatewayUrl: isMagpieGatewayUrl(raw.magpieGatewayUrl) ? raw.magpieGatewayUrl : undefined,
     env: isPlainObject(raw.env) ? (raw.env as Record<string, string>) : {},
     prompt: typeof raw.prompt === 'string' ? raw.prompt : '',
     titleGeneration,
@@ -210,6 +252,7 @@ function buildAgentConfigMeta(roomId: string, raw: unknown): AgentConfigMeta | n
     agentType: parsed.agentType,
     customAcp: parsed.customAcp,
     runtimeOverrides: parsed.runtimeOverrides,
+    magpieGatewayUrl: parsed.magpieGatewayUrl,
     env: parsed.env,
     prompt: parsed.prompt,
     titleGeneration: parsed.titleGeneration,
@@ -228,6 +271,7 @@ function buildLegacyAgentConfigMeta(roomId: string, raw: unknown): LegacyAgentCo
     agentType: parsed.agentType,
     customAcp: parsed.customAcp,
     runtimeOverrides: parsed.runtimeOverrides,
+    magpieGatewayUrl: parsed.magpieGatewayUrl,
     env: parsed.env,
     prompt: parsed.prompt,
     titleGeneration: parsed.titleGeneration,
@@ -329,11 +373,12 @@ export const cmdCreateAgentConfigAtom = atom(
     if (!runtime) throw new Error('Runtime not ready');
     if (!config.machineId) throw new Error('machineId is required to create an agent config');
     const rows = await writeAgentConfigToMachineFlock(runtime, config);
+    // Replace rather than merge: merge cannot drop a key, so a retracted opt-out would
+    // linger in the cache until the next sync.
     _set(setMachineFlockRowsForMachineAtom, {
       workspaceId: runtime.workspaceId,
       machineId: config.machineId,
       rows,
-      mode: 'merge',
     });
     return config.id;
   }
@@ -344,10 +389,10 @@ export const cmdCreateProviderSetupAtom = atom(null, async (get, set, config: Ag
   if (!runtime) throw new Error('Runtime not ready');
   if (
     config.cliType !== 'builtin' ||
-    !isManagedBuiltinAgentType(config.agentType) ||
+    !supportsBuiltinProviderSetup(config.agentType) ||
     hasBuiltinRuntimeOverrideValues(config.runtimeOverrides)
   ) {
-    throw new Error('Provider setup is only supported for managed builtin agents');
+    throw new Error('Provider setup is not supported for this agent');
   }
   const now = getServerNow();
   const setup: ProviderSetupTask = {

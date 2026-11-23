@@ -5,6 +5,7 @@ import { DeepSeekIcon } from './deepseek-icon';
 import { GlmIcon } from './glm-icon';
 import { MinimaxIcon } from './minimax-icon';
 import { OpenAIIcon } from './openai-icon';
+import { InlineSvg } from './inline-svg';
 import { REGISTRY_AGENT_ICON_SVGS } from './registry-agent-icons';
 
 /**
@@ -35,10 +36,9 @@ function RegistrySvg({ name, className }: { name: string; className: string }) {
   const raw = REGISTRY_AGENT_ICON_SVGS[name];
   if (!raw) return <Sparkles className={className} />;
   return (
-    <span
-      aria-hidden="true"
+    <InlineSvg
+      raw={raw}
       className={`${className} inline-flex items-center justify-center [&_svg]:h-full [&_svg]:w-full`}
-      dangerouslySetInnerHTML={{ __html: raw }}
     />
   );
 }

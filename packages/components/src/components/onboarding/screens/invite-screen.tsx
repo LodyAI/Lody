@@ -1,14 +1,50 @@
+import { useCloudQuery } from '@lody/platform/react';
+import { cloudOperations } from '@/lib/cloud-api-operations';
+import {
+  SeatCostNotice,
+  isSeatInvitePreviewReady,
+  type SeatInvitePreview,
+} from '../../settings/invite-member-dialog';
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Loader2, Mail, Plus, Send, X } from 'lucide-react';
-import { toast } from 'sonner';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { ArrowRight, Mail, Plus, Send, X } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
+import { toast } from '@/lib/toast';
+import { withClassName } from '@/lib/stylex';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useAuthClient } from '../../../providers/convex-provider';
 import { OnboardingShell, OnboardingBackButton } from '../onboarding-shell';
+import { onboardingSurface as surface } from './surface';
+
+const styles = stylex.create({
+  form: { display: 'flex', alignItems: 'center', gap: space[2] },
+  emailField: { flexGrow: 1, minWidth: 0 },
+  email: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.label,
+  },
+  sending: { display: 'flex', flexShrink: 0, color: colors.secondaryLabel },
+  statusSent: { color: colors.success },
+  statusFailed: { color: colors.destructive },
+  empty: {
+    alignItems: 'center',
+    paddingInline: space[4],
+    paddingBlock: space[6],
+    textAlign: 'center',
+  },
+});
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -21,6 +57,7 @@ export interface InviteEntry {
 }
 
 export interface InviteScreenViewProps {
+  seatPreview?: SeatInvitePreview | null;
   email: string;
   onEmailChange: (next: string) => void;
   onAdd: () => void;
@@ -35,6 +72,7 @@ export interface InviteScreenViewProps {
 }
 
 export function InviteScreenView({
+  seatPreview,
   email,
   onEmailChange,
   onAdd,
@@ -60,99 +98,111 @@ export function InviteScreenView({
       )}
       secondaryAction={<OnboardingBackButton onClick={onBack} disabled={sending} />}
       primaryAction={
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="lg" onClick={onSkip} disabled={sending}>
+        <div {...stylex.props(surface.actions)}>
+          <Button variant="ghost" size="large" onClick={onSkip} disabled={sending}>
             {t('onboarding.invite.skip', 'Skip')}
           </Button>
           <Button
-            size="lg"
-            onClick={onSendAndContinue}
-            className="gap-2"
-            disabled={!hasAnything || sending || pendingCount === 0}
+            size="large"
+            onClick={() => {
+              if (isSeatInvitePreviewReady(seatPreview)) onSendAndContinue();
+            }}
+            disabled={
+              !hasAnything ||
+              sending ||
+              pendingCount === 0 ||
+              !isSeatInvitePreviewReady(seatPreview)
+            }
           >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {sending ? <Spinner size="small" /> : <Send {...stylex.props(surface.icon16)} />}
             {pendingCount > 0
               ? t('onboarding.invite.sendCount', 'Send {{count}} & continue', {
                   count: pendingCount,
                 })
               : t('onboarding.invite.send', 'Send & continue')}
-            {!sending ? <ArrowRight className="h-4 w-4" /> : null}
+            {!sending ? <ArrowRight {...stylex.props(surface.icon16)} /> : null}
           </Button>
         </div>
       }
     >
-      <div className="flex flex-col gap-3">
+      <div {...stylex.props(surface.stack)}>
         <form
-          className="flex items-stretch gap-2"
+          {...stylex.props(styles.form)}
           onSubmit={(event) => {
             event.preventDefault();
             onAdd();
           }}
         >
-          <div className="relative flex-1">
-            <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <div {...stylex.props(styles.emailField)}>
             <Input
               type="email"
               value={email}
               onChange={(event) => onEmailChange(event.target.value)}
               placeholder={t('onboarding.invite.placeholder', 'name@company.com')}
-              className={cn('pl-9', inputError ? 'border-destructive' : '')}
+              leading={<Mail aria-hidden {...stylex.props(surface.icon16)} />}
+              aria-invalid={inputError ? true : undefined}
               disabled={sending}
             />
           </div>
-          <Button type="submit" variant="outline" disabled={!email.trim() || sending}>
-            <Plus className="h-4 w-4" />
+          <Button type="submit" variant="secondary" disabled={!email.trim() || sending}>
+            <Plus {...stylex.props(surface.icon16)} />
             {t('onboarding.invite.add', 'Add')}
           </Button>
         </form>
-        {inputError ? <p className="text-xs text-destructive">{inputError}</p> : null}
+        {inputError ? <UiField.Error render={<p />}>{inputError}</UiField.Error> : null}
 
         {hasAnything ? (
           // Cap at ~5 rows; long lists scroll inside the card.
-          <ul className="scrollbar-pro -mx-1 max-h-[260px] divide-y divide-border/50 overflow-y-auto overscroll-contain rounded-xl border border-border/60 bg-card/40 px-1">
-            <AnimatePresence initial={false}>
-              {invites.map((invite) => (
-                <motion.li
-                  key={invite.id}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ duration: 0.2 }}
-                  className="flex items-center gap-3 px-3 py-2.5"
-                >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/50">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm text-foreground">{invite.email}</div>
-                    <InviteStatusLine status={invite.status} errorMessage={invite.errorMessage} />
-                  </div>
-                  {invite.status === 'sending' ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      aria-label={t('common.remove', 'Remove')}
-                      onClick={() => onRemove(invite.id)}
-                      disabled={sending}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </motion.li>
-              ))}
-            </AnimatePresence>
-          </ul>
+          <div {...stylex.props(surface.card)}>
+            <ul {...withClassName(stylex.props(surface.list), 'scrollbar-pro')}>
+              <AnimatePresence initial={false}>
+                {invites.map((invite, index) => (
+                  <motion.li
+                    key={invite.id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.2 }}
+                    {...stylex.props(surface.row, index > 0 && surface.ruled)}
+                  >
+                    <div {...stylex.props(surface.glyphBox, surface.glyphBoxSmall)}>
+                      <Mail {...stylex.props(surface.icon16)} />
+                    </div>
+                    <div {...stylex.props(surface.textColumn)}>
+                      <div {...stylex.props(styles.email)}>{invite.email}</div>
+                      <InviteStatusLine status={invite.status} errorMessage={invite.errorMessage} />
+                    </div>
+                    {invite.status === 'sending' ? (
+                      <span {...stylex.props(styles.sending)}>
+                        <Spinner size="small" />
+                      </span>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        aria-label={t('common.remove', 'Remove')}
+                        size="small"
+                        icon
+                        tone="destructive"
+                        onClick={() => onRemove(invite.id)}
+                        disabled={sending}
+                      >
+                        <X {...stylex.props(surface.icon16)} />
+                      </Button>
+                    )}
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+            </ul>
+          </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 px-4 py-6 text-center text-xs text-muted-foreground">
+          <div {...stylex.props(surface.message, surface.messageNeutral, styles.empty)}>
             {t(
               'onboarding.invite.emptyHint',
               'Add a teammate by email — or skip and invite them later.'
             )}
           </div>
         )}
+        {pendingCount > 0 && <SeatCostNotice preview={seatPreview} />}
       </div>
     </OnboardingShell>
   );
@@ -168,25 +218,27 @@ function InviteStatusLine({
   const { t } = useTranslation();
   if (status === 'sent') {
     return (
-      <div className="text-xs text-primary">{t('onboarding.invite.statusSent', 'Sent')}</div>
+      <div {...stylex.props(surface.detail, styles.statusSent)}>
+        {t('onboarding.invite.statusSent', 'Sent')}
+      </div>
     );
   }
   if (status === 'failed') {
     return (
-      <div className="truncate text-xs text-destructive">
+      <div {...stylex.props(surface.detail, styles.statusFailed)}>
         {errorMessage ?? t('onboarding.invite.statusFailed', 'Failed to send')}
       </div>
     );
   }
   if (status === 'sending') {
     return (
-      <div className="text-xs text-muted-foreground">
+      <div {...stylex.props(surface.detail)}>
         {t('onboarding.invite.statusSending', 'Sending…')}
       </div>
     );
   }
   return (
-    <div className="text-xs text-muted-foreground">
+    <div {...stylex.props(surface.detail)}>
       {t('onboarding.invite.statusPending', 'Will be sent')}
     </div>
   );
@@ -212,8 +264,19 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
   const [invites, setInvites] = useState<InviteEntry[]>([]);
   const [sending, setSending] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
+  const requestedSeats = invites.filter((entry) => entry.status === 'pending').length;
+  const seatPreview = useCloudQuery(
+    cloudOperations.billing.getWorkspaceSeatInvitePreview,
+    activeOrganization && requestedSeats > 0
+      ? { workspaceId: activeOrganization.id, requestedSeats }
+      : 'skip'
+  );
 
   const handleAdd = useCallback(() => {
+    if (invites.length >= 100) {
+      setInputError(t('workspace.invite.seat.batchLimit'));
+      return;
+    }
     const candidate = email.trim();
     if (!candidate) {
       setInputError(t('onboarding.invite.errorEmpty', 'Enter an email address'));
@@ -245,6 +308,7 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
 
   const handleSendAndContinue = useCallback(() => {
     if (!activeOrganization) {
+      console.error('[onboarding] Cannot send invitations without an active workspace');
       toast.error(t('onboarding.invite.errorNoWorkspace', 'No workspace to invite to'));
       return;
     }
@@ -253,6 +317,7 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
       onCompleted();
       return;
     }
+    if (!isSeatInvitePreviewReady(seatPreview)) return;
     setSending(true);
     void (async () => {
       // Mark all pending as sending up-front so the user sees progress.
@@ -272,6 +337,7 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
           const failed = result?.error;
           if (failed) {
             const message = failed.message || String(failed);
+            console.error(`[onboarding] Failed to invite ${entry.email}:`, failed);
             setInvites((prev) =>
               prev.map((e) =>
                 e.id === entry.id ? { ...e, status: 'failed', errorMessage: message } : e
@@ -285,6 +351,7 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
             );
           }
         } catch (error) {
+          console.error(`[onboarding] Failed to invite ${entry.email}:`, error);
           const message = error instanceof Error ? error.message : String(error);
           setInvites((prev) =>
             prev.map((e) =>
@@ -302,10 +369,11 @@ export function InviteScreen({ onBack, onSkip, onCompleted }: InviteScreenProps)
         return current;
       });
     })();
-  }, [activeOrganization, authClient, invites, onCompleted, t]);
+  }, [activeOrganization, authClient, invites, onCompleted, seatPreview, t]);
 
   return (
     <InviteScreenView
+      seatPreview={seatPreview}
       email={email}
       onEmailChange={(next) => {
         setEmail(next);

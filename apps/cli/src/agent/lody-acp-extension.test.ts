@@ -1,0 +1,121 @@
+import { describe, expect, it } from 'vitest';
+import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
+import type { RequestPermissionRequest, SessionConfigOption } from '@agentclientprotocol/sdk';
+import { getBuiltinToolPermissionOutcome, parseLodyExtensionMessage } from './lody-acp-extension';
+
+describe('Core usage accounting boundary', () => {
+  it('scopes Core-marked snapshots for any provider and keeps the native routing session', () => {
+    const usage = { inputTokens: 2000, outputTokens: 0, cacheReadInputTokens: 0 };
+    const update = { sessionId: 'native', usage, modelUsage: { 'model-b': usage } };
+    const parse = (_meta: Record<string, unknown>) =>
+      parseLodyExtensionMessage({
+        method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
+        params: { ...update, _meta },
+        sessionId: 'native',
+      });
+    expect(parse({ lody: { usageScopeId: 'result/1' } })).toEqual({
+      type: 'usage',
+      accountingId: 'native:scope:result%2F1',
+      update,
+    });
+    expect(
+      parseLodyExtensionMessage({
+        method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
+        params: { ...update, _meta: { lody: { usageScopeId: 'result/1' } } },
+        sessionId: 'lody-session',
+      })
+    ).toEqual({ type: 'usage', accountingId: 'native:scope:result%2F1', update });
+    // The Codex adapter's duplicate `codex.usageTurnId` spelling is not an accounting scope.
+    expect(parse({ codex: { usageTurnId: 'turn-b' } })).toEqual({ type: 'usage', update });
+    expect(parse({ lody: { usageScopeId: '' } })).toEqual({ type: 'usage', update });
+  });
+});
+
+describe('Grok TUI permission compatibility', () => {
+  const request: RequestPermissionRequest = {
+    sessionId: 'grok-session',
+    toolCall: { toolCallId: 'tool', title: 'Execute', kind: 'execute' },
+    options: [
+      { kind: 'allow_always', optionId: 'lasting-grant', name: 'Always allow' },
+      { kind: 'allow_once', optionId: 'this-call', name: 'Allow once' },
+    ],
+  };
+  const configOptions = (currentValue: string): SessionConfigOption[] => [
+    {
+      id: 'permission_mode',
+      name: 'Permissions',
+      type: 'select',
+      category: '_permission',
+      currentValue,
+      options: [],
+    },
+  ];
+  const args = {
+    agentConfig: { cliType: 'builtin' as const, agentType: 'grok' },
+    configOptions: configOptions('always-approve'),
+    request,
+    pending: false,
+  };
+
+  it('grants only this call, independent of option order or labels', () => {
+    expect(getBuiltinToolPermissionOutcome(args)).toEqual({
+      outcome: 'selected',
+      optionId: 'this-call',
+    });
+  });
+
+  it.each(['ask', 'auto', 'dontAsk', 'yolo', 'agent-full-access'])(
+    'keeps %s interactive',
+    (mode) => {
+      expect(
+        getBuiltinToolPermissionOutcome({ ...args, configOptions: configOptions(mode) })
+      ).toBeUndefined();
+    }
+  );
+
+  it('does not apply Grok policy to other providers or an absent option snapshot', () => {
+    for (const agentType of ['claude', 'codex', 'kimi']) {
+      expect(
+        getBuiltinToolPermissionOutcome({ ...args, agentConfig: { cliType: 'builtin', agentType } })
+      ).toBeUndefined();
+    }
+    expect(getBuiltinToolPermissionOutcome({ ...args, agentConfig: undefined })).toBeUndefined();
+    expect(getBuiltinToolPermissionOutcome({ ...args, configOptions: [] })).toBeUndefined();
+  });
+
+  it('never substitutes a lasting grant when AllowOnce is missing', () => {
+    const withoutOnce = {
+      ...request,
+      options: request.options.filter((o) => o.kind !== 'allow_once'),
+    };
+    expect(getBuiltinToolPermissionOutcome({ ...args, request: withoutOnce })).toBeUndefined();
+    expect(
+      getBuiltinToolPermissionOutcome({ ...args, request: withoutOnce, pending: true })
+    ).toEqual({ outcome: 'cancelled' });
+  });
+
+  it('keeps question requests interactive even when draining', () => {
+    const question: RequestPermissionRequest = {
+      ...request,
+      _meta: {
+        claudeCode: {
+          requestType: 'askUserQuestion',
+          askUserQuestion: {
+            version: 1,
+            questions: [
+              {
+                question: 'Which database?',
+                header: 'Database',
+                options: [{ label: 'Postgres', description: 'Use Postgres' }],
+                multiSelect: false,
+              },
+            ],
+          },
+        },
+      },
+    };
+    expect(
+      getBuiltinToolPermissionOutcome({ ...args, request: question, pending: true })
+    ).toBeUndefined();
+  });
+});

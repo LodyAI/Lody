@@ -15,6 +15,9 @@ function FilterShell({
 }) {
   const [organize, setOrganize] = useState<SidebarOrganizeMode>(organizeArg);
   const [scope, setScope] = useState<SidebarChatScope>(scopeArg);
+  const [showUpdatedProjectNames, setShowUpdatedProjectNames] = useState(true);
+  const [showBranchNames, setShowBranchNames] = useState(false);
+  const [hideEmptyProjects, setHideEmptyProjects] = useState(true);
 
   return (
     <div className="flex min-h-[260px] items-end gap-6 rounded-2xl bg-sidebar p-6 text-sidebar-foreground">
@@ -31,6 +34,18 @@ function FilterShell({
             <span className="text-sidebar-foreground-muted">Scope:</span>{' '}
             <span className="font-medium">{scope}</span>
           </div>
+          <div className="mt-1">
+            <span className="text-sidebar-foreground-muted">Project line:</span>{' '}
+            <span className="font-medium">{showUpdatedProjectNames ? 'on' : 'off'}</span>
+          </div>
+          <div className="mt-1">
+            <span className="text-sidebar-foreground-muted">Branch line:</span>{' '}
+            <span className="font-medium">{showBranchNames ? 'on' : 'off'}</span>
+          </div>
+          <div className="mt-1">
+            <span className="text-sidebar-foreground-muted">Hide empty projects:</span>{' '}
+            <span className="font-medium">{hideEmptyProjects ? 'on' : 'off'}</span>
+          </div>
         </div>
         <p className="mt-3 text-xs text-sidebar-foreground-muted">
           Click the filter icon to open the popover. Selections update the panel above.
@@ -42,6 +57,12 @@ function FilterShell({
           scope={scope}
           onOrganizeChange={setOrganize}
           onScopeChange={setScope}
+          showUpdatedProjectNames={showUpdatedProjectNames}
+          onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
+          showBranchNames={showBranchNames}
+          onShowBranchNamesChange={setShowBranchNames}
+          hideEmptyProjects={hideEmptyProjects}
+          onHideEmptyProjectsChange={setHideEmptyProjects}
           {...(defaultOpen ? { side: 'top', align: 'end' } : null)}
         />
       </div>

@@ -1,7 +1,4 @@
-import { deferredPostHog } from './deferred-posthog';
 import { isNativeAppShell, isNativeIOSAppShell } from './native-platform';
-import { capturePostHogEvent } from './posthog-analytics';
-import { hashAnalyticsId } from '@lody/shared';
 
 type OneSignalLanguage = 'en' | 'zh';
 type OneSignalLogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
@@ -201,47 +198,26 @@ function navigateWithinApp(target: string): void {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-// Low-cardinality push payload kind (set by the Convex sender as
-// additionalData.kind). Never send the raw route/url (denylist).
-function readNotificationKind(additionalData: Record<string, unknown> | undefined): string {
-  const kind = additionalData?.kind;
-  return typeof kind === 'string' && kind ? kind : 'unknown';
-}
-
 function registerNativeNotificationHandlers(nativeOneSignal: NativeOneSignalPlugin): void {
   if (nativeNotificationClickListenerRegistered) {
     return;
   }
 
   nativeNotificationClickListenerRegistered = true;
-  // TODO(analytics P0): push/received — the native OneSignal plugin's typed
-  // surface here only exposes 'click'. Emitting push/received needs the
-  // 'foregroundWillDisplay' listener, which requires widening NativeOneSignalPlugin
-  // and confirming the plugin version exposes it; deferred to avoid a runtime
-  // risk on an unverified native API.
   nativeOneSignal.Notifications.addEventListener('click', (event) => {
+    const recipient = event.notification.additionalData?.recipientUserId;
+    if (typeof recipient === 'string' && recipient !== localStorage.getItem('lody:push-user'))
+      return;
     // Prefer data.route (in-app path) over URL-based targets
     const dataRoute = event.notification.additionalData?.route;
-    const routeTarget = typeof dataRoute === 'string' ? dataRoute : null;
+    const routeTarget =
+      typeof dataRoute === 'string' && dataRoute.startsWith('/') && !dataRoute.startsWith('//')
+        ? dataRoute
+        : null;
     const target =
       routeTarget ||
       normalizeNotificationTarget(event.result.url) ||
       normalizeNotificationTarget(event.notification.launchURL);
-
-    const notificationKind = readNotificationKind(event.notification.additionalData);
-
-    // push/opened (spec §8f.3, P0, tier A): the user tapped a native push.
-    // Only the low-cardinality kind + a hashed route are sent (no raw path/url).
-    try {
-      capturePostHogEvent(deferredPostHog, 'push/opened', {
-        surface: 'native',
-        notification_kind: notificationKind,
-        has_target: Boolean(target),
-        route_hash: hashAnalyticsId(target),
-      });
-    } catch {
-      // side-effect-only
-    }
 
     if (!target) {
       return;
@@ -548,7 +524,7 @@ export function initOneSignal(): Promise<OneSignalClient | null> {
         serviceWorkerPath: 'push/onesignal/OneSignalSDKWorker.js',
         serviceWorkerUpdaterPath: 'push/onesignal/OneSignalSDKUpdaterWorker.js',
         serviceWorkerParam: { scope: '/push/onesignal/' },
-        autoResubscribe: true,
+        autoResubscribe: false,
         welcomeNotification: { disable: true, message: '' },
       });
 

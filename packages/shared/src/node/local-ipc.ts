@@ -1,4 +1,36 @@
+import {
+  LOCAL_E2EE_PAIRING_PATH,
+  LOCAL_E2EE_RESET_PATH,
+  LocalE2eeResetResponseSchema,
+  LocalE2eePairingFailureSchema,
+  type LocalE2eeResetRequest,
+  type LocalE2eeResetResponse,
+  LocalE2eePrepareReplySchema,
+  LocalE2eeActivateResponseSchema,
+  type LocalE2eePrepareRequest,
+  type LocalE2eeActivateRequest,
+  type LocalE2eePrepareReply,
+  type LocalE2eeActivateResponse,
+} from '../e2ee-local-pairing';
+import {
+  LOCAL_SCHEDULE_CONTROL_PATH,
+  ScheduleControlResponseSchema,
+  type ScheduleControlRequest,
+  type ScheduleControlResponse,
+} from '../schedule-control';
+import {
+  LOCAL_WORKSPACE_BUNDLE_PATH,
+  WorkspaceBundleControlResponseSchema,
+  type WorkspaceBundleControlRequest,
+  type WorkspaceBundleControlResponse,
+} from '../workspace-bundle-control';
 import crypto from 'node:crypto';
+import {
+  AUTOMATION_CONTROL_PATH,
+  automationControlResponseSchema,
+  type AutomationControlRequest,
+  type AutomationControlResponse,
+} from '../automations/control';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -27,6 +59,8 @@ import {
 import { LOCAL_PROJECT_CONTROL_PATH } from './local-project-control';
 import { getInstallationProfile, getLodyDataDir } from './installation-profile';
 import type { PlatformKind } from '../platform-kind';
+
+import { LOCAL_IPC_TOKEN_HEADER, makeWindowsLocalPipePath } from './local-ipc-auth';
 
 export const LOCAL_CONTROL_HEADER = 'x-lody-local-control';
 export const LOCAL_SESSION_CONTROL_PATH = '/session-control';
@@ -101,12 +135,19 @@ const LocalDaemonRunFileSchema = z.object({
   controlSocketPath: z.string().min(1),
   version: z.string().min(1),
   startedAt: z.string().min(1),
+  token: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  dataPlaneSocketPath: z.string().min(1).optional(),
 });
 
 export type LocalDaemonRunFile = z.infer<typeof LocalDaemonRunFileSchema>;
 
 export class IpcConnectError extends Data.TaggedError('IpcConnectError')<{
   message: string;
+  /** True only when the HTTP socket never established a connection. */
+  beforeConnect?: boolean;
   cause?: unknown;
 }> {}
 
@@ -166,6 +207,30 @@ export type LocalProbeClientService = {
 };
 
 export type LocalControlClientService = {
+  automationControl: (
+    message: AutomationControlRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<AutomationControlResponse, IpcError>;
+  e2eeReset: (
+    message: LocalE2eeResetRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalE2eeResetResponse, IpcError>;
+  e2eePrepare: (
+    message: LocalE2eePrepareRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalE2eePrepareReply, IpcError>;
+  e2eeActivate: (
+    message: LocalE2eeActivateRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalE2eeActivateResponse, IpcError>;
+  scheduleControl: (
+    message: ScheduleControlRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<ScheduleControlResponse, IpcError>;
+  workspaceBundleControl: (
+    message: WorkspaceBundleControlRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<WorkspaceBundleControlResponse, IpcError>;
   sessionControl: (
     message: LocalSessionControlRequest,
     options?: LocalSessionControlRequestOptions
@@ -181,11 +246,13 @@ export type LocalControlClientService = {
 };
 
 export type LocalProbeClientSocketOptions = {
+  token?: string;
   socketPath?: string;
   runFilePath?: string;
 };
 
 export type LocalControlClientSocketOptions = {
+  token?: string;
   socketPath?: string;
   runFilePath?: string;
 };
@@ -193,18 +260,6 @@ export type LocalControlClientSocketOptions = {
 export type LocalProbeClientAutoOptions = LocalProbeClientSocketOptions;
 
 export type LocalControlClientAutoOptions = LocalControlClientSocketOptions;
-
-function getUserSocketSuffix(): string {
-  if (typeof process.getuid === 'function') {
-    return String(process.getuid());
-  }
-  const userInfo = os.userInfo();
-  return crypto
-    .createHash('sha256')
-    .update(`${userInfo.uid}:${userInfo.username}:${os.homedir()}`)
-    .digest('hex')
-    .slice(0, 16);
-}
 
 // sockaddr_un.sun_path is ~104 bytes on macOS and 108 on Linux, including the
 // trailing NUL; binding a longer path fails at the OS level.
@@ -218,15 +273,21 @@ const MAX_UNIX_SOCKET_PATH_BYTES = 103;
  * `local_ipc_socket_path_too_long` instead of silently falling back when the
  * home dir pushes the path past the `sun_path` limit.
  */
-export function getLocalDaemonSocketPath(basename: string, platform?: PlatformKind): string {
+export function getLocalDaemonSocketPath(
+  basename: string,
+  platform?: PlatformKind,
+  pipeSuffix?: string
+): string {
   if (process.platform === 'win32') {
-    // Windows named pipes cannot get an explicit DACL from Node's listen(); we
-    // rely on (a) the per-user suffix keeping paths collision-free and (b) the
-    // creating process's default pipe security descriptor, which grants write
-    // access to the owner (and Administrators — who can compromise the user's
-    // processes regardless). If Node ever exposes pipe security attributes,
-    // tighten this to owner-only explicitly.
-    return `\\\\.\\pipe\\${basename}-${getUserSocketSuffix()}`;
+    if (pipeSuffix) return makeWindowsLocalPipePath(basename, pipeSuffix);
+    // Legacy terminal endpoint has a separate protocol and CJS client.
+    const user = os.userInfo();
+    const suffix = crypto
+      .createHash('sha256')
+      .update(`${user.uid}:${user.username}:${os.homedir()}`)
+      .digest('hex')
+      .slice(0, 16);
+    return `\\\\.\\pipe\\${basename}-${suffix}`;
   }
 
   const socketPath = path.join(getLocalDaemonRunDir(platform), `${basename}.sock`);
@@ -236,21 +297,41 @@ export function getLocalDaemonSocketPath(basename: string, platform?: PlatformKi
   return socketPath;
 }
 
-export function getLocalControlSocketPath(platform?: PlatformKind): string {
+export function getLocalControlSocketPath(platform?: PlatformKind, pipeSuffix?: string): string {
+  if (process.platform === 'win32' && !pipeSuffix)
+    return readLocalDaemonRunFile(getLocalDaemonRunFilePath(platform)).controlSocketPath;
   return getLocalDaemonSocketPath(
     getSocketBasename(LOCAL_CONTROL_SOCKET_SUFFIX, platform),
-    platform
+    platform,
+    pipeSuffix
   );
 }
 
-export function getLocalProbeSocketPath(platform?: PlatformKind): string {
-  return getLocalDaemonSocketPath(getSocketBasename(LOCAL_PROBE_SOCKET_SUFFIX, platform), platform);
+export function getLocalProbeSocketPath(platform?: PlatformKind, pipeSuffix?: string): string {
+  if (process.platform === 'win32' && !pipeSuffix)
+    return readLocalDaemonRunFile(getLocalDaemonRunFilePath(platform)).socketPath;
+  return getLocalDaemonSocketPath(
+    getSocketBasename(LOCAL_PROBE_SOCKET_SUFFIX, platform),
+    platform,
+    pipeSuffix
+  );
 }
 
-export function getLocalLoroDataPlaneSocketPath(platform?: PlatformKind): string {
+export function getLocalLoroDataPlaneSocketPath(
+  platform?: PlatformKind,
+  pipeSuffix?: string
+): string {
+  if (process.platform === 'win32' && !pipeSuffix) {
+    const endpoint = readLocalDaemonRunFile(
+      getLocalDaemonRunFilePath(platform)
+    ).dataPlaneSocketPath;
+    if (!endpoint) throw new Error('local_data_plane_endpoint_missing');
+    return endpoint;
+  }
   return getLocalDaemonSocketPath(
     getSocketBasename(LOCAL_LORO_DATA_PLANE_SOCKET_SUFFIX, platform),
-    platform
+    platform,
+    pipeSuffix
   );
 }
 
@@ -372,7 +453,7 @@ function formatUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function mapRequestError(error: unknown, timeoutMs: number): IpcError {
+function mapRequestError(error: unknown, timeoutMs: number, beforeConnect = false): IpcError {
   if (isIpcError(error)) {
     return error;
   }
@@ -386,6 +467,7 @@ function mapRequestError(error: unknown, timeoutMs: number): IpcError {
   return new IpcConnectError({
     message: formatUnknownError(error),
     cause: error,
+    beforeConnect,
   });
 }
 
@@ -403,6 +485,7 @@ function requestJsonOverSocket(
     try: () =>
       new Promise<{ response: HttpResponseLike; payload: unknown }>((resolve, reject) => {
         let settled = false;
+        let connected = false;
         const settleWith = (settle: () => void): void => {
           if (settled) return;
           settled = true;
@@ -444,12 +527,32 @@ function requestJsonOverSocket(
               const status = response.statusCode ?? 0;
               settleWith(() => {
                 try {
+                  const payload: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                  // Classify transport authentication inside the endpoint runner,
+                  // before endpoint-specific parsers can accept it as a business reply.
+                  if (
+                    status === 401 &&
+                    payload &&
+                    typeof payload === 'object' &&
+                    'error' in payload &&
+                    payload.error === 'local_ipc_unauthorized'
+                  ) {
+                    reject(
+                      new IpcProtocolError({
+                        message: 'Local IPC unauthorized',
+                        status,
+                        errorCode: 'local_ipc_unauthorized',
+                        responseBody: payload,
+                      })
+                    );
+                    return;
+                  }
                   resolve({
                     response: {
                       ok: status >= 200 && status < 300,
                       status,
                     },
-                    payload: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+                    payload,
                   });
                 } catch (error) {
                   reject(
@@ -479,7 +582,16 @@ function requestJsonOverSocket(
           );
           request.destroy();
         });
-        request.on('error', (error) => settleWith(() => reject(error)));
+        request.on('socket', (socket) => {
+          if (!socket.connecting) connected = true;
+          else
+            socket.once('connect', () => {
+              connected = true;
+            });
+        });
+        request.on('error', (error) =>
+          settleWith(() => reject(mapRequestError(error, timeoutMs, !connected)))
+        );
         if (init.body !== undefined) {
           request.write(init.body);
         }
@@ -492,16 +604,23 @@ function requestJsonOverSocket(
 function getJsonOverSocket(
   socketPath: string,
   requestPath: string,
-  timeoutMs: number
+  timeoutMs: number,
+  token?: string
 ): Effect.Effect<{ response: HttpResponseLike; payload: unknown }, IpcError> {
-  return requestJsonOverSocket(socketPath, requestPath, { method: 'GET' }, timeoutMs);
+  return requestJsonOverSocket(
+    socketPath,
+    requestPath,
+    { method: 'GET', headers: token ? { [LOCAL_IPC_TOKEN_HEADER]: token } : {} },
+    timeoutMs
+  );
 }
 
 function postJsonOverSocket(
   socketPath: string,
   requestPath: string,
   body: unknown,
-  timeoutMs: number
+  timeoutMs: number,
+  token?: string
 ): Effect.Effect<{ response: HttpResponseLike; payload: unknown }, IpcError> {
   const encoded = JSON.stringify(body);
   return requestJsonOverSocket(
@@ -513,6 +632,7 @@ function postJsonOverSocket(
         'content-type': 'application/json',
         'content-length': String(Buffer.byteLength(encoded, 'utf8')),
         [LOCAL_CONTROL_HEADER]: '1',
+        ...(token ? { [LOCAL_IPC_TOKEN_HEADER]: token } : {}),
       },
       body: encoded,
     },
@@ -523,7 +643,8 @@ function postJsonOverSocket(
 function postSessionControlOverSocket(
   socketPath: string,
   message: LocalSessionControlRequest,
-  options: LocalSessionControlRequestOptions
+  options: LocalSessionControlRequestOptions,
+  token?: string
 ): Effect.Effect<LocalSessionControlResponse[], IpcError> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS;
   const encoded = JSON.stringify(message);
@@ -531,6 +652,7 @@ function postSessionControlOverSocket(
     try: () =>
       new Promise<LocalSessionControlResponse[]>((resolve, reject) => {
         let settled = false;
+        let connected = false;
         const responses: LocalSessionControlResponse[] = [];
         const settleWith = (settle: () => void): void => {
           if (settled) return;
@@ -547,6 +669,7 @@ function postSessionControlOverSocket(
               'content-length': String(Buffer.byteLength(encoded, 'utf8')),
               accept: LOCAL_SESSION_CONTROL_STREAM_MEDIA_TYPE,
               [LOCAL_CONTROL_HEADER]: '1',
+              ...(token ? { [LOCAL_IPC_TOKEN_HEADER]: token } : {}),
             },
           },
           (response) => {
@@ -741,7 +864,16 @@ function postSessionControlOverSocket(
           );
           request.destroy();
         });
-        request.on('error', (error) => settleWith(() => reject(error)));
+        request.on('socket', (socket) => {
+          if (!socket.connecting) connected = true;
+          else
+            socket.once('connect', () => {
+              connected = true;
+            });
+        });
+        request.on('error', (error) =>
+          settleWith(() => reject(mapRequestError(error, timeoutMs, !connected)))
+        );
         request.write(encoded);
         request.end();
       }),
@@ -922,6 +1054,45 @@ function makeControlClient(
   postSessionControl?: PostSessionControlFn
 ): LocalControlClientService {
   return {
+    e2eeReset: (message, options) =>
+      Effect.flatMap(
+        post(
+          LOCAL_E2EE_RESET_PATH,
+          message,
+          options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<LocalE2eeResetResponse>(
+            LocalE2eeResetResponseSchema,
+            () => 'e2ee_reset_unavailable'
+          )(response, payload)
+      ),
+    e2eePrepare: (message, options) =>
+      Effect.flatMap(
+        post(
+          LOCAL_E2EE_PAIRING_PATH,
+          message,
+          options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<LocalE2eePrepareReply>(LocalE2eePrepareReplySchema, () => {
+            const safe = LocalE2eePairingFailureSchema.safeParse(payload);
+            return safe.success ? safe.data.error : 'e2ee_pairing_unavailable';
+          })(response, payload)
+      ),
+    e2eeActivate: (message, options) =>
+      Effect.flatMap(
+        post(
+          LOCAL_E2EE_PAIRING_PATH,
+          message,
+          options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<LocalE2eeActivateResponse>(LocalE2eeActivateResponseSchema, () => {
+            const safe = LocalE2eePairingFailureSchema.safeParse(payload);
+            return safe.success ? safe.data.error : 'e2ee_pairing_unavailable';
+          })(response, payload)
+      ),
     sessionControl: (message, requestOptions) =>
       postSessionControl
         ? postSessionControl(message, requestOptions ?? {})
@@ -933,6 +1104,45 @@ function makeControlClient(
             ),
             ({ response, payload }) => parseSessionControlEnvelope(response, payload)
           ),
+    scheduleControl: (message, requestOptions) =>
+      Effect.flatMap(
+        post(
+          LOCAL_SCHEDULE_CONTROL_PATH,
+          message,
+          requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<ScheduleControlResponse>(
+            ScheduleControlResponseSchema,
+            (status) => `Invalid Schedule response (HTTP ${status})`
+          )(response, payload)
+      ),
+    workspaceBundleControl: (message, requestOptions) =>
+      Effect.flatMap(
+        post(
+          LOCAL_WORKSPACE_BUNDLE_PATH,
+          message,
+          requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<WorkspaceBundleControlResponse>(
+            WorkspaceBundleControlResponseSchema,
+            (status) => `Invalid workspace bundle response (HTTP ${status})`
+          )(response, payload)
+      ),
+    automationControl: (message, requestOptions) =>
+      Effect.flatMap(
+        post(
+          AUTOMATION_CONTROL_PATH,
+          message,
+          requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<AutomationControlResponse>(
+            automationControlResponseSchema,
+            (status) => `Invalid Automation response (HTTP ${status})`
+          )(response, payload)
+      ),
     projectControl: (message, requestOptions) =>
       Effect.flatMap(
         post(
@@ -971,79 +1181,135 @@ function runFileToConnectError(error: unknown): IpcConnectError {
   });
 }
 
-function resolveProbeSocketPath(
-  options: LocalProbeClientSocketOptions
-): Effect.Effect<string, IpcConnectError> {
-  if (options.socketPath) {
-    return Effect.succeed(options.socketPath);
-  }
+type LocalEndpoint = { socketPath: string; token?: string; runFilePath?: string };
+function resolveLocalEndpoint(
+  options: LocalControlClientSocketOptions,
+  channel: 'socketPath' | 'controlSocketPath'
+): Effect.Effect<LocalEndpoint, IpcConnectError> {
   return Effect.try({
-    try: () => readLocalDaemonRunFile(options.runFilePath).socketPath,
+    try: () => {
+      if (options.socketPath && options.token !== undefined)
+        return { socketPath: options.socketPath, token: options.token };
+      // Never send a daemon secret to an unrelated caller-supplied socket.
+      if (options.socketPath && !options.runFilePath) {
+        const file = getLocalDaemonRunFilePath();
+        if (!fs.existsSync(file)) return { socketPath: options.socketPath };
+        try {
+          const run = readLocalDaemonRunFile(file);
+          return {
+            socketPath: options.socketPath,
+            token: run[channel] === options.socketPath ? run.token : undefined,
+            runFilePath: run[channel] === options.socketPath ? file : undefined,
+          };
+        } catch {
+          // An explicit endpoint is independent of optional default discovery.
+          return { socketPath: options.socketPath };
+        }
+      }
+      const run = readLocalDaemonRunFile(options.runFilePath);
+      if (options.socketPath && options.socketPath !== run[channel])
+        throw new Error('local_ipc_endpoint_mismatch');
+      return {
+        socketPath: run[channel],
+        token: run.token,
+        runFilePath: options.runFilePath ?? getLocalDaemonRunFilePath(),
+      };
+    },
     catch: runFileToConnectError,
   });
 }
-
-function resolveControlSocketPath(
-  options: LocalControlClientSocketOptions
-): Effect.Effect<string, IpcConnectError> {
-  if (options.socketPath) {
-    return Effect.succeed(options.socketPath);
+// Retry only a stale cached generation that was refused before dispatch. Never
+// replay timeouts, disconnects after connection, or ordinary business failures.
+function canRefreshEndpoint(error: IpcError): boolean {
+  if (error._tag === 'IpcProtocolError') {
+    const body = error.responseBody;
+    return (
+      error.status === 401 &&
+      !!body &&
+      typeof body === 'object' &&
+      'error' in body &&
+      body.error === 'local_ipc_unauthorized'
+    );
   }
-  return Effect.try({
-    try: () => readLocalDaemonRunFile(options.runFilePath).controlSocketPath,
-    catch: runFileToConnectError,
-  });
+  if (error._tag !== 'IpcConnectError' || !error.beforeConnect) return false;
+  const cause = error.cause as NodeJS.ErrnoException | undefined;
+  return cause?.code === 'ENOENT' || cause?.code === 'ECONNREFUSED';
 }
 
-// Resolving a socket path reads + zod-parses the run file synchronously, and
-// long-lived clients (e.g. the Electron data-plane poll) issue requests
-// continuously — cache the resolved path per client and invalidate it on
-// connect errors so a daemon restart or stale run file re-resolves.
-function makeCachedSocketPathRunner(
-  resolveSocketPath: () => Effect.Effect<string, IpcConnectError>
-): <A>(run: (socketPath: string) => Effect.Effect<A, IpcError>) => Effect.Effect<A, IpcError> {
-  let cachedSocketPath: string | null = null;
-  return (run) =>
-    Effect.suspend(() =>
-      cachedSocketPath
-        ? Effect.succeed(cachedSocketPath)
-        : Effect.tap(resolveSocketPath(), (socketPath) =>
-            Effect.sync(() => {
-              cachedSocketPath = socketPath;
+function makeEndpointRunner(
+  options: LocalControlClientSocketOptions,
+  channel: 'socketPath' | 'controlSocketPath'
+) {
+  let cached: LocalEndpoint | null = null;
+  let discoveryOptions = options;
+  const remember = (endpoint: LocalEndpoint): void => {
+    cached = endpoint;
+    if (endpoint.runFilePath) discoveryOptions = { runFilePath: endpoint.runFilePath };
+  };
+  return <A>(
+    run: (endpoint: LocalEndpoint) => Effect.Effect<A, IpcError>
+  ): Effect.Effect<A, IpcError> =>
+    Effect.suspend(() => {
+      const usedCached = cached !== null;
+      return (
+        cached
+          ? Effect.succeed(cached)
+          : Effect.tap(resolveLocalEndpoint(discoveryOptions, channel), (endpoint) =>
+              Effect.sync(() => remember(endpoint))
+            )
+      ).pipe(
+        Effect.flatMap((endpoint) =>
+          run(endpoint).pipe(
+            Effect.catch((error) => {
+              if (error._tag === 'IpcConnectError' || canRefreshEndpoint(error)) cached = null;
+              if (!usedCached || !canRefreshEndpoint(error)) return Effect.fail(error);
+              return resolveLocalEndpoint(discoveryOptions, channel).pipe(
+                Effect.flatMap((fresh) => {
+                  remember(fresh);
+                  if (fresh.socketPath === endpoint.socketPath && fresh.token === endpoint.token)
+                    return Effect.fail(error);
+                  // One retry only; its failure does not recurse through this catch.
+                  return run(fresh).pipe(
+                    Effect.tapError(() =>
+                      Effect.sync(() => {
+                        cached = null;
+                      })
+                    )
+                  );
+                })
+              );
             })
           )
-    ).pipe(
-      Effect.flatMap(run),
-      Effect.catchTag('IpcConnectError', (error) => {
-        cachedSocketPath = null;
-        return Effect.fail(error);
-      })
-    );
+        )
+      );
+    });
 }
 
 export function makeLocalProbeClientSocket(
   options: LocalProbeClientSocketOptions = {}
 ): LocalProbeClientService {
-  const withSocketPath = makeCachedSocketPathRunner(() => resolveProbeSocketPath(options));
+  const withSocketPath = makeEndpointRunner(options, 'socketPath');
   return {
     health: (requestOptions) =>
-      withSocketPath((socketPath) =>
+      withSocketPath(({ socketPath, token }) =>
         Effect.flatMap(
           getJsonOverSocket(
             socketPath,
             LOCAL_PROBE_HEALTH_PATH,
-            requestOptions?.timeoutMs ?? DEFAULT_LOCAL_PROBE_TIMEOUT_MS
+            requestOptions?.timeoutMs ?? DEFAULT_LOCAL_PROBE_TIMEOUT_MS,
+            token
           ),
           ({ response, payload }) => parseProbeHealth(response, payload)
         )
       ),
     state: (requestOptions) =>
-      withSocketPath((socketPath) =>
+      withSocketPath(({ socketPath, token }) =>
         Effect.flatMap(
           getJsonOverSocket(
             socketPath,
             LOCAL_PROBE_STATE_PATH,
-            requestOptions?.timeoutMs ?? DEFAULT_LOCAL_PROBE_TIMEOUT_MS
+            requestOptions?.timeoutMs ?? DEFAULT_LOCAL_PROBE_TIMEOUT_MS,
+            token
           ),
           ({ response, payload }) => parseProbeState(response, payload)
         )
@@ -1054,13 +1320,15 @@ export function makeLocalProbeClientSocket(
 export function makeLocalControlClientSocket(
   options: LocalControlClientSocketOptions = {}
 ): LocalControlClientService {
-  const withSocketPath = makeCachedSocketPathRunner(() => resolveControlSocketPath(options));
+  const withSocketPath = makeEndpointRunner(options, 'controlSocketPath');
   return makeControlClient(
     (requestPath, body, timeoutMs) =>
-      withSocketPath((socketPath) => postJsonOverSocket(socketPath, requestPath, body, timeoutMs)),
+      withSocketPath(({ socketPath, token }) =>
+        postJsonOverSocket(socketPath, requestPath, body, timeoutMs, token)
+      ),
     (message, requestOptions) =>
-      withSocketPath((socketPath) =>
-        postSessionControlOverSocket(socketPath, message, requestOptions)
+      withSocketPath(({ socketPath, token }) =>
+        postSessionControlOverSocket(socketPath, message, requestOptions, token)
       )
   );
 }

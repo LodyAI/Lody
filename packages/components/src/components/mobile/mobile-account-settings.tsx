@@ -3,49 +3,27 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import type { AvatarKind, CliApiKeyRecord } from '@lody/shared';
 import {
-  Loader2,
   UserPlus,
   Mail,
   Clock,
   Copy,
   Trash2,
   ChevronDown,
-  Check,
   LogOut,
   KeyRound,
   Pencil,
   X,
 } from 'lucide-react';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { Badge } from '@/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Badge } from '@lody/ui/badge';
+import { Menu } from '@/ui/menu';
 import { UserAvatar } from '../user-avatar';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { Dialog } from '@/ui/dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { MobileDeleteWorkspaceSheet } from '@/components/mobile/mobile-delete-workspace-sheet';
 import { AvatarEditor } from '../settings/avatar-editor';
@@ -53,30 +31,11 @@ import { ChangePasswordButton } from '../settings/change-password-button';
 import { LinkedAccountsList } from '../settings/linked-accounts-list';
 import { InviteMemberDialog, type InviteMemberRole } from '../settings/invite-member-dialog';
 import type { AccountSettingsPureProps } from '../settings/account-setting-pure';
+import { useMobileSettingsFold } from './mobile-settings-fold-context';
+import { describeCliApiKey, partitionCliApiKeys } from '../settings/cli-api-key-display';
+import { Collapsible } from '@lody/ui/collapsible';
 
-function formatCliApiKeyTimestamp(
-  value: number | null
-): { label: string; dateTime: string } | null {
-  if (value === null) {
-    return null;
-  }
-
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) {
-    return null;
-  }
-
-  return {
-    label: new Intl.DateTimeFormat(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date),
-    dateTime: date.toISOString(),
-  };
-}
+const EMPTY_MACHINE_NAMES: ReadonlyMap<string, string> = new Map();
 
 export function MobileAccountSettings({
   surface = 'account',
@@ -87,7 +46,9 @@ export function MobileAccountSettings({
   members,
   pendingInvitations: initialPendingInvitations,
   workspaceJoinRequestsSlot,
+  workspaceOwnershipSlot,
   accountMachinesSlot,
+  accountBillingSlot,
   memberLimit = null,
   memberLimitReached = false,
   billingUiAvailable = true,
@@ -116,6 +77,8 @@ export function MobileAccountSettings({
   onSetupPassword,
   canGenerateCliApiKey = false,
   cliApiKeys = [],
+  cliApiKeyMachineNames = EMPTY_MACHINE_NAMES,
+  currentMachineId = null,
   isLoadingCliApiKeys = false,
   isCreatingCliApiKey = false,
   hasGeneratedCliApiKey = false,
@@ -125,8 +88,10 @@ export function MobileAccountSettings({
   onClearGeneratedCliApiKey,
   onRevokeCliApiKey,
 }: AccountSettingsPureProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const isWorkspaceSurface = surface === 'workspace';
+  const settingsFold = useMobileSettingsFold();
+  const fold = settingsFold;
 
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
@@ -153,6 +118,61 @@ export function MobileAccountSettings({
   const [cliApiKeyDialogOpen, setCliApiKeyDialogOpen] = useState(false);
   const [cliApiKeyNote, setCliApiKeyNote] = useState('');
   const [cliApiKeyToRevoke, setCliApiKeyToRevoke] = useState<CliApiKeyRecord | null>(null);
+  const describeApiKey = (apiKey: CliApiKeyRecord) =>
+    describeCliApiKey(apiKey, {
+      machineNamesById: cliApiKeyMachineNames,
+      currentMachineId,
+      language: i18n.language,
+      t,
+    });
+  const cliApiKeyToRevokeDisplay = cliApiKeyToRevoke ? describeApiKey(cliApiKeyToRevoke) : null;
+  const { listed: listedCliApiKeys, signIn: signInCliApiKeys } = partitionCliApiKeys(cliApiKeys);
+  const [signInCliApiKeysOpen, setSignInCliApiKeysOpen] = useState(false);
+  const renderCliApiKeyRow = (apiKey: CliApiKeyRecord, ruled: boolean) => {
+    const display = describeApiKey(apiKey);
+    const details = [display.lifetime, display.createdAt, display.lastUsed].filter(Boolean);
+
+    return (
+      <div
+        key={apiKey.id}
+        className={cn('flex flex-col gap-3 px-4 py-3 text-sm', ruled && 'border-t border-border')}
+      >
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <p className="truncate text-[0.95rem] font-medium">{display.title}</p>
+            {display.isCurrentMachine && (
+              <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+            )}
+            {display.sourceLabel && <Badge>{display.sourceLabel}</Badge>}
+          </div>
+          {(apiKey.keyPreview || details.length > 0) && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[0.72rem] text-muted-foreground">
+              {apiKey.keyPreview && <span className="font-mono">{apiKey.keyPreview}</span>}
+              {details.map((detail) => (
+                <span key={detail}>{detail}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <Button
+            variant="secondary"
+            size="small"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setCliApiKeyToRevoke(apiKey)}
+            disabled={revokingCliApiKeyId === apiKey.id}
+          >
+            {revokingCliApiKeyId === apiKey.id ? (
+              <Spinner className="mr-1.5 h-3.5 w-3.5" />
+            ) : (
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {t('settings.account.cliAuth.revokeButton')}
+          </Button>
+        </div>
+      </div>
+    );
+  };
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   const [userNameDraft, setUserNameDraft] = useState(currentUser?.name ?? '');
@@ -356,556 +376,535 @@ export function MobileAccountSettings({
 
   return (
     <>
-      {surface === 'account' ? (
-        <MobileSettingsSection
-          title={t('settings.profile.title')}
-          actions={
-            currentUser?.email ? (
-              <span className="max-w-[55vw] truncate text-[0.78rem] text-muted-foreground">
-                {currentUser.email}
-              </span>
-            ) : undefined
-          }
+      <div className={cn(fold && 'flex h-full min-h-0 flex-col')}>
+        <div
+          data-workspace-settings-summary
+          className={cn(fold && 'min-h-0 overflow-y-auto')}
+          style={fold ? { flex: `0 0 ${fold.messageHeight}px` } : undefined}
         >
-          <MobileSettingsRow
-            label={t('settings.profile.name')}
-            stack={canEditUserName && isEditingUserName}
-          >
-            {canEditUserName ? (
-              isEditingUserName ? (
-                <Input
-                  ref={userNameInputRef}
-                  id="profile-name-mobile"
-                  value={userNameDraft}
-                  onChange={(event) => setUserNameDraft(event.target.value)}
-                  onBlur={() => {
-                    void commitUserNameEdit();
-                  }}
-                  onKeyDown={handleUserNameKeyDown}
-                  maxLength={120}
-                  placeholder={t('settings.profile.namePlaceholder')}
-                  disabled={isSavingUserName}
-                  className="h-9 w-full"
-                  aria-label={t('settings.profile.name')}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
-                  onClick={beginUserNameEdit}
-                  disabled={isSavingUserName}
-                  aria-label={t('settings.profile.nameEditLabel')}
-                >
-                  <span className="min-w-0 truncate">
-                    {userNameBaseline || t('settings.profile.nameEmpty')}
+          {surface === 'account' ? (
+            <MobileSettingsSection
+              title={t('settings.profile.title')}
+              actions={
+                currentUser?.email ? (
+                  <span className="max-w-[55vw] truncate text-[0.78rem] text-muted-foreground">
+                    {currentUser.email}
                   </span>
-                  {isSavingUserName ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                  ) : (
-                    <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/70" />
-                  )}
-                </button>
-              )
-            ) : (
-              <span className="truncate text-[0.95rem] text-muted-foreground">
-                {userNameBaseline || '—'}
-              </span>
-            )}
-          </MobileSettingsRow>
-          <MobileSettingsRow label={t('settings.profile.avatar.label')} hasDivider>
-            <AvatarEditor
-              kind="user"
-              name={userNameBaseline}
-              image={userImage}
-              email={currentUser?.email}
-              editable={Boolean(onUploadAvatar)}
-              onUpload={(file) => handleUploadAvatar('user', file)}
-            />
-          </MobileSettingsRow>
-          {showLinkedAccounts ? (
-            <MobileSettingsRow label={t('settings.profile.bindings.label')} hasDivider>
-              <LinkedAccountsList
-                accounts={linkedAccounts}
-                loading={isLoadingLinkedAccounts}
-                onConnect={onConnectAccount}
-              />
-            </MobileSettingsRow>
-          ) : null}
-          {onChangePassword && onSetupPassword ? (
-            <MobileSettingsRow
-              label={t('settings.profile.password.label')}
-              helper={
-                hasPasswordCredential
-                  ? t('settings.profile.password.helper')
-                  : t('settings.profile.password.setupHelper')
+                ) : undefined
               }
-              hasDivider
             >
-              <ChangePasswordButton
-                hasPassword={hasPasswordCredential}
-                onChangePassword={onChangePassword}
-                onVerifyCurrentPassword={onVerifyCurrentPassword}
-                onSetupPassword={onSetupPassword}
-              />
-            </MobileSettingsRow>
-          ) : null}
-          <MobileSettingsRow label={t('settings.account.signOut')} hasDivider>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void onSignOut();
-              }}
-            >
-              <LogOut className="mr-1.5 h-3.5 w-3.5" />
-              {t('settings.account.signOut')}
-            </Button>
-          </MobileSettingsRow>
-        </MobileSettingsSection>
-      ) : null}
-
-      {surface === 'account' ? accountMachinesSlot : null}
-
-      {isWorkspaceSurface ? (
-        <MobileSettingsSection title={t('settings.workspace.title')}>
-          <MobileSettingsRow
-            label={t('settings.account.workspaceName')}
-            stack={canRenameOrganization && isEditingWorkspaceName}
-          >
-            {canRenameOrganization ? (
-              isEditingWorkspaceName ? (
-                <Input
-                  ref={workspaceNameInputRef}
-                  id="workspace-name-mobile"
-                  value={workspaceNameDraft}
-                  onChange={(event) => setWorkspaceNameDraft(event.target.value)}
-                  onBlur={() => {
-                    void commitWorkspaceNameEdit();
-                  }}
-                  onKeyDown={handleWorkspaceNameKeyDown}
-                  maxLength={120}
-                  placeholder={t('settings.account.workspaceNamePlaceholder')}
-                  disabled={isRenamingOrganization}
-                  className="h-9 w-full"
-                  aria-label={t('settings.account.workspaceName')}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
-                  onClick={beginWorkspaceNameEdit}
-                  disabled={isRenamingOrganization}
-                  aria-label={t('settings.account.workspaceNameEditLabel')}
-                >
-                  <span className="min-w-0 truncate">{workspaceNameBaseline}</span>
-                  {isRenamingOrganization ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+              <MobileSettingsRow
+                label={t('settings.profile.name')}
+                stack={canEditUserName && isEditingUserName}
+              >
+                {canEditUserName ? (
+                  isEditingUserName ? (
+                    <Input
+                      ref={userNameInputRef}
+                      id="profile-name-mobile"
+                      value={userNameDraft}
+                      onChange={(event) => setUserNameDraft(event.target.value)}
+                      onBlur={() => {
+                        void commitUserNameEdit();
+                      }}
+                      onKeyDown={handleUserNameKeyDown}
+                      maxLength={120}
+                      placeholder={t('settings.profile.namePlaceholder')}
+                      disabled={isSavingUserName}
+                      className="h-9 w-full"
+                      aria-label={t('settings.profile.name')}
+                    />
                   ) : (
-                    <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/70" />
-                  )}
-                </button>
-              )
-            ) : (
-              <span className="truncate text-[0.95rem] text-muted-foreground">
-                {organization.name}
-              </span>
-            )}
-          </MobileSettingsRow>
-          <MobileSettingsRow label={t('settings.workspace.avatar.label')} hasDivider>
-            <AvatarEditor
-              kind="workspace"
-              name={workspaceNameBaseline}
-              image={workspaceLogo}
-              editable={canRenameOrganization && Boolean(onUploadAvatar)}
-              onUpload={(file) => handleUploadAvatar('workspace', file)}
-            />
-          </MobileSettingsRow>
-        </MobileSettingsSection>
-      ) : null}
-
-      {isWorkspaceSurface ? (
-        <MobileSettingsSection
-          title={t('workspace.members.title')}
-          actions={
-            hasAdminPermission ? (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 px-2.5"
-                onClick={() => setInviteDialogOpen(true)}
-              >
-                <UserPlus className="mr-1.5 h-3.5 w-3.5" />
-                {t('workspace.members.invite')}
-              </Button>
-            ) : undefined
-          }
-        >
-          {members.map((member, index) => {
-            const isEditable =
-              hasAdminPermission && member.role !== 'owner' && member.userId !== currentUser?.id;
-
-            return (
-              <div
-                key={member.id}
-                className={cn(
-                  'flex items-center gap-3 px-4 py-3 text-sm',
-                  index > 0 && 'border-t border-border'
-                )}
-              >
-                <UserAvatar user={member.user} className="h-9 w-9 shrink-0 text-[12px]" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[0.95rem] font-medium leading-tight">
-                    {member.user?.name || '—'}
-                    {member.userId === currentUser?.id && (
-                      <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
-                        ({t('workspace.members.you', 'you')})
+                    <button
+                      type="button"
+                      className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium leading-tight text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                      onClick={beginUserNameEdit}
+                      disabled={isSavingUserName}
+                      aria-label={t('settings.profile.nameEditLabel')}
+                    >
+                      <span className="min-w-0 truncate">
+                        {userNameBaseline || t('settings.profile.nameEmpty')}
                       </span>
-                    )}
-                  </p>
-                  {member.user?.email ? (
-                    <p className="truncate text-[0.78rem] leading-tight text-muted-foreground">
-                      {member.user.email}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  {isEditable ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground">
-                          {t(`organization.role.${member.role}`)}
-                          <ChevronDown className="h-3 w-3 opacity-50" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => {
-                            void onUpdateRole(member, 'member');
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              'mr-2 h-3.5 w-3.5',
-                              member.role === 'member' ? 'opacity-100' : 'opacity-0'
-                            )}
-                          />
-                          {t('organization.role.member')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => {
-                            void onUpdateRole(member, 'admin');
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              'mr-2 h-3.5 w-3.5',
-                              member.role === 'admin' ? 'opacity-100' : 'opacity-0'
-                            )}
-                          />
-                          {t('organization.role.admin')}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : (
-                    <span className="px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                      {t(`organization.role.${member.role}`)}
-                    </span>
-                  )}
-                  {isEditable && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={t('workspace.removeMember.title')}
-                      className="h-9 w-9 text-muted-foreground hover:text-destructive"
-                      onClick={() => {
-                        setUserToDelete(member.id);
-                        setDeleteUserDialogOpen(true);
-                      }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </MobileSettingsSection>
-      ) : null}
-
-      {isWorkspaceSurface && pendingInvitations.length > 0 ? (
-        <MobileSettingsSection title={t('workspace.invitations.title')}>
-          {pendingInvitations.map((invitation, index) => (
-            <div
-              key={invitation.id}
-              className={cn(
-                'flex items-center gap-3 px-4 py-3 text-sm',
-                index > 0 && 'border-t border-border'
-              )}
-            >
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
-                <Mail className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <div className="min-w-0 flex-1">
-                {/* Emails have no spaces — `truncate` cut long addresses to an
-                   unreadable stub on narrow phones; wrap them instead. */}
-                <p className="break-all text-[0.95rem] font-medium leading-tight">
-                  {invitation.email}
-                </p>
-                <div className="mt-0.5 flex items-center gap-2 text-[0.72rem] text-muted-foreground">
-                  <span>{t(`organization.role.${invitation.role}`)}</span>
-                  <span className="inline-flex items-center gap-0.5">
-                    <Clock className="h-2.5 w-2.5" />
-                    {t(`workspace.invitations.${invitation.status.toLowerCase()}`)}
-                  </span>
-                </div>
-              </div>
-              {invitation.status === 'pending' && (
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t('workspace.invitations.copyLink')}
-                    className="h-9 w-9 text-muted-foreground hover:text-foreground"
-                    onClick={() => {
-                      void onCopyInviteLink(getInviteLink(invitation));
-                    }}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                  {hasAdminPermission && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={t('common.cancel')}
-                      className="h-9 w-9 text-muted-foreground hover:text-destructive"
-                      disabled={cancellingInvitationIds.has(invitation.id)}
-                      onClick={() => {
-                        void (async () => {
-                          setCancellingInvitationIds((prev) => {
-                            const next = new Set(prev);
-                            next.add(invitation.id);
-                            return next;
-                          });
-                          try {
-                            await onCancelInvitation(invitation.id);
-                            setPendingInvitations((prev) =>
-                              prev.filter((inv) => inv.id !== invitation.id)
-                            );
-                          } catch {
-                            // Error already handled by onCancelInvitation (toast shown)
-                          } finally {
-                            setCancellingInvitationIds((prev) => {
-                              const next = new Set(prev);
-                              next.delete(invitation.id);
-                              return next;
-                            });
-                          }
-                        })();
-                      }}
-                    >
-                      {cancellingInvitationIds.has(invitation.id) ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {isSavingUserName ? (
+                        <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       ) : (
-                        <X className="h-3.5 w-3.5" />
+                        <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
                       )}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </MobileSettingsSection>
-      ) : null}
+                    </button>
+                  )
+                ) : (
+                  <span className="truncate text-[0.95rem] text-muted-foreground">
+                    {userNameBaseline || '—'}
+                  </span>
+                )}
+              </MobileSettingsRow>
+              <MobileSettingsRow label={t('settings.profile.avatar.label')} hasDivider>
+                <AvatarEditor
+                  kind="user"
+                  name={userNameBaseline}
+                  image={userImage}
+                  email={currentUser?.email}
+                  editable={Boolean(onUploadAvatar)}
+                  onUpload={(file) => handleUploadAvatar('user', file)}
+                />
+              </MobileSettingsRow>
+              {showLinkedAccounts ? (
+                <MobileSettingsRow label={t('settings.profile.bindings.label')} hasDivider>
+                  <LinkedAccountsList
+                    accounts={linkedAccounts}
+                    loading={isLoadingLinkedAccounts}
+                    onConnect={onConnectAccount}
+                  />
+                </MobileSettingsRow>
+              ) : null}
+              {onChangePassword && onSetupPassword ? (
+                <MobileSettingsRow
+                  label={t('settings.profile.password.label')}
+                  helper={
+                    hasPasswordCredential
+                      ? t('settings.profile.password.helper')
+                      : t('settings.profile.password.setupHelper')
+                  }
+                  hasDivider
+                >
+                  <ChangePasswordButton
+                    hasPassword={hasPasswordCredential}
+                    onChangePassword={onChangePassword}
+                    onVerifyCurrentPassword={onVerifyCurrentPassword}
+                    onSetupPassword={onSetupPassword}
+                  />
+                </MobileSettingsRow>
+              ) : null}
+              <MobileSettingsRow label={t('settings.account.signOut')} hasDivider>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => {
+                    void onSignOut();
+                  }}
+                >
+                  <LogOut className="mr-1.5 h-3.5 w-3.5" />
+                  {t('settings.account.signOut')}
+                </Button>
+              </MobileSettingsRow>
+            </MobileSettingsSection>
+          ) : null}
 
-      {isWorkspaceSurface ? workspaceJoinRequestsSlot : null}
-
-      {surface === 'account' && canGenerateCliApiKey ? (
-        <MobileSettingsSection
-          title={t('settings.account.cliAuth.title')}
-          description={t('settings.account.cliAuth.description')}
-          actions={
-            <Button
-              size="sm"
-              className="h-8 px-2.5"
-              onClick={() => {
-                setCliApiKeyDialogOpen(true);
-              }}
-              disabled={!onGenerateCliApiKey}
-            >
-              <KeyRound className="mr-1.5 h-3.5 w-3.5" />
-              {t('settings.account.cliAuth.generateButton')}
-            </Button>
-          }
+          {isWorkspaceSurface ? (
+            <MobileSettingsSection title={t('settings.workspace.title')}>
+              <MobileSettingsRow
+                label={t('settings.account.workspaceName')}
+                stack={canRenameOrganization && isEditingWorkspaceName}
+              >
+                {canRenameOrganization ? (
+                  isEditingWorkspaceName ? (
+                    <Input
+                      ref={workspaceNameInputRef}
+                      id="workspace-name-mobile"
+                      value={workspaceNameDraft}
+                      onChange={(event) => setWorkspaceNameDraft(event.target.value)}
+                      onBlur={() => {
+                        void commitWorkspaceNameEdit();
+                      }}
+                      onKeyDown={handleWorkspaceNameKeyDown}
+                      maxLength={120}
+                      placeholder={t('settings.account.workspaceNamePlaceholder')}
+                      disabled={isRenamingOrganization}
+                      className="h-9 w-full"
+                      aria-label={t('settings.account.workspaceName')}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="group flex min-w-0 max-w-[60vw] items-center gap-1.5 rounded-md text-right text-[0.95rem] font-medium leading-tight text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                      onClick={beginWorkspaceNameEdit}
+                      disabled={isRenamingOrganization}
+                      aria-label={t('settings.account.workspaceNameEditLabel')}
+                    >
+                      <span className="min-w-0 truncate">{workspaceNameBaseline}</span>
+                      {isRenamingOrganization ? (
+                        <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+                      )}
+                    </button>
+                  )
+                ) : (
+                  <span className="truncate text-[0.95rem] text-muted-foreground">
+                    {organization.name}
+                  </span>
+                )}
+              </MobileSettingsRow>
+              <MobileSettingsRow label={t('settings.workspace.avatar.label')} hasDivider>
+                <AvatarEditor
+                  kind="workspace"
+                  name={workspaceNameBaseline}
+                  image={workspaceLogo}
+                  editable={canRenameOrganization && Boolean(onUploadAvatar)}
+                  onUpload={(file) => handleUploadAvatar('workspace', file)}
+                />
+              </MobileSettingsRow>
+            </MobileSettingsSection>
+          ) : null}
+        </div>
+        {fold ? <div aria-hidden="true" style={{ flex: `0 0 ${fold.gapHeight}px` }} /> : null}
+        <div
+          data-workspace-settings-details
+          className={cn(fold && 'min-h-0 flex-1 overflow-y-auto')}
         >
-          {isLoadingCliApiKeys ? (
-            <div className="flex items-center gap-2 px-4 py-3 text-[0.78rem] text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {t('settings.account.cliAuth.loadingRecords')}
-            </div>
-          ) : cliApiKeys.length === 0 ? (
-            <div className="px-4 py-3 text-[0.78rem] text-muted-foreground">
-              {t('settings.account.cliAuth.noRecords')}
-            </div>
-          ) : (
-            cliApiKeys.map((apiKey, index) => {
-              const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt);
-              const lastRequest = formatCliApiKeyTimestamp(apiKey.lastRequest);
-              const sourceLabel =
-                apiKey.source === 'auto'
-                  ? t('settings.account.cliAuth.sourceAuto')
-                  : apiKey.source === 'manual'
-                    ? t('settings.account.cliAuth.sourceManual')
-                    : null;
+          {surface === 'account' ? (
+            <>
+              {accountMachinesSlot}
+              {accountBillingSlot}
+            </>
+          ) : null}
 
-              return (
+          {isWorkspaceSurface ? (
+            <MobileSettingsSection
+              title={t('workspace.members.title')}
+              actions={
+                hasAdminPermission ? (
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    className="h-8 px-2.5"
+                    onClick={() => setInviteDialogOpen(true)}
+                  >
+                    <UserPlus className="mr-1.5 h-3.5 w-3.5" />
+                    {t('workspace.members.invite')}
+                  </Button>
+                ) : undefined
+              }
+            >
+              {members.map((member, index) => {
+                const isEditable =
+                  hasAdminPermission &&
+                  member.role !== 'owner' &&
+                  member.userId !== currentUser?.id;
+
+                return (
+                  <div
+                    key={member.id}
+                    className={cn(
+                      'flex items-center gap-3 px-4 py-3 text-sm',
+                      index > 0 && 'border-t border-border'
+                    )}
+                  >
+                    <UserAvatar user={member.user} size="large" className="shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[0.95rem] font-medium leading-tight">
+                        {member.user?.name || '—'}
+                        {member.userId === currentUser?.id && (
+                          <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
+                            ({t('workspace.members.you', 'you')})
+                          </span>
+                        )}
+                      </p>
+                      {member.user?.email ? (
+                        <p className="truncate text-[0.78rem] leading-tight text-muted-foreground">
+                          {member.user.email}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {isEditable ? (
+                        <Menu.Root>
+                          <Menu.Trigger render={<Button variant="ghost" size="mini" />}>
+                            {t(`organization.role.${member.role}`)}
+                            <ChevronDown className="h-3 w-3 opacity-50" />
+                          </Menu.Trigger>
+                          <Menu.Content align="end">
+                            <Menu.RadioGroup
+                              value={member.role}
+                              onValueChange={(nextRole) => {
+                                if (nextRole === 'member' || nextRole === 'admin') {
+                                  void onUpdateRole(member, nextRole);
+                                }
+                              }}
+                            >
+                              <Menu.RadioItem value="member" indicator="check">
+                                {t('organization.role.member')}
+                              </Menu.RadioItem>
+                              <Menu.RadioItem value="admin" indicator="check">
+                                {t('organization.role.admin')}
+                              </Menu.RadioItem>
+                            </Menu.RadioGroup>
+                          </Menu.Content>
+                        </Menu.Root>
+                      ) : (
+                        <Badge>{t(`organization.role.${member.role}`)}</Badge>
+                      )}
+                      {isEditable && (
+                        <Button
+                          variant="ghost"
+                          icon
+                          aria-label={t('workspace.removeMember.title')}
+                          className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            setUserToDelete(member.id);
+                            setDeleteUserDialogOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </MobileSettingsSection>
+          ) : null}
+
+          {isWorkspaceSurface && pendingInvitations.length > 0 ? (
+            <MobileSettingsSection title={t('workspace.invitations.title')}>
+              {pendingInvitations.map((invitation, index) => (
                 <div
-                  key={apiKey.id}
+                  key={invitation.id}
                   className={cn(
-                    'flex flex-col gap-3 px-4 py-3 text-sm',
+                    'flex items-center gap-3 px-4 py-3 text-sm',
                     index > 0 && 'border-t border-border'
                   )}
                 >
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <p className="truncate text-[0.95rem] font-medium">
-                        {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
-                      </p>
-                      {sourceLabel && (
-                        <Badge variant="outline" className="h-5 rounded-md px-1.5 text-[10px]">
-                          {sourceLabel}
-                        </Badge>
-                      )}
-                      {createdAt && (
-                        <time
-                          dateTime={createdAt.dateTime}
-                          className="shrink-0 text-[0.72rem] text-muted-foreground"
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
+                    <Mail className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    {/* Emails have no spaces — `truncate` cut long addresses to an
+                   unreadable stub on narrow phones; wrap them instead. */}
+                    <p className="break-all text-[0.95rem] font-medium leading-tight">
+                      {invitation.email}
+                    </p>
+                    <div className="mt-0.5 flex items-center gap-2 text-[0.72rem] text-muted-foreground">
+                      <span>{t(`organization.role.${invitation.role}`)}</span>
+                      <span className="inline-flex items-center gap-0.5">
+                        <Clock className="h-2.5 w-2.5" />
+                        {t(`workspace.invitations.${invitation.status.toLowerCase()}`)}
+                      </span>
+                    </div>
+                  </div>
+                  {invitation.status === 'pending' && (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        icon
+                        aria-label={t('workspace.invitations.copyLink')}
+                        className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          void onCopyInviteLink(getInviteLink(invitation));
+                        }}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                      {hasAdminPermission && (
+                        <Button
+                          variant="ghost"
+                          icon
+                          aria-label={t('common.cancel')}
+                          className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                          disabled={cancellingInvitationIds.has(invitation.id)}
+                          onClick={() => {
+                            void (async () => {
+                              setCancellingInvitationIds((prev) => {
+                                const next = new Set(prev);
+                                next.add(invitation.id);
+                                return next;
+                              });
+                              try {
+                                await onCancelInvitation(invitation.id);
+                                setPendingInvitations((prev) =>
+                                  prev.filter((inv) => inv.id !== invitation.id)
+                                );
+                              } catch {
+                                // Error already handled by onCancelInvitation (toast shown)
+                              } finally {
+                                setCancellingInvitationIds((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(invitation.id);
+                                  return next;
+                                });
+                              }
+                            })();
+                          }}
                         >
-                          {createdAt.label}
-                        </time>
+                          {cancellingInvitationIds.has(invitation.id) ? (
+                            <Spinner className="h-3.5 w-3.5" />
+                          ) : (
+                            <X className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
                       )}
                     </div>
-                    {(apiKey.keyPreview || lastRequest) && (
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[0.72rem] text-muted-foreground">
-                        {apiKey.keyPreview && (
-                          <span className="font-mono">{apiKey.keyPreview}</span>
-                        )}
-                        {lastRequest && (
-                          <span>
-                            {t('settings.account.cliAuth.lastUsed', { at: lastRequest.label })}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => setCliApiKeyToRevoke(apiKey)}
-                      disabled={revokingCliApiKeyId === apiKey.id}
-                    >
-                      {revokingCliApiKeyId === apiKey.id ? (
-                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                      )}
-                      {t('settings.account.cliAuth.revokeButton')}
-                    </Button>
-                  </div>
+                  )}
                 </div>
-              );
-            })
-          )}
-        </MobileSettingsSection>
-      ) : null}
+              ))}
+            </MobileSettingsSection>
+          ) : null}
 
-      {isWorkspaceSurface ? (
-        <MobileSettingsSection title={t('workspace.danger.title')}>
-          {role !== 'owner' && (
-            <MobileSettingsRow
-              label={t('workspace.danger.leaveWorkspace.title')}
-              helper={t('workspace.danger.leaveWorkspace.description')}
-              stack
-            >
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => setLeaveDialogOpen(true)}
-              >
-                {t('workspace.danger.leaveWorkspace.button')}
-              </Button>
-            </MobileSettingsRow>
-          )}
-          {role === 'owner' && (
-            <MobileSettingsRow
-              label={t('workspace.danger.deleteWorkspace.title')}
-              helper={t('workspace.danger.deleteWorkspace.description')}
-              stack
-            >
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => {
-                  // A live subscription blocks deletion; explain instead of
-                  // letting the backend reject the delete.
-                  if (deleteBillingGuard?.kind === 'active-subscription') {
-                    setDeleteBlockedDialogOpen(true);
-                    return;
-                  }
-                  setDeleteDialogOpen(true);
-                }}
-              >
-                {t('workspace.danger.deleteWorkspace.button')}
-              </Button>
-            </MobileSettingsRow>
-          )}
-        </MobileSettingsSection>
-      ) : null}
+          {isWorkspaceSurface && workspaceJoinRequestsSlot ? (
+            <MobileSettingsSection noCard>
+              <div className="mx-3">{workspaceJoinRequestsSlot}</div>
+            </MobileSettingsSection>
+          ) : null}
 
-      {surface === 'account' && showAccountDeletion ? (
-        <MobileSettingsSection title={t('settings.account.accountDeletion.title')}>
-          <MobileSettingsRow
-            label={t('settings.account.accountDeletion.title')}
-            helper={t('settings.account.accountDeletion.description')}
-            stack
-          >
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setDeleteAccountDialogOpen(true)}
+          {surface === 'account' && canGenerateCliApiKey ? (
+            <MobileSettingsSection
+              title={t('settings.account.cliAuth.title')}
+              description={t('settings.account.cliAuth.description')}
+              actions={
+                <Button
+                  size="small"
+                  className="h-8 px-2.5"
+                  onClick={() => {
+                    setCliApiKeyDialogOpen(true);
+                  }}
+                  disabled={!onGenerateCliApiKey}
+                >
+                  <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                  {t('settings.account.cliAuth.generateButton')}
+                </Button>
+              }
             >
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-              {t('settings.account.accountDeletion.button')}
-            </Button>
-          </MobileSettingsRow>
-        </MobileSettingsSection>
-      ) : null}
+              {isLoadingCliApiKeys ? (
+                <div className="flex items-center gap-2 px-4 py-3 text-[0.78rem] text-muted-foreground">
+                  <Spinner className="h-3.5 w-3.5" />
+                  {t('settings.account.cliAuth.loadingRecords')}
+                </div>
+              ) : cliApiKeys.length === 0 ? (
+                <div className="px-4 py-3 text-[0.78rem] text-muted-foreground">
+                  {t('settings.account.cliAuth.noRecords')}
+                </div>
+              ) : (
+                <>
+                  {listedCliApiKeys.map((apiKey, index) => renderCliApiKeyRow(apiKey, index > 0))}
+                  {signInCliApiKeys.length > 0 ? (
+                    <Collapsible.Root
+                      open={signInCliApiKeysOpen}
+                      onOpenChange={setSignInCliApiKeysOpen}
+                      className={cn(listedCliApiKeys.length > 0 && 'border-t border-border')}
+                    >
+                      <Collapsible.Trigger className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm">
+                        <span className="min-w-0 flex-1 space-y-1">
+                          <span className="block text-[0.95rem] font-medium">
+                            {t('settings.account.cliAuth.signInGroup')}
+                          </span>
+                          <span className="block text-[0.72rem] text-muted-foreground">
+                            {t('settings.account.cliAuth.signInGroupHelper', {
+                              count: signInCliApiKeys.length,
+                            })}
+                          </span>
+                        </span>
+                        {signInCliApiKeys.some(
+                          (apiKey) => describeApiKey(apiKey).isCurrentMachine
+                        ) ? (
+                          <Badge>{t('settings.account.cliAuth.currentMachine')}</Badge>
+                        ) : null}
+                        <ChevronDown
+                          aria-hidden="true"
+                          className={cn(
+                            'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
+                            signInCliApiKeysOpen && 'rotate-180'
+                          )}
+                        />
+                      </Collapsible.Trigger>
+                      <Collapsible.Panel>
+                        {signInCliApiKeys.map((apiKey) => renderCliApiKeyRow(apiKey, true))}
+                      </Collapsible.Panel>
+                    </Collapsible.Root>
+                  ) : null}
+                </>
+              )}
+            </MobileSettingsSection>
+          ) : null}
+
+          {isWorkspaceSurface ? (
+            <MobileSettingsSection title={t('workspace.danger.title')}>
+              {role === 'owner' ? workspaceOwnershipSlot : null}
+              {role !== 'owner' && (
+                <MobileSettingsRow
+                  label={t('workspace.danger.leaveWorkspace.title')}
+                  helper={t('workspace.danger.leaveWorkspace.description')}
+                  stack
+                >
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setLeaveDialogOpen(true)}
+                  >
+                    {t('workspace.danger.leaveWorkspace.button')}
+                  </Button>
+                </MobileSettingsRow>
+              )}
+              {role === 'owner' && (
+                <MobileSettingsRow
+                  label={t('workspace.danger.deleteWorkspace.title')}
+                  helper={t('workspace.danger.deleteWorkspace.description')}
+                  stack
+                >
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => {
+                      // A live subscription blocks deletion; explain instead of
+                      // letting the backend reject the delete.
+                      if (deleteBillingGuard?.kind === 'active-subscription') {
+                        setDeleteBlockedDialogOpen(true);
+                        return;
+                      }
+                      setDeleteDialogOpen(true);
+                    }}
+                  >
+                    {t('workspace.danger.deleteWorkspace.button')}
+                  </Button>
+                </MobileSettingsRow>
+              )}
+            </MobileSettingsSection>
+          ) : null}
+
+          {surface === 'account' && showAccountDeletion ? (
+            <MobileSettingsSection title={t('settings.account.accountDeletion.title')}>
+              <MobileSettingsRow
+                label={t('settings.account.accountDeletion.title')}
+                helper={t('settings.account.accountDeletion.description')}
+                stack
+              >
+                <Button
+                  variant="secondary"
+                  size="small"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => setDeleteAccountDialogOpen(true)}
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  {t('settings.account.accountDeletion.button')}
+                </Button>
+              </MobileSettingsRow>
+            </MobileSettingsSection>
+          ) : null}
+        </div>
+      </div>
 
       {surface === 'account' ? (
-        <Dialog open={cliApiKeyDialogOpen} onOpenChange={handleCliApiKeyDialogOpenChange}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
+        <Dialog.Root open={cliApiKeyDialogOpen} onOpenChange={handleCliApiKeyDialogOpenChange}>
+          <Dialog.Content>
+            <Dialog.Header>
+              <Dialog.Title>
                 {hasGeneratedCliApiKey
                   ? t('settings.account.cliAuth.createdDialogTitle')
                   : t('settings.account.cliAuth.createDialogTitle')}
-              </DialogTitle>
-              <DialogDescription>
+              </Dialog.Title>
+              <Dialog.Description>
                 {hasGeneratedCliApiKey
                   ? t('settings.account.cliAuth.createdDialogDescription')
                   : t('settings.account.cliAuth.createDialogDescription')}
-              </DialogDescription>
-            </DialogHeader>
+              </Dialog.Description>
+            </Dialog.Header>
             {hasGeneratedCliApiKey ? (
               <div className="space-y-3 py-4 text-sm">
                 <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   onClick={() => {
                     void onCopyGeneratedCliApiKey?.();
                   }}
@@ -917,7 +916,9 @@ export function MobileAccountSettings({
               </div>
             ) : (
               <div className="space-y-2 py-4">
-                <Label htmlFor="cli-api-key-note">{t('settings.account.cliAuth.noteLabel')}</Label>
+                <UiField.Label htmlFor="cli-api-key-note">
+                  {t('settings.account.cliAuth.noteLabel')}
+                </UiField.Label>
                 <Input
                   id="cli-api-key-note"
                   value={cliApiKeyNote}
@@ -930,10 +931,10 @@ export function MobileAccountSettings({
                 </p>
               </div>
             )}
-            <DialogFooter>
+            <Dialog.Footer>
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 onClick={() => handleCliApiKeyDialogOpenChange(false)}
                 disabled={isCreatingCliApiKey}
               >
@@ -941,42 +942,47 @@ export function MobileAccountSettings({
               </Button>
               {!hasGeneratedCliApiKey && (
                 <Button
-                  size="sm"
+                  size="small"
                   onClick={() => {
                     void handleCreateCliApiKey();
                   }}
                   disabled={isCreatingCliApiKey || !onGenerateCliApiKey}
                 >
-                  {isCreatingCliApiKey && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  {isCreatingCliApiKey && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
                   {t('settings.account.cliAuth.createConfirmButton')}
                 </Button>
               )}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Root>
       ) : null}
 
       {surface === 'account' ? (
-        <AlertDialog
+        <AlertDialog.Root
           open={Boolean(cliApiKeyToRevoke)}
           onOpenChange={(open) => {
             if (!open) setCliApiKeyToRevoke(null);
           }}
         >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('settings.account.cliAuth.revokeDialogTitle')}</AlertDialogTitle>
-              <AlertDialogDescription>
+          <AlertDialog.Content>
+            <AlertDialog.Header>
+              <AlertDialog.Title>
+                {t('settings.account.cliAuth.revokeDialogTitle')}
+              </AlertDialog.Title>
+              <AlertDialog.Description>
                 {t('settings.account.cliAuth.revokeDialogDescription', {
-                  note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
+                  note: cliApiKeyToRevokeDisplay?.title ?? '',
                 })}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={Boolean(revokingCliApiKeyId)}>
+                {cliApiKeyToRevokeDisplay?.isCurrentMachine
+                  ? ` ${t('settings.account.cliAuth.revokeCurrentMachineWarning')}`
+                  : null}
+              </AlertDialog.Description>
+            </AlertDialog.Header>
+            <AlertDialog.Footer>
+              <AlertDialog.Cancel disabled={Boolean(revokingCliApiKeyId)}>
                 {t('common.cancel')}
-              </AlertDialogCancel>
-              <AlertDialogAction
+              </AlertDialog.Cancel>
+              <AlertDialog.Action
                 onClick={() => {
                   void (async () => {
                     if (!cliApiKeyToRevoke) return;
@@ -988,18 +994,18 @@ export function MobileAccountSettings({
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 {revokingCliApiKeyId ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
                 ) : (
                   <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                 )}
                 {t('settings.account.cliAuth.revokeConfirmButton')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+              </AlertDialog.Action>
+            </AlertDialog.Footer>
+          </AlertDialog.Content>
+        </AlertDialog.Root>
       ) : null}
 
-      {/* Invite Dialog */}
+      {/* Invite Dialog.Root */}
       <InviteMemberDialog
         open={inviteDialogOpen}
         onOpenChange={setInviteDialogOpen}
@@ -1015,43 +1021,47 @@ export function MobileAccountSettings({
         }}
       />
 
-      {/* Remove Member Dialog */}
-      <AlertDialog open={deleteUserDialogOpen} onOpenChange={setDeleteUserDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('workspace.removeMember.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('workspace.removeMember.description')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+      {/* Remove Member Dialog.Root */}
+      <AlertDialog.Root open={deleteUserDialogOpen} onOpenChange={setDeleteUserDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('workspace.removeMember.title')}</AlertDialog.Title>
+            <AlertDialog.Description>
+              {t('workspace.removeMember.description')}{' '}
+              {billingUiAvailable ? t('billing.seatRemovalConsequences') : null}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               onClick={() => {
                 void handleRemoveMember();
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {t('common.remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
-      {/* Leave Workspace Dialog */}
-      <AlertDialog open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('workspace.danger.leaveWorkspace.confirmTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      {/* Leave Workspace Dialog.Root */}
+      <AlertDialog.Root open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
+              {t('workspace.danger.leaveWorkspace.confirmTitle')}
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.danger.leaveWorkspace.confirmDescription', {
                 workspace: organization.name,
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isLeaving}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+              })}{' '}
+              {billingUiAvailable ? t('billing.seatRemovalConsequences') : null}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={isLeaving}>{t('common.cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               onClick={() => {
                 void (async () => {
                   setIsLeaving(true);
@@ -1068,19 +1078,19 @@ export function MobileAccountSettings({
             >
               {isLeaving ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Spinner className="mr-2 h-4 w-4" />
                   {t('common.processing')}
                 </>
               ) : (
                 t('workspace.danger.leaveWorkspace.confirmButton')
               )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
       {/* Delete Workspace — mobile-native bottom sheet replaces the
-          centered Dialog so the destructive flow stays in the same
+          centered Dialog.Root so the destructive flow stays in the same
           visual family as the rest of the mobile chrome. The sheet
           owns its own type-to-confirm state and `isDeleting` spinner
           state; we just pass through the workspace name + the
@@ -1090,25 +1100,26 @@ export function MobileAccountSettings({
         onOpenChange={setDeleteDialogOpen}
         workspaceName={organization.name}
         onConfirm={onDeleteOrganization}
+        warningText={billingUiAvailable ? t('billing.workspaceDeletionCharges') : null}
       />
 
       {/* Workspaces with active billing must be managed outside the mobile app. */}
-      <AlertDialog open={deleteBlockedDialogOpen} onOpenChange={setDeleteBlockedDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('workspace.deleteBlockedMobileTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      <AlertDialog.Root open={deleteBlockedDialogOpen} onOpenChange={setDeleteBlockedDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('workspace.deleteBlockedMobileTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.deleteBlockedMobileDescription')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.close')}</AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.close')}</AlertDialog.Cancel>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
-      {/* Delete Account Dialog */}
-      <Dialog
+      {/* Delete Account Dialog.Root */}
+      <Dialog.Root
         open={deleteAccountDialogOpen}
         onOpenChange={(open) => {
           if (isDeletingAccount) {
@@ -1120,22 +1131,22 @@ export function MobileAccountSettings({
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-destructive">
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title className="text-destructive">
               {t('settings.account.accountDeletion.confirmTitle')}
-            </DialogTitle>
-            <DialogDescription>
+            </Dialog.Title>
+            <Dialog.Description>
               {t('settings.account.accountDeletion.confirmDescription')}
-            </DialogDescription>
-          </DialogHeader>
+            </Dialog.Description>
+          </Dialog.Header>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="mobileDeleteAccountConfirmText">
+              <UiField.Label htmlFor="mobileDeleteAccountConfirmText">
                 {t('settings.account.accountDeletion.typeToConfirm', {
                   email: currentUser?.email ?? '',
                 })}
-              </Label>
+              </UiField.Label>
               <Input
                 id="mobileDeleteAccountConfirmText"
                 value={deleteAccountConfirmText}
@@ -1149,9 +1160,9 @@ export function MobileAccountSettings({
               />
             </div>
           </div>
-          <DialogFooter>
+          <Dialog.Footer>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={() => {
                 setDeleteAccountDialogOpen(false);
                 setDeleteAccountConfirmText('');
@@ -1183,16 +1194,16 @@ export function MobileAccountSettings({
             >
               {isDeletingAccount ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Spinner className="mr-2 h-4 w-4" />
                   {t('common.processing')}
                 </>
               ) : (
                 t('settings.account.accountDeletion.confirmButton')
               )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }

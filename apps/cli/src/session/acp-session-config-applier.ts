@@ -1,4 +1,7 @@
 import {
+  ACP_CONFIG_OPTION_OFF_VALUE,
+  ACP_CONFIG_OPTION_ON_VALUE,
+  ACP_FAST_MODE_VALUE_FAST,
   ACP_PLAN_PERMISSION_MODE_ID,
   ACP_REASONING_EFFORT_CONFIG_ID,
   isAcpFastModeConfigId,
@@ -9,8 +12,10 @@ import {
   type AcpConfigOptionValue,
   type AgentConfigCliType,
   type SessionId,
+  type SessionAcpRuntimeConfigPatch,
 } from '@lody/shared';
 import type { AgentClient } from '@/agent/agent-client';
+import { getAcpRuntimeConfigPatchFromOptions } from '@/lib/acp/runtime-config';
 import type { Logger } from '@/utils/logger';
 
 const MAX_ACP_CONFIG_VALUE_LOG_LENGTH = 160;
@@ -42,6 +47,84 @@ function shouldSkipFableFastModeDisable(args: {
   );
 }
 
+type LiveConfigOption = {
+  id: string;
+  type?: string;
+  options?: ReadonlyArray<{ value?: string; options?: ReadonlyArray<{ value?: string }> }>;
+};
+
+function collectLiveSelectOptionValues(option: LiveConfigOption): Set<string> {
+  const values = new Set<string>();
+  for (const entry of option.options ?? []) {
+    if (typeof entry.value === 'string') {
+      values.add(entry.value);
+    } else if (Array.isArray(entry.options)) {
+      for (const child of entry.options) {
+        if (typeof child.value === 'string') {
+          values.add(child.value);
+        }
+      }
+    }
+  }
+  return values;
+}
+
+/**
+ * Reconciles a fast-mode / speed-tier value against the live target model's
+ * advertised config option so legacy boolean settings work on multi-tier speed
+ * selects and unsupported tiers are never submitted to a model that lacks them.
+ */
+function resolveLiveFastModeValue(
+  configId: string,
+  value: AcpConfigOptionValue,
+  liveOptions: readonly LiveConfigOption[]
+): { skip: true } | { skip: false; value: AcpConfigOptionValue } {
+  if (!isAcpFastModeConfigId(configId) || liveOptions.length === 0) {
+    return { skip: false, value };
+  }
+  const liveOption = liveOptions.find((candidate) => candidate.id === configId);
+  if (!liveOption) {
+    return { skip: true };
+  }
+  if (liveOption.type === 'boolean') {
+    if (typeof value === 'boolean') return { skip: false, value };
+    if (value === ACP_CONFIG_OPTION_ON_VALUE || value === ACP_FAST_MODE_VALUE_FAST) {
+      return { skip: false, value: true };
+    }
+    if (value === ACP_CONFIG_OPTION_OFF_VALUE) {
+      return { skip: false, value: false };
+    }
+    return { skip: true };
+  }
+  if (liveOption.type === 'select') {
+    const allowed = collectLiveSelectOptionValues(liveOption);
+    if (typeof value === 'string') {
+      if (allowed.has(value)) return { skip: false, value };
+      if (value === ACP_CONFIG_OPTION_ON_VALUE && allowed.has(ACP_FAST_MODE_VALUE_FAST)) {
+        return { skip: false, value: ACP_FAST_MODE_VALUE_FAST };
+      }
+      if (value === ACP_FAST_MODE_VALUE_FAST && allowed.has(ACP_CONFIG_OPTION_ON_VALUE)) {
+        return { skip: false, value: ACP_CONFIG_OPTION_ON_VALUE };
+      }
+      return { skip: true };
+    }
+    if (value === true) {
+      if (allowed.has(ACP_FAST_MODE_VALUE_FAST)) {
+        return { skip: false, value: ACP_FAST_MODE_VALUE_FAST };
+      }
+      if (allowed.has(ACP_CONFIG_OPTION_ON_VALUE)) {
+        return { skip: false, value: ACP_CONFIG_OPTION_ON_VALUE };
+      }
+      return { skip: true };
+    }
+    if (allowed.has(ACP_CONFIG_OPTION_OFF_VALUE)) {
+      return { skip: false, value: ACP_CONFIG_OPTION_OFF_VALUE };
+    }
+    return { skip: true };
+  }
+  return { skip: false, value };
+}
+
 export type AcpSessionConfigTarget = {
   sessionId: SessionId;
   acpSessionId: ACPSessionId | null;
@@ -61,6 +144,8 @@ type AcpSessionRunConfigApplyResult = {
   rejectedSelections: string[];
   /** Rejections that should become a user-visible Agent warning. */
   warningSelections: string[];
+  /** Agent-confirmed state after applying the requested selections. */
+  runtimeConfigPatch: SessionAcpRuntimeConfigPatch | null;
 };
 
 function isCodexOrClaudeRunConfig(config: AcpSessionRunConfig): boolean {
@@ -88,8 +173,15 @@ export async function applyAcpSessionRunConfig(args: {
   session: AcpSessionConfigTarget;
   config: AcpSessionRunConfig;
   logger: Logger;
+  signal?: AbortSignal;
 }): Promise<AcpSessionRunConfigApplyResult> {
-  const { session, config, logger } = args;
+  const { session, config, logger, signal } = args;
+  const assertNotAborted = (): void => {
+    if (!signal?.aborted) return;
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new Error('ACP run configuration was aborted');
+  };
   const { sessionId, acpSessionId, agentClient } = session;
   const configOptionValues = config.configOptionValues;
   const configOptionEntries = configOptionValues ? Object.entries(configOptionValues) : [];
@@ -108,11 +200,13 @@ export async function applyAcpSessionRunConfig(args: {
   );
   if (!agentClient?.isCreated() || !acpSessionId) {
     logger.debug(`[${sessionId}] applyAcpSessionRunConfig skipped (agentClient not ready)`);
-    return { rejectedSelections: [], warningSelections: [] };
+    return { rejectedSelections: [], warningSelections: [], runtimeConfigPatch: null };
   }
 
   const rejectedSelections: string[] = [];
   const warningSelections: string[] = [];
+  let confirmedLegacyModeId: string | undefined;
+  let confirmedLegacyModelId: string | undefined;
   const agentConfigOptions = agentClient.getConfigOptions?.() ?? [];
   const suppressKnownRunConfigWarnings = isCodexOrClaudeRunConfig(config);
   const recordRejection = (selection: string, suppressWarning: boolean): void => {
@@ -125,79 +219,103 @@ export async function applyAcpSessionRunConfig(args: {
     agentConfigOptions.find((option) => option.category === 'mode')?.id ?? 'mode';
   const modelConfigId =
     agentConfigOptions.find((option) => option.category === 'model')?.id ?? 'model';
+  const configOptionModeId = configOptionValues?.[modeConfigId];
+  const targetModeId =
+    config.modeId ?? (typeof configOptionModeId === 'string' ? configOptionModeId : undefined);
   const configOptionModelId = configOptionValues?.[modelConfigId];
   const targetModelId =
     config.modelId ?? (typeof configOptionModelId === 'string' ? configOptionModelId : undefined);
 
-  if (config.modeId) {
+  // Modes can change the model, and models can reset model-dependent options.
+  // Resolve both representations before applying effort, regardless of key order.
+  if (targetModeId) {
+    assertNotAborted();
     try {
-      await agentClient.setSessionMode?.(acpSessionId, config.modeId);
+      await agentClient.setSessionMode?.(acpSessionId, targetModeId);
+      confirmedLegacyModeId = targetModeId;
     } catch (error) {
+      assertNotAborted();
       recordRejection(
-        `mode=${JSON.stringify(config.modeId)}`,
-        suppressKnownRunConfigWarnings && config.modeId === ACP_PLAN_PERMISSION_MODE_ID
+        `mode=${JSON.stringify(targetModeId)}`,
+        suppressKnownRunConfigWarnings && targetModeId === ACP_PLAN_PERMISSION_MODE_ID
       );
       logger.debug(
-        `[${sessionId}] Failed to set ACP mode ${JSON.stringify(config.modeId)}: ${String(error)}`
+        `[${sessionId}] Failed to set ACP mode ${JSON.stringify(targetModeId)}: ${String(error)}`
       );
     }
+    assertNotAborted();
   }
-  if (config.modelId) {
+  if (targetModelId) {
+    assertNotAborted();
     try {
-      await agentClient.unstable_setSessionModel?.(acpSessionId, config.modelId);
+      await agentClient.unstable_setSessionModel?.(acpSessionId, targetModelId);
+      confirmedLegacyModelId = targetModelId;
     } catch (error) {
-      recordRejection(`model=${JSON.stringify(config.modelId)}`, suppressKnownRunConfigWarnings);
+      assertNotAborted();
+      recordRejection(`model=${JSON.stringify(targetModelId)}`, false);
       logger.debug(
-        `[${sessionId}] Failed to set ACP model ${JSON.stringify(config.modelId)}: ${String(error)}`
+        `[${sessionId}] Failed to set ACP model ${JSON.stringify(targetModelId)}: ${String(error)}`
       );
     }
+    assertNotAborted();
   }
 
-  for (const [configId, value] of configOptionEntries) {
-    if (configId === modeConfigId) {
-      if (!config.modeId && typeof value === 'string') {
-        try {
-          await agentClient.setSessionMode?.(acpSessionId, value);
-        } catch (error) {
-          logger.debug(
-            `[${sessionId}] Failed to set ACP mode option ${configId}=${formatAcpConfigValueForLog(
-              configId,
-              value
-            )}: ${String(error)}`
-          );
-        }
-      }
+  const liveConfigOptions = (agentClient.getConfigOptions?.() ?? []) as readonly LiveConfigOption[];
+  for (const [configId, rawValue] of configOptionEntries) {
+    assertNotAborted();
+    if (configId === modeConfigId || configId === modelConfigId) {
       continue;
     }
-    if (configId === modelConfigId) {
-      if (!config.modelId && typeof value === 'string') {
-        try {
-          await agentClient.unstable_setSessionModel?.(acpSessionId, value);
-        } catch (error) {
-          logger.debug(
-            `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
-              configId,
-              value
-            )}: ${String(error)}`
-          );
-        }
-      }
+    if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value: rawValue })) {
       continue;
     }
-    if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value })) {
+    const resolvedFast = resolveLiveFastModeValue(configId, rawValue, liveConfigOptions);
+    if (resolvedFast.skip) {
+      logger.debug(
+        `[${sessionId}] Skipping unsupported ACP speed option ${configId}=${formatAcpConfigValueForLog(configId, rawValue)} for model=${targetModelId ?? 'current'}`
+      );
       continue;
     }
+    const value = resolvedFast.value;
     try {
       await agentClient.setSessionConfigOption(acpSessionId, configId, value);
     } catch (error) {
+      assertNotAborted();
       recordRejection(
         `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
         suppressKnownRunConfigWarnings && isKnownRunConfigOption(configId, agentConfigOptions)
       );
       logger.debug(`[${sessionId}] Failed to set ACP config option ${configId}: ${String(error)}`);
     }
+    assertNotAborted();
   }
 
+  assertNotAborted();
   logger.debug(`[${sessionId}] applyAcpSessionRunConfig completed`);
-  return { rejectedSelections, warningSelections };
+  const runtimeConfigPatch = getAcpRuntimeConfigPatchFromOptions(
+    acpSessionId,
+    agentClient.getConfigOptions()
+  );
+  const availableCommands = agentClient.getAvailableCommands();
+  if (availableCommands !== undefined) runtimeConfigPatch.availableCommands = availableCommands;
+  if (confirmedLegacyModeId) {
+    runtimeConfigPatch.modeId = confirmedLegacyModeId;
+    if (
+      !isSensitiveAcpConfigOptionId(modeConfigId) &&
+      agentConfigOptions.some((option) => option.id === modeConfigId)
+    ) {
+      runtimeConfigPatch.configOptionValues = {
+        ...runtimeConfigPatch.configOptionValues,
+        [modeConfigId]: confirmedLegacyModeId,
+      };
+    }
+  }
+  if (confirmedLegacyModelId && !runtimeConfigPatch.modelId) {
+    runtimeConfigPatch.modelId = confirmedLegacyModelId;
+  }
+  return {
+    rejectedSelections,
+    warningSelections,
+    runtimeConfigPatch,
+  };
 }

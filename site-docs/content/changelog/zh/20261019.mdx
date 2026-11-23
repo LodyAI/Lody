@@ -1,0 +1,28 @@
+---
+title: '20261019'
+version: 0.107.0
+date: 2026-10-19
+description: 原生结果通知、回合费用预估、多机 Role、Mermaid 与 Linux ARM64，并改善会话稳定性与同步引擎。
+---
+
+版本 0.107.0
+
+### ✨ 新功能
+
+- Agent 完成时推送原生结果通知，文案更贴近当前工作上下文。
+- 回合可显示预估费用。
+- 同一 Agent Role 可在多台机器上运行；支持通过 MCP / CLI 提议创建或更新 Role。
+- 聊天里用 Pele 渲染 Mermaid 图；Markdown 预览可显示内嵌图片。
+- 「Open with Delta」启动入口；机器设置里展示已连接 Agent 图标。
+- 移动端 Changes 导航与桌面对齐。
+- 正式版与 Nightly 均提供 Linux ARM64 安装包。
+- 反馈里附带客户端诊断 / 环境信息，便于排查。
+
+### 🐛 修复与改进
+
+- 会话与 Daemon 更稳：闲置回收不误杀仍在工作的会话、临时失败后可重试启动、停转后仍能继续聊。
+- 优化和修复若干同步引擎的问题。
+- 无 Daemon 时也能预览本地文件；Codex 引用显示为文件卡片，并恢复捆绑 Codex 历史导入。
+- iOS 16.4+ 运行时兼容；Windows 标题栏按钮不再挡住浮层。
+
+感谢 Astro-Han、scbizu 和 timonwong 为本次更新作出的贡献！

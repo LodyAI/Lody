@@ -1,0 +1,131 @@
+# Mermaid diagram rendering
+
+`markdown-mermaid-block.tsx` renders a closed Mermaid fence;
+`use-mermaid-diagram-canvas.tsx` decides what a diagram in a message may do, and
+`mermaid-diagram-viewer.tsx` owns the full-screen surface. A fence that is still
+streaming stays an ordinary code block until it closes.
+Binding rules live in [AGENTS.md](AGENTS.md); this file holds the invariants and
+why they read the way they do. Coverage:
+`tests/markdown-mermaid-fullscreen.test.tsx`.
+
+## The renderer produces an inert SVG colored by the theme
+
+- `markdown-mermaid.ts` lazily imports Pele and calls its synchronous `render()`,
+  never `mount()` or `enableZoom()`: those would take resizing and zoom away from
+  the canvas and viewer below. `responsive: false` keeps the natural size those
+  surfaces scale from.
+- The renderer output is sanitized with DOMPurify's SVG profiles before caching,
+  insertion, cloning or export. Scripts, event attributes, foreign HTML, links,
+  images and embedded stylesheets are excluded.
+- Links and images are disabled. An agent's diagram must not make the desktop
+  fetch a remote image or carry a navigable link.
+- Diagram colors come from the app palette, never from the markup. The
+  markdown stylesheet maps `--pele-*` to theme tokens on the block, so an inline
+  diagram matches Lody Light or Vesper and switches without re-rendering, and
+  the SVG cache is keyed by source alone. Labels use the prose foreground; chart
+  series keep Pele's categorical palette, since status tokens carry meaning.
+- A copy that leaves the block carries resolved plain colors:
+  `resolveMermaidColors` reads them where the diagram sits, and SVG/PNG download
+  (`withMermaidColors`) and the portalled viewer clone (`applyMermaidColors`)
+  declare them on their root. Without that, the viewer falls back to Pele's
+  light defaults in a dark theme.
+- Anything Pele rejects (syntax error, ZenUML, a size limit) or a runtime that
+  fails to load renders the source as an SVG listing, so the block's controls keep
+  working. Decision: [Pele renderer note](../../../../../.agents/notes/implemented/feature/2026-10-18-pele-mermaid-renderer.md).
+
+## A diagram is content, not a card
+
+- The block draws no frame, fill, or reserved height. A diagram sits in the prose
+  the way an image does and is sized by its own content; the earlier card made
+  every diagram read as a widget and left a message-height of empty space under a
+  short one. The palette variables still hang off the block. The hover controls
+  float in a lane above the diagram's top-right corner — a rendered diagram is
+  drawn to its own bounds and has no empty corner inside — so they never cover a
+  node, and a tall diagram scrolls beneath that lane instead of under the pill.
+- The rendered SVG is scaled to the message width and never upscaled: a diagram
+  that already fits keeps its natural size, and a wider one shrinks instead of
+  being cut off at the right edge. Only height is bounded, at
+  `min(70vh, 36rem)`; a tall sequence diagram scrolls inside that bound instead of
+  running for several screens of the conversation. The chaining rule below is what
+  keeps the conversation scrollable at its edges, and the full-screen viewer still
+  opens at natural size.
+
+## A diagram in a message is a still preview until it is clicked
+
+- It NEVER captures an unmodified wheel, activated or not. The only wheel the
+  markdown root consumes is a pinch (a ctrl- or meta-modified wheel) over the
+  activated diagram; every other wheel reaches the conversation's own listeners
+  untouched, which keeps the scroll engine's follow (`lib/conversation-scroll`) and outline
+  jumps (`view.tsx`) working. An earlier bundled pan/zoom canvas took every wheel
+  and turned a page scroll into a zoom; nothing may reintroduce that.
+- Native scrolling must also chain from the bounded preview to the conversation
+  at either edge, including when the diagram has no vertical overflow. The
+  preview uses `overscroll-behavior: auto`; letting the wheel event bubble alone
+  cannot undo CSS scroll containment. Browser coverage lives in
+  `tests/e2e/conversation-scroll-engine.spec.ts`; see the
+  [scroll-chaining decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-mermaid-scroll-chaining.md).
+- Clicking a diagram with a mouse, pen, or the keyboard ACTIVATES it: that one
+  diagram becomes a canvas, where a trackpad pinch (a ctrl- or meta-modified
+  wheel) zooms around the pointer and a held button drags. Escape, a press
+  anywhere else, or the full-screen viewer releases it while preserving its
+  current pan and zoom. Reactivation resumes that view for the same rendered SVG.
+  View state is local to the mounted diagram; replacing it starts a new view.
+- Touch never activates: inline pinch would mean taking `touch-action` from the
+  browser and reimplementing inertial panning for the phone case the viewer
+  exists to serve. A tap opens the viewer, where touch can pan and pinch and the
+  control bar provides a precise zoom fallback.
+- The transform goes on the `<svg>`, which the block injects as raw markup and
+  never writes to again, so a finger resting on a diagram still scrolls the
+  conversation.
+- Activation adds no outline or ring. The grab cursor indicates the active state.
+  The full-screen viewer receives a clone with the inline transform removed and
+  dimensions corrected for its scale; opening it leaves the inline view intact.
+- Every key the canvas answers — Escape included — is read only while focus is
+  inside the activated diagram. An activated diagram sitting further up the
+  scrollback must not swallow the Escape that dismisses a dialog, nor pull the
+  caret out of the composer. Leaving by keyboard releases the canvas, so
+  "activated" and "focused" never drift apart.
+- The click target, its `role`/`tabindex`, and the full-screen button's host are
+  all found by a `MutationObserver` — a diagram appears only after the lazily
+  imported runtime resolves, long after the component commits. The block's own copy/download controls stay reachable
+  without hover, and the full-screen button joins them there.
+- The observer marks a diagram ONCE. It re-runs on every mutation a streaming
+  turn makes, and removing `tabindex` from a focused element blurs it in
+  Chromium — which would drop an activated canvas out of the keyboard mid-turn —
+  while rewriting `aria-label` re-announces it. Only a diagram that has
+  disappeared is restored.
+
+## The viewer is the only full-screen surface
+
+- It replaced an earlier bundled full-screen overlay whose only exit sat at a raw
+  `top-4 right-4` — inside a phone's status-bar inset — while its content layer
+  covered the backdrop and swallowed every tap, leaving a touch user no way out.
+  Its entry point is a button portalled into the block's action bar, beside copy
+  and download.
+- Controls are at least 44px and padded by the `--safe-area-*` variables, never at
+  a fixed viewport offset. There is always more than one exit: the close button, a
+  click off the diagram, and Escape. Stacking comes from `--z-image-viewer`, so a
+  diagram opened inside a dialog lands above that dialog.
+- A diagram that does not fit opens at NATURAL size and is panned. Scaling an
+  agent's sequence diagram down to a phone screen turns readable labels into a
+  grey texture; only a diagram that already fits is scaled up.
+- A trackpad pinch arrives as a ctrl-modified `wheel`, which Chromium would spend
+  on zooming the whole window, so the viewer takes that default and zooms the
+  diagram around the pointer instead. The anchored point is restored by scrolling
+  the surface, measured from the diagram's own box: the surface centres a diagram
+  that fits, and that offset is not proportional to the zoom.
+- Plain wheel scrolling stays with the surface's own scrolling. On touch screens
+  the full-screen surface owns one-finger panning and two-finger pinch so a
+  diagram can be inspected without zooming the page; a mouse or pen drag still
+  pans by hand. The inline preview keeps the browser's native touch behavior and
+  opens the full-screen viewer on a tap.
+- Whether a click closes the viewer is decided by where the press STARTED, never
+  by the click's target. Panning takes pointer capture on the surface, and pointer
+  capture retargets the following `click` to the capturing element — so a plain
+  click on the diagram arrives with the surface as its target and would otherwise
+  dismiss the viewer the reader just opened.
+- The full-screen surface sets `touch-action: none` only while it owns a touch
+  gesture. A one-finger move changes the scroll offsets, and a two-finger move
+  scales around the fingers' centre while following that centre's pan. The
+  inline preview deliberately leaves `touch-action` alone so a message can still
+  scroll naturally; tapping it opens this viewer.

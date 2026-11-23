@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Loader2 } from 'lucide-react';
-import { Button } from '@/ui/button';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/ui/card';
-import { ScrollArea } from '@/ui/scroll-area';
-import { cn } from '@/lib/utils';
-import { ConversationColumn } from '@/components/shared/conversation-column';
-import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { usePermissionResponse } from '@/hooks/use-permission-response';
-import { usePlanModeExitApprovalNotifier } from '@/hooks/use-plan-mode-exit-approval';
-import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { ChevronDown, ChevronLeft, ChevronRight, CircleStop } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Button, ButtonGroup } from '@lody/ui/button';
+import { Spinner } from '@lody/ui/spinner';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import {
   createAskUserQuestionPermissionOutcome,
   isAskUserQuestionPermissionMeta,
@@ -21,14 +24,37 @@ import {
   type SessionId,
   type SessionStatus,
 } from '@lody/shared';
+import { Menu } from '@/ui/menu';
+import { ScrollArea } from '@lody/ui/scroll-area';
+import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { ConversationColumn } from '@/components/shared/conversation-column';
+import { usePermissionResponse } from '@/hooks/use-permission-response';
+import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
+import {
+  resolveDismissOptionId,
+  resolvePermissionHeading,
+  resolvePermissionOptionDescription,
+  resolvePermissionOptionTone,
+  resolvePermissionQuestionKind,
+  resolvePermissionReason,
+  resolvePermissionSubject,
+  resolveSuggestedOptionId,
+  type PermissionOption,
+  type PermissionQuestionKind,
+  type PermissionRequest,
+} from '@/lib/permission-request-presentation';
 import { AskUserQuestionCard } from './ask-user-question-card';
 
+export type { PermissionOption };
+
 type ToolCallContent = Extract<MessageContent, { type: 'tool_call' }>;
-export type PermissionOption = NonNullable<ToolCallContent['permissionRequest']>['options'][number];
 
 interface PendingPermission {
+  /** The turn the request lives on, so responding addresses it directly. */
+  turnId: string;
   toolCall: ToolCallContent;
-  permission: NonNullable<ToolCallContent['permissionRequest']>;
+  permission: PermissionRequest;
   isAskUserQuestion: boolean;
 }
 
@@ -51,6 +77,7 @@ function findPendingPermissions(history: SessionDoc['history'] | undefined): Pen
         const tc = item as ToolCallContent;
         const permission = tc.permissionRequest!;
         results.push({
+          turnId: entry.id,
           toolCall: tc,
           permission,
           isAskUserQuestion: isAskUserQuestionPermissionMeta(permission._meta),
@@ -80,358 +107,555 @@ export function hasPendingPermissionRequest(
   return findPendingPermissions(sessionHistory).length > 0;
 }
 
-export interface FloatingPermissionRequestProps {
-  sessionId: SessionId;
-  sessionStatus: SessionStatus | undefined;
-  sessionHistory: SessionDoc['history'] | undefined;
+/**
+ * A block inside a card: the region rung. Its named token collapses into the
+ * card in Vesper, so it is the card mixed toward the ink, as the settings
+ * editors' blocks are.
+ */
+const REGION = `color-mix(in oklab, transparent, ${colors.label} 4%)`;
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
+
+const styles = stylex.create({
+  /**
+   * It stands in the composer's place, so it is the composer's rung and scale:
+   * a card of small controls, not a dialog. The question, what it is about,
+   * and one row of answers.
+   */
+  card: {
+    boxSizing: 'border-box',
+    minWidth: 0,
+    maxWidth: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    padding: space[3],
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    color: colors.label,
+    outlineStyle: 'none',
+  },
+  header: { display: 'flex', alignItems: 'flex-start', gap: space[2], minWidth: 0 },
+  headerText: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  title: {
+    margin: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 600,
+  },
+  description: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+    overflowWrap: 'anywhere',
+  },
+  /** The corner: which request of how many, and the way out. */
+  corner: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: '2px',
+    marginBlockStart: '-4px',
+    marginInlineEnd: `calc(-1 * ${space[1.5]})`,
+    fontSize: text.footnoteSize,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  positionLabel: { paddingInline: '2px' },
+
+  /** What would run or be touched, exactly: a block of the card, in code. */
+  subject: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: space[3],
+    maxHeight: '9.5em',
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontFamily: MONO,
+    fontSize: text.footnoteSize,
+    lineHeight: '18px',
+  },
+  subjectBody: { flexGrow: 1, minWidth: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+  subjectLine: { display: 'block' },
+  subjectWhere: {
+    flexShrink: 0,
+    maxWidth: '40%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.tertiaryLabel,
+  },
+
+  status: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  statusError: { color: colors.destructive },
+
+  /**
+   * The answers: one row at the end, one split button per kind of answer —
+   * refuse, then allow — each showing its one-time answer, with the answers
+   * that change what happens from now on ("don't ask again", "block this
+   * host") in its menu, where a provider's long sentence reads naturally.
+   */
+  footer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[2],
+    paddingTop: space[1],
+  },
+  split: {
+    minWidth: 0,
+    maxWidth: '100%',
+  },
+  optionLabel: {
+    minWidth: 0,
+    maxWidth: '32em',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+  },
+  menuLabel: { paddingBlock: space[1.5], textAlign: 'start' },
+  menuChevron: { width: '12px', height: '12px', flexShrink: 0 },
+
+  queueStrip: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: '2px',
+    marginBottom: space[1],
+    fontSize: text.footnoteSize,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+});
+
+export interface PermissionPromptPosition {
+  /** Zero-based. */
+  index: number;
+  total: number;
+  onPrevious: () => void;
+  onNext: () => void;
 }
 
-export interface PermissionRequestCardProps {
-  title?: string | null;
-  options: PermissionOption[];
-  isResolved?: boolean;
-  isCancelled?: boolean;
-  isReady?: boolean;
-  pendingOptionId?: string | null;
-  selectedOptionId?: string | null;
+export interface PermissionPromptProps {
+  toolCall: ToolCallContent;
+  permission: PermissionRequest;
   onSelect: (optionId: string) => void;
+  /** The option whose answer is on its way; every option waits for it. */
+  sendingOptionId?: string | null;
+  /** Why the last answer did not arrive. */
+  error?: string | null;
+  /** False while this client cannot answer yet (the workspace is connecting). */
+  isReady?: boolean;
+  /** Where this request sits among the pending ones, when there is more than one. */
+  position?: PermissionPromptPosition;
+  /** Stop the agent instead of answering. */
+  onStop?: () => void;
+  /** Take keyboard focus on arrival when nothing else holds it. */
+  autoFocus?: boolean;
   className?: string;
 }
 
-function CollapsibleCommand({ title }: { title: string }) {
+/**
+ * One permission request at the composer's scale: the question and why, what
+ * it is about, and one row of answers at the end — a split button for refusing
+ * and one for allowing, each showing its one-time answer (the suggestion
+ * primary) with the standing answers in its menu. A long shown answer moves
+ * its family into a compact menu trigger. Option names stay the provider's
+ * own words, never rewritten, and opening a menu submits no answer.
+ *
+ * Keyboard: the arrows walk the answers starting from the suggested one, Enter
+ * or Space presses the one focused, and Escape refuses once. Enter on the card
+ * itself does nothing: a person typing a message when the request replaced the
+ * composer must not approve it with the Enter meant for their message.
+ */
+export function PermissionPrompt({
+  toolCall,
+  permission,
+  onSelect,
+  sendingOptionId = null,
+  error = null,
+  isReady = true,
+  position,
+  onStop,
+  autoFocus = false,
+  className,
+}: PermissionPromptProps) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
-  const [isOverflowing, setIsOverflowing] = useState(false);
-  const clampedRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const answerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const questionKind = resolvePermissionQuestionKind(toolCall.kind);
+  const heading = resolvePermissionHeading(permission) ?? t(QUESTION_KEYS[questionKind]);
+  const reason = resolvePermissionReason(permission);
+  const subject = resolvePermissionSubject(toolCall);
+  const subjectText =
+    subject?.type === 'text' && !restates(subject.text, heading) ? subject.text : null;
+  const suggestedOptionId = resolveSuggestedOptionId(permission);
+  const dismissOptionId = resolveDismissOptionId(permission.options);
+  const disabled = !isReady || sendingOptionId !== null;
+
+  // Two families of answer, refuse and allow (an unknown kind keeps the allow
+  // family's company: it is an answer, not a refusal). Each shows one answer —
+  // the suggestion if it is in the family, else its one-time answer — and keeps
+  // the rest behind its chevron, in the provider's order.
+  const families = useMemo(() => {
+    const build = (members: PermissionOption[], onceTone: 'allow' | 'reject') => {
+      if (members.length === 0) return null;
+      const main =
+        members.find((option) => option.optionId === suggestedOptionId) ??
+        members.find((option) => resolvePermissionOptionTone(option) === onceTone) ??
+        members[0]!;
+      return { main, more: members.filter((option) => option !== main) };
+    };
+    const refuse = permission.options.filter((option) => {
+      const tone = resolvePermissionOptionTone(option);
+      return tone === 'reject' || tone === 'rejectAlways';
+    });
+    const allow = permission.options.filter((option) => !refuse.includes(option));
+    return [build(refuse, 'reject'), build(allow, 'allow')].filter(
+      (family): family is { main: PermissionOption; more: PermissionOption[] } => family !== null
+    );
+  }, [permission.options, suggestedOptionId]);
+  const answers = families.map((family) => family.main);
+  const sendingFamily = families.find(
+    (family) =>
+      family.main.optionId === sendingOptionId ||
+      family.more.some((option) => option.optionId === sendingOptionId)
+  );
 
   useEffect(() => {
-    if (expanded) return undefined;
-    const element = clampedRef.current;
-    if (!element) return undefined;
-    const check = () => {
-      setIsOverflowing(element.scrollHeight > element.clientHeight + 1);
-    };
-    check();
-    return observeResizeOnAnimationFrame(element, () => check());
-  }, [title, expanded]);
+    if (!autoFocus) return;
+    const active = document.activeElement;
+    // Never take focus from something a person is using: only from nothing,
+    // which is where it lands when the composer this prompt replaced unmounts.
+    if (active && active !== document.body) return;
+    cardRef.current?.focus({ preventScroll: true });
+  }, [autoFocus, permission.requestId]);
 
-  const textClassName = 'whitespace-pre-wrap break-words text-xs leading-5 text-foreground/75';
+  const focusAnswer = (optionId: string | null | undefined) => {
+    if (!optionId) return;
+    answerRefs.current.get(optionId)?.focus();
+  };
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    if (event.key === 'Escape') {
+      if (dismissOptionId && !disabled) {
+        event.preventDefault();
+        onSelect(dismissOptionId);
+      }
+      return;
+    }
+    const forward = event.key === 'ArrowDown' || event.key === 'ArrowRight';
+    const backward = event.key === 'ArrowUp' || event.key === 'ArrowLeft';
+    if (!forward && !backward) return;
+    event.preventDefault();
+    const currentIndex = answers.findIndex(
+      (option) => answerRefs.current.get(option.optionId) === document.activeElement
+    );
+    if (currentIndex === -1) {
+      // The first step lands on the suggestion, whichever arrow it was: its
+      // family's shown answer, even when the suggestion itself is in a menu.
+      const suggestedFamily = families.find(
+        (family) =>
+          family.main.optionId === suggestedOptionId ||
+          family.more.some((option) => option.optionId === suggestedOptionId)
+      );
+      focusAnswer(suggestedFamily?.main.optionId ?? answers[answers.length - 1]?.optionId);
+      return;
+    }
+    const step = forward ? 1 : -1;
+    const next = answers[(currentIndex + step + answers.length) % answers.length];
+    focusAnswer(next?.optionId);
+  };
+
+  const renderFamily = (family: { main: PermissionOption; more: PermissionOption[] }) => {
+    const { main, more } = family;
+    const description = resolvePermissionOptionDescription(main);
+    const tone = resolvePermissionOptionTone(main);
+    // Keep sentences in the reading surface. Full-width characters consume
+    // two places in this conservative compact-control label budget.
+    const menuOnly =
+      Array.from(main.name).reduce(
+        (width, character) => width + (character.codePointAt(0)! > 255 ? 2 : 1),
+        0
+      ) > 32;
+    const variant = main.optionId === suggestedOptionId ? 'primary' : 'secondary';
+    const registerAnswer = (node: HTMLButtonElement | null) => {
+      if (node) answerRefs.current.set(main.optionId, node);
+      else answerRefs.current.delete(main.optionId);
+    };
+    const renderOptions = (options: PermissionOption[]) => (
+      <Menu.Content side="top" align="end">
+        {options.map((option) => (
+          <Menu.Item
+            key={option.optionId}
+            data-tone={resolvePermissionOptionTone(option)}
+            onClick={() => onSelect(option.optionId)}
+          >
+            <span {...stylex.props(styles.optionLabel, styles.menuLabel)}>{option.name}</span>
+          </Menu.Item>
+        ))}
+      </Menu.Content>
+    );
+    if (menuOnly) {
+      const label =
+        tone === 'reject' || tone === 'rejectAlways'
+          ? t('sessions.permission.refuseChoices', 'Decline')
+          : tone === 'allow' || tone === 'allowAlways'
+            ? t('sessions.permission.allowChoices', 'Allow')
+            : t('sessions.permission.otherChoices', 'Choose an answer');
+      return (
+        <Menu.Root key={main.optionId}>
+          <Menu.Trigger
+            render={
+              <Button ref={registerAnswer} variant={variant} size="small" disabled={disabled} />
+            }
+          >
+            {sendingFamily === family ? <Spinner size="small" /> : null}
+            {label}
+            <ChevronDown aria-hidden="true" {...stylex.props(styles.menuChevron)} />
+          </Menu.Trigger>
+          {renderOptions(
+            permission.options.filter((option) => option === main || more.includes(option))
+          )}
+        </Menu.Root>
+      );
+    }
+    return (
+      <ButtonGroup key={main.optionId} {...stylex.props(styles.split)}>
+        <Button
+          ref={registerAnswer}
+          variant={variant}
+          size="small"
+          disabled={disabled}
+          title={description ?? undefined}
+          aria-keyshortcuts={main.optionId === dismissOptionId ? 'Escape' : undefined}
+          data-tone={resolvePermissionOptionTone(main)}
+          onClick={() => onSelect(main.optionId)}
+        >
+          {sendingFamily === family ? <Spinner size="small" /> : null}
+          {main.name}
+        </Button>
+        {more.length > 0 ? (
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button
+                  variant={main.optionId === suggestedOptionId ? 'primary' : 'secondary'}
+                  size="small"
+                  icon
+                  disabled={disabled}
+                  aria-label={t('sessions.permission.moreAnswers', 'More answers')}
+                />
+              }
+            >
+              <ChevronDown aria-hidden="true" />
+            </Menu.Trigger>
+            {renderOptions(more)}
+          </Menu.Root>
+        ) : null}
+      </ButtonGroup>
+    );
+  };
 
   return (
-    <div className="flex flex-col gap-1">
-      <div
-        ref={expanded ? undefined : clampedRef}
-        className={cn(
-          textClassName,
-          expanded ? 'max-h-40 overflow-y-auto overscroll-contain pr-2' : 'line-clamp-2'
-        )}
-      >
-        {title}
+    <div
+      ref={cardRef}
+      role="group"
+      tabIndex={-1}
+      aria-label={heading}
+      onKeyDown={handleKeyDown}
+      {...withClassName(stylex.props(styles.card), className)}
+    >
+      <div {...stylex.props(styles.header)}>
+        <div {...stylex.props(styles.headerText)}>
+          <p {...stylex.props(styles.title)}>{heading}</p>
+          {reason ? <p {...stylex.props(styles.description)}>{reason}</p> : null}
+          {subjectText ? <p {...stylex.props(styles.description)}>{subjectText}</p> : null}
+        </div>
+        {(position && position.total > 1) || onStop ? (
+          <div {...stylex.props(styles.corner)}>
+            {position && position.total > 1 ? <PositionControl position={position} /> : null}
+            {onStop ? (
+              <Button
+                variant="ghost"
+                size="small"
+                icon
+                aria-label={t('sessions.permission.stop', 'Stop the agent')}
+                title={t('sessions.permission.stop', 'Stop the agent')}
+                onClick={onStop}
+              >
+                <CircleStop aria-hidden="true" />
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
-      {(isOverflowing || expanded) && (
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((v) => !v)}
-          className="inline-flex items-center gap-1 rounded-sm text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+
+      {subject && subject.type !== 'text' ? (
+        <div
+          {...stylex.props(styles.subject)}
+          aria-label={t('sessions.permission.subject', 'What the agent wants to do')}
         >
-          <ChevronDown
-            className={cn('h-3 w-3 transition-transform duration-200', expanded && 'rotate-180')}
-          />
-          {expanded
-            ? t('sessions.permissionShowLess', 'Show less')
-            : t('sessions.permissionShowMore', 'Show more')}
-        </button>
-      )}
+          <span {...stylex.props(styles.subjectBody)}>
+            {subject.type === 'command'
+              ? subject.command
+              : subject.paths.map((path) => (
+                  <span key={path} {...stylex.props(styles.subjectLine)}>
+                    {path}
+                  </span>
+                ))}
+          </span>
+          {subject.type === 'command' && subject.cwd ? (
+            <span {...stylex.props(styles.subjectWhere)} title={subject.cwd}>
+              {t('sessions.permission.inDirectory', 'in {{path}}', { path: subject.cwd })}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {subject?.type === 'command' && subject.truncated ? (
+        <p role="note" {...stylex.props(styles.status, styles.statusError)}>
+          {t(
+            'sessions.permission.commandTruncated',
+            'This command is longer than 1 KB and only its beginning is shown. Approve only if you trust the rest.'
+          )}
+        </p>
+      ) : null}
+
+      {error ? (
+        <p role="alert" {...stylex.props(styles.status, styles.statusError)}>
+          {error}
+        </p>
+      ) : !isReady ? (
+        <p {...stylex.props(styles.status)}>
+          {t('sessions.permission.connecting', 'Connecting to the workspace…')}
+        </p>
+      ) : null}
+
+      <div {...stylex.props(styles.footer)}>{families.map(renderFamily)}</div>
     </div>
   );
 }
 
-const getPermissionOptionIdByKind = (
-  options: PermissionOption[],
-  predicate: (option: PermissionOption) => boolean
-): string | null => options.find(predicate)?.optionId ?? null;
-
-const getAskQuestionAnswerOptionId = (options: PermissionOption[]): string | null =>
-  getPermissionOptionIdByKind(options, (option) => option.optionId === 'answer') ??
-  getPermissionOptionIdByKind(options, (option) => option.kind?.startsWith('allow') === true) ??
-  options[0]?.optionId ??
-  null;
-
-const getAskQuestionCancelOptionId = (
-  options: PermissionOption[],
-  answerOptionId: string | null
-): string | null =>
-  getPermissionOptionIdByKind(
-    options,
-    (option) =>
-      option.optionId !== answerOptionId &&
-      (option.kind?.startsWith('deny') === true || option.kind?.startsWith('reject') === true)
-  ) ??
-  options.find((option) => option.optionId !== answerOptionId)?.optionId ??
-  null;
-
-export function PermissionRequestCard({
-  title,
-  options,
-  isResolved = false,
-  isCancelled = false,
-  isReady = true,
-  pendingOptionId = null,
-  selectedOptionId = null,
-  onSelect,
-  className,
-}: PermissionRequestCardProps) {
-  const { t } = useTranslation();
-  const disabled = isResolved || isCancelled || pendingOptionId !== null || !isReady;
-  const selectedOption =
-    selectedOptionId == null
-      ? null
-      : options.find((option) => option.optionId === selectedOptionId);
-  const selectedOptionIsAllow = selectedOption
-    ? selectedOption.kind?.startsWith('allow') === true
-    : true;
-  const headerLabel = isCancelled
-    ? t('sessions.permissionCancelled', 'Permission Cancelled')
-    : isResolved
-      ? selectedOptionIsAllow
-        ? t('sessions.permissionApproved', 'Permission Approved')
-        : t('sessions.permissionDenied', 'Permission Denied')
-      : t('sessions.permissionRequired', 'Permission Required');
-  const showFooter = !isReady;
-  const primaryOptionId = options[0]?.optionId ?? null;
-
-  return (
-    <Card
-      className={cn(
-        'overflow-hidden border-border/60 bg-secondary/25 text-xs shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300',
-        className
-      )}
-    >
-      <CardHeader className="flex flex-col gap-0.5 border-b border-border/40 bg-secondary/55 px-3 py-2">
-        <CardTitle className="text-[13px] font-medium text-muted-foreground">
-          {headerLabel}
-        </CardTitle>
-        {title && <CollapsibleCommand title={title} />}
-      </CardHeader>
-      <CardContent className={cn('px-3 pt-2', showFooter ? 'pb-1.5' : 'pb-2.5')}>
-        <div className="flex flex-col gap-0.5">
-          {options.map((option) => {
-            const isPending = pendingOptionId === option.optionId && !isResolved;
-            const isSelected = selectedOptionId === option.optionId;
-            const emphasize = !isResolved && !isCancelled && option.optionId === primaryOptionId;
-
-            let toneClass = 'text-foreground/85 hover:bg-hover hover:text-foreground';
-            if (emphasize) {
-              toneClass = 'bg-hover text-foreground';
-            }
-            if (isResolved && isSelected) {
-              toneClass = 'bg-hover font-medium text-foreground disabled:opacity-100';
-            } else if (isResolved || isCancelled) {
-              toneClass = 'text-foreground/45 disabled:opacity-100';
-            }
-
-            return (
-              <Button
-                key={option.optionId}
-                size="sm"
-                type="button"
-                disabled={disabled}
-                variant="ghost"
-                className={cn(
-                  'h-auto min-h-8 w-full min-w-0 items-start justify-start gap-2 whitespace-normal break-words rounded-md px-3 py-1.5 text-left text-xs leading-5 transition-colors',
-                  toneClass
-                )}
-                onClick={() => onSelect(option.optionId)}
-              >
-                <span
-                  className={cn(
-                    'mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full transition-colors',
-                    emphasize || (isResolved && isSelected)
-                      ? 'bg-primary'
-                      : 'bg-muted-foreground/50'
-                  )}
-                />
-                <span className="min-w-0 flex-1 whitespace-normal break-words">{option.name}</span>
-                {isPending && (
-                  <Loader2 className="mt-0.5 ml-auto h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                )}
-              </Button>
-            );
-          })}
-        </div>
-      </CardContent>
-      {showFooter && (
-        <CardFooter className="px-3 pb-2.5 pt-1">
-          <div className="text-xs text-muted-foreground">
-            {t(
-              'sessions.permissionActionsDisabled',
-              'Permission actions are disabled in this environment.'
-            )}
-          </div>
-        </CardFooter>
-      )}
-    </Card>
-  );
-}
-
-function PermissionCard({
-  sessionId,
-  pending,
-  isReady,
-}: {
-  sessionId: SessionId;
-  pending: PendingPermission;
-  isReady: boolean;
-}) {
-  const { respondToPermission } = usePermissionResponse();
-  const [pendingOptionId, setPendingOptionId] = useState<string | null>(null);
-
-  const permission = pending.permission;
-  const isResolved = Boolean(permission.outcome);
-  const askQuestionMeta = useMemo(
-    () => parseAskUserQuestionPermissionMeta(permission._meta),
-    [permission._meta]
-  );
-  const { answerOptionId, cancelOptionId } = useMemo(() => {
-    const answer = getAskQuestionAnswerOptionId(permission.options);
-    return {
-      answerOptionId: answer,
-      cancelOptionId: getAskQuestionCancelOptionId(permission.options, answer),
-    };
-  }, [permission.options]);
-
-  const notifyPlanExitApproved = usePlanModeExitApprovalNotifier(sessionId);
-
-  const handleSelect = useCallback(
-    async (optionId: string) => {
-      if (isResolved || !isReady || pendingOptionId !== null) return;
-      setPendingOptionId(optionId);
-      try {
-        await respondToPermission(sessionId, permission.requestId, {
-          outcome: 'selected',
-          optionId,
-        });
-        notifyPlanExitApproved(pending.toolCall, permission.options, optionId);
-      } catch (error) {
-        console.error('Failed to respond to permission request:', error);
-        setPendingOptionId(null);
-      }
-    },
-    [
-      isResolved,
-      isReady,
-      notifyPlanExitApproved,
-      pending.toolCall,
-      pendingOptionId,
-      respondToPermission,
-      sessionId,
-      permission.options,
-      permission.requestId,
-    ]
-  );
-
-  const handleSubmitAnswers = useCallback(
-    async (answers: AskUserQuestionAnswers) => {
-      if (isResolved || !isReady || pendingOptionId !== null) return;
-      if (!answerOptionId) return;
-      setPendingOptionId(answerOptionId);
-      try {
-        await respondToPermission(
-          sessionId,
-          permission.requestId,
-          createAskUserQuestionPermissionOutcome(
-            answerOptionId,
-            answers,
-            askQuestionMeta ?? 'claude'
-          )
-        );
-      } catch (error) {
-        console.error('Failed to respond to question request:', error);
-        setPendingOptionId(null);
-      }
-    },
-    [
-      isResolved,
-      isReady,
-      pendingOptionId,
-      askQuestionMeta,
-      answerOptionId,
-      permission.requestId,
-      respondToPermission,
-      sessionId,
-    ]
-  );
-
-  const handleCancelQuestion = useCallback(async () => {
-    if (isResolved || !isReady || pendingOptionId !== null) return;
-    if (!cancelOptionId) return;
-    setPendingOptionId(cancelOptionId);
-    try {
-      await respondToPermission(sessionId, permission.requestId, {
-        outcome: 'selected',
-        optionId: cancelOptionId,
-      });
-    } catch (error) {
-      console.error('Failed to cancel question request:', error);
-      setPendingOptionId(null);
-    }
-  }, [
-    isResolved,
-    isReady,
-    pendingOptionId,
-    cancelOptionId,
-    permission.requestId,
-    respondToPermission,
-    sessionId,
-  ]);
-
-  if (askQuestionMeta) {
-    return (
-      <AskUserQuestionCard
-        meta={askQuestionMeta}
-        mode={{
-          kind: 'interactive',
-          isReady,
-          disabled: isResolved,
-          isPendingSubmit: pendingOptionId !== null && pendingOptionId === answerOptionId,
-          isPendingCancel: pendingOptionId !== null && pendingOptionId === cancelOptionId,
-          onSubmit: (answers) => {
-            void handleSubmitAnswers(answers);
-          },
-          onCancel: () => {
-            void handleCancelQuestion();
-          },
-        }}
-      />
+/** Whether a line only says again what the question already asked. */
+const restates = (line: string, heading: string) => {
+  const words = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .filter((word) => word.length > 3)
     );
-  }
+  const headingWords = words(heading);
+  if (headingWords.size === 0) return false;
+  const textWords = words(line);
+  let shared = 0;
+  for (const word of headingWords) if (textWords.has(word)) shared++;
+  return shared === headingWords.size && textWords.size <= headingWords.size;
+};
 
+const QUESTION_KEYS: Record<PermissionQuestionKind, string> = {
+  command: 'sessions.permission.question.command',
+  edit: 'sessions.permission.question.edit',
+  delete: 'sessions.permission.question.delete',
+  move: 'sessions.permission.question.move',
+  read: 'sessions.permission.question.read',
+  search: 'sessions.permission.question.search',
+  fetch: 'sessions.permission.question.fetch',
+  plan: 'sessions.permission.question.plan',
+  tool: 'sessions.permission.question.tool',
+};
+
+function PositionControl({ position }: { position: PermissionPromptPosition }) {
+  const { t } = useTranslation();
   return (
-    <PermissionRequestCard
-      title={pending.toolCall.title}
-      options={permission.options}
-      isResolved={isResolved}
-      isCancelled={permission.outcome?.outcome === 'cancelled'}
-      isReady={isReady}
-      pendingOptionId={pendingOptionId}
-      selectedOptionId={
-        permission.outcome?.outcome === 'selected' ? permission.outcome.optionId : null
-      }
-      onSelect={(optionId) => {
-        void handleSelect(optionId);
-      }}
-    />
+    <>
+      <Button
+        variant="ghost"
+        size="small"
+        icon
+        aria-label={t('sessions.permission.previous', 'Previous request')}
+        onClick={position.onPrevious}
+      >
+        <ChevronLeft aria-hidden="true" />
+      </Button>
+      <span {...stylex.props(styles.positionLabel)}>
+        {t('sessions.permission.position', '{{index}}/{{total}}', {
+          index: position.index + 1,
+          total: position.total,
+        })}
+      </span>
+      <Button
+        variant="ghost"
+        size="small"
+        icon
+        aria-label={t('sessions.permission.next', 'Next request')}
+        onClick={position.onNext}
+      >
+        <ChevronRight aria-hidden="true" />
+      </Button>
+    </>
   );
 }
 
+export interface FloatingPermissionRequestProps {
+  /** Mobile session drawers render outside the workspace keyboard padding. */
+  liftAboveKeyboard?: boolean;
+  sessionId: SessionId;
+  sessionStatus: SessionStatus | undefined;
+  sessionHistory: SessionDoc['history'] | undefined;
+  /** Stop the agent instead of answering; the composer holding Stop is hidden. */
+  onStop?: () => void;
+}
+
+type Sending = { requestId: string; optionId: string } | null;
+type SendError = { requestId: string; message: string } | null;
+
+/**
+ * Where a person answers what the agent is waiting on. It takes the composer's
+ * place — the answer is the next thing the conversation needs from them — and
+ * it is the ONLY live surface: the conversation shows the request's place in
+ * the turn, never a second set of buttons.
+ *
+ * Requests are asked one at a time. Several can be pending (parallel tool
+ * calls); the prompt says which one of how many this is and walks between
+ * them, and answering one brings up the next in the same place.
+ */
 export function FloatingPermissionRequest({
+  liftAboveKeyboard = false,
   sessionId,
   sessionStatus,
   sessionHistory,
+  onStop,
 }: FloatingPermissionRequestProps) {
-  const { isReady } = usePermissionResponse();
+  const { t } = useTranslation();
+  const { respondToPermission, isReady } = usePermissionResponse();
   const askQuestionScrollRef = useRef<HTMLDivElement>(null);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [sending, setSending] = useState<Sending>(null);
+  const [sendError, setSendError] = useState<SendError>(null);
+  const lastIndexRef = useRef(0);
 
   const pendingList = useMemo(() => {
     if (sessionStatus?.type !== 'requestPermission' && sessionStatus?.type !== 'running') return [];
@@ -440,32 +664,78 @@ export function FloatingPermissionRequest({
 
   useKeyboardAwareScrollIntoView(askQuestionScrollRef);
 
-  if (pendingList.length === 0) return null;
+  // The request on screen: the one chosen, or — once it is answered and gone —
+  // the one that took its place, so answering walks forward rather than back.
+  const selectedIndex = pendingList.findIndex(
+    (entry) => entry.permission.requestId === selectedRequestId
+  );
+  const index =
+    selectedIndex !== -1
+      ? selectedIndex
+      : Math.min(lastIndexRef.current, Math.max(0, pendingList.length - 1));
+  lastIndexRef.current = index;
+  const current = pendingList[index];
 
-  // When any pending entry is an ask-user-question, the chat input + queue are
-  // hidden upstream so the user focuses on answering. This bottom surface must
-  // replace the composer keyboard behavior: lift on iOS, resize naturally on
-  // Android, and keep focused custom-answer fields visible inside the cap.
-  const hasAskUserQuestion = pendingList.some((entry) => entry.isAskUserQuestion);
-
-  const items = (
-    <ConversationColumn className="flex flex-col gap-3">
-      {pendingList.map((pending) => (
-        <PermissionCard
-          key={pending.permission.requestId}
-          sessionId={sessionId}
-          pending={pending}
-          isReady={isReady}
-        />
-      ))}
-    </ConversationColumn>
+  const respond = useCallback(
+    async (
+      entry: PendingPermission,
+      optionId: string,
+      outcome: Parameters<typeof respondToPermission>[2]
+    ) => {
+      if (!isReady || sending) return;
+      setSending({ requestId: entry.permission.requestId, optionId });
+      setSendError(null);
+      try {
+        await respondToPermission(sessionId, entry.permission.requestId, outcome, {
+          turnId: entry.turnId,
+        });
+      } catch (error) {
+        console.error('Failed to respond to permission request:', error);
+        setSendError({
+          requestId: entry.permission.requestId,
+          message: t(
+            'sessions.permission.sendFailed',
+            "Your answer didn't reach the agent. Try again."
+          ),
+        });
+      } finally {
+        setSending(null);
+      }
+    },
+    [isReady, respondToPermission, sending, sessionId, t]
   );
 
-  if (hasAskUserQuestion) {
-    return (
+  if (!current) return null;
+
+  const requestId = current.permission.requestId;
+  const sendingOptionId = sending?.requestId === requestId ? sending.optionId : null;
+  const error = sendError?.requestId === requestId ? sendError.message : null;
+  const position: PermissionPromptPosition | undefined =
+    pendingList.length > 1
+      ? {
+          index,
+          total: pendingList.length,
+          onPrevious: () =>
+            setSelectedRequestId(
+              pendingList[(index - 1 + pendingList.length) % pendingList.length]!.permission
+                .requestId
+            ),
+          onNext: () =>
+            setSelectedRequestId(
+              pendingList[(index + 1) % pendingList.length]!.permission.requestId
+            ),
+        }
+      : undefined;
+
+  // Keep each pending form mounted across request navigation. Only the current
+  // one is visible and answerable; removing a request releases its local draft.
+  return (
+    <>
       <ScrollArea
+        hidden={!current.isAskUserQuestion}
         className={cn(
-          'mx-3 mb-[calc(0.5rem+var(--native-keyboard-height,0px))]',
+          'mx-3',
+          liftAboveKeyboard ? 'mb-[calc(0.5rem+var(--native-keyboard-height,0px))]' : 'mb-2',
           'max-h-[calc(100dvh-var(--native-keyboard-height,0px)-4rem)]',
           'transition-[margin-bottom] duration-[250ms] ease-out'
         )}
@@ -475,17 +745,136 @@ export function FloatingPermissionRequest({
         )}
         viewportRef={askQuestionScrollRef}
       >
-        {items}
+        <ConversationColumn>
+          {position ? (
+            <div {...stylex.props(styles.queueStrip)}>
+              <PositionControl position={position} />
+            </div>
+          ) : null}
+          {pendingList
+            .filter((entry) => entry.isAskUserQuestion)
+            .map((entry) => {
+              const isCurrent = entry.permission.requestId === requestId;
+              return (
+                <div
+                  key={`${sessionId}:${entry.permission.requestId}`}
+                  hidden={!isCurrent}
+                  inert={!isCurrent}
+                >
+                  <QuestionRequest
+                    entry={entry}
+                    isReady={isReady && isCurrent}
+                    sendingOptionId={
+                      sending?.requestId === entry.permission.requestId ? sending.optionId : null
+                    }
+                    error={
+                      sendError?.requestId === entry.permission.requestId ? sendError.message : null
+                    }
+                    onRespond={respond}
+                  />
+                </div>
+              );
+            })}
+        </ConversationColumn>
       </ScrollArea>
-    );
-  }
+      {!current.isAskUserQuestion ? (
+        <div className="mx-3 mb-2">
+          <ConversationColumn>
+            <PermissionPrompt
+              key={`${sessionId}:${requestId}`}
+              toolCall={current.toolCall}
+              permission={current.permission}
+              isReady={isReady}
+              sendingOptionId={sendingOptionId}
+              error={error}
+              position={position}
+              onStop={onStop}
+              autoFocus
+              onSelect={(optionId) => {
+                void respond(current, optionId, { outcome: 'selected', optionId });
+              }}
+            />
+          </ConversationColumn>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+const getOptionIdByKind = (
+  options: PermissionOption[],
+  predicate: (option: PermissionOption) => boolean
+): string | null => options.find(predicate)?.optionId ?? null;
+
+function QuestionRequest({
+  entry,
+  isReady,
+  sendingOptionId,
+  error,
+  onRespond,
+}: {
+  entry: PendingPermission;
+  isReady: boolean;
+  sendingOptionId: string | null;
+  error: string | null;
+  onRespond: (
+    entry: PendingPermission,
+    optionId: string,
+    outcome: Parameters<ReturnType<typeof usePermissionResponse>['respondToPermission']>[2]
+  ) => Promise<void>;
+}) {
+  const permission = entry.permission;
+  const meta = useMemo(
+    () => parseAskUserQuestionPermissionMeta(permission._meta),
+    [permission._meta]
+  );
+  const { answerOptionId, cancelOptionId } = useMemo(() => {
+    const options = permission.options;
+    const answer =
+      getOptionIdByKind(options, (option) => option.optionId === 'answer') ??
+      getOptionIdByKind(options, (option) => option.kind?.startsWith('allow') === true) ??
+      options[0]?.optionId ??
+      null;
+    const cancel =
+      getOptionIdByKind(
+        options,
+        (option) =>
+          option.optionId !== answer &&
+          (option.kind?.startsWith('deny') === true || option.kind?.startsWith('reject') === true)
+      ) ??
+      options.find((option) => option.optionId !== answer)?.optionId ??
+      null;
+    return { answerOptionId: answer, cancelOptionId: cancel };
+  }, [permission.options]);
+
+  if (!meta) return null;
 
   return (
-    <ScrollArea
-      className="mx-3 mb-2 max-h-[min(24rem,calc(100vh-14rem))]"
-      viewportClassName="overscroll-contain"
-    >
-      {items}
-    </ScrollArea>
+    <AskUserQuestionCard
+      meta={meta}
+      mode={{
+        kind: 'interactive',
+        isReady,
+        disabled: false,
+        error,
+        isPendingSubmit: sendingOptionId !== null && sendingOptionId === answerOptionId,
+        isPendingCancel: sendingOptionId !== null && sendingOptionId === cancelOptionId,
+        onSubmit: (answers: AskUserQuestionAnswers) => {
+          if (!answerOptionId) return;
+          void onRespond(
+            entry,
+            answerOptionId,
+            createAskUserQuestionPermissionOutcome(answerOptionId, answers, meta)
+          );
+        },
+        onCancel: () => {
+          if (!cancelOptionId) return;
+          void onRespond(entry, cancelOptionId, {
+            outcome: 'selected',
+            optionId: cancelOptionId,
+          });
+        },
+      }}
+    />
   );
 }

@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { runtimeAtom } from '@/atoms/runtime';
+import { useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { Image as ImageIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { SessionId, SessionInputBlock, WorkspaceId } from '@lody/shared';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { authTokenAtom } from '@/atoms/runtime';
 import { getSessionImageBlobUrl } from '@/lib/session-image-cache';
 import { cn } from '@/lib/utils';
+import { ZoomableImageViewer } from '@/components/shared/zoomable-image-viewer';
 
 export type QueuedImageBlock = Extract<SessionInputBlock, { type: 'image' }>;
 
@@ -25,16 +27,52 @@ export function QueuedImagePreview({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const runtime = useAtomValue(runtimeAtom);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [originalUrl, setOriginalUrl] = useState<string | undefined>(undefined);
   const label = image.fileName || t('sessions.uploadedImage', 'Uploaded image');
+
+  // The full-size image loads only once the preview opens (the row itself
+  // needs just the thumbnail); the viewer shows its loading state until then.
+  useEffect(() => {
+    if (!previewOpen || originalUrl || !workspaceId || (!authToken && image.transport !== 'local' && !image.localImageId)) return undefined;
+    let active = true;
+    void getSessionImageBlobUrl({
+      ...image,
+      workspaceId,
+      sessionId: image.storageSessionId ?? sessionId,
+      encryption: image.encryption, attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
+      imageId: image.imageId,
+      transport: image.transport,
+      machineId: image.machineId,
+      token: authToken ?? '',
+      variant: 'original',
+    })
+      .then((url) => {
+        if (active) setOriginalUrl(url);
+      })
+      .catch(() => {
+        // Keep the thumbnail as the preview rather than an endless spinner.
+        if (active && thumbnailUrl) setOriginalUrl(thumbnailUrl);
+      });
+    return () => {
+      active = false;
+    };
+  }, [authToken, runtime, image.localImageId, image.mimeType, image.sizeBytes, image.transport, image.machineId, image.storageSessionId, image.encryption, image.imageId, originalUrl, previewOpen, sessionId, thumbnailUrl, workspaceId]);
+
+  const previewImages = useMemo(
+    () => [{ key: image.imageId, src: originalUrl, fileName: image.fileName }],
+    [image.fileName, image.imageId, originalUrl]
+  );
 
   useEffect(() => {
     let active = true;
     setThumbnailUrl(null);
     setLoadFailed(false);
 
-    if (!workspaceId || !authToken) {
+    if (!workspaceId || (!authToken && image.transport !== 'local' && !image.localImageId)) {
       setLoadFailed(true);
       return () => {
         active = false;
@@ -42,10 +80,14 @@ export function QueuedImagePreview({
     }
 
     void getSessionImageBlobUrl({
+      ...image,
       workspaceId,
-      sessionId,
+      sessionId: image.storageSessionId ?? sessionId,
+      encryption: image.encryption, attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
       imageId: image.imageId,
-      token: authToken,
+      transport: image.transport,
+      machineId: image.machineId,
+      token: authToken ?? '',
       variant: 'thumbnail',
       thumbnailWidth: size * 2,
       thumbnailHeight: size * 2,
@@ -66,34 +108,52 @@ export function QueuedImagePreview({
     return () => {
       active = false;
     };
-  }, [authToken, image.imageId, sessionId, workspaceId, size]);
+  }, [authToken, runtime, image.localImageId, image.mimeType, image.sizeBytes, image.transport, image.machineId, image.storageSessionId, image.encryption, image.imageId, sessionId, workspaceId, size]);
 
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <div
-          className={cn(
-            'flex shrink-0 items-center justify-center overflow-hidden rounded',
-            'border border-border/40 bg-background/60',
-            className
-          )}
-          style={{ width: size, height: size }}
-          role="img"
-          aria-label={label}
-        >
-          {thumbnailUrl ? (
-            <img src={thumbnailUrl} alt={label} className="h-full w-full object-cover" />
-          ) : loadFailed ? (
-            <ImageIcon
-              className="text-muted-foreground"
-              style={{ width: size * 0.5, height: size * 0.5 }}
-            />
-          ) : (
-            <div className="h-full w-full animate-pulse bg-muted/70" />
-          )}
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+    <>
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={300} render={<button
+            type="button"
+            disabled={loadFailed}
+            onClick={(event) => {
+              // The row is draggable and editable; opening the preview is all
+              // this click should do.
+              event.stopPropagation();
+              setPreviewOpen(true);
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            className={cn(
+              'flex shrink-0 items-center justify-center overflow-hidden rounded',
+              'border border-border/40 bg-background/60',
+              'cursor-zoom-in disabled:cursor-default',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40',
+              className
+            )}
+            style={{ width: size, height: size }}
+            aria-label={t('sessions.messageQueue.previewImage', 'Preview {{name}}', {
+              name: label,
+            })}
+          >
+            {thumbnailUrl ? (
+              <img src={thumbnailUrl} alt={label} className="h-full w-full object-cover" />
+            ) : loadFailed ? (
+              <ImageIcon
+                className="text-muted-foreground"
+                style={{ width: size * 0.5, height: size * 0.5 }}
+              />
+            ) : (
+              <div className="h-full w-full animate-pulse bg-muted/70" />
+            )}
+          </button>}/>
+        <Tooltip.Content side="top">{label}</Tooltip.Content>
+      </Tooltip.Root>
+      <ZoomableImageViewer
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        images={previewImages}
+        index={0}
+      />
+    </>
   );
 }

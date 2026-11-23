@@ -1,9 +1,9 @@
 import 'monaco-editor/min/vs/editor/editor.main.css';
+import './session-monaco-text-viewer.css';
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
-import { fileViewerWordWrapAtom } from '@/atoms/settings';
+import { extendedCodeLanguagesEnabledAtom, fileViewerWordWrapAtom } from '@/atoms/settings';
 import { cn } from '@/lib/utils';
 import { configureSessionMonacoWorkers } from '@/lib/session-monaco-workers';
 import { ensureSessionMonacoLanguages } from '@/lib/session-monaco-languages';
@@ -22,9 +22,9 @@ import {
   type SessionMonacoSelectionRestore,
 } from '@/lib/session-monaco-editor-controller';
 import type { LodyResolvedVSCodeTheme } from '@/lib/vscode-theme';
+import { useKeyScope } from '@/lib/commands';
 
 configureSessionMonacoWorkers();
-ensureSessionMonacoLanguages();
 
 export type SessionMonacoExternalTextUpdate = {
   // Monotonic counter; the viewer fires when this changes, even when
@@ -100,22 +100,26 @@ export function SessionMonacoTextViewer({
     readonly character: number;
   }) => void;
   readonly onScrollChange?: (state: { readonly scrollTop: number }) => void;
-  // Optional Monaco model URI. When provided the viewer creates the
+  // Optional serialized Monaco model URI (e.g. from
+  // `buildCodeCollabMonacoUri`). When provided the viewer creates the
   // model under this URI, which lets Monaco's globally-registered
   // Code Collab definition/reference providers (see
   // `lib/session-monaco-language-providers`) attach via the
   // `code-collab://<fileId>` scheme. Defaults to Monaco's auto-generated
   // URI so non-collab callers (story/diff viewer) keep working unchanged.
-  readonly modelUri?: monaco.Uri;
+  // Serialized so callers can build it without importing `monaco-editor`.
+  readonly modelUri?: string;
   readonly className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<SessionMonacoEditorController | null>(null);
+  useKeyScope('session-monaco-quick-fix', containerRef, { claims: ['Mod+.'] });
 
   // Line wrap is a global, persisted viewer preference (defaults on). Read it
   // here so every SessionMonacoTextViewer mount — session file viewer, mobile
   // file browser — shares the same wrap state without prop threading.
   const wordWrap = useAtomValue(fileViewerWordWrapAtom);
+  const extendedCodeLanguagesEnabled = useAtomValue(extendedCodeLanguagesEnabledAtom);
 
   // Lazily register / look up the VSCode-derived Monaco theme name. When
   // no VSCode theme is active we fall back to Monaco's built-in vs/vs-dark.
@@ -185,11 +189,24 @@ export function SessionMonacoTextViewer({
   }, [onContentChange, onSelectionChange, onGoToDefinition, onFindReferences, onScrollChange]);
 
   useEffect(() => {
+    let cancelled = false;
+    void ensureSessionMonacoLanguages(language, extendedCodeLanguagesEnabled)
+      .then(() => {
+        if (!cancelled) controllerRef.current?.setLanguage(language);
+      })
+      .catch(() => {
+        if (!cancelled) controllerRef.current?.setLanguage('plaintext');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [extendedCodeLanguagesEnabled, language]);
+
+  useEffect(() => {
     const controller = controllerRef.current;
     if (!controller) return;
     controller.applyText(text, readOnly);
-    controller.setLanguage(language);
-  }, [language, readOnly, text]);
+  }, [readOnly, text]);
 
   useEffect(() => {
     controllerRef.current?.setTheme(
@@ -239,7 +256,9 @@ export function SessionMonacoTextViewer({
   }, [findRequestSeq]);
 
   return (
-    <div className={cn('h-full min-h-[240px] w-full overflow-hidden', className)}>
+    <div
+      className={cn('lody-session-monaco h-full min-h-[240px] w-full overflow-hidden', className)}
+    >
       <div ref={containerRef} className="h-full w-full" />
     </div>
   );

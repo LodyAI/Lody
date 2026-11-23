@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {
   forwardRef,
   Fragment,
@@ -10,21 +11,46 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, CloudOff, FileText, FolderOpen, Home, Loader2 } from 'lucide-react';
+import {
+  ChevronRight,
+  CloudOff,
+  Eye,
+  EyeClosed,
+  FileText,
+  FolderOpen,
+  Home,
+  Loader2,
+} from 'lucide-react';
+import { Button } from '@lody/ui/button';
+import { ReadOnlyHtmlPreview } from '@/components/sessions/read-only-html-preview';
+import { StaticHtmlScriptPreview } from '@/components/sessions/static-html-script-preview';
+import { useTextBoundScriptOptIn } from '@/components/sessions/use-text-bound-script-opt-in';
+import { getExecutableHtmlPreviewSupport } from '@/components/sessions/managed-preview-frame-cache';
+import { toast } from '@/lib/toast';
+import { Spinner } from '@/ui/spinner';
 import type { FileTreeItem } from '@lody/shared';
 
 import { useAtomValue } from 'jotai';
-import { conversationFontSizeAtom } from '@/atoms';
+import { conversationFontSizeAtom, extendedCodeLanguagesEnabledAtom } from '@/atoms';
 import { FileIcon, FolderIcon } from '@/components/icons/file-icons';
 import { MobileEdgeBackSwipeZone } from '@/components/mobile/mobile-edge-back-swipe';
 import { SessionFileImagePreview } from '@/components/sessions/session-file-image-preview';
+import { SessionFileVideoPreview } from '@/components/sessions/session-file-video-preview';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
-import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
+import { MarkdownFileResources } from '@/components/ai-gui/markdown-file-image';
+import { LazySessionMonacoTextViewer } from '@/components/sessions/lazy-session-monaco-text-viewer';
+import { SessionShikiTextViewer } from '@/components/sessions/session-shiki-text-viewer';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
 import { isNativeAppShell } from '@/lib/native-platform';
 import type { FileWorkspaceProvider, FileWorkspaceSnapshot } from '@/lib/file-workspace-provider';
 import { getImageMimeTypeForPath, isSvgPath } from '@/lib/image-file-preview';
-import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
+import { getVideoMimeTypeForPath } from '@/lib/video-file-preview';
+import {
+  getSessionFileLanguageId,
+  getSessionFileMonacoLanguageId,
+  isSessionFileShikiLanguage,
+  isSessionMarkdownPath,
+} from '@/lib/session-file-language';
 import { cn } from '@/lib/utils';
 import { useActiveVSCodeTheme, useResolvedTheme } from '../../theme-provider';
 
@@ -40,6 +66,7 @@ const MOBILE_TABBAR_CLEARANCE =
 const MOBILE_SAFE_AREA_CLEARANCE = 'pb-[calc(var(--k-safe-area-bottom,0px)+1rem)]';
 
 const ROOT_PATH = '';
+const videoStyles = stylex.create({ frame: { height: '100%', minHeight: 0 } });
 
 export type MobileProjectFileBrowserHandle = {
   /** Pop one level (folder listing or file preview). No-op at the root. */
@@ -640,7 +667,7 @@ function MobileFilePreview({
           });
           return;
         }
-        setContent({ status: 'ready', path, snapshot: result.snapshot });
+        setContent({ status: 'ready', path: result.entry.path, snapshot: result.snapshot });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -676,6 +703,13 @@ function MobileFilePreview({
   // Raster/binary images (png/jpeg/gif/webp/…) arrive as raw bytes. A binary
   // snapshot without bytes is an image that was too large to transfer.
   if (snapshot.kind === 'binary') {
+    if (getVideoMimeTypeForPath(path) && snapshot.bytes !== undefined) {
+      return (
+        <div className={cn(stylex.props(videoStyles.frame).className, bottomClearanceClassName)}>
+          <SessionFileVideoPreview path={path} bytes={snapshot.bytes} />
+        </div>
+      );
+    }
     if (isImage && snapshot.bytes && snapshot.bytes.byteLength > 0) {
       return (
         <MobileImagePreview
@@ -723,13 +757,22 @@ function MobileFilePreview({
     );
   }
 
-  return (
+  const textPreview = (
     <MobileTextPreview
-      path={path}
+      key={content.path}
+      path={content.path}
       text={snapshot.text}
+      truncated={snapshot.truncated}
       onScrollActivity={onScrollActivity}
       bottomClearanceClassName={bottomClearanceClassName}
     />
+  );
+  return provider ? (
+    <MarkdownFileResources provider={provider} documentPath={content.path} automatic={false} active>
+      {textPreview}
+    </MarkdownFileResources>
+  ) : (
+    textPreview
   );
 }
 
@@ -758,23 +801,103 @@ function MobileImagePreview({
 function MobileTextPreview({
   path,
   text,
+  truncated,
   onScrollActivity,
   bottomClearanceClassName,
 }: {
   readonly path: string;
   readonly text: string;
+  readonly truncated?: boolean;
   readonly onScrollActivity?: (scrollTop: number) => void;
   readonly bottomClearanceClassName: string;
 }) {
+  const { t } = useTranslation();
+  const [showHtml, setShowHtml] = useState(true);
+  // Repository HTML is untrusted (it may come from a cloned third-party repo),
+  // so it opens script-free and runs only after an explicit, labelled opt-in on
+  // every engine, for this exact text.
+  const {
+    optedIn: runHtmlScripts,
+    toggle: toggleHtmlScripts,
+    revoke: revokeHtmlScripts,
+  } = useTextBoundScriptOptIn(text);
+  const canRunHtmlScripts = getExecutableHtmlPreviewSupport() !== 'unsupported';
   const resolvedTheme = useResolvedTheme();
   const activeVSCodeTheme = useActiveVSCodeTheme();
   const conversationFontSize = useAtomValue(conversationFontSizeAtom);
+  const extendedCodeLanguagesEnabled = useAtomValue(extendedCodeLanguagesEnabledAtom);
+  const language = getSessionFileLanguageId(path, extendedCodeLanguagesEnabled);
+
+  if (/\.(?:html|htm)$/iu.test(path) && !truncated) {
+    return (
+      <div className={cn(stylex.props(htmlStyles.root).className, bottomClearanceClassName)}>
+        <div {...stylex.props(htmlStyles.toolbar)}>
+          <Button
+            variant="ghost"
+            icon
+            aria-pressed={showHtml}
+            aria-label={
+              showHtml
+                ? t('sessions.fileViewer.preview.hide', 'Hide preview')
+                : t('sessions.fileViewer.preview.show', 'Preview')
+            }
+            onClick={() => {
+              revokeHtmlScripts();
+              setShowHtml((value) => !value);
+            }}
+          >
+            {showHtml ? <EyeClosed size={16} /> : <Eye size={16} />}
+          </Button>
+          {showHtml && canRunHtmlScripts ? (
+            <Button
+              variant="ghost"
+              size="small"
+              aria-pressed={runHtmlScripts}
+              onClick={toggleHtmlScripts}
+            >
+              {runHtmlScripts
+                ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')}
+            </Button>
+          ) : null}
+        </div>
+        {showHtml && runHtmlScripts ? (
+          <StaticHtmlScriptPreview
+            path={path}
+            text={text}
+            onNavigationRequest={() => {
+              revokeHtmlScripts();
+              toast.warning(
+                t(
+                  'sessions.fileViewer.htmlPreview.navigationDisabled',
+                  'Navigation is disabled for self-contained HTML previews.'
+                )
+              );
+            }}
+          />
+        ) : showHtml ? (
+          <ReadOnlyHtmlPreview text={text} />
+        ) : (
+          <LazySessionMonacoTextViewer
+            key={path}
+            text={text}
+            language="html"
+            resolvedTheme={resolvedTheme}
+            vscodeTheme={activeVSCodeTheme ?? null}
+            readOnly
+            className={stylex.props(htmlStyles.source).className}
+            onScrollChange={({ scrollTop }) => onScrollActivity?.(scrollTop)}
+          />
+        )}
+      </div>
+    );
+  }
 
   if (isSessionMarkdownPath(path)) {
     return (
       <div
         className={cn('min-h-0 flex-1 overflow-auto overscroll-contain', bottomClearanceClassName)}
-        data-native-selection-allow
+        data-text-selectable
         onScroll={(event) => onScrollActivity?.(event.currentTarget.scrollTop)}
       >
         <div className="mx-auto w-full max-w-3xl px-3 py-3 sm:px-4 sm:py-4">
@@ -784,14 +907,33 @@ function MobileTextPreview({
     );
   }
 
+  if (isSessionFileShikiLanguage(language)) {
+    return (
+      <div
+        className={cn(
+          'min-h-0 flex-1 overflow-hidden overscroll-contain',
+          bottomClearanceClassName
+        )}
+      >
+        <SessionShikiTextViewer
+          key={path}
+          path={path}
+          text={text}
+          language={language}
+          className="h-full min-h-0"
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn('min-h-0 flex-1 overflow-hidden overscroll-contain', bottomClearanceClassName)}
     >
-      <SessionMonacoTextViewer
+      <LazySessionMonacoTextViewer
         key={path}
         text={text}
-        language={getSessionFileMonacoLanguageId(path)}
+        language={getSessionFileMonacoLanguageId(path, extendedCodeLanguagesEnabled)}
         resolvedTheme={resolvedTheme}
         vscodeTheme={activeVSCodeTheme ?? null}
         readOnly
@@ -806,12 +948,18 @@ function StatusPanel({
   icon: Icon,
   title,
   description,
-  spin,
+  spin = false,
   tone = 'muted',
 }: {
   readonly icon: typeof FileText;
   readonly title: ReactNode;
   readonly description?: ReactNode;
+  /**
+   * Rotates the icon: the panel is a loading state. Defaults to false, and
+   * MUST keep a default here — `Spinner` treats an omitted `spinning` as a
+   * loading indicator, so forwarding this prop while it is `undefined` would
+   * spin the resting states' icons forever.
+   */
   readonly spin?: boolean;
   readonly tone?: 'muted' | 'destructive';
 }) {
@@ -822,7 +970,7 @@ function StatusPanel({
         tone === 'destructive' ? 'text-destructive' : 'text-muted-foreground'
       )}
     >
-      <Icon className={cn('h-6 w-6', spin && 'animate-spin')} aria-hidden />
+      <Spinner icon={Icon} spinning={spin} className="h-6 w-6" aria-hidden />
       <span className="text-[0.95rem]">{title}</span>
       {description ? (
         <span className="text-[0.8125rem] text-muted-foreground">{description}</span>
@@ -830,3 +978,9 @@ function StatusPanel({
     </div>
   );
 }
+
+const htmlStyles = stylex.create({
+  root: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' },
+  toolbar: { display: 'flex', flexShrink: 0 },
+  source: { flex: 1, minHeight: 0 },
+});

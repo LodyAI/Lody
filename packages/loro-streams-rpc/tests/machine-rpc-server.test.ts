@@ -1,5 +1,15 @@
+import { AndroidEmulatorRemoteResponseSchema } from '@lody/shared';
+import { getAndroidEmulatorViewerSecretContext } from '../src/rpc-secret';
+import { IosSimulatorRemoteResponseSchema } from '@lody/shared';
+import { remoteAutomationEncryptedResponseSchema } from '@lody/shared/automations';
+import {
+  createRpcSecretRecipient,
+  getAutomationResponseSecretContext,
+  getIosSimulatorViewerSecretContext,
+} from '../src/rpc-secret';
 import { describe, expect, it, vi } from 'vitest';
 import type {
+  CodeCollabDiffReadContext,
   AgentConfigId,
   LocalProjectControlResponse,
   LocalProjectId,
@@ -28,10 +38,20 @@ import {
   getMachineAcpAuthorizationCodeSecretContext,
   LoroStreamsGatewayError,
   LoroStreamsMachineRpcServer,
+  LoroStreamsMachineRpcClient,
+  LoroStreamsRpcHandlerError,
   type LoroJsonLiveBatchHandler,
   type LoroJsonStreamBatch,
   type LoroStreamsJsonStreamClient,
+  type SessionHistoryRpcRejection,
+  type SessionHistoryRpcRejectionStore,
 } from '../src/index';
+
+const previewProof = {
+  runtimeNonce: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  requestToken: 'synthetic-preview-proof',
+};
 
 const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 const configId = 'config-1' as AgentConfigId;
@@ -42,6 +62,16 @@ const createSilentLogger = () => ({
   warn: () => {},
   error: () => {},
 });
+const createHistoryRejectionStore = (): SessionHistoryRpcRejectionStore => {
+  const rejections = new Map<string, SessionHistoryRpcRejection>();
+  return {
+    get: async (request) => rejections.get(request.id) ?? null,
+    put: async (request, rejection) => {
+      rejections.set(request.id, rejection);
+      return rejection;
+    },
+  };
+};
 
 const createFakeStreamClient = () => {
   const ensured: string[] = [];
@@ -109,6 +139,959 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcServer', () => {
+  it.each([
+    ['read', 'metadata'],
+    ['subscribe', 'metadata'],
+    ['write', 'metadata'],
+    ['write', 'authorization'],
+    ['write', 'claim'],
+    ['write', 'proof'],
+  ] as const)(
+    'does not start history %s when its deadline expires during %s',
+    async (kind, phase) => {
+      const fake = createFakeStreamClient();
+      let now = 1;
+      let entered!: () => void;
+      const checking = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let ready!: () => void;
+      const metadata = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      const operations: string[] = [];
+      const rejectionStore = createHistoryRejectionStore();
+      const put = rejectionStore.put;
+      rejectionStore.put = async (...args) => {
+        const result = await put(...args);
+        if (phase === 'claim') {
+          entered();
+          await metadata;
+        }
+        return result;
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        machineId: 'synthetic-machine' as MachineId,
+        now: () => now,
+        logger: createSilentLogger(),
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        historyRequestRejections: rejectionStore,
+        resolveSessionHistoryOwnerSessionId: async (id) => {
+          if (phase === 'metadata') {
+            entered();
+            await metadata;
+          }
+          return id;
+        },
+        authorizeSessionHistoryRead: async () => true,
+        readSessionHistory: async ({ sessionId }) => {
+          operations.push('read');
+          return { type: 'session/history-read_response', sessionId, success: true, result: [] };
+        },
+        subscribeSessionHistory: async () => {
+          operations.push('subscribe');
+        },
+        authorizeSessionHistoryWrite: async () => {
+          if (phase === 'authorization' || phase === 'proof') {
+            entered();
+            await metadata;
+          }
+          return { expiresAt: phase === 'proof' ? 2 : Number.MAX_SAFE_INTEGER };
+        },
+        writeSessionHistory: async ({ sessionId, operation }) => {
+          operations.push('write');
+          return { type: 'session/history-write_response', sessionId, operation, success: true };
+        },
+      });
+      try {
+        await server.start();
+        fake.pushBatch({
+          messages: [
+            {
+              jsonrpc: '2.0',
+              id: 'synthetic-expiring-request',
+              rpcVersion: '1',
+              workspaceId: 'synthetic-workspace',
+              machineId: 'synthetic-machine',
+              replyTo: 'synthetic-reply',
+              method:
+                kind === 'subscribe'
+                  ? 'session/history-subscribe'
+                  : kind === 'read'
+                    ? 'session/history-read'
+                    : 'session/history-write',
+              sentAt: 1,
+              expiresAt: phase === 'proof' ? 30_001 : 2,
+              params: await encryptCodeCollabV2RpcPayload(
+                'synthetic-session',
+                kind === 'read'
+                  ? { sessionId: 'synthetic-session', query: { kind: 'count' } }
+                  : kind === 'subscribe'
+                    ? {
+                        sessionId: 'synthetic-session',
+                        readProof: 'synthetic-proof',
+                        subscription: {
+                          action: 'open',
+                          id: crypto.randomUUID(),
+                          checkpoint: 'synthetic-checkpoint',
+                        },
+                      }
+                    : { sessionId: 'synthetic-session', operation: 'append', payload: {} }
+              ),
+            },
+          ],
+          nextOffset: '1',
+          upToDate: true,
+        });
+        await checking;
+        now = 2;
+        ready();
+        await Promise.all(
+          (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
+        );
+        expect(operations).toEqual([]);
+        if (phase === 'proof')
+          expect(fake.appended[0]?.value).toMatchObject({
+            error: { code: 'session_history_write_denied' },
+          });
+        else expect(fake.appended).toEqual([]);
+      } finally {
+        ready();
+        server.stop();
+      }
+    }
+  );
+
+  it.each(['missing', 'lookup', 'save'] as const)(
+    'fails closed when history refusal persistence is %s',
+    async (phase) => {
+      const fake = createFakeStreamClient();
+      const stored: string[] = [];
+      const rejectionStore = createHistoryRejectionStore();
+      if (phase === 'lookup')
+        rejectionStore.get = async () => {
+          throw new Error('synthetic-private-driver-detail');
+        };
+      if (phase === 'save')
+        rejectionStore.put = async () => {
+          throw new Error('synthetic-private-driver-detail');
+        };
+      const server = new LoroStreamsMachineRpcServer({
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        machineId: 'synthetic-machine' as MachineId,
+        now: () => 1,
+        logger: createSilentLogger(),
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        ...(phase === 'missing' ? {} : { historyRequestRejections: rejectionStore }),
+        resolveSessionHistoryOwnerSessionId: async () => {
+          throw new LoroStreamsRpcHandlerError(
+            'session_metadata_pending',
+            'Metadata is pending; history was not started.'
+          );
+        },
+        authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
+        writeSessionHistory: async ({ sessionId, operation }) => {
+          stored.push(sessionId);
+          return { type: 'session/history-write_response', sessionId, operation, success: true };
+        },
+      });
+      try {
+        await server.start();
+        fake.pushBatch({
+          messages: [
+            {
+              jsonrpc: '2.0',
+              id: 'synthetic-refusal-failure',
+              rpcVersion: '1',
+              workspaceId: 'synthetic-workspace',
+              machineId: 'synthetic-machine',
+              replyTo: 'synthetic-reply',
+              method: 'session/history-write',
+              sentAt: 1,
+              expiresAt: 30_001,
+              params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+                sessionId: 'synthetic-session',
+                operation: 'append',
+                payload: {},
+              }),
+            },
+          ],
+          nextOffset: '1',
+          upToDate: true,
+        });
+        await fake.waitForAppendedCount(1);
+        expect(stored).toEqual([]);
+        expect(fake.appended[0]?.value).toMatchObject({
+          error: { code: 'session_history_request_state_unavailable' },
+        });
+        const reply = fake.appended[0];
+        if (!reply) throw new Error('Missing history RPC refusal response');
+        const message = (reply.value as { error: { message: string } }).error.message;
+        expect(message).not.toContain('synthetic-private-driver-detail');
+        expect(message).not.toContain('history was not started');
+      } finally {
+        server.stop();
+      }
+    }
+  );
+
+  it('joins identical concurrent history requests and rejects request ID reuse before history', async () => {
+    const fake = createFakeStreamClient();
+    const stored: string[] = [];
+    let entered!: () => void;
+    const checking = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let ready!: () => void;
+    const metadata = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const server = new LoroStreamsMachineRpcServer({
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+      machineId: 'synthetic-machine' as MachineId,
+      now: () => 1,
+      logger: createSilentLogger(),
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      historyRequestRejections: createHistoryRejectionStore(),
+      resolveSessionHistoryOwnerSessionId: async (id) => {
+        entered();
+        await metadata;
+        return id;
+      },
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
+      writeSessionHistory: async ({ sessionId, operation }) => {
+        stored.push(sessionId);
+        return { type: 'session/history-write_response', sessionId, operation, success: true };
+      },
+    });
+    const request = {
+      jsonrpc: '2.0',
+      id: 'synthetic-concurrent-request',
+      rpcVersion: '1',
+      workspaceId: 'synthetic-workspace',
+      machineId: 'synthetic-machine',
+      replyTo: 'synthetic-reply',
+      method: 'session/history-write',
+      sentAt: 1,
+      expiresAt: 30_001,
+      params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+        sessionId: 'synthetic-session',
+        operation: 'append',
+        payload: {},
+      }),
+    };
+    try {
+      await server.start();
+      fake.pushBatch({
+        messages: [request, request, { ...request, replyTo: 'different-client' }],
+        nextOffset: '3',
+        upToDate: true,
+      });
+      await checking;
+      await fake.waitForAppendedCount(1);
+      expect(stored).toEqual([]);
+      expect(fake.appended[0]?.value).toMatchObject({
+        error: { code: 'rpc_request_identity_mismatch' },
+      });
+      ready();
+      await fake.waitForAppendedCount(2);
+      await Promise.all(
+        (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
+      );
+      expect(stored).toEqual(['synthetic-session']);
+      expect(fake.appended.map(({ streamId }) => streamId)).toEqual([
+        'different-client',
+        'synthetic-reply',
+      ]);
+    } finally {
+      ready();
+      server.stop();
+    }
+  });
+
+  it('keeps a history precondition refusal terminal when an unexpired request is replayed after restart', async () => {
+    const machineId = 'synthetic-wsl' as MachineId;
+    const sessionId = 'synthetic-session' as SessionId;
+    const workspaceId = 'synthetic-workspace' as WorkspaceId;
+    const request = {
+      jsonrpc: '2.0',
+      id: 'synthetic-refused-request',
+      rpcVersion: '1',
+      workspaceId,
+      machineId,
+      replyTo: 'synthetic-reply',
+      method: 'session/history-write',
+      sentAt: 1,
+      expiresAt: 30_001,
+      params: await encryptCodeCollabV2RpcPayload(sessionId, {
+        sessionId,
+        operation: 'append',
+        payload: { entry: { id: 'synthetic-turn' } },
+      }),
+    };
+    let ready = false;
+    const stored: string[] = [];
+    const historyRequestRejections = createHistoryRejectionStore();
+    const createServer = (fake: ReturnType<typeof createFakeStreamClient>) =>
+      new LoroStreamsMachineRpcServer({
+        workspaceId,
+        machineId,
+        now: () => 1,
+        logger: createSilentLogger(),
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        ...{ historyRequestRejections },
+        resolveSessionHistoryOwnerSessionId: async () => {
+          if (!ready)
+            throw new LoroStreamsRpcHandlerError(
+              'session_metadata_pending',
+              'Metadata is pending; history was not started.'
+            );
+          return sessionId;
+        },
+        authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
+        writeSessionHistory: async ({ sessionId: id, operation }) => {
+          stored.push(id);
+          return {
+            type: 'session/history-write_response',
+            sessionId: id,
+            operation,
+            success: true,
+            historyRevision: 1,
+            historyCount: 1,
+            historyChange: null,
+          };
+        },
+      });
+    const firstTransport = createFakeStreamClient();
+    const first = createServer(firstTransport);
+    const secondTransport = createFakeStreamClient();
+    const second = createServer(secondTransport);
+    try {
+      await first.start();
+      firstTransport.pushBatch({ messages: [request], nextOffset: '1', upToDate: true });
+      await firstTransport.waitForAppendedCount(1);
+      expect(stored).toEqual([]);
+      expect(firstTransport.appended[0]?.value).toMatchObject({
+        id: request.id,
+        error: { code: 'session_metadata_pending' },
+      });
+      first.stop();
+      ready = true;
+      await second.start();
+      secondTransport.pushBatch({ messages: [request], nextOffset: '1', upToDate: true });
+      await secondTransport.waitForAppendedCount(1);
+      expect(stored).toEqual([]);
+      expect(secondTransport.appended[0]?.value).toMatchObject({
+        id: request.id,
+        error: { code: 'session_metadata_pending' },
+      });
+      secondTransport.pushBatch({
+        messages: [{ ...request, id: 'synthetic-fresh-request' }],
+        nextOffset: '2',
+        upToDate: true,
+      });
+      await secondTransport.waitForAppendedCount(2);
+      expect(stored).toEqual([sessionId]);
+      expect(secondTransport.appended[1]?.value).toMatchObject({
+        id: 'synthetic-fresh-request',
+        result: expect.any(Object),
+      });
+    } finally {
+      first.stop();
+      second.stop();
+    }
+  });
+
+  it('cancels a pending history owner check on stop before any history operation starts', async () => {
+    const fake = createFakeStreamClient();
+    let entered!: () => void;
+    const checking = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let released!: () => void;
+    const release = new Promise<void>((resolve) => {
+      released = resolve;
+    });
+    const stored: string[] = [];
+    const server = new LoroStreamsMachineRpcServer({
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+      machineId: 'synthetic-wsl' as MachineId,
+      now: () => 1,
+      logger: createSilentLogger(),
+      streamClient: fake.streamClient,
+      historyRequestRejections: createHistoryRejectionStore(),
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      resolveSessionHistoryOwnerSessionId: (_id, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              reject(new Error('Owner wait cancelled'));
+              released();
+            },
+            { once: true }
+          );
+          entered();
+        }),
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
+      writeSessionHistory: async ({ sessionId, operation }) => {
+        stored.push(sessionId);
+        return {
+          type: 'session/history-write_response',
+          sessionId,
+          operation,
+          success: true,
+          historyRevision: 1,
+          historyCount: 1,
+          historyChange: null,
+        };
+      },
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'synthetic-stop-request',
+          rpcVersion: '1',
+          workspaceId: 'synthetic-workspace',
+          machineId: 'synthetic-wsl',
+          replyTo: 'synthetic-reply',
+          method: 'session/history-write',
+          sentAt: 1,
+          expiresAt: 30_001,
+          params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+            sessionId: 'synthetic-session',
+            operation: 'append',
+            payload: {},
+          }),
+        },
+      ],
+      nextOffset: '1',
+      upToDate: true,
+    });
+    await server.start();
+    try {
+      await checking;
+      server.stop();
+      await release;
+      const pending = server as unknown as { inFlightRequests: Set<Promise<void>> };
+      await Promise.all(pending.inFlightRequests);
+      expect(stored).toEqual([]);
+      expect(fake.appended).toEqual([]);
+    } finally {
+      server.stop();
+    }
+  });
+
+  it('retains metadata rejection codes and request correlation without changing the encrypted history wire result', async () => {
+    const requests = createFakeStreamClient();
+    const responses = createFakeStreamClient();
+    const forward =
+      (destination: ReturnType<typeof createFakeStreamClient>) =>
+      async (_id: string, value: unknown) => {
+        destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+        return '1';
+      };
+    const machineId = 'synthetic-wsl' as MachineId;
+    const sessionId = 'synthetic-session' as SessionId;
+    const records: string[] = [];
+    const wireReplies: unknown[] = [];
+    const logs: string[] = [];
+    let ready = false;
+    const server = new LoroStreamsMachineRpcServer({
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+      machineId,
+      logger: {
+        ...createSilentLogger(),
+        warn: (message) => {
+          logs.push(message);
+        },
+      },
+      streamClient: {
+        ...requests.streamClient,
+        appendJson: async (id, value) => {
+          wireReplies.push(value);
+          return forward(responses)(id, value);
+        },
+      },
+      historyRequestRejections: createHistoryRejectionStore(),
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      resolveSessionHistoryOwnerSessionId: async (id) => {
+        if (!ready)
+          throw new LoroStreamsRpcHandlerError(
+            'session_metadata_pending',
+            'Session metadata is pending.',
+            { sessionId: id, machineId, observedMachineId: 'unknown' }
+          );
+        return id;
+      },
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
+      writeSessionHistory: async ({ sessionId: targetSessionId, operation }) => {
+        records.push(targetSessionId);
+        return {
+          type: 'session/history-write_response',
+          sessionId: targetSessionId,
+          operation,
+          success: true,
+          historyRevision: 1,
+          historyCount: 1,
+          historyChange: null,
+        };
+      },
+    });
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'synthetic-workspace',
+      machineId,
+      streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+    });
+    await server.start();
+    try {
+      const rejected = await client.requestSessionHistoryWrite({
+        sessionId,
+        operation: 'append',
+        payload: {},
+      });
+      expect(rejected).toMatchObject({
+        success: false,
+        rpcFailure: {
+          source: 'remote',
+          code: 'session_metadata_pending',
+          machineId,
+          requestId: expect.any(String),
+        },
+      });
+      expect(records).toEqual([]);
+      const evidence = logs
+        .map((message) => message.slice(message.indexOf('{')))
+        .map((value) => JSON.parse(value));
+      expect(evidence).toContainEqual({
+        rpcRequestId: rejected?.rpcFailure?.requestId,
+        method: 'session/history-write',
+        code: 'session_metadata_pending',
+        sessionId,
+        machineId,
+        observedMachineId: 'unknown',
+      });
+      ready = true;
+      const accepted = await client.requestSessionHistoryWrite({
+        sessionId,
+        operation: 'append',
+        payload: {},
+      });
+      expect(accepted).toEqual({
+        type: 'session/history-write_response',
+        sessionId,
+        operation: 'append',
+        success: true,
+        historyRevision: 1,
+        historyCount: 1,
+        historyChange: null,
+      });
+      expect(records).toEqual([sessionId]);
+      const wire = wireReplies.at(-1) as { result: CodeCollabV2RpcContentEnvelope };
+      expect(await decryptCodeCollabV2RpcPayload(wire.result, sessionId)).toEqual(accepted);
+    } finally {
+      client.stop();
+      server.stop();
+    }
+  });
+
+  it.each(['available', 'unavailable', 'invalid nonce'] as const)(
+    'isolates the %s preview handshake from the legacy machine status response',
+    async (scenario) => {
+      const requests = createFakeStreamClient();
+      const responses = createFakeStreamClient();
+      const forward =
+        (destination: ReturnType<typeof createFakeStreamClient>) =>
+        async (_streamId: string, value: unknown) => {
+          destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+          return '1';
+        };
+      const machineId = 'machine-1' as MachineId;
+      const status: MachineStatusResponse = {
+        type: 'machine/status_response',
+        machineId,
+        success: true,
+        resources: {
+          totalMemoryGB: 16,
+          usedMemoryGB: 8,
+          freeMemoryGB: 8,
+          totalCpus: 8,
+          cpuUsagePercent: 25,
+        },
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId,
+        streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+        getMachineStatus: async () => status,
+        getPreviewControl:
+          scenario === 'unavailable'
+            ? undefined
+            : async () => {
+                return {
+                  type: 'machine/preview-control_response',
+                  machineId,
+                  success: true,
+                  runtimeNonce:
+                    scenario === 'invalid nonce' ? 'invalid' : previewProof.runtimeNonce,
+                };
+              },
+        refreshMachineAcpCapabilities: vi.fn(),
+        getSessionPreviewStatus: async (params) => {
+          expect(params.proof).toEqual(previewProof);
+          expect(params.renewEndpointId).toBe('expired-endpoint');
+          return {
+            type: 'session/preview-status_response',
+            sessionId: params.sessionId,
+            success: true,
+            connection: {
+              status: 'closed',
+              endpointId: params.renewEndpointId,
+              closedReason: 'idle_timeout',
+            },
+          };
+        },
+      });
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: 'workspace-1',
+        machineId,
+        streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+      });
+      await server.start();
+      try {
+        const result = await client.requestPreviewControl();
+        if (scenario === 'available') {
+          expect(result).toEqual({
+            type: 'machine/preview-control_response',
+            machineId,
+            success: true,
+            runtimeNonce: previewProof.runtimeNonce,
+          });
+          await expect(
+            client.requestSessionPreviewStatus({
+              proof: previewProof,
+              sessionId: 'session-1',
+              requestedByUserId: 'user-1',
+              renewEndpointId: 'expired-endpoint',
+            })
+          ).resolves.toEqual({
+            type: 'session/preview-status_response',
+            sessionId: 'session-1',
+            success: true,
+            connection: {
+              status: 'closed',
+              endpointId: 'expired-endpoint',
+              closedReason: 'idle_timeout',
+            },
+          });
+        } else {
+          expect(result).toEqual({
+            type: 'machine/preview-control_response',
+            machineId,
+            success: false,
+            error: expect.stringContaining(
+              scenario === 'unavailable' ? 'method_unavailable' : 'invalid_result'
+            ),
+          });
+        }
+        // The strict status parser and exact payload stay compatible with older clients,
+        // even when Preview is supported or its handler fails.
+        await expect(client.requestMachineStatus()).resolves.toEqual(status);
+      } finally {
+        client.stop();
+        server.stop();
+      }
+    }
+  );
+
+  it('routes scoped automation control through the owner envelope and rejects a different owner', async () => {
+    const requests = createFakeStreamClient();
+    const responses = createFakeStreamClient();
+    const wire: unknown[] = [];
+    const forward =
+      (destination: ReturnType<typeof createFakeStreamClient>) =>
+      async (_streamId: string, value: unknown) => {
+        wire.push(value);
+        destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+        return '1';
+      };
+    const machineId = 'machine-1' as MachineId;
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId,
+      streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      resolveSessionHistoryOwnerSessionId: async (id) => id,
+      getAutomationControl: async () => ({
+        type: 'machine/automation-control_response',
+        machineId,
+        success: true,
+        runtimeNonce: previewProof.runtimeNonce,
+      }),
+      controlAutomation: async (params) => ({
+        type: 'session/automation-control_response',
+        sessionId: params.sessionId,
+        success: true,
+        result: { type: 'settings', settings: { recoverCapacity: true } },
+      }),
+    });
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId,
+      streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+    });
+    await server.start();
+    try {
+      expect(await client.requestAutomationControlHandshake()).toMatchObject({
+        success: true,
+        runtimeNonce: previewProof.runtimeNonce,
+      });
+      const request = {
+        sessionId: 'session-1',
+        ownerSessionId: 'session-1',
+        requesterUserId: 'user-1',
+        operation: { type: 'settings' as const },
+        proof: previewProof,
+        responseRecipient: await createRpcSecretRecipient(),
+      };
+      expect(await client.requestSessionAutomationControl(request)).toEqual({
+        type: 'session/automation-control_response',
+        sessionId: 'session-1',
+        success: true,
+        result: { type: 'settings', settings: { recoverCapacity: true } },
+      });
+      const reply = wire.at(-1) as { result: CodeCollabV2RpcContentEnvelope };
+      const protectedResult = remoteAutomationEncryptedResponseSchema.parse(
+        await decryptCodeCollabV2RpcPayload(reply.result, request.sessionId)
+      );
+      const context = getAutomationResponseSecretContext({
+        workspaceId: 'workspace-1',
+        machineId,
+        sessionId: request.sessionId,
+        requestId: request.proof.requestId,
+      });
+      expect(
+        JSON.parse(await request.responseRecipient.decrypt(protectedResult.payload, context))
+      ).toMatchObject({
+        result: { type: 'settings', settings: { recoverCapacity: true } },
+      });
+      const otherRecipient = await createRpcSecretRecipient();
+      await expect(otherRecipient.decrypt(protectedResult.payload, context)).rejects.toThrow();
+      expect(JSON.stringify(wire)).not.toContain('synthetic-preview-proof');
+      expect(
+        await client.requestSessionAutomationControl({
+          ...request,
+          ownerSessionId: 'other-session',
+        })
+      ).toMatchObject({ success: false });
+    } finally {
+      client.stop();
+      server.stop();
+    }
+  });
+
+  it.each([
+    'session/preview-create',
+    'session/preview-status',
+    'session/preview-revoke',
+    'ios-simulator/control',
+  ])(
+    'rejects missing or malformed proof without dispatching %s or logging its secret',
+    async (method) => {
+      const fake = createFakeStreamClient();
+      let signalLogged = () => {};
+      const logged = new Promise<void>((resolve) => {
+        signalLogged = resolve;
+      });
+      const warnings: string[] = [];
+      const handler = vi.fn();
+      const server = new LoroStreamsMachineRpcServer({
+        logger: {
+          ...createSilentLogger(),
+          warn: (message) => {
+            warnings.push(message);
+            if (warnings.length === 2) signalLogged();
+          },
+        },
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId: 'machine-1' as MachineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        createSessionPreview: handler,
+        getSessionPreviewStatus: handler,
+        revokeSessionPreview: handler,
+        controlIosSimulator: handler,
+      });
+      const target = { protocol: 'http', host: '127.0.0.1', port: 5173 };
+      fake.pushBatch({
+        messages: [undefined, { ...previewProof, requestId: 'invalid' }].map((proof) => ({
+          jsonrpc: '2.0',
+          id: 'invalid-preview',
+          method,
+          rpcVersion: '1',
+          workspaceId: 'workspace-1',
+          machineId: 'machine-1',
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          params: {
+            sessionId: 'session-1',
+            requestedByUserId: 'user-1',
+            proof,
+            ...(method === 'ios-simulator/control' ? { command: { action: 'list' } } : {}),
+            ...(method === 'session/preview-create'
+              ? {
+                  target,
+                  approval: {
+                    source: 'browser_address',
+                    targetClass: 'loopback',
+                    target,
+                    confirmedByUserId: 'user-1',
+                    confirmedAt: 1000,
+                  },
+                }
+              : {}),
+          },
+        })),
+        nextOffset: '1',
+        upToDate: true,
+      });
+      await server.start();
+      try {
+        await logged;
+        expect(handler).not.toHaveBeenCalled();
+        expect(fake.appended).toEqual([]);
+        expect(warnings.join(' ')).toContain('[REDACTED PREVIEW CONTROL]');
+        expect(warnings.join(' ')).not.toContain(previewProof.requestToken);
+      } finally {
+        server.stop();
+      }
+    }
+  );
+
+  it('returns Pi discovery from the saved config through the machine RPC', async () => {
+    const fake = createFakeStreamClient();
+    const result = {
+      success: true as const,
+      discovery: { version: 1 as const, agentDir: '/fixture/pi', extensions: [], warnings: [] },
+    };
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId: 'machine-1' as MachineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      listMachinePiExtensions: async ({ configId: selectedConfigId }) =>
+        selectedConfigId === 'pi-config' ? result : { success: false, error: 'Wrong provider' },
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'pi-scan',
+          method: 'machine/pi-extensions',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:client-1',
+          sentAt: 1,
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          params: { configId: 'pi-config' },
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+    await server.start();
+    try {
+      await fake.waitForAppendedCount(1);
+      expect(fake.appended[0]?.value).toMatchObject({
+        id: 'pi-scan',
+        method: 'machine/pi-extensions',
+        result,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+  it('forwards the reporter client log of a bug report to the daemon', async () => {
+    const fake = createFakeStreamClient();
+    const clientLog = {
+      encoding: 'gzip-base64' as const,
+      data: 'H4sIAAAAAAAAA8vJLC4BAQAA//8DAOKaL3oEAAAA',
+      rawBytes: 4,
+      compressedBytes: 28,
+    };
+    const submitBugReport = vi.fn(async () => ({
+      type: 'machine/bug-report_response' as const,
+      machineId: 'machine-1' as MachineId,
+      success: true,
+      bugReportId: 'bug-1',
+    }));
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId: 'machine-1' as MachineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      submitBugReport,
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'bug-report',
+          method: 'machine/bug-report',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:client-1',
+          sentAt: 1,
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          params: {
+            description: 'diff sheet reloads the app',
+            reporterUserId: 'owner',
+            requestToken: 'proof',
+            clientLog,
+          },
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+    await server.start();
+    try {
+      await fake.waitForAppendedCount(1);
+      expect(fake.appended[0]?.value).toMatchObject({
+        id: 'bug-report',
+        result: { success: true, bugReportId: 'bug-1' },
+      });
+      expect(submitBugReport).toHaveBeenCalledWith(expect.objectContaining({ clientLog }));
+    } finally {
+      server.stop();
+    }
+  });
+
   it('redacts invalid authorization-code requests from warning logs', async () => {
     const fake = createFakeStreamClient();
     const logger = {
@@ -142,6 +1125,10 @@ describe('LoroStreamsMachineRpcServer', () => {
             requestId: 'auth-code-ack',
             action: 'start',
             authorizationCode: 'secret-browser-code',
+            authenticationInput: 'secret-form-input',
+            authorizationCodeEnvelope: { ciphertext: 'secret-code-ciphertext' },
+            authenticationInputEnvelope: { ciphertext: 'secret-form-ciphertext' },
+            env: { PROVIDER_TOKEN: 'secret-provider-token' },
             cliType: 'builtin',
             agentType: 'claude',
           },
@@ -155,7 +1142,15 @@ describe('LoroStreamsMachineRpcServer', () => {
     await server.start();
     await vi.waitFor(() => expect(logger.warn).toHaveBeenCalledOnce());
     expect(logger.warn.mock.calls[0]?.[0]).toContain('"authorizationCode":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"authenticationInput":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"authorizationCodeEnvelope":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"authenticationInputEnvelope":"[REDACTED]"');
+    expect(logger.warn.mock.calls[0]?.[0]).toContain('"env":"[REDACTED]"');
     expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-browser-code');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-form-input');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-code-ciphertext');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-form-ciphertext');
+    expect(logger.warn.mock.calls[0]?.[0]).not.toContain('secret-provider-token');
     server.stop();
   });
 
@@ -219,16 +1214,14 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const forkSession = vi.fn(
-      async (args: SessionForkSpec): Promise<SessionForkResponse> => ({
-        type: 'session/fork_response',
-        sourceSessionId: args.sourceSessionId,
-        targetSessionId: args.targetSessionId,
-        success: true,
-        partial: false,
-        warnings: [],
-      })
-    );
+    const forkSession = vi.fn(async (args: SessionForkSpec): Promise<SessionForkResponse> => ({
+      type: 'session/fork_response',
+      sourceSessionId: args.sourceSessionId,
+      targetSessionId: args.targetSessionId,
+      success: true,
+      partial: false,
+      warnings: [],
+    }));
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
       workspaceId,
@@ -350,8 +1343,6 @@ describe('LoroStreamsMachineRpcServer', () => {
             requestId: 'auth-claude',
             action: 'start',
             configId,
-            cliType: 'builtin',
-            agentType: 'claude',
           },
         },
       ],
@@ -362,11 +1353,18 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     await server.start();
     await fake.waitForAppendedCount(1);
-    const publicKey = (
+    const authorizationProgress = (
       fake.appended[0]!.value as {
-        result: { authorizationCodePublicKey: RpcSecretPublicKey };
+        result: {
+          authorizationCodePublicKey: RpcSecretPublicKey;
+          authenticationInputPublicKey?: RpcSecretPublicKey;
+        };
       }
-    ).result.authorizationCodePublicKey;
+    ).result;
+    const publicKey = authorizationProgress.authorizationCodePublicKey;
+    // Preserve the old built-in OAuth progress shape for strict older clients.
+    // The generic key is advertised only by the new interactive protocol flows.
+    expect(authorizationProgress.authenticationInputPublicKey).toBeUndefined();
     const authorizationCodeEnvelope = await encryptRpcSecret(
       publicKey,
       'browser-returned-code',
@@ -387,9 +1385,6 @@ describe('LoroStreamsMachineRpcServer', () => {
             action: 'submit-code',
             authenticationRequestId: 'auth-claude',
             authorizationCodeEnvelope,
-            configId,
-            cliType: 'builtin',
-            agentType: 'claude',
           },
         },
       ],
@@ -407,46 +1402,45 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
-  it('routes identifier-only session preparation requests on the control lane', async () => {
+  it('carries only the persisted config reference when starting authentication', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const prepareSession = vi.fn(async (spec) => ({
-      type: 'session/prepare_response' as const,
-      preparationId: spec.preparationId,
-      sessionId: spec.sessionId,
-      accepted: true,
-      disposition: 'accepted' as const,
+    const authenticateMachineAcp = vi.fn(async (args): Promise<MachineAcpAuthenticateResponse> => ({
+      type: 'machine/acp-authenticate_response',
+      machineId,
+      requestId: args.requestId,
+      agentType: 'antigravity-acp',
+      success: true,
+      disposition: 'authenticated',
     }));
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
       workspaceId,
       machineId,
       streamClient: fake.streamClient,
+      maxConcurrentRequests: 1,
       getMachineStatus: vi.fn(),
       refreshMachineAcpCapabilities: vi.fn(),
-      prepareSession,
+      authenticateMachineAcp,
     });
 
     fake.pushBatch({
       messages: [
         {
-          jsonrpc: '2.0',
-          id: 'prepare-1',
-          method: 'session/prepare',
+          jsonrpc: '2.0' as const,
           rpcVersion: '1',
           machineId,
           workspaceId,
-          replyTo: 'workspace-1:rpc:res:client-1',
+          replyTo: 'workspace-1:rpc:res:machine-1',
           sentAt: Date.now(),
-          expiresAt: Date.now() + 5_000,
+          expiresAt: Date.now() + 5000,
+          id: 'auth-pick',
+          method: 'machine/acp-authenticate',
           params: {
-            preparationId: 'preparation-1',
-            sessionId: 'session-1',
-            requestedByUserId: 'user-1',
-            agentConfigId: configId,
-            cliType: 'builtin',
-            agentType: 'codex',
+            requestId: 'auth-antigravity',
+            action: 'start',
+            configId,
           },
         },
       ],
@@ -457,121 +1451,10 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     await server.start();
     await fake.waitForAppendedCount(1);
-    expect(prepareSession).toHaveBeenCalledWith({
-      preparationId: 'preparation-1',
-      sessionId: 'session-1',
-      requestedByUserId: 'user-1',
-      agentConfigId: 'config-1',
-      cliType: 'builtin',
-      agentType: 'codex',
-    });
-    expect(fake.appended[0]?.value).toEqual(
-      expect.objectContaining({
-        id: 'prepare-1',
-        method: 'session/prepare',
-        result: {
-          type: 'session/prepare_response',
-          preparationId: 'preparation-1',
-          sessionId: 'session-1',
-          accepted: true,
-          disposition: 'accepted',
-        },
-      })
+    expect(authenticateMachineAcp).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'auth-antigravity', action: 'start', configId })
     );
     server.stop();
-  });
-
-  it('logs when the request listener starts', async () => {
-    const fake = createFakeStreamClient();
-    const logger = {
-      info: vi.fn(),
-      debug: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    };
-    const server = new LoroStreamsMachineRpcServer({
-      logger,
-      workspaceId: 'workspace-1' as WorkspaceId,
-      machineId: 'machine-1' as MachineId,
-      streamClient: fake.streamClient,
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-    });
-
-    await server.start();
-
-    expect(logger.info).toHaveBeenCalledWith(
-      '[rpc-server:machine-1] ensuring request stream workspace-1:rpc:req:machine-1 for workspace workspace-1 (retentionSeconds=86400)'
-    );
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.stringMatching(
-        /^\[rpc-server:machine-1\] listening on request stream workspace-1:rpc:req:machine-1 for workspace workspace-1 \(ensureElapsedMs=\d+\)$/
-      )
-    );
-
-    server.stop();
-  });
-
-  it('throttles repeated request loop errors and summarizes recovery', async () => {
-    vi.useFakeTimers();
-    let now = 0;
-    let server: LoroStreamsMachineRpcServer | null = null;
-    let readCount = 0;
-    const logger = {
-      info: vi.fn(),
-      debug: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    };
-    const streamClient: LoroStreamsJsonStreamClient = {
-      ensureJsonStream: vi.fn(async () => {}),
-      appendJson: vi.fn(async () => 'next-offset'),
-      readJsonLive: vi.fn(async () => {
-        readCount += 1;
-        if (readCount <= 3) {
-          throw new Error('fetch failed');
-        }
-        server?.stop();
-      }),
-    };
-
-    try {
-      server = new LoroStreamsMachineRpcServer({
-        logger,
-        workspaceId: 'workspace-1' as WorkspaceId,
-        machineId: 'machine-1' as MachineId,
-        streamClient,
-        now: () => now,
-        getMachineStatus: vi.fn(),
-        refreshMachineAcpCapabilities: vi.fn(),
-      });
-
-      await server.start();
-      await Promise.resolve();
-      expect(logger.warn).toHaveBeenCalledTimes(1);
-      expect(logger.warn).toHaveBeenLastCalledWith(
-        '[rpc-server:machine-1] request loop error: fetch failed (consecutiveFailures=1 nextRetryMs=1000)'
-      );
-
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(logger.warn).toHaveBeenCalledTimes(1);
-
-      now = 31_000;
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(logger.warn).toHaveBeenCalledTimes(2);
-      expect(logger.warn).toHaveBeenLastCalledWith(
-        '[rpc-server:machine-1] request loop error repeated: fetch failed (consecutiveFailures=3 firstSeenMsAgo=31000 nextRetryMs=1000)'
-      );
-
-      now = 32_000;
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(logger.info).toHaveBeenCalledWith(
-        '[rpc-server:machine-1] request loop recovered after 32000ms (consecutiveFailures=3 lastError=fetch failed)'
-      );
-    } finally {
-      server?.stop();
-      vi.useRealTimers();
-    }
   });
 
   it('dispatches requests concurrently so a slow handler does not block others', async () => {
@@ -665,20 +1548,18 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const getMachineStatus = vi.fn(
-      async (): Promise<MachineStatusResponse> => ({
-        type: 'machine/status_response' as const,
-        machineId,
-        success: true,
-        resources: {
-          totalMemoryGB: 16,
-          usedMemoryGB: 8,
-          freeMemoryGB: 8,
-          totalCpus: 8,
-          cpuUsagePercent: 25,
-        },
-      })
-    );
+    const getMachineStatus = vi.fn(async (): Promise<MachineStatusResponse> => ({
+      type: 'machine/status_response' as const,
+      machineId,
+      success: true,
+      resources: {
+        totalMemoryGB: 16,
+        usedMemoryGB: 8,
+        freeMemoryGB: 8,
+        totalCpus: 8,
+        cpuUsagePercent: 25,
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -796,20 +1677,18 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const getMachineStatus = vi.fn(
-      async (): Promise<MachineStatusResponse> => ({
-        type: 'machine/status_response',
-        machineId,
-        success: true,
-        resources: {
-          totalMemoryGB: 16,
-          usedMemoryGB: 8,
-          freeMemoryGB: 8,
-          totalCpus: 8,
-          cpuUsagePercent: 25,
-        },
-      })
-    );
+    const getMachineStatus = vi.fn(async (): Promise<MachineStatusResponse> => ({
+      type: 'machine/status_response',
+      machineId,
+      success: true,
+      resources: {
+        totalMemoryGB: 16,
+        usedMemoryGB: 8,
+        freeMemoryGB: 8,
+        totalCpus: 8,
+        cpuUsagePercent: 25,
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -930,100 +1809,208 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
-  it('handles machine restart RPC requests and fires lifecycle hook after append', async () => {
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    const fake = createFakeStreamClient();
-    const appendedAtHook: unknown[] = [];
-    const onMachineLifecycleResponseAppended = vi.fn(() => {
-      appendedAtHook.push(...fake.appended.map((entry) => entry.value));
-    });
-    const restartMachine = vi.fn(async () => ({
-      type: 'machine/restart_response' as const,
-      machineId,
-      requestId: 'restart-1',
-      success: true,
-      accepted: true,
-      disposition: 'accepted' as const,
-    }));
+  it.each([undefined, 'retired-machine'])(
+    'handles restart or identity restore %s before firing the lifecycle hook',
+    async (restoreMachineId) => {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      const fake = createFakeStreamClient();
+      const appendedAtHook: unknown[] = [];
+      let resolveSettled!: () => void;
+      const settled = new Promise<void>((resolve) => {
+        resolveSettled = resolve;
+      });
+      let restoredIdentity: string | undefined;
+      const onMachineLifecycleResponseSettled = () => {
+        appendedAtHook.push(...fake.appended.map((entry) => entry.value));
+        resolveSettled();
+      };
+      const restartMachine = async (request: { restoreMachineId?: string }) => {
+        restoredIdentity = request.restoreMachineId;
+        return {
+          type: 'machine/restart_response' as const,
+          machineId,
+          requestId: 'restart-1',
+          success: true,
+          accepted: true,
+          disposition: 'accepted' as const,
+        };
+      };
 
-    const server = new LoroStreamsMachineRpcServer({
-      logger: createSilentLogger(),
-      workspaceId,
-      machineId,
-      streamClient: fake.streamClient,
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-      restartMachine,
-      onMachineLifecycleResponseAppended,
-    });
+      const server = new LoroStreamsMachineRpcServer({
+        now: () => 1000,
+        logger: createSilentLogger(),
+        workspaceId,
+        machineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        restartMachine,
+        onMachineLifecycleResponseSettled,
+      });
 
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'req-1',
+            method: 'machine/restart',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: 1000,
+            expiresAt: 6000,
+            params: {
+              ...(restoreMachineId ? { restoreMachineId } : {}),
+              requesterUserId: 'user-1',
+              requestToken: 'signed-token',
+              requestId: 'restart-1',
+            },
+          },
+        ],
+        nextOffset: '1',
+        cursor: 'cursor-1',
+        upToDate: true,
+      });
+
+      await server.start();
+
+      await settled;
+      expect(restoredIdentity).toBe(restoreMachineId);
+      expect(appendedAtHook).toEqual([
+        expect.objectContaining({
           id: 'req-1',
           method: 'machine/restart',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1',
-          replyTo: 'workspace-1:rpc:res:machine-1',
-          sentAt: Date.now(),
-          expiresAt: Date.now() + 5000,
-          params: {
-            requesterUserId: 'user-1',
-            requestToken: 'signed-token',
+          result: expect.objectContaining({
+            type: 'machine/restart_response',
             requestId: 'restart-1',
-          },
-        },
-      ],
-      nextOffset: '1',
-      cursor: 'cursor-1',
-      upToDate: true,
-    });
-
-    await server.start();
-
-    await vi.waitFor(() => {
-      expect(onMachineLifecycleResponseAppended).toHaveBeenCalledTimes(1);
-    });
-
-    expect(restartMachine).toHaveBeenCalledWith({
-      requesterUserId: 'user-1',
-      requestToken: 'signed-token',
-      requestId: 'restart-1',
-    });
-    expect(appendedAtHook).toEqual([
-      expect.objectContaining({
-        id: 'req-1',
-        method: 'machine/restart',
-        result: expect.objectContaining({
-          type: 'machine/restart_response',
-          requestId: 'restart-1',
-          accepted: true,
+            accepted: true,
+          }),
         }),
-      }),
-    ]);
+      ]);
 
-    server.stop();
+      server.stop();
+    }
+  );
+
+  describe.each(['restart', 'upgrade'] as const)('machine %s ACK delivery', (action) => {
+    it.each([
+      'success',
+      'failure',
+      'timeout-resolve',
+      'timeout-reject',
+      'rejected',
+      'rejected-failure',
+    ] as const)('handles %s without stranding or executing rejected work', async (outcome) => {
+      vi.useFakeTimers();
+      const fake = createFakeStreamClient();
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      const accepted = !outcome.startsWith('rejected');
+      const response = {
+        machineId,
+        requestId: 'lifecycle-1',
+        success: accepted,
+        accepted,
+        disposition: accepted ? ('accepted' as const) : ('unauthorized' as const),
+      };
+      const deliveredActions: string[] = [];
+      const warnings: string[] = [];
+      let resolveAppend: (value: string) => void = () => {};
+      let rejectAppend: (reason: Error) => void = () => {};
+      const stalledAppend = new Promise<string>((resolve, reject) => {
+        resolveAppend = resolve;
+        rejectAppend = reject;
+      });
+      fake.streamClient.appendJson = async (streamId, value) => {
+        fake.appended.push({ streamId, value });
+        if (outcome === 'failure' || outcome === 'rejected-failure') {
+          throw new Error('Synthetic ACK transport failure');
+        }
+        if (outcome.startsWith('timeout')) return await stalledAppend;
+        return 'next-offset';
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: { ...createSilentLogger(), warn: (message) => warnings.push(message) },
+        workspaceId,
+        machineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        restartMachine: async () => ({ ...response, type: 'machine/restart_response' }),
+        upgradeMachine: async () => ({ ...response, type: 'machine/upgrade_response' }),
+        onMachineLifecycleResponseSettled: (event) => deliveredActions.push(event.action),
+      });
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'rpc-lifecycle-1',
+            method: `machine/${action}`,
+            rpcVersion: '1',
+            machineId,
+            workspaceId,
+            replyTo: 'workspace-1:rpc:res:synthetic-client',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 30_000,
+            params: {
+              requesterUserId: 'synthetic-user',
+              requestToken: 'synthetic-token',
+              requestId: 'lifecycle-1',
+              ...(action === 'upgrade' ? { targetVersion: '1.2.3' } : {}),
+            },
+          },
+        ],
+        nextOffset: '1',
+        upToDate: true,
+      });
+      try {
+        await server.start();
+        await vi.advanceTimersByTimeAsync(0);
+        if (outcome.startsWith('timeout')) {
+          await vi.advanceTimersByTimeAsync(4_999);
+          expect(deliveredActions).toEqual([]);
+          await vi.advanceTimersByTimeAsync(1);
+          expect(deliveredActions).toEqual([action]);
+          if (outcome === 'timeout-resolve') resolveAppend('late-offset');
+          else rejectAppend(new Error('Synthetic late ACK failure'));
+        }
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(deliveredActions).toEqual(accepted ? [action] : []);
+        if (accepted) {
+          // ACK errors stay diagnostic; no contradictory internal_error response.
+          expect(fake.appended.length).toBeGreaterThan(0);
+          for (const entry of fake.appended) {
+            expect(entry.value).toMatchObject({ result: { accepted: true } });
+            expect(entry.value).not.toHaveProperty('error');
+          }
+          expect(
+            warnings.some((message) => message.includes('continuing accepted operation'))
+          ).toBe(outcome !== 'success');
+        }
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        server.stop();
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('decrypts Code Collab requests and encrypts Code Collab results by owner session', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const openCodeCollabText = vi.fn(
-      async (): Promise<CodeCollabV2OpenTextOk> => ({
-        status: 'ok',
-        path: 'src/app.ts',
-        digest: `sha256:${'1'.repeat(64)}`,
-        text: {
-          encoding: 'plain',
-          text: 'hello',
-          rawBytes: 5,
-        },
-      })
-    );
+    const openCodeCollabText = vi.fn(async (): Promise<CodeCollabV2OpenTextOk> => ({
+      status: 'ok',
+      path: 'src/app.ts',
+      digest: `sha256:${'1'.repeat(64)}`,
+      text: {
+        encoding: 'plain',
+        text: 'hello',
+        rawBytes: 5,
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -1096,6 +2083,244 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     server.stop();
   });
+
+  it.each(['session-parent', 'wrong-owner'])(
+    'serves diff manifests and blobs inside the measured owner envelope (owner=%s)',
+    async (owner) => {
+      const fake = createFakeStreamClient();
+      const key = `sha256:${'1'.repeat(64)}`;
+      const manifest = {
+        status: 'ok' as const,
+        base: 'base',
+        entries: [
+          {
+            path: '合成.txt',
+            status: 'ok' as const,
+            base: null,
+            head: { key, rawBytes: 3, format: { encoding: 'utf8' as const } },
+          },
+        ],
+        nextCursor: null,
+      };
+      const blob = {
+        offset: 0,
+        length: 3,
+        totalBytes: 3,
+        encoding: 'gzip-base64' as const,
+        data: 'SYNTHETIC_PRIVATE_BYTES',
+      };
+      const measured: number[] = [];
+      const measure = async (context: CodeCollabDiffReadContext, value: unknown) => {
+        expect(context.plane).toBe('remote');
+        if (context.plane !== 'remote') throw new Error('Remote context required.');
+        measured.push(await context.measureResponse(value));
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId: 'machine-1' as MachineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        resolveCodeCollabOwnerSessionId: async () => 'session-parent' as SessionId,
+        openCodeCollabDiffManifest: async (params, context) => {
+          expect(params).toEqual({ sessionId: 'child', path: '合成.txt' });
+          await measure(context, manifest);
+          return manifest;
+        },
+        readCodeCollabBlob: async (params, context) => {
+          expect(params).toEqual({ sessionId: 'child', key, offset: 0, length: 3 });
+          await measure(context, blob);
+          return blob;
+        },
+      });
+      const inputs = [
+        ['code-collab/open-diff-manifest', { sessionId: 'child', path: '合成.txt' }],
+        ['code-collab/read-blob', { sessionId: 'child', key, offset: 0, length: 3 }],
+      ] as const;
+      fake.pushBatch({
+        messages: await Promise.all(
+          inputs.map(async ([method, params], index) => ({
+            jsonrpc: '2.0',
+            id: `diff-${index}`,
+            method,
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 5000,
+            params: await encryptCodeCollabV2RpcPayload(owner, params),
+          }))
+        ),
+        nextOffset: '1',
+        cursor: '1',
+        upToDate: true,
+      });
+      await server.start();
+      try {
+        await fake.waitForAppendedCount(2);
+        for (const entry of fake.appended) {
+          const response = entry.value as {
+            method: string;
+            result?: CodeCollabV2RpcContentEnvelope;
+            error?: { code: string };
+          };
+          if (owner === 'wrong-owner') {
+            expect(response.error?.code).toBe('permission_denied');
+            expect(response.result).toBeUndefined();
+          } else {
+            const expected = response.method === inputs[0][0] ? manifest : blob;
+            expect(response.error).toBeUndefined();
+            expect(JSON.stringify(response)).not.toContain('SYNTHETIC_PRIVATE_BYTES');
+            expect(measured).toContain(
+              new TextEncoder().encode(JSON.stringify(response)).byteLength
+            );
+            expect(await decryptCodeCollabV2RpcPayload(response.result!, owner)).toEqual(expected);
+          }
+        }
+      } finally {
+        server.stop();
+      }
+    }
+  );
+
+  it.each(['session-parent', 'wrong-owner'])(
+    'authorizes and encrypts file download chunks (owner=%s)',
+    async (owner) => {
+      const fake = createFakeStreamClient();
+      const result = {
+        status: 'ok' as const,
+        path: 'asset.bin',
+        revision: 'a'.repeat(64),
+        offset: 0,
+        sizeBytes: 3,
+        data: 'AP8B',
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId: 'machine-1' as MachineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        resolveCodeCollabOwnerSessionId: async () => 'session-parent' as SessionId,
+        downloadFileChunk: async () => result,
+      });
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'download-1',
+            method: 'file/download-chunk',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 5000,
+            params: await encryptCodeCollabV2RpcPayload(owner, {
+              sessionId: 'child',
+              path: 'asset.bin',
+              offset: 0,
+            }),
+          },
+        ],
+        nextOffset: '1',
+        cursor: '1',
+        upToDate: true,
+      });
+      await server.start();
+      try {
+        await fake.waitForAppendedCount(1);
+        const response = fake.appended[0]?.value as {
+          result?: CodeCollabV2RpcContentEnvelope;
+          error?: { code: string };
+        };
+        if (owner === 'wrong-owner') {
+          expect(response.result).toBeUndefined();
+          expect(response.error?.code).toBe('permission_denied');
+        } else {
+          expect(response.error).toBeUndefined();
+          expect(response.result).not.toHaveProperty('data');
+          await expect(
+            decryptCodeCollabV2RpcPayload(response.result as CodeCollabV2RpcContentEnvelope, owner)
+          ).resolves.toEqual(result);
+        }
+      } finally {
+        server.stop();
+      }
+    }
+  );
+
+  it.each(['session-parent', 'wrong-owner'])(
+    'authorizes and encrypts session folder listings (owner=%s)',
+    async (owner) => {
+      const fake = createFakeStreamClient();
+      const result = {
+        status: 'ok' as const,
+        v: 3 as const,
+        path: 'docs',
+        entries: [{ name: 'plan.md', type: 'file' as const }],
+        truncated: false,
+      };
+      const listSessionDirectory = vi.fn(async () => result);
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId: 'machine-1' as MachineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        resolveCodeCollabOwnerSessionId: async () => 'session-parent' as SessionId,
+        listSessionDirectory,
+      });
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'list-1',
+            method: 'file/list-dir',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 5000,
+            params: await encryptCodeCollabV2RpcPayload(owner, {
+              v: 3,
+              sessionId: 'child',
+              path: 'docs',
+            }),
+          },
+        ],
+        nextOffset: '1',
+        cursor: '1',
+        upToDate: true,
+      });
+      await server.start();
+      try {
+        await fake.waitForAppendedCount(1);
+        const response = fake.appended[0]?.value as {
+          result?: CodeCollabV2RpcContentEnvelope;
+          error?: { code: string };
+        };
+        if (owner === 'wrong-owner') {
+          expect(response.result).toBeUndefined();
+          expect(response.error?.code).toBe('permission_denied');
+          expect(listSessionDirectory).not.toHaveBeenCalled();
+        } else {
+          expect(response.error).toBeUndefined();
+          expect(JSON.stringify(response)).not.toContain('plan.md');
+          await expect(
+            decryptCodeCollabV2RpcPayload(response.result as CodeCollabV2RpcContentEnvelope, owner)
+          ).resolves.toEqual(result);
+        }
+      } finally {
+        server.stop();
+      }
+    }
+  );
 
   it('serves file/preview through the owner-scoped encrypted envelope', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
@@ -1346,31 +2571,29 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const openCodeCollabTurnDiff = vi.fn(
-      async (): Promise<CodeCollabV2OpenTurnDiffResponse> => ({
-        status: 'ok',
-        path: 'src/app.ts',
-        turnId: 'turn-1',
-        oldSnapshot: {
-          kind: 'text',
-          text: {
-            encoding: 'plain',
-            text: 'old\n',
-            rawBytes: 4,
-          },
+    const openCodeCollabTurnDiff = vi.fn(async (): Promise<CodeCollabV2OpenTurnDiffResponse> => ({
+      status: 'ok',
+      path: 'src/app.ts',
+      turnId: 'turn-1',
+      oldSnapshot: {
+        kind: 'text',
+        text: {
+          encoding: 'plain',
+          text: 'old\n',
+          rawBytes: 4,
         },
-        newSnapshot: {
-          kind: 'text',
-          text: {
-            encoding: 'plain',
-            text: 'new\n',
-            rawBytes: 4,
-          },
+      },
+      newSnapshot: {
+        kind: 'text',
+        text: {
+          encoding: 'plain',
+          text: 'new\n',
+          rawBytes: 4,
         },
-        add: 1,
-        del: 1,
-      })
-    );
+      },
+      add: 1,
+      del: 1,
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -1456,18 +2679,16 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const openCodeCollabText = vi.fn(
-      async (): Promise<CodeCollabV2OpenTextOk> => ({
-        status: 'ok',
-        path: 'src/app.ts',
-        digest: `sha256:${'1'.repeat(64)}`,
-        text: {
-          encoding: 'plain',
-          text: 'hello',
-          rawBytes: 5,
-        },
-      })
-    );
+    const openCodeCollabText = vi.fn(async (): Promise<CodeCollabV2OpenTextOk> => ({
+      status: 'ok',
+      path: 'src/app.ts',
+      digest: `sha256:${'1'.repeat(64)}`,
+      text: {
+        encoding: 'plain',
+        text: 'hello',
+        rawBytes: 5,
+      },
+    }));
     const resolveCodeCollabOwnerSessionId = vi.fn(
       async (): Promise<SessionId> => 'session-parent' as SessionId
     );
@@ -1628,17 +2849,15 @@ describe('LoroStreamsMachineRpcServer', () => {
     const machineId = 'machine-1' as MachineId;
     const localProjectId = 'local-project-1' as LocalProjectId;
     const fake = createFakeStreamClient();
-    const dispatchLocalProjectControl = vi.fn(
-      async (): Promise<LocalProjectControlResponse> => ({
-        ok: true,
-        type: 'local-project/sync-history',
-        result: {
-          listed: 0,
-          lastListedAt: 1,
-          sessions: [],
-        },
-      })
-    );
+    const dispatchLocalProjectControl = vi.fn(async (): Promise<LocalProjectControlResponse> => ({
+      ok: true,
+      type: 'local-project/sync-history',
+      result: {
+        listed: 0,
+        lastListedAt: 1,
+        sessions: [],
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -1733,9 +2952,6 @@ describe('LoroStreamsMachineRpcServer', () => {
           expiresAt: Date.now() + 5000,
           params: {
             configId,
-            cliType: 'builtin',
-            agentType: 'codex',
-            env: { ACP_PROVIDER_TOKEN: 'secret-token' },
           },
         },
       ],
@@ -1805,10 +3021,6 @@ describe('LoroStreamsMachineRpcServer', () => {
           expiresAt: Date.now() + 5000,
           params: {
             configId,
-            cliType: 'custom',
-            agentType: 'custom-agent',
-            customAcp: { command: 'my-acp-agent', args: ['--stdio'] },
-            env: { ACP_PROVIDER_TOKEN: 'secret-token' },
           },
         },
       ],
@@ -1826,10 +3038,8 @@ describe('LoroStreamsMachineRpcServer', () => {
     expect(refreshMachineAcpCapabilities).toHaveBeenCalledWith(
       expect.objectContaining({
         configId,
-        cliType: 'custom',
-        agentType: 'custom-agent',
-        customAcp: { command: 'my-acp-agent', args: ['--stdio'] },
-        env: { ACP_PROVIDER_TOKEN: 'secret-token' },
+        // Absent on the wire means "the machine may answer from its cache".
+        force: false,
         onAcpBinaryProgress: expect.any(Function),
       })
     );
@@ -1843,6 +3053,63 @@ describe('LoroStreamsMachineRpcServer', () => {
           success: true,
         }),
       })
+    );
+
+    server.stop();
+  });
+
+  it('forwards a forced capability refresh so the machine cannot answer from its cache', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const fake = createFakeStreamClient();
+    const refreshMachineAcpCapabilities = vi.fn(
+      async (): Promise<MachineAcpCapabilitiesRefreshResponse> => ({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId,
+        configId,
+        cliType: 'custom' as const,
+        agentType: 'custom-agent' as const,
+        success: true,
+      })
+    );
+
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities,
+    });
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'req-forced',
+          method: 'machine/acp-capabilities-refresh',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          params: { configId, force: true },
+        },
+      ],
+      nextOffset: '4',
+      cursor: 'cursor-4',
+      upToDate: true,
+    });
+
+    await server.start();
+
+    await vi.waitFor(() => {
+      expect(fake.appended).toHaveLength(1);
+    });
+
+    expect(refreshMachineAcpCapabilities).toHaveBeenCalledWith(
+      expect.objectContaining({ configId, force: true })
     );
 
     server.stop();
@@ -1889,10 +3156,7 @@ describe('LoroStreamsMachineRpcServer', () => {
       replyTo: 'workspace-1:rpc:res:machine-1',
       sentAt: Date.now(),
       expiresAt: Date.now() + 5000,
-      params: {
-        cliType: 'builtin' as const,
-        agentType: 'codex',
-      },
+      params: {},
     };
     fake.pushBatch({
       messages: [
@@ -2041,8 +3305,6 @@ describe('LoroStreamsMachineRpcServer', () => {
           expiresAt: Date.now() + 5000,
           params: {
             configId,
-            cliType: 'builtin',
-            agentType: 'codex',
           },
         },
       ],
@@ -2064,105 +3326,108 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
-  it('appends structured ACP authorization before the final auth response', async () => {
-    const workspaceId = 'workspace-1' as WorkspaceId;
-    const machineId = 'machine-1' as MachineId;
-    const fake = createFakeStreamClient();
-    const authenticateMachineAcp = vi.fn(
-      async ({ onProgress }): Promise<MachineAcpAuthenticateResponse> => {
-        onProgress?.({
-          type: 'machine/acp-authentication-progress',
-          machineId,
-          requestId: 'auth-1',
-          agentType: 'kimi',
-          status: 'authorization',
-          authorizationUrl: 'https://www.kimi.com/code/authorize_device?user_code=GI5T-ACD0',
-          userCode: 'GI5T-ACD0',
-          expiresInSeconds: 1800,
-        });
-        return {
-          type: 'machine/acp-authenticate_response',
-          machineId,
-          requestId: 'auth-1',
-          agentType: 'kimi',
-          success: true,
-          disposition: 'authenticated',
-        };
-      }
-    );
-    const server = new LoroStreamsMachineRpcServer({
-      logger: createSilentLogger(),
-      workspaceId,
-      machineId,
-      streamClient: fake.streamClient,
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-      authenticateMachineAcp,
-    });
-
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
-          id: 'req-auth',
-          method: 'machine/acp-authenticate',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1',
-          replyTo: 'workspace-1:rpc:res:machine-1',
-          sentAt: Date.now(),
-          expiresAt: Date.now() + 5000,
-          params: {
+  it.each(['api-key', 'oauth', undefined])(
+    'forwards selected ACP method %s and appends authorization before the final response',
+    async (methodId) => {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      const fake = createFakeStreamClient();
+      const authenticateMachineAcp = vi.fn(
+        async ({
+          onProgress,
+          methodId: selectedMethodId,
+        }): Promise<MachineAcpAuthenticateResponse> => {
+          expect(selectedMethodId).toBe(methodId);
+          onProgress?.({
+            type: 'machine/acp-authentication-progress',
+            machineId,
             requestId: 'auth-1',
-            action: 'start',
-            configId,
-            cliType: 'builtin',
             agentType: 'kimi',
-            runtimeOverrides: { kimiPath: '/opt/kimi' },
+            status: 'authorization',
+            authorizationUrl: 'https://www.kimi.com/code/authorize_device?user_code=GI5T-ACD0',
+            userCode: 'GI5T-ACD0',
+            expiresInSeconds: 1800,
+          });
+          return {
+            type: 'machine/acp-authenticate_response',
+            machineId,
+            requestId: 'auth-1',
+            agentType: 'kimi',
+            success: true,
+            disposition: 'authenticated',
+          };
+        }
+      );
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId,
+        machineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        authenticateMachineAcp,
+      });
+
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: 'req-auth',
+            method: 'machine/acp-authenticate',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            replyTo: 'workspace-1:rpc:res:machine-1',
+            sentAt: Date.now(),
+            expiresAt: Date.now() + 5000,
+            params: {
+              requestId: 'auth-1',
+              action: 'start',
+              configId,
+              ...(methodId === undefined ? {} : { methodId }),
+            },
           },
-        },
-      ],
-      nextOffset: '5',
-      cursor: 'cursor-5',
-      upToDate: true,
-    });
+        ],
+        nextOffset: '5',
+        cursor: 'cursor-5',
+        upToDate: true,
+      });
 
-    await server.start();
+      await server.start();
 
-    await vi.waitFor(() => {
-      expect(fake.appended).toHaveLength(2);
-    });
+      await vi.waitFor(() => {
+        expect(fake.appended).toHaveLength(2);
+      });
 
-    expect(authenticateMachineAcp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requestId: 'auth-1',
-        action: 'start',
-        agentType: 'kimi',
-        runtimeOverrides: { kimiPath: '/opt/kimi' },
-        onProgress: expect.any(Function),
-      })
-    );
-    expect(
-      fake.appended.map((entry) => (entry.value as { result?: { type?: string } }).result?.type)
-    ).toEqual(['machine/acp-authentication-progress', 'machine/acp-authenticate_response']);
+      expect(authenticateMachineAcp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: 'auth-1',
+          action: 'start',
+          configId,
+          methodId,
+          onProgress: expect.any(Function),
+        })
+      );
+      expect(
+        fake.appended.map((entry) => (entry.value as { result?: { type?: string } }).result?.type)
+      ).toEqual(['machine/acp-authentication-progress', 'machine/acp-authenticate_response']);
 
-    server.stop();
-  });
+      server.stop();
+    }
+  );
 
   it('handles session preview create RPC requests', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const sessionId = 'session-1' as SessionId;
     const fake = createFakeStreamClient();
-    const createSessionPreview = vi.fn(
-      async (): Promise<SessionPreviewCreateResponse> => ({
-        type: 'session/preview-create_response',
-        sessionId,
-        success: false,
-        error: 'tunnel_not_configured',
-        message: 'Preview gateway is not configured.',
-      })
-    );
+    const createSessionPreview = vi.fn(async (): Promise<SessionPreviewCreateResponse> => ({
+      type: 'session/preview-create_response',
+      sessionId,
+      success: false,
+      error: 'tunnel_not_configured',
+      message: 'Remote preview is not configured.',
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -2187,6 +3452,7 @@ describe('LoroStreamsMachineRpcServer', () => {
           sentAt: Date.now(),
           expiresAt: Date.now() + 5000,
           params: {
+            proof: previewProof,
             sessionId: 'session-1',
             requestedByUserId: 'user-1',
             target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
@@ -2212,6 +3478,7 @@ describe('LoroStreamsMachineRpcServer', () => {
     });
 
     expect(createSessionPreview).toHaveBeenCalledWith({
+      proof: previewProof,
       sessionId,
       requestedByUserId: 'user-1',
       target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
@@ -2222,7 +3489,7 @@ describe('LoroStreamsMachineRpcServer', () => {
         confirmedByUserId: 'user-1',
         confirmedAt: 1000,
       },
-      replaceExisting: undefined,
+      restart: undefined,
     });
     expect(fake.appended[0]?.value).toEqual(
       expect.objectContaining({
@@ -2240,6 +3507,59 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
+  it('returns the project member probe through the request reply stream', async () => {
+    const fake = createFakeStreamClient();
+    const result = {
+      type: 'project/probe-local-member' as const,
+      repoFullName: 'acme/api',
+      isGit: true,
+      submodules: [{ path: 'proto', url: '../proto.git', repoFullName: 'acme/proto' }],
+    };
+    const server = new LoroStreamsMachineRpcServer({
+      now: () => 1,
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId: 'machine-1' as MachineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      probeLocalProjectMember: async ({ localProjectId, requestedByUserId }) => {
+        if (localProjectId !== 'local-1' || requestedByUserId !== 'user-1')
+          throw new Error('Access denied');
+        return result;
+      },
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'probe-1',
+          method: 'project/probe-local-member',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:client',
+          sentAt: 1,
+          expiresAt: 5001,
+          params: { localProjectId: 'local-1', requestedByUserId: 'user-1' },
+        },
+      ],
+      nextOffset: '1',
+      cursor: '1',
+      upToDate: true,
+    });
+    await server.start();
+    try {
+      await fake.waitForAppendedCount(1);
+      expect(fake.appended[0]).toMatchObject({
+        streamId: 'workspace-1:rpc:res:client',
+        value: { id: 'probe-1', method: 'project/probe-local-member', result },
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   it('handles local project git state RPC requests', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
@@ -2255,6 +3575,24 @@ describe('LoroStreamsMachineRpcServer', () => {
       state: { git: false as const },
     }));
 
+    const listLocalProjectBranches = vi.fn(async () => ({
+      type: 'local-project/list-branches_response' as const,
+      machineId,
+      workspaceId,
+      localProjectId,
+      success: true as const,
+      observedAtMs: 456,
+      result: {
+        git: true as const,
+        currentBranch: 'main',
+        defaultBranch: 'main',
+        pinnedBranches: ['main'],
+        branches: ['main'],
+        truncated: false,
+        totalCount: 1,
+      },
+    }));
+
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
       workspaceId,
@@ -2263,6 +3601,7 @@ describe('LoroStreamsMachineRpcServer', () => {
       getMachineStatus: vi.fn(),
       refreshMachineAcpCapabilities: vi.fn(),
       getLocalProjectGitState,
+      listLocalProjectBranches,
     });
 
     fake.pushBatch({
@@ -2282,6 +3621,23 @@ describe('LoroStreamsMachineRpcServer', () => {
             requestedByUserId: 'user-1',
           },
         },
+        {
+          jsonrpc: '2.0',
+          id: 'req-local-branches',
+          method: 'local-project/list-branches',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          params: {
+            localProjectId: 'local-project-1',
+            requestedByUserId: 'user-1',
+            query: 'ma',
+            limit: 10,
+          },
+        },
       ],
       nextOffset: '5',
       cursor: 'cursor-5',
@@ -2291,12 +3647,19 @@ describe('LoroStreamsMachineRpcServer', () => {
     await server.start();
 
     await vi.waitFor(() => {
-      expect(fake.appended).toHaveLength(1);
+      expect(fake.appended).toHaveLength(2);
     });
 
     expect(getLocalProjectGitState).toHaveBeenCalledWith({
       localProjectId,
       requestedByUserId: 'user-1',
+    });
+    expect(listLocalProjectBranches).toHaveBeenCalledWith({
+      localProjectId,
+      requestedByUserId: 'user-1',
+      query: 'ma',
+      limit: 10,
+      cursor: undefined,
     });
     expect(fake.appended[0]?.value).toEqual(
       expect.objectContaining({
@@ -2307,6 +3670,18 @@ describe('LoroStreamsMachineRpcServer', () => {
           type: 'local-project/git-state_response',
           success: true,
           state: { git: false },
+        }),
+      })
+    );
+    expect(fake.appended[1]?.value).toEqual(
+      expect.objectContaining({
+        jsonrpc: '2.0',
+        id: 'req-local-branches',
+        method: 'local-project/list-branches',
+        result: expect.objectContaining({
+          type: 'local-project/list-branches_response',
+          success: true,
+          result: expect.objectContaining({ git: true, branches: ['main'] }),
         }),
       })
     );
@@ -2366,20 +3741,18 @@ describe('LoroStreamsMachineRpcServer', () => {
       ),
     };
 
-    const getMachineStatus = vi.fn(
-      async (): Promise<MachineStatusResponse> => ({
-        type: 'machine/status_response' as const,
-        machineId,
-        success: true,
-        resources: {
-          totalMemoryGB: 16,
-          usedMemoryGB: 8,
-          freeMemoryGB: 8,
-          totalCpus: 8,
-          cpuUsagePercent: 25,
-        },
-      })
-    );
+    const getMachineStatus = vi.fn(async (): Promise<MachineStatusResponse> => ({
+      type: 'machine/status_response' as const,
+      machineId,
+      success: true,
+      resources: {
+        totalMemoryGB: 16,
+        usedMemoryGB: 8,
+        freeMemoryGB: 8,
+        totalCpus: 8,
+        cpuUsagePercent: 25,
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -2448,4 +3821,1022 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     server.stop();
   });
+
+  it('aborts in-flight capability work when a token auth failure stops the loop', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const authError = new LoroStreamsTokenAuthError('synthetic revoked token', 403, '{}');
+    let refreshSignal: AbortSignal | undefined;
+    let refreshStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      refreshStarted = resolve;
+    });
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async () => {}),
+      appendJson: vi.fn(async () => 'next-offset'),
+      readJsonLive: vi.fn(async (_streamId, _state, onBatch) => {
+        await onBatch({
+          messages: [
+            {
+              jsonrpc: '2.0',
+              id: 'refresh-in-flight',
+              method: 'machine/acp-capabilities-refresh',
+              rpcVersion: '1',
+              machineId,
+              workspaceId,
+              replyTo: 'workspace-1:rpc:res:machine-1',
+              sentAt: Date.now(),
+              expiresAt: Date.now() + 5000,
+              params: { configId },
+            },
+          ],
+          nextOffset: '1',
+          cursor: 'cursor-1',
+          upToDate: true,
+        });
+        await started;
+        throw authError;
+      }),
+    };
+    const onFatalAuthFailure = vi.fn();
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(
+        ({ signal }) =>
+          new Promise<MachineAcpCapabilitiesRefreshResponse>(() => {
+            refreshSignal = signal;
+            refreshStarted();
+          })
+      ),
+      onFatalAuthFailure,
+    });
+
+    await server.start();
+    await vi.waitFor(() => expect(onFatalAuthFailure).toHaveBeenCalledWith(authError));
+    expect(refreshSignal?.aborted).toBe(true);
+  });
+
+  it('keeps listening when recreating a missing request stream fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const workspaceId = 'workspace-1' as WorkspaceId;
+      const machineId = 'machine-1' as MachineId;
+      let ensureCalls = 0;
+      let reads = 0;
+      const streamClient: LoroStreamsJsonStreamClient = {
+        ensureJsonStream: vi.fn(async () => {
+          ensureCalls += 1;
+          if (ensureCalls === 2) throw new Error('synthetic gateway unavailable');
+        }),
+        appendJson: vi.fn(async () => 'next-offset'),
+        readJsonLive: vi.fn(async (_streamId, _state, _onBatch, options) => {
+          reads += 1;
+          if (reads <= 2) throw new LoroStreamsGatewayError('stream not found', 404);
+          await new Promise((_resolve, reject) =>
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            })
+          );
+        }),
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId,
+        machineId,
+        streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+      });
+
+      await server.start();
+      await vi.waitFor(() => expect(ensureCalls).toBe(2));
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(reads).toBe(3));
+      // Start, the failed recreate, then the retried recreate.
+      expect(ensureCalls).toBe(3);
+      server.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+it('round trips typed simulator commands and isolates unavailable and denied controls', async () => {
+  const wire: unknown[] = [];
+  const recipient = await createRpcSecretRecipient();
+  const requests = createFakeStreamClient(),
+    responses = createFakeStreamClient();
+  const forward =
+    (destination: ReturnType<typeof createFakeStreamClient>) =>
+    async (_streamId: string, value: unknown) => {
+      wire.push(value);
+      destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+      return '1';
+    };
+  const server = new LoroStreamsMachineRpcServer({
+    logger: createSilentLogger(),
+    workspaceId: 'w' as WorkspaceId,
+    machineId: 'm' as MachineId,
+    streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    controlIosSimulator: async (params) => {
+      if (params.proof.requestToken !== 'synthetic-preview-proof') throw new Error('Access denied');
+      return {
+        type: 'ios-simulator/control_response',
+        sessionId: params.sessionId,
+        success: true,
+        preview:
+          params.command.action === 'start'
+            ? {
+                operationId: 'op',
+                udid: params.command.udid,
+                phase: 'ready',
+                transport: 'remote',
+                viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+              }
+            : undefined,
+      };
+    },
+  });
+  const client = new LoroStreamsMachineRpcClient({
+    workspaceId: 'w',
+    machineId: 'm',
+    streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+  });
+  await server.start();
+  try {
+    const result = await client.requestIosSimulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'start', udid: '5519cb11-71c9-46d9-aeff-73c96f1104e0' },
+      proof: previewProof,
+      responseRecipient: recipient,
+    });
+    expect(result).toMatchObject({
+      success: true,
+      preview: {
+        phase: 'ready',
+        viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+        udid: '5519cb11-71c9-46d9-aeff-73c96f1104e0',
+      },
+    });
+    expect(JSON.stringify(wire)).not.toContain('synthetic-viewer-secret');
+    expect(JSON.stringify(wire)).not.toContain('https://viewer.example');
+    expect(IosSimulatorRemoteResponseSchema.safeParse(result).success).toBe(false);
+    const envelopeResponse = wire.find(
+      (v): v is { result: unknown } => typeof v === 'object' && v !== null && 'result' in v
+    );
+    const envelope = IosSimulatorRemoteResponseSchema.parse(envelopeResponse?.result).preview
+      ?.viewerUrlEnvelope;
+    if (!envelope) throw Error('Missing encrypted viewer capability');
+    const context = getIosSimulatorViewerSecretContext({
+      workspaceId: 'w',
+      machineId: 'm',
+      sessionId: 's',
+      requestId: previewProof.requestId,
+    });
+    await expect((await createRpcSecretRecipient()).decrypt(envelope, context)).rejects.toThrow();
+    await expect(recipient.decrypt(envelope, context + 'other-request')).rejects.toThrow();
+
+    const denied = await client.requestIosSimulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'list' },
+      proof: { ...previewProof, requestToken: 'forged' },
+      responseRecipient: recipient,
+    });
+    expect(denied).toMatchObject({ success: false, sessionId: 's', error: 'failed' });
+  } finally {
+    client.stop();
+    server.stop();
+  }
+});
+
+it('delivers Provider quota refresh results for the exact persisted config', async () => {
+  const fake = createFakeStreamClient();
+  const workspaceId = 'quota-workspace' as WorkspaceId;
+  const machineId = 'quota-machine' as MachineId;
+  const result = {
+    type: 'machine/provider-rate-limits-refresh_response' as const,
+    machineId,
+    configId: 'quota-provider' as AgentConfigId,
+    success: true,
+  };
+  const server = new LoroStreamsMachineRpcServer({
+    logger: createSilentLogger(),
+    workspaceId,
+    machineId,
+    streamClient: fake.streamClient,
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    refreshMachineProviderRateLimits: async (id) => ({
+      ...result,
+      success: id === result.configId,
+    }),
+  });
+  fake.pushBatch({
+    messages: [
+      {
+        jsonrpc: '2.0',
+        id: 'quota-request',
+        rpcVersion: '1',
+        method: 'machine/provider-rate-limits-refresh',
+        machineId,
+        workspaceId,
+        replyTo: `${workspaceId}:rpc:res:client`,
+        sentAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+        params: { configId: result.configId },
+      },
+    ],
+    nextOffset: '1',
+    cursor: '1',
+    upToDate: true,
+  });
+  await server.start();
+  try {
+    await fake.waitForAppendedCount(1);
+    expect(fake.appended[0]?.value).toMatchObject({
+      id: 'quota-request',
+      method: 'machine/provider-rate-limits-refresh',
+      result,
+    });
+  } finally {
+    server.stop();
+  }
+});
+
+it('bounds owner subscriptions separately from reads, sends and controls', async () => {
+  const fake = createFakeStreamClient();
+  let enter!: () => void, releaseWait!: () => void;
+  const entered = {
+    promise: new Promise<void>((resolve) => {
+      enter = resolve;
+    }),
+    resolve: () => enter(),
+  };
+  const release = {
+    promise: new Promise<void>((resolve) => {
+      releaseWait = resolve;
+    }),
+    resolve: () => releaseWait(),
+  };
+  let active = 0;
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'synthetic-workspace' as WorkspaceId,
+    machineId: 'synthetic-machine' as MachineId,
+    now: () => 1,
+    maxConcurrentRequests: 1,
+    maxPendingRequests: 1,
+    logger: createSilentLogger(),
+    streamClient: fake.streamClient,
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    historyRequestRejections: createHistoryRejectionStore(),
+    resolveSessionHistoryOwnerSessionId: async (id) => id,
+    subscribeSessionHistory: async ({ signal }) => {
+      if (++active === 128) entered.resolve();
+      try {
+        await release.promise;
+      } finally {
+        active--;
+      }
+      if (signal?.aborted) throw signal.reason;
+    },
+    authorizeSessionHistoryRead: async () => true,
+    readSessionHistory: async ({ sessionId, query }) => ({
+      type: 'session/history-read_response',
+      sessionId,
+      success: true,
+      historyRevision: 2,
+      historyCount: 1,
+      result:
+        query.kind === 'count'
+          ? 1
+          : { state: 'ready', checkpoint: 'checkpoint-2', ids: ['synthetic-body'] },
+    }),
+    authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
+    writeSessionHistory: async ({ sessionId, operation }) => ({
+      type: 'session/history-write_response',
+      sessionId,
+      operation,
+      success: true,
+      result: { status: 'accepted', turnId: 'synthetic-input', active: true },
+    }),
+    pingMachine: async ({ requestId }) => ({
+      type: 'machine/ping_response',
+      machineId: 'synthetic-machine' as MachineId,
+      requestId,
+      success: true,
+    }),
+  });
+  const base = {
+    jsonrpc: '2.0',
+    rpcVersion: '1',
+    workspaceId: 'synthetic-workspace',
+    machineId: 'synthetic-machine',
+    replyTo: 'synthetic-replies',
+    sentAt: 1,
+    expiresAt: 30_001,
+  };
+  const subscribe = async (id: string) => ({
+    ...base,
+    id,
+    method: 'session/history-subscribe',
+    params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+      sessionId: 'synthetic-session',
+      readProof: 'synthetic-proof',
+      subscription: { action: 'open', id: crypto.randomUUID(), checkpoint: 'checkpoint-1' },
+    }),
+  });
+  await server.start();
+  try {
+    fake.pushBatch({
+      messages: await Promise.all(
+        Array.from({ length: 128 }, (_, i) => subscribe(`subscription-${i}`))
+      ),
+      upToDate: true,
+    });
+    await entered.promise;
+    fake.pushBatch({
+      messages: [
+        await subscribe('overflow'),
+        {
+          ...base,
+          id: 'ordinary',
+          method: 'session/history-read',
+          params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+            sessionId: 'synthetic-session',
+            query: { kind: 'count' },
+          }),
+        },
+        {
+          ...base,
+          id: 'send',
+          method: 'session/history-write',
+          params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+            sessionId: 'synthetic-session',
+            operation: 'accept_input_and_dispatch',
+            payload: {},
+          }),
+        },
+        { ...base, id: 'ping', method: 'machine/ping', params: { requestId: 'synthetic-ping' } },
+      ],
+      upToDate: true,
+    });
+    await fake.waitForAppendedCount(4);
+    expect(active).toBe(128);
+    const replies = new Map(
+      fake.appended.map(({ value }) => [
+        (value as { id: string }).id,
+        value as { result: CodeCollabV2RpcContentEnvelope },
+      ])
+    );
+    expect([...replies.keys()].sort()).toEqual(['ordinary', 'overflow', 'ping', 'send']);
+    expect(replies.get('overflow')).toMatchObject({
+      error: { code: 'rpc_request_capacity_exceeded' },
+    });
+    expect(
+      await decryptCodeCollabV2RpcPayload(replies.get('ordinary')!.result, 'synthetic-session')
+    ).toMatchObject({ success: true, result: 1 });
+    expect(
+      await decryptCodeCollabV2RpcPayload(replies.get('send')!.result, 'synthetic-session')
+    ).toMatchObject({ success: true, result: { status: 'accepted' } });
+    release.resolve();
+    await fake.waitForAppendedCount(132);
+    expect(active).toBe(0);
+    const closed = fake.appended.find(
+      ({ value }) => (value as { id: string }).id === 'subscription-0'
+    )!.value as { result: CodeCollabV2RpcContentEnvelope };
+    expect(await decryptCodeCollabV2RpcPayload(closed.result, 'synthetic-session')).toMatchObject({
+      type: 'session/history-subscription_response',
+      event: 'closed',
+    });
+  } finally {
+    release.resolve();
+    server.stop();
+  }
+});
+
+it.each([true, false])(
+  'streams owner checkpoints and checks the current read grant before delivery (allowed: %s)',
+  async (allowed) => {
+    const requests = createFakeStreamClient();
+    const responses = createFakeStreamClient();
+    const forward =
+      (destination: ReturnType<typeof createFakeStreamClient>) =>
+      async (_id: string, value: unknown) => {
+        destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+        return '1';
+      };
+    let release!: () => void;
+    let first!: () => void;
+    const waitForRelease = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const waitForFirst = new Promise<void>((resolve) => {
+      first = resolve;
+    });
+    const workspaceId = 'synthetic-workspace' as WorkspaceId;
+    const machineId = 'synthetic-machine' as MachineId;
+    const sessionId = 'synthetic-session' as SessionId;
+    const subscriptionId = crypto.randomUUID();
+    const wire: unknown[] = [];
+    const checkpoints: string[] = [];
+    let current = true;
+    const server = new LoroStreamsMachineRpcServer({
+      workspaceId,
+      machineId,
+      logger: createSilentLogger(),
+      streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      historyRequestRejections: createHistoryRejectionStore(),
+      resolveSessionHistoryOwnerSessionId: async (id) => id,
+      authorizeSessionHistoryRead: async ({ readProof }) =>
+        current && readProof === 'synthetic-proof',
+      subscribeSessionHistory: async ({ subscription, signal, publish }) => {
+        if (subscription.action !== 'open') throw new Error('Unexpected close');
+        await publish({ checkpoint: subscription.checkpoint!, revision: 1 }, signal);
+        await waitForRelease;
+        await publish({ checkpoint: 'owner-2', revision: 2 }, signal);
+      },
+    });
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId,
+      machineId,
+      streamClient: {
+        ...responses.streamClient,
+        appendJson: async (id, value) => {
+          wire.push(value);
+          return forward(requests)(id, value);
+        },
+      },
+    });
+    await server.start();
+    try {
+      const subscription = client.requestSessionHistorySubscription({
+        sessionId,
+        readProof: 'synthetic-proof',
+        subscription: { action: 'open', id: subscriptionId, checkpoint: 'owner-1' },
+        onPublication: ({ checkpoint }) => {
+          checkpoints.push(checkpoint);
+          first();
+        },
+      });
+      await waitForFirst;
+      expect(checkpoints).toEqual(['owner-1']);
+      expect(wire[0]).toMatchObject({
+        method: 'session/history-subscribe',
+        params: { ownerSessionId: sessionId },
+      });
+      expect(JSON.stringify(wire)).not.toMatch(/owner-1|synthetic-proof/);
+      current = allowed;
+      release();
+      const result = await subscription;
+      if (allowed) {
+        expect(result).toMatchObject({ event: 'closed', subscriptionId });
+        expect(checkpoints).toEqual(['owner-1', 'owner-2']);
+      } else {
+        expect(result).toMatchObject({ event: 'closed', error: 'session_history_read_denied' });
+        expect(checkpoints).toEqual(['owner-1']);
+      }
+    } finally {
+      release();
+      client.stop();
+      server.stop();
+    }
+  }
+);
+
+it('keeps stop and steer responsive while automation proof verification is blocked', async () => {
+  const fake = createFakeStreamClient();
+  let signalStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    signalStarted = resolve;
+  });
+  let releaseAutomation!: () => void;
+  const release = new Promise<void>((resolve) => {
+    releaseAutomation = resolve;
+  });
+  let active = 0;
+  const machineId = 'synthetic-machine' as MachineId;
+  const sessionId = 'synthetic-session' as SessionId;
+  const recipient = await createRpcSecretRecipient();
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'synthetic-workspace' as WorkspaceId,
+    machineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    streamClient: fake.streamClient,
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    getAutomationControl: async () => ({
+      type: 'machine/automation-control_response',
+      machineId,
+      success: true,
+      runtimeNonce: previewProof.runtimeNonce,
+    }),
+    controlAutomation: async () => {
+      if (++active === 4) signalStarted();
+      await release;
+      return {
+        type: 'session/automation-control_response',
+        sessionId,
+        success: true,
+        result: { type: 'settings', settings: {} },
+      };
+    },
+    cancelSession: async () => ({ type: 'session/cancel_response', sessionId, success: true }),
+    steerSession: async ({ userTurnId }) => ({
+      type: 'session/steer_response',
+      sessionId,
+      userTurnId,
+      applied: true,
+      disposition: 'applied',
+    }),
+  });
+  const base = {
+    jsonrpc: '2.0',
+    rpcVersion: '1',
+    workspaceId: 'synthetic-workspace',
+    machineId,
+    replyTo: 'synthetic-replies',
+    sentAt: 1,
+    expiresAt: 30_001,
+  };
+  try {
+    await server.start();
+    fake.pushBatch({
+      messages: await Promise.all(
+        Array.from({ length: 4 }, async (_, index) => ({
+          ...base,
+          id: `automation-${index}`,
+          method: 'session/automation-control',
+          params: await encryptCodeCollabV2RpcPayload(sessionId, {
+            sessionId,
+            requesterUserId: 'user',
+            operation: { type: 'settings' },
+            proof: { ...previewProof, requestId: `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb${index}` },
+            responseKey: recipient.publicKey,
+          }),
+        }))
+      ),
+      upToDate: true,
+    });
+    await started;
+    fake.pushBatch({
+      messages: [
+        { ...base, id: 'stop', method: 'session/cancel', params: { sessionId, turnId: 'turn' } },
+        {
+          ...base,
+          id: 'steer',
+          method: 'session/steer',
+          params: {
+            sessionId,
+            expectedTurnId: 'turn',
+            userTurnId: 'new-turn',
+            userId: 'user',
+            timestamp: '2026-01-01',
+            inputConfig: { prompt: 'continue' },
+          },
+        },
+        { ...base, id: 'handshake', method: 'machine/automation-control', params: {} },
+      ],
+      upToDate: true,
+    });
+    await fake.waitForAppendedCount(3);
+    expect(fake.appended.map(({ value }) => value)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'stop', result: expect.objectContaining({ success: true }) }),
+        expect.objectContaining({
+          id: 'steer',
+          result: expect.objectContaining({ applied: true }),
+        }),
+        expect.objectContaining({
+          id: 'handshake',
+          result: expect.objectContaining({ success: true }),
+        }),
+      ])
+    );
+    releaseAutomation();
+    await fake.waitForAppendedCount(7);
+  } finally {
+    releaseAutomation();
+    server.stop();
+  }
+});
+
+it.each([1, 16])(
+  'keeps send and control replies independent of %i saturated history-read handlers across batches',
+  async (capacity) => {
+    const fake = createFakeStreamClient();
+    let readStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    let releaseReads!: () => void;
+    const reads = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    let activeReads = 0;
+    const accepted: string[] = [];
+    const server = new LoroStreamsMachineRpcServer({
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+      machineId: 'synthetic-machine' as MachineId,
+      now: () => 1,
+      maxConcurrentRequests: capacity,
+      maxPendingRequests: capacity,
+      logger: createSilentLogger(),
+      streamClient: fake.streamClient,
+      getMachineStatus: async () => {
+        throw new Error('Unexpected status');
+      },
+      refreshMachineAcpCapabilities: async () => {
+        throw new Error('Unexpected refresh');
+      },
+      historyRequestRejections: createHistoryRejectionStore(),
+      resolveSessionHistoryOwnerSessionId: async (id) => id,
+      authorizeSessionHistoryRead: async () => true,
+      readSessionHistory: async ({ sessionId }) => {
+        if (++activeReads === capacity) readStarted();
+        await reads;
+        return {
+          type: 'session/history-read_response',
+          sessionId,
+          success: true,
+          result: 120,
+          historyCount: 120,
+          historyRevision: 1,
+        };
+      },
+      authorizeSessionHistoryWrite: async () => ({ expiresAt: Number.MAX_SAFE_INTEGER }),
+      writeSessionHistory: async ({ sessionId, operation }) => {
+        accepted.push('synthetic-input');
+        return {
+          type: 'session/history-write_response',
+          sessionId,
+          operation,
+          success: true,
+          result: { status: 'accepted', turnId: 'synthetic-input', active: true },
+        };
+      },
+      pingMachine: async ({ requestId }) => ({
+        type: 'machine/ping_response',
+        machineId: 'synthetic-machine' as MachineId,
+        requestId,
+        success: true,
+      }),
+    });
+    const base = {
+      jsonrpc: '2.0',
+      rpcVersion: '1',
+      workspaceId: 'synthetic-workspace',
+      machineId: 'synthetic-machine',
+      replyTo: 'synthetic-replies',
+      sentAt: 1,
+      expiresAt: 30_001,
+    };
+    const read = async (id: string) => ({
+      ...base,
+      id,
+      method: 'session/history-read',
+      params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+        sessionId: 'synthetic-session',
+        query: { kind: 'count' },
+      }),
+    });
+    try {
+      await server.start();
+      fake.pushBatch({
+        messages: await Promise.all(Array.from({ length: capacity }, (_, i) => read(`read-${i}`))),
+        upToDate: true,
+      });
+      await started;
+      fake.pushBatch({
+        messages: [
+          await read('queued-read'),
+          {
+            ...base,
+            id: 'send',
+            method: 'session/history-write',
+            params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+              sessionId: 'synthetic-session',
+              operation: 'accept_input_and_dispatch',
+              payload: {},
+            }),
+          },
+          { ...base, id: 'ping', method: 'machine/ping', params: { requestId: 'synthetic-ping' } },
+        ],
+        upToDate: true,
+      });
+      await fake.waitForAppendedCount(3);
+      expect(accepted).toEqual(['synthetic-input']);
+      expect(fake.appended.map((reply) => (reply.value as { id: string }).id).sort()).toEqual([
+        'ping',
+        'queued-read',
+        'send',
+      ]);
+      expect(
+        fake.appended.find((reply) => (reply.value as { id: string }).id === 'queued-read')?.value
+      ).toMatchObject({ error: { code: 'rpc_request_capacity_exceeded' } });
+      releaseReads();
+      await fake.waitForAppendedCount(capacity + 3);
+    } finally {
+      releaseReads();
+      server.stop();
+    }
+  }
+);
+
+it('round trips Android commands and isolates unavailable and denied controls', async () => {
+  const wire: unknown[] = [];
+  const recipient = await createRpcSecretRecipient();
+  const requests = createFakeStreamClient(),
+    responses = createFakeStreamClient();
+  const forward =
+    (destination: ReturnType<typeof createFakeStreamClient>) =>
+    async (_streamId: string, value: unknown) => {
+      wire.push(value);
+      destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+      return '1';
+    };
+  const server = new LoroStreamsMachineRpcServer({
+    logger: createSilentLogger(),
+    workspaceId: 'w' as WorkspaceId,
+    machineId: 'm' as MachineId,
+    streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    controlAndroidEmulator: async (params) => {
+      if (params.proof.requestToken !== 'synthetic-preview-proof') throw new Error('Access denied');
+      return {
+        type: 'android-emulator/control_response',
+        sessionId: params.sessionId,
+        success: true,
+        preview:
+          params.command.action === 'start'
+            ? {
+                operationId: 'op',
+                id: params.command.id,
+                phase: 'ready',
+                transport: 'remote',
+                viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+              }
+            : undefined,
+      };
+    },
+  });
+  const client = new LoroStreamsMachineRpcClient({
+    workspaceId: 'w',
+    machineId: 'm',
+    streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+  });
+  await server.start();
+  try {
+    const result = await client.requestAndroidEmulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'start', id: 'Pixel_8' },
+      proof: previewProof,
+      responseRecipient: recipient,
+    });
+    expect(result).toMatchObject({
+      success: true,
+      preview: {
+        phase: 'ready',
+        viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+        id: 'Pixel_8',
+      },
+    });
+    expect(JSON.stringify(wire)).not.toContain('synthetic-viewer-secret');
+    expect(JSON.stringify(wire)).not.toContain('https://viewer.example');
+    expect(AndroidEmulatorRemoteResponseSchema.safeParse(result).success).toBe(false);
+    const envelopeResponse = wire.find(
+      (v): v is { result: unknown } => typeof v === 'object' && v !== null && 'result' in v
+    );
+    const envelope = AndroidEmulatorRemoteResponseSchema.parse(envelopeResponse?.result).preview
+      ?.viewerUrlEnvelope;
+    if (!envelope) throw Error('Missing encrypted viewer capability');
+    const context = getAndroidEmulatorViewerSecretContext({
+      workspaceId: 'w',
+      machineId: 'm',
+      sessionId: 's',
+      requestId: previewProof.requestId,
+    });
+    await expect((await createRpcSecretRecipient()).decrypt(envelope, context)).rejects.toThrow();
+    await expect(recipient.decrypt(envelope, context + 'other-request')).rejects.toThrow();
+
+    const denied = await client.requestAndroidEmulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'list' },
+      proof: { ...previewProof, requestToken: 'forged' },
+      responseRecipient: recipient,
+    });
+    expect(denied).toMatchObject({ success: false, sessionId: 's', error: 'failed' });
+  } finally {
+    client.stop();
+    server.stop();
+  }
+});
+
+it('admits a session-only read proof without lending it to another session or write; revocation rechecks', async () => {
+  const fake = createFakeStreamClient();
+  let granted = true;
+  const readIds: string[] = [],
+    writeIds: string[] = [];
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'synthetic-workspace' as WorkspaceId,
+    machineId: 'synthetic-machine' as MachineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    streamClient: fake.streamClient,
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    historyRequestRejections: createHistoryRejectionStore(),
+    resolveSessionHistoryOwnerSessionId: async (id) => id,
+    authorizeSessionHistoryRead: async ({ sessionId, readProof }) =>
+      granted && sessionId === 'shared-session' && readProof === 'synthetic-session-read-proof',
+    readSessionHistory: async ({ sessionId }) => {
+      readIds.push(sessionId);
+      return {
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        result: ['readable-history'],
+      };
+    },
+    authorizeSessionHistoryWrite: async () => null,
+    writeSessionHistory: async ({ sessionId, operation }) => {
+      writeIds.push(sessionId);
+      return { type: 'session/history-write_response', sessionId, operation, success: true };
+    },
+  });
+  const send = async (
+    id: string,
+    sessionId: string,
+    write = false,
+    proof: string | undefined = 'synthetic-session-read-proof'
+  ) => {
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id,
+          rpcVersion: '1',
+          workspaceId: 'synthetic-workspace',
+          machineId: 'synthetic-machine',
+          replyTo: 'native-query',
+          sentAt: 1,
+          expiresAt: 100,
+          method: write ? 'session/history-write' : 'session/history-read',
+          params: await encryptCodeCollabV2RpcPayload(sessionId, {
+            sessionId,
+            ...(write ? { operation: 'append', payload: {} } : { query: { kind: 'count' } }),
+            ...(proof ? { readProof: proof } : {}),
+          }),
+        },
+      ],
+      upToDate: true,
+    });
+  };
+  await server.start();
+  try {
+    await send('read', 'shared-session');
+    await fake.waitForAppendedCount(1);
+    expect(readIds).toEqual(['shared-session']);
+    await send('other', 'other-session');
+    await fake.waitForAppendedCount(2);
+    await send('write', 'shared-session', true, undefined);
+    await fake.waitForAppendedCount(3);
+    granted = false;
+    await send('revoked', 'shared-session');
+    await fake.waitForAppendedCount(4);
+    expect(readIds).toEqual(['shared-session']);
+    expect(writeIds).toEqual([]);
+    const replies = fake.appended.map((x) => x.value as { id: string; error?: { code: string } });
+    expect(replies.find((x) => x.id === 'other')?.error?.code).toBe('session_history_read_denied');
+    expect(replies.find((x) => x.id === 'revoked')?.error?.code).toBe(
+      'session_history_read_denied'
+    );
+    expect(replies.find((x) => x.id === 'write')?.error).toBeDefined();
+  } finally {
+    server.stop();
+  }
+});
+
+it('preserves encrypted point-in-time history semantics through the real feature adapter without entering writes', async () => {
+  const observed: string[] = [];
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'workspace' as WorkspaceId,
+    machineId: 'machine' as MachineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    resolveSessionHistoryOwnerSessionId: async (id) => id,
+    readSessionHistory: async ({ sessionId, query }) => {
+      observed.push(query.kind);
+      return {
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        historyRevision: 1,
+        historyCount: 0,
+        result: { state: 'ready', checkpoint: 'next', ids: [] },
+      };
+    },
+    writeSessionHistory: async () => {
+      throw new Error('history read started a write');
+    },
+  });
+  try {
+    const result = await server.readFeatureQuery(
+      {
+        method: 'session/history-read',
+        machineId: 'machine',
+        workspaceId: 'workspace',
+        params: {
+          sessionId: 'root' as SessionId,
+          query: { kind: 'readChanges', checkpoint: 'previous' },
+        },
+      },
+      {
+        requestId: 'synthetic',
+        expiresAt: 1000,
+        signal: new AbortController().signal,
+        authority: { isCurrent: () => true, signal: new AbortController().signal },
+      }
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        type: 'session/history-read_response',
+        success: true,
+        result: { checkpoint: 'next' },
+      },
+    });
+    expect(observed).toEqual(['readChanges']);
+  } finally {
+    server.stop();
+  }
+});
+
+it('drops encrypted history when authority is withdrawn during an in-flight read', async () => {
+  let current = true;
+  const observed: string[] = [];
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: 'workspace' as WorkspaceId,
+    machineId: 'machine' as MachineId,
+    now: () => 1,
+    logger: createSilentLogger(),
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    resolveSessionHistoryOwnerSessionId: async (id) => id,
+    readSessionHistory: async ({ sessionId, query }) => {
+      observed.push(query.kind);
+      current = false;
+      return {
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        historyRevision: 1,
+        historyCount: 0,
+        result: { state: 'ready', checkpoint: 'next', ids: [] },
+      };
+    },
+    writeSessionHistory: async () => {
+      throw new Error('history read started a write');
+    },
+  });
+  try {
+    const result = await server.readFeatureQuery(
+      {
+        method: 'session/history-read',
+        machineId: 'machine',
+        workspaceId: 'workspace',
+        params: {
+          sessionId: 'root' as SessionId,
+          query: { kind: 'readChanges', checkpoint: 'previous' },
+        },
+      },
+      {
+        requestId: 'synthetic',
+        expiresAt: 1000,
+        signal: new AbortController().signal,
+        authority: { isCurrent: () => current, signal: new AbortController().signal },
+      }
+    );
+    expect(result).toMatchObject({ ok: false, code: 'session_history_read_denied' });
+    expect(JSON.stringify(result)).not.toContain('checkpoint');
+    expect(observed).toEqual(['readChanges']);
+  } finally {
+    server.stop();
+  }
 });

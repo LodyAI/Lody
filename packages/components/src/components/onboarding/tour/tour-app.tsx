@@ -1,11 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Provider } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import type { AgentBrandId, AgentConfigCliType, SessionId, SessionMeta } from '@lody/shared';
+import type {
+  AgentBrandId,
+  AgentConfigCliType,
+  MessageContent,
+  SessionId,
+  SessionMeta,
+} from '@lody/shared';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
-import { PermissionRequestCard } from '@/components/sessions/floating-permission-request';
+import { PermissionPrompt } from '@/components/sessions/floating-permission-request';
 import {
   SessionConversationPage,
   SessionConversationPageBody,
@@ -21,7 +27,15 @@ import {
 } from '@/components/sessions/session-side-panel-tab-bar';
 import { SessionTabBar } from '@/components/sessions/session-tab-bar';
 import { PrTabView } from '@/components/sessions/pr-tab-view';
-import { TerminalDock } from '@/components/terminal/terminal-dock';
+/* xterm stays out of the boot chunk even though the onboarding graph is
+   statically imported: the dock only ever mounts after `terminalEverOpened`,
+   so React.lazy fetches the chunk on exactly the same render that would have
+   mounted a static import — the still-0-height pre-mount is unchanged. */
+const TerminalDock = lazy(() =>
+  import('@/components/terminal/terminal-dock').then((module) => ({
+    default: module.TerminalDock,
+  }))
+);
 import { buildAcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import { StableSessionContext } from '@/hooks/useStableSession';
 import { cn } from '@/lib/utils';
@@ -37,6 +51,7 @@ import {
   TOUR_PULL_REQUEST,
   TOUR_SESSION_ID,
   TOUR_TASKS,
+  buildPermissionItem,
   buildTourHistory,
   buildTourSession,
   buildTourStableSession,
@@ -45,12 +60,13 @@ import {
   type TourIdentity,
 } from './tour-fixtures';
 import { TourBrowserPreview } from './tour-browser-preview';
+import { TourCloudBoundary } from './tour-cloud-boundary';
 
 // The app the tour is a tour OF.
 //
 // Not a drawing of it, not a "preview", not a fixed-size still life scaled into
 // a card. This is `LoroSidebar` beside `DesktopSessionDetailLayout`, holding
-// `SessionTabBar`, `SessionChatStreamView`, `PermissionRequestCard`,
+// `SessionTabBar`, `SessionChatStreamView`, `PermissionPrompt`,
 // `SessionInfoBar`, `SessionChatInputArea`, `SessionSidePanelTabBar`,
 // `SessionChangesSidebar` and `TerminalDock` — every one of them the component
 // production mounts, in the position production mounts it.
@@ -144,6 +160,12 @@ export type TourAppProps = {
   className?: string;
 };
 
+/** The pending request the run stops on, as the product's prompt receives it. */
+const TOUR_PERMISSION_TOOL_CALL = buildPermissionItem(null) as Extract<
+  MessageContent,
+  { type: 'tool_call' }
+>;
+
 const TOUR_PROMPT = 'Have a look at the auth module and clean it up.';
 /** What the film types into the composer to start the second task. */
 const TOUR_SECOND_PROMPT = 'Add tests for the token expiry path.';
@@ -177,25 +199,27 @@ export function TourApp({
   const session = useMemo(() => buildTourSession(identity), [identity]);
 
   return (
-    <Provider store={store}>
-      <StableSessionContext.Provider value={stableSession as never}>
-        <TourWindow
-          identity={identity}
-          session={session}
-          tracks={tracks}
-          configurationState={configurationState}
-          permissionAnswer={permissionAnswer}
-          onPermissionAnswer={onPermissionAnswer}
-          activeSidePanelTab={activeSidePanelTab}
-          onSidePanelTabSelect={onSidePanelTabSelect}
-          selectedTaskId={selectedTaskId}
-          activeTabIndex={activeTabIndex}
-          onSelectTabIndex={onSelectTabIndex}
-          onMergePr={onMergePr}
-          className={className}
-        />
-      </StableSessionContext.Provider>
-    </Provider>
+    <TourCloudBoundary identity={identity}>
+      <Provider store={store}>
+        <StableSessionContext.Provider value={stableSession as never}>
+          <TourWindow
+            identity={identity}
+            session={session}
+            tracks={tracks}
+            configurationState={configurationState}
+            permissionAnswer={permissionAnswer}
+            onPermissionAnswer={onPermissionAnswer}
+            activeSidePanelTab={activeSidePanelTab}
+            onSidePanelTabSelect={onSidePanelTabSelect}
+            selectedTaskId={selectedTaskId}
+            activeTabIndex={activeTabIndex}
+            onSelectTabIndex={onSelectTabIndex}
+            onMergePr={onMergePr}
+            className={className}
+          />
+        </StableSessionContext.Provider>
+      </Provider>
+    </TourCloudBoundary>
   );
 }
 
@@ -258,6 +282,15 @@ function TourWindow({
     }));
   }, [identity.projectName, merged, tracks.archived, tracks.pr, tracks.tasks]);
 
+  // Once onboarding has sent the person's own first task, the run on screen is
+  // theirs: their words open the conversation and name the tab, and the
+  // composer they typed into is empty again. The sidebar lists it as the
+  // project's first session.
+  const sentPrompt =
+    configurationState?.conversationStatus === 'starting'
+      ? configurationState.promptValue.trim() || null
+      : null;
+
   /**
    * The project groups the sidebar renders.
    *
@@ -270,32 +303,48 @@ function TourWindow({
     return [...names].map((repoFullName) => ({
       id: repoFullName,
       repoFullName,
-      items: visibleTasks
-        .filter((task) => task.repoFullName === repoFullName)
-        .map((task) => ({
-          id: task.taskId,
-          title: task.title,
-          isSelected: task.taskId === selectedTaskId,
-        })),
+      items: [
+        ...(sentPrompt && repoFullName === identity.projectName
+          ? [{ id: TOUR_SESSION_ID, title: sentPrompt, isSelected: true }]
+          : []),
+        ...visibleTasks
+          .filter((task) => task.repoFullName === repoFullName)
+          .map((task) => ({
+            id: task.taskId,
+            title: task.title,
+            isSelected: !sentPrompt && task.taskId === selectedTaskId,
+          })),
+      ],
     }));
-  }, [identity.projectName, selectedTaskId, visibleTasks]);
+  }, [identity.projectName, selectedTaskId, sentPrompt, visibleTasks]);
 
   const history = useMemo(
     () =>
       buildTourHistory({
-        prompt: TOUR_PROMPT,
+        prompt: sentPrompt ?? TOUR_PROMPT,
         revealed: tracks.reveal,
         permissionAnswer,
         subagents: tracks.subagents >= 0.5,
         taskId: selectedTaskId,
       }),
-    [permissionAnswer, selectedTaskId, tracks.reveal, tracks.subagents]
+    [permissionAnswer, selectedTaskId, sentPrompt, tracks.reveal, tracks.subagents]
+  );
+  const shownSession = useMemo(
+    () => (sentPrompt ? { ...session, title: sentPrompt } : session),
+    [sentPrompt, session]
   );
 
+  // A setup preview before anything has been sent shows the conversation as a
+  // fresh install has it: empty. Nothing is drawn that has not happened.
+  const emptyConversation =
+    configurationState !== undefined && sentPrompt === null && tracks.reveal <= 0;
   const items = useMemo(
     () =>
-      history.map((message) => ({ type: 'message', sessionId: TOUR_SESSION_ID, message }) as const),
-    [history]
+      (emptyConversation ? [] : history).map(
+        (message, turnIndex) =>
+          ({ type: 'message', sessionId: TOUR_SESSION_ID, message, turnIndex }) as const
+      ),
+    [emptyConversation, history]
   );
 
   /**
@@ -320,14 +369,16 @@ function TourWindow({
    */
   const typedRef = useRef<string>('');
   useEffect(() => {
-    const target = configurationState?.promptValue ?? (tracks.typing > 0 ? TOUR_SECOND_PROMPT : '');
+    const target = sentPrompt
+      ? ''
+      : (configurationState?.promptValue ?? (tracks.typing > 0 ? TOUR_SECOND_PROMPT : ''));
     const shown = configurationState
       ? target
       : target.slice(0, Math.round(target.length * Math.min(1, tracks.typing)));
     if (shown === typedRef.current) return;
     typedRef.current = shown;
     composerRef.current?.setInputText(shown);
-  }, [configurationState, tracks.typing]);
+  }, [configurationState, sentPrompt, tracks.typing]);
 
   const stagedAnnotation = useRef(false);
   useEffect(() => {
@@ -482,7 +533,7 @@ function TourWindow({
       {/* Window chrome. The tour is a WINDOW on a desk, not a fullscreen slab:
           nobody runs their editor fullscreen, and a frameless rectangle reads
           as a screenshot of a product rather than a product. */}
-      <div className="flex h-9 shrink-0 items-center gap-2  px-4">
+      <div data-tour-anchor="window.chrome" className="flex h-9 shrink-0 items-center gap-2  px-4">
         <span className="flex items-center gap-1.5">
           <span className="size-[11px] rounded-full bg-[#ff5f57]" />
           <span className="size-[11px] rounded-full bg-[#febc2e]" />
@@ -494,10 +545,10 @@ function TourWindow({
         <span className="w-14" />
       </div>
 
-      <div className="flex min-h-0 flex-1 m-2">
+      <div className="flex min-h-0 flex-1">
         <div data-tour-anchor="sidebar" className="h-full w-[280px] shrink-0 overflow-hidden">
           <LoroSidebar
-            className="border border-border h-full w-[280px]"
+            className="h-full w-[280px] border-r-[0.5px] border-sidebar-border/70 bg-sidebar"
             defaultWidth={280}
             minWidth={280}
             maxWidth={280}
@@ -509,6 +560,8 @@ function TourWindow({
             }
             activeNav="home"
             repoSections={repoSections}
+            // Setup previews someone's own, still-empty Lody: no invented chats.
+            chats={configurationState ? [] : undefined}
           />
         </div>
 
@@ -526,7 +579,7 @@ function TourWindow({
               <div data-tour-anchor="tab-bar">
                 <SessionTabBar
                   variant="session"
-                  parentSession={session}
+                  parentSession={shownSession}
                   childSessions={childSessions}
                   draftTabs={[]}
                   archivedChildSessions={[]}
@@ -556,17 +609,22 @@ function TourWindow({
                         <SessionChatStreamView
                           sessionId={TOUR_SESSION_ID}
                           items={items}
+                          // A fresh window says nothing about its emptiness; the
+                          // product's own "no messages" line would be noise here.
+                          emptyState={emptyConversation ? <span /> : undefined}
                           renderMessageRow={({ message, sessionId }) => (
                             <MessageRowView message={message} sessionId={sessionId} />
                           )}
                           className="h-full"
                           agentActivityLabel={
-                            configurationActivity?.label ??
-                            (permissionPending
-                              ? t('sessions.statusIndicator.requestPermission')
-                              : Math.floor(tracks.reveal) >= 13
-                                ? null
-                                : t('sessions.statusIndicator.running'))
+                            emptyConversation
+                              ? (configurationActivity?.label ?? null)
+                              : (configurationActivity?.label ??
+                                (permissionPending
+                                  ? t('sessions.statusIndicator.requestPermission')
+                                  : Math.floor(tracks.reveal) >= 13
+                                    ? null
+                                    : t('sessions.statusIndicator.running')))
                           }
                           agentActivityTone={
                             configurationActivity?.tone ??
@@ -581,12 +639,9 @@ function TourWindow({
                         // scripted cursor presses the real button inside it; the
                         // resolution is this component resolving, not a flag.
                         <div data-tour-anchor="permission" className="px-3 pb-2">
-                          <PermissionRequestCard
-                            title="Bash(pnpm typecheck)"
-                            options={[
-                              { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-                              { optionId: 'deny', name: 'Not this time', kind: 'reject_once' },
-                            ]}
+                          <PermissionPrompt
+                            toolCall={TOUR_PERMISSION_TOOL_CALL}
+                            permission={TOUR_PERMISSION_TOOL_CALL.permissionRequest!}
                             onSelect={onPermissionAnswer}
                           />
                         </div>
@@ -598,7 +653,9 @@ function TourWindow({
                           <SessionInfoBar
                             status={null}
                             projectName={identity.projectName}
-                            branch={session.branchName}
+                            // A setup preview has no session yet, so it has no
+                            // session branch either: show the project's own.
+                            branch={configurationState ? 'main' : session.branchName}
                             pr={tracks.pr >= 1 ? TOUR_PULL_REQUEST : null}
                             prCiRuns={
                               tracks.pr >= 2
@@ -641,6 +698,8 @@ function TourWindow({
                           />
                         </div>
                         <SessionChatInputArea
+                          // The info bar above owns this gap, as on the session page.
+                          hideTopSpacer
                           ref={composerRef}
                           session={session}
                           sessionLocalProjectRootPath={`/Users/you/Code/${identity.projectName}`}
@@ -682,19 +741,27 @@ function TourWindow({
                     transition: 'height 420ms ease, opacity 420ms ease',
                   }}
                 >
-                  <TerminalDock
-                    channel={terminalChannel}
-                    sessionId={TOUR_SESSION_ID}
-                    defaultView="terminal"
-                    autoOpenFirstTerminal
-                  />
+                  <Suspense fallback={null}>
+                    <TerminalDock
+                      channel={terminalChannel}
+                      sessionId={TOUR_SESSION_ID}
+                      defaultView="terminal"
+                      autoOpenFirstTerminal
+                    />
+                  </Suspense>
                 </div>
               ) : null
             }
             secondaryPanel={
               <div
                 data-tour-anchor="side-panel"
-                className="mx-2 mb-2 mt-2 flex h-[calc(100%_-_1rem)] min-w-0 flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]"
+                // The edge belongs to an OPEN panel. Collapsed, the panel is a
+                // zero-width sliver whose border drew a notch into the window's
+                // right edge.
+                className={cn(
+                  'flex h-full min-w-0 flex-col overflow-hidden bg-background',
+                  panelOpen && 'border-l border-border/70'
+                )}
               >
                 <SessionSidePanelTabBar
                   tabs={sidePanelTabs}

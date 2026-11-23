@@ -10,6 +10,7 @@ function createTestLogger(): Logger {
     error: vi.fn(),
     success: vi.fn(),
     debug: vi.fn(),
+    trace: vi.fn(),
     setLevel: vi.fn(),
     setDebug: vi.fn(),
     child: vi.fn(() => logger),
@@ -42,6 +43,7 @@ function makeResolver(overrides: {
     { outcome: 'token'; token: string } | { outcome: 'gh-missing' } | { outcome: 'not-authed' }
   >;
   fetchGhUserId?: () => Promise<string | null>;
+  nowMs?: () => number;
 }) {
   const logger = createTestLogger();
   const resolver = new GitHubCredentialResolver({
@@ -49,6 +51,7 @@ function makeResolver(overrides: {
       overrides.tokenManager === undefined ? makeTokenManager() : overrides.tokenManager,
     writeTokenContext: CONTEXT,
     workspaceId: 'workspace-1',
+    nowMs: overrides.nowMs,
     logger,
     ...(overrides.harvestGhToken ? { harvestGhToken: overrides.harvestGhToken } : {}),
     ...(overrides.fetchGhUserId ? { fetchGhUserId: overrides.fetchGhUserId } : {}),
@@ -57,19 +60,15 @@ function makeResolver(overrides: {
 }
 
 describe('GitHubCredentialResolver', () => {
-  it('prefers the managed workspace token over ambient gh auth', async () => {
-    const harvestGhToken = vi.fn(async () => ({ outcome: 'token' as const, token: 'gh-token' }));
-    const tokenManager = makeTokenManager('managed-token');
-    const { resolver } = makeResolver({ tokenManager, harvestGhToken });
-
-    const credential = await resolver.resolve('owner/repo');
-
-    expect(credential?.source).toBe('managed');
-    expect(credential?.token).toBe('managed-token');
-    expect(credential?.credentialScope).toBe('github:installation:123');
-    expect(tokenManager.getWriteTokenInfoForRepo).toHaveBeenCalledWith('owner/repo', CONTEXT);
-    // gh fallback is never consulted while the managed tier works.
-    expect(harvestGhToken).not.toHaveBeenCalled();
+  it('uses ambient credentials for local members even when managed tokens exist', async () => {
+    const { resolver } = makeResolver({
+      harvestGhToken: async () => ({ outcome: 'token', token: 'native-token' }),
+      fetchGhUserId: async () => '7',
+    });
+    expect((await resolver.resolve('owner/local', true))?.token).toBe('native-token');
+    expect((await resolver.resolve('owner/managed', false))?.token).toBe('managed-token');
+    const missing = makeResolver({ harvestGhToken: async () => ({ outcome: 'not-authed' }) });
+    expect(await missing.resolver.resolve('owner/local', true)).toBeNull();
   });
 
   it('falls back to a harvested gh token when the managed tier fails', async () => {
@@ -88,106 +87,40 @@ describe('GitHubCredentialResolver', () => {
     expect(credential?.credentialScope).toBe('github:user:456');
   });
 
-  it('caches the gh token and stable user identity across resolves', async () => {
-    const harvestGhToken = vi.fn(async () => ({ outcome: 'token' as const, token: 'gh-token' }));
-    const fetchGhUserId = vi.fn(async () => '456');
-    const { resolver } = makeResolver({ tokenManager: null, harvestGhToken, fetchGhUserId });
-
-    await resolver.resolve('owner/a');
-    await resolver.resolve('owner/b');
-
-    expect(harvestGhToken).toHaveBeenCalledTimes(1);
-    expect(fetchGhUserId).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps the managed scope stable when the backend rotates the token', async () => {
-    const tokenManager = makeTokenManager('token-a');
-    tokenManager.getWriteTokenInfoForRepo
-      .mockResolvedValueOnce({
-        token: 'token-a',
-        tokenSource: 'app',
-        rateLimitScope: 'github:installation:123',
-      })
-      .mockResolvedValueOnce({
-        token: 'token-b',
-        tokenSource: 'app',
-        rateLimitScope: 'github:installation:123',
-      });
-    const { resolver } = makeResolver({ tokenManager });
-
-    const first = await resolver.resolve('owner/repo');
-    const second = await resolver.resolve('owner/repo');
-
-    expect(first?.token).not.toBe(second?.token);
-    expect(first?.credentialScope).toBe('github:installation:123');
-    expect(second?.credentialScope).toBe(first?.credentialScope);
-  });
-
-  it('disables ambient polling when its stable GitHub user ID is unavailable', async () => {
-    const { resolver, logger } = makeResolver({
+  it('allows installation credentials without a /user identity under a conservative quota', async () => {
+    const { resolver } = makeResolver({
       tokenManager: null,
-      harvestGhToken: async () => ({ outcome: 'token', token: 'gh-token' }),
+      harvestGhToken: async () => ({ outcome: 'token', token: 'installation-token' }),
       fetchGhUserId: async () => null,
     });
-
-    expect(await resolver.resolve('owner/repo')).toBeNull();
-    expect(logger.debug).toHaveBeenCalledWith(
-      expect.stringContaining('Could not resolve the ambient GitHub user ID')
-    );
-  });
-
-  it('gh-missing disables only the harvest fallback (logged once)', async () => {
-    const harvestGhToken = vi.fn(async () => ({ outcome: 'gh-missing' as const }));
-    const { resolver, logger } = makeResolver({ tokenManager: null, harvestGhToken });
-
-    expect(await resolver.resolve('owner/a')).toBeNull();
-    expect(await resolver.resolve('owner/b')).toBeNull();
-    expect(harvestGhToken).toHaveBeenCalledTimes(1);
-    expect(
-      (logger.debug as ReturnType<typeof vi.fn>).mock.calls.filter((args) =>
-        String(args[0]).includes('gh CLI not found')
-      )
-    ).toHaveLength(1);
-  });
-
-  it('gh-not-authed disables the ambient credential scope (logged once)', async () => {
-    const harvestGhToken = vi.fn(async () => ({ outcome: 'not-authed' as const }));
-    const { resolver, logger } = makeResolver({ tokenManager: null, harvestGhToken });
-
-    expect(await resolver.resolve('owner/a')).toBeNull();
-    expect(await resolver.resolve('owner/b')).toBeNull();
-    expect(
-      (logger.debug as ReturnType<typeof vi.fn>).mock.calls.filter((args) =>
-        String(args[0]).includes('not authenticated')
-      )
-    ).toHaveLength(1);
-  });
-
-  it('invalidate() drops a managed token through the token manager', async () => {
-    const tokenManager = makeTokenManager('managed-token');
-    const { resolver } = makeResolver({ tokenManager });
-
-    const credential = await resolver.resolve('owner/repo');
-    if (!credential) throw new Error('expected a credential');
-    resolver.invalidate('owner/repo', credential);
-
-    expect(tokenManager.invalidate).toHaveBeenCalledWith('owner/repo', {
-      requesterUserId: CONTEXT.requesterUserId,
-      invalidatedToken: 'managed-token',
+    expect(await resolver.resolve('owner/repo')).toEqual({
+      token: 'installation-token',
+      source: 'gh',
+      credentialScope: 'github:ambient:github.com',
     });
   });
 
-  it('invalidate() clears the gh cache so the next resolve re-harvests', async () => {
-    const harvestGhToken = vi.fn(async () => ({ outcome: 'token' as const, token: 'gh-token' }));
-    const fetchGhUserId = vi.fn(async () => '456');
-    const { resolver } = makeResolver({ tokenManager: null, harvestGhToken, fetchGhUserId });
-
-    const credential = await resolver.resolve('owner/repo');
-    if (!credential) throw new Error('expected a credential');
-    resolver.invalidate('owner/repo', credential);
-    await resolver.resolve('owner/repo');
-
-    expect(harvestGhToken).toHaveBeenCalledTimes(2);
-    expect(fetchGhUserId).toHaveBeenCalledTimes(2);
+  it('recovers after login and observes rotation and logout without restarting', async () => {
+    let now = 0;
+    let token: string | null = null;
+    const { resolver } = makeResolver({
+      tokenManager: null,
+      nowMs: () => now,
+      harvestGhToken: async () => (token ? { outcome: 'token', token } : { outcome: 'not-authed' }),
+      fetchGhUserId: async () => '456',
+    });
+    expect(await resolver.resolve('owner/repo')).toBeNull();
+    token = 'first';
+    expect(await resolver.resolve('owner/repo')).toBeNull();
+    now = 60_000;
+    const first = await resolver.resolve('owner/repo');
+    expect(first).toEqual({ token: 'first', source: 'gh', credentialScope: 'github:user:456' });
+    token = 'rotated';
+    expect(await resolver.resolve('owner/repo')).toEqual(first);
+    now += 60_000;
+    expect(await resolver.resolve('owner/repo')).toEqual({ ...first, token: 'rotated' });
+    token = null;
+    now += 60_000;
+    expect(await resolver.resolve('owner/repo')).toBeNull();
   });
 });

@@ -1,0 +1,188 @@
+# Managed preview proxy and cloudflared
+
+## Embedded local authentication
+
+`local-preview-proxy.ts` exchanges a query capability for an HttpOnly, Secure,
+SameSite=None, Partitioned cookie on both local and remote endpoints. Chromium
+accepts Secure cookies on the literal loopback listener. SameSite=Lax cannot
+bootstrap cookies inside cross-site preview frames: first-level resources may
+authenticate through a token-bearing Referer, but nested module imports lack it.
+Each local Session and target origin uses a stable `lody-<scope>.localhost`
+viewer hostname. Chromium resolves it to loopback and gives it a separate
+partitioned-cookie quota, so one preview cannot evict another preview’s token.
+It may connect to IPv6 first, so the proxy reserves the same port on 127.0.0.1
+and ::1 before publishing the URL. Port conflicts retry with a new port; only an
+unavailable IPv6 stack permits IPv4-only operation. Closing joins both listeners.
+Reopening the target reuses the hostname and cookie names, but generates a new
+token. When an application sets cookies the proxy reissues the capability last;
+under Chromium quota pressure application cookies may be evicted. Chromium limits
+partitioned cookies to about 10 KiB per embedded site and partition. Local headers
+remain limited to 1 MiB for clients with larger cookie jars, not as a browser quota.
+
+Every HTTP request and WebSocket upgrade still requires that endpoint's token.
+Matching Origin or a tokenless Referer cannot unlock the listener. Application cookies
+are scoped by Session and target origin locally and forwarded to the development
+server; capability cookies
+are never forwarded. The [cookie decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-preview-app-cookies.md) explains the attribute changes and limits. A 502 is a separate
+forwarding/upstream failure; inspect its response body instead of disabling
+authentication or the development server's origin checks.
+
+Evidence and browser-validation limits:
+[local module authentication](../../../../.agents/notes/implemented/bug-fix/2026-10-04-local-preview-module-auth.md).
+
+Same-origin redirects resolve against the upstream request URL, so nested pages and modules
+retain their directory and query semantics on the viewer origin.
+
+## Process ownership
+
+Quick Tunnels start with `--protocol http2`, using TCP for the connection from
+cloudflared to Cloudflare's edge. They do not attempt QUIC or negotiate a transport
+fallback. This setting does not select the browser-to-Cloudflare protocol.
+
+```text
+CLI / QuickTunnelSession
+  └─ cloudflared-worker.js (private IPC ownership)
+       └─ pinned native cloudflared + temporary config
+```
+
+`cloudflared-process.ts` launches the lightweight owner and interprets its typed
+origin/diagnostic/error messages. `cloudflared-worker.ts` releases resources on
+an IPC stop request, parent disconnect or termination signal; `cloudflared-native.ts`
+owns native startup/log parsing and bounded TERM → KILL escalation. There is no
+polling, process discovery, persistent PID state, automatic restart or dev-server
+ownership. Session readiness, idle timeout and endpoint credentials stay in the CLI.
+The trade-off is one additional Node process per live tunnel, rather than a shared
+watchdog with a registry and cross-session failure policy.
+
+Normal shutdown keeps IPC open until error reporting is complete. Completion means
+the lifecycle owner's OS exit after native exit and config removal, not merely
+that shutdown was requested. A disconnected parent cannot receive cleanup errors.
+The owner itself being forcibly killed is outside this parent-disconnect guarantee.
+
+Public, Cloud and development bundles emit the same sibling worker entry. Source
+integration fixtures explicitly build that entry in their scratch directory;
+production never falls back to TypeScript execution. POSIX process tests cover
+normal stop, CLI SIGKILL during creation/active use, native crash, missing binaries
+and cleanup failure. Native verification on other operating systems is separate.
+
+Native dependencies can emit plain-text diagnostics even with `--output json`.
+The log reader ignores bounded non-JSON lines; structured messages still require
+schema validation, and allocated origins still require the Quick Tunnel allowlist.
+Fatal parser and size-limit errors survive shutdown so a later DNS cancellation
+cannot replace the original failure.
+
+## First public request
+
+`preview-tunnel-dns.ts` queries the configured DNS servers with a private Node
+Resolver, bypassing OS hostname lookup caches. A newly allocated Quick Tunnel
+hostname can initially return NXDOMAIN. Sending it to an HTTP proxy or TUN at
+that point can cache failure long after the tunnel is usable. The startup
+verifier waits for the bounded DNS publication check and the native connector's
+first registration, reported through typed IPC, before its first public request. All stages
+share the existing 90-second readiness deadline and cancellation signal.
+
+Negative DNS answers retry for at most ten seconds before falling back to the
+existing proxy HTTP verification: filtered/split local DNS may stay negative even
+when the proxy can resolve the hostname. Unavailable DNS transport falls back
+immediately. The DNS budget cancels in-flight queries without resetting the
+shared startup deadline; parent cancellation still aborts readiness. No IP
+is pinned, no external resolver is selected, and DNS never grants access or proves
+readiness. Five-second active health checks and local viewing skip this startup gate.
+
+Startup also retries network/host-unreachable errors within the same deadline.
+Dual-stack connection errors are inspected across bounded aggregate branches;
+permanent errors such as certificate failures still fail immediately. Diagnostics
+retain validated IP addresses and address families, never arbitrary error messages.
+The shared CLI HTTP dispatcher explicitly enables Node address-family selection
+for direct destinations and proxy connections. Proxy routing remains authoritative;
+an unavailable proxy does not authorize a direct connection. This also benefits
+other callers of that dispatcher; explicit Node-default transport mode is unchanged.
+
+## Distribution
+
+`cloudflared-manifest.json` pins upstream release artifacts. The downloader uses
+the public runtime channel, checks their bytes, and atomically installs an
+executable with `THIRD_PARTY_NOTICES.txt`. The notices come from a static JSON
+import in `cloudflared-binary.ts`, so source, bundled CLI and embedded CLI use the
+same text without a second asset-copy pipeline. Existing incomplete installations
+are errors, not repair or migration inputs.
+The [security release decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-cloudflared-emudhra-update.md)
+records the current pin and its distribution prerequisites.
+
+## Updating notices with the pinned release
+
+The generated JSON contains exact collected license/notice text, the release URL,
+all release Go versions, and source `go.mod`/`go.sum` hashes. Do not edit individual generated
+license texts. Changing the manifest version also requires regenerating notices;
+the binary helper rejects mismatched release metadata.
+
+1. Check out the matching upstream source and inspect the downloaded binaries
+   using `go version -m -json <binary>`. Match their Go version and compiled module
+   paths, versions, checksums and replacements against the source dependency graph.
+2. Use `github.com/google/go-licenses/v2@v2.0.1` with the pinned module graph. From the
+   upstream source directory, collect `go-licenses save ./cmd/cloudflared
+--save_path=<output-dir>` for each row below, setting `GOOS`, `GOARCH` and
+   `CGO_ENABLED`. Save each output in a separate directory. Do not reuse an output
+   from another release.
+3. Review tool warnings and non-Go sources separately. The collector cannot prove
+   that assembly/C or dynamically linked libraries have no additional obligations.
+4. Obtain the source for every Go version reported by the artifacts, verifying
+   official archive checksums. Include each root's runtime and vendor notices;
+   do not infer the release's toolchain from the current machine's binary alone.
+   From the public repository, run:
+
+   ```sh
+   node scripts/generate-cloudflared-notices.mjs <upstream-source-dir> <go-source-dir>... -- <darwin-arm64-notices> <darwin-amd64-notices> <linux-amd64-notices> <linux-arm64-notices> <windows-amd64-notices>
+   node --test scripts/generate-cloudflared-notices.test.mjs
+   ```
+
+5. Inspect the generated diff, run the binary install tests and rebuild the CLI.
+   Notice conflicts across platforms or same-version Go roots fail generation
+   rather than choosing one. The installed notice heading lists release toolchains,
+   not a single toolchain claimed for every platform.
+
+| GOOS    | GOARCH | CGO_ENABLED | Artifact Go version | Module dependencies |
+| ------- | ------ | ----------- | ------------------- | ------------------- |
+| darwin  | arm64  | 1           | 1.27.3              | 66                  |
+| darwin  | amd64  | 1           | 1.27.3              | 66                  |
+| linux   | amd64  | 0           | 1.27.3              | 67                  |
+| linux   | arm64  | 0           | 1.27.3              | 67                  |
+| windows | amd64  | 1           | 1.27.3              | 66                  |
+
+Windows ARM64 uses the same pinned Windows AMD64 artifact; it does not introduce
+another dependency graph. Native execution on supported platforms is a separate
+acceptance requirement.
+
+## Current evidence and limits
+
+The 2026.10.4 collection merges 91 notice files from five platform selections
+and checksum-verified Go 1.27.3 source. The same Go version is embedded in all five
+distinct upstream artifacts. Windows notices were collected with CGO enabled.
+
+All five distinct artifact checksums, module versions/checksums/replacements and
+at least one collected notice's exact source bytes per compiled module were
+verified against the tagged source's module graph. `go-licenses` labels some inherited
+root licenses by package import path; replacements retain the original import
+path label but must match the replacement source's license text.
+
+All five report main-module revision `dc3b264da64a801bc3a8d5301a6db21401910ad5`
+matching the source tag, but also report `vcs.modified=true`; this does not prove
+an identical source build. The macOS Release body labels executable hashes with
+archive names; the manifest instead pins the actual `.tgz` asset hashes independently
+verified against GitHub's asset metadata. Non-Go warnings and native linkage still
+need review before publication. The generated text is not a claim that every
+distribution obligation has been independently verified.
+
+Behavioral tests check deterministic collection, platform conflicts, source
+license mismatch, installed text, cache reuse and explicit rejection of missing
+or modified cached notices.
+
+## Agent-reported startup
+
+The local message handler derives the active execution user and passes it separately
+from the candidate payload. An available loopback candidate from the Session owner
+starts background preparation when the platform supports remote preview. Reports
+return promptly; Browser clicks join preparation and then retain the usual control
+authorization checks. Same-origin reports coalesce; newer origins, revoke and
+Session cleanup cancel obsolete queued work. Resource limits and the one-hour idle
+policy still apply, including to a prepared preview that nobody opens.

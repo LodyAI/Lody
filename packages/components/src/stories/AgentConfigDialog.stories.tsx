@@ -11,14 +11,13 @@ import {
 import {
   AgentConfigDialog,
   type AgentConfigDialogProps,
-  DEEPSEEK_CLAUDE_PRESET_ID,
   GLM_CLAUDE_PRESET_ID,
   GLM_ZAI_CREDENTIAL_MODE_ID,
   MIMO_CLAUDE_PRESET_ID,
   MIMO_TOKEN_PLAN_CREDENTIAL_MODE_ID,
   MINIMAX_CLAUDE_PRESET_ID,
 } from '@/components/settings/agent-config-dialog';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 
 const machineId = 'machine-story' as MachineId;
 const existingConfigId = 'cfg-claude' as AgentConfigId;
@@ -76,8 +75,8 @@ const refreshCapabilities: AgentConfigDialogProps['onRefreshCapabilities'] = asy
   type: 'machine/acp-capabilities-refresh_response',
   machineId: args.machineId,
   configId: args.configId,
-  cliType: args.cliType,
-  agentType: args.agentType,
+  cliType: 'builtin',
+  agentType: 'claude',
   success: true,
   modes: [],
   models: [],
@@ -99,16 +98,16 @@ function CreateWrapper() {
 
 function NestedCreateWrapper() {
   const [settingsOpen, setSettingsOpen] = useState(true);
-  const [providerOpen, setProviderOpen] = useState(true);
+  const [providerOpen, setProviderOpen] = useState(false);
 
   return (
-    <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-      <DialogContent
+    <Dialog.Root open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <Dialog.Content
         noAnimation
         className="h-[min(90vh,950px)] w-[84vw] max-w-[1100px] overflow-hidden p-0 sm:p-0"
       >
-        <DialogTitle className="sr-only">Settings</DialogTitle>
-        <DialogDescription className="sr-only">Nested provider dialog preview</DialogDescription>
+        <Dialog.Title className="sr-only">Settings</Dialog.Title>
+        <Dialog.Description className="sr-only">Nested provider dialog preview</Dialog.Description>
         <div className="flex h-full">
           <aside className="w-56 border-r border-border bg-background p-4">
             <div className="rounded-lg bg-secondary px-3 py-2 text-sm font-medium">Agents</div>
@@ -116,19 +115,25 @@ function NestedCreateWrapper() {
           <main className="flex-1 bg-background p-8">
             <h2 className="text-xl font-semibold">Agent Provider</h2>
             <div className="mt-4 h-24 rounded-lg border border-border bg-card" />
+            <button
+              type="button"
+              className="mt-6 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground"
+              onClick={() => setProviderOpen(true)}
+            >
+              New provider
+            </button>
           </main>
         </div>
         <AgentConfigDialog
           open={providerOpen}
           onOpenChange={setProviderOpen}
-          nestedInDialog
           mode={{ kind: 'create' }}
           machine={makeMachineWithClaudeCaps()}
           onSubmit={async () => {}}
           onRefreshCapabilities={refreshCapabilities}
         />
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -146,20 +151,151 @@ function EditWrapper({ config = existingConfig }: { config?: AgentConfigMeta }) 
   );
 }
 
-function DeepSeekPresetWrapper() {
+const kimiConfigId = 'cfg-kimi' as AgentConfigId;
+
+/**
+ * A builtin Kimi config on a machine whose runtime-probed capabilities publish
+ * a catalog the size of a real provider's — over a hundred models — so the
+ * title-generation selectors show their searchable, scrollable form.
+ */
+const makeMachineWithKimiCaps = (): MachineViewMeta => ({
+  id: machineId,
+  name: 'Workstation',
+  cliVersion: '0.44.0',
+  os: 'macOS',
+  sessions: [],
+  raceLimits: {},
+  acpCapabilities: {
+    [getAcpCapabilityCacheKey(kimiConfigId)]: {
+      cliType: 'builtin',
+      agentType: 'kimi',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      sourceVersion: 'kimi-code@1.0.0',
+      provenance: 'runtime',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'session_mode',
+          name: 'Session Mode',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'code',
+          options: [
+            { value: 'code', name: 'Code' },
+            { value: 'plan', name: 'Plan' },
+          ],
+        },
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'swe-2',
+          options: [
+            { value: 'adaptive', name: 'Adaptive' },
+            { value: 'swe-2', name: 'SWE-2' },
+            { value: 'swe-1.7-lightning', name: 'SWE-1.7 Lightning' },
+            { value: 'claude-fable-5.1', name: 'Claude Fable 5.1' },
+            { value: 'claude-opus-5.5', name: 'Claude Opus 5.5' },
+            { value: 'gpt-6-astra', name: 'GPT-6 Astra' },
+            { value: 'gpt-6-sol', name: 'GPT-6 Sol' },
+            { value: 'gpt-6-luna', name: 'GPT-6 Luna' },
+            { value: 'kimi-k3', name: 'Kimi K3' },
+            { value: 'glm-5.2-high', name: 'GLM-5.2 High' },
+            { value: 'glm-5.2-high-1m', name: 'GLM-5.2 High 1M' },
+            ...Array.from({ length: 96 }, (_, i) => ({
+              value: `catalog-model-${i + 1}`,
+              name: `Catalog Model ${i + 1}`,
+            })),
+          ],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'max',
+          options: [
+            { value: 'low', name: 'low' },
+            { value: 'medium', name: 'medium' },
+            { value: 'high', name: 'high' },
+            { value: 'max', name: 'max' },
+          ],
+        },
+      ],
+      availableCommands: [],
+      fetchedAt: Date.now(),
+    },
+  },
+});
+
+function EditLongOptionListsWrapper() {
   const [open, setOpen] = useState(true);
   return (
     <AgentConfigDialog
       open={open}
       onOpenChange={setOpen}
       mode={{
-        kind: 'create',
-        initialForm: {
-          name: 'DeepSeek over Claude Code',
-          presetId: DEEPSEEK_CLAUDE_PRESET_ID,
-          presetToken: 'sk-storybook-demo-token',
+        kind: 'edit',
+        config: {
+          id: kimiConfigId,
+          machineId,
+          name: 'Kimi',
+          description: undefined,
+          cliType: 'builtin',
+          agentType: 'kimi',
+          env: {},
         },
       }}
+      machine={makeMachineWithKimiCaps()}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={async (args) => ({
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId: args.machineId,
+        configId: args.configId,
+        cliType: 'builtin',
+        agentType: 'kimi',
+        success: true,
+      })}
+    />
+  );
+}
+
+function DeepSeekHarnessWrapper({
+  initialForm,
+  config,
+}: {
+  initialForm?: {
+    name: string;
+    cliType: 'builtin';
+    agentType: 'deepseek';
+    env?: Record<string, string>;
+    deepseekEndpointMode?: 'official' | 'custom';
+    deepseekCustomBaseUrl?: string;
+  };
+  config?: AgentConfigMeta;
+} = {}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={
+        config
+          ? { kind: 'edit', config }
+          : {
+              kind: 'create',
+              initialForm: initialForm ?? {
+                name: 'DeepSeek Harness',
+                cliType: 'builtin',
+                agentType: 'deepseek',
+                env: {
+                  DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
+                },
+              },
+            }
+      }
       machine={makeMachineWithClaudeCaps()}
       onSubmit={async () => {}}
       onRefreshCapabilities={refreshCapabilities}
@@ -167,29 +303,31 @@ function DeepSeekPresetWrapper() {
   );
 }
 
-function DeepSeekHarnessWrapper() {
-  const [open, setOpen] = useState(true);
-  return (
-    <AgentConfigDialog
-      open={open}
-      onOpenChange={setOpen}
-      mode={{
-        kind: 'create',
-        initialForm: {
-          name: 'DeepSeek Harness',
-          cliType: 'builtin',
-          agentType: 'deepseek',
-          env: {
-            DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
-          },
-        },
-      }}
-      machine={makeMachineWithClaudeCaps()}
-      onSubmit={async () => {}}
-      onRefreshCapabilities={refreshCapabilities}
-    />
-  );
-}
+const deepseekHarnessEditOfficial: AgentConfigMeta = {
+  id: existingConfigId,
+  machineId,
+  name: 'DeepSeek Harness',
+  description: undefined,
+  cliType: 'builtin',
+  agentType: 'deepseek',
+  env: {
+    DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
+    DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
+  },
+};
+
+const deepseekHarnessEditCustom: AgentConfigMeta = {
+  id: existingConfigId,
+  machineId,
+  name: 'DeepSeek Harness',
+  description: undefined,
+  cliType: 'builtin',
+  agentType: 'deepseek',
+  env: {
+    DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
+    DEEPSEEK_BASE_URL: 'https://llm.example.com/open',
+  },
+};
 
 function MiMoPresetWrapper() {
   const [open, setOpen] = useState(true);
@@ -278,6 +416,98 @@ function GlmPresetWrapper({ credentialModeId }: { credentialModeId?: string } = 
   );
 }
 
+function PiExtensionsWrapper({
+  supported = true,
+  scanError = false,
+}: {
+  supported?: boolean;
+  scanError?: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={{
+        kind: 'edit',
+        config: {
+          ...existingConfig,
+          name: 'Pi',
+          agentType: 'pi',
+          runtimeOverrides: { piExtensions: ['/fixture/custom/provider.ts'] },
+        },
+      }}
+      machine={{
+        ...makeMachineWithClaudeCaps(),
+        protocolCapabilities: supported ? { piExtensions: 1 } : {},
+      }}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={async (args) => ({
+        ...(await refreshCapabilities(args)),
+        agentType: 'pi',
+      })}
+      onScanPiExtensions={async () =>
+        scanError
+          ? { success: false, error: 'Synthetic scan failure' }
+          : {
+              success: true,
+              discovery: {
+                version: 1,
+                agentDir: '/fixture/pi/agent',
+                warnings: [],
+                extensions: [
+                  {
+                    path: '/fixture/pi/agent/extensions/provider.ts',
+                    name: 'Provider extension',
+                    source: 'directory',
+                  },
+                  {
+                    path: '/fixture/pi/agent/npm/node_modules/example-tools/index.js',
+                    name: 'Example tools',
+                    source: 'package',
+                  },
+                ],
+              },
+            }
+      }
+    />
+  );
+}
+
+function AntigravitySkipPermissionsWrapper({
+  supported = true,
+  enabled = false,
+}: {
+  supported?: boolean;
+  enabled?: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={{
+        kind: 'edit',
+        config: {
+          ...existingConfig,
+          name: 'Antigravity',
+          agentType: 'antigravity',
+          ...(enabled ? { runtimeOverrides: { antigravitySkipPermissions: true } } : {}),
+        },
+      }}
+      machine={{
+        ...makeMachineWithClaudeCaps(),
+        protocolCapabilities: supported ? { antigravitySkipPermissions: 1 } : {},
+      }}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={async (args) => ({
+        ...(await refreshCapabilities(args)),
+        agentType: 'antigravity',
+      })}
+    />
+  );
+}
+
 const meta = {
   title: 'Settings/AgentConfigDialog',
   parameters: { layout: 'fullscreen' },
@@ -286,6 +516,19 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const PiExtensions: Story = { render: () => <PiExtensionsWrapper /> };
+export const PiExtensionsUnsupported: Story = {
+  render: () => <PiExtensionsWrapper supported={false} />,
+};
+export const PiExtensionsScanError: Story = { render: () => <PiExtensionsWrapper scanError /> };
+
+export const AntigravitySkipPermissions: Story = {
+  render: () => <AntigravitySkipPermissionsWrapper enabled />,
+};
+export const AntigravitySkipPermissionsUnsupported: Story = {
+  render: () => <AntigravitySkipPermissionsWrapper supported={false} />,
+};
 
 export const Create: Story = {
   render: () => <CreateWrapper />,
@@ -299,17 +542,47 @@ export const Edit: Story = {
   render: () => <EditWrapper />,
 };
 
+/**
+ * Title-generation selectors against a provider-scale catalog (~108 models):
+ * the option list is taller than the dialog, so the popup must stay anchored
+ * below its trigger and offer search rather than flipping up over the form.
+ */
+export const EditLongOptionLists: Story = {
+  render: () => <EditLongOptionListsWrapper />,
+};
+
 /** Signing in again lives here, not on the provider list row. */
 export const EditEnvCredentialProvider: Story = {
   render: () => <EditWrapper config={envCredentialConfig} />,
 };
 
-export const DeepSeekPreset: Story = {
-  render: () => <DeepSeekPresetWrapper />,
-};
-
 export const DeepSeekHarness: Story = {
   render: () => <DeepSeekHarnessWrapper />,
+};
+
+export const DeepSeekHarnessCustomEndpoint: Story = {
+  render: () => (
+    <DeepSeekHarnessWrapper
+      initialForm={{
+        name: 'DeepSeek Harness',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        deepseekEndpointMode: 'custom',
+        deepseekCustomBaseUrl: 'https://llm.example.com/open',
+        env: {
+          DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
+        },
+      }}
+    />
+  ),
+};
+
+export const DeepSeekHarnessEditOfficial: Story = {
+  render: () => <DeepSeekHarnessWrapper config={deepseekHarnessEditOfficial} />,
+};
+
+export const DeepSeekHarnessEditCustom: Story = {
+  render: () => <DeepSeekHarnessWrapper config={deepseekHarnessEditCustom} />,
 };
 
 export const MiMoPreset: Story = {
@@ -358,8 +631,8 @@ export const MobileEditEnvCredentialProvider: Story = {
   },
 };
 
-export const MobileDeepSeekPreset: Story = {
-  render: () => <DeepSeekPresetWrapper />,
+export const MobileDeepSeekHarness: Story = {
+  render: () => <DeepSeekHarnessWrapper />,
   parameters: {
     viewport: { defaultViewport: 'mobile1' },
   },

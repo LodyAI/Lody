@@ -17,11 +17,17 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { LocalProjectBrowseDirectoryEntry } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Skeleton } from '@/ui/skeleton';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Skeleton } from '@lody/ui/skeleton';
+import {
+  RemoteDirectoryNewFolderAction,
+  RemoteDirectoryNewFolderControl,
+} from './remote-directory-new-folder-control';
 import {
   describeBrowseError,
   getTailPriorityBreadcrumbs,
@@ -46,7 +52,7 @@ export function MobileAddLocalProjectFlow(args: RemoteDirectoryPickerArgs) {
   const title =
     c.phase === 'machine'
       ? t('localProjects.add.pickMachine', 'Choose a machine')
-      : (c.selectedMachine?.name ?? t('localProjects.add.title', 'Add a local project'));
+      : (c.selectedMachine?.name ?? t('localProjects.add.title', 'Add a folder'));
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -92,7 +98,7 @@ function MobileMachineList({ controller: c }: { controller: RemoteDirectoryPicke
     return (
       <MobileStatusPanel
         icon={Loader2}
-        iconClassName="animate-spin"
+        spinning
         title={t('workspace.machines.loadingVisibility', 'Loading machines')}
       />
     );
@@ -245,7 +251,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
           <>
             <div className="flex min-h-10 min-w-0 flex-1 items-center gap-0.5 overflow-hidden whitespace-nowrap text-[0.9rem] text-muted-foreground">
               {crumbs.length === 0 ? (
-                <Skeleton className="mx-1.5 h-4 w-32 shrink-0 rounded" />
+                <Skeleton width={128} height={16} className="mx-1.5 shrink-0" />
               ) : (
                 <>
                   {breadcrumbTrail.hiddenPrefix ? (
@@ -283,18 +289,21 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
             </div>
             {c.status === 'loading' ? (
               <div className="flex h-9 w-9 shrink-0 items-center justify-center">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+                <Spinner className="h-4 w-4 text-muted-foreground" aria-hidden />
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={c.startEditPath}
-                disabled={!c.current}
-                aria-label={t('localProjects.add.editPath', 'Edit path')}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-muted/60 disabled:opacity-40"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
+              <>
+                <RemoteDirectoryNewFolderAction controller={c} />
+                <button
+                  type="button"
+                  onClick={c.startEditPath}
+                  disabled={!c.current}
+                  aria-label={t('localProjects.add.editPath', 'Edit path')}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-muted/60 disabled:opacity-40"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              </>
             )}
           </>
         )}
@@ -327,7 +336,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
             title={errorView.title}
             description={errorView.description}
             action={
-              <Button type="button" variant="outline" onClick={c.retry} className="h-10 gap-1.5">
+              <Button type="button" variant="secondary" size="large" onClick={c.retry}>
                 <RefreshCw className="h-4 w-4" />
                 {t('common.retry', 'Retry')}
               </Button>
@@ -367,7 +376,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
                 className="flex w-full items-center justify-center gap-2 px-4 py-3.5 text-[0.95rem] text-muted-foreground active:bg-muted/50"
               >
                 {c.loadingMore ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Spinner className="h-4 w-4" />
                 ) : (
                   t('localProjects.add.loadMore', 'Load more')
                 )}
@@ -379,18 +388,20 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
         )}
       </div>
 
-      {/* Footer — full-width primary action (adds the current folder directly) */}
+      {/* Footer — the creation form appears only after invoking the path-bar action. */}
       <div className="border-t border-border/60 px-4 pb-[max(0.75rem,var(--safe-area-bottom,0px))] pt-3">
+        <RemoteDirectoryNewFolderControl controller={c} />
         {c.addError ? (
           <p className="mb-2 text-left text-[0.8rem] text-destructive">{c.addError}</p>
         ) : null}
         <Button
           type="button"
-          className="h-12 w-full gap-2 text-[1rem]"
-          disabled={!c.current || c.status !== 'ready' || c.editingPath || c.adding}
+          size="large"
+          className="w-full"
+          disabled={!c.canAddCurrentFolder}
           onClick={() => void c.addCurrentFolder()}
         >
-          {c.adding ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
+          {c.adding ? <Spinner className="h-5 w-5" /> : null}
           {t('localProjects.add.useThisFolder', 'Add')}
         </Button>
       </div>
@@ -430,10 +441,9 @@ function MobileEntryRow({
         {entry.name}
       </span>
       {registered ? (
-        <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[0.75rem] font-medium text-emerald-600 dark:text-emerald-400">
-          <Check className="h-3.5 w-3.5" />
+        <Badge tone="success" icon={<Check size="100%" />}>
           {t('localProjects.add.added', 'Added')}
-        </span>
+        </Badge>
       ) : unreadable ? (
         <Lock className="h-5 w-5 shrink-0 text-muted-foreground/40" aria-hidden />
       ) : (
@@ -448,8 +458,8 @@ function MobileDirectorySkeleton() {
     <div className="py-1">
       {Array.from({ length: 8 }).map((_, index) => (
         <div key={index} className="flex items-center gap-3 px-4 py-3.5">
-          <Skeleton className="h-7 w-7 shrink-0 rounded" />
-          <Skeleton className="h-4 flex-1 rounded" style={{ maxWidth: `${64 - index * 5}%` }} />
+          <Skeleton width={28} height={28} className="shrink-0" />
+          <Skeleton height={16} className="flex-1" style={{ maxWidth: `${64 - index * 5}%` }} />
         </div>
       ))}
     </div>
@@ -458,21 +468,29 @@ function MobileDirectorySkeleton() {
 
 function MobileStatusPanel({
   icon: Icon,
-  iconClassName,
+  spinning = false,
   title,
   description,
   action,
 }: {
   icon: LucideIcon;
-  iconClassName?: string;
+  /**
+   * Rotates the icon: the panel is a loading state. Defaults to false, and
+   * MUST keep a default here — `Spinner` treats an omitted `spinning` as a
+   * loading indicator, so forwarding this prop while it is `undefined` would
+   * spin the resting states' icons forever.
+   */
+  spinning?: boolean;
   title: React.ReactNode;
   description?: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
-      <Icon
-        className={cn('h-9 w-9 text-muted-foreground', iconClassName)}
+      <Spinner
+        icon={Icon}
+        spinning={spinning}
+        className="h-9 w-9 text-muted-foreground"
         aria-hidden
         strokeWidth={1.6}
       />

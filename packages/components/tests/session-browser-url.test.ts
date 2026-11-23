@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildManagedViewerUrl,
   getManagedPageKey,
-  samePreviewTargetOrigin,
   toManagedLogicalUrl,
 } from '../src/lib/session-browser-url';
 
@@ -35,30 +34,6 @@ describe('session Browser URL mapping', () => {
         'http://localhost:5173/settings'
       )
     ).toBe('http://localhost:5173/dashboard?filter=open');
-  });
-
-  it('maps path-relative annotation runtime locations to the logical preview origin', () => {
-    expect(
-      toManagedLogicalUrl(
-        '/docs/guide?section=annotation#target',
-        'http://localhost:5173/current/page'
-      )
-    ).toBe('http://localhost:5173/docs/guide?section=annotation#target');
-  });
-
-  it('compares origins independently from paths', () => {
-    expect(
-      samePreviewTargetOrigin(
-        { protocol: 'http', host: 'LOCALHOST', port: 5173, path: '/one' },
-        { protocol: 'http', host: 'localhost', port: 5173, path: '/two' }
-      )
-    ).toBe(true);
-    expect(
-      samePreviewTargetOrigin(
-        { protocol: 'http', host: 'localhost', port: 5173 },
-        { protocol: 'https', host: 'localhost', port: 5173 }
-      )
-    ).toBe(false);
   });
 
   it('uses a token-free relative page key for annotation filtering', () => {

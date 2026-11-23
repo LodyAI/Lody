@@ -1,0 +1,237 @@
+# 会话历史写入
+
+Status: draft
+Translation: current
+
+[English](session-history-writes.md)
+
+## 场景
+
+同步来的会话包含未来版本的未知 item，或损坏的旧 text item。用户仍应能发送合法消息，
+并流式修改另一项。但兼容旧数据不能变成允许本地创建格式错误的新 item。
+
+## 契约
+
+- 前端与 CLI 共用一个 HistoryWriter 进行本地 Loro 历史修改。读取功能开关可切换视图，不能切换写入契约。
+- 新轮次使用明确消息类型和运行时输入解析。原有带类型的 callback 调用通过会话适配层进入同一 writer。
+- 一条命令修改历史前，先校验新增轮次和变化的已知字段/item。非法命令报告路径和错误码，
+  保留旧值；另一条合法命令仍可执行。不重新校验无关旧 item。
+- 闭合的新输入对象过滤未知字段，明确的协议扩展字典仍保存 JSON 数据。
+  保留已存储的未知字段，以及未修改的未知/损坏 item；读取不意味着迁移或清理数据。
+- 已有 primitive 字符串不升级容器；已有 Text 编辑保留容器身份。新写入把普通元数据字符串
+  （工具的 `title`/`status`/`kind`/`toolCallId`、`locations[].path`）存为 primitive，
+  只为真正流式增长的字段创建 Text 容器（`text`/`thought`、`markdown`、工具 block 的
+  `text`/`output` 及嵌套 `content.text`、worktree step 的 `output`）。该规则对每个嵌套层级
+  都成立：嵌套的工具/worktree 元数据如 `command`、`path`、`args`、`cwd`、`terminalId` 和
+  `input` 值都是 primitive，绝不存为 Text。这是一条插入策略：不是迁移，不重写已存储的值，
+  也不对旧数据或未来 payload 增加校验约束。存储布局变更单独审查。
+- Fork 是复制已存历史，不是创建新消息。只能从 writer 捕获的快照复制，保留目标初始化日志，
+  保留未改动的未知字段和不透明 item；显式修改及新增 fork notice 仍需解析。
+  复制轮次插在目标已有轮次之前，拒绝 id 冲突，保留目标容器。
+  调用者构造的 JSON 不能冒充这种来源。复制不修改源文档。
+  Fork 持有的独立捕获在源会话缓存回收及关闭后仍有效；不同 backend 实例继续依赖
+  writer 的既有来源校验，复制不要求源存储保持打开。
+- 编辑后重发失败时，可恢复捕获的旧历史，不将其当新输入重验。一次性的本地回滚凭据
+  只恢复本次变化的区间，保留未涉及轮次的当前内容及随后追加的轮次。期间若轮次身份/顺序变化，或区间内
+  内容变化，则拒绝覆盖；区间内唯一例外是本次新插入的 pending 用户轮次
+  变成 seen/read，且其他字段完全不变；它不是崩溃恢复或分布式事务。
+  外部 provider 导入仍是新输入，不能借用已存历史复制权限。
+- Loro writer 的接受表示本地 CRDT 写入。持久化、权限和远端同步仍由原有 repo 和传输层负责。
+- 除 type/toolCallId 外，工具字段只解析本次变化的值，不重验未修改的工具内容；
+  只修改 outcome 时保留已有请求信息。修改工具身份需完整 item 解析；变化的 content block
+  单独解析。新增字段非法时，整条命令在写入前拒绝。
+- 新历史接受原有内置 CLI selector 的归一化，不重写旧历史。steer 配置编辑只校验变化的字段。
+- 队列提升必须在历史接受后才删除队列行；写入失败保留队列行。
+- 每条缓冲中的 ACP 通知在自动重试期间保留稳定 operation ID。若 backend 在后续写入失败前只提交了
+  批次前缀，重试时必须复用原 ID，backend 对已接受的 ID 按幂等操作处理。过滤和拆分批次必须保持
+  ID 与通知的对应关系。分别入队的 Provider 通知即使 payload 相同，也仍是不同事件。
+- 调度和激活检查遇到重复 turn ID 时，采用最后一条已存记录，与定点历史读写一致。
+  前面的副本不能复活已进入终态的最后一条。完整历史导出保留所有已存记录，不执行去重。
+  尝试修复终态后，若该身份仍可被调度，当前检查必须结束，不重放该消息或反复物化历史。
+- 用户状态写入作用于该用户 turn 的所有已存副本。是否接受带条件的写入由最后一条副本决定；
+  前面的副本随之更新，但已进入终态的副本不得回退。steer 结果只迁移仍处于 steer 状态的副本。
+  任一副本已开始或已结束时，拒绝把未送达的 steer 重新排队。
+- 追加一条历史中尚不存在的排队 turn 之前，队列提升在其租约内重新读取会话 meta。若该 turn 的
+  steer 已被拒绝，保留队列行，直到该 steer 自己的历史到达，或 missing-history 恢复将其结束。
+  若 steer 已被接收或已结束、turn 正在执行或已处理、激活已结算、存在 missing-history
+  tombstone 或已完成的 assistant 输出，则删除队列行且不追加历史；这些证据优先于被拒绝的
+  steer 状态。
+- 输入框 steering 必须同时具备权威 ACP acknowledged steering 能力、活跃 prompt 和已知未结束
+  assistant turn。忙碌期间，Guide 偏好或反转 Queue 的发送若不具备该能力，直接追加到正规 Queue；
+  能力信息不可用或仅为 provisional 时也如此。消息保留队列顺序及正常提升前的编辑/删除能力，
+  不创建 pending-apply 历史，也不发出 steer 请求。这是投递前的路由决策；已经提交的原生 steer
+  仍遵循下文的投递结果规则。
+- 手动 Codex 压缩持有 native turn 直到完成。Stop 中断该 turn，并保留 ACP prompt，
+  直到 `turn/completed` 确认结果或 provider 连接关闭。对已 in-flight 且 ACP session 就绪的
+  prompt，Lody 记录取消并发送 provider cancel，不中断 owner fiber。ACP 返回前保留 owner
+  和未完成的历史；新 dispatch 及未投递的 steer 保持 pending。raw steer 请求和在途 steer
+  配置也纳入同一收尾流程。Stop 后五秒仍有请求未结束时，Lody 终止旧 session，让连接关闭
+  结束请求。计时不等待 cancel ACK，
+  也不因重复 Stop 重置。终止失败则继续持有 owner，直到 ACP 结束。start/interrupt ACK
+  和压缩 item 的完成均不能释放执行 ownership。助手 turn 收尾时会结算其遗留的上下文
+  压缩标记，适用于所有路径而不只是取消确认之后：provider 从未推进到终态的标记，在接受
+  下一轮之前持久化为 failed。若同一 turn 中还有更晚的压缩标记，被取代的标记属于同一次
+  压缩的重复身份（adapter 重复声明了已在进行中的压缩），予以移除，使一次压缩只呈现一
+  行。之后若 provider 仍为同一 `toolCallId` 发来更新，以该更新为准。
+  打开 Session 不触发历史修复 RPC，也不改写旧结果。
+- steer adapter 只报告三种最终投递结果：`applied`、`not-applied` 或 `unknown`。只有
+  `not-applied` 可以把同一个用户轮次交回普通 dispatch；`applied` 表示已经消费，
+  `unknown` 则在历史中变为 `delivery_unknown` 并返回 `delivery-unknown`，绝不自动调度。
+  显式重发必须提示原消息可能已经执行，并创建新的用户轮次；不能改写原投递结论。
+  Session execution 不根据 Stop、传输失败或本地 ownership 状态推断投递结果。
+- Stop 和目标 prompt 结束会中止本地文档加载、准备、配置及投递结论等待，释放 steer 队列
+  和 rewrite lease；不取消原始请求，也不丢弃其结论。例外：handoff adapter 可能先返回被让出的
+  prompt，再报告已提交 steer 的结论，因此其完成需等待该结论；引导 prompt 是下一轮本身，
+  绝不作为取消收尾的残留请求。已经进入 applied 所有权交接的操作
+  必须完整结束；排队中的 steer 不得为已停止的目标开始准备。结果持久化失败仍须释放
+  application lease，并允许取消收尾继续。
+- 执行端统一拥有 steer 状态，以及 `steerTurnStatuses` 中按消息 ID 记录的恢复激活。
+  拒绝结果不得回退生产者的 `latestUserMsgId`，也不得清除其他消息的 missing-history 标记。
+  watcher 在历史到达时投影结果，并在普通执行接管、终态投影或历史缺失失败后清理恢复项。
+  RPC applied ACK 只是展示提示，不能由前端回写执行状态；迟到 ACK 不得复活终态消息。
+  已应用的 steer provenance 必须阻止普通重启调度重放该消息。
+- 取消 turn 必须显式携带 pending-input 策略。用户 Stop 可以提升已确定为
+  `not-applied` 的 steer；Edit & Resend、访问撤销和 cleanup 必须保持它。若 Stop 先于
+  `applied` 结果发生，晚到结果不能转移 ownership，也不能重放该用户轮次。重复取消竞争时，
+  第一次写入的策略生效。
+- pre-prompt ACP 生命周期独立于 pending input：Stop 选择 promote/discard，Edit & Resend
+  选择 preserve/keep，访问撤销选择 preserve/discard。Edit & Resend 必须保留持有 prepared
+  replacement 的进程。create/restore 原有的取消 fence 保持有效。
+- promotion 写入失败不能丢失已确认的未投递结论。CLI 返回 `promotion-failed` 和错误，不能
+  假装恢复成功或改报投递未知。daemon 的 `recoveryOwned` 响应表示恢复仍由该 daemon 负责：
+  前端既不重试也不修复该轮次。旧响应（没有 `recoveryOwned`）保留
+  pending_apply/pending/seen 的 dispatch 修复。不得复活 active、terminal 或已删除的轮次；
+  超时或投递未知绝不授权重试。
+- foreground run configuration 归属其 turn 的 Effect signal。turn 被中断后，在途配置请求
+  可以结束，但不得再发送后续配置 mutation，也不得持久化被中断 turn 的 runtime patch。
+  steer 配置使用目标的本地等待 signal，遵循同一 mutation fence。
+- 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
+  当作可独立重放的普通用户轮次。
+
+## 外部导入的内容基线
+
+来源 hash 和据此生成的 id 保持不变；文档 cursor 另存带版本的实际写入内容基线。
+刷新时精确比较已有 role/items/plan，不把旧内容裁剪后再比较。没有基线时仍严格比较
+旧来源 hash；用户删除旧轮次应视作冲突，而不是自动恢复。基线只绑定同一 cursor 的
+来源 hashes，不采用可能已提前更新的元数据 digest。hash 版本出现之前写入的基线没有
+版本字段，视为 v1，可与 v1 cursor 匹配；把缺失字段当作“不是 v1”会丢弃合法的投影基线，
+把正常追加误报为冲突；真正的 v1/v2 不一致仍被拒绝。显式解决冲突后记录新基线。
+
+规范轮次 hash 带版本。v1 原样哈希 `{role, items, plan}`；v2 哈希规范化的 item 形式，
+使被封存的 tool_call 骨架与封存它的完整 tool_call 得到相同 hash，且只改变工具 payload
+字节的来源变更不改变轮次身份。缺失版本即为 v1。每个 hash 只与同版本的 hash 比较；
+存储的 cursor 记录自己 `importedTurnHashes` 的版本，同步元数据独立记录自己
+`replayDigest` 的版本，因为冲突标记可能只更新元数据。v1 文档 cursor 绝不能按 v2 解读，
+否则会制造假的 `prefix_mismatch`。版本不一致且缺少可用于重算的 replay 历史时是错误，
+而不是宽容猜测。新导入使用 v2；现有 v1 规范化规则不变。
+
+这会新增可选 cursor 元数据，但不迁移历史正文。旧读取端可忽略新字段；旧导入器
+不理解基线，仍可能对已裁剪的历史报告冲突，因此不是任意降级安全保证。
+
+## 边界与待审事项
+
+### Backend 选择与显示读取
+
+新会话默认使用 Loro。Developer mode 与开发者侧 Roost 开关都打开时，renderer 仅在目标机器声明支持所需
+历史协议时优先选择 Roost；能力缺失或较旧时，在任何会话写入前保留 Loro。
+明确要求 Roost 而目标不支持时，在 metadata、历史或 warm-up 创建前报错。
+没有显式选择的旧会话和非 renderer 创建路径仍使用 Loro。开关变化不会改变已有会话保存的
+backend。命令通过会话选定的 backend，使用该存储唯一的 writer。上文 Loro 容器规则
+只适用于 Loro backend；Roost 保持 sealed segment 不可变，将状态修正和独立权限
+结果投影为同一逻辑 turn。结构替换先准备一致的分支，再原子激活；准备失败
+不能清空可见历史。Cloud 命令通过会话所属机器读写，不选择调用者本机数据库。
+control metadata 与投递状态仍由 Loro 保存。本地历史接受不表示 Roost
+远端已同步。
+
+Roost 签名身份沿用现有应用数据的安全边界，与登录凭据分开。每个可写的执行副本只创建并持久保存一次自己的身份；
+正常启动不要求系统凭据存储或用户提供 seed。签名身份证明底层写入者，不代表人类发起者，也不授予权限。
+多个获授权的成员或设备可以使用同一执行副本；每轮人类身份及现有 Workspace、机器授权继续作为判断依据。
+签名私钥不进入历史同步、导出、RPC 或诊断。身份缺失或损坏时不得静默更换已有写入者。
+实验 Nightly 钥匙串身份的迁移不在本次范围内；没有配套身份的已有数据会保留并明确拒绝，不能静默接管或删除。
+
+桌面侧栏的工作区、按更新时间排列和置顶列表中，会话 hover 卡片显示该会话保存的历史
+backend，标为 Roost 或 Loro。旧会话没有 backend 字段时按 Loro 显示；当前实验开关偏好
+不决定这个标签。显示标签不读取历史正文。
+
+Roost 初始化或存储失败不得把既有会话切回 Loro，也不得重放结果未知的写入。
+保留“尚未发出请求”和“已发出但结果不确定”的区别。所属机器在本地日志记录
+Worker 原始异常、异常退出及运行时/构建信息。渲染端和远程历史 RPC 报告这些故障时只携带
+不含内容的失败阶段、稳定错误码和诊断编号；不返回原始异常、路径、凭据或历史正文。
+界面说明写入未获确认，并显示可在所属机器本地日志中查找的编号。
+
+性能优化必须保留原有 Lody 对话身份及 owner 流程。Edit & Resend 可以通过存储 SDK
+内部的分支操作复用不可变前缀，但不能创建或跳转到另一条 Lody 对话。旧 writer 必须
+继续被阻止写入；确认丢失后须刷新到已提交分支；回滚须保留后续追加，或拒绝覆盖
+冲突编辑。目标校验缓存只在精确匹配历史版本时有效；缓存证据缺失、损坏或受并发
+写入影响时，必须执行权威校验。缓存不存在不能证明没有 active goal。
+
+普通 Roost 查询使用逻辑字段和目标正文。结构编辑通过 SDK 成员清单引用已有物理分段，
+重新插入的业务 ID 使用新物理主分段。最终激活同事务提交根引用、分支版本和操作回执。
+该成员格式需要匹配的 SDK 和 Native 能力。
+
+打开 Roost 会话只读取 active branch 的最新窗口；向上滚动通过反向 cursor 加载旧
+逻辑 turn。全历史搜索、大纲导航、计数和事实必须覆盖更早的页，不要求用户手动
+翻页。这些消费方在后台读取 directory page，正文 hydration 仍受各自 lease 约束；
+打开会话不等待完整历史读取。恢复阅读位置时，先加载对应逻辑 turn，再声明首个
+窗口就绪。新消息保留已加载前缀及
+其 cursor；branch rewrite 使不兼容的页失效，只刷新已加载窗口，不能显示被替换的
+suffix。未加载行不能生成假消息，也不能被视为完整历史事实。显式 export/snapshot
+操作继续使用权威的完整读取能力。
+
+文字增量更新可见正文和大纲摘要，不反复重建未变化的全历史业务事实。目标、权限、
+调度、diff 和状态变更仍须使对应消费方失效。反向分页在已有行的位置和内容不变时，
+保留其行及正文身份。优化不能延迟控制更新，也不能把未读前缀声明为完整事实。
+
+owner 不可用时，之前同步的历史仍可读取，包括重新打开会话、搜索和浏览已缓存的
+旧 turn。renderer 按账号、工作区、机器和会话隔离持久化只读 projection。
+owner 读取响应把页内容、count 与持久 revision 绑定在同一次 observation。
+连续变更原子更新受影响的缓存行。独立协商的增量恢复使用 owner 签发的持久
+checkpoint 补齐漏过的变化；仅通知合并不能要求重新读取未变化的历史正文。
+缓存正文、成员关系和 checkpoint 一起推进。仅失去补丁资格时，保留已经验证的变更
+覆盖游标，通过完整正文回复校准。恢复证据缺失或不属于当前 owner 时，原子替换最新
+窗口，并在该窗口提交前保留之前可读的快照。失效旧页按需重取，重新获取前不能离线
+读取；普通增量校准保留已缓存的前缀。恢复不得自动遍历整份历史。
+重连通过现有 owner transport 刷新。缓存不能接受
+或重放用户命令，也不能提供本设备从未同步过的历史。
+
+独立协商的历史观察通过现有 owner transport 跟随所有者已提交的检查点。
+首次读取及后续观察从持久检查点衔接，包括两者之间、断线期间提交的变化；
+独立的 Loro 控制提示不能是唯一更新信号。空闲观察不读取未变化的历史正文，
+有界等待不占前台执行容量。后端身份待就绪应与确认的空历史、旧后端区分，
+恢复期间仍可读取已解析身份的缓存内容。不支持的所有者保留明确的旧协议路径。
+该观察保证仍是草案意图，实现边界及 watch 合同记录在
+[跨成员读取修复](../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.zh.md)中。
+
+### 验证限制
+
+这不是任意跨版本兼容或 reader 安全的证明。TypeScript 无法保证不可信输入、字符串语义约束，
+也不能阻止刻意的类型断言/底层访问。修改已损坏 item 的命令可能需要修复该 item，
+不能借用针对“未修改历史”的兼容处理。初版 callback 适配支持保持既有轮次顺序的修改，
+不支持任意重排普通 LoroList 中的已有轮次。
+
+Roost reader 已采用 active-branch page，旧 Loro reader 仍加载其 directory；这不构成
+3000 轮性能验收。
+非历史控制字段的校验不属于这个 HistoryWriter 契约。v2 规范形式只针对本仓库当前写入的
+形状定义。完整的封存骨架特性（读取侧的 `ref` payload 拉取、payload hook 以及消费它们的
+UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不会被误判为 hash 冲突。
+
+## 实现证据
+
+- `packages/shared/src/{history-writer,history-write-schema,history-materializer,session-mirror,schema}.ts`
+- `packages/shared/src/session-data/{history-import,loro}.ts`
+- `apps/cli/src/lib/local-project-history-sync-service.ts`
+- `apps/cli/src/session/{roost-node-session,roost-history-generation,roost-rpc-session}.ts`
+- `apps/cli/tests/roost-session-backend-contract.test.ts`
+- `apps/cli/src/session/roost-history-diagnostics.ts` 与 `apps/cli/tests/roost-history-local-owner.test.ts`
+- `packages/components/src/lib/roost-history-error.ts` 与 `packages/components/tests/conversation-session-backend-factory.test.ts`
+- `packages/shared/tests/history-writer.test.ts`、`history-writer.contract.ts`、
+  `history-storage-policy.test.ts` 与 `session-history-import-port.test.ts`
+- `apps/cli/tests/local-project-history-sync-service.test.ts` 与 `local-project-history-sync-writer.test.ts`
+- [决策记录](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
+- [业务字段修复与待定 hash 决策](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
+- [外部历史基线修复](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
+- [中断时 pending input 的 exactly-once](../.agents/notes/implemented/bug-fix/2026-09-14-interrupt-pending-input-exactly-once.zh.md)
+- [Steer Stop 与恢复所有权](../.agents/notes/implemented/bug-fix/2026-09-16-steer-stop-recovery-ownership.zh.md)
+- [带版本轮次 hash 与 primitive 元数据插入](../.agents/notes/implemented/architecture/2026-09-14-versioned-history-hashes-and-primitive-metadata.zh.md)
+
+这是供人工审阅的草稿；实现和测试通过不代表 Spec 已获批准。

@@ -1,11 +1,11 @@
 import { PricingPage } from '@site/components/pricing-page';
-import { pageHead } from '@site/lib/metadata';
+import { brandTitle, pageHead } from '@site/lib/metadata';
 import type { SiteHead } from '@site/lib/metadata';
 import { localeCode, type SiteLocale } from './shared';
 
 export function pricingHead(locale: SiteLocale): SiteHead {
   return pageHead({
-    title: locale === 'zh' ? '价格' : 'Pricing',
+    title: brandTitle(locale === 'zh' ? '价格' : 'Pricing'),
     description:
       locale === 'zh'
         ? 'Lody 免费版、Plus 和企业版价格。'
@@ -20,7 +20,5 @@ export function pricingHead(locale: SiteLocale): SiteHead {
 }
 
 export function PricingRoutePage({ locale }: { locale: SiteLocale }) {
-  // Early-bird yearly ($5/seat/mo) is fixed static copy on PricingPage — no
-  // client clock / env gate (avoids $8 → $5 flash on first paint).
   return <PricingPage locale={locale} />;
 }

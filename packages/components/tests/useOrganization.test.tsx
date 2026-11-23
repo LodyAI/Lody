@@ -1,9 +1,20 @@
 // @vitest-environment jsdom
-
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
+import { PlatformContext } from '@lody/platform/react';
+import { useE2eeWorkspaceRemoval } from '../src/components/pages/e2ee-workspace-removal';
+import { TEST_CLOUD_PLATFORM } from './test-platform';
+import { getCachedWorkspaceId } from '../src/lib/local-storage-cache';
+import { readPreferredWorkspaceSlug, writePreferredWorkspaceSlug } from '../src/lib/workspace';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  editSessionRunConfigDraftAtom,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftsAtom,
+  setSessionRunConfigDraftAccountAtom,
+} from '../src/atoms/session-run-config-drafts';
 
 vi.mock('@/lib/auth-bootstrap', () => ({
   readAuthBootstrapSnapshot: () => null,
@@ -13,11 +24,24 @@ vi.mock('@/lib/auth-bootstrap', () => ({
 
 const organizationMocks = vi.hoisted(() => ({
   authClient: null as unknown,
+  encryptedWorkspaces: [] as unknown[] | undefined,
+  directoryError: null as Error | null,
   refetchActiveOrganization: vi.fn(),
   refetchOrganizations: vi.fn(),
   setActive: vi.fn(),
   deleteOrganization: vi.fn(),
+  deleteEncrypted: vi.fn(),
+  query: vi.fn(),
   leaveOrganization: vi.fn(),
+}));
+
+vi.mock('../src/providers/cloud-platform-api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/providers/cloud-platform-api')>()),
+  useCloudPlatformClient: () => ({ query: organizationMocks.query }),
+  useOptionalCloudPlatformQuery: () => ({
+    data: organizationMocks.encryptedWorkspaces,
+    error: organizationMocks.directoryError,
+  }),
 }));
 
 vi.mock('../src/providers/convex-provider', () => ({
@@ -34,6 +58,13 @@ const { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } =
   await import('../src/atoms/workspace-context');
 type OrganizationState = ReturnType<typeof useOrganization>;
 let latestOrganizationState: OrganizationState | null = null;
+let latestGlobalState: OrganizationState | null = null;
+let latestRemoval: ReturnType<typeof useE2eeWorkspaceRemoval>;
+function GlobalOrganizationProbe() {
+  latestRemoval = useE2eeWorkspaceRemoval();
+  latestGlobalState = useOrganization();
+  return null;
+}
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -44,7 +75,7 @@ type TestOrganization = {
   slug: string;
   name: string;
   logo: null;
-  members: Array<{ userId: string; role: string }>;
+  members?: Array<{ userId: string; role: string }> | null;
 };
 
 function createOrganization(id: string, slug: string, name: string): TestOrganization {
@@ -65,16 +96,45 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
+function editRunConfigDraft(store: Store, workspaceId: string, accountId = 'user-1') {
+  store.set(setSessionRunConfigDraftAccountAtom, accountId);
+  const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
+    accountId,
+    workspaceId,
+    sessionId: 'session-1',
+    targetKey: 'codex',
+  });
+  store.set(editSessionRunConfigDraftAtom, {
+    lease,
+    edit: { type: 'config', configId: 'fast', value: false },
+  });
+  return lease;
+}
+
 function OrganizationProbe({ targetSlug }: { targetSlug: string }) {
   latestOrganizationState = useOrganization({ targetSlug });
   return null;
 }
 
+const testPlatform = {
+  ...TEST_CLOUD_PLATFORM,
+  e2eeWorkspaces: {
+    create: unexpectedE2eeWorkspaceOperation,
+    describe: unexpectedE2eeWorkspaceOperation,
+    history: unexpectedE2eeWorkspaceOperation,
+    deleteWorkspace: organizationMocks.deleteEncrypted,
+  },
+};
+
 function TestApp({
   targetSlug,
   renderVersion,
   store,
+  includeGlobal = false,
+  remountTarget = false,
 }: {
+  remountTarget?: boolean;
+  includeGlobal?: boolean;
   targetSlug: string;
   renderVersion: number;
   store: Store;
@@ -82,26 +142,37 @@ function TestApp({
   void renderVersion;
 
   return createElement(
-    Provider,
-    { store },
+    PlatformContext.Provider,
+    { value: testPlatform },
     createElement(
-      StableSessionContext.Provider,
-      {
-        value: {
-          data: { user: { id: 'user-1' } },
-          rawData: { user: { id: 'user-1' } },
-          bootstrapSnapshot: null,
-          hasLocalToken: false,
-          hasRawUser: true,
-          isOptimistic: false,
-          isPending: false,
-          isRetrying: false,
-          error: null,
-          confirmedUnauthenticated: false,
+      Provider,
+      { store },
+      createElement(
+        StableSessionContext.Provider,
+        {
+          value: {
+            data: { user: { id: 'user-1' } },
+            rawData: { user: { id: 'user-1' } },
+            bootstrapSnapshot: null,
+            hasLocalToken: false,
+            hasRawUser: true,
+            isOptimistic: false,
+            isPending: false,
+            isRetrying: false,
+            error: null,
+            confirmedUnauthenticated: false,
+          },
         },
-      },
-      createElement(OrganizationProbe, { targetSlug }),
-      createElement(OrganizationProbe, { targetSlug })
+        createElement(OrganizationProbe, {
+          targetSlug,
+          key: remountTarget ? `first:${targetSlug}` : 'first',
+        }),
+        createElement(OrganizationProbe, {
+          targetSlug,
+          key: remountTarget ? `second:${targetSlug}` : 'second',
+        }),
+        includeGlobal ? createElement(GlobalOrganizationProbe) : null
+      )
     )
   );
 }
@@ -114,7 +185,10 @@ describe('useOrganization setActive dedupe', () => {
   let listVersion = 0;
 
   beforeEach(() => {
+    organizationMocks.encryptedWorkspaces = [];
+    organizationMocks.directoryError = null;
     latestOrganizationState = null;
+    latestGlobalState = null;
     listVersion = 0;
     activeOrganization = createOrganization('workspace-old', 'old-workspace', 'Old Workspace');
     store = createStore();
@@ -150,6 +224,7 @@ describe('useOrganization setActive dedupe', () => {
       }),
       organization: {
         setActive: organizationMocks.setActive,
+        list: async () => ({ data: [activeOrganization], error: null }),
         delete: organizationMocks.deleteOrganization,
         leave: organizationMocks.leaveOrganization,
       },
@@ -168,7 +243,12 @@ describe('useOrganization setActive dedupe', () => {
     vi.clearAllMocks();
   });
 
-  async function render(targetSlug: string, renderVersion: number): Promise<void> {
+  async function render(
+    targetSlug: string,
+    renderVersion: number,
+    includeGlobal = false,
+    remountTarget = false
+  ): Promise<void> {
     if (!container) {
       container = document.createElement('div');
       document.body.appendChild(container);
@@ -176,38 +256,199 @@ describe('useOrganization setActive dedupe', () => {
     }
 
     await act(async () => {
-      root?.render(createElement(TestApp, { targetSlug, renderVersion, store }));
+      root?.render(
+        createElement(TestApp, { targetSlug, renderVersion, store, includeGlobal, remountTarget })
+      );
     });
     await act(async () => {
       await Promise.resolve();
     });
   }
 
-  it('sends one setActive request for duplicate target workspace switchers', async () => {
-    await render('target-workspace', 0);
-
-    expect(organizationMocks.setActive).toHaveBeenCalledTimes(1);
-    expect(organizationMocks.setActive).toHaveBeenCalledWith({
-      organizationId: 'workspace-target',
+  it('opens a ledger-bound workspace with a full projected roster without Better Auth setActive', async () => {
+    organizationMocks.encryptedWorkspaces = [
+      {
+        id: 'encrypted',
+        name: 'Cipher Team',
+        slug: 'cipher-team',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: '11'.repeat(32),
+        genesisHash: '11'.repeat(32),
+        role: 'member',
+        members: [
+          {
+            id: 'member-key',
+            userId: 'user-1',
+            role: 'member',
+            user: { id: 'user-1', name: 'Synthetic Member', email: 'member@synthetic.test' },
+          },
+        ],
+      },
+    ];
+    await render('cipher-team', 0);
+    expect(latestOrganizationState!.activeOrganization).toMatchObject({
+      id: 'encrypted',
+      members: [{ userId: 'user-1', role: 'member' }],
     });
-
-    listVersion += 1;
-    await render('target-workspace', 1);
-
-    expect(organizationMocks.setActive).toHaveBeenCalledTimes(1);
-
-    activeOrganization = createOrganization(
-      'workspace-target',
-      'target-workspace',
-      'Target Workspace'
+    expect(
+      latestOrganizationState!.organizations?.some((workspace) => workspace.id === 'encrypted')
+    ).toBe(true);
+    expect(latestOrganizationState!.role).toBe('member');
+    expect(store.get(currentWorkspaceIdAtom)).toBe('encrypted');
+    expect(organizationMocks.setActive).not.toHaveBeenCalled();
+  });
+  it('returns global selection to a remounted ordinary URL even if the optional directory fails', async () => {
+    organizationMocks.encryptedWorkspaces = [
+      {
+        id: 'encrypted',
+        name: 'Cipher Team',
+        slug: 'cipher-team',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: '11'.repeat(32),
+        genesisHash: '11'.repeat(32),
+        role: 'member',
+        members: [
+          {
+            id: 'member-key',
+            userId: 'user-1',
+            role: 'member',
+            user: { id: 'user-1', name: 'Synthetic Member', email: 'member@synthetic.test' },
+          },
+        ],
+      },
+    ];
+    await render('cipher-team', 0, true, true);
+    expect(latestGlobalState!.activeOrganization?.id).toBe('encrypted');
+    organizationMocks.encryptedWorkspaces = undefined;
+    organizationMocks.directoryError = new Error('directory unavailable');
+    await render('old-workspace', 1, true, true);
+    expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
+    expect(latestGlobalState!.activeOrganization?.id).toBe('workspace-old');
+    expect(latestOrganizationState!.error).toBeNull();
+    expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-old');
+  });
+  it('isolates an unavailable encrypted directory from a healthy ordinary workspace and fails closed for an unknown encrypted target', async () => {
+    organizationMocks.encryptedWorkspaces = undefined;
+    organizationMocks.directoryError = new Error('directory unavailable');
+    await render('old-workspace', 0, true);
+    expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
+    expect(latestOrganizationState!.error).toBeNull();
+    await render('unknown-encrypted', 1, true);
+    expect(latestOrganizationState!.activeOrganization).toBeNull();
+    expect(latestOrganizationState!.organizationsError?.message).toContain(
+      'Encrypted membership directory'
     );
-    listVersion += 1;
-    await render('target-workspace', 2);
+  });
 
-    expect(organizationMocks.setActive).toHaveBeenCalledTimes(1);
+  it.each([undefined, null])(
+    'gates incomplete membership (%s) and recovers after refetch',
+    async (members) => {
+      await render('old-workspace', 0);
+      expect(latestOrganizationState!.hasAdminPermission).toBe(true);
+
+      activeOrganization = { ...activeOrganization, members };
+      await render('old-workspace', 1);
+
+      expect(latestOrganizationState!.activeOrganization).toBeNull();
+      expect(latestOrganizationState!.role).toBeUndefined();
+      expect(latestOrganizationState!.hasAdminPermission).toBe(false);
+      expect(latestOrganizationState!.error?.message).toContain('Incomplete organization response');
+      expect(organizationMocks.setActive).not.toHaveBeenCalled();
+
+      organizationMocks.refetchActiveOrganization.mockImplementationOnce(() => {
+        activeOrganization = createOrganization('workspace-old', 'old-workspace', 'Old Workspace');
+      });
+      await act(async () => {
+        await latestOrganizationState!.refetchActiveOrganization();
+      });
+      await render('old-workspace', 2);
+
+      expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
+      expect(latestOrganizationState!.role).toBe('owner');
+      expect(latestOrganizationState!.hasAdminPermission).toBe(true);
+      expect(latestOrganizationState!.error).toBeNull();
+    }
+  );
+
+  it('can switch away from a previous organization with incomplete membership', async () => {
+    activeOrganization = { ...activeOrganization, members: undefined };
+    await render('workspace-new', 0);
+
+    expect(latestOrganizationState!.activeOrganization).toBeNull();
+    expect(latestOrganizationState!.hasAdminPermission).toBe(false);
+    expect(latestOrganizationState!.error).toBeNull();
+    expect(organizationMocks.setActive).toHaveBeenCalledWith({ organizationId: 'workspace-new' });
+
+    activeOrganization = createOrganization('workspace-new', 'workspace-new', 'New Workspace');
+    await render('workspace-new', 1);
+    expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-new');
+    expect(latestOrganizationState!.role).toBe('owner');
+  });
+
+  it('reconciles a lost-access deletion against the encrypted directory after a lost reply', async () => {
+    await render('old-workspace', 0, true);
+    organizationMocks.deleteEncrypted.mockRejectedValueOnce(new Error('lost reply'));
+    await act(async () => {
+      await expect(latestRemoval!.submit('delete', 'successor-workspace')).rejects.toThrow(
+        'lost reply'
+      );
+    });
+    expect(organizationMocks.deleteEncrypted).toHaveBeenCalledWith({
+      workspaceId: 'successor-workspace',
+    });
+    expect(organizationMocks.deleteOrganization).not.toHaveBeenCalled();
+    organizationMocks.query.mockImplementationOnce(async (operation) => {
+      expect(operation.name).toBe('e2eeMembers:workspaces');
+      return [{ id: 'successor-workspace' }];
+    });
+    await expect(latestRemoval!.listed('successor-workspace')).resolves.toBe(true);
+    organizationMocks.query.mockRejectedValueOnce(new Error('offline'));
+    await expect(latestRemoval!.listed('successor-workspace')).resolves.toBeNull();
+    organizationMocks.query.mockResolvedValueOnce([]);
+    await expect(latestRemoval!.listed('successor-workspace')).resolves.toBe(false);
+  });
+
+  it('deletes a successor Owner workspace, clears its selection and caches, and activates the fallback', async () => {
+    const workspace = {
+      ...createOrganization('cipher-id', 'cipher-team', 'Cipher Team'),
+      contentMode: 'e2ee',
+      role: 'owner',
+    };
+    organizationMocks.encryptedWorkspaces = [workspace];
+    const removedDraft = editRunConfigDraft(store, workspace.id);
+    await render(workspace.slug, 0, true);
+    expect(latestGlobalState!.activeOrganization?.id).toBe(workspace.id);
+    writePreferredWorkspaceSlug(workspace.slug);
+    expect(getCachedWorkspaceId(workspace.slug)).toBe(workspace.id);
+    organizationMocks.deleteEncrypted.mockImplementationOnce(async ({ workspaceId }) => {
+      expect(workspaceId).toBe(workspace.id);
+      return { workspaceId, deleted: true };
+    });
+    organizationMocks.setActive.mockImplementationOnce(async ({ organizationId }) => {
+      activeOrganization = createOrganization(organizationId, 'target-workspace', 'Fallback');
+      return { data: activeOrganization, error: null };
+    });
+    await act(async () => {
+      await latestGlobalState!.deleteOrganization(workspace.id);
+    });
+    expect(organizationMocks.deleteOrganization).not.toHaveBeenCalled();
+    expect(latestGlobalState!.organizations?.map((org) => org.id)).not.toContain(workspace.id);
+    expect(removedDraft.active).toBe(false);
+    expect(getCachedWorkspaceId(workspace.slug)).toBeNull();
+    expect(readPreferredWorkspaceSlug()).toBeNull();
+    expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-target');
+    expect(latestGlobalState!.activeOrganization?.id).toBe('workspace-target');
+    // A stale directory response must not revive the previous global selection.
+    organizationMocks.encryptedWorkspaces = [workspace];
+    await render('', 1, true);
+    expect(latestGlobalState!.activeOrganization?.id).toBe('workspace-target');
   });
 
   it('publishes the fallback after delete success when no newer writer intervenes', async () => {
+    const removed = editRunConfigDraft(store, 'workspace-old');
+    editRunConfigDraft(store, 'workspace-target');
     organizationMocks.deleteOrganization.mockResolvedValueOnce({
       data: { id: 'workspace-old' },
       error: null,
@@ -218,11 +459,21 @@ describe('useOrganization setActive dedupe', () => {
       await latestOrganizationState!.deleteOrganization('workspace-old');
     });
 
+    expect(organizationMocks.deleteOrganization).toHaveBeenCalledWith({
+      organizationId: 'workspace-old',
+    });
+    expect(organizationMocks.deleteEncrypted).not.toHaveBeenCalled();
     expect(store.get(currentWorkspaceSlugAtom)).toBe('target-workspace');
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-target');
+    expect(
+      [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => scope.workspaceId)
+    ).toEqual(['workspace-target']);
+    expect(removed.active).toBe(false);
   });
 
   it('rolls back after leave failure when no newer writer intervenes', async () => {
+    const lease = editRunConfigDraft(store, 'workspace-old');
+    const drafts = store.get(sessionRunConfigDraftsAtom);
     organizationMocks.leaveOrganization.mockResolvedValueOnce({
       data: null,
       error: { message: 'leave failed' },
@@ -236,6 +487,8 @@ describe('useOrganization setActive dedupe', () => {
 
     expect(store.get(currentWorkspaceSlugAtom)).toBe('old-workspace');
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-old');
+    expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+    expect(lease.active).toBe(true);
   });
 
   it('does not switch Better Auth or replace identity when delete resolves after navigation', async () => {
@@ -444,16 +697,141 @@ describe('useOrganization setActive dedupe', () => {
     expect(store.get(currentWorkspaceSlugAtom)).toBe('workspace-new');
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-new');
   });
+});
 
-  it('rejects an awaited activation when Better Auth refuses the switch', async () => {
-    organizationMocks.setActive.mockResolvedValueOnce({
-      data: null,
-      error: { message: 'membership changed' },
+describe('useOrganization list recovery', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  let networkUp: boolean;
+  let list: { data: TestOrganization[] | null; error: Error | null };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    organizationMocks.encryptedWorkspaces = [];
+    latestOrganizationState = null;
+    networkUp = false;
+    list = { data: null, error: new Error('Failed to fetch') };
+    organizationMocks.refetchOrganizations.mockReset();
+    organizationMocks.refetchOrganizations.mockImplementation(async () => {
+      list = networkUp
+        ? {
+            data: [createOrganization('workspace-target', 'target-workspace', 'Target')],
+            error: null,
+          }
+        : { data: null, error: new Error('Failed to fetch') };
     });
-    await render('old-workspace', 0);
+    const target = createOrganization('workspace-target', 'target-workspace', 'Target');
+    organizationMocks.authClient = {
+      useListOrganizations: () => ({
+        data: list.data,
+        isPending: false,
+        error: list.error,
+        refetch: organizationMocks.refetchOrganizations,
+      }),
+      useActiveOrganization: () => ({
+        data: target,
+        isPending: false,
+        error: null,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+      organization: { setActive: organizationMocks.setActive },
+    };
+  });
 
-    await expect(
-      latestOrganizationState?.activateOrganization('workspace-rejected')
-    ).rejects.toThrow('membership changed');
+  afterEach(async () => {
+    if (root) {
+      await act(async () => {
+        root?.unmount();
+      });
+    }
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  async function renderApp(): Promise<void> {
+    if (!container) {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+    }
+    await act(async () => {
+      root?.render(
+        createElement(TestApp, {
+          targetSlug: 'target-workspace',
+          renderVersion: 0,
+          store: createStore(),
+        })
+      );
+    });
+  }
+
+  /** Let scheduled retries fire, then re-render so the hook reads the new list. */
+  async function advance(ms: number): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+    await renderApp();
+  }
+
+  it('loads the list once the network returns after the retry burst was spent', async () => {
+    await renderApp();
+    for (let i = 0; i < 8; i += 1) await advance(5_000);
+    expect(latestOrganizationState?.organizations).toBeUndefined();
+    expect(latestOrganizationState?.error).not.toBeNull();
+
+    networkUp = true;
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await advance(5_000);
+    await advance(0);
+
+    expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
+      'target-workspace',
+    ]);
+    expect(latestOrganizationState?.error).toBeNull();
+  });
+
+  it('keeps loading through a first-login active-organization failure until the list resolves', async () => {
+    const workspace = createOrganization('workspace-first-login', 'target-workspace', 'Target');
+    // Answered before the new session settled; Better Auth only refetches it on setActive.
+    let active: { data: TestOrganization | null; error: Error | null } = {
+      data: null,
+      error: new Error('Unauthorized'),
+    };
+    organizationMocks.refetchOrganizations.mockImplementation(async () => {
+      list = networkUp ? { data: [workspace], error: null } : list;
+    });
+    organizationMocks.setActive.mockImplementation(async () => {
+      active = { data: workspace, error: null };
+      return { data: workspace, error: null };
+    });
+    organizationMocks.authClient = {
+      ...(organizationMocks.authClient as object),
+      useActiveOrganization: () => ({
+        data: active.data,
+        isPending: false,
+        error: active.error,
+        refetch: organizationMocks.refetchActiveOrganization,
+      }),
+    };
+
+    await renderApp();
+    await advance(400);
+    expect(latestOrganizationState?.organizationsLoading).toBe(true);
+    expect(latestOrganizationState?.error).toBeNull();
+
+    networkUp = true;
+    await advance(5_000);
+    await advance(0);
+
+    expect(latestOrganizationState?.organizations?.map((org) => org.slug)).toEqual([
+      'target-workspace',
+    ]);
+    expect(latestOrganizationState?.activeOrganization?.id).toBe('workspace-first-login');
+    expect(latestOrganizationState?.error).toBeNull();
   });
 });

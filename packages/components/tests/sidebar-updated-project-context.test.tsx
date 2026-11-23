@@ -1,0 +1,534 @@
+// @vitest-environment jsdom
+
+import React from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'react-dom';
+import { createRoot, type Root } from 'react-dom/client';
+import { createStore, Provider } from 'jotai';
+import {
+  SidebarUpdatedSessionList,
+  type SidebarUpdatedItem,
+} from '../src/components/sidebar-updated-session-list';
+import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
+import { initI18n } from '../src/i18n';
+import { SessionList } from '../src/components/session-list';
+import type { SessionSharingState } from '../src/lib/session-sharing';
+
+describe('sidebar-updated-project-context', () => {
+  function makeItem(overrides: Partial<SidebarUpdatedItem> & { id: string }): SidebarUpdatedItem {
+    return {
+      kind: 'chat',
+      title: `Session ${overrides.id}`,
+      sectionLabel: 'Chats',
+      latestMessageAt: '2026-04-22T00:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  describe('SidebarUpdatedSessionList project context', () => {
+    let root: Root | undefined;
+    let container: HTMLDivElement | undefined;
+
+    beforeEach(async () => {
+      await initI18n('en');
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: vi.fn().mockImplementation((query: string) => ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        })),
+      });
+    });
+
+    afterEach(() => {
+      if (root) {
+        flushSync(() => {
+          root?.unmount();
+        });
+      }
+      root = undefined;
+      container?.remove();
+      container = undefined;
+      vi.restoreAllMocks();
+    });
+
+    function render(
+      items: SidebarUpdatedItem[],
+      showProjectContext = true,
+      selectedItemId?: string,
+      options?: { branchNames?: boolean }
+    ) {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      const store = createStore();
+      if (options?.branchNames !== undefined) {
+        store.set(sidebarShowBranchNamesAtom, options.branchNames);
+      }
+      flushSync(() => {
+        root?.render(
+          React.createElement(
+            Provider,
+            { store },
+            React.createElement(SidebarUpdatedSessionList, {
+              items,
+              now: new Date('2026-04-22T12:00:00.000Z'),
+              showProjectContext,
+              selectedItemId,
+            })
+          )
+        );
+      });
+    }
+
+    it('does not show a project line unless Updated mode asks for it', () => {
+      render(
+        [
+          makeItem({
+            id: 'local',
+            kind: 'local',
+            title: 'Local session',
+            subtitle: 'lody',
+            sectionLabel: 'Local Projects · lody',
+          }),
+        ],
+        false
+      );
+      expect(container?.querySelector('[data-sidebar-updated-project]')).toBeNull();
+    });
+
+    it('hides the project line on nested opened Sessions', () => {
+      render([
+        makeItem({
+          id: 'opener',
+          kind: 'local',
+          title: 'Opener',
+          subtitle: 'lody',
+          sectionLabel: 'Local Projects · lody',
+          latestMessageAt: '2026-04-22T11:00:00.000Z',
+        }),
+        makeItem({
+          id: 'opened',
+          kind: 'local',
+          title: 'Opened child',
+          subtitle: 'lody',
+          sectionLabel: 'Local Projects · lody',
+          openedBySessionId: 'opener',
+          latestMessageAt: '2026-04-22T10:00:00.000Z',
+        }),
+      ]);
+
+      expect(
+        container
+          ?.querySelector('[data-sidebar-updated-id="opener"]')
+          ?.querySelector('[data-sidebar-updated-project]')
+      ).not.toBeNull();
+      expect(
+        container
+          ?.querySelector('[data-sidebar-updated-id="opened"]')
+          ?.querySelector('[data-sidebar-updated-project]')
+      ).toBeNull();
+    });
+
+    it('appends the branch segment to a repo row when the preference is on', () => {
+      render(
+        [
+          makeItem({
+            id: 'github',
+            kind: 'github',
+            title: 'GitHub session',
+            subtitle: 'loro-dev/lody',
+            repoFullName: 'loro-dev/lody',
+            branchName: 'feat/repository-identity',
+            sectionLabel: 'loro-dev/lody',
+          }),
+        ],
+        true,
+        undefined,
+        { branchNames: true }
+      );
+
+      const meta = container
+        ?.querySelector('[data-sidebar-updated-id="github"]')
+        ?.querySelector('[data-sidebar-session-meta]');
+      expect(meta?.textContent).toContain('feat/repository-identity');
+      expect(meta?.querySelector('.lucide-git-branch')).not.toBeNull();
+    });
+
+    it('omits the branch segment on rows without a branch and on nested children', () => {
+      render([
+        makeItem({
+          id: 'chat',
+          kind: 'chat',
+          title: 'Chat session',
+          subtitle: null,
+          sectionLabel: 'Chats',
+        }),
+        makeItem({
+          id: 'opener',
+          kind: 'github',
+          title: 'Opener',
+          subtitle: 'loro-dev/lody',
+          repoFullName: 'loro-dev/lody',
+          branchName: 'main',
+          sectionLabel: 'loro-dev/lody',
+        }),
+        makeItem({
+          id: 'opened',
+          kind: 'github',
+          title: 'Opened child',
+          subtitle: 'loro-dev/lody',
+          repoFullName: 'loro-dev/lody',
+          branchName: 'feat/child',
+          openedBySessionId: 'opener',
+          sectionLabel: 'loro-dev/lody',
+        }),
+      ]);
+
+      const chatRow = container?.querySelector('[data-sidebar-updated-id="chat"]');
+      const openedRow = container?.querySelector('[data-sidebar-updated-id="opened"]');
+      // Chat rows have no branch, so the chat keeps its project-only second line.
+      expect(chatRow?.querySelector('.lucide-git-branch')).toBeNull();
+      expect(
+        container
+          ?.querySelector('[data-sidebar-updated-id="opener"]')
+          ?.querySelector('[data-sidebar-session-meta]')
+      ).not.toBeNull();
+      expect(openedRow?.querySelector('[data-sidebar-session-meta]')).toBeNull();
+    });
+
+    it('collapses the second line to the project segment when the branch preference is off', () => {
+      render(
+        [
+          makeItem({
+            id: 'github',
+            kind: 'github',
+            title: 'GitHub session',
+            subtitle: 'loro-dev/lody',
+            repoFullName: 'loro-dev/lody',
+            branchName: 'feat/repository-identity',
+            sectionLabel: 'loro-dev/lody',
+          }),
+        ],
+        true,
+        undefined,
+        { branchNames: false }
+      );
+
+      const row = container?.querySelector('[data-sidebar-updated-id="github"]');
+      expect(row?.querySelector('[data-sidebar-updated-project="github"]')).not.toBeNull();
+      expect(row?.querySelector('.lucide-git-branch')).toBeNull();
+    });
+  });
+});
+
+describe('sidebar-updated-session-list-worktree', () => {
+  describe('SidebarUpdatedSessionList session-type icon', () => {
+    let root: Root | undefined;
+    let container: HTMLDivElement | undefined;
+
+    beforeEach(async () => {
+      await initI18n('en');
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: vi.fn().mockImplementation((query: string) => ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        })),
+      });
+    });
+
+    afterEach(() => {
+      if (root) {
+        flushSync(() => {
+          root?.unmount();
+        });
+      }
+      root = undefined;
+      container?.remove();
+      container = undefined;
+      vi.restoreAllMocks();
+    });
+
+    it('shows the PR icon for a local row linked to a GitHub PR', () => {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+
+      flushSync(() => {
+        root?.render(
+          React.createElement(SidebarUpdatedSessionList, {
+            now: new Date('2026-05-09T12:00:00.000Z'),
+            items: [
+              {
+                id: 'session-local-with-pr',
+                kind: 'local',
+                title: 'Local session with PR',
+                sectionLabel: 'Local Projects · lody',
+                subtitle: 'lody',
+                repoFullName: 'loro-dev/lody',
+                latestMessageAt: new Date('2026-05-09T11:45:00.000Z'),
+                prUrl: 'https://github.com/loro-dev/lody/pull/42',
+                prStatus: 'open',
+              },
+            ],
+          })
+        );
+      });
+
+      // Local projects linked to a GitHub repo can carry a PR; the row must not
+      // hide it just because `kind` is 'local'.
+      const row = container.querySelector('[data-sidebar-updated-id="session-local-with-pr"]');
+      expect(row?.querySelector('.lucide-git-pull-request')).not.toBeNull();
+    });
+  });
+});
+
+describe('sidebar-share-only-menu', () => {
+  const PRIVATE_SHARING: SessionSharingState = {
+    visibility: 'private',
+    privateReason: 'machine',
+    canManage: true,
+    machineId: null,
+    localProjectId: null,
+    machineName: null,
+    projectName: null,
+  };
+
+  describe('sidebar share-only context menus', () => {
+    let root: Root | undefined;
+    let container: HTMLDivElement | undefined;
+
+    beforeEach(async () => {
+      await initI18n('en');
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: vi.fn().mockImplementation((query: string) => ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        })),
+      });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+    });
+
+    afterEach(() => {
+      if (root) {
+        flushSync(() => {
+          root?.unmount();
+        });
+      }
+      root = undefined;
+      container?.remove();
+      container = undefined;
+      vi.restoreAllMocks();
+    });
+
+    function openContextMenu(row: Element | null) {
+      expect(row).not.toBeNull();
+      flushSync(() => {
+        row?.dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            clientX: 10,
+            clientY: 10,
+          })
+        );
+      });
+    }
+
+    function getShareMenuItem() {
+      return Array.from(document.querySelectorAll('[role="menuitem"]')).find((node) =>
+        node.textContent?.includes('Share with team')
+      );
+    }
+
+    it('keeps the SessionList menu reachable when Share is its only action', () => {
+      const onShareSessionWithTeam = vi.fn();
+
+      flushSync(() => {
+        root?.render(
+          React.createElement(SessionList, {
+            sessions: [
+              {
+                sessionId: 'task-list-session',
+                title: 'Private conversation',
+                repoFullName: 'loro-dev/lody',
+                branchName: '',
+                latestMessageAt: '2026-07-19T00:00:00.000Z',
+                addedLines: 0,
+                deletedLines: 0,
+                isWorking: false,
+                hasUnreadMessages: false,
+                isOffline: false,
+                isWaitingPermission: false,
+                sharing: PRIVATE_SHARING,
+              },
+            ],
+            repos: [{ repoFullName: 'loro-dev/lody', collapsed: false }],
+            onShareSessionWithTeam,
+          })
+        );
+      });
+
+      openContextMenu(container?.querySelector('[data-sidebar-session-id="task-list-session"]'));
+      const shareItem = getShareMenuItem();
+      expect(shareItem).not.toBeUndefined();
+
+      flushSync(() => {
+        shareItem?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      });
+      expect(onShareSessionWithTeam).toHaveBeenCalledWith('task-list-session');
+    });
+
+    it('keeps the Updated list menu reachable when Share is its only action', () => {
+      const onShareItemWithTeam = vi.fn();
+
+      flushSync(() => {
+        root?.render(
+          React.createElement(SidebarUpdatedSessionList, {
+            now: new Date('2026-07-19T01:00:00.000Z'),
+            items: [
+              {
+                id: 'updated-session',
+                kind: 'local',
+                title: 'Private conversation',
+                sectionLabel: 'Local Projects · lody',
+                latestMessageAt: new Date('2026-07-19T00:00:00.000Z'),
+                sharing: PRIVATE_SHARING,
+              },
+            ],
+            onShareItemWithTeam,
+          })
+        );
+      });
+
+      openContextMenu(container?.querySelector('[data-sidebar-updated-id="updated-session"]'));
+      const shareItem = getShareMenuItem();
+      expect(shareItem).not.toBeUndefined();
+
+      flushSync(() => {
+        shareItem?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      });
+      expect(onShareItemWithTeam).toHaveBeenCalledWith('updated-session');
+    });
+    it.each(['sessions', 'updated'] as const)(
+      'hides management controls but retains read preferences in %s rows',
+      (surface) => {
+        const sharing: SessionSharingState = {
+          ...PRIVATE_SHARING,
+          visibility: 'team',
+          access: 'read',
+          canManage: false,
+        };
+        const actions = { pin: false, unread: false };
+        const forbidden = () => {
+          throw new Error('management must stay hidden');
+        };
+        flushSync(() =>
+          root?.render(
+            surface === 'sessions' ? (
+              <SessionList
+                sessions={[
+                  {
+                    sessionId: 'read-only',
+                    title: 'Read-only conversation',
+                    repoFullName: null,
+                    branchName: '',
+                    latestMessageAt: 100,
+                    addedLines: 0,
+                    deletedLines: 0,
+                    isWorking: false,
+                    hasUnreadMessages: false,
+                    isOffline: false,
+                    isWaitingPermission: false,
+                    sharing,
+                  },
+                ]}
+                repos={[]}
+                onArchiveSession={forbidden}
+                onRenameSession={forbidden}
+                onTogglePinSession={() => {
+                  actions.pin = true;
+                }}
+                onMarkSessionUnread={() => {
+                  actions.unread = true;
+                }}
+              />
+            ) : (
+              <SidebarUpdatedSessionList
+                items={[
+                  {
+                    id: 'read-only',
+                    kind: 'local',
+                    title: 'Read-only conversation',
+                    sectionLabel: 'Local',
+                    latestMessageAt: new Date(100),
+                    sharing,
+                  },
+                ]}
+                onArchiveItem={forbidden}
+                onRenameItem={forbidden}
+                onTogglePinItem={() => {
+                  actions.pin = true;
+                }}
+                onMarkItemUnread={() => {
+                  actions.unread = true;
+                }}
+              />
+            )
+          )
+        );
+        const row =
+          container?.querySelector(
+            '[data-sidebar-session-id="read-only"], [data-sidebar-updated-id="read-only"]'
+          ) ?? null;
+        expect(
+          row?.querySelector('[aria-label="Archive session"], [aria-label="Archive Session"]')
+        ).toBeNull();
+        for (const label of ['Pin Session', 'Mark as unread']) {
+          openContextMenu(row);
+          const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+          expect(
+            items
+              .map((item) => item.textContent)
+              .some((text) => /Rename|Archive|Delete/.test(text ?? ''))
+          ).toBe(false);
+          const action = items.find((item) => item.textContent === label);
+          expect(action).toBeDefined();
+          flushSync(() => action!.click());
+        }
+        expect(actions).toEqual({ pin: true, unread: true });
+        const title = [...row!.querySelectorAll('span')].find(
+          (node) => node.textContent === 'Read-only conversation'
+        );
+        expect(title).toBeDefined();
+        flushSync(() => title!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+      }
+    );
+  });
+});

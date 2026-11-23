@@ -3,6 +3,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_AGENT_ROLE_EMOJI } from '@lody/shared';
 import type {
   AgentConfigId,
   AgentConfigMeta,
@@ -15,6 +16,7 @@ import type {
 const catalog = vi.hoisted(() => ({
   roles: [] as AgentRole[],
   agentConfigs: [] as AgentConfigMeta[],
+  synced: true,
 }));
 
 vi.mock('jotai', async (importOriginal) => ({
@@ -23,13 +25,19 @@ vi.mock('jotai', async (importOriginal) => ({
 }));
 
 vi.mock('../src/hooks/use-workspace-agent-roles', () => ({
-  useWorkspaceAgentRoles: () => ({ roles: catalog.roles }),
+  useWorkspaceAgentRoles: () => ({ roles: catalog.roles, synced: catalog.synced }),
+  useAgentRoleAvailability: () => ({ resolve: () => ({ kind: 'available' }) }),
 }));
 
 import {
   useSessionAgentRole,
   type SessionAgentRoleControl,
 } from '../src/hooks/use-session-agent-role';
+import { resolveProgrammaticTurnAgentRole } from '../src/lib/composer-agent-roles';
+import {
+  sessionAgentRoleDurableSnapshotAtomFamily,
+  sessionAgentRoleSelectionAtomFamily,
+} from '../src/atoms/session-agent-roles';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -64,20 +72,34 @@ describe('useSessionAgentRole', () => {
   let hookProps: {
     sessionId: string;
     provenanceRoleId?: AgentRoleId;
+    durableRoleId?: AgentRoleId | null;
+    durableRoleRevision?: number;
+    durableSourceTurnKey?: string;
+    durableKnownSourceTurnKeys?: readonly string[];
+    durableRoleReady?: boolean;
+    runConfigHasUserEdits?: boolean;
     selectedModelId: string;
+    planMode?: boolean;
   };
 
   function Harness() {
     control = useSessionAgentRole({
       sessionId: hookProps.sessionId as SessionId,
       provenanceRoleId: hookProps.provenanceRoleId,
-      agentType: 'codex',
+      durableRoleId: hookProps.durableRoleId,
+      durableRoleRevision: hookProps.durableRoleRevision,
+      durableSourceTurnKey: hookProps.durableSourceTurnKey,
+      durableKnownSourceTurnKeys: hookProps.durableKnownSourceTurnKeys,
+      durableRoleReady: hookProps.durableRoleReady,
+      runConfigHasUserEdits: hookProps.runConfigHasUserEdits,
+      machineId: 'machine-1' as MachineId,
+      agentConfigId: 'agent-1' as AgentConfigId,
       modelOptions: [{ value: 'model-1', label: 'Model 1' }],
       selectedModelId: hookProps.selectedModelId,
       modeOptions: [],
       selectedModeId: null,
       configOptionSelectors: [],
-      configOptionValues: {},
+      configOptionValues: hookProps.planMode === undefined ? {} : { plan_mode: hookProps.planMode },
     });
     return null;
   }
@@ -85,19 +107,49 @@ describe('useSessionAgentRole', () => {
   const render = async ({
     sessionId = 'session-1',
     provenanceRoleId,
+    durableRoleId,
+    durableRoleRevision,
+    durableSourceTurnKey,
+    durableKnownSourceTurnKeys,
+    durableRoleReady,
+    runConfigHasUserEdits,
     selectedModelId = 'model-1',
+    planMode,
   }: {
     sessionId?: string;
     provenanceRoleId?: AgentRoleId;
+    durableRoleId?: AgentRoleId | null;
+    durableRoleRevision?: number;
+    durableSourceTurnKey?: string;
+    durableKnownSourceTurnKeys?: readonly string[];
+    durableRoleReady?: boolean;
+    runConfigHasUserEdits?: boolean;
     selectedModelId?: string;
+    planMode?: boolean;
   }) => {
-    hookProps = { sessionId, provenanceRoleId, selectedModelId };
+    hookProps = {
+      sessionId,
+      provenanceRoleId,
+      durableRoleId,
+      durableRoleRevision,
+      durableSourceTurnKey,
+      durableKnownSourceTurnKeys,
+      durableRoleReady,
+      runConfigHasUserEdits,
+      selectedModelId,
+      planMode,
+    };
     await act(async () => root?.render(createElement(Harness)));
   };
 
   beforeEach(() => {
+    sessionAgentRoleSelectionAtomFamily.remove('session-1' as SessionId);
+    sessionAgentRoleSelectionAtomFamily.remove('session-2' as SessionId);
+    sessionAgentRoleDurableSnapshotAtomFamily.remove('session-1' as SessionId);
+    sessionAgentRoleDurableSnapshotAtomFamily.remove('session-2' as SessionId);
     catalog.roles = [];
     catalog.agentConfigs = [agentConfig];
+    catalog.synced = true;
     control = null;
     hookProps = { sessionId: 'session-1', selectedModelId: 'model-1' };
     container = document.createElement('div');
@@ -110,6 +162,34 @@ describe('useSessionAgentRole', () => {
     root = null;
     container?.remove();
     container = null;
+  });
+
+  it('preserves Role identity and memory through Plan toggles and navigation', async () => {
+    const planner = role('role-1', 'model-1');
+    planner.runConfig = {
+      ...planner.runConfig,
+      configOptionValues: { plan_mode: true },
+      memory: { providerId: 'nowledge', memoryId: 'planner' },
+    };
+    catalog.roles = [planner];
+    await render({ provenanceRoleId: planner.id, planMode: true });
+    await act(async () => control?.onSelect(planner.id));
+    await render({ provenanceRoleId: planner.id, planMode: false, runConfigHasUserEdits: true });
+    expect(control?.selectedRoleId).toBe(planner.id);
+    expect(control?.turnSelection).toMatchObject({
+      agentRoleId: planner.id,
+      agentRoleRevision: planner.revision,
+      memory: planner.runConfig.memory,
+    });
+    await act(async () => root?.unmount());
+    root = createRoot(container!);
+    await render({ provenanceRoleId: planner.id, planMode: false });
+    expect(control?.selectedRoleId).toBe(planner.id);
+    await render({ provenanceRoleId: planner.id, planMode: true });
+    expect(control?.selectedRoleId).toBe(planner.id);
+    await act(async () => control?.onSelect(null));
+    await render({ provenanceRoleId: planner.id, planMode: false });
+    expect(control?.turnSelection).toBeNull();
   });
 
   it('shows the creating Role after the workspace catalog loads', async () => {
@@ -137,6 +217,155 @@ describe('useSessionAgentRole', () => {
 
     await render({ sessionId: 'session-2', provenanceRoleId });
     expect(control?.selectedRoleId).toBe(provenanceRoleId);
+  });
+
+  it('keeps explicit Role choices independently while switching Sessions', async () => {
+    catalog.roles = [role('role-1', 'model-1'), role('role-2', 'model-1')];
+    await render({ sessionId: 'session-1' });
+    await act(async () => control?.onSelect('role-1' as AgentRoleId));
+    expect(control?.selectedRoleId).toBe('role-1');
+
+    await render({ sessionId: 'session-2' });
+    await act(async () => control?.onSelect('role-2' as AgentRoleId));
+    expect(control?.selectedRoleId).toBe('role-2');
+
+    await render({ sessionId: 'session-1' });
+    expect(control?.selectedRoleId).toBe('role-1');
+  });
+
+  it('restores from the latest durable Turn and lets a newer Turn supersede a local draft', async () => {
+    catalog.roles = [role('role-1', 'model-1'), role('role-2', 'model-1')];
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 1,
+      durableSourceTurnKey: 'turn:turn-1',
+    });
+    expect(control?.selectedRoleId).toBe('role-1');
+
+    await act(async () => control?.onSelect('role-2' as AgentRoleId));
+    expect(control?.selectedRoleId).toBe('role-2');
+
+    await render({ durableRoleId: null, durableSourceTurnKey: 'turn:turn-2' });
+    expect(control?.selectedRoleId).toBeNull();
+
+    // Consuming the superseded draft is permanent: if a queue item disappears
+    // and the resolver returns to the old history source, role-2 cannot revive.
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 1,
+      durableSourceTurnKey: 'turn:turn-1',
+    });
+    expect(control?.selectedRoleId).toBe('role-1');
+  });
+
+  it('keeps a history-based draft visible while the Session doc remount hydrates', async () => {
+    catalog.roles = [role('role-1', 'model-1'), role('role-2', 'model-1')];
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 1,
+      durableSourceTurnKey: 'turn:turn-1',
+    });
+    await act(async () => control?.onSelect('role-2' as AgentRoleId));
+
+    await act(async () => root?.unmount());
+    root = createRoot(container!);
+    await render({ durableRoleReady: false });
+    expect(control?.selectedRoleId).toBe('role-2');
+
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 1,
+      durableSourceTurnKey: 'turn:turn-1',
+      durableRoleReady: true,
+    });
+    expect(control?.selectedRoleId).toBe('role-2');
+  });
+
+  it('does not mistake transient hydration defaults for manual Role drift', async () => {
+    catalog.roles = [role('role-special', 'model-special')];
+    await render({
+      durableRoleId: 'role-special' as AgentRoleId,
+      durableRoleRevision: 1,
+      durableSourceTurnKey: 'turn:turn-1',
+      selectedModelId: 'model-special',
+    });
+
+    await act(async () => root?.unmount());
+    root = createRoot(container!);
+    await render({ durableRoleReady: false, selectedModelId: 'provider-default' });
+
+    expect(control?.selectedRoleId).toBe('role-special');
+    expect(control?.turnSelection).toEqual({
+      agentRoleId: 'role-special',
+      agentRoleRevision: 1,
+      agentRoleSnapshot: {
+        id: 'role-special',
+        revision: 1,
+        name: 'role-special',
+        emoji: DEFAULT_AGENT_ROLE_EMOJI,
+      },
+    });
+  });
+
+  it('keeps an unsent Role through queue lifecycle and older backfill', async () => {
+    catalog.roles = [role('role-1', 'model-1'), role('role-2', 'model-1')];
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 1,
+      durableSourceTurnKey: 'turn:turn-2',
+      durableKnownSourceTurnKeys: ['turn:turn-2', 'turn:turn-1'],
+    });
+    await act(async () => control?.onSelect('role-2' as AgentRoleId));
+
+    // Older backfill extends the lineage without changing its current Turn.
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 1,
+      durableSourceTurnKey: 'turn:turn-2',
+      durableKnownSourceTurnKeys: ['turn:turn-2', 'turn:turn-1', 'turn:turn-0'],
+    });
+    expect(control?.selectedRoleId).toBe('role-2');
+
+    // Falling back to an older Turn that was already known is not a new Turn.
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 1,
+      durableSourceTurnKey: 'turn:turn-1',
+      durableKnownSourceTurnKeys: ['turn:turn-1'],
+    });
+    expect(control?.selectedRoleId).toBe('role-2');
+  });
+
+  it('preserves durable Role metadata while its catalog row is still syncing', async () => {
+    catalog.synced = false;
+    catalog.roles = [];
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 5,
+      durableSourceTurnKey: 'turn:turn-1',
+    });
+    expect(control?.selectedRoleId).toBeNull();
+    expect(control?.turnSelection).toEqual({
+      agentRoleId: 'role-1',
+      agentRoleRevision: 5,
+    });
+
+    await render({
+      durableRoleId: 'role-1' as AgentRoleId,
+      durableRoleRevision: 5,
+      durableSourceTurnKey: 'turn:turn-1',
+      runConfigHasUserEdits: true,
+      selectedModelId: 'model-2',
+    });
+    expect(control?.turnSelection).toBeNull();
+    expect(
+      resolveProgrammaticTurnAgentRole({
+        composer: control?.turnSelection,
+        durableRoleId: 'role-1' as AgentRoleId,
+        durableRoleRevision: 5,
+        durableMemory: { providerId: 'nowledge-mem', memoryId: 'synthetic-memory' },
+      })
+    ).toBeNull();
   });
 
   it('does not name the provenance Role after its run config changes', async () => {

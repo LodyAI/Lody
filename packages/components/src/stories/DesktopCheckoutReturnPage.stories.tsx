@@ -6,7 +6,7 @@ const meta = {
   title: 'Pages/DesktopCheckoutReturnPage',
   component: DesktopCheckoutReturnPage,
   parameters: {
-    layout: 'centered',
+    layout: 'fullscreen',
   },
   tags: ['autodocs'],
 } satisfies Meta<typeof DesktopCheckoutReturnPage>;

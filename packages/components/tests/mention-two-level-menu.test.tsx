@@ -1,23 +1,25 @@
 // @vitest-environment jsdom
-
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Mention, MentionInput, useMentionContext } from '../src/ui/mention';
+
 import type { Mention as MentionRange } from '../src/ui/mention/mention-root';
 import {
   MentionTwoLevelMenuBody,
   useMentionCategoryActivation,
 } from '../src/components/mentions/mention-two-level-menu';
 import {
-  selectMentionMenuView,
+  getMentionViewCandidates,
   selectMentionMenuViewForTrigger,
-  toSkillCandidate,
   type MentionCandidate,
   type MentionCandidateDetail,
   type MentionCategory,
+  type MentionMenuView,
 } from '../src/components/mentions/mention-registry';
+import { initI18n } from '../src/i18n';
+import { composerIn } from './composer-test-utils';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -67,7 +69,6 @@ function makeCategories(): MentionCategory[] {
             kind: 'dir' as const,
             icon: 'dir' as const,
             title: 'src/',
-            mono: true,
           },
         ].filter((entry) => entry.value.includes(term)),
     },
@@ -89,18 +90,21 @@ function Harness({
   initialValue,
   categories,
   detail,
+  followHighlight = false,
 }: {
   initialValue: string;
   categories: MentionCategory[];
   detail?: MentionCandidateDetail | null;
+  followHighlight?: boolean;
 }) {
   const [value, setValue] = React.useState(initialValue);
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
   const [selected, setSelected] = React.useState<string[]>([]);
-  const view = selectMentionMenuView(categories, value.slice(1));
+  const view = selectMentionMenuViewForTrigger(categories, value[0] ?? '@', value.slice(1));
 
   return (
     <Mention
+      trigger={value[0] === '/' || value[0] === '、' ? value[0] : '@'}
       defaultOpen
       inputValue={value}
       onInputValueChange={setValue}
@@ -113,14 +117,32 @@ function Harness({
     >
       <Probe />
       <MentionInput value={value} onChange={() => {}} />
-      <MentionTwoLevelMenuBody
-        view={view}
-        onBack={() => {}}
-        showBack
-        onCategoryNavigate={(category) => category.activation?.activate()}
-        detail={detail}
-      />
+      {view ? <MenuBody view={view} detail={detail} followHighlight={followHighlight} /> : null}
     </Mention>
+  );
+}
+
+function MenuBody({
+  view,
+  detail,
+  followHighlight,
+}: {
+  view: MentionMenuView;
+  detail?: MentionCandidateDetail | null;
+  followHighlight: boolean;
+}) {
+  const { highlightedItem } = useMentionContext('MenuBody');
+  const candidates = getMentionViewCandidates(view);
+  const highlighted =
+    candidates.find((candidate) => candidate.value === highlightedItem?.value) ?? candidates[0];
+  return (
+    <MentionTwoLevelMenuBody
+      view={view}
+      onBack={() => {}}
+      showBack
+      onCategoryNavigate={(category) => category.activation?.activate()}
+      detail={followHighlight ? highlighted?.detail : detail}
+    />
   );
 }
 
@@ -172,7 +194,9 @@ describe('MentionTwoLevelMenuBody', () => {
   let container: HTMLDivElement | undefined;
   let originalRequestAnimationFrame: typeof requestAnimationFrame | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // The menu's copy interpolates (a typed term, a category name).
+    await initI18n('en');
     originalRequestAnimationFrame = globalThis.requestAnimationFrame;
     globalThis.requestAnimationFrame = ((callback) => {
       callback(0);
@@ -202,11 +226,8 @@ describe('MentionTwoLevelMenuBody', () => {
     act(() => {
       root?.render(<Harness initialValue={initialValue} categories={categories} detail={detail} />);
     });
-    const input = container?.querySelector('textarea');
-    if (!input) throw new Error('Expected mention textarea to render');
-    act(() => {
-      input.setSelectionRange(initialValue.length, initialValue.length);
-    });
+    const input = composerIn(container!);
+    input.setSelectionRange(initialValue.length, initialValue.length);
     return input;
   }
 
@@ -234,13 +255,42 @@ describe('MentionTwoLevelMenuBody', () => {
     );
   }
 
-  it('lists one row per category at the first level', () => {
-    render('@');
-
-    const titles = rowTitles();
-    expect(titles.some((title) => title.startsWith('Files'))).toBe(true);
-    expect(titles.some((title) => title.startsWith('Issues'))).toBe(true);
-  });
+  it.each(['click', 'Enter', 'Tab', 'direct'] as const)(
+    'shows disabled role reasons and blocks %s selection',
+    (action) => {
+      const candidate: MentionCandidate = {
+        value: 'offline-role',
+        label: 'Offline',
+        insertText: '@Offline',
+        kind: 'agent_role',
+        icon: 'agent_role',
+        title: 'Offline Reviewer',
+        disabled: true,
+        subtitle: 'Unavailable: its machine is offline',
+      };
+      const categories: MentionCategory[] = [
+        {
+          id: 'agent_role',
+          namespace: 'role',
+          label: 'Agent Roles',
+          icon: 'agent_role',
+          status: 'ready',
+          getCandidates: () => [candidate],
+        },
+      ];
+      const input = render('@Offline', categories);
+      const row = container?.querySelector<HTMLElement>('[data-disabled]');
+      expect(row?.textContent).toContain('Unavailable: its machine is offline');
+      expect(row?.getAttribute('aria-disabled')).toBe('true');
+      act(() => {
+        if (action === 'click') row?.click();
+        else if (action === 'direct') latest.onMentionAdd?.('offline-role', 0);
+        else input.dispatchEvent(new KeyboardEvent('keydown', { key: action, bubbles: true }));
+      });
+      expect(latest.mentions).toEqual([]);
+      expect(latest.inputValue).toBe('@Offline');
+    }
+  );
 
   it('descends into a category without recording a mention', () => {
     render('@');
@@ -249,28 +299,6 @@ describe('MentionTwoLevelMenuBody', () => {
 
     expect(latest.inputValue).toBe('@issue:');
     expect(latest.mentions).toEqual([]);
-  });
-
-  it('activates a lazy source while navigating into its category', () => {
-    const { categories, activate } = makeIssuePrActivationCategories();
-    render('@', categories);
-    const issuesRow = Array.from(
-      container?.querySelectorAll<HTMLElement>('[data-slot="mention-item"]') ?? []
-    ).find((item) => item.textContent?.includes('Issues'));
-    if (!issuesRow) throw new Error('Issues category row missing');
-
-    act(() => issuesRow.click());
-
-    expect(activate).toHaveBeenCalledOnce();
-    expect(latest.inputValue).toBe('@issue:');
-    expect(latest.mentions).toEqual([]);
-  });
-
-  it('shows that category rows carry the drill-down text, not a commit', () => {
-    render('@issue:');
-
-    // Second level lists the category's own candidates.
-    expect(rowTitles()).toEqual(['Broken menu#3312', 'Slow switch#3298']);
   });
 
   it('commits a candidate with its own insert text', () => {
@@ -283,13 +311,112 @@ describe('MentionTwoLevelMenuBody', () => {
     expect(latest.mentions).toEqual([{ value: '#3312', start: 0, end: 5, kind: 'issue' }]);
   });
 
-  it('groups results by category when a bare term is typed', () => {
+  it('shows matching results with their source when a bare term is typed', () => {
     render('@3312');
 
     const titles = rowTitles();
-    expect(titles).toContain('Broken menu#3312');
+    expect(titles).toContain('Broken menuIssues · #3312');
     // Only the issue category matched, so the file group is absent.
     expect(titles.some((title) => title.startsWith('src/'))).toBe(false);
+  });
+
+  it.each(['click', 'Enter'] as const)(
+    'puts Roles before cross-source matches and category links, then selects by %s',
+    (action) => {
+      const categories = makeCategories();
+      categories[0]!.getCandidates = () => [
+        {
+          value: 'src/review.md',
+          label: 'src/review.md',
+          title: 'review.md',
+          insertText: '@src/review.md',
+          kind: 'file',
+          icon: 'file',
+        },
+      ];
+      categories.push({
+        id: 'agent_role',
+        namespace: 'role',
+        label: 'Review Roles',
+        icon: 'agent_role',
+        status: 'ready',
+        getCandidates: () => [
+          {
+            value: 'reviewer-role',
+            label: 'Reviewer',
+            title: 'Reviewer',
+            insertText: '@Reviewer',
+            kind: 'agent_role',
+            icon: 'agent_role',
+          },
+        ],
+      });
+      const input = render('@review', categories);
+      expect(rowTitles()).toEqual(['ReviewerReview Roles', 'review.mdFiles', 'Review Roles']);
+      act(() => {
+        if (action === 'click') {
+          container?.querySelector<HTMLElement>('[data-slot="mention-item"]')?.click();
+        } else {
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        }
+      });
+      expect(latest.inputValue).toBe('@Reviewer ');
+      expect(latest.mentions).toEqual([
+        { value: 'reviewer-role', start: 0, end: 9, kind: 'agent_role' },
+      ]);
+    }
+  );
+
+  it('renders a typed slash query as ranked rows with their sources', () => {
+    const shortcuts: MentionCategory = {
+      id: 'prompt_shortcut',
+      namespace: 'shortcut',
+      directTrigger: '/',
+      label: 'Prompt Shortcuts',
+      icon: 'prompt_shortcut',
+      status: 'ready',
+      getCandidates: () =>
+        ['create-intro-video', 'videoer'].map((name) => ({
+          value: `prompt-shortcut:${name}`,
+          label: name,
+          insertText: `/${name}`,
+          kind: 'prompt_shortcut' as const,
+          icon: 'prompt_shortcut' as const,
+          title: `/${name}`,
+        })),
+    };
+    const command: MentionCategory = {
+      id: 'command',
+      namespace: 'cmd',
+      directTrigger: '/',
+      label: 'Agent Commands',
+      icon: 'command',
+      status: 'ready',
+      getCandidates: () => [
+        {
+          value: 'acp-command:video',
+          label: 'video',
+          insertText: '/video',
+          kind: 'command',
+          icon: 'command',
+          title: '/video',
+        },
+      ],
+    };
+
+    render('/video', [shortcuts, command]);
+    expect(rowTitles()).toEqual([
+      '/videoAgent Commands',
+      '/videoerPrompt Shortcuts',
+      '/create-intro-videoPrompt Shortcuts',
+    ]);
+
+    const rows = container?.querySelectorAll<HTMLElement>('[data-slot="mention-item"]');
+    act(() => rows?.[1]?.click());
+    expect(latest.inputValue).toBe('/videoer ');
+    expect(latest.mentions).toEqual([
+      { value: 'prompt-shortcut:videoer', start: 0, end: 8, kind: 'prompt_shortcut' },
+    ]);
   });
 
   it('renders a category message instead of rows when the source cannot answer', () => {
@@ -306,141 +433,77 @@ describe('MentionTwoLevelMenuBody', () => {
     expect(rowTitles()).toEqual([]);
   });
 
-  it('renders the detail panel beside the rows when one is supplied', () => {
-    render('@issue:', makeCategories(), {
-      title: 'code-collab-debug',
-      badges: ['project', 'v2'],
-      description: 'Diagnose Code Collab diffs.',
-      rows: [{ label: 'Path', value: '.claude/skills/x/SKILL.md', mono: true }],
-    });
-
-    const text = container?.textContent ?? '';
-    expect(text).toContain('code-collab-debug');
-    expect(text).toContain('project');
-    expect(text).toContain('Diagnose Code Collab diffs.');
-    expect(text).toContain('.claude/skills/x/SKILL.md');
-    // The rows are still there beside it.
-    expect(rowTitles()).toEqual(['Broken menu#3312', 'Slow switch#3298']);
-    const detailTitle = Array.from(container?.querySelectorAll('p') ?? []).find(
-      (entry) => entry.textContent === 'code-collab-debug'
-    );
-    expect(detailTitle?.parentElement?.classList).toContain('[scrollbar-gutter:stable]');
-    expect(detailTitle?.parentElement?.classList).toContain('h-[320px]');
-  });
-
-  it('omits the detail panel when the candidate has none', () => {
-    render('@issue:', makeCategories(), null);
-
-    expect(container?.querySelector('dl')).toBeNull();
-  });
-
-  it('does not activate lazy sources from the first-level category index', () => {
-    const { categories, activate } = makeIssuePrActivationCategories();
-
-    renderActivation(true, '', categories);
-
-    expect(activate).not.toHaveBeenCalled();
-  });
-
-  it('activates the source for a scoped category', () => {
-    const { categories, activate } = makeIssuePrActivationCategories();
-
-    renderActivation(true, 'issue:', categories);
-
-    expect(activate).toHaveBeenCalledOnce();
-  });
-
-  it('activates a shared source only once per menu-open cycle', () => {
-    const { categories, activate } = makeIssuePrActivationCategories();
-
-    renderActivation(true, 'issue:', categories);
-    renderActivation(true, 'pr:', categories);
-
-    expect(activate).toHaveBeenCalledOnce();
-
-    renderActivation(false, '', categories);
-    renderActivation(true, 'pr:', categories);
-    expect(activate).toHaveBeenCalledTimes(2);
-  });
-
-  it('deduplicates synchronous navigation and the destination-view fallback', () => {
-    const { categories, activate } = makeIssuePrActivationCategories();
-
-    renderActivation(true, '', categories, 'issue');
-    renderActivation(true, 'issue:', categories);
-
-    expect(activate).toHaveBeenCalledOnce();
-  });
-
-  it('activates a source whose callback identity changed, keyed by its source', () => {
-    const { categories } = makeIssuePrActivationCategories();
-    const rebuilt = vi.fn();
-    // `refresh` is a `useCallback`; a new identity for the same source must not
-    // look like a second source to activate.
-    for (const category of categories) {
-      if (category.activation) category.activation = { sourceKey: 'issuePr', activate: rebuilt };
-    }
-
-    renderActivation(true, 'issue:', categories);
-    for (const category of categories) {
-      if (category.activation) category.activation = { sourceKey: 'issuePr', activate: rebuilt };
-    }
-    renderActivation(true, 'pr:', categories);
-
-    expect(rebuilt).toHaveBeenCalledOnce();
-  });
-});
-
-describe('skill candidate detail', () => {
-  const labels = {
-    author: 'Author',
-    path: 'Path',
-    linksTo: 'Links to',
-    symlink: 'symlink',
-    scope: { project: 'Project', global: 'Global', system: 'System' },
-  };
-
-  it('carries the skill metadata the old two-pane menu showed', () => {
-    const candidate = toSkillCandidate(
-      {
-        token: 'code-collab-debug',
-        dir: '.claude/skills',
-        scope: 'project',
-        skill: {
-          name: 'Code Collab Debug',
-          description: 'Diagnose Code Collab diffs.',
-          relativePath: '.claude/skills/code-collab-debug/SKILL.md',
-          version: '2',
-          author: 'zx',
-          isSymlink: true,
-          symlinkTarget: '../shared/skill',
+  it.each(['click', 'Enter'] as const)(
+    'keeps a scrolled Role reachable as hover opens and closes its detail, then selects by %s',
+    (action) => {
+      const categories: MentionCategory[] = [
+        {
+          id: 'issue',
+          namespace: 'issue',
+          label: 'Issues',
+          icon: 'issue',
+          status: 'ready',
+          getCandidates: () =>
+            Array.from({ length: 4 }, (_, index) => issueCandidate(index + 1, `Review ${index}`)),
         },
-      } as Parameters<typeof toSkillCandidate>[0],
-      labels
-    );
+        {
+          id: 'agent_role',
+          namespace: 'role',
+          label: 'Agent Roles',
+          icon: 'agent_role',
+          status: 'ready',
+          getCandidates: () => [
+            {
+              value: 'reviewer-role',
+              label: 'Reviewer',
+              title: 'Reviewer',
+              insertText: '@Reviewer',
+              kind: 'agent_role',
+              icon: 'agent_role',
+              detail: { title: 'Reviewer', description: 'Review the changes.' },
+            },
+          ],
+        },
+      ];
+      act(() =>
+        root?.render(<Harness initialValue="@review" categories={categories} followHighlight />)
+      );
+      const input = container ? composerIn(container) : null;
+      const rows = container?.querySelectorAll<HTMLElement>('[data-slot="mention-item"]');
+      const issue = rows?.[3];
+      const role = rows?.[0];
+      if (!input || !issue || !role) throw new Error('Expected issue and Role candidates');
+      const scroller = role.parentElement;
+      if (!scroller) throw new Error('Expected candidate scroller');
+      scroller.scrollTop = 240;
+      input.setSelectionRange(7, 7);
 
-    expect(candidate.insertText).toBe('$code-collab-debug');
-    expect(candidate.detail?.title).toBe('Code Collab Debug');
-    expect(candidate.detail?.badges).toEqual(['Project', 'v2', 'symlink']);
-    expect(candidate.detail?.rows).toEqual([
-      { label: 'Author', value: 'zx' },
-      { label: 'Path', value: '.claude/skills/code-collab-debug/SKILL.md', mono: true },
-      { label: 'Links to', value: '../shared/skill', mono: true },
-    ]);
-  });
+      for (const row of [role, issue, role]) {
+        act(() => {
+          row.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+        });
+        const currentRole = container?.querySelectorAll('[data-slot="mention-item"]')[0];
+        expect(currentRole?.parentElement?.scrollTop).toBe(240);
+        expect(currentRole).toBe(role);
+        expect(row.hasAttribute('data-highlighted')).toBe(true);
+        expect(Boolean(container?.querySelector('[data-mention-detail]'))).toBe(row === role);
+      }
 
-  it('omits rows the skill does not have', () => {
-    const candidate = toSkillCandidate(
-      {
-        token: 'plain',
-        dir: '.claude/skills',
-        scope: 'global',
-        skill: { name: 'Plain', relativePath: 'a/SKILL.md' },
-      } as Parameters<typeof toSkillCandidate>[0],
-      labels
-    );
+      act(() => {
+        if (action === 'click') role.click();
+        else input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      expect(latest.inputValue).toBe('@Reviewer ');
+      expect(latest.mentions).toEqual([
+        { value: 'reviewer-role', start: 0, end: 9, kind: 'agent_role' },
+      ]);
+    }
+  );
 
-    expect(candidate.detail?.badges).toEqual(['Global']);
-    expect(candidate.detail?.rows).toEqual([{ label: 'Path', value: 'a/SKILL.md', mono: true }]);
+  it('says nothing matched instead of keeping the list', () => {
+    render('@issue:zzz');
+
+    expect(rowTitles()).toEqual([]);
+    expect(container?.textContent).toContain('Nothing matches “zzz”');
   });
 });

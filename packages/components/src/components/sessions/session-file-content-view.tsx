@@ -1,33 +1,42 @@
+import { ReadOnlyHtmlPreview } from './read-only-html-preview';
+import { PagedFileViewer } from './paged-file-viewer';
+import * as stylex from '@stylexjs/stylex';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Copy,
+  Download,
   Eye,
   EyeClosed,
-  Loader2,
   MessageCircle,
+  Pencil,
+  Play,
+  LockKeyhole,
   RefreshCw,
   Save,
   Search,
   ShieldAlert,
+  Square,
   WrapText,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   getMachineFlockLocalProjects,
+  resolveSessionFilePath,
   type CodeCollabContentUnavailableReason,
   type SessionId,
   type SessionMeta,
   type VisualAnnotationReferencePayload,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { cn } from '@/lib/utils';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { useActiveVSCodeTheme, useResolvedTheme } from '../../theme-provider';
 import {
   conversationFontSizeAtom,
   currentWorkspaceIdAtom,
+  extendedCodeLanguagesEnabledAtom,
   fileViewerWordWrapAtom,
   getMachineMetaByIdAtomFamily,
   userAtom,
@@ -38,13 +47,19 @@ import {
   resolveSessionLocalFileSource,
   resolveSessionLocalProjectRootPath,
 } from '@/lib/session-local-file-source';
+import { useSessionFileActions } from '@/hooks/use-session-file-actions';
+import {
+  LocalHtmlPreviewConsentDialog,
+  LocalHtmlPreviewFrame,
+  useLocalHtmlPreview,
+} from './local-html-preview';
 import { chooseSessionFileSurfaceSource } from '@/lib/session-file-source-selection';
 import { resolveEffectiveCodeCollabWorkspaceId } from '@/lib/code-collab-workspace-id';
 import {
   createLocalProjectIpcFileTransport,
   createLocalProjectRpcFileTransport,
 } from '@/lib/local-project-rpc-file-provider';
-import { ScrollArea } from '@/ui/scroll-area';
+import { ScrollArea } from '@lody/ui/scroll-area';
 import {
   hasSessionFileLspProvider,
   type SessionFileProvider,
@@ -57,34 +72,47 @@ import {
 } from '@/lib/session-file-content-snapshot';
 import { normalizePinnedProviderOpenResult } from '@/lib/session-file-provider-open-result';
 import { SessionFileBinaryPreview } from './session-file-binary-preview';
+import { SessionFileCsvPreview } from './session-file-csv-preview';
+import { DocumentSelectionSurface } from './document-selection-surface';
+import type { DocumentSelection } from '@/lib/document-selection';
 import { SessionFileImagePreview } from './session-file-image-preview';
 import { MarkdownRenderer } from '../ai-gui/markdown-renderer';
+import { MarkdownFileResources } from '../ai-gui/markdown-file-image';
+import { SessionLinkProvider } from '../ai-gui/session-link-context';
 import { isSvgPath } from '@/lib/image-file-preview';
+import { isPdfFilePath } from '@/lib/pdf-file-preview';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
 import {
   decideCodeCollabLiveTextUpdate,
   RecentLocalTextEchoTracker,
 } from '@/lib/code-collab-live-text-update';
-import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
+import {
+  getSessionFileLanguageId,
+  getSessionFileMonacoLanguageId,
+  isSessionFileShikiLanguage,
+  isSessionMarkdownPath,
+} from '@/lib/session-file-language';
+import { getOfficePreviewKind } from '@/lib/session-file-office-source';
+import { saveBytesAsFile } from '@/lib/download-file';
+import { usePostHog } from '@/lib/posthog-context';
+import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
-import {
-  SessionMonacoTextViewer,
-  type SessionMonacoExternalTextUpdate,
-} from './session-monaco-text-viewer';
+import { LazySessionMonacoTextViewer } from './lazy-session-monaco-text-viewer';
+import type { SessionMonacoExternalTextUpdate } from './session-monaco-text-viewer';
 import {
   useCodeCollabSaveText,
   type SessionFileLiveSyncStatus,
   type SessionFileSaveStatus,
 } from '@/hooks/use-code-collab-save-text';
-import { Button } from '@/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useCodeCollabLsp, type CodeCollabLspState } from '@/hooks/use-code-collab-lsp';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import {
   buildCodeCollabMonacoUri,
   registerCodeCollabMonacoModelProvider,
-} from '@/lib/session-monaco-language-providers';
+} from '@/lib/code-collab-monaco-model-provider';
 import {
   normalizeSessionMonacoSelectedLines,
   type SessionMonacoSelectedLines,
@@ -93,12 +121,302 @@ import type { SessionMonacoSelectionRestore } from '@/lib/session-monaco-editor-
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
 import { SessionFileErrorState } from './session-file-error-state';
+import { SessionShikiTextViewer } from './session-shiki-text-viewer';
 import { ManagedPreviewSurface } from './managed-preview-surface';
-import { supportsCredentiallessManagedPreviewFrames } from './managed-preview-frame-cache';
+import { useTextBoundScriptOptIn } from './use-text-bound-script-opt-in';
+
+import { getExecutableHtmlPreviewSupport } from './managed-preview-frame-cache';
 import {
   buildStaticHtmlPreviewDocument,
   getStaticHtmlPreviewLogicalUrl,
 } from './static-html-preview-document';
+const styles = stylex.create({
+  spinner16: { width: '16px', height: '16px', flexShrink: 0 },
+  spinner14: { width: '14px', height: '14px', flexShrink: 0 },
+  markdownPreview: {
+    width: '100%',
+    maxWidth: '48rem',
+    marginInline: 'auto',
+    padding: {
+      default: '12px',
+      '@media (min-width: 640px)': '16px',
+    },
+    userSelect: 'text',
+  },
+  centeredState: {
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    padding: '12px',
+    textAlign: 'center',
+    fontSize: '0.875rem',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  previewFrame: {
+    position: 'relative',
+    height: '100%',
+    minHeight: 0,
+    overflow: 'hidden',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  previewLoading: {
+    position: 'absolute',
+    insetBlockStart: '12px',
+    insetInlineEnd: '12px',
+    pointerEvents: 'none',
+    borderRadius: '4px',
+    backgroundColor: 'hsl(var(--background) / 0.9)',
+    padding: '6px',
+    color: 'hsl(var(--muted-foreground))',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  previewError: {
+    position: 'absolute',
+    insetBlockEnd: '12px',
+    insetInline: '12px',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    borderRadius: '6px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--status-warning) / 0.3)',
+    backgroundColor: 'hsl(var(--background) / 0.95)',
+    paddingBlock: '8px',
+    paddingInline: '12px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: 'hsl(var(--foreground))',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  previewErrorIcon: {
+    marginTop: '2px',
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning))',
+  },
+  contentColumn: { display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column' },
+  contentFlexible: { minHeight: 0, flex: 1 },
+  truncatedNote: {
+    paddingBlock: '8px',
+    paddingInline: '12px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  viewerRoot: {
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  /* The surface's own edge (the side-panel tab strip, the mobile drawer header)
+     already separates it; the bar is the same surface as the body, not a frame. */
+  toolbar: {
+    display: 'flex',
+    height: '2rem',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: '4px',
+    backgroundColor: 'hsl(var(--background))',
+    paddingInline: '8px',
+  },
+  toolbarActions: { display: 'flex', marginInlineStart: 'auto', alignItems: 'center', gap: '4px' },
+  toolButton: {
+    display: 'flex',
+    width: '24px',
+    height: '24px',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '4px',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':hover': 'hsl(var(--foreground))',
+    },
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--accent))',
+    },
+    cursor: {
+      default: null,
+      ':disabled': 'not-allowed',
+    },
+    opacity: {
+      default: null,
+      ':disabled': 0.5,
+    },
+  },
+  toolButtonActive: { color: 'hsl(var(--foreground))' },
+  saveAvailable: {
+    color: {
+      default: 'hsl(var(--status-warning))',
+      ':hover': 'hsl(var(--status-warning))',
+    },
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--status-warning) / 0.1)',
+    },
+  },
+  icon: { width: '14px', height: '14px' },
+  iconSmall: { width: '12px', height: '12px', flexShrink: 0 },
+  contentBody: { position: 'relative', minHeight: 0, flex: 1, overflow: 'hidden' },
+  fullSize: { width: '100%', height: '100%' },
+  fullMinContent: { minWidth: 0, minHeight: '100%' },
+  sourceTextarea: {
+    width: '100%',
+    height: '100%',
+    minHeight: '240px',
+    resize: 'none',
+    overflow: 'auto',
+    borderWidth: 0,
+    backgroundColor: 'hsl(var(--background))',
+    padding: '12px',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.75rem',
+    lineHeight: '1.25rem',
+    color: 'hsl(var(--foreground))',
+    outline: 'none',
+  },
+  previewToggle: {
+    display: 'flex',
+    width: '24px',
+    height: '24px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '4px',
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--accent))',
+    },
+    color: {
+      default: null,
+      ':hover': 'hsl(var(--foreground))',
+    },
+  },
+  previewToggleActive: { color: 'hsl(var(--foreground))' },
+  previewToggleInactive: { color: 'hsl(var(--muted-foreground))' },
+  smallTooltip: { fontSize: '0.75rem' },
+  statusBar: {
+    display: 'flex',
+    height: '24px',
+    minHeight: '24px',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: '8px',
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: 'hsl(var(--background))',
+    paddingInline: '8px',
+    fontSize: '11px',
+    lineHeight: 1,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  statusItems: {
+    display: 'flex',
+    minWidth: 0,
+    flex: 1,
+    alignItems: 'center',
+    gap: '6px',
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+  },
+  statusItem: { display: 'flex', minWidth: 0, flexShrink: 0, alignItems: 'center', gap: '4px' },
+  statusSeparator: { marginInlineEnd: '2px', color: 'hsl(var(--muted-foreground) / 0.55)' },
+  statusDot: { width: '6px', height: '6px', flexShrink: 0, borderRadius: '9999px' },
+  statusPositiveDot: { backgroundColor: '#10b981' },
+  statusMutedDot: { backgroundColor: 'hsl(var(--muted-foreground) / 0.5)' },
+  statusWarningDot: { backgroundColor: '#f59e0b' },
+  statusDangerDot: { backgroundColor: 'hsl(var(--destructive))' },
+  statusDanger: { color: 'hsl(var(--destructive))' },
+  statusWarning: {
+    color: {
+      default: '#b45309',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        '#fcd34d',
+    },
+  },
+  statusPositive: { color: 'hsl(var(--foreground))' },
+  screenReaderOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  conflictBanner: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '6px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'rgb(245 158 11 / 0.3)',
+    backgroundColor: 'rgb(245 158 11 / 0.1)',
+    paddingBlock: '4px',
+    paddingInline: '8px',
+    fontSize: '11px',
+    color: {
+      default: '#92400e',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        '#fcd34d',
+    },
+  },
+  conflictCopy: { color: 'hsl(var(--muted-foreground))' },
+  conflictActions: { display: 'flex', marginInlineStart: 'auto', gap: '6px' },
+  lspPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border))',
+    backgroundColor: 'hsl(var(--muted) / 0.3)',
+    paddingBlock: '8px',
+    paddingInline: '12px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+  },
+  lspHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' },
+  lspTitle: { fontWeight: 500, color: 'hsl(var(--foreground))' },
+  foreground: { color: 'hsl(var(--foreground))' },
+  muted: { color: 'hsl(var(--muted-foreground))' },
+  destructive: { color: 'hsl(var(--destructive))' },
+  lspList: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  locationButton: {
+    width: '100%',
+    overflow: 'hidden',
+    textAlign: 'left',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':hover': 'hsl(var(--foreground))',
+    },
+    textDecoration: {
+      default: null,
+      ':hover': 'underline',
+    },
+  },
+  crossFile: { fontWeight: 500, color: 'hsl(var(--foreground))' },
+});
 
 type ViewData =
   | { status: 'loading' }
@@ -151,8 +469,13 @@ export type SessionFileContentViewProps = {
   focusRequestSeq?: number;
   /** Explicit user request to enter rendered HTML for this open action. */
   htmlPreviewRequestSeq?: number;
+  /** Mobile file opens start in preview; desktop keeps explicit script opt-in. */
+  defaultHtmlPreview?: boolean;
+  /** Require explicit editing on each mobile file open. */
+  defaultReadOnly?: boolean;
   saveRequestSeq?: number;
   copyMarkdownRequestSeq?: number;
+  sessionLinksEnabled?: boolean;
   /**
    * Mobile file drawers use the platform text surface for Markdown source so
    * long-press opens the OS selection controls instead of Monaco's desktop
@@ -186,10 +509,17 @@ export type SessionFileContentViewProps = {
   }) => void;
   visualAnnotationReferenceKeys?: readonly string[];
   onAddVisualAnnotationToChat?: (reference: VisualAnnotationReferencePayload) => boolean | void;
+  onAddSelectionToChat?: (selection: DocumentSelection) => boolean;
   onToggleVisualAnnotationInChat?: (reference: VisualAnnotationReferencePayload) => boolean | void;
 };
 
 const isHtmlPath = (filePath: string): boolean => /\.(?:html|htm)$/iu.test(filePath);
+
+// The local-project read defaults to a 64 KiB PREVIEW budget, which is right
+// for a mention popover and wrong for the file viewer — it truncated anything
+// past 64 KiB behind a banner. Ask for the machine's whole allowance instead;
+// it clamps this to its own hard ceiling.
+const LOCAL_FILE_VIEWER_READ_MAX_BYTES = 5 * 1024 * 1024;
 
 function getCodeCollabTextChangeChecker(
   provider: SessionFileProvider
@@ -208,8 +538,11 @@ function SessionFileContentViewImpl({
   endLine,
   focusRequestSeq,
   htmlPreviewRequestSeq,
+  defaultHtmlPreview = false,
+  defaultReadOnly = false,
   saveRequestSeq,
   copyMarkdownRequestSeq,
+  sessionLinksEnabled = false,
   preferNativeMarkdownSelection = false,
   className,
   active = true,
@@ -221,9 +554,11 @@ function SessionFileContentViewImpl({
   onOpenFile,
   visualAnnotationReferenceKeys,
   onAddVisualAnnotationToChat,
+  onAddSelectionToChat,
   onToggleVisualAnnotationInChat,
 }: SessionFileContentViewProps) {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const tRef = useLatestRef(t);
   const onSaveStateChangeRef = useLatestRef(onSaveStateChange);
   const activeVSCodeTheme = useActiveVSCodeTheme();
@@ -234,6 +569,7 @@ function SessionFileContentViewImpl({
   const setWordWrapEnabled = useSetAtom(fileViewerWordWrapAtom);
   // Match the main conversation Markdown typography (settings → font size).
   const conversationFontSize = useAtomValue(conversationFontSizeAtom);
+  const extendedCodeLanguagesEnabled = useAtomValue(extendedCodeLanguagesEnabledAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -246,6 +582,7 @@ function SessionFileContentViewImpl({
   const machineFlockRows = useMachineFlockRows(session.machineId, {
     families: ['localProject'],
   });
+  const sessionFileActions = useSessionFileActions({ session, fileProvider });
   const sessionMachineLocalProjects = useMemo(
     () => ({
       ...(sessionMachine?.localProjects ?? {}),
@@ -299,8 +636,10 @@ function SessionFileContentViewImpl({
   // Markdown opens as a rendered document by default, matching SVG previews.
   // The source remains one toggle away in the editable source surface.
   const [markdownRenderMode, setMarkdownRenderMode] = useState<'rendered' | 'code'>('rendered');
-  // HTML starts as source because entering preview executes its inline scripts.
-  const [htmlRenderMode, setHtmlRenderMode] = useState<'rendered' | 'code'>('code');
+  const [csvRenderMode, setCsvRenderMode] = useState<'rendered' | 'code'>('rendered');
+  const [htmlRenderMode, setHtmlRenderMode] = useState<'rendered' | 'code'>(
+    defaultHtmlPreview ? 'rendered' : 'code'
+  );
   const handledHtmlPreviewRequestSeqRef = useRef<number | undefined>(undefined);
   const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(false);
   const [htmlAnnotationAvailable, setHtmlAnnotationAvailable] = useState(false);
@@ -329,10 +668,39 @@ function SessionFileContentViewImpl({
   const markProviderConflictPendingRef = useRef<((message?: string) => void) | null>(null);
 
   const normalizedPath = useMemo(() => filePath.trim(), [filePath]);
+  const [retryRevision, setRetryRevision] = useState(0);
+  const [lastOpenRequest, setLastOpenRequest] = useState({ path: normalizedPath, focusRequestSeq });
+  // Reopening an already-active failed tab is a new read, not just cursor focus.
+  // Successful previews (especially unsaved drafts) retain their current snapshot.
+  if (
+    lastOpenRequest.path !== normalizedPath ||
+    lastOpenRequest.focusRequestSeq !== focusRequestSeq
+  ) {
+    setLastOpenRequest({ path: normalizedPath, focusRequestSeq });
+    if (
+      lastOpenRequest.path === normalizedPath &&
+      (data.status === 'error' || (data.status === 'ready' && data.snapshot.kind === 'missing'))
+    ) {
+      setRetryRevision((revision) => revision + 1);
+      setData({ status: 'loading' });
+    }
+  }
+  const retryFile = useCallback(() => {
+    setData({ status: 'loading' });
+    setRetryRevision((revision) => revision + 1);
+  }, []);
   const selectedLines = useMemo<SessionMonacoSelectedLines>(
     () => createSelectedLines(startLine, endLine, focusRequestSeq),
     [endLine, focusRequestSeq, startLine]
   );
+
+  // Lody refuses to render some files it can locate perfectly well — too large,
+  // unsupported encoding, one endless line. The error state then says "open it
+  // on the host machine", so it also carries the ways to do that. Which ones
+  // exist is `useSessionFileActions`' call, shared with the file tree context
+  // menu and the side panel ⋯ menu: copying the path works anywhere, handing
+  // the file to the OS needs the desktop bridge and this machine.
+  const fileErrorActions = sessionFileActions.buildErrorActions(normalizedPath);
   const contentTargetKey = [
     fileContentSource,
     localFileSourceKind ?? '',
@@ -432,7 +800,10 @@ function SessionFileContentViewImpl({
                     return createLocalProjectIpcFileTransport({
                       workspaceId: localProjectWorkspaceId,
                       localProjectId,
-                    }).readFile({ relativePath: normalizedPath });
+                    }).readFile({
+                      relativePath: normalizedPath,
+                      maxBytes: LOCAL_FILE_VIEWER_READ_MAX_BYTES,
+                    });
                   }
                   if (!workspaceRuntime || !currentUserId || !localProjectMachineId) {
                     throw new Error(
@@ -449,7 +820,10 @@ function SessionFileContentViewImpl({
                     requestedByUserId: currentUserId,
                     requestLocalProjectControl: (request, requestOptions) =>
                       workspaceRuntime.requestLocalProjectControl(request, requestOptions),
-                  }).readFile({ relativePath: normalizedPath });
+                  }).readFile({
+                    relativePath: normalizedPath,
+                    maxBytes: LOCAL_FILE_VIEWER_READ_MAX_BYTES,
+                  });
                 })()
               : (() => {
                   const reader = getIpcServices()?.localProjects.readSessionWorktreeFile.bind(
@@ -471,7 +845,9 @@ function SessionFileContentViewImpl({
                       )
                     );
                   }
-                  return reader(localWorktreeRepoKey, localWorktreeSessionId, normalizedPath);
+                  return reader(localWorktreeRepoKey, localWorktreeSessionId, normalizedPath, {
+                    maxBytes: LOCAL_FILE_VIEWER_READ_MAX_BYTES,
+                  });
                 })();
 
           const result = await readResult;
@@ -566,6 +942,7 @@ function SessionFileContentViewImpl({
       cancelled = true;
     };
   }, [
+    retryRevision,
     fileContentSource,
     fileProviderMessage,
     currentUserId,
@@ -602,7 +979,13 @@ function SessionFileContentViewImpl({
     providerEntry.sourceState === 'live-collaborative' &&
     providerEntry.unavailableReason === undefined &&
     (fileProviderRole === 'host' || fileProviderRole === 'write');
-  const isProviderFileEditable = isActiveSurface && isProviderFileWritable;
+  const [editingTarget, setEditingTarget] = useState<string | null>(null);
+  const editingEnabled = !defaultReadOnly || editingTarget === contentTargetKey;
+  // Drawers stay mounted when closed; every subsequent open starts read-only.
+  useEffect(() => {
+    setEditingTarget(null);
+  }, [contentTargetKey, isActiveSurface]);
+  const isProviderFileEditable = isActiveSurface && isProviderFileWritable && editingEnabled;
 
   const editableFileId = isProviderFileWritable ? (providerEntry?.fileId ?? fileId ?? null) : null;
 
@@ -617,6 +1000,9 @@ function SessionFileContentViewImpl({
   >(undefined);
   const externalSeqRef = useRef(0);
   const latestEditorTextRef = useRef<string | undefined>(undefined);
+  const lastAckedExternalTextRef = useRef<
+    { text: string; snapshot: SessionFileContentSnapshot } | undefined
+  >(undefined);
   const latestStableSelectionRef = useRef<StableProviderEditorSelection | null>(null);
   const recentLocalTextEchoTrackerRef = useRef(new RecentLocalTextEchoTracker());
   const hasAcceptedLocalContentChangeRef = useRef(false);
@@ -648,20 +1034,23 @@ function SessionFileContentViewImpl({
   useEffect(() => {
     setExternalTextUpdate(undefined);
     latestEditorTextRef.current = undefined;
+    lastAckedExternalTextRef.current = undefined;
     latestStableSelectionRef.current = null;
     recentLocalTextEchoTrackerRef.current.clear();
     hasAcceptedLocalContentChangeRef.current = false;
   }, [liveFileId]);
 
-  const openedLiveText =
+  const openedLiveSnapshot =
     shouldUseProviderFileContent && data.status === 'ready' && data.snapshot.kind === 'text'
-      ? data.snapshot.text
+      ? data.snapshot
       : undefined;
+  const openedLiveText = openedLiveSnapshot?.text;
 
   useEffect(() => {
-    if (openedLiveText === undefined) return;
-    latestEditorTextRef.current = openedLiveText;
-  }, [liveFileId, openedLiveText]);
+    if (openedLiveSnapshot === undefined) return;
+    latestEditorTextRef.current = openedLiveSnapshot.text;
+    handleExternalTextAppliedToSaveState(openedLiveSnapshot.text);
+  }, [handleExternalTextAppliedToSaveState, liveFileId, openedLiveSnapshot]);
 
   const liveTextUpdate = useCodeCollabLiveText(
     shouldUseProviderFileContent ? fileProvider : null,
@@ -727,26 +1116,57 @@ function SessionFileContentViewImpl({
 
   const handleExternalTextUpdateApplied = useCallback(
     (result: 'applied' | 'no-op') => {
+      // An acknowledged snapshot must not replay when preview or tab switching
+      // remounts the editor. Preserve a newer update awaiting its own acknowledgement.
+      if (externalTextUpdate) {
+        setExternalTextUpdate((current) =>
+          current?.seq === externalTextUpdate.seq ? undefined : current
+        );
+      }
       if (result === 'applied') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
         }
         if (preservePendingOnNextExternalTextAppliedRef.current) {
           preservePendingOnNextExternalTextAppliedRef.current = false;
+          if (externalTextUpdate) handleEditorContentChange(externalTextUpdate.text);
           return;
         }
         providerEditorDirtyRef.current = false;
-        handleExternalTextAppliedToSaveState();
+        if (externalTextUpdate) {
+          handleExternalTextAppliedToSaveState(externalTextUpdate.text);
+        }
         return;
       }
       if (result === 'no-op') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
+        }
+        if (preservePendingOnNextExternalTextAppliedRef.current) {
+          preservePendingOnNextExternalTextAppliedRef.current = false;
+          if (externalTextUpdate) handleEditorContentChange(externalTextUpdate.text);
+          return;
+        }
+        if (externalTextUpdate) {
+          providerEditorDirtyRef.current = false;
+          handleExternalTextAppliedToSaveState(externalTextUpdate.text);
         }
         return;
       }
     },
-    [externalTextUpdate, handleExternalTextAppliedToSaveState]
+    [data, externalTextUpdate, handleEditorContentChange, handleExternalTextAppliedToSaveState]
   );
 
   const handleSaveConflictResolve = useCallback(
@@ -781,23 +1201,66 @@ function SessionFileContentViewImpl({
   );
 
   const isTextFileReady = data.status === 'ready' && data.snapshot.kind === 'text';
-  const supportsHtmlPreview = supportsCredentiallessManagedPreviewFrames();
+  const htmlScriptSupport = getExecutableHtmlPreviewSupport();
+  const isHtmlFile = isHtmlPath(normalizedPath);
   const htmlPreviewSource =
-    supportsHtmlPreview &&
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
     data.snapshot.truncated !== true &&
-    isHtmlPath(normalizedPath)
+    isHtmlFile
       ? (latestEditorTextRef.current ?? data.snapshot.text)
       : null;
-  const isHtmlTextFile = htmlPreviewSource !== null;
-  const showHtmlRendered = isActiveSurface && isHtmlTextFile && htmlRenderMode === 'rendered';
+  // WebKit has no credentialless frames, so HTML there runs scripts only after an
+  // explicit opt-in for this exact text; leaving rendered mode revokes it.
+  const {
+    optedIn: htmlScriptsOptedIn,
+    toggle: toggleHtmlScriptsOptIn,
+    revoke: revokeHtmlScriptsOptIn,
+  } = useTextBoundScriptOptIn(htmlPreviewSource);
+  const supportsHtmlPreview =
+    htmlScriptSupport === 'automatic' || (htmlScriptSupport === 'opt-in' && htmlScriptsOptedIn);
+  // Desktop + file on this machine: serve the real file from its own isolated
+  // origin so relative assets load, after a per-entry consent that decides
+  // JavaScript. Everything else keeps the inline srcdoc preview below.
+  const [localHtmlUnavailablePath, setLocalHtmlUnavailablePath] = useState<string | null>(null);
+  const localHtmlHostPath =
+    localHtmlUnavailablePath !== normalizedPath && sessionFileActions.localHost
+      ? sessionFileActions.resolveHostPath(normalizedPath)
+      : null;
+  const canPreviewHtml =
+    htmlPreviewSource !== null ||
+    (isHtmlFile &&
+      localHtmlHostPath !== null &&
+      data.status === 'ready' &&
+      data.snapshot.kind === 'paged-text');
+  const showHtmlRendered = isActiveSurface && canPreviewHtml && htmlRenderMode === 'rendered';
+  const workspaceRoot = sessionFileActions.workspacePath;
+  const nestedWorkspaceFile =
+    workspaceRoot &&
+    localHtmlHostPath &&
+    resolveSessionFilePath(
+      [{ id: 'main', absolutePath: workspaceRoot }],
+      localHtmlHostPath
+    )?.relativePath.includes('/');
+  const handleLocalHtmlCancel = useCallback(() => setHtmlRenderMode('code'), []);
+  const handleLocalHtmlUnavailable = useCallback(
+    () => setLocalHtmlUnavailablePath(normalizedPath),
+    [normalizedPath]
+  );
+  const localHtmlPreview = useLocalHtmlPreview({
+    active: showHtmlRendered,
+    machineId: session.machineId,
+    hostPath: localHtmlHostPath,
+    onCancel: handleLocalHtmlCancel,
+    onUnavailable: handleLocalHtmlUnavailable,
+  });
+  const useLocalHtml = localHtmlPreview.enabled;
   const htmlPreviewDocument = useMemo(
     () =>
-      showHtmlRendered && htmlPreviewSource !== null
+      showHtmlRendered && !useLocalHtml && supportsHtmlPreview && htmlPreviewSource !== null
         ? buildStaticHtmlPreviewDocument(htmlPreviewSource)
         : null,
-    [htmlPreviewSource, showHtmlRendered]
+    [htmlPreviewSource, showHtmlRendered, supportsHtmlPreview, useLocalHtml]
   );
   const htmlPreviewLogicalUrl = useMemo(
     () => getStaticHtmlPreviewLogicalUrl(normalizedPath),
@@ -806,12 +1269,13 @@ function SessionFileContentViewImpl({
 
   useEffect(() => {
     if (showHtmlRendered) return;
+    revokeHtmlScriptsOptIn();
     setHtmlAnnotationEnabled(false);
     setHtmlAnnotationAvailable(false);
     setHtmlPreviewLoading(false);
     setHtmlRuntimeError(null);
     setHtmlPreviewCommand(undefined);
-  }, [showHtmlRendered]);
+  }, [revokeHtmlScriptsOptIn, showHtmlRendered]);
 
   const handleHtmlAnnotationAvailabilityChange = useCallback((available: boolean) => {
     setHtmlAnnotationAvailable(available);
@@ -825,6 +1289,7 @@ function SessionFileContentViewImpl({
   }, []);
   const handleHtmlBrowserStateChange = useCallback(() => undefined, []);
   const handleHtmlNavigationRequest = useCallback(() => {
+    revokeHtmlScriptsOptIn();
     setHtmlAnnotationEnabled(false);
     setHtmlRenderMode('code');
     toast.warning(
@@ -833,21 +1298,30 @@ function SessionFileContentViewImpl({
         'Navigation is disabled for self-contained HTML previews.'
       )
     );
-  }, [tRef]);
+  }, [revokeHtmlScriptsOptIn, tRef]);
   const isProviderEditorDirty =
     saveStatus.kind === 'pending' ||
     saveStatus.kind === 'saving' ||
     saveStatus.kind === 'error' ||
     saveStatus.kind === 'conflict_pending' ||
     saveStatus.kind === 'conflict';
+  const resolveProviderEditorMountText = (snapshot: { text: string }): string => {
+    if (hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty) {
+      return latestEditorTextRef.current ?? snapshot.text;
+    }
+    const acked = lastAckedExternalTextRef.current;
+    if (acked && acked.snapshot === snapshot) {
+      return acked.text;
+    }
+    return snapshot.text;
+  };
   markProviderConflictPendingRef.current = markProviderConflictPending;
   useEffect(() => {
-    if (saveStatus.kind === 'saved') {
-      providerEditorDirtyRef.current = false;
-    }
-  }, [saveStatus.kind]);
+    providerEditorDirtyRef.current = isProviderEditorDirty;
+  }, [isProviderEditorDirty]);
   const canSaveProviderEditor =
-    isProviderFileEditable &&
+    isActiveSurface &&
+    isProviderFileWritable &&
     (saveStatus.kind === 'pending' ||
       saveStatus.kind === 'error' ||
       saveStatus.kind === 'conflict_pending');
@@ -910,6 +1384,24 @@ function SessionFileContentViewImpl({
     lastCopyMarkdownRequestSeqRef.current = copyMarkdownRequestSeq;
     void handleCopyMarkdown();
   }, [copyMarkdownRequestSeq, data, handleCopyMarkdown, normalizedPath]);
+  const handleDownloadHtml = useCallback(async () => {
+    if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
+    const content = latestEditorTextRef.current ?? data.snapshot.text;
+    const bytes = new TextEncoder().encode(content);
+    try {
+      const { saved } = await saveBytesAsFile(normalizedPath, bytes);
+      if (!saved) return;
+    } catch {
+      toast.error(
+        tRef.current('sessions.fileActions.downloadFailed', 'Could not download that file.')
+      );
+      return;
+    }
+    capturePostHogEvent(postHog, 'file_preview/downloaded', {
+      file_kind: getAnalyticsFileKind(normalizedPath),
+      source: 'file_viewer',
+    });
+  }, [data, normalizedPath, postHog]);
   const saveViewState = useMemo<SessionFileSaveViewState>(
     () => ({
       dirty: isProviderEditorDirty,
@@ -981,6 +1473,16 @@ function SessionFileContentViewImpl({
     shouldUseProviderFileContent,
   ]);
 
+  const handleReloadHtmlPreview = useCallback(() => {
+    setHtmlPreviewCommand((current) => ({
+      id: (current?.id ?? 0) + 1,
+      action: 'reload',
+    }));
+    if (shouldUseProviderFileContent) {
+      handleProviderRefresh();
+    }
+  }, [handleProviderRefresh, shouldUseProviderFileContent]);
+
   // LSP entry points. Enabled whenever the provider supplies content
   // for this view (including read-only mode — read roles can
   // still request LSP per spec L651). The hook handles the RPC round
@@ -1009,6 +1511,8 @@ function SessionFileContentViewImpl({
   // so Cmd-click / F12 reach the right provider when multiple files are
   // open. Unregisters on unmount or when the active fileId / provider
   // changes so a stale entry can't intercept a different mount.
+  // The URI is a serialized `code-collab://` string built without
+  // `monaco-editor`; the lazy viewer parses it once its chunk loads.
   const lspModelUri = useMemo(
     () =>
       isLspEnabled && lspFileId ? buildCodeCollabMonacoUri(lspFileId, normalizedPath) : undefined,
@@ -1030,12 +1534,30 @@ function SessionFileContentViewImpl({
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
     isSessionMarkdownPath(normalizedPath);
+  const sessionFileLanguageId = getSessionFileLanguageId(
+    normalizedPath,
+    extendedCodeLanguagesEnabled
+  );
+  const sessionFileShikiLanguage = isSessionFileShikiLanguage(sessionFileLanguageId)
+    ? sessionFileLanguageId
+    : null;
+  // Keep writable mobile editors mounted across mode changes to preserve drafts and undo.
+  const useProviderShikiViewer =
+    sessionFileShikiLanguage !== null &&
+    !isProviderFileEditable &&
+    !(defaultReadOnly && isProviderFileWritable);
   const canCopyFullMarkdown =
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
     isSessionMarkdownPath(normalizedPath) &&
     data.snapshot.truncated !== true;
   const showMarkdownRendered = isMarkdownTextFile && markdownRenderMode === 'rendered';
+  const isCsvTextFile =
+    data.status === 'ready' &&
+    data.snapshot.kind === 'text' &&
+    data.snapshot.truncated !== true &&
+    /\.(csv|tsv)$/i.test(normalizedPath);
+  const showCsvRendered = isCsvTextFile && csvRenderMode === 'rendered';
   // Source text for the rendered Markdown preview. Prefer the latest text the
   // editor has committed (local edits + applied live syncs) over the opened
   // snapshot, so toggling to `rendered` after editing shows the current
@@ -1051,11 +1573,22 @@ function SessionFileContentViewImpl({
   // Typography tracks conversationFontSize so side-panel README preview matches
   // the left chat Markdown (default = text-sm; was hard-coded large/"base").
   const previewSurface: ReactNode = isMarkdownTextFile ? (
-    <div
-      className="mx-auto w-full max-w-3xl px-3 py-3 select-text sm:px-4 sm:py-4"
-      data-native-selection-allow
-    >
-      <MarkdownRenderer text={markdownPreviewText} size={conversationFontSize} />
+    <div {...stylex.props(styles.markdownPreview)} data-text-selectable>
+      <SessionLinkProvider enabled={sessionLinksEnabled}>
+        {fileProvider ? (
+          <MarkdownFileResources
+            key={`${session.machineId}:${sessionId}`}
+            provider={fileProvider}
+            documentPath={providerEntry?.path ?? normalizedPath}
+            automatic={Boolean(sessionFileActions.localHost)}
+            active={isActiveSurface && showMarkdownRendered}
+          >
+            <MarkdownRenderer text={markdownPreviewText} size={conversationFontSize} />
+          </MarkdownFileResources>
+        ) : (
+          <MarkdownRenderer text={markdownPreviewText} size={conversationFontSize} />
+        )}
+      </SessionLinkProvider>
     </div>
   ) : isSvgTextFile && data.status === 'ready' && data.snapshot.kind === 'text' ? (
     <SessionFileImagePreview path={normalizedPath} svgText={data.snapshot.text} />
@@ -1109,8 +1642,8 @@ function SessionFileContentViewImpl({
 
   if (showProviderConnecting) {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-sm text-muted-foreground text-center">
-        <Loader2 className="h-4 w-4 animate-spin" />
+      <div {...stylex.props(styles.centeredState)}>
+        <Spinner {...stylex.props(styles.spinner16)} />
         <span>
           {fileProviderMessage ??
             t('sessions.codeSession.connecting', 'Connecting to code session…')}
@@ -1119,8 +1652,8 @@ function SessionFileContentViewImpl({
     );
   } else if (showLocalLoading || data.status === 'loading') {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-sm text-muted-foreground text-center">
-        <Loader2 className="h-4 w-4 animate-spin" />
+      <div {...stylex.props(styles.centeredState)}>
+        <Spinner {...stylex.props(styles.spinner16)} />
         <span>
           {shouldUseLocalFileContent
             ? localFileLoadingLabel
@@ -1129,27 +1662,75 @@ function SessionFileContentViewImpl({
       </div>
     );
   } else if (data.status === 'error') {
-    body = <SessionFileErrorState message={data.message} reason={data.reason} />;
+    body = (
+      <SessionFileErrorState
+        message={data.message}
+        reason={data.reason}
+        onRetry={retryFile}
+        {...(fileErrorActions ? { fileActions: fileErrorActions } : {})}
+      />
+    );
   } else if (data.snapshot.kind === 'binary') {
-    body = <SessionFileBinaryPreview path={normalizedPath} bytes={data.snapshot.bytes} />;
+    body = (
+      <SessionFileBinaryPreview
+        path={normalizedPath}
+        bytes={data.snapshot.bytes}
+        url={data.snapshot.url}
+        active={isActiveSurface}
+        fileActions={sessionFileActions.buildErrorActions(normalizedPath, data.snapshot)}
+        onAddSelectionToChat={onAddSelectionToChat}
+      />
+    );
   } else if (data.snapshot.kind === 'missing') {
     body = (
       <SessionFileErrorState
         message={t('sessions.fileViewer.missing', 'File not found.')}
         reason="deleted"
+        onRetry={retryFile}
       />
     );
+  } else if (showHtmlRendered && useLocalHtml) {
+    const state = localHtmlPreview.state;
+    body =
+      state.status === 'ready' ? (
+        <div {...stylex.props(styles.previewFrame)}>
+          <LocalHtmlPreviewFrame
+            key={localHtmlPreview.reloadKey}
+            url={state.url}
+            allowScripts={state.allowScripts}
+            title={normalizedPath}
+          />
+        </div>
+      ) : state.status === 'error' ? (
+        <SessionFileErrorState message={state.message} onRetry={localHtmlPreview.retry} />
+      ) : state.status === 'opening' ? (
+        <div {...stylex.props(styles.centeredState)}>
+          <Spinner {...stylex.props(styles.spinner16)} />
+        </div>
+      ) : null;
+  } else if (data.snapshot.kind === 'paged-text') {
+    body = (
+      <PagedFileViewer
+        key={normalizedPath}
+        source={data.snapshot.source}
+        active={isActiveSurface}
+        onOpenExternal={fileErrorActions?.localHost?.onOpen}
+      />
+    );
+  } else if (showHtmlRendered && !supportsHtmlPreview && htmlPreviewSource !== null) {
+    body = <ReadOnlyHtmlPreview text={htmlPreviewSource} />;
   } else if (showHtmlRendered && htmlPreviewDocument !== null) {
     body = (
-      <div className="relative h-full min-h-0 overflow-hidden bg-background">
+      <div {...stylex.props(styles.previewFrame)}>
         <ManagedPreviewSurface
           session={session}
           viewerUrl={htmlPreviewLogicalUrl}
           logicalUrl={htmlPreviewLogicalUrl}
           documentHtml={htmlPreviewDocument}
+          scriptsOptedIn={htmlScriptsOptedIn}
           annotationEnabled={htmlAnnotationEnabled}
           command={htmlPreviewCommand}
-          className="h-full"
+          {...stylex.props(styles.fullSize)}
           visualAnnotationReferenceKeys={visualAnnotationReferenceKeys}
           onAnnotationAvailabilityChange={handleHtmlAnnotationAvailabilityChange}
           onRuntimeError={handleHtmlRuntimeError}
@@ -1160,36 +1741,52 @@ function SessionFileContentViewImpl({
           onToggleVisualAnnotationInChat={onToggleVisualAnnotationInChat}
         />
         {htmlPreviewLoading ? (
-          <div className="pointer-events-none absolute right-3 top-3 rounded bg-background/90 p-1.5 text-muted-foreground shadow-sm">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          <div {...stylex.props(styles.previewLoading)}>
+            <Spinner {...stylex.props(styles.spinner14)} aria-hidden="true" />
           </div>
         ) : null}
         {htmlRuntimeError ? (
-          <div className="absolute bottom-3 left-3 right-3 flex items-start gap-2 rounded-md border border-status-warning/30 bg-background/95 px-3 py-2 text-xs text-foreground shadow-sm">
-            <ShieldAlert
-              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning"
-              aria-hidden="true"
-            />
+          <div {...stylex.props(styles.previewError)}>
+            <ShieldAlert {...stylex.props(styles.previewErrorIcon)} aria-hidden="true" />
             <span>{htmlRuntimeError}</span>
           </div>
         ) : null}
       </div>
+    );
+  } else if (showCsvRendered && data.snapshot.kind === 'text') {
+    body = (
+      <DocumentSelectionSurface
+        path={normalizedPath}
+        source={latestEditorTextRef.current ?? data.snapshot.text}
+        active={isActiveSurface}
+        onAdd={onAddSelectionToChat}
+      >
+        <SessionFileCsvPreview
+          text={latestEditorTextRef.current ?? data.snapshot.text}
+          path={normalizedPath}
+          active={isActiveSurface}
+        />
+      </DocumentSelectionSurface>
     );
   } else if (showSvgRendered || showMarkdownRendered) {
     body = previewSurface;
   } else {
     if (shouldUseProviderFileContent) {
       body = (
-        <div className="flex h-full min-h-0 flex-col">
-          <div className="min-h-0 flex-1">
-            {isMarkdownTextFile && preferNativeMarkdownSelection ? (
+        <div {...stylex.props(styles.contentColumn)}>
+          <div {...stylex.props(styles.contentFlexible)}>
+            {useProviderShikiViewer && sessionFileShikiLanguage !== null ? (
+              <SessionShikiTextViewer
+                key={liveFileId ?? normalizedPath}
+                path={normalizedPath}
+                text={resolveProviderEditorMountText(data.snapshot)}
+                language={sessionFileShikiLanguage}
+                {...stylex.props(styles.fullSize)}
+              />
+            ) : isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
+                text={resolveProviderEditorMountText(data.snapshot)}
                 readOnly={!isProviderFileEditable}
                 wordWrap={wordWrapEnabled}
                 selectedLines={selectedLines}
@@ -1205,13 +1802,12 @@ function SessionFileContentViewImpl({
               />
             ) : (
               <LazyProviderTextMonacoViewer
-                key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
-                language={getSessionFileMonacoLanguageId(normalizedPath)}
+                key={lspModelUri ?? liveFileId ?? normalizedPath}
+                text={resolveProviderEditorMountText(data.snapshot)}
+                language={getSessionFileMonacoLanguageId(
+                  normalizedPath,
+                  extendedCodeLanguagesEnabled
+                )}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}
                 vscodeTheme={activeVSCodeTheme ?? null}
@@ -1232,7 +1828,7 @@ function SessionFileContentViewImpl({
             )}
           </div>
           {data.snapshot.truncated ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
+            <div {...stylex.props(styles.truncatedNote)}>
               {t('sessions.localProject.fileViewer.truncated', 'File content was truncated.')}
             </div>
           ) : null}
@@ -1249,9 +1845,17 @@ function SessionFileContentViewImpl({
       );
     } else {
       body = (
-        <div className="flex h-full min-h-0 flex-col">
-          <div className="min-h-0 flex-1">
-            {isMarkdownTextFile && preferNativeMarkdownSelection ? (
+        <div {...stylex.props(styles.contentColumn)}>
+          <div {...stylex.props(styles.contentFlexible)}>
+            {sessionFileShikiLanguage !== null ? (
+              <SessionShikiTextViewer
+                key={normalizedPath}
+                path={normalizedPath}
+                text={data.snapshot.text}
+                language={sessionFileShikiLanguage}
+                {...stylex.props(styles.fullSize)}
+              />
+            ) : isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={normalizedPath}
                 text={data.snapshot.text}
@@ -1264,7 +1868,10 @@ function SessionFileContentViewImpl({
               <LazyTextMonacoViewer
                 key={normalizedPath}
                 text={data.snapshot.text}
-                language={getSessionFileMonacoLanguageId(normalizedPath)}
+                language={getSessionFileMonacoLanguageId(
+                  normalizedPath,
+                  extendedCodeLanguagesEnabled
+                )}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}
                 vscodeTheme={activeVSCodeTheme ?? null}
@@ -1274,7 +1881,7 @@ function SessionFileContentViewImpl({
             )}
           </div>
           {data.snapshot.truncated ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
+            <div {...stylex.props(styles.truncatedNote)}>
               {t('sessions.localProject.fileViewer.truncated', 'File content was truncated.')}
             </div>
           ) : null}
@@ -1283,56 +1890,86 @@ function SessionFileContentViewImpl({
     }
   }
 
-  const bodyUsesNativeScrolling = isTextFileReady && !showSvgRendered && !showMarkdownRendered;
+  // PDF and Office own their scrollports and need a definite height; the outer
+  // ScrollArea content wrapper sizes itself from its children instead.
+  const bodyUsesNativeScrolling =
+    useLocalHtml ||
+    (isTextFileReady && !showSvgRendered && !showMarkdownRendered) ||
+    (data.status === 'ready' &&
+      data.snapshot.kind === 'binary' &&
+      (isPdfFilePath(normalizedPath) || getOfficePreviewKind(normalizedPath) !== null));
   const showRealtimeStatusBar = shouldUseProviderFileContent || showProviderConnecting;
   // Top toolbar controls. The render-mode toggle moved here from the bottom
   // status bar (which now only carries save/live/offline state). The search
   // button only appears when a Monaco editor is mounted — a rendered SVG/Markdown
   // preview has no editor to search.
-  const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || isHtmlTextFile;
+  const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || canPreviewHtml || isCsvTextFile;
+  const filePreviewActive = isSvgTextFile
+    ? svgRenderMode === 'rendered'
+    : isMarkdownTextFile
+      ? markdownRenderMode === 'rendered'
+      : isCsvTextFile
+        ? csvRenderMode === 'rendered'
+        : htmlRenderMode === 'rendered';
   const showSearchButton =
     isTextFileReady &&
     !showSvgRendered &&
     !showMarkdownRendered &&
+    !showCsvRendered &&
     !showHtmlRendered &&
+    !useProviderShikiViewer &&
     !(isMarkdownTextFile && preferNativeMarkdownSelection);
   const showWordWrapButton =
-    isTextFileReady && !showSvgRendered && !showMarkdownRendered && !showHtmlRendered;
-  const showSaveButton = isProviderFileEditable && isTextFileReady;
-  const showRefreshButton = shouldUseProviderFileContent && isTextFileReady;
+    isTextFileReady &&
+    !showSvgRendered &&
+    !showMarkdownRendered &&
+    !showCsvRendered &&
+    !showHtmlRendered;
+  const showEditModeButton = defaultReadOnly && isProviderFileWritable && isTextFileReady;
+  const showSaveButton =
+    isActiveSurface &&
+    isProviderFileWritable &&
+    isTextFileReady &&
+    (editingEnabled || isProviderEditorDirty);
+  const showRefreshButton = shouldUseProviderFileContent && isTextFileReady && !showHtmlRendered;
   const showViewerTopBar =
     showPreviewToggle ||
     isMarkdownTextFile ||
+    (isHtmlFile && isTextFileReady) ||
     showSearchButton ||
+    showEditModeButton ||
     showSaveButton ||
     showRefreshButton;
 
+  const viewerRootClassName = stylex.props(styles.viewerRoot).className;
   return (
-    <div className={cn('flex h-full min-h-0 flex-col overflow-hidden', className)}>
+    <div className={[viewerRootClassName, className].filter(Boolean).join(' ')}>
       {showViewerTopBar ? (
-        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/50 bg-background px-2">
-          <div className="ml-auto flex items-center gap-1">
+        <div {...stylex.props(styles.toolbar)}>
+          <div {...stylex.props(styles.toolbarActions)}>
             {showPreviewToggle ? (
               <FilePreviewToggle
-                active={
-                  isSvgTextFile
-                    ? svgRenderMode === 'rendered'
-                    : isMarkdownTextFile
-                      ? markdownRenderMode === 'rendered'
-                      : htmlRenderMode === 'rendered'
-                }
+                active={filePreviewActive}
                 onToggle={() => {
+                  if (!filePreviewActive) {
+                    capturePostHogEvent(postHog, 'file_preview/opened', {
+                      file_kind: getAnalyticsFileKind(normalizedPath),
+                      source: 'preview_toggle',
+                    });
+                  }
                   if (isSvgTextFile) {
                     setSvgRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
                   } else if (isMarkdownTextFile) {
                     setMarkdownRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
+                  } else if (isCsvTextFile) {
+                    setCsvRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
                   } else {
                     setHtmlAnnotationEnabled(false);
                     setHtmlRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
                   }
                 }}
                 showLabel={
-                  isHtmlTextFile
+                  canPreviewHtml && !localHtmlHostPath && htmlScriptSupport === 'automatic'
                     ? t('sessions.fileViewer.htmlPreview.show', 'Preview HTML (runs scripts)')
                     : t('sessions.fileViewer.preview.show', 'Preview')
                 }
@@ -1353,12 +1990,39 @@ function SessionFileContentViewImpl({
                       )
                 }
                 aria-label={t('sessions.fileViewer.copyMarkdown', 'Copy full Markdown')}
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                {...stylex.props(styles.toolButton)}
               >
-                <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                <Copy {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered ? (
+            {showHtmlRendered && !useLocalHtml && htmlScriptSupport === 'opt-in' ? (
+              <button
+                type="button"
+                aria-pressed={htmlScriptsOptedIn}
+                onClick={() => {
+                  setHtmlAnnotationEnabled(false);
+                  toggleHtmlScriptsOptIn();
+                }}
+                title={
+                  htmlScriptsOptedIn
+                    ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                    : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')
+                }
+                aria-label={
+                  htmlScriptsOptedIn
+                    ? t('sessions.fileViewer.htmlPreview.stopScripts', 'Stop scripts')
+                    : t('sessions.fileViewer.htmlPreview.runScripts', 'Run scripts')
+                }
+                {...stylex.props(styles.toolButton, htmlScriptsOptedIn && styles.toolButtonActive)}
+              >
+                {htmlScriptsOptedIn ? (
+                  <Square {...stylex.props(styles.icon)} aria-hidden="true" />
+                ) : (
+                  <Play {...stylex.props(styles.icon)} aria-hidden="true" />
+                )}
+              </button>
+            ) : null}
+            {showHtmlRendered && !useLocalHtml && supportsHtmlPreview ? (
               <button
                 type="button"
                 aria-pressed={htmlAnnotationEnabled}
@@ -1366,28 +2030,42 @@ function SessionFileContentViewImpl({
                 disabled={!htmlAnnotationAvailable}
                 title={t('sessions.preview.annotation.addComment', 'Add comment')}
                 aria-label={t('sessions.preview.annotation.addComment', 'Add comment')}
-                className={cn(
-                  'flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50',
-                  htmlAnnotationEnabled ? 'text-foreground' : 'text-muted-foreground'
+                {...stylex.props(
+                  styles.toolButton,
+                  htmlAnnotationEnabled && styles.toolButtonActive
                 )}
               >
-                <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                <MessageCircle {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
-            {showHtmlRendered ? (
+            {showHtmlRendered &&
+            (useLocalHtml ? localHtmlPreview.state.status === 'ready' : supportsHtmlPreview) ? (
               <button
                 type="button"
-                onClick={() =>
-                  setHtmlPreviewCommand((current) => ({
-                    id: (current?.id ?? 0) + 1,
-                    action: 'reload',
-                  }))
-                }
+                onClick={useLocalHtml ? localHtmlPreview.reload : handleReloadHtmlPreview}
+                disabled={isRefreshing}
                 title={t('sessions.browser.reload', 'Reload')}
                 aria-label={t('sessions.browser.reload', 'Reload')}
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-busy={isRefreshing}
+                {...stylex.props(styles.toolButton)}
               >
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                <Spinner
+                  icon={RefreshCw}
+                  spinning={isRefreshing}
+                  {...stylex.props(styles.spinner14)}
+                  aria-hidden="true"
+                />
+              </button>
+            ) : null}
+            {isHtmlFile && isTextFileReady ? (
+              <button
+                type="button"
+                onClick={handleDownloadHtml}
+                title={t('sessions.fileActions.download', 'Download file')}
+                aria-label={t('sessions.fileActions.download', 'Download file')}
+                {...stylex.props(styles.toolButton)}
+              >
+                <Download {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
             {showWordWrapButton ? (
@@ -1401,12 +2079,9 @@ function SessionFileContentViewImpl({
                     : t('sessions.fileViewer.wordWrapEnable', 'Wrap long lines')
                 }
                 aria-label={t('sessions.fileViewer.wordWrap', 'Wrap lines')}
-                className={cn(
-                  'flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground',
-                  wordWrapEnabled ? 'text-foreground' : 'text-muted-foreground'
-                )}
+                {...stylex.props(styles.toolButton, wordWrapEnabled && styles.toolButtonActive)}
               >
-                <WrapText className="h-3.5 w-3.5" aria-hidden="true" />
+                <WrapText {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
             {showSearchButton ? (
@@ -1415,10 +2090,44 @@ function SessionFileContentViewImpl({
                 onClick={() => setFindRequestSeq((seq) => seq + 1)}
                 title={t('sessions.fileViewer.search', 'Search')}
                 aria-label={t('sessions.fileViewer.search', 'Search')}
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                {...stylex.props(styles.toolButton)}
               >
-                <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                <Search {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
+            ) : null}
+            {showEditModeButton ? (
+              <Button
+                type="button"
+                variant="ghost"
+                icon
+                aria-pressed={editingEnabled}
+                aria-label={
+                  editingEnabled
+                    ? t('sessions.fileViewer.readOnly', 'Switch to read-only')
+                    : t('sessions.fileViewer.edit', 'Edit file')
+                }
+                title={
+                  editingEnabled
+                    ? t('sessions.fileViewer.readOnly', 'Switch to read-only')
+                    : t('sessions.fileViewer.edit', 'Edit file')
+                }
+                onClick={() => {
+                  setEditingTarget(editingEnabled ? null : contentTargetKey);
+                  if (!editingEnabled) {
+                    setSvgRenderMode('code');
+                    setMarkdownRenderMode('code');
+                    setCsvRenderMode('code');
+                    setHtmlAnnotationEnabled(false);
+                    setHtmlRenderMode('code');
+                  }
+                }}
+              >
+                {editingEnabled ? (
+                  <LockKeyhole {...stylex.props(styles.icon)} aria-hidden="true" />
+                ) : (
+                  <Pencil {...stylex.props(styles.icon)} aria-hidden="true" />
+                )}
+              </Button>
             ) : null}
             {showSaveButton ? (
               <button
@@ -1431,17 +2140,12 @@ function SessionFileContentViewImpl({
                     : t('sessions.fileViewer.save.withShortcut', 'Save (⌘S / Ctrl+S)')
                 }
                 aria-label={t('sessions.fileViewer.save', 'Save')}
-                className={cn(
-                  'flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50',
-                  canSaveProviderEditor
-                    ? 'text-status-warning hover:bg-status-warning/10 hover:text-status-warning'
-                    : 'text-muted-foreground'
-                )}
+                {...stylex.props(styles.toolButton, canSaveProviderEditor && styles.saveAvailable)}
               >
                 {saveStatus.kind === 'saving' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  <Spinner {...stylex.props(styles.spinner14)} aria-hidden="true" />
                 ) : (
-                  <Save className="h-3.5 w-3.5" aria-hidden="true" />
+                  <Save {...stylex.props(styles.icon)} aria-hidden="true" />
                 )}
               </button>
             ) : null}
@@ -1460,10 +2164,12 @@ function SessionFileContentViewImpl({
                 }
                 aria-label={t('sessions.fileViewer.refresh', 'Refresh')}
                 aria-busy={isRefreshing}
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                {...stylex.props(styles.toolButton)}
               >
-                <RefreshCw
-                  className={cn('h-3.5 w-3.5', isRefreshing && 'animate-spin')}
+                <Spinner
+                  icon={RefreshCw}
+                  spinning={isRefreshing}
+                  {...stylex.props(styles.spinner14)}
                   aria-hidden="true"
                 />
               </button>
@@ -1471,27 +2177,37 @@ function SessionFileContentViewImpl({
           </div>
         </div>
       ) : null}
-      <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div {...stylex.props(styles.contentBody)}>
         {bodyUsesNativeScrolling ? (
-          <div className="h-full min-h-0 min-w-0">{body}</div>
+          <div {...stylex.props(styles.fullSize)}>{body}</div>
         ) : (
-          <ScrollArea className="h-full w-full">
-            <div className="min-h-full min-w-0">{body}</div>
+          <ScrollArea {...stylex.props(styles.fullSize)}>
+            <div {...stylex.props(styles.fullMinContent)}>{body}</div>
           </ScrollArea>
         )}
       </div>
-      {isProviderFileEditable && saveStatus.kind === 'conflict' ? (
+      {isActiveSurface && isProviderFileWritable && saveStatus.kind === 'conflict' ? (
         <SessionFileConflictActionRow onResolveConflict={handleSaveConflictResolve} t={t} />
       ) : null}
       {showRealtimeStatusBar ? (
         <SessionFileRealtimeStatusBar
           saveStatus={saveStatus}
           liveStatus={liveStatus}
-          showSaveStatus={isProviderFileEditable}
+          showSaveStatus={isActiveSurface && isProviderFileWritable}
           machineOffline={
             showProviderConnecting || shouldUseProviderFileContent ? isSessionMachineOffline : false
           }
           t={t}
+        />
+      ) : null}
+      {useLocalHtml && localHtmlPreview.state.status === 'confirming' ? (
+        <LocalHtmlPreviewConsentDialog
+          key={JSON.stringify([localHtmlHostPath, workspaceRoot])}
+          open
+          fileName={normalizedPath.split('/').pop() ?? normalizedPath}
+          workspaceRoot={nestedWorkspaceFile ? workspaceRoot : null}
+          onConfirm={localHtmlPreview.confirm}
+          onCancel={localHtmlPreview.cancel}
         />
       ) : null}
     </div>
@@ -1585,8 +2301,8 @@ function NativeMarkdownSource({
       wrap={wordWrap ? 'soft' : 'off'}
       spellCheck={false}
       aria-label={ariaLabel}
-      data-native-selection-allow
-      className="h-full min-h-[240px] w-full resize-none overflow-auto border-0 bg-background p-3 font-mono text-xs leading-5 text-foreground outline-none"
+      data-text-selectable
+      {...stylex.props(styles.sourceTextarea)}
       onChange={(event) => {
         const nextValue = event.currentTarget.value;
         setValue(nextValue);
@@ -1624,31 +2340,38 @@ function FilePreviewToggle({
   const Icon = active ? EyeClosed : Eye;
   const label = active ? hideLabel : showLabel;
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-pressed={active}
-          onClick={onToggle}
-          aria-label={label}
-          className={cn(
-            'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground',
-            active ? 'text-foreground' : 'text-muted-foreground'
-          )}
-        >
-          {/* lucide's open Eye packs the iris + almond into 14px, so at stroke-width
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        delay={300}
+        render={
+          <button
+            type="button"
+            aria-pressed={active}
+            onClick={onToggle}
+            aria-label={label}
+            {...stylex.props(
+              styles.previewToggle,
+              active ? styles.previewToggleActive : styles.previewToggleInactive
+            )}
+          >
+            {/* lucide's open Eye packs the iris + almond into 14px, so at stroke-width
               2 it reads ~26% denser than the neighbouring Search glyph and looks
               darker at the same color. Thin it to 1.5 to match Search's optical
               weight (measured ink coverage 20.2% vs 20.9%). The closed Eye has no
               iris (already lighter) and is shown alone in the active color, so it
               keeps the default weight. */}
-          <Icon className="h-3.5 w-3.5" strokeWidth={active ? 2 : 1.5} aria-hidden="true" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="text-xs">
+            <Icon
+              {...stylex.props(styles.icon)}
+              strokeWidth={active ? 2 : 1.5}
+              aria-hidden="true"
+            />
+          </button>
+        }
+      />
+      <Tooltip.Content side="bottom" className="text-xs">
         {label}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -1690,37 +2413,29 @@ export function SessionFileRealtimeStatusBar({
   if (items.length === 0) return null;
 
   return (
-    <div
-      data-testid="session-file-realtime-status-bar"
-      className="flex h-6 min-h-6 shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-t border-border/50 bg-background px-2 text-[11px] leading-none text-muted-foreground"
-    >
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden whitespace-nowrap">
+    <div data-testid="session-file-realtime-status-bar" {...stylex.props(styles.statusBar)}>
+      <div {...stylex.props(styles.statusItems)}>
         {items.map((item, index) => (
-          <span key={item.key} className="flex min-w-0 shrink-0 items-center gap-1">
-            {index > 0 ? <span className="mr-0.5 text-muted-foreground/55">·</span> : null}
+          <span key={item.key} {...stylex.props(styles.statusItem)}>
+            {index > 0 ? <span {...stylex.props(styles.statusSeparator)}>·</span> : null}
             {item.icon === 'cloud-offline' ? (
               <FamiconsCloudOfflineOutline
-                className="h-3 w-3 shrink-0 text-muted-foreground"
+                {...stylex.props(styles.iconSmall, styles.muted)}
                 aria-hidden="true"
               />
             ) : (
-              <span
-                className={cn(
-                  'h-1.5 w-1.5 shrink-0 rounded-full',
-                  realtimeStatusDotClass(item.tone)
-                )}
-              />
+              <span {...stylex.props(styles.statusDot, realtimeStatusDotStyle(item.tone))} />
             )}
             <span
-              className={cn(
-                item.iconOnly === true ? 'sr-only' : 'truncate',
+              {...stylex.props(
+                item.iconOnly === true ? styles.screenReaderOnly : styles.truncate,
                 item.tone === 'danger'
-                  ? 'text-destructive'
+                  ? styles.statusDanger
                   : item.tone === 'warning'
-                    ? 'text-amber-700 dark:text-amber-300'
+                    ? styles.statusWarning
                     : item.tone === 'positive'
-                      ? 'text-foreground'
-                      : ''
+                      ? styles.statusPositive
+                      : null
               )}
               title={item.title ?? item.label}
             >
@@ -1821,16 +2536,16 @@ function liveStatusItem(
   return assertNever(status);
 }
 
-function realtimeStatusDotClass(tone: RealtimeStatusItem['tone']): string {
+function realtimeStatusDotStyle(tone: RealtimeStatusItem['tone']) {
   switch (tone) {
     case 'positive':
-      return 'bg-emerald-500';
+      return styles.statusPositiveDot;
     case 'muted':
-      return 'bg-muted-foreground/50';
+      return styles.statusMutedDot;
     case 'warning':
-      return 'bg-amber-500';
+      return styles.statusWarningDot;
     case 'danger':
-      return 'bg-destructive';
+      return styles.statusDangerDot;
   }
   return assertNever(tone);
 }
@@ -1892,8 +2607,8 @@ export function SessionFileConflictActionRow({
 }): ReactNode {
   const [pendingOverride, setPendingOverride] = useState(false);
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-t border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-800 dark:text-amber-300">
-      <span className="text-muted-foreground">
+    <div {...stylex.props(styles.conflictBanner)}>
+      <span {...stylex.props(styles.conflictCopy)}>
         {pendingOverride
           ? t(
               'sessions.fileSave.conflictOverrideWarn',
@@ -1904,21 +2619,15 @@ export function SessionFileConflictActionRow({
               'The file changed on disk while you were editing. Choose how to reconcile.'
             )}
       </span>
-      <span className="ml-auto flex gap-1.5">
+      <span {...stylex.props(styles.conflictActions)}>
         {pendingOverride ? (
           <>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 px-2 text-[11px]"
-              onClick={() => setPendingOverride(false)}
-            >
+            <Button variant="ghost" size="small" onClick={() => setPendingOverride(false)}>
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
-              size="sm"
               variant="destructive"
-              className="h-6 px-2 text-[11px]"
+              size="small"
               onClick={() => {
                 setPendingOverride(false);
                 void onResolveConflict('override');
@@ -1930,37 +2639,33 @@ export function SessionFileConflictActionRow({
         ) : (
           <>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictDiscardHint',
                 'Throw away your local edits and reload from disk.'
               )}
+              size="small"
               onClick={() => void onResolveConflict('discard')}
             >
               {t('sessions.fileSave.conflictDiscard', 'Discard my edits')}
             </Button>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictMarkersHint',
                 'Reload with <<<<<<< / >>>>>>> conflict markers so you can resolve by hand.'
               )}
+              size="small"
               onClick={() => void onResolveConflict('load_with_conflicts')}
             >
               {t('sessions.fileSave.conflictMarkers', 'Insert conflict markers')}
             </Button>
             <Button
-              size="sm"
-              variant="default"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictOverrideHint',
                 'Replace the disk version with your edits. Concurrent changes will be lost.'
               )}
+              size="small"
               onClick={() => setPendingOverride(true)}
             >
               {t('sessions.fileSave.conflictOverride', 'Overwrite disk')}
@@ -2000,36 +2705,36 @@ function SessionFileLspPanel({
       ? t('sessions.lsp.definitionTitle', 'Go to Definition')
       : t('sessions.lsp.referencesTitle', 'Find References');
   return (
-    <div className="flex flex-col gap-1 border-t border-border bg-muted/30 px-3 py-2 text-xs">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-foreground">{actionLabel}</span>
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
+    <div {...stylex.props(styles.lspPanel)}>
+      <div {...stylex.props(styles.lspHeader)}>
+        <span {...stylex.props(styles.lspTitle)}>{actionLabel}</span>
+        <Button variant="ghost" size="small" onClick={onDismiss}>
           {t('sessions.lsp.dismiss', 'Dismiss')}
         </Button>
       </div>
       {state.kind === 'pending' ? (
-        <span className="text-muted-foreground">
+        <span {...stylex.props(styles.muted)}>
           {t('sessions.lsp.pending', 'Querying host language service…')}
         </span>
       ) : null}
       {state.kind === 'error' ? (
-        <span className="text-destructive">
+        <span {...stylex.props(styles.destructive)}>
           {t('sessions.lsp.error', 'LSP request failed')}: {state.message}
         </span>
       ) : null}
       {state.kind === 'result' && state.result.status === 'unsupported' ? (
-        <span className="text-muted-foreground">
+        <span {...stylex.props(styles.muted)}>
           {t('sessions.lsp.unsupported', 'Host language service does not support this file')}:{' '}
           {state.result.message}
         </span>
       ) : null}
       {state.kind === 'result' && state.result.status === 'ready' ? (
         state.result.locations.length === 0 ? (
-          <span className="text-muted-foreground">
+          <span {...stylex.props(styles.muted)}>
             {t('sessions.lsp.empty', 'No locations found')}
           </span>
         ) : (
-          <ul className="flex flex-col gap-0.5">
+          <ul {...stylex.props(styles.lspList)}>
             {state.result.locations.map((location, index) => {
               const isCrossFile =
                 currentFileId !== undefined &&
@@ -2042,10 +2747,10 @@ function SessionFileLspPanel({
                 return (
                   <li
                     key={`${location.fileId}:${location.range.start.line}:${location.range.start.character}:${index}`}
-                    className="truncate text-muted-foreground"
+                    {...stylex.props(styles.truncate, styles.muted)}
                     title={titleHint}
                   >
-                    <span className="text-foreground">{location.path}</span>
+                    <span {...stylex.props(styles.foreground)}>{location.path}</span>
                     <span>
                       :{location.range.start.line + 1}:{location.range.start.character + 1}
                     </span>
@@ -2055,7 +2760,7 @@ function SessionFileLspPanel({
               return (
                 <li
                   key={`${location.fileId}:${location.range.start.line}:${location.range.start.character}:${index}`}
-                  className="truncate"
+                  {...stylex.props(styles.truncate)}
                 >
                   <button
                     type="button"
@@ -2068,12 +2773,9 @@ function SessionFileLspPanel({
                         character: location.range.start.character,
                       })
                     }
-                    className={cn(
-                      'w-full truncate text-left text-muted-foreground hover:text-foreground hover:underline',
-                      isCrossFile && 'font-medium text-foreground'
-                    )}
+                    {...stylex.props(styles.locationButton, isCrossFile && styles.crossFile)}
                   >
-                    <span className="text-foreground">{location.path}</span>
+                    <span {...stylex.props(styles.foreground)}>{location.path}</span>
                     <span>
                       :{location.range.start.line + 1}:{location.range.start.character + 1}
                     </span>
@@ -2089,11 +2791,11 @@ function SessionFileLspPanel({
 }
 
 function LazyProviderTextMonacoViewer(props: SessionTextMonacoViewerProps) {
-  return <LazyTextMonacoViewer {...props} />;
+  return <LazySessionMonacoTextViewer {...props} />;
 }
 
 function LazyTextMonacoViewer(props: SessionTextMonacoViewerProps) {
-  return <SessionMonacoTextViewer {...props} />;
+  return <LazySessionMonacoTextViewer {...props} />;
 }
 
 type SessionTextMonacoViewerProps = {
@@ -2120,5 +2822,7 @@ type SessionTextMonacoViewerProps = {
   readonly externalTextUpdate?: SessionMonacoExternalTextUpdate;
   readonly onExternalTextUpdateApplied?: (result: 'applied' | 'no-op') => void;
   readonly findRequestSeq?: number;
-  readonly modelUri?: import('monaco-editor/esm/vs/editor/editor.api.js').Uri;
+  // Serialized `code-collab://` model URI; kept as a string so this module
+  // never needs the `monaco-editor` import.
+  readonly modelUri?: string;
 };

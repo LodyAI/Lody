@@ -1,7 +1,12 @@
 import {
   parseGitHubPullRequestUrl,
+  parsePullRequestUrl,
+  readSessionPullRequestLinks,
+  resolveSessionPullRequests,
+  type SessionPullRequestSource,
   resolveProjectGitHubRepo,
   type SessionId,
+  type PrStatus,
   type SessionMeta,
 } from '@lody/shared';
 
@@ -14,15 +19,22 @@ import {
  */
 
 /**
- * An associated PR whose last known status is open/draft: refresh lifecycle,
+ * An active PR, or one whose compatibility status needs projection: refresh lifecycle,
  * CI rollup, and merge/conflict state. Keyed by the canonical PR URL exactly
  * as stored in session meta (also the write-back upsert key).
  */
 export type PrPollStatusTarget = {
+  nativeCredentials?: boolean;
   url: string;
   repoFullName: string;
   prNumber: number;
-  status: 'open' | 'draft';
+  status: PrStatus;
+  /**
+   * An explicitly linked PR not yet in `pullRequests`: queried by number so a
+   * valid provider result can be associated. `unreadable` once a check failed
+   * for this link generation (retried at the slower discovery cadence).
+   */
+  pendingLink?: 'checking' | 'unreadable';
 };
 
 /**
@@ -33,8 +45,12 @@ export type PrPollStatusTarget = {
  * still be discovered).
  */
 export type PrPollDiscoveryTarget = {
+  nativeCredentials?: boolean;
   repoFullName: string;
   branch: string;
+  memberId?: string;
+  /** Activity observed before dispatch; never advance this from fresh writeback metadata. */
+  activityAtMs?: number;
 };
 
 /** Polling view of one owner session (child tabs folded into their owner). */
@@ -48,6 +64,8 @@ export type PrPollSessionEntry = {
   runtimeBranch: string | null;
   statusTargets: PrPollStatusTarget[];
   discoveryTarget: PrPollDiscoveryTarget | null;
+  discoveryTargets?: PrPollDiscoveryTarget[];
+  projectMemberIds?: string[];
 };
 
 export type AliveSessionMeta = {
@@ -72,14 +90,13 @@ export function resolveDiscoveryBranch(meta: SessionMeta): string | undefined {
   return branch ? branch : undefined;
 }
 
-/**
- * The idle-terminal fingerprint: "this exact `(repository, branch)` context
- * has already had a successful discovery". Stored per owner in the local
- * scheduling state; a branch switch changes the fingerprint and re-enables
- * discovery automatically.
- */
-export function computeDiscoveryFingerprint(repoFullName: string, branch: string): string {
-  return `${repoFullName}|${branch}`;
+/** Durable discovery checkpoint; v2 invalidates legacy context-only fingerprints once. */
+export function computeDiscoveryFingerprint(
+  repoFullName: string,
+  branch: string,
+  activityAtMs: number | null = null
+): string {
+  return JSON.stringify(['v2', repoFullName, branch, activityAtMs]);
 }
 
 /**
@@ -97,11 +114,92 @@ export function resolveOwnerRepositoryContext(
   };
 }
 
+export function projectMemberRepositoryContext(
+  meta: SessionMeta,
+  memberId?: string,
+  repository?: string
+): { repoFullName: string | null; branch: string | null } {
+  if (!meta.projectRun) return resolveOwnerRepositoryContext(meta);
+  const entries = Object.entries(meta.projectRun.members);
+  const member = memberId
+    ? entries.find(([id]) => id === memberId)?.[1]
+    : entries.find(
+        ([, value]) =>
+          (value.src.kind === 'github'
+            ? value.src.repoFullName
+            : value.repoFullName
+          )?.toLowerCase() === repository?.toLowerCase()
+      )?.[1];
+  return {
+    repoFullName: member
+      ? ((member.src.kind === 'github' ? member.src.repoFullName : member.repoFullName) ?? null)
+      : null,
+    branch: member?.branch?.trim() || null,
+  };
+}
+
+export function discoveryOwnerKey(ownerSessionId: string, memberId?: string): string {
+  return memberId ? `${ownerSessionId}:${memberId}` : ownerSessionId;
+}
+
 /** The current PR is the LAST item of `pullRequests` (shared metadata contract). */
 export function getCurrentPullRequest(
-  meta: Pick<SessionMeta, 'pullRequests'> | undefined
+  meta: SessionPullRequestSource | undefined
 ): NonNullable<SessionMeta['pullRequests']>[number] | null {
-  return (meta?.pullRequests ?? []).at(-1) ?? null;
+  return resolveSessionPullRequests(meta).at(-1) ?? null;
+}
+
+/**
+ * Everything `enumeratePrPollTargets` + the lane rule read out of ONE session
+ * meta: ownership/liveness, the activity signal, the repository context, and
+ * the associated PR list (order included — the current PR is the LAST item).
+ *
+ * Session metadata changes for reasons the reconciler does not care about
+ * (title, status, token usage, cost, awaiting-user marker...). Those writes
+ * leave this signature untouched, cannot move a single target or lane, and
+ * must therefore not re-project or wake the poller — otherwise every unrelated
+ * write pays a full wake, and with an exhausted quota that is thousands of
+ * pointless credential resolutions a day.
+ */
+export function computePrPollMetaSignature(
+  meta: SessionMeta,
+  resolveGitHubRepo: ResolveSessionGitHubRepo = defaultResolveGitHubRepo
+): string {
+  const pullRequests = resolveSessionPullRequests(meta)
+    .map(
+      (pr, index) => `${pr.url}\u0000${pr.status}\u0000${meta.pullRequests?.[index]?.status ?? ''}`
+    )
+    .join('\u0001');
+  return [
+    meta.machineId ?? '',
+    meta.parentSessionId ?? '',
+    // Raw membership: an unlinked URL still in the list needs a local removal.
+    (meta.pullRequests ?? []).map((pr) => pr.url).join('\u0001'),
+    JSON.stringify(
+      readSessionPullRequestLinks(meta).map((link) => [
+        link.key,
+        link.state,
+        link.at,
+        link.unreadableAt,
+      ])
+    ),
+    meta.isArchived ? '1' : '0',
+    meta.lastMessageAt ?? '',
+    resolveDiscoveryBranch(meta) ?? '',
+    resolveGitHubRepo(meta) ?? '',
+    pullRequests,
+    meta.projectRun
+      ? JSON.stringify(
+          Object.entries(meta.projectRun.members).map(([id, member]) => [
+            id,
+            member.src.kind === 'github' ? member.src.repoFullName : member.repoFullName,
+            member.branch,
+            member.repositoryCheckout,
+            member.src.kind,
+          ])
+        )
+      : '',
+  ].join('\u0002');
 }
 
 /**
@@ -151,16 +249,64 @@ export function enumeratePrPollTargets(
       ),
       runtimeBranch,
       statusTargets: collectStatusTargets(ownerMeta),
-      discoveryTarget: collectDiscoveryTarget(
-        ownerMeta,
-        runtimeBranch,
-        discoveryFingerprints[ownerSessionId],
-        resolveGitHubRepo
-      ),
+      discoveryTarget: null,
     });
   }
 
-  return Array.from(entries.values());
+  return Array.from(entries.values()).map((entry) => {
+    const ownerMeta = metaBySessionId.get(entry.ownerSessionId)!;
+    // Fold every child tab's activity before deciding whether discovery is idle.
+    if (!ownerMeta.projectRun)
+      return {
+        ...entry,
+        discoveryTarget: collectDiscoveryTarget(
+          ownerMeta,
+          entry.runtimeBranch,
+          discoveryFingerprints[entry.ownerSessionId],
+          resolveGitHubRepo,
+          entry.lastMessageAtMs
+        ),
+      };
+    const discoveryTargets: PrPollDiscoveryTarget[] = [];
+    for (const [memberId, member] of Object.entries(ownerMeta.projectRun.members)) {
+      const context = projectMemberRepositoryContext(ownerMeta, memberId);
+      if (!context.repoFullName) continue;
+      const nativeCredentials =
+        member.src.kind === 'local' || member.repositoryCheckout?.kind === 'local';
+      for (const status of entry.statusTargets) {
+        if (status.repoFullName.toLowerCase() === context.repoFullName.toLowerCase())
+          status.nativeCredentials = nativeCredentials;
+      }
+      if (!context.branch) continue;
+      const memberMeta = {
+        ...ownerMeta,
+        project: {
+          kind: 'github' as const,
+          repoFullName: context.repoFullName,
+          branch: member.base,
+        },
+        pullRequests: resolveSessionPullRequests(ownerMeta).filter(
+          (pr) =>
+            parseGitHubPullRequestUrl(pr.url)?.repoFullName.toLowerCase() ===
+            context.repoFullName!.toLowerCase()
+        ),
+      };
+      const target = collectDiscoveryTarget(
+        memberMeta,
+        context.branch,
+        discoveryFingerprints[discoveryOwnerKey(entry.ownerSessionId, memberId)],
+        defaultResolveGitHubRepo,
+        entry.lastMessageAtMs
+      );
+      if (target) discoveryTargets.push({ ...target, memberId, nativeCredentials });
+    }
+    return {
+      ...entry,
+      discoveryTarget: null,
+      discoveryTargets,
+      projectMemberIds: Object.keys(ownerMeta.projectRun.members),
+    };
+  });
 }
 
 function maxNullable(a: number | null, b: number | null): number | null {
@@ -169,11 +315,17 @@ function maxNullable(a: number | null, b: number | null): number | null {
   return Math.max(a, b);
 }
 
-function collectStatusTargets(ownerMeta: SessionMeta): PrPollStatusTarget[] {
+export function collectStatusTargets(
+  ownerMeta: SessionMeta,
+  includeTerminal = false
+): PrPollStatusTarget[] {
   const targets: PrPollStatusTarget[] = [];
   const seen = new Set<string>();
-  for (const pr of ownerMeta.pullRequests ?? []) {
-    if (pr.status !== 'open' && pr.status !== 'draft') {
+  const resolved = resolveSessionPullRequests(ownerMeta);
+  for (const [index, pr] of resolved.entries()) {
+    // Refresh once until legacy readers receive the same lifecycle projection.
+    const needsProjection = ownerMeta.pullRequests?.[index]?.status !== pr.status;
+    if (!includeTerminal && pr.status !== 'open' && pr.status !== 'draft' && !needsProjection) {
       continue;
     }
     const parsed = parseGitHubPullRequestUrl(pr.url);
@@ -187,6 +339,31 @@ function collectStatusTargets(ownerMeta: SessionMeta): PrPollStatusTarget[] {
       repoFullName: parsed.repoFullName,
       prNumber: parsed.prNumber,
       status: pr.status,
+      ...(includeTerminal && ownerMeta.projectRun
+        ? {
+            nativeCredentials: Object.entries(ownerMeta.projectRun.members).some(
+              ([memberId, member]) =>
+                projectMemberRepositoryContext(ownerMeta, memberId).repoFullName?.toLowerCase() ===
+                  parsed.repoFullName.toLowerCase() &&
+                (member.src.kind === 'local' || member.repositoryCheckout?.kind === 'local')
+            ),
+          }
+        : {}),
+    });
+  }
+  const associatedKeys = new Set(
+    resolved.map((pr) => parsePullRequestUrl(pr.url)?.key ?? pr.url.toLowerCase())
+  );
+  for (const link of readSessionPullRequestLinks(ownerMeta)) {
+    const parts = link.supported ? parsePullRequestUrl(link.url) : null;
+    if (link.state !== 'linked' || !parts || associatedKeys.has(parts.key)) continue;
+    associatedKeys.add(parts.key);
+    targets.push({
+      url: parts.canonicalUrl,
+      repoFullName: parts.repoFullName,
+      prNumber: parts.number,
+      status: 'open',
+      pendingLink: link.unreadableAt === null ? 'checking' : 'unreadable',
     });
   }
   return targets;
@@ -196,7 +373,8 @@ function collectDiscoveryTarget(
   ownerMeta: SessionMeta,
   runtimeBranch: string | null,
   ownerFingerprint: string | undefined,
-  resolveGitHubRepo: ResolveSessionGitHubRepo
+  resolveGitHubRepo: ResolveSessionGitHubRepo,
+  activityAtMs: number | null
 ): PrPollDiscoveryTarget | null {
   const repoFullName = resolveGitHubRepo(ownerMeta);
   if (!repoFullName || !runtimeBranch) {
@@ -204,15 +382,19 @@ function collectDiscoveryTarget(
     return null;
   }
   // Idle-terminal: the current PR (last array item) is terminal AND this exact
-  // (repo, branch) context has already had a successful discovery. Only a
-  // context change (fingerprint mismatch) re-enables discovery.
-  const current = (ownerMeta.pullRequests ?? []).at(-1);
+  // (repo, branch, activity) snapshot has had a successful discovery. New
+  // owner/child activity re-enables each repository independently.
+  const current = resolveSessionPullRequests(ownerMeta).at(-1);
   if (
     current &&
     (current.status === 'merged' || current.status === 'closed') &&
-    ownerFingerprint === computeDiscoveryFingerprint(repoFullName, runtimeBranch)
+    ownerFingerprint === computeDiscoveryFingerprint(repoFullName, runtimeBranch, activityAtMs)
   ) {
     return null;
   }
-  return { repoFullName, branch: runtimeBranch };
+  return {
+    repoFullName,
+    branch: runtimeBranch,
+    ...(activityAtMs === null ? {} : { activityAtMs }),
+  };
 }

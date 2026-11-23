@@ -1,16 +1,84 @@
-import type { ComponentType, SVGProps } from 'react';
-import type { CodeCollabContentUnavailableReason } from '@lody/shared';
 import {
-  FileClock,
-  FileLock2,
-  FileQuestion,
-  FileWarning,
-  FileX2,
-  HardDrive,
-  ShieldAlert,
-  WifiOff,
-} from 'lucide-react';
+  protectedFileWriteDeniedMessage,
+  workspaceFeatureUnavailableMessage,
+} from '@/lib/workspace-feature';
+import type { CodeCollabContentUnavailableReason } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
+import { Copy, ExternalLink, FolderOpen, Loader2, Share2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+// The action model is shared with the file tree context menu and the side
+// panel ⋯ menu; the card is one consumer of it, not its owner.
+import type { SessionFileErrorActions } from '@/lib/session-file-actions';
+import { Button } from '@lody/ui/button';
+
+const spin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
+const styles = stylex.create({
+  frame: {
+    display: 'flex',
+    minHeight: '100%',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingBlock: '24px',
+    paddingInline: '16px',
+  },
+  card: {
+    width: '100%',
+    maxWidth: '20rem',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    borderRadius: '0.75rem',
+    backgroundColor: 'hsl(var(--card))',
+    paddingBlock: '14px',
+    paddingInline: '16px',
+    boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+  },
+  title: {
+    color: 'hsl(var(--foreground))',
+    fontSize: '0.875rem',
+    fontWeight: 600,
+    lineHeight: '1.25rem',
+  },
+  description: {
+    marginTop: '4px',
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '13px',
+    lineHeight: '1.25rem',
+  },
+  actions: { display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '12px' },
+  actionIcon: { width: '14px', height: '14px', flexShrink: 0 },
+  spinner: {
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    animationName: spin,
+    animationDuration: '1s',
+    animationTimingFunction: 'linear',
+    animationIterationCount: 'infinite',
+  },
+  technicalDetails: {
+    marginTop: '12px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    paddingTop: '10px',
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+  },
+  summary: {
+    cursor: 'pointer',
+    userSelect: 'none',
+    fontWeight: 500,
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 80%, transparent)',
+  },
+  technicalText: {
+    marginTop: '8px',
+    overflowWrap: 'break-word',
+    fontFamily: 'var(--font-mono)',
+    lineHeight: '1.25rem',
+  },
+});
 
 type Translation = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
 
@@ -24,6 +92,14 @@ export type SessionFileErrorKind =
   | 'unsupported'
   | 'content-unavailable'
   | 'unknown';
+
+/**
+ * Only the errors whose advice is "open it outside Lody" get the actions. On a
+ * missing, denied, or offline file every button would fail, so they stay off.
+ */
+export function offersFileActions(kind: SessionFileErrorKind): boolean {
+  return kind === 'too-large' || kind === 'unsupported';
+}
 
 export type SessionFileErrorPresentation = {
   readonly kind: SessionFileErrorKind;
@@ -190,6 +266,20 @@ export function getSessionFileErrorPresentation(
     };
   }
 
+  // Protected-workspace refusals (Guest role, host without signed file RPC) arrive
+  // as `permission_denied`; "Access denied" would wrongly blame filesystem rights.
+  const trimmed = message.trim();
+  if (
+    trimmed === protectedFileWriteDeniedMessage() ||
+    trimmed === workspaceFeatureUnavailableMessage('rpc')
+  ) {
+    return {
+      kind: 'content-unavailable',
+      title: t('sessions.fileError.protected.title', 'Not available in this encrypted workspace'),
+      description: trimmed,
+    };
+  }
+
   if (reason) {
     return providerReasonPresentation(reason, t);
   }
@@ -265,61 +355,126 @@ export function getSessionFileErrorPresentation(
   };
 }
 
-const ERROR_ICON: Record<
-  SessionFileErrorKind,
-  ComponentType<SVGProps<SVGSVGElement> & { size?: string | number }>
-> = {
-  'outside-workspace': ShieldAlert,
-  'not-found': FileX2,
-  'permission-denied': FileLock2,
-  'temporarily-locked': FileClock,
-  'temporarily-unavailable': WifiOff,
-  'too-large': HardDrive,
-  unsupported: FileWarning,
-  'content-unavailable': FileQuestion,
-  unknown: FileWarning,
-};
+// One row per action, all the same width. A wrapping row of buttons sized by
+// their own labels was the previous layout, and in a side panel it produced
+// three ragged widths on three lines — the width difference read as meaning.
+const ACTION_BUTTON_CLASS = 'h-8 w-full justify-start gap-2 px-2.5 text-xs font-normal';
 
 export function SessionFileErrorState({
   message,
   reason,
+  fileActions,
+  onRetry,
 }: {
+  readonly onRetry?: () => void;
   readonly message: string;
   readonly reason?: CodeCollabContentUnavailableReason;
+  readonly fileActions?: SessionFileErrorActions;
 }) {
   const { t } = useTranslation();
   const presentation = getSessionFileErrorPresentation(message, reason, t);
-  const Icon = ERROR_ICON[presentation.kind];
+  const actions = fileActions && offersFileActions(presentation.kind) ? fileActions : undefined;
+  return (
+    <SessionFileNoticeCard presentation={presentation} fileActions={actions} onRetry={onRetry} />
+  );
+}
+
+/** Shared presentation for files that cannot be displayed inline. */
+export function SessionFileNoticeCard({
+  presentation,
+  fileActions: actions,
+  onRetry,
+}: {
+  readonly onRetry?: () => void;
+  readonly presentation: Pick<
+    SessionFileErrorPresentation,
+    'title' | 'description' | 'technicalDetails'
+  >;
+  readonly fileActions?: SessionFileErrorActions;
+}) {
+  const { t } = useTranslation();
+  const localHost = actions?.localHost;
 
   return (
-    <div className="flex min-h-full items-center justify-center px-5 py-8">
-      <section
-        data-testid="session-file-error-state"
-        className="w-full max-w-sm rounded-2xl border border-border/70 bg-card px-5 py-6 shadow-sm"
-      >
-        <div className="flex items-start gap-3.5">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-            <Icon className="h-5 w-5" strokeWidth={1.7} aria-hidden="true" />
-          </span>
-          <div className="min-w-0 flex-1 pt-0.5">
-            <h2 className="text-sm font-semibold leading-5 text-foreground">
-              {presentation.title}
-            </h2>
-            <p className="mt-1.5 text-sm leading-5 text-muted-foreground">
-              {presentation.description}
-            </p>
-            {presentation.technicalDetails ? (
-              <details className="mt-4 border-t border-border/60 pt-3 text-xs text-muted-foreground">
-                <summary className="cursor-pointer select-none font-medium text-foreground/80">
-                  {t('sessions.fileError.technicalDetails', 'Technical details')}
-                </summary>
-                <p className="mt-2 break-words font-mono leading-5">
-                  {presentation.technicalDetails}
-                </p>
-              </details>
-            ) : null}
+    <div {...stylex.props(styles.frame)}>
+      {/* No status glyph: the card is one short paragraph and a stack of
+          actions, and a 40px icon column indented all of it for decoration. */}
+      <section data-testid="session-file-error-state" {...stylex.props(styles.card)}>
+        <h2 {...stylex.props(styles.title)}>{presentation.title}</h2>
+        <p {...stylex.props(styles.description)}>{presentation.description}</p>
+        {onRetry ? (
+          <div {...stylex.props(styles.actions)}>
+            <Button size="small" variant="secondary" onClick={onRetry}>
+              {t('common.retry', 'Retry')}
+            </Button>
           </div>
-        </div>
+        ) : null}
+        {actions ? (
+          <div {...stylex.props(styles.actions)}>
+            {actions.onShare ? (
+              <Button
+                size="small"
+                variant="secondary"
+                className={ACTION_BUTTON_CLASS}
+                onClick={actions.onShare}
+                disabled={actions.sharing}
+              >
+                {actions.sharing ? (
+                  <Loader2 {...stylex.props(styles.spinner)} aria-hidden="true" />
+                ) : (
+                  <Share2 {...stylex.props(styles.actionIcon)} aria-hidden="true" />
+                )}
+                {t('sessions.fileActions.share', 'Share file…')}
+              </Button>
+            ) : null}
+            {localHost ? (
+              <>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  className={ACTION_BUTTON_CLASS}
+                  onClick={localHost.onOpen}
+                  data-testid="session-file-error-open"
+                >
+                  <ExternalLink {...stylex.props(styles.actionIcon)} aria-hidden="true" />
+                  {localHost.openTarget === 'browser'
+                    ? t('sessions.fileActions.openInBrowser', 'Open in browser')
+                    : t('sessions.fileActions.openInDefaultApp', 'Open in default app')}
+                </Button>
+                <Button
+                  size="small"
+                  variant="ghost"
+                  className={ACTION_BUTTON_CLASS}
+                  onClick={localHost.onReveal}
+                  data-testid="session-file-error-reveal"
+                >
+                  <FolderOpen {...stylex.props(styles.actionIcon)} aria-hidden="true" />
+                  {localHost.revealLabel}
+                </Button>
+              </>
+            ) : null}
+            <Button
+              size="small"
+              // Without the local-host pair this is the only way out of the
+              // card, so it leads instead of trailing them.
+              variant={localHost || actions.onShare ? 'ghost' : 'secondary'}
+              className={ACTION_BUTTON_CLASS}
+              onClick={actions.onCopyPath}
+              data-testid="session-file-error-copy-path"
+            >
+              <Copy {...stylex.props(styles.actionIcon)} aria-hidden="true" />
+              {t('sessions.fileViewer.copyPath', 'Copy file path')}
+            </Button>
+          </div>
+        ) : null}
+        {presentation.technicalDetails ? (
+          <details {...stylex.props(styles.technicalDetails)}>
+            <summary {...stylex.props(styles.summary)}>
+              {t('sessions.fileError.technicalDetails', 'Technical details')}
+            </summary>
+            <p {...stylex.props(styles.technicalText)}>{presentation.technicalDetails}</p>
+          </details>
+        ) : null}
       </section>
     </div>
   );

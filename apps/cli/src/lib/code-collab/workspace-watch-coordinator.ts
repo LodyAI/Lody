@@ -1,9 +1,14 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
+import { toShared } from '@/platform/process-options';
+import type { ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Logger } from '@/utils/logger';
+import { formatErrorMessage } from '@/utils/format-error';
+import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
+
 import {
   parseWorkspaceWatchChildMessage,
   type WorkspaceWatchParentMessage,
@@ -21,7 +26,8 @@ export interface WorkspaceWatchCoordinatorApi {
     workspaceId: string;
     ownerSessionId: string;
     workspaceRoot: string;
-    onDirty: (reason: WorkspaceWatchDirtyReason) => void;
+    /** `path` is the root-relative event path, present only for `event` dirt that has one. */
+    onDirty: (reason: WorkspaceWatchDirtyReason, path?: string) => void;
   }): Promise<WorkspaceWatchSubscription | null>;
   recordCoalescedRefresh?(): void;
 }
@@ -53,17 +59,24 @@ type RootState = {
   recycledForResourceError: boolean;
 };
 
-type ChildLike = Pick<ChildProcess, 'connected' | 'exitCode' | 'kill' | 'pid' | 'send' | 'on'>;
+type ChildLike = Pick<ChildProcess, 'connected' | 'exitCode' | 'pid' | 'send' | 'on'>;
+
+/** A launched watch worker: its IPC channel plus whole-tree termination. */
+export type WorkspaceWatchChild = {
+  readonly child: ChildLike;
+  readonly terminate: ProcessHandleLegacy['terminate'];
+};
 
 export type WorkspaceWatchCoordinatorOptions = {
   mode?: 'broker' | 'off';
-  childLauncher?: (generation: number) => ChildLike;
+  childLauncher?: (generation: number) => WorkspaceWatchChild;
   realpath?: (value: string) => Promise<string>;
   restartDelayMs?: (attempt: number) => number;
   noRootLingerMs?: number;
   cooldownMs?: number;
   gracefulShutdownMs?: number;
   sigtermWaitMs?: number;
+  sigkillWaitMs?: number;
   maxReconfigurations?: number;
   maxChildAgeMs?: number;
   maxRssBytes?: number;
@@ -100,10 +113,10 @@ export function buildWorkspaceWatchWorkerEnvironment(
 export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
   private readonly subscriptions = new Map<
     string,
-    { root: string; onDirty: (reason: WorkspaceWatchDirtyReason) => void }
+    { root: string; onDirty: (reason: WorkspaceWatchDirtyReason, path?: string) => void }
   >();
   private readonly roots = new Map<string, RootState>();
-  private child: ChildLike | null = null;
+  private worker: WorkspaceWatchChild | null = null;
   private generation = 0;
   private revision = 0;
   private restartCount = 0;
@@ -135,7 +148,7 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
     workspaceId: string;
     ownerSessionId: string;
     workspaceRoot: string;
-    onDirty: (reason: WorkspaceWatchDirtyReason) => void;
+    onDirty: (reason: WorkspaceWatchDirtyReason, path?: string) => void;
   }): Promise<WorkspaceWatchSubscription | null> {
     if (this.disposed || this.phase === 'off') return null;
     let canonicalRoot: string;
@@ -176,7 +189,7 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
   getSnapshot(): WorkspaceWatchCoordinatorSnapshot {
     return {
       generation: this.generation,
-      pid: this.child?.pid ?? null,
+      pid: this.worker?.child.pid ?? null,
       phase: this.phase,
       restartReason: this.restartReason,
       restartCount: this.restartCount,
@@ -229,7 +242,7 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
   private reconcile(reason: string): void {
     if (this.disposed || this.phase === 'off') return;
     if (this.roots.size === 0) {
-      if (!this.child || this.lingerTimer) return;
+      if (!this.worker || this.lingerTimer) return;
       this.sendDesiredRoots();
       this.lingerTimer = setTimeout(() => {
         this.lingerTimer = null;
@@ -238,7 +251,7 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
       this.lingerTimer.unref?.();
       return;
     }
-    if (!this.child) {
+    if (!this.worker) {
       this.startChild(reason);
       return;
     }
@@ -246,20 +259,21 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
   }
 
   private startChild(reason: string): void {
-    if (this.disposed || this.child || this.restartTimer || this.roots.size === 0) return;
+    if (this.disposed || this.worker || this.restartTimer || this.roots.size === 0) return;
     this.generation += 1;
     this.phase = 'starting';
     try {
-      const child = (this.options.childLauncher ?? launchWorkspaceWatchChild)(this.generation);
-      this.child = child;
+      const worker = (this.options.childLauncher ?? launchWorkspaceWatchChild)(this.generation);
+      this.worker = worker;
+      const { child } = worker;
       const generation = this.generation;
-      child.on('message', (raw: unknown) => this.handleMessage(child, generation, raw));
+      child.on('message', (raw: unknown) => this.handleMessage(worker, generation, raw));
       child.on('error', (error: Error) => {
         this.logger.warn(`[code-collab-watch] child error code=${errorCode(error)}`);
       });
       child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
-        if (this.child !== child || generation !== this.generation) return;
-        this.child = null;
+        if (this.worker !== worker || generation !== this.generation) return;
+        this.worker = null;
         this.actualWatcherCount = 0;
         if (this.disposed) return;
         this.markAllDirty('broker-gap');
@@ -271,7 +285,7 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
       this.sendDesiredRoots();
     } catch (error) {
       this.logger.warn(`[code-collab-watch] spawn failed code=${errorCode(error)}`);
-      this.child = null;
+      this.worker = null;
       if (errorCode(error) === 'WATCH_WORKER_MISSING') {
         this.phase = 'off';
         return;
@@ -281,7 +295,7 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
   }
 
   private sendDesiredRoots(): void {
-    const child = this.child;
+    const child = this.worker?.child;
     if (!child?.connected) return;
     const now = this.now();
     const roots = Array.from(this.roots, ([root, state]) =>
@@ -300,12 +314,12 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
     });
   }
 
-  private handleMessage(child: ChildLike, generation: number, raw: unknown): void {
-    if (child !== this.child || generation !== this.generation) return;
+  private handleMessage(worker: WorkspaceWatchChild, generation: number, raw: unknown): void {
+    if (worker !== this.worker || generation !== this.generation) return;
     const message = parseWorkspaceWatchChildMessage(raw);
     if (!message || message.generation !== generation) return;
     if (message.type === 'code-collab-watch/dirty') {
-      this.markRootDirty(message.root, 'event');
+      this.markRootDirty(message.root, 'event', message.path);
       return;
     }
     if (message.type === 'code-collab-watch/ready') {
@@ -360,7 +374,7 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
   }
 
   private async recycle(reason: string): Promise<void> {
-    if (!this.child || this.disposed) return;
+    if (!this.worker || this.disposed) return;
     this.recycleCount += 1;
     this.markAllDirty('broker-gap');
     await this.stopChild();
@@ -400,11 +414,11 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
     this.cooldownTimer.unref?.();
   }
 
-  private markRootDirty(root: string, reason: WorkspaceWatchDirtyReason): void {
+  private markRootDirty(root: string, reason: WorkspaceWatchDirtyReason, path?: string): void {
     const state = this.roots.get(root);
     if (!state) return;
     this.dirtyEventCount += 1;
-    for (const key of state.subscribers) this.subscriptions.get(key)?.onDirty(reason);
+    for (const key of state.subscribers) this.subscriptions.get(key)?.onDirty(reason, path);
   }
 
   private markAllDirty(reason: WorkspaceWatchDirtyReason): void {
@@ -412,18 +426,25 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
   }
 
   private async stopChild(): Promise<void> {
-    const child = this.child;
-    if (!child) return;
-    this.child = null;
+    const worker = this.worker;
+    if (!worker) return;
+    this.worker = null;
+    const { child } = worker;
     const exited = new Promise<void>((resolve) => child.on('exit', () => resolve()));
     if (child.connected) {
       child.send?.({ type: 'code-collab-watch/shutdown', generation: this.generation });
     }
     if (await waitFor(exited, this.options.gracefulShutdownMs ?? 1_000)) return;
-    child.kill('SIGTERM');
-    if (await waitFor(exited, this.options.sigtermWaitMs ?? 2_000)) return;
-    child.kill('SIGKILL');
-    await exited;
+    try {
+      await worker.terminate({
+        graceMs: this.options.sigtermWaitMs ?? 2_000,
+        killWaitMs: this.options.sigkillWaitMs ?? 5_000,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[code-collab-watch] worker pid=${child.pid ?? 'unknown'} did not stop: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   private cancelLinger(): void {
@@ -445,16 +466,24 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
   }
 }
 
-function launchWorkspaceWatchChild(_generation: number): ChildLike {
+function launchWorkspaceWatchChild(_generation: number): WorkspaceWatchChild {
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   const productionEntry = path.join(moduleDirectory, 'code-collab-watch-worker.js');
   const env = buildWorkspaceWatchWorkerEnvironment();
   if (existsSync(productionEntry)) {
-    return spawn(process.execPath, [productionEntry], {
-      env,
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
-      windowsHide: true,
-    });
+    return startProcessLegacy(
+      {
+        command: getCliNodeExecutable(),
+        args: [productionEntry],
+        options: {
+          env,
+          stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+          windowsHide: true,
+        },
+        processGroup: false,
+      },
+      toShared()
+    );
   }
   throw Object.assign(new Error('Code Collab watch worker bundle is missing'), {
     code: 'WATCH_WORKER_MISSING',

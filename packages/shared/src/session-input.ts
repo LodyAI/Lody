@@ -1,3 +1,4 @@
+import type { MemoryBinding } from './memory-provider';
 import type {
   ACPSessionConfig,
   AcpConfigOptionValue,
@@ -12,7 +13,7 @@ import type {
 } from './ai';
 import { isSessionFileSourcePath } from './ai';
 import type { SessionHistoryInput } from './schema';
-import type { McpServerId } from './ids';
+import type { AgentRoleId, McpServerId } from './ids';
 import { reanchorMessageTextSpansForTrim, sanitizeMessageTextSpans } from './message-text-spans';
 import {
   AgentConfigCliTypeSchema,
@@ -46,6 +47,7 @@ export type SessionInputHistoryItem =
 export type PendingUserHistoryEntry = {
   userId: string;
   role: 'user';
+  author: { v: 1; kind: 'human'; userId: string };
   items: NonNullable<SessionHistoryInput['items']>;
   timestamp: string;
   status: 'pending' | 'pending_apply';
@@ -60,13 +62,99 @@ export type SessionConversationConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  memory?: MemoryBinding;
   mcpServerIds?: McpServerId[];
-  taskToolsEnabled?: boolean;
+  /** Null is an explicit None; undefined means the selected Turn predates this field. */
+  agentRoleId?: AgentRoleId | null;
+  agentRoleRevision?: number;
+  agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
+};
+
+type SessionConversationSource = {
+  value: unknown;
+  configKey: string;
+  /** Stable across queue -> history promotion for the same logical Turn. */
+  turnKey: string;
+};
+
+const collectSessionConversationSources = (
+  history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
+  messageQueue: readonly {
+    $cid?: unknown;
+    userTurnId?: unknown;
+    acpSessionConfig?: unknown;
+  }[] = []
+): SessionConversationSource[] => {
+  const sources: SessionConversationSource[] = [];
+  for (let index = messageQueue.length - 1; index >= 0; index -= 1) {
+    const item = messageQueue[index];
+    const itemId = typeof item?.$cid === 'string' ? item.$cid : String(index);
+    const userTurnId =
+      typeof item?.userTurnId === 'string' && item.userTurnId.trim()
+        ? item.userTurnId.trim()
+        : null;
+    sources.push({
+      value: item?.acpSessionConfig,
+      configKey: `queue:${itemId}`,
+      // Matches both renderer-native steer and CLI promotion fallback ids.
+      turnKey: `turn:${userTurnId ?? `queued-${itemId}`}`,
+    });
+  }
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry?.role !== 'user') continue;
+    sources.push({
+      // Read on demand: a windowed index row resolves its send configuration
+      // lazily (a schema parse per turn), and `resolveSessionConversationConfig`
+      // inspects the newest source plus however few older ones it takes to find
+      // an explicit Role. Reading every entry here would parse the whole
+      // conversation to answer a question about its tail.
+      get value() {
+        return entry.inputConfig;
+      },
+      configKey: `history:${entry.id}`,
+      turnKey: `turn:${entry.id}`,
+    });
+  }
+  return sources;
+};
+
+export type SessionConversationSourceFence = {
+  /** Latest logical accepted/queued user Turn. */
+  currentTurnKey?: string;
+  /** Every logical user Turn visible when a local composer draft is made. */
+  knownTurnKeys: string[];
+};
+
+/**
+ * Causal fence for unsent composer state.
+ *
+ * A queue row and its promoted history entry share one Turn key. Keeping the
+ * whole currently known lineage lets queue deletion/reordering fall back to an
+ * older known Turn without pretending that a newer Turn superseded the draft.
+ */
+export const resolveSessionConversationSourceFence = (
+  history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
+  messageQueue: readonly {
+    $cid?: unknown;
+    userTurnId?: unknown;
+    acpSessionConfig?: unknown;
+  }[] = []
+): SessionConversationSourceFence => {
+  const sources = collectSessionConversationSources(history, messageQueue);
+  return {
+    ...(sources[0] ? { currentTurnKey: sources[0].turnKey } : {}),
+    knownTurnKeys: [...new Set(sources.map((source) => source.turnKey))],
+  };
 };
 
 export const resolveSessionConversationConfig = (
   history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
-  messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
+  messageQueue: readonly {
+    $cid?: unknown;
+    userTurnId?: unknown;
+    acpSessionConfig?: unknown;
+  }[] = []
 ): SessionConversationConfig => {
   const resolveConfig = (
     value: unknown,
@@ -84,29 +172,94 @@ export const resolveSessionConversationConfig = (
       ...(inputConfig.configOptionValues && Object.keys(inputConfig.configOptionValues).length > 0
         ? { configOptionValues: inputConfig.configOptionValues }
         : {}),
+      ...(inputConfig.memory ? { memory: inputConfig.memory } : {}),
+      ...(inputConfig.agentRoleSnapshot
+        ? { agentRoleSnapshot: inputConfig.agentRoleSnapshot }
+        : {}),
       ...(inputConfig.mcpServerIds ? { mcpServerIds: inputConfig.mcpServerIds } : {}),
-      ...(typeof inputConfig.taskToolsEnabled === 'boolean'
-        ? { taskToolsEnabled: inputConfig.taskToolsEnabled }
+      ...(inputConfig.agentRoleId !== undefined ? { agentRoleId: inputConfig.agentRoleId } : {}),
+      ...(typeof inputConfig.agentRoleId === 'string' && inputConfig.agentRoleRevision !== undefined
+        ? { agentRoleRevision: inputConfig.agentRoleRevision }
         : {}),
     };
   };
 
-  const latestQueuedIndex = messageQueue.length - 1;
-  if (latestQueuedIndex >= 0) {
-    const item = messageQueue[latestQueuedIndex];
-    const itemId = typeof item?.$cid === 'string' ? item.$cid : String(latestQueuedIndex);
-    return resolveConfig(item?.acpSessionConfig, `queue:${itemId}`) ?? {};
-  }
+  const sources = collectSessionConversationSources(history, messageQueue);
 
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const entry = history[index];
-    if (entry?.role !== 'user') {
-      continue;
+  const latest = sources[0];
+  if (!latest) return {};
+  const resolved = resolveConfig(latest.value, latest.configKey) ?? {};
+  if (resolved.agentRoleId !== undefined) return resolved;
+
+  // Role selection is sticky across legacy and non-composer Turn producers
+  // that predate this metadata. The first explicit value (including null)
+  // wins; the latest source key still fences unsent local composer drafts.
+  for (const source of sources.slice(1)) {
+    const older = normalizeSessionTurnInputConfig(source.value);
+    if (!older || older.agentRoleId === undefined) continue;
+    return {
+      ...resolved,
+      agentRoleId: older.agentRoleId,
+      ...(older.agentRoleSnapshot ? { agentRoleSnapshot: older.agentRoleSnapshot } : {}),
+      ...(older.agentRoleId !== null && older.agentRoleRevision !== undefined
+        ? { agentRoleRevision: older.agentRoleRevision }
+        : {}),
+    };
+  }
+  return resolved;
+};
+
+const normalizeRuntimeConfigOptionValues = (
+  value: unknown
+): Record<string, AcpConfigOptionValue> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized: Record<string, AcpConfigOptionValue> = {};
+  for (const [configId, optionValue] of Object.entries(value)) {
+    if (typeof optionValue === 'string' || typeof optionValue === 'boolean') {
+      normalized[configId] = optionValue;
     }
-    return resolveConfig(entry.inputConfig, `history:${entry.id}`) ?? {};
+  }
+  return normalized;
+};
+
+/**
+ * Resolves the ACP-reported shared baseline only when it is causally attached
+ * to the latest accepted Turn. A queued Turn is already frozen and always wins.
+ */
+export const resolveSessionAcpRuntimeConfig = (
+  history: readonly { id: string; role: unknown }[],
+  messageQueue: readonly unknown[] = [],
+  snapshot: unknown
+): SessionConversationConfig | null => {
+  if (messageQueue.length > 0 || !snapshot || typeof snapshot !== 'object') {
+    return null;
+  }
+  const latestUserTurn = [...history].reverse().find((entry) => entry.role === 'user');
+  if (!latestUserTurn) {
+    return null;
   }
 
-  return {};
+  const value = snapshot as Record<string, unknown>;
+  if (
+    typeof value.acpSessionId !== 'string' ||
+    typeof value.basedOnUserTurnId !== 'string' ||
+    value.basedOnUserTurnId !== latestUserTurn.id ||
+    typeof value.revision !== 'number' ||
+    !Number.isFinite(value.revision)
+  ) {
+    return null;
+  }
+
+  const hasConfigOptionValues = Object.prototype.hasOwnProperty.call(value, 'configOptionValues');
+  const configOptionValues = normalizeRuntimeConfigOptionValues(value.configOptionValues);
+  return {
+    sourceConfigKey: `runtime:${value.acpSessionId}:${value.revision}`,
+    ...(typeof value.modeId === 'string' ? { modeId: value.modeId } : {}),
+    ...(typeof value.modelId === 'string' ? { modelId: value.modelId } : {}),
+    ...(hasConfigOptionValues && configOptionValues ? { configOptionValues } : {}),
+  };
 };
 
 /**
@@ -119,12 +272,6 @@ export const resolveSessionMcpSelection = (
   history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
   messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
 ): McpServerId[] => resolveSessionConversationConfig(history, messageQueue).mcpServerIds ?? [];
-
-/** The Task MCP gate frozen by the latest driving Turn. Missing legacy values are disabled. */
-export const resolveSessionTaskToolsEnabled = (
-  history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
-  messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
-): boolean => resolveSessionConversationConfig(history, messageQueue).taskToolsEnabled === true;
 
 const normalizeTextInputBlock = (
   block: Extract<SessionInputBlock, { type: 'text' }>
@@ -151,6 +298,10 @@ const toImagePayload = (
 
   return {
     imageId: block.imageId,
+    transport: block.transport,
+    machineId: block.machineId,
+    localImageId: block.localImageId,
+    ...(block.encryption ? { encryption: block.encryption } : {}),
     mimeType: block.mimeType,
     fileName,
     sizeBytes: block.sizeBytes,
@@ -178,6 +329,7 @@ const toFilePayload = (
   return {
     type: 'file',
     fileId: block.fileId,
+    ...(block.encryption ? { encryption: block.encryption } : {}),
     fileName: block.fileName,
     mimeType: block.mimeType,
     sizeBytes: block.sizeBytes,
@@ -319,6 +471,17 @@ export const normalizeSessionInputBlocks = (
   fallbackPrompt: string
 ): SessionInputBlock[] => {
   const parsedInputBlocks = SessionInputBlocksSchema.safeParse(inputBlocks);
+  if (
+    !parsedInputBlocks.success &&
+    Array.isArray(inputBlocks) &&
+    inputBlocks.some(
+      (block) =>
+        block?.type === 'local_attachment' ||
+        (block?.type === 'image' && block?.transport === 'local')
+    )
+  ) {
+    throw new Error('Invalid or unsupported local attachment input');
+  }
   if (parsedInputBlocks.success && parsedInputBlocks.data.length > 0) {
     const normalized: SessionInputBlock[] = [];
     for (const block of parsedInputBlocks.data) {
@@ -351,6 +514,42 @@ export const extractPromptPreviewFromInputBlocks = (
     .map((block) => block.text.trim())
     .filter((text) => text.length > 0)
     .join('\n\n');
+};
+
+/**
+ * Resolve the frozen execution input, independently of how the turn is dispatched.
+ * `prompt` owns effective text (including accepted Config/Role instructions);
+ * `inputBlocks` retain authored text for editing and own structured attachments.
+ * Only legacy inputs without a prompt derive execution text from their blocks.
+ * An explicit empty prompt means no execution text, not a request to use raw text.
+ */
+export const resolveSessionExecutionInputBlocks = (input: {
+  prompt?: string;
+  inputBlocks?: unknown;
+}): SessionInputBlock[] => {
+  const blocks = normalizeSessionInputBlocks(input.inputBlocks, '');
+  if (input.prompt === undefined) return blocks;
+
+  const attachments = blocks.filter((block) => block.type !== 'text');
+  const prompt = input.prompt.trim();
+  // Authored spans refer to the raw text, never to the composed execution text.
+  return prompt ? [...attachments, { type: 'text', text: prompt }] : attachments;
+};
+
+/**
+ * The text the user actually wrote for a turn, for consumers that must name
+ * the task (title generation) rather than run it. Execution `prompt` also
+ * carries accepted Config/Role instructions, so authored text blocks win; only
+ * legacy inputs without any blocks fall back to the prompt. Attachment-only
+ * turns have no authored text and resolve to `''`.
+ */
+export const resolveSessionAuthoredText = (input: {
+  prompt?: string;
+  inputBlocks?: unknown;
+}): string => {
+  const blocks = normalizeSessionInputBlocks(input.inputBlocks, '');
+  if (blocks.length > 0) return extractPromptPreviewFromInputBlocks(blocks);
+  return input.prompt?.trim() ?? '';
 };
 
 export const inputBlocksToHistoryItems = (
@@ -386,6 +585,11 @@ export const inputBlocksToHistoryItems = (
       continue;
     }
 
+    if (block.type === 'local_attachment') {
+      items.push({ ...block });
+      continue;
+    }
+
     if (block.type === 'file') {
       items.push({
         text: undefined,
@@ -417,6 +621,17 @@ export const historyItemsToInputBlocks = (
   const blocks: SessionInputBlock[] = [];
 
   for (const item of items) {
+    if (
+      typeof item === 'object' &&
+      item !== null &&
+      'type' in item &&
+      item.type === 'local_attachment'
+    ) {
+      const parsed = SessionInputBlocksSchema.safeParse([item]);
+      if (!parsed.success) throw new Error('Invalid local attachment');
+      blocks.push(...parsed.data);
+      continue;
+    }
     if (isTextHistoryItem(item)) {
       // `item` came out of the session document, where spans ride an untyped
       // catchall — whatever wrote them, including an older or newer client,
@@ -485,8 +700,11 @@ export const buildSessionTurnInputConfig = (args: {
   modeId?: string | null;
   modelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
+  memory?: MemoryBinding;
   mcpServerIds?: readonly McpServerId[] | null;
-  taskToolsEnabled?: boolean;
+  agentRoleId?: AgentRoleId | null;
+  agentRoleRevision?: number;
+  agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
   issuePRMentions?: IssuePRMention[];
   resume?: ACPSessionConfig['resume'];
   prompt?: string;
@@ -504,13 +722,53 @@ export const buildSessionTurnInputConfig = (args: {
       args.configOptionValues && Object.keys(args.configOptionValues).length > 0
         ? args.configOptionValues
         : undefined,
+    memory: args.memory,
     mcpServerIds: args.mcpServerIds ? [...args.mcpServerIds] : undefined,
-    ...(args.taskToolsEnabled !== undefined
-      ? { taskToolsEnabled: args.taskToolsEnabled === true }
+    ...(args.agentRoleId !== undefined ? { agentRoleId: args.agentRoleId } : {}),
+    ...(typeof args.agentRoleId === 'string' && args.agentRoleRevision !== undefined
+      ? { agentRoleRevision: args.agentRoleRevision }
+      : {}),
+    ...(args.agentRoleSnapshot?.id === args.agentRoleId &&
+    args.agentRoleSnapshot?.revision === args.agentRoleRevision
+      ? { agentRoleSnapshot: args.agentRoleSnapshot }
       : {}),
     issuePRMentions: args.issuePRMentions,
     resume: args.resume,
   };
+};
+
+const sortedJson = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(sortedJson)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(
+          Object.entries(value)
+            .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+            .map(([key, item]) => [key, sortedJson(item)])
+        )
+      : value;
+
+/**
+ * Canonical bytes of what a queued input's author chose, comparable across the
+ * composer's config and the promoted history row. Promotion replaces `resume`
+ * from Session metadata; absent and empty MCP selections mean the same input.
+ */
+export const queuedInputEvidence = (config: unknown): string | undefined => {
+  const input = normalizeSessionTurnInputConfig(config);
+  const cliType = input?.cliType;
+  const agentType = input?.agentType;
+  if (!input || !cliType || !agentType) return undefined;
+  const inputBlocks = normalizeSessionInputBlocks(input.inputBlocks, input.prompt ?? '');
+  if (inputBlocks.length === 0) return undefined;
+  const { resume: _resume, ...chosen } = buildSessionTurnInputConfig({
+    ...input,
+    cliType,
+    agentType,
+    inputBlocks,
+    mcpServerIds: input.mcpServerIds?.length ? input.mcpServerIds : undefined,
+  });
+  const evidence = { ...chosen, _lodyAutomation: input._lodyAutomation };
+  return JSON.stringify(sortedJson(JSON.parse(JSON.stringify(evidence))));
 };
 
 export const buildInitialSessionTurnInputConfig = (args: {
@@ -534,6 +792,46 @@ export const buildInitialSessionTurnInputConfig = (args: {
   });
 };
 
+/**
+ * Omits `inputConfig.inputBlocks` on persisted user turns when the turn has a
+ * single plain-text block whose trimmed text equals `inputConfig.prompt.trim()`.
+ * The prompt and `items` already preserve that text, and `queuedInputEvidence`
+ * reconstructs the identical `inputBlocks` from `prompt`, keeping E2EE digests exact.
+ */
+export const compactRedundantUserTurnInputBlocks = (
+  inputConfig: SessionTurnInputConfig | undefined,
+  inputBlocks: readonly SessionInputBlock[]
+): SessionTurnInputConfig | undefined => {
+  if (!inputConfig?.inputBlocks || inputConfig.inputBlocks.length === 0) {
+    return inputConfig;
+  }
+  if (typeof inputConfig.prompt !== 'string') {
+    return inputConfig;
+  }
+  const normalized = normalizeSessionInputBlocks(inputBlocks, '');
+  if (normalized.length !== 1) return inputConfig;
+  const [onlyBlock] = normalized;
+  if (!onlyBlock || onlyBlock.type !== 'text' || onlyBlock.spans?.length) {
+    return inputConfig;
+  }
+  const configNormalized = normalizeSessionInputBlocks(inputConfig.inputBlocks, '');
+  if (configNormalized.length !== 1) return inputConfig;
+  const [onlyConfigBlock] = configNormalized;
+  if (
+    !onlyConfigBlock ||
+    onlyConfigBlock.type !== 'text' ||
+    onlyConfigBlock.spans?.length ||
+    onlyConfigBlock.text !== onlyBlock.text
+  ) {
+    return inputConfig;
+  }
+  if (inputConfig.prompt.trim() !== onlyConfigBlock.text) {
+    return inputConfig;
+  }
+  const { inputBlocks: _omitted, ...compacted } = inputConfig;
+  return compacted;
+};
+
 export const buildPendingUserHistoryEntry = (args: {
   userId: string | undefined;
   inputBlocks: readonly SessionInputBlock[];
@@ -554,10 +852,11 @@ export const buildPendingUserHistoryEntry = (args: {
   return {
     userId,
     role: 'user',
+    author: { v: 1, kind: 'human', userId },
     items,
     timestamp: args.timestamp,
     status: args.status ?? 'pending',
-    inputConfig: args.inputConfig,
+    inputConfig: compactRedundantUserTurnInputBlocks(args.inputConfig, args.inputBlocks),
     read: false,
     fileDiff: [],
     finished: true,

@@ -10,9 +10,10 @@ import {
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { PlatformContext } from '@lody/platform/react';
-import { ArrowLeft, Check, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { TourStill, type TourStillDebugOptions } from './tour/tour-still';
 import { DEFAULT_TOUR_IDENTITY, type TourIdentity } from './tour/tour-fixtures';
 import type { TourAppTracks, TourConfigurationState } from './tour/tour-app';
@@ -227,7 +228,11 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
 
 const COMPACT_FORM =
   'max-[1080px]:left-[calc(50%_-_min(310px,43%))]! max-[1080px]:top-[9%]! max-[1080px]:bottom-[7%]! max-[1080px]:w-[min(620px,86%)]!';
-const COMPACT_CAMERA = 'max-[1080px]:opacity-20';
+// Below the two-column breakpoint the centred form overlaps the product and
+// the close-up frames an empty patch of the window, so the preview steps out
+// entirely. Opacity (not unmount) is what flips, keeping the camera mounted
+// and letting the existing 700ms fade carry the transition both ways.
+const COMPACT_CAMERA = 'max-[1080px]:opacity-0';
 
 const STEP_CONFIGURATION_STATE: Partial<Record<OnboardingStepKey, TourConfigurationState>> = {
   login: {
@@ -591,15 +596,14 @@ export function OnboardingBackButton({ onClick, disabled, label }: OnboardingBac
   return (
     <Button
       variant="ghost"
-      size="lg"
       onMouseEnter={() => playHover()}
+      size="large"
       onClick={() => {
         // Going back falls in pitch, as it does everywhere else in the flow.
         playBack();
         onClick();
       }}
       disabled={disabled}
-      className="gap-2"
     >
       <ArrowLeft className="h-4 w-4" />
       {label ?? t('common.back', 'Back')}
@@ -630,8 +634,8 @@ export function OnboardingNextButton({
   const text = label ?? (isFinish ? t('common.finish', 'Finish') : t('common.next', 'Next'));
   return (
     <Button
-      size="lg"
       onMouseEnter={() => playHover()}
+      size="large"
       onClick={() => {
         // Advancing rises; the last step gets the confirming click instead.
         if (isFinish) playClick();
@@ -639,10 +643,9 @@ export function OnboardingNextButton({
         onClick();
       }}
       disabled={disabled}
-      className="gap-2"
     >
       {loading === true ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
       ) : isFinish ? (
         <Check className="h-4 w-4" />
       ) : null}

@@ -1,7 +1,7 @@
 /**
  * Which provider configs can use a built-in agent's interactive sign-in flow.
  *
- * Only the managed built-in agents (Claude Code / Codex / Kimi Code / Grok) have one.
+ * Only the managed built-in agents (Claude Code / Codex / Kimi Code / Grok / Antigravity) have one.
  * A config that carries its own credentials in `env` — every preset such as
  * DeepSeek, MiniMax, MiMo, or GLM, plus hand-rolled configs pointed at an
  * OpenRouter/Ollama-style endpoint — authenticates through those variables
@@ -21,7 +21,7 @@ import { isAgentBrandId, type AgentBrandId } from './agent-brand';
  * is reported by the agent itself (Codex custom model providers may set
  * `requires_openai_auth = false`), never inferred from environment variables.
  */
-const CLAUDE_ENV_AUTH_KEYS = [
+export const CLAUDE_ENV_AUTH_KEYS = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_CUSTOM_HEADERS',
@@ -58,6 +58,7 @@ export const supportsBuiltinAuthentication = (input: {
 }): boolean => {
   if (input.cliType !== 'builtin') return false;
   const agentType = input.agentType;
+  if (agentType === 'pi' || agentType === 'devin') return false;
   if (!agentType || !isManagedBuiltinAgentType(agentType)) return false;
   if (hasBuiltinEnvAuthentication(agentType, input.env)) return false;
   // A persisted brand marks a preset routed through a third-party provider even
@@ -66,3 +67,36 @@ export const supportsBuiltinAuthentication = (input: {
   // the env check above for Claude, and means nothing on Codex, Kimi, or Grok.
   return !isAgentBrandId(input.brandId);
 };
+
+/**
+ * True when the config uses agent-driven authentication (registry, custom, or
+ * builtin Devin or Sorbet), which authenticates
+ * through the standard ACP `initialize` → `authenticate` exchange.
+ *
+ * The methods are advertised by the agent itself, so the list cannot be known
+ * before the daemon has initialized it once. Callers show the advertised
+ * methods themselves rather than waiting for a live `authRequired` signal:
+ * `initialize` lists every way to sign in, whether or not the current
+ * credentials still work, and a reader may want to switch accounts on purpose.
+ */
+export const usesAcpProtocolAuthentication = (
+  cliType: AgentConfigCliType | null | undefined,
+  agentType?: string | null
+): boolean =>
+  cliType === 'registry' ||
+  cliType === 'custom' ||
+  (cliType === 'builtin' && (agentType === 'devin' || agentType === 'sorbet'));
+
+/**
+ * True when Lody has any sign-in flow to offer for this config after the agent
+ * reported that authentication is required.
+ */
+export const supportsAuthenticationWhenRequired = (input: {
+  cliType: AgentConfigCliType | null | undefined;
+  agentType: string | null | undefined;
+}): boolean =>
+  usesAcpProtocolAuthentication(input.cliType, input.agentType) ||
+  (input.cliType === 'builtin' &&
+    !!input.agentType &&
+    input.agentType !== 'pi' &&
+    isManagedBuiltinAgentType(input.agentType));

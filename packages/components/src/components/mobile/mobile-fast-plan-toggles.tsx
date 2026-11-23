@@ -1,7 +1,9 @@
 import { useMemo, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { ListChecks, Zap, ZapOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import { Toggle } from '@lody/ui/toggle';
+import { composerSurface } from '@/components/shared/composer-surface';
 import {
   resolveOnOffConfigOptionEnabled,
   resolvePlanModeSelectorEnabled,
@@ -65,9 +67,9 @@ export function MobileFastModeToggle({
       className={className}
     >
       {fastValue ? (
-        <Zap className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+        <Zap {...stylex.props(composerSurface.glyph16)} strokeWidth={1.8} aria-hidden="true" />
       ) : (
-        <ZapOff className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+        <ZapOff {...stylex.props(composerSurface.glyph16)} strokeWidth={1.8} aria-hidden="true" />
       )}
     </ToggleButton>
   );
@@ -109,17 +111,17 @@ export function MobilePlanModeToggle({
       withLabel
       className={className}
     >
-      <ListChecks className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
-      <span className="leading-none">{planLabel}</span>
+      <ListChecks {...stylex.props(composerSurface.glyph16)} strokeWidth={1.8} aria-hidden="true" />
+      <span>{planLabel}</span>
     </ToggleButton>
   );
 }
 
-/* Shared chip surface for the fast + plan buttons. Active state uses
-   the primary-tinted background the desktop pattern uses; inactive
-   stays muted so the row reads as "this is a toggle, currently off".
-   `withLabel` flips from a square icon button (h-8 w-8) to a wider
-   pill (h-8 px-2 gap-1.5) so the plan toggle can carry text. */
+/* Shared control for the fast + plan buttons: `@lody/ui`'s Toggle at the touch
+   step. Off it is a ghost button; on it sinks into the well, which is how this
+   system says a control went down and stayed — not a tinted chip. `withLabel`
+   flips from a square icon button to a wider one so the plan toggle can carry
+   text. `className` is layout only. */
 function ToggleButton({
   children,
   ariaLabel,
@@ -138,24 +140,17 @@ function ToggleButton({
   className?: string;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
+    <Toggle
+      size="medium"
+      icon={!withLabel}
+      pressed={active}
+      onPressedChange={onToggle}
       aria-label={ariaLabel}
       title={ariaLabel}
       disabled={disabled}
-      onClick={onToggle}
-      className={cn(
-        'inline-flex h-8 shrink-0 select-none items-center justify-center rounded-md border transition-colors',
-        withLabel ? 'gap-1.5 px-2 text-sm font-medium' : 'w-8',
-        active
-          ? 'border-primary/40 bg-primary/[0.12] text-primary'
-          : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-        disabled && 'cursor-not-allowed opacity-60 hover:bg-inherit hover:text-inherit',
-        className
-      )}
+      className={className}
     >
       {children}
-    </button>
+    </Toggle>
   );
 }

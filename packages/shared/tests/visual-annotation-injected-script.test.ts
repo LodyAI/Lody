@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
 
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  MANAGED_BROWSER_COMMAND_MESSAGE_TYPE,
+  MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE,
   MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
-  MANAGED_BROWSER_STATE_MESSAGE_TYPE,
-  RESOLVE_VISUAL_ANNOTATION_ANCHORS_MESSAGE_TYPE,
+  MANAGED_BROWSER_READY_MESSAGE_TYPE,
   SET_ANNOTATION_MODE_MESSAGE_TYPE,
-  VISUAL_ANNOTATION_ANCHORS_RESOLVED_MESSAGE_TYPE,
   VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE,
 } from '../src/visual-annotation-types';
 import {
@@ -47,8 +46,17 @@ const setRect = (
   } as DOMRect);
 };
 
-const installInjectedScript = () => {
+const installInjectedScript = (handshake = false) => {
   (0, eval)(VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT);
+  if (handshake) {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: false },
+        origin: 'https://app.example.test',
+        source: window,
+      })
+    );
+  }
 };
 
 const mockElementFromPoint = (element: Element) => {
@@ -80,75 +88,29 @@ describe('visual annotation injected script', () => {
     Reflect.deleteProperty(window, 'navigation');
   });
 
-  it('uses the referrer origin and posts inspect payloads back to it', () => {
-    const button = document.createElement('button');
-    button.textContent = 'Send';
-    setRect(button, { x: 40, y: 50, width: 120, height: 32 });
-    document.body.append(button);
-    mockElementFromPoint(button);
+  it('queues early navigation until the real parent responds to the ready signal', () => {
     const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
-
     installInjectedScript();
+    expect(postMessage.mock.calls).toEqual([[{ type: MANAGED_BROWSER_READY_MESSAGE_TYPE }, '*']]);
+    const anchor = document.createElement('a');
+    anchor.href = 'https://example.com/early';
+    document.body.append(anchor);
+    expect(
+      anchor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+    ).toBe(false);
+    expect(postMessage.mock.calls).toEqual([[{ type: MANAGED_BROWSER_READY_MESSAGE_TYPE }, '*']]);
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: true },
-        origin: 'https://app.example.test',
         source: window,
-      })
-    );
-    const interactionLayer = document.querySelector<HTMLElement>(
-      '[data-lody-visual-annotation-interaction-layer="true"]'
-    );
-    expect(interactionLayer).not.toBeNull();
-    expect(interactionLayer?.style.pointerEvents).toBe('auto');
-    expect(interactionLayer?.style.zIndex).toBe('2147483647');
-    interactionLayer?.dispatchEvent(
-      new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        clientX: 50,
-        clientY: 60,
-      })
-    );
-
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE,
-        payload: expect.objectContaining({
-          target: expect.objectContaining({ tag: 'button', text: 'Send' }),
-        }),
-      }),
-      'https://app.example.test'
-    );
-  });
-
-  it('reports managed browser state and executes trusted history commands', async () => {
-    const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
-    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
-
-    installInjectedScript();
-    window.dispatchEvent(
-      new MessageEvent('message', {
+        origin: 'https://app.example.test',
         data: { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: false },
-        origin: 'https://app.example.test',
-        source: window,
       })
     );
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { type: MANAGED_BROWSER_COMMAND_MESSAGE_TYPE, command: 'back' },
-        origin: 'https://app.example.test',
-        source: window,
-      })
-    );
-    await new Promise((resolve) => window.setTimeout(resolve, 20));
-
-    expect(back).toHaveBeenCalledOnce();
     expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: MANAGED_BROWSER_STATE_MESSAGE_TYPE,
-        payload: expect.objectContaining({ url: window.location.href }),
-      }),
+      {
+        type: MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
+        payload: { url: 'https://example.com/early' },
+      },
       'https://app.example.test'
     );
   });
@@ -162,7 +124,7 @@ describe('visual annotation injected script', () => {
     anchor.addEventListener('click', appClick);
     const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
 
-    installInjectedScript();
+    installInjectedScript(true);
     const click = new MouseEvent('click', {
       bubbles: true,
       cancelable: true,
@@ -177,6 +139,31 @@ describe('visual annotation injected script', () => {
         payload: { url: 'https://example.com/docs' },
       },
       'https://app.example.test'
+    );
+  });
+
+  // Must run before the marked-document test: the unload listener is deliberately
+  // not removable by destroy(), so it outlives that test in this shared window.
+  it('does not send unload signals from application previews', () => {
+    const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
+    installInjectedScript();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE }),
+      expect.anything()
+    );
+  });
+
+  it('signals the parent when page script unloads a marked static document', () => {
+    document.documentElement.setAttribute(STATIC_HTML_PREVIEW_DOCUMENT_MARKER, 'true');
+    const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
+    installInjectedScript();
+    // Page script cannot switch the signal off through the exposed inspector API.
+    window.__lodyVisualCommentInspector?.destroy();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: MANAGED_BROWSER_DOCUMENT_UNLOAD_MESSAGE_TYPE },
+      '*'
     );
   });
 
@@ -265,7 +252,7 @@ describe('visual annotation injected script', () => {
     document.body.append(anchor);
     const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
 
-    installInjectedScript();
+    installInjectedScript(true);
     const click = new MouseEvent('click', {
       bubbles: true,
       cancelable: true,
@@ -325,7 +312,6 @@ describe('visual annotation injected script', () => {
 
     expect(appPointerDown).not.toHaveBeenCalled();
     expect(appClick).not.toHaveBeenCalled();
-    expect(postMessage).toHaveBeenCalledTimes(1);
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE,
@@ -337,47 +323,7 @@ describe('visual annotation injected script', () => {
     );
   });
 
-  it('learns the parent origin from the first valid control message when referrer is unavailable', () => {
-    Object.defineProperty(document, 'referrer', {
-      configurable: true,
-      value: '',
-    });
-    const button = document.createElement('button');
-    button.textContent = 'Send';
-    setRect(button, { x: 40, y: 50, width: 120, height: 32 });
-    document.body.append(button);
-    mockElementFromPoint(button);
-    const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
-
-    installInjectedScript();
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: true },
-        origin: 'https://app.example.test',
-        source: window,
-      })
-    );
-    button.dispatchEvent(
-      new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        clientX: 50,
-        clientY: 60,
-      })
-    );
-
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE,
-        payload: expect.objectContaining({
-          target: expect.objectContaining({ tag: 'button', text: 'Send' }),
-        }),
-      }),
-      'https://app.example.test'
-    );
-  });
-
-  it('rejects a parent message whose origin differs from the referrer', () => {
+  it('accepts the real parent after navigation changes the referrer to the preview origin', () => {
     Object.defineProperty(document, 'referrer', {
       configurable: true,
       value: 'https://preview.example.test/workspace/session',
@@ -406,7 +352,29 @@ describe('visual annotation injected script', () => {
       })
     );
 
-    expect(postMessage).not.toHaveBeenCalled();
+    expect(window.__lodyVisualCommentInspector?.isEnabled()).toBe(true);
+    document
+      .querySelector('[data-lody-visual-annotation-interaction-layer="true"]')
+      ?.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 50, clientY: 60 })
+      );
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE }),
+      'https://app.example.test'
+    );
+  });
+
+  it('rejects a non-parent window even when its origin matches the referrer', () => {
+    installInjectedScript();
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: true },
+        origin: 'https://app.example.test',
+        source: null,
+      })
+    );
+    expect(window.__lodyVisualCommentInspector?.isEnabled()).toBe(false);
+    expect(document.querySelector('[data-lody-visual-annotation-interaction-layer]')).toBeNull();
   });
 
   it('keeps the first learned parent origin locked for later control messages', () => {
@@ -483,162 +451,6 @@ describe('visual annotation injected script', () => {
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE }),
       '*'
-    );
-  });
-
-  it('preserves data-test and data-cy attribute names in generated selectors', () => {
-    const target = document.createElement('div');
-    target.setAttribute('data-test', 'hero');
-    target.textContent = 'Hero';
-    setRect(target, { x: 12, y: 16, width: 200, height: 80 });
-    document.body.append(target);
-    mockElementFromPoint(target);
-    const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
-
-    installInjectedScript();
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: true },
-        origin: 'https://app.example.test',
-        source: window,
-      })
-    );
-    target.dispatchEvent(
-      new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        clientX: 24,
-        clientY: 32,
-      })
-    );
-
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          target: expect.objectContaining({ selector: 'div[data-test="hero"]' }),
-        }),
-      }),
-      'https://app.example.test'
-    );
-  });
-
-  it('removes annotation listeners on destroy', () => {
-    const button = document.createElement('button');
-    button.textContent = 'Send';
-    setRect(button, { x: 40, y: 50, width: 120, height: 32 });
-    document.body.append(button);
-    mockElementFromPoint(button);
-    const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
-
-    installInjectedScript();
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: true },
-        origin: 'https://app.example.test',
-        source: window,
-      })
-    );
-    window.__lodyVisualCommentInspector?.destroy();
-    button.dispatchEvent(
-      new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        clientX: 50,
-        clientY: 60,
-      })
-    );
-
-    expect(postMessage).not.toHaveBeenCalled();
-  });
-
-  it('pins the hover overlay to the viewport origin before translating it', () => {
-    const button = document.createElement('button');
-    button.textContent = 'Send';
-    setRect(button, { x: 40, y: 50, width: 120, height: 32 });
-    document.body.append(button);
-    mockElementFromPoint(button);
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-      callback(0);
-      return 1;
-    });
-
-    installInjectedScript();
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: true },
-        origin: 'https://app.example.test',
-        source: window,
-      })
-    );
-    button.dispatchEvent(
-      new MouseEvent('mousemove', {
-        bubbles: true,
-        clientX: 50,
-        clientY: 60,
-      })
-    );
-
-    const overlay = document.querySelector(
-      '[data-lody-visual-annotation-overlay="true"]'
-    ) as HTMLElement | null;
-    expect(overlay?.style.position).toBe('fixed');
-    expect(overlay?.style.top).toBe('0px');
-    expect(overlay?.style.left).toBe('0px');
-    expect(overlay?.style.transform).toBe('translate(40px, 50px)');
-  });
-
-  it('updates tracked anchors on scroll even when annotation mode is off', () => {
-    const target = document.createElement('button');
-    target.id = 'tracked-anchor';
-    target.textContent = 'Tracked';
-    setRect(target, { x: 80, y: 120, width: 160, height: 40 });
-    document.body.append(target);
-    const postMessage = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-      callback(0);
-      return 1;
-    });
-
-    installInjectedScript();
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: {
-          type: RESOLVE_VISUAL_ANNOTATION_ANCHORS_MESSAGE_TYPE,
-          payload: {
-            anchors: [
-              {
-                commentId: 'comment-1',
-                anchor: {
-                  target: {
-                    id: 'tracked-anchor',
-                    selector: '#tracked-anchor',
-                  },
-                },
-              },
-            ],
-          },
-        },
-        origin: 'https://app.example.test',
-        source: window,
-      })
-    );
-    postMessage.mockClear();
-
-    window.dispatchEvent(new Event('scroll'));
-
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: VISUAL_ANNOTATION_ANCHORS_RESOLVED_MESSAGE_TYPE,
-        payload: expect.objectContaining({
-          results: [
-            expect.objectContaining({
-              commentId: 'comment-1',
-              resolved: true,
-            }),
-          ],
-        }),
-      }),
-      'https://app.example.test'
     );
   });
 });

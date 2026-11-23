@@ -1,15 +1,57 @@
-import { type ReactNode } from 'react';
-import { useAtomValue } from 'jotai';
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
-import { useIsMobile } from '../hooks/use-mobile';
-import { useTaskIndexSync } from '../hooks/use-task-index';
-import { MobileWorkspaceLayout } from './mobile/mobile-workspace-layout';
+import { SETTINGS_DEFAULT_TAB } from './settings/settings-tabs';
+import { loadSettingsModal, preloadSettings } from './settings/settings-code';
+import { scheduleIdleTask } from '@/lib/idle-task';
+import { useAppCapability } from '@/lib/app-platform';
+import { MagpieImportDialogContainer } from './settings/magpie-import-dialog-container';
+import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
+import { useAgentRoleSchemaReconciliation } from '@/hooks/use-agent-role-schema-reconciliation';
+import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
+import { useWorkspaceWindowOwner, WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
+import { type ReactNode, lazy, Suspense, useEffect, useState, useLayoutEffect } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { useScheduleRegistrySync } from '@/hooks/use-schedules';
+import { useIsCompactDesktop, useIsMobile } from '../hooks/use-mobile';
+import { syncCompactDesktopLayoutAtom } from '@/atoms/layout-state';
 import { WebWorkspaceLayout } from './web-workspace-layout';
+
+/* Lazy so the mobile layout graph (including `TerminalDockHost` → the lazy
+   xterm chunk) stays out of the desktop boot chunk. `useIsMobile` resolves
+   synchronously, so mobile loads this on first render; desktop never does. */
+const MobileWorkspaceLayout = lazy(() =>
+  import('./mobile/mobile-workspace-layout').then((module) => ({
+    default: module.MobileWorkspaceLayout,
+  }))
+);
 import { BugReportDialogContainer } from './bug-report/bug-report-dialog-container';
+import { JoinCommunityDialogContainer } from './settings/join-community-dialog-container';
 import { StuckConnectionBannerContainer } from './stuck-connection-banner';
-import { DesktopSettingsModal } from './settings/desktop-settings-modal';
-import { TaskQuickAddDialogContainer } from './tasks/task-quick-add-dialog-container';
-import { TaskStatusWatcher } from './tasks/task-status-watcher';
+import { settingsDialogOpenAtom } from '@/atoms';
+import { ProjectEditorHost } from './settings/project-editor-host';
+import { PromptShortcutProvider } from '../providers/prompt-shortcut-provider';
+
+const DesktopSettingsModal = lazy(loadSettingsModal);
+
+function DeferredDesktopSettingsModal() {
+  const open = useAtomValue(settingsDialogOpenAtom);
+  const cloud = useAppCapability('cloudAccount');
+  const mobile = useIsMobile();
+  useEffect(
+    () =>
+      scheduleIdleTask(() => {
+        void preloadSettings(cloud ? SETTINGS_DEFAULT_TAB : 'preferences', mobile).catch(() => {});
+      }),
+    [cloud, mobile]
+  );
+  const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    if (open) setOpened(true);
+  }, [open]);
+  return open || opened ? (
+    <Suspense fallback={null}>
+      <DesktopSettingsModal />
+    </Suspense>
+  ) : null;
+}
 export {
   getMobileMainLayoutContentClassName,
   getMobileMainLayoutRootClassName,
@@ -25,16 +67,42 @@ export function WorkspaceRuntimeShell({
   const isMobile = useIsMobile();
   if (isMobile) {
     return (
-      <MobileWorkspaceLayout workspaceReady={workspaceReady}>{children}</MobileWorkspaceLayout>
+      <Suspense fallback={null}>
+        <MobileWorkspaceLayout workspaceReady={workspaceReady}>{children}</MobileWorkspaceLayout>
+      </Suspense>
     );
   }
 
   return <WebWorkspaceLayout>{children}</WebWorkspaceLayout>;
 }
 
-/** Keeps the workspace task index live for the sidebar count and the Tasks page. */
-function TaskIndexSync() {
-  useTaskIndexSync();
+function WorkspaceBadge() {
+  useWorkspaceBadge();
+  return null;
+}
+
+function AgentRoleSchemaReconciliation() {
+  useAgentRoleSchemaReconciliation();
+  return null;
+}
+
+function ScheduleRegistrySync() {
+  useScheduleRegistrySync();
+  return null;
+}
+
+/**
+ * Bridges the viewport's compact-desktop flag into atom state so commands and
+ * derived visibility (which cannot call hooks) see the same presentation.
+ * Runs in a layout effect so the compact sidebar suppression applies before
+ * first paint — no open-overlay flash when a narrow window mounts.
+ */
+function CompactDesktopLayoutSync() {
+  const compact = useIsCompactDesktop();
+  const syncCompact = useSetAtom(syncCompactDesktopLayoutAtom);
+  useLayoutEffect(() => {
+    syncCompact(compact);
+  }, [compact, syncCompact]);
   return null;
 }
 
@@ -49,23 +117,26 @@ export function MainLayout({
    */
   workspaceReady?: boolean;
 }) {
-  // Behind the beta gate none of this mounts: no index subscription, no status
-  // watcher, no quick-add dialog listening for its open atom.
-  const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
+  const workspace = useAtomValue(currentWorkspaceSlugAtom);
+  const owner = useWorkspaceWindowOwner(workspaceReady ? workspace : null);
 
   return (
-    <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
-      {children}
-      {tasksEnabled && workspaceReady ? (
-        <>
-          <TaskIndexSync />
-          <TaskStatusWatcher />
-          <TaskQuickAddDialogContainer />
-        </>
-      ) : null}
-      {workspaceReady ? <BugReportDialogContainer /> : null}
-      <StuckConnectionBannerContainer />
-      {workspaceReady ? <DesktopSettingsModal /> : null}
-    </WorkspaceRuntimeShell>
+    <WorkspaceWindowOwnerContext value={owner}>
+      <PromptShortcutProvider enabled={workspaceReady}>
+        <CompactDesktopLayoutSync />
+        <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
+          {children}
+          {workspaceReady ? <ScheduleRegistrySync /> : null}
+          {owner && workspaceReady ? <WorkspaceBadge /> : null}
+          {owner && workspaceReady ? <AgentRoleSchemaReconciliation /> : null}
+          {workspaceReady ? <BugReportDialogContainer /> : null}
+          <JoinCommunityDialogContainer />
+          <StuckConnectionBannerContainer />
+          {workspaceReady ? <DeferredDesktopSettingsModal /> : null}
+          {workspaceReady ? <MagpieImportDialogContainer /> : null}
+          {workspaceReady ? <ProjectEditorHost /> : null}
+        </WorkspaceRuntimeShell>
+      </PromptShortcutProvider>
+    </WorkspaceWindowOwnerContext>
   );
 }

@@ -33,3 +33,12 @@ export const AuthFlow: Story = {
     description: 'Finishing sign-in so we can link your email.',
   },
 };
+
+/** Boot/auth gates continue the window's first frame; the copy fades in late. */
+export const Boot: Story = {
+  args: {
+    variant: 'boot',
+    title: 'Starting local workspace',
+    description: 'Waiting for the local runtime.',
+  },
+};

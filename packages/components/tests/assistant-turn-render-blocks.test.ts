@@ -1,270 +1,433 @@
 import { describe, expect, it } from 'vitest';
-import type { MessageContent } from '@lody/shared';
 import {
-  buildAssistantTurnRenderBlocks,
-  buildAssistantTurnRenderLayout,
-} from '../src/components/ai-gui/assistant-turn-render-blocks';
+  type MessageContent,
+  applyNotificationOnHistory,
+  parseSessionNotifications,
+  type SessionHistoryParsed,
+  type SessionId,
+} from '@lody/shared';
+import { buildAssistantTurnRenderLayout } from '../src/components/ai-gui/assistant-turn-render-blocks';
+import { buildAssistantMessageRenderItems } from '../src/components/ai-gui/assistant-message-render-items';
+import {
+  collectSessionImageGalleryEntries,
+  createSessionImageGalleryEntry,
+  findSessionImageGalleryEntryIndex,
+} from '../src/lib/session-image-gallery';
 
-const tool = (
-  toolCallId: string,
-  kind: Extract<MessageContent, { type: 'tool_call' }>['kind'],
-  overrides: Partial<Extract<MessageContent, { type: 'tool_call' }>> = {}
-): Extract<MessageContent, { type: 'tool_call' }> => ({
-  type: 'tool_call',
-  toolCallId,
-  kind,
-  status: 'completed',
-  ...overrides,
-});
-
-describe('buildAssistantTurnRenderBlocks', () => {
-  it('groups adjacent thoughts and tool calls while keeping text in chronological order', () => {
-    const items: MessageContent[] = [
-      { type: 'thought', text: 'Inspect the current renderer.' },
-      tool('command-1', 'execute'),
-      tool('command-2', 'execute'),
-      { type: 'text', text: 'I found the rendering boundary.' },
-      tool('read-1', 'read', { locations: [{ path: 'src/view.tsx' }] }),
-      tool('edit-1', 'edit', {
-        locations: [{ path: 'src/view.tsx' }],
-        content: [{ type: 'diff', path: 'src/view.tsx', oldText: 'a', newText: 'b' }],
-      }),
-      { type: 'text', text: 'Done.' },
-    ];
-
-    const blocks = buildAssistantTurnRenderBlocks('assistant-1', items);
-
-    expect(blocks.map((block) => block.kind)).toEqual([
-      'activity_group',
-      'content',
-      'activity_group',
-      'content',
-    ]);
-    const firstActivity = blocks[0];
-    expect(firstActivity?.kind).toBe('activity_group');
-    if (firstActivity?.kind !== 'activity_group') throw new Error('Expected activity group');
-    expect(firstActivity.entries).toHaveLength(3);
-    expect(firstActivity.summary.hasThought).toBe(true);
-    expect(firstActivity.summary.commandCount).toBe(2);
-
-    const secondActivity = blocks[2];
-    expect(secondActivity?.kind).toBe('activity_group');
-    if (secondActivity?.kind !== 'activity_group') throw new Error('Expected activity group');
-    expect(secondActivity.summary.readFileCount).toBe(1);
-    expect(secondActivity.summary.editFileCount).toBe(1);
+describe('assistant-turn-render-blocks', () => {
+  const tool = (
+    toolCallId: string,
+    kind: Extract<MessageContent, { type: 'tool_call' }>['kind'],
+    overrides: Partial<Extract<MessageContent, { type: 'tool_call' }>> = {}
+  ): Extract<MessageContent, { type: 'tool_call' }> => ({
+    type: 'tool_call',
+    toolCallId,
+    kind,
+    status: 'completed',
+    ...overrides,
   });
 
-  it('keeps group keys stable while adjacent thoughts and tool calls stream in', () => {
-    const initial = buildAssistantTurnRenderBlocks('assistant-1', [
-      { type: 'thought', text: 'Inspect first.' },
-    ]);
-    const updated = buildAssistantTurnRenderBlocks('assistant-1', [
-      { type: 'thought', text: 'Inspect first.' },
-      tool('command-1', 'execute'),
-      tool('command-2', 'execute'),
-    ]);
+  describe('buildAssistantTurnRenderLayout', () => {
+    it('groups alternating thoughts and tools, counting tools across thoughts', () => {
+      const items: MessageContent[] = [
+        tool('command-1', 'execute'),
+        { type: 'thought', text: 'Inspect the command result.' },
+        tool('command-2', 'execute'),
+        { type: 'thought', text: 'Read the source next.' },
+        tool('read-1', 'read', { locations: [{ path: '/project/source.ts' }] }),
+        { type: 'thought', text: 'Ready to answer.' },
+        { type: 'text', text: 'Answer' },
+      ];
+      const layout = buildAssistantTurnRenderLayout('mixed', items, false);
+      expect(layout.blocks).toHaveLength(2);
+      expect(layout.blocks[0]).toMatchObject({
+        kind: 'activity_group',
+        entries: items.slice(0, 6).map((content, itemIndex) => ({ content, itemIndex })),
+        summary: { hasThought: true, commandCount: 2, readFileCount: 1 },
+      });
+      expect(layout.blocks[1]).toMatchObject({ kind: 'content', entry: { content: items[6] } });
+    });
 
-    expect(initial[0]?.key).toBe(updated[0]?.key);
-  });
-
-  it('treats invisible command metadata as transparent and provider thinking tools as thought', () => {
-    const blocks = buildAssistantTurnRenderBlocks('assistant-1', [
-      tool('command-1', 'execute'),
-      { type: 'available_commands', commands: [{ name: 'review' }] },
-      tool('command-2', 'execute'),
-      tool('think-1', 'think'),
-      { type: 'thought', text: 'Continue reasoning.' },
-      tool('switch-1', 'switch_mode'),
-    ]);
-
-    expect(blocks.map((block) => block.kind)).toEqual(['activity_group', 'content']);
-    const activityGroup = blocks[0];
-    expect(activityGroup?.kind).toBe('activity_group');
-    if (activityGroup?.kind !== 'activity_group') throw new Error('Expected activity group');
-    expect(activityGroup.entries).toHaveLength(4);
-    expect(activityGroup.summary).toMatchObject({ hasThought: true, commandCount: 2 });
-  });
-
-  it('counts unique file paths and tool categories', () => {
-    const blocks = buildAssistantTurnRenderBlocks('assistant-1', [
-      tool('read-1', 'read', { locations: [{ path: 'src/view.tsx' }] }),
-      tool('read-2', 'read', { locations: [{ path: 'src/view.tsx' }] }),
-      tool('edit-1', 'edit', {
-        status: 'in_progress',
-        content: [
-          { type: 'diff', path: 'src/view.tsx', newText: 'next' },
-          { type: 'diff', path: 'src/index.ts', newText: 'next' },
+    it('folds earlier text and activity while keeping the final text run visible', () => {
+      const layout = buildAssistantTurnRenderLayout(
+        'assistant-1',
+        [
+          { type: 'thought', text: 'Inspect the renderer.' },
+          tool('command-1', 'execute'),
+          { type: 'text', text: 'I found the relevant component.' },
+          tool('edit-1', 'edit'),
+          { type: 'text', text: 'The renderer now collapses completed work.' },
         ],
-      }),
-      tool('search-1', 'search', { status: 'failed' }),
-    ]);
+        true
+      );
 
-    const block = blocks[0];
-    expect(block?.kind).toBe('activity_group');
-    if (block?.kind !== 'activity_group') throw new Error('Expected activity group');
-    expect(block.summary).toMatchObject({
-      readFileCount: 1,
-      editFileCount: 2,
-      searchCount: 1,
+      expect(layout.blocks.map((block) => block.kind)).toEqual([
+        'activity_group',
+        'content',
+        'activity_group',
+        'content',
+      ]);
+      expect(layout.firstWorkBlockIndex).toBe(0);
+      expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
+        true,
+        true,
+        true,
+        false,
+      ]);
+    });
+
+    it('keeps the final text and trailing generated images outside the work group', () => {
+      const layout = buildAssistantTurnRenderLayout(
+        'assistant-1',
+        [
+          { type: 'thought', text: 'Generate the requested image.' },
+          { type: 'text', text: 'Here is the finished image.' },
+          {
+            type: 'image_group',
+            images: [{ imageId: 'image-1', mimeType: 'image/png', sizeBytes: 123 }],
+          },
+        ],
+        true
+      );
+
+      expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
+        true,
+        false,
+        false,
+      ]);
+    });
+
+    it('folds earlier text when the agent continues working and sends a later answer', () => {
+      const layout = buildAssistantTurnRenderLayout(
+        'assistant-1',
+        [
+          { type: 'text', text: 'The bug is in the parser.' },
+          tool('command-1', 'execute'),
+          { type: 'text', text: 'Confirmed by the reproduction.' },
+        ],
+        true
+      );
+
+      expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
+        true,
+        true,
+        false,
+      ]);
+    });
+
+    it('keeps every adjacent trailing text block regardless of phase', () => {
+      const layout = buildAssistantTurnRenderLayout(
+        'tail',
+        [
+          { type: 'text', text: 'Earlier' },
+          tool('read', 'read'),
+          { type: 'text', text: 'First answer part' },
+          { type: 'text', text: 'Second answer part', messagePhase: 'commentary' },
+          {
+            type: 'image_group',
+            images: [{ imageId: 'generated', mimeType: 'image/png', sizeBytes: 123 }],
+          },
+        ],
+        true
+      );
+      expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
+        true,
+        true,
+        false,
+        false,
+        false,
+      ]);
+    });
+
+    it('treats a finished activity-only turn as work even without a final text reply', () => {
+      const layout = buildAssistantTurnRenderLayout(
+        'assistant-1',
+        [tool('command-1', 'execute')],
+        true
+      );
+
+      expect(layout.workBlockKeys.size).toBe(1);
+      expect(layout.firstWorkBlockIndex).toBe(0);
     });
   });
 });
 
-describe('buildAssistantTurnRenderLayout', () => {
-  it('puts finished activity and progress text into work while leaving the final reply visible', () => {
-    const layout = buildAssistantTurnRenderLayout(
-      'assistant-1',
-      [
-        { type: 'thought', text: 'Inspect the renderer.' },
-        tool('command-1', 'execute'),
-        { type: 'text', text: 'I found the relevant component.' },
-        tool('edit-1', 'edit'),
-        { type: 'text', text: 'The renderer now collapses completed work.' },
-      ],
-      true
-    );
+describe('worked-group-collapse-gate', () => {
+  // Guards the load-bearing invariant behind view.tsx `shouldUseWorkedGroup`: a finished
+  // turn is folded into a "Worked for …" summary ONLY when it has something visible left
+  // outside `workBlockKeys`. Activity groups fold unconditionally, so an interrupted or
+  // cancelled turn that ends mid-tool with no prose must have NO visible tail and must
+  // stay expanded. See packages/components/src/components/ai-gui/AGENTS.md
+  // ("Worked for …" collapse gate).
+  const text = (value: string): MessageContent => ({ type: 'text', text: value }) as MessageContent;
 
-    expect(layout.blocks.map((block) => block.kind)).toEqual([
-      'activity_group',
-      'content',
-      'activity_group',
-      'content',
-    ]);
-    expect(layout.firstWorkBlockIndex).toBe(0);
-    expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
-      true,
-      true,
-      true,
-      false,
-    ]);
-  });
+  let toolSeq = 0;
+  const toolCall = (): MessageContent =>
+    ({
+      type: 'tool_call',
+      toolCallId: `tool-${(toolSeq += 1)}`,
+      status: 'completed',
+      title: 'ran a tool',
+    }) as unknown as MessageContent;
 
-  it('keeps the final text and trailing generated images outside the work group', () => {
-    const layout = buildAssistantTurnRenderLayout(
-      'assistant-1',
-      [
-        { type: 'thought', text: 'Generate the requested image.' },
-        { type: 'text', text: 'Here is the finished image.' },
-        {
-          type: 'image_group',
-          images: [{ imageId: 'image-1', mimeType: 'image/png', sizeBytes: 123 }],
-        },
-      ],
-      true
-    );
+  // Mirror of the gate predicate in view.tsx.
+  const hasVisibleFinalContent = (items: MessageContent[], isTurnFinished: boolean): boolean => {
+    const { blocks, workBlockKeys } = buildAssistantTurnRenderLayout('m1', items, isTurnFinished);
+    return blocks.some((block) => !workBlockKeys.has(block.key));
+  };
 
-    expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
-      true,
-      false,
-      false,
-    ]);
-  });
+  describe('Worked for … collapse gate (buildAssistantTurnRenderLayout)', () => {
+    it('interrupted turn with only tool work and no final text has no visible tail → do not collapse', () => {
+      // e.g. cancelled/agent-disconnected mid-tool: CLI still marks finished=true.
+      expect(hasVisibleFinalContent([toolCall(), toolCall()], true)).toBe(false);
+    });
 
-  it('does not create completed-work boundaries while a turn is streaming', () => {
-    const layout = buildAssistantTurnRenderLayout(
-      'assistant-1',
-      [{ type: 'thought', text: 'Still inspecting.' }, tool('command-1', 'execute')],
-      false
-    );
+    it('normal turn ending with a text answer keeps that answer as a visible tail → collapse', () => {
+      expect(hasVisibleFinalContent([toolCall(), toolCall(), text('all done')], true)).toBe(true);
+    });
 
-    expect(layout.workBlockKeys.size).toBe(0);
-    expect(layout.firstWorkBlockIndex).toBe(-1);
-  });
+    it('text followed by unfinished tool work has no answer tail → do not collapse', () => {
+      expect(hasVisibleFinalContent([text('the answer'), toolCall()], true)).toBe(false);
+    });
 
-  it('treats a finished activity-only turn as work even without a final text reply', () => {
-    const layout = buildAssistantTurnRenderLayout(
-      'assistant-1',
-      [tool('command-1', 'execute')],
-      true
-    );
-
-    expect(layout.workBlockKeys.size).toBe(1);
-    expect(layout.firstWorkBlockIndex).toBe(0);
+    it('streaming turn keeps its work region so the reader can fold it, with no visible tail', () => {
+      const { workBlockKeys } = buildAssistantTurnRenderLayout(
+        'm1',
+        [toolCall(), toolCall()],
+        false
+      );
+      expect(workBlockKeys.size).toBe(1);
+    });
   });
 });
 
-describe('buildAssistantTurnRenderLayout plan segments', () => {
-  // Plan mode is a permission MODE, so the same ACP turn proposes the plan and
-  // then implements it. One foldable region would bury the whole implementation
-  // in the plan's "Worked for …" row.
-  const planTurnItems: MessageContent[] = [
-    tool('read-1', 'read', { locations: [{ path: 'src/a.ts' }] }),
-    tool('grep-1', 'search'),
-    { type: 'text', text: '# Plan\n1. Do the thing' },
-    tool('switch-1', 'switch_mode', { title: 'Exited Plan Mode' }),
-    { type: 'thought', text: 'Start with the parser.' },
-    tool('edit-1', 'edit', { locations: [{ path: 'src/a.ts' }] }),
-    { type: 'text', text: 'Done, changed 1 file.' },
-  ];
+describe('adapter-fold-parity', () => {
+  /**
+   * Every ACP adapter uses the same completed-turn tail rule. This runs each shape through the real ingest and the real
+   * fold so a future folding change cannot regress a provider that looks fine today.
+   */
+  const visibleTexts = (items: MessageContent[]): string[] => {
+    const layout = buildAssistantTurnRenderLayout('message-1', items, true);
+    const texts: string[] = [];
+    for (const block of layout.blocks) {
+      if (layout.workBlockKeys.has(block.key)) continue;
+      if (block.kind !== 'content') continue;
+      if (block.entry.content.type !== 'text') continue;
+      texts.push(block.entry.content.text);
+    }
+    return texts;
+  };
 
-  it('cuts a segment after the plan-exit card so approved work folds on its own', () => {
-    const layout = buildAssistantTurnRenderLayout('assistant-1', planTurnItems, true);
-
-    // [pre-plan activity] [plan text] [Exited Plan Mode] | [execution activity] [answer]
-    expect(layout.blocks.map((block) => block.kind)).toEqual([
-      'activity_group',
-      'content',
-      'content',
-      'activity_group',
-      'content',
-    ]);
-    expect(layout.segments.map((segment) => segment.blockRange)).toEqual([
-      [0, 3],
-      [3, 5],
-    ]);
-
-    const [planSegment, executionSegment] = layout.segments;
-    if (!planSegment || !executionSegment) throw new Error('Expected two segments');
-
-    // Plan segment: the pre-plan exploration folds, the plan and its card stay.
-    expect(layout.blocks.map((block) => planSegment.workBlockKeys.has(block.key))).toEqual([
-      true,
-      false,
-      false,
-      false,
-      false,
-    ]);
-    // Execution segment: its own work folds, its own answer stays visible.
-    expect(layout.blocks.map((block) => executionSegment.workBlockKeys.has(block.key))).toEqual([
-      false,
-      false,
-      false,
-      true,
-      false,
-    ]);
-  });
-
-  it('keeps one segment for an ordinary turn', () => {
-    const layout = buildAssistantTurnRenderLayout(
-      'assistant-1',
-      [tool('read-1', 'read'), { type: 'text', text: 'Done.' }],
-      true
+  const ingest = (updates: unknown[]): MessageContent[] => {
+    const notifications = parseSessionNotifications(
+      updates.map((update) => ({ sessionId: 'session-1', update }))
     );
+    const history = applyNotificationOnHistory([], notifications);
+    const items = history[0]?.items;
+    return Array.isArray(items) ? (items as MessageContent[]) : [];
+  };
 
-    expect(layout.segments).toHaveLength(1);
-    expect(layout.segments[0]?.blockRange).toEqual([0, 2]);
+  const text = (value: string, messagePhase?: 'commentary' | 'final_answer') => ({
+    sessionUpdate: 'agent_message_chunk',
+    content: { type: 'text', text: value },
+    ...(messagePhase === undefined ? {} : { _meta: { lody: { messagePhase } } }),
   });
 
-  it('does not open an empty trailing segment when the turn ends on the plan card', () => {
-    const layout = buildAssistantTurnRenderLayout(
-      'assistant-1',
-      [
-        { type: 'text', text: '# Plan' },
-        tool('switch-1', 'switch_mode', { title: 'Exited Plan Mode' }),
-      ],
-      true
-    );
-
-    expect(layout.segments.map((segment) => segment.blockRange)).toEqual([[0, 2]]);
+  const toolCall = (id: string) => ({
+    sessionUpdate: 'tool_call',
+    toolCallId: id,
+    title: 'Read src/parser.ts',
+    kind: 'read',
+    status: 'completed',
+    locations: [{ path: 'src/parser.ts' }],
   });
 
-  it('keeps the segment shape while the turn is still streaming, folding nothing', () => {
-    const layout = buildAssistantTurnRenderLayout('assistant-1', planTurnItems, false);
+  describe('assistant text folding across adapter shapes', () => {
+    it('folds earlier prose and keeps the last answer (Claude/Pi/Sorbet deltas)', () => {
+      const items = ingest([text('The bug is in the parser.'), toolCall('call-1'), text('Done.')]);
 
-    expect(layout.segments.map((segment) => segment.blockRange)).toEqual([
-      [0, 3],
-      [3, 5],
-    ]);
-    expect(layout.workBlockKeys.size).toBe(0);
+      expect(visibleTexts(items)).toEqual(['Done.']);
+    });
+
+    it('folds explicit commentary while keeping the answer visible (Codex)', () => {
+      const items = ingest([
+        text('Checking the parser.', 'commentary'),
+        toolCall('call-1'),
+        text('The bug is in the parser.', 'final_answer'),
+      ]);
+
+      expect(visibleTexts(items)).toEqual(['The bug is in the parser.']);
+    });
+
+    it('still folds the tool work of a finished turn', () => {
+      const items = ingest([text('Looking at the parser.'), toolCall('call-1'), text('Fixed.')]);
+      const layout = buildAssistantTurnRenderLayout('message-1', items, true);
+
+      expect(layout.blocks.some((block) => block.kind === 'activity_group')).toBe(true);
+      expect(layout.workBlockKeys.size).toBeGreaterThan(0);
+    });
+  });
+});
+
+describe('assistant-message-render-items', () => {
+  const sessionId = 'session-1' as SessionId;
+
+  const buildAssistantMessage = (items: MessageContent[]): SessionHistoryParsed => ({
+    id: 'assistant-1',
+    role: 'assistant',
+    timestamp: '2026-07-03T00:00:00.000Z',
+    read: true,
+    finished: true,
+    items,
+  });
+
+  describe('buildAssistantMessageRenderItems', () => {
+    it('hides completed retry activities but keeps active retries and compaction results', () => {
+      const items = [
+        {
+          type: 'tool_call',
+          toolCallId: 'retry-active',
+          title: 'Codex retrying',
+          status: 'in_progress',
+          activityKind: 'codex_retry',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'retry-completed',
+          title: 'Codex retrying',
+          status: 'completed',
+          activityKind: 'codex_retry',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'compaction-completed',
+          title: 'Context compacted',
+          status: 'completed',
+          activityKind: 'context_compaction',
+        },
+      ] satisfies MessageContent[];
+
+      expect(
+        buildAssistantMessageRenderItems(items).map((item) =>
+          item.content.type === 'tool_call' ? item.content.toolCallId : item.content.type
+        )
+      ).toEqual(['retry-active', 'compaction-completed']);
+    });
+
+    it('keeps original history indexes for image preview keys after filtering and reordering', () => {
+      const items = [
+        {
+          type: 'subagent_task',
+          taskId: 'task-1',
+          status: 'completed',
+        },
+        {
+          type: 'text',
+          text: 'Rendered answer',
+        },
+        {
+          type: 'proposed_plan',
+          turnId: 'turn-plan',
+          markdown: '- Inspect\n- Fix',
+          status: 'completed',
+          isLatest: true,
+        },
+        {
+          type: 'image_group',
+          images: [
+            {
+              imageId: 'img-agent',
+              mimeType: 'image/png',
+              sizeBytes: 123,
+            },
+          ],
+        },
+      ] satisfies MessageContent[];
+
+      const renderItems = buildAssistantMessageRenderItems(items);
+
+      expect(
+        renderItems.map((item) => ({
+          type: item.content.type,
+          itemIndex: item.itemIndex,
+          displayIndex: item.displayIndex,
+        }))
+      ).toEqual([
+        { type: 'text', itemIndex: 1, displayIndex: 0 },
+        { type: 'proposed_plan', itemIndex: 2, displayIndex: 1 },
+        { type: 'image_group', itemIndex: 3, displayIndex: 2 },
+      ]);
+
+      const imageRenderItem = renderItems.find((item) => item.content.type === 'image_group');
+      expect(imageRenderItem?.content.type).toBe('image_group');
+      if (!imageRenderItem || imageRenderItem.content.type !== 'image_group') {
+        throw new Error('Expected an image_group render item');
+      }
+
+      const galleryEntries = collectSessionImageGalleryEntries(
+        [buildAssistantMessage(items)],
+        sessionId
+      );
+      const renderedEntry = createSessionImageGalleryEntry({
+        sessionId,
+        messageId: 'assistant-1',
+        itemIndex: imageRenderItem.itemIndex,
+        imageIndex: 0,
+        image: imageRenderItem.content.images[0]!,
+      });
+
+      expect(renderedEntry.key).toBe('assistant-1:3:0:img-agent');
+      expect(findSessionImageGalleryEntryIndex(galleryEntries, renderedEntry.key)).toBe(0);
+    });
+    it('sorts agent attachments below the plan, and leaves plan-less turns alone', () => {
+      // A plan runs long; an attachment above it is stranded mid-markdown.
+      const withPlan = [
+        { type: 'text', text: 'Answer' },
+        { type: 'file', fileId: 'f1' },
+        {
+          type: 'proposed_plan',
+          turnId: 't',
+          markdown: '# Plan',
+          status: 'completed',
+          isLatest: true,
+        },
+        { type: 'image_group', images: [{ imageId: 'i1', mimeType: 'image/png', sizeBytes: 1 }] },
+      ] as unknown as MessageContent[];
+
+      expect(buildAssistantMessageRenderItems(withPlan).map((i) => i.content.type)).toEqual([
+        'text',
+        'proposed_plan',
+        'file',
+        'image_group',
+      ]);
+
+      // Files and images stay together rather than straddling the plan.
+      const attachmentsFirst = [
+        { type: 'image_group', images: [{ imageId: 'i1', mimeType: 'image/png', sizeBytes: 1 }] },
+        {
+          type: 'proposed_plan',
+          turnId: 't',
+          markdown: '# Plan',
+          status: 'completed',
+          isLatest: true,
+        },
+        { type: 'file', fileId: 'f1' },
+      ] as unknown as MessageContent[];
+
+      expect(buildAssistantMessageRenderItems(attachmentsFirst).map((i) => i.content.type)).toEqual(
+        ['proposed_plan', 'image_group', 'file']
+      );
+
+      // No plan: the turn's own order is authoritative.
+      const withoutPlan = [
+        { type: 'file', fileId: 'f1' },
+        { type: 'text', text: 'Answer' },
+      ] as unknown as MessageContent[];
+
+      expect(buildAssistantMessageRenderItems(withoutPlan).map((i) => i.content.type)).toEqual([
+        'file',
+        'text',
+      ]);
+    });
   });
 });

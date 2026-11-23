@@ -1,0 +1,2123 @@
+import { readScheduleAuthorization } from '@lody/shared/schedule-authorization';
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
+import { build } from 'esbuild';
+import { createRequire } from 'node:module';
+import { chromium, webkit, type BrowserContext, type Page } from '@playwright/test';
+import { expect, it } from 'vitest';
+import { LoroDoc } from 'loro-crdt';
+import { Result } from 'effect';
+import {
+  decodeE2eeIntentRecord,
+  E2EE_INTENT_KIND,
+  getScheduleRoomId,
+  scheduleDeclarationSubject,
+  type ScheduleRepositoryPort,
+  type WorkspaceId,
+} from '@lody/shared';
+import { Bytes, verifyExecutionIntent } from '@lody/e2ee-core/protocol';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { KEY_DELIVERY_RETRY_DELAYS } from '../src/account-requester';
+
+type Fixture = typeof import('./browser/host-fixture');
+type Surface = typeof globalThis & { HostFixture: Fixture };
+const raw = (page: Page, action: string) =>
+  page.evaluate((a) => (globalThis as Surface).HostFixture.invoke(a), action);
+const call = (page: Page, action: string) =>
+  page.evaluate((a) => (globalThis as Surface).HostFixture.runtimeInvoke(a), action);
+const record = (result: { value?: unknown }) => result.value as Record<string, string>;
+const good = async (page: Page, action: string) => {
+  const result = await call(page, action);
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  return result.value;
+};
+
+it.each(
+  (['chromium', 'webkit'] as const).flatMap((engine) =>
+    (['first', 'saved-snapshot', 'fork', 'rollback'] as const).map((scenario) => ({
+      engine,
+      scenario,
+    }))
+  )
+)(
+  'claim continuity preserves pre-approval evidence: $scenario in $engine',
+  async ({ engine, scenario }) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-claim-continuity-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      const browser = engine === 'chromium' ? chromium : webkit;
+      const launch = () =>
+        browser.launchPersistentContext(join(directory, 'profile'), { headless: true });
+      context = await launch();
+      let page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(async (fixtureScenario) => {
+        localStorage.setItem('empty-local-originals', 'true');
+        if (fixtureScenario !== 'saved-snapshot')
+          localStorage.setItem('qualify-approval-history', 'true');
+        await (globalThis as Surface).HostFixture.boot();
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      }, scenario);
+      expect((await raw(page, 'addMachine')).ok).toBe(true);
+      expect(await good(page, 'observeCheckpoint')).toMatchObject({ length: 2 });
+      if (scenario === 'fork') expect((await raw(page, 'forkBeforeApproval')).ok).toBe(true);
+      await good(page, 'prepare');
+      expect((await raw(page, 'approve')).ok).toBe(true);
+      if (scenario === 'rollback') {
+        await page.evaluate(() => localStorage.setItem('truncate-approval-history', 'true'));
+        expect((await call(page, 'claim')).ok).toBe(false);
+        await page.evaluate(() => localStorage.removeItem('truncate-approval-history'));
+      }
+      await good(page, 'claim');
+      if (scenario === 'fork') {
+        expect((await call(page, 'openObserved')).reason).toBe('history-conflict');
+        return;
+      }
+      if (scenario === 'saved-snapshot') {
+        expect((await call(page, 'openObserved')).reason).toBe('history-conflict');
+        await good(page, 'close');
+        await context.close();
+        context = await launch();
+        page = await context.newPage();
+        await page.goto(pathToFileURL(file).href);
+        await page.evaluate(async () => {
+          localStorage.setItem('qualify-approval-history', 'true');
+          await (globalThis as Surface).HostFixture.boot('open-existing');
+          await (globalThis as Surface).HostFixture.bootRuntime();
+        });
+        await good(page, 'claim');
+      }
+      expect(await good(page, 'openObserved')).toMatchObject({ length: 3 });
+      expect(await good(page, 'ledger')).toMatchObject({ recordPositions: [0, 1, 2] });
+      expect((await call(page, 'wrongCheckpoint')).reason).toBe('history-conflict');
+      await good(page, 'close');
+      await context.close();
+      context = await launch();
+      page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(async () => {
+        localStorage.setItem('synthetic-offline', 'true');
+        await (globalThis as Surface).HostFixture.boot('open-existing');
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      });
+      expect(await good(page, 'openObserved')).toMatchObject({ length: 3 });
+      expect(await good(page, 'ledger')).toMatchObject({ recordPositions: [0, 1, 2] });
+      await good(page, 'close');
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+let controlRouteBundle: Promise<string> | undefined;
+const testRequire = createRequire(import.meta.url);
+function bundleControlRoute() {
+  controlRouteBundle ??= (async () => {
+    const source = fileURLToPath(new URL('../../components/src/', import.meta.url));
+    const ports = fileURLToPath(
+      new URL('../../components/tests/browser/e2ee-control-route-ports.tsx', import.meta.url)
+    );
+    const output = await build({
+      entryPoints: [
+        fileURLToPath(
+          new URL('../../components/tests/browser/e2ee-control-route-fixture.tsx', import.meta.url)
+        ),
+      ],
+      bundle: true,
+      platform: 'browser',
+      format: 'iife',
+      globalName: 'ControlRouteFixture',
+      target: 'safari16.4',
+      write: false,
+      logLevel: 'silent',
+      define: { 'process.env.NODE_ENV': '"test"' },
+      plugins: [
+        {
+          name: 'control-route-test-ports',
+          setup(builder) {
+            // Custody CI installs only this package's dependency closure. Resolve
+            // Bare imports from the UI fixture use this installed closure too.
+            builder.onResolve(
+              { filter: /^react(?:-dom)?(?:\/.*)?$|^effect$|^@lody\/e2ee-core\/protocol$/ },
+              ({ path }) => ({ path: testRequire.resolve(path) })
+            );
+            // Relatively imported lost-access display page and hosted workspace removal.
+            builder.onResolve(
+              {
+                filter:
+                  /^(?:\.\/|(?:\.\.\/)+components\/pages\/)e2ee-(?:lost-access|workspace-removal)$/,
+              },
+              () => ({ path: ports })
+            );
+            builder.onResolve(
+              {
+                filter:
+                  /^@\/|^(?:@tanstack\/react-router|@lody\/platform\/react|jotai|react-i18next)$/,
+              },
+              ({ path }) => ({
+                path:
+                  path === '@/providers/workspace-runtime-retirements' ||
+                  path === '@/lib/e2ee-ledger-history'
+                    ? source + path.slice(2) + '.ts'
+                    : ports,
+              })
+            );
+          },
+        },
+      ],
+    });
+    return output.outputFiles[0].text;
+  })();
+  return controlRouteBundle;
+}
+
+for (const engine of ['chromium', 'webkit'] as const) {
+  it.each(['describe', 'history'] as const)(
+    `control route reopens after confirmed close before stale %s in ${engine}`,
+    async (paused) => {
+      const directory = await mkdtemp(join(tmpdir(), 'lody-control-reader-'));
+      let context: BrowserContext | undefined;
+      try {
+        const file = join(directory, 'index.html');
+        await writeFile(
+          file,
+          '<!doctype html><script>' +
+            (await bundleControlRoute()).replaceAll('</script', '<\\/script') +
+            '</script>'
+        );
+        context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+          join(directory, 'profile'),
+          { headless: true }
+        );
+        const page = await context.newPage();
+        const startupErrors: string[] = [];
+        page.on('pageerror', (error) => startupErrors.push(error.message));
+        await page.goto(pathToFileURL(file).href);
+        expect(startupErrors).toEqual([]);
+        const result = await page.evaluate(
+          (phase) =>
+            (
+              globalThis as typeof globalThis & {
+                ControlRouteFixture: {
+                  reopen: (phase: 'describe' | 'history') => Promise<{
+                    localView: { view?: string | null };
+                    confirmedClose: { readers: string[] };
+                    beforeNetwork: {
+                      view?: string | null;
+                      readers: string[];
+                      publicReleased: boolean;
+                    };
+                    afterNetwork: unknown;
+                  }>;
+                };
+              }
+            ).ControlRouteFixture.reopen(phase),
+          paused
+        );
+        expect(result.localView.view).toBe('1');
+        expect(result.confirmedClose.readers).toEqual([]);
+        expect(result.beforeNetwork.publicReleased).toBe(false);
+        expect(result.beforeNetwork.view).toBe('1');
+        expect(result.beforeNetwork.readers).toHaveLength(1);
+        expect(result.afterNetwork).toEqual({ ...result.beforeNetwork, publicReleased: true });
+      } finally {
+        await context?.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+}
+
+it.each(['chromium', 'webkit'] as const)(
+  'shared platform runtime consumes real personal custody and approved key workflows in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-personal-runtime-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        metafile: true,
+        logLevel: 'silent',
+      });
+      expect(Object.values(output.metafile!.outputs).flatMap((o) => o.imports)).toEqual([]);
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      const browser = engine === 'chromium' ? chromium : webkit;
+      context = await browser.launchPersistentContext(join(directory, 'profile'), {
+        headless: true,
+      });
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(async () => {
+        await (globalThis as Surface).HostFixture.boot();
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      });
+      expect((await call(page, 'open')).reason).toBe('identity-lost');
+      expect(await good(page, 'accountRequester')).toBeNull();
+      expect((await raw(page, 'currentPhase')).value).toBeUndefined();
+      expect((await call(page, 'wrongAccount')).reason).toBe('scope-mismatch');
+      expect((await call(page, 'wrongWorkspace')).reason).toBe('scope-mismatch');
+      await good(page, 'prepare');
+      expect((await call(page, 'open')).reason).toBe('approval-required');
+      expect((await raw(page, 'events')).value).toEqual([]);
+      expect((await raw(page, 'approve')).ok).toBe(true);
+      expect(await good(page, 'claim')).toMatchObject({ ready: true, status: 'approved' });
+      expect((await call(page, 'wrongCheckpoint')).reason).toBe('history-conflict');
+      expect(await good(page, 'open')).toMatchObject({
+        deviceKind: 'personal',
+        hasCurrentKey: false,
+        writeEpoch: null,
+      });
+      expect((await call(page, 'grant')).reason).toBe('keys-unavailable');
+      expect((await call(page, 'seal')).ok).toBe(false);
+      expect((await call(page, 'keyFailure')).ok).toBe(false);
+      expect(await good(page, 'ledger')).toMatchObject({
+        recordsHex: expect.any(Array),
+        recordPositions: expect.any(Array),
+      });
+      expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true, writeEpoch: 0 });
+      expect(await good(page, 'capabilities')).toEqual({
+        iroh: true,
+        rpc: true,
+        sharing: false,
+        manager: true,
+        personalManager: false,
+      });
+      expect(await good(page, 'grant')).toMatchObject({
+        bucketId: 'protected-fixture',
+        attachmentToken: 'synthetic-attachment-only',
+      });
+      expect(await good(page, 'rpcGrant')).toMatchObject({
+        token: 'synthetic-short-lived-content',
+      });
+      expect((await call(page, 'badGrant')).reason).toBe('invalid-input');
+      await good(page, 'sealMutable');
+      expect(await good(page, 'openBody')).toEqual([72, 105]);
+      expect(await good(page, 'management')).toMatchObject({
+        mayRotate: true,
+        devices: expect.any(Array),
+      });
+      const beforeRole = await good(page, 'ledger');
+      expect((await call(page, 'forbiddenRole')).ok).toBe(false);
+      // Ownership moves only to an existing member; nothing is signed or appended otherwise.
+      expect((await call(page, 'forbiddenTransfer')).ok).toBe(false);
+      expect(await good(page, 'ledger')).toEqual(beforeRole);
+      expect((await raw(page, 'addMachine')).ok).toBe(true);
+      await good(page, 'refresh');
+      const rpc = await good(page, 'rpc');
+      expect(await good(page, 'rpc')).toEqual(rpc);
+      // Native iroh port: no connection yet, so this request uses Streams and a
+      // background dial starts; the next request uses iroh.
+      expect(await good(page, 'irohPath')).toBe('none');
+      // A passive query must not open the endpoint or start a dial.
+      const passiveEvidence = (await good(page, 'irohEvidence')) as { opener?: unknown };
+      expect(passiveEvidence.opener).toBeUndefined();
+      expect(await good(page, 'irohReady')).toBe(false);
+      expect(await good(page, 'irohReady')).toBe(true);
+      expect(await good(page, 'irohPath')).toBe('direct');
+      expect(await good(page, 'irohCall')).toEqual(['cd'.repeat(150)]);
+      const iroh = (await good(page, 'irohEvidence')) as {
+        opener: string;
+        device: string;
+        seedWiped: boolean;
+        targets: string[];
+        machine: string;
+      };
+      // The endpoint key is this device's ledger key; the dialed target is the
+      // ledger-admitted machine device, resolved from the verified ledger.
+      expect(iroh.opener).toBe(iroh.device);
+      expect(iroh.seedWiped).toBe(true);
+      expect(iroh.targets).toEqual([iroh.machine]);
+      await savesSignedSchedule(page);
+      expect((await raw(page, 'rotateRemote')).ok).toBe(true);
+      // Another device's frame at an epoch this device's verified ledger does not hold
+      // yet (Streams ahead of the ledger feed) is retryable lag within the bounded
+      // lookahead; a forged far-future epoch keeps its original failure. Once the
+      // ledger holds the epoch, the read stays retryable until the key arrives.
+      expect(await good(page, 'sealRemoteRotated')).toEqual({ epoch: 1 });
+      expect((await call(page, 'openRemote')).reason).toBe('key-pending');
+      const farFuture = await call(page, 'openRemoteFarFuture');
+      expect(farFuture.ok).toBe(false);
+      expect(farFuture.reason).not.toBe('key-pending');
+      expect(await good(page, 'refresh')).toMatchObject({
+        epoch: 1,
+        hasCurrentKey: false,
+        writeEpoch: 0,
+      });
+      expect((await call(page, 'openRemote')).reason).toBe('key-pending');
+      expect((await raw(page, 'graceLastMillisecond')).ok).toBe(true);
+      expect(await good(page, 'sealOldHint')).toEqual({ epoch: 0 });
+      expect((await raw(page, 'graceExpired')).ok).toBe(true);
+      expect((await call(page, 'seal')).reason).toBe('key-update-required');
+      expect(await good(page, 'openBody')).toEqual([72, 105]);
+      expect((await raw(page, 'stageCurrent')).ok).toBe(true);
+      // The shared reader's reception round installs the key; the pending read succeeds.
+      expect(await good(page, 'receiveOnly')).toMatchObject({ hasCurrentKey: true, writeEpoch: 1 });
+      expect(await good(page, 'openRemote')).toEqual([72, 105]);
+      expect(await good(page, 'sealOldHint')).toEqual({ epoch: 1 });
+      expect(await good(page, 'openBody')).toEqual([72, 105]);
+      // Team management on the portable runtime: invite, list, admit exactly the shown
+      // applicant, never twice, and never one the relay swapped after the preview.
+      expect(await good(page, 'memberInvite')).toBe('link');
+      const applicant = await good(page, 'memberApplicant');
+      expect((await call(page, 'memberApprove')).ok).toBe(false);
+      const second = await good(page, 'memberSecondApplicant');
+      expect(await good(page, 'memberList')).toEqual([applicant, second]);
+      expect((await call(page, 'memberAutomatic')).ok).toBe(false);
+      // Asked for the first request, the relay answers with the second listed package:
+      // approving the first never admits the second.
+      await good(page, 'memberReadSecondAsFirst');
+      expect((await call(page, 'memberApprove')).ok).toBe(false);
+      expect(await good(page, 'memberSecondAdmitted')).toBe(false);
+      await good(page, 'memberReadHonest');
+      await good(page, 'memberSwap');
+      expect(await good(page, 'memberList')).toEqual([second]);
+      expect((await call(page, 'memberApprove')).ok).toBe(false);
+      expect(await good(page, 'memberAdmitted')).toBe(false);
+      await good(page, 'memberRestore');
+      const beforeAdmission = (await good(page, 'memberRecordCount')) as number;
+      // The admission lands but its reply and the read-back are both lost; once online, the
+      // retry settles the same original instead of staying pending or signing again.
+      await good(page, 'memberLoseReply');
+      expect((await call(page, 'memberApprove')).ok).toBe(false);
+      await good(page, 'memberOnline');
+      expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true, keyPending: true });
+      expect(await good(page, 'memberAdmitted')).toBe(true);
+      // The journal is settled, so later management is not left blocked behind it.
+      expect(await good(page, 'management')).toMatchObject({ updatePending: false });
+      expect(await good(page, 'memberRecordCount')).toBe(beforeAdmission + 1);
+      expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true });
+      expect(await good(page, 'memberRecordCount')).toBe(beforeAdmission + 1);
+      expect(await good(page, 'memberSecondAdmitted')).toBe(false);
+      // Unattended admission requires an email invitation this device verifies against its
+      // own ledger; a relay-written `source: 'email'` label grants nothing.
+      expect(await good(page, 'memberEmailInvite')).toBe('email');
+      // Inviting the same email again re-sends the pending invitation; that is not a conflict.
+      expect(await good(page, 'memberEmailReinvite')).toBe(
+        await good(page, 'memberInvitationToken')
+      );
+      const emailApplicant = await good(page, 'memberEmailApplicant');
+      expect(await good(page, 'memberList')).toContain(emailApplicant);
+      const beforeEmail = (await good(page, 'memberRecordCount')) as number;
+      // A relay-signed offer verifies under the relay's own key, which the ledger never
+      // admitted; an altered offer fails its genuine endorser's signature.
+      for (const [forged, reason] of [
+        ['memberRelaySignedInvitation', 'invitation-endorser-ineligible'],
+        ['memberAlteredInvitation', 'invitation-invalid'],
+      ] as const) {
+        await good(page, forged);
+        expect((await call(page, 'memberAutomatic')).reason).toBe(reason);
+      }
+      expect(await good(page, 'memberRecordCount')).toBe(beforeEmail);
+      await good(page, 'memberGenuineInvitation');
+      expect(await good(page, 'memberAutomatic')).toMatchObject({ admitted: true });
+      expect(await good(page, 'memberRecordCount')).toBe(beforeEmail + 1);
+      // The invitation admits one membership: a second device presenting it is told so.
+      expect(await good(page, 'memberReplayInvitation')).toBe(emailApplicant);
+      expect((await call(page, 'memberAutomatic')).reason).toBe('invitation-used');
+      expect(await good(page, 'memberRecordCount')).toBe(beforeEmail + 1);
+      // A key delivery's approval sessions never leak a reader: the last release
+      // closes the workspace the approval opened.
+      expect(await good(page, 'approvalRelease')).toEqual({
+        held: true,
+        afterOne: true,
+        afterAll: false,
+      });
+      await good(page, 'close');
+      await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
+      await good(page, 'open');
+      // Closing while the first native open is in flight waits for it, and the late
+      // endpoint is still closed instead of keeping the device key's endpoint alive.
+      expect(await good(page, 'irohCloseDuringOpen')).toEqual({
+        beforeRelease: { closeSettled: false, closed: 0 },
+        closed: 1,
+      });
+      await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime(true));
+      await good(page, 'open');
+      expect(await good(page, 'capabilities')).toMatchObject({ sharing: true });
+      expect(await good(page, 'sharingRead')).toMatchObject({
+        sharedWithTeam: false,
+        projects: [],
+      });
+      expect(await good(page, 'sharingWrite')).toMatchObject({ status: 'saved' });
+      expect(await good(page, 'sharingRead')).toMatchObject({
+        sharedWithTeam: true,
+        projects: ['fixture-project'],
+      });
+      await good(page, 'closeWrongOwner');
+      expect((await call(page, 'status')).ok).toBe(true);
+      await good(page, 'startGrant');
+      await good(page, 'switchAccount');
+      expect(await good(page, 'releaseGrant')).toEqual({ ok: false, reason: 'scope-mismatch' });
+      expect((await call(page, 'accountRequester')).reason).toBe('closed');
+      expect((await call(page, 'seal')).reason).toBe('closed');
+      // After an account switch a delivery retry gets no approval session.
+      expect((await call(page, 'approvalSession')).ok).toBe(false);
+      await good(page, 'restoreAccount');
+      await good(page, 'close');
+      expect((await call(page, 'open')).reason).toBe('closed');
+      await page.evaluate(() => (globalThis as Surface).HostFixture.bootRuntime());
+      expect(await good(page, 'open')).toMatchObject({ writeEpoch: 1 });
+      expect((await raw(page, 'revoke')).ok).toBe(true);
+      expect((await call(page, 'refresh')).reason).toBe('e2ee_device_revoked');
+      expect((await call(page, 'seal')).reason).toBe('e2ee_device_revoked');
+      expect((await call(page, 'grant')).reason).toBe('e2ee_device_revoked');
+      expect(
+        ((await good(page, 'ledger')) as { status: { length: number } }).status.length
+      ).toBeGreaterThan(2);
+      await good(page, 'close');
+      await page.evaluate(() => (globalThis as Surface).HostFixture.stop());
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+/** An admitted, key-holding owner device with an open runtime, in Chromium. */
+async function openedOwnerRuntime(directory: string) {
+  const output = await build({
+    entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    globalName: 'HostFixture',
+    target: 'safari16.4',
+    write: false,
+    logLevel: 'silent',
+  });
+  const file = join(directory, 'index.html');
+  await writeFile(
+    file,
+    '<!doctype html><script>' +
+      output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+      '</script>'
+  );
+  const context = await chromium.launchPersistentContext(join(directory, 'profile'), {
+    headless: true,
+  });
+  const page = await context.newPage();
+  await page.goto(pathToFileURL(file).href);
+  await page.evaluate(async () => {
+    await (globalThis as Surface).HostFixture.boot();
+    await (globalThis as Surface).HostFixture.bootRuntime();
+  });
+  await good(page, 'prepare');
+  expect((await raw(page, 'approve')).ok).toBe(true);
+  expect(await good(page, 'claim')).toMatchObject({ ready: true });
+  await good(page, 'open');
+  expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true });
+  expect(await good(page, 'memberInvite')).toBe('link');
+  return { context, page };
+}
+/** An admitted, key-holding owner device whose runtime has just approved one applicant
+ * while the mailbox refuses every envelope. */
+async function approvedWhileMailboxRefuses(directory: string, hold: boolean) {
+  const { context, page } = await openedOwnerRuntime(directory);
+  const requestId = await good(page, 'memberApplicant');
+  // Approval signs only a package this session listed.
+  expect(await good(page, 'memberList')).toEqual([requestId]);
+  if (hold) await good(page, 'memberHoldRetry');
+  await good(page, 'memberRefuseKeys');
+  expect(await good(page, 'memberApprove')).toMatchObject({
+    admitted: true,
+    keyPending: true,
+    keyDelivery: 'delivering',
+  });
+  return { context, page, requestId };
+}
+type Deliveries = {
+  items: { requestId: string; state: string; code?: string }[];
+  sleeps: number[];
+  envelopes: boolean[];
+  storedSinceAccept: number;
+};
+
+// Core lets only the owner remove a member and publish the next epoch in one record. An
+// administrator removes the member plainly, which marks the epoch for rotation, and may
+// then publish that update; the owner's single-record removal is unchanged.
+it('an owner removes with the key update and an administrator removes plainly, then updates keys', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-removal-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await openedOwnerRuntime(directory);
+    context = opened.context;
+    const page = opened.page;
+    const admit = async (applicant: string) => {
+      const requestId = (await good(page, applicant)) as string;
+      await good(page, 'memberList');
+      expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true });
+      // The admitted membership id is the join request id.
+      return requestId;
+    };
+    const successor = await admit('memberApplicant');
+    const second = await admit('memberNextApplicant');
+    const third = await admit('memberThirdApplicant');
+    const start = (await good(page, 'refresh')) as { epoch: number; membershipId: string };
+    await good(page, `memberRemove:${third}`);
+    expect(await good(page, 'memberRoles')).not.toHaveProperty(third);
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: start.epoch + 1,
+      rotationRequired: false,
+      memberRole: 'owner',
+    });
+    await good(page, 'ownerTransfersToFirstMember');
+    expect(await good(page, 'refresh')).toMatchObject({ memberRole: 'admin' });
+    expect(await good(page, 'memberRoles')).toMatchObject({
+      [successor]: 'owner',
+      [start.membershipId]: 'admin',
+      [second]: 'member',
+    });
+    await good(page, `memberRemove:${second}`);
+    expect(await good(page, 'memberRoles')).not.toHaveProperty(second);
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: start.epoch + 1,
+      rotationRequired: true,
+    });
+    await good(page, 'updateKeys');
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: start.epoch + 2,
+      rotationRequired: false,
+    });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// The approval's first key round ends with the applicant's slot still NeedsEnvelope. The
+// runtime retries on its own after the injected backoff, without the approver pressing
+// retry, and the applicant's envelope is stored.
+// Another device's rotation wins this device's key-update CAS: acknowledging the lost
+// candidate first deletes its staged envelope group, now proven obsolete.
+it('a key update that loses its epoch to another rotation deletes its staged envelope group', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-rotation-conflict-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await openedOwnerRuntime(directory);
+    context = opened.context;
+    const page = opened.page;
+    expect((await raw(page, 'addMachine')).ok).toBe(true);
+    await good(page, 'refresh');
+    await good(page, 'revokeMachine');
+    expect(await good(page, 'refresh')).toMatchObject({ epoch: 0, rotationRequired: true });
+    expect((await raw(page, 'raceNextRotation')).ok).toBe(true);
+    // The candidate settles as Conflict; its group goes before the acknowledgement.
+    expect((await call(page, 'updateKeys')).reason).toBe('conflict');
+    const { staged, deleted } = (await raw(page, 'stagingDeletes')).value as {
+      staged: string[];
+      deleted: { recordHash: string; occupiedEpoch: number }[];
+    };
+    expect(staged).toHaveLength(1);
+    expect(deleted).toEqual([{ recordHash: staged[0], occupiedEpoch: 1 }]);
+    // The acknowledged conflict no longer blocks key updates at the winning epoch.
+    expect(await good(page, 'refresh')).toMatchObject({ epoch: 1, rotationRequired: false });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('multi-epoch updateKeys skips historical key unwraps and redundant feed/log round-trips while keeping historical decrypts usable', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-update-keys-perf-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await openedOwnerRuntime(directory);
+    context = opened.context;
+    const page = opened.page;
+    expect(await good(page, 'seal')).toEqual({ epoch: 0 });
+    expect(await good(page, 'openBody')).toEqual([72, 105]);
+
+    // Advance from epoch 0 to epoch 2 so historical epochs 0 and 1 exist.
+    for (const expectedEpoch of [1, 2]) {
+      expect((await raw(page, 'addFreshMachine')).ok).toBe(true);
+      await good(page, 'refresh');
+      await good(page, 'revokeMachine');
+      await good(page, 'updateKeys');
+      expect(await good(page, 'refresh')).toMatchObject({
+        epoch: expectedEpoch,
+        rotationRequired: false,
+        hasCurrentKey: true,
+      });
+    }
+
+    // Prepare epoch 2 -> 3 rotation with current key already installed, then measure updateKeys.
+    expect((await raw(page, 'addFreshMachine')).ok).toBe(true);
+    await good(page, 'refresh');
+    await good(page, 'revokeMachine');
+    await good(page, 'resetTelemetry');
+    await good(page, 'updateKeys');
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: 3,
+      rotationRequired: false,
+      hasCurrentKey: true,
+    });
+    const metrics = (await good(page, 'telemetry')) as {
+      feedReadAfterCalls: number;
+      logReadFromCalls: number;
+      logReadCalls: number;
+      installedLoadEpochs: number[];
+    };
+    expect(metrics.logReadCalls).toBe(0);
+    expect(metrics.logReadFromCalls).toBeLessThanOrEqual(1);
+    expect(metrics.feedReadAfterCalls).toBeLessThanOrEqual(3);
+    expect(metrics.installedLoadEpochs.every((epoch) => epoch >= 2)).toBe(true);
+
+    // Historical decryption at epoch 0 still works on demand after skipping history during updateKeys.
+    expect(await good(page, 'openBody')).toEqual([72, 105]);
+
+    // Concurrent updateKeys + refresh serialize cleanly under the single session permit.
+    expect((await raw(page, 'addFreshMachine')).ok).toBe(true);
+    await good(page, 'refresh');
+    await good(page, 'revokeMachine');
+    await good(page, 'concurrentUpdateAndRefresh');
+    expect(await good(page, 'refresh')).toMatchObject({
+      epoch: 4,
+      rotationRequired: false,
+      hasCurrentKey: true,
+    });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('a member key delivery that fails its first round is retried and delivered without user action', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-retry-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, false);
+    context = opened.context;
+    await expect
+      .poll(async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items, {
+        timeout: 30_000,
+      })
+      .toEqual([{ requestId: opened.requestId, state: 'delivered' }]);
+    const settled = (await good(opened.page, 'memberDeliveries')) as Deliveries;
+    // One bounded backoff, the schedule's short first step, then the stored envelope.
+    expect(settled.sleeps).toEqual([KEY_DELIVERY_RETRY_DELAYS[0]]);
+    expect(settled.envelopes[0]).toBe(false);
+    expect(settled.envelopes.at(-1)).toBe(true);
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// Not only the approval page delivers: the undelivered task is durable in the core
+// distribution journal, so any later key round on this device sends it, here an
+// ordinary key-installing refresh while the approval's own retry never fires.
+it('a later key round on the approving device delivers to a member its approval did not reach', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-round-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    // The approval's own round has ended with the applicant's slot still empty.
+    await expect
+      .poll(
+        async () => ((await good(opened.page, 'memberDeliveries')) as Deliveries).items[0]?.code,
+        { timeout: 30_000 }
+      )
+      .toBe('e2ee_key_not_sent');
+    expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).envelopes).not.toContain(
+      true
+    );
+    await good(opened.page, 'memberAcceptKeys');
+    await good(opened.page, 'receive');
+    expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).envelopes.at(-1)).toBe(
+      true
+    );
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.each(['chromium', 'webkit'] as const)(
+  'a failed approval-reader close keeps the release retryable in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-approval-release-'));
+    let context: BrowserContext | undefined;
+    type Paused = Surface & { nativeBorrow: { entered: Promise<void>; release(): void } };
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      // Hold one native key operation so the reader's close cannot drain in budget.
+      await page.evaluate(() => {
+        const native = SubtleCrypto.prototype.encrypt;
+        let release!: () => void,
+          enter!: () => void,
+          held = false;
+        const entered = new Promise<void>((resolve) => (enter = resolve));
+        const released = new Promise<void>((resolve) => (release = resolve));
+        SubtleCrypto.prototype.encrypt = async function (algorithm, key, data) {
+          const aad = (algorithm as AesGcmParams).additionalData;
+          if (!held && aad && new TextDecoder().decode(aad).includes('installed-epoch-key')) {
+            held = true;
+            enter();
+            await released;
+          }
+          return native.call(this, algorithm, key, data);
+        };
+        (globalThis as Paused).nativeBorrow = { entered, release };
+      });
+      await page.evaluate(async () => {
+        await (globalThis as Surface).HostFixture.boot('create-or-open', true);
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      });
+      await good(page, 'prepare');
+      expect((await raw(page, 'approve')).ok).toBe(true);
+      await good(page, 'claim');
+      try {
+        // Only the approval holds the workspace.
+        await good(page, 'approvalHold');
+        await good(page, 'startReceive');
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.entered);
+        await good(page, 'startApprovalRelease');
+        expect((await raw(page, 'waitCloseBudget')).ok).toBe(true);
+        expect((await raw(page, 'advanceCloseBudget')).ok).toBe(true);
+        expect(await good(page, 'approvalReleaseResult')).toEqual({
+          state: 'failed',
+          code: 'close-incomplete',
+        });
+        // Not silently done: the workspace still has an unfinished close.
+        expect((await call(page, 'open')).reason).toBe('close-incomplete');
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.release());
+        await call(page, 'workResult');
+        // The same holder releases again; this time the close completes.
+        await good(page, 'startApprovalRelease');
+        expect(await good(page, 'approvalReleaseResult')).toEqual({ state: 'released' });
+        expect(await good(page, 'open')).toMatchObject({ deviceKind: 'personal' });
+      } finally {
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.release());
+        await raw(page, 'expireCloseWaiters');
+        await call(page, 'close');
+      }
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
+  'runtime close retains native ownership and refuses a successor until actual drain in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-runtime-close-'));
+    let context: BrowserContext | undefined;
+    type Paused = Surface & {
+      nativeBorrow: {
+        entered: Promise<void>;
+        release(): void;
+        inspect(): { allZero: boolean; length: number };
+      };
+    };
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(() => {
+        const native = SubtleCrypto.prototype.encrypt;
+        let release!: () => void, enter!: () => void, held: Uint8Array | undefined;
+        const entered = new Promise<void>((resolve) => {
+          enter = resolve;
+        });
+        const released = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        SubtleCrypto.prototype.encrypt = async function (algorithm, key, data) {
+          const aad = (algorithm as AesGcmParams).additionalData;
+          if (!held && aad && new TextDecoder().decode(aad).includes('installed-epoch-key')) {
+            held =
+              data instanceof ArrayBuffer
+                ? new Uint8Array(data)
+                : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+            enter();
+            await released;
+          }
+          return native.call(this, algorithm, key, data);
+        };
+        (globalThis as Paused).nativeBorrow = {
+          entered,
+          release,
+          inspect() {
+            if (!held) throw Error('no native borrow');
+            return { length: held.length, allZero: held.every((b) => b === 0) };
+          },
+        };
+      });
+      await page.evaluate(async () => {
+        await (globalThis as Surface).HostFixture.boot('create-or-open', true);
+        await (globalThis as Surface).HostFixture.bootRuntime();
+      });
+      await good(page, 'prepare');
+      expect((await raw(page, 'approve')).ok).toBe(true);
+      await good(page, 'claim');
+      await good(page, 'open');
+      expect((await raw(page, 'open')).ok).toBe(true);
+
+      try {
+        await good(page, 'startReceive');
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.entered);
+        await good(page, 'startClose');
+        await good(page, 'startClose');
+        expect((await raw(page, 'waitCloseBudget')).ok).toBe(true);
+        expect((await raw(page, 'advanceCloseBudget')).ok).toBe(true);
+        expect(await good(page, 'closeResults')).toEqual({
+          outcomes: [
+            { state: 'failed', code: 'close-incomplete' },
+            { state: 'failed', code: 'close-incomplete' },
+          ],
+          shared: true,
+        });
+        expect(await good(page, 'compoundCloseFailure')).toBe(true);
+        expect((await call(page, 'open')).reason).toBe('close-incomplete');
+        expect((await call(page, 'status')).reason).toBe('closed');
+        expect((await raw(page, 'ledger')).ok).toBe(true);
+        expect(
+          await page.evaluate(() => (globalThis as Paused).nativeBorrow.inspect())
+        ).toMatchObject({ allZero: false });
+        expect(
+          await page.evaluate(async () => {
+            const name = (await navigator.locks.query()).held![0]!.name!;
+            return navigator.locks.request(name, { ifAvailable: true }, (lock) => lock === null);
+          })
+        ).toBe(true);
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.release());
+        expect(await good(page, 'workResult')).toMatchObject({ ok: false });
+        await good(page, 'close');
+        expect(
+          await page.evaluate(() => (globalThis as Paused).nativeBorrow.inspect())
+        ).toMatchObject({ allZero: true });
+        expect(await page.evaluate(async () => (await navigator.locks.query()).held!.length)).toBe(
+          0
+        );
+        expect(await good(page, 'open')).toMatchObject({ deviceKind: 'personal' });
+        await good(page, 'close');
+      } finally {
+        await page.evaluate(() => (globalThis as Paused).nativeBorrow.release());
+        await raw(page, 'expireCloseWaiters');
+        await call(page, 'workResult');
+        await call(page, 'close');
+        await page.evaluate(() => (globalThis as Surface).HostFixture.stop());
+      }
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
+  'preallocated cold-open retirement preserves its native plaintext and isolates another pending reader in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-runtime-cold-close-'));
+    let context: BrowserContext | undefined;
+    type Cold = Surface & {
+      pendingUnwrap: { enable(): void; entered: Promise<void>; release(): void; zero(): boolean };
+    };
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      for (const kind of ['other-pending', 'own-pending'] as const) {
+        context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+          join(directory, kind),
+          { headless: true }
+        );
+        const page = await context.newPage();
+        await page.goto(pathToFileURL(file).href);
+        await page.evaluate(() => {
+          const native = SubtleCrypto.prototype.decrypt;
+          let enabled = false,
+            held: Uint8Array | undefined,
+            enter!: () => void,
+            release!: () => void;
+          const entered = new Promise<void>((resolve) => {
+              enter = resolve;
+            }),
+            released = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          SubtleCrypto.prototype.decrypt = async function (algorithm, key, data) {
+            const result = await native.call(this, algorithm, key, data),
+              aad = (algorithm as AesGcmParams).additionalData;
+            if (
+              enabled &&
+              !held &&
+              aad &&
+              new TextDecoder().decode(aad).includes('signing-private-key')
+            ) {
+              held = new Uint8Array(result);
+              enter();
+              await released;
+            }
+            return result;
+          };
+          (globalThis as Cold).pendingUnwrap = {
+            enable() {
+              enabled = true;
+            },
+            entered,
+            release,
+            zero() {
+              if (!held) throw Error('no native plaintext');
+              return held.every((b) => b === 0);
+            },
+          };
+        });
+        await page.evaluate(async () => {
+          await (globalThis as Surface).HostFixture.boot('create-or-open', true);
+          await (globalThis as Surface).HostFixture.bootRuntime();
+        });
+        await good(page, 'prepare');
+        expect((await raw(page, 'approve')).ok).toBe(true);
+        await good(page, 'claim');
+        await page.evaluate(() => (globalThis as Cold).pendingUnwrap.enable());
+        try {
+          await good(page, 'startOpen');
+          await page.evaluate(() => (globalThis as Cold).pendingUnwrap.entered);
+          expect(await page.evaluate(() => (globalThis as Cold).pendingUnwrap.zero())).toBe(false);
+          if (kind === 'other-pending') {
+            await good(page, 'startOtherOpen');
+            await good(page, 'closeOtherPending');
+            await page.evaluate(() => (globalThis as Cold).pendingUnwrap.release());
+            expect(await good(page, 'openResults')).toMatchObject({
+              primary: { ok: true },
+              other: { ok: false, reason: 'closed' },
+            });
+            expect(await good(page, 'status')).toMatchObject({ deviceKind: 'personal' });
+          } else {
+            await good(page, 'startClose');
+            await good(page, 'startClose');
+            expect((await raw(page, 'waitCloseBudget')).ok).toBe(true);
+            expect((await raw(page, 'advanceCloseBudget')).ok).toBe(true);
+            expect(await good(page, 'closeResults')).toEqual({
+              outcomes: [
+                { state: 'failed', code: 'close-incomplete' },
+                { state: 'failed', code: 'close-incomplete' },
+              ],
+              shared: true,
+            });
+            expect((await call(page, 'open')).reason).toBe('closed');
+            expect(await page.evaluate(() => (globalThis as Cold).pendingUnwrap.zero())).toBe(
+              false
+            );
+            expect((await raw(page, 'currentPhase')).value).toBe('ready');
+            await page.evaluate(() => (globalThis as Cold).pendingUnwrap.release());
+            expect(await good(page, 'openResults')).toMatchObject({
+              primary: { ok: false, reason: 'closed' },
+            });
+          }
+          await good(page, 'close');
+          expect(await page.evaluate(() => (globalThis as Cold).pendingUnwrap.zero())).toBe(true);
+        } finally {
+          await page.evaluate(() => (globalThis as Cold).pendingUnwrap.release());
+          await raw(page, 'expireCloseWaiters');
+          await call(page, 'openResults');
+          await call(page, 'close');
+          await page.evaluate(() => (globalThis as Surface).HostFixture.stop());
+        }
+        await context.close();
+        context = undefined;
+      }
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+type ExecutorSurface = typeof globalThis & {
+  HostFixture: typeof import('./browser/host-fixture');
+  unwrapPause: { enable(): void; entered: Promise<void>; release(): void; zero(): boolean };
+};
+it.each(['chromium', 'webkit'] as const)(
+  'owns input capture before executor entry and through actual native settlement in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-executor-ownership-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(() => {
+        const native = SubtleCrypto.prototype.decrypt;
+        let enabled = false,
+          held: Uint8Array | undefined,
+          enter!: () => void,
+          release!: () => void;
+        const entered = new Promise<void>((resolve) => {
+            enter = resolve;
+          }),
+          released = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        SubtleCrypto.prototype.decrypt = async function (algorithm, key, data) {
+          const result = await native.call(this, algorithm, key, data),
+            aad = (algorithm as AesGcmParams).additionalData;
+          if (
+            enabled &&
+            !held &&
+            aad &&
+            new TextDecoder().decode(aad).includes('installed-epoch-key')
+          ) {
+            held = new Uint8Array(result);
+            enter();
+            await released;
+          }
+          return result;
+        };
+        (globalThis as ExecutorSurface).unwrapPause = {
+          enable() {
+            enabled = true;
+          },
+          entered,
+          release,
+          zero() {
+            if (!held) throw Error('no native buffer');
+            return held.every((byte) => byte === 0);
+          },
+        };
+      });
+      await page.evaluate(async () => {
+        await (globalThis as ExecutorSurface).HostFixture.boot();
+        await (globalThis as ExecutorSurface).HostFixture.bootRuntime();
+      });
+      try {
+        for (const action of ['prepare', 'claim', 'open', 'receive']) {
+          if (action === 'claim')
+            expect(
+              (
+                await page.evaluate(() =>
+                  (globalThis as ExecutorSurface).HostFixture.invoke('approve')
+                )
+              ).ok
+            ).toBe(true);
+          expect(
+            (
+              await page.evaluate(
+                (command) => (globalThis as ExecutorSurface).HostFixture.runtimeInvoke(command),
+                action
+              )
+            ).ok,
+            action
+          ).toBe(true);
+        }
+        for (const mode of ['disposed', 'layer-failed', 'reject', 'late'] as const) {
+          const result = await page.evaluate(
+            (executorCase) =>
+              (globalThis as ExecutorSurface).HostFixture.rejectedExecutorCopy(executorCase),
+            mode
+          );
+          expect(result, mode).toMatchObject({
+            rejected: true,
+            copies: 1,
+            zero: true,
+            callerIntact: true,
+          });
+          if (mode === 'late') expect(result.lateRejected).toBe(true);
+        }
+        await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.enable());
+        await page.evaluate(() =>
+          (globalThis as ExecutorSurface).HostFixture.startExecutorOwnedSeal()
+        );
+        await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.entered);
+        expect(
+          await page.evaluate(() =>
+            (globalThis as ExecutorSurface).HostFixture.inspectExecutorOwnedSeal()
+          )
+        ).toMatchObject({ copies: 1, zero: false, callerIntact: true });
+        expect(await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.zero())).toBe(
+          false
+        );
+        await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.release());
+        expect(
+          await page.evaluate(() =>
+            (globalThis as ExecutorSurface).HostFixture.settleExecutorOwnedSeal()
+          )
+        ).toMatchObject({ copies: 1, zero: true, callerIntact: true });
+        expect(await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.zero())).toBe(
+          true
+        );
+      } finally {
+        await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.release());
+        await page.evaluate(() => (globalThis as ExecutorSurface).HostFixture.stop());
+      }
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+type RetirementSurface = typeof globalThis & {
+  RetirementFixture: typeof import('../../components/tests/browser/workspace-retirement-fixture');
+  nativeBorrow: { entered: Promise<void>; release(): void; zero(): boolean };
+};
+it.each(['chromium', 'webkit'] as const)(
+  'isolates independent ordinary storage from retained personal retirement in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-scoped-retirement-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [
+          fileURLToPath(
+            new URL(
+              '../../components/tests/browser/workspace-retirement-fixture.ts',
+              import.meta.url
+            )
+          ),
+        ],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'RetirementFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(() => {
+        const native = SubtleCrypto.prototype.encrypt;
+        let held: Uint8Array | undefined, enter!: () => void, release!: () => void;
+        const entered = new Promise<void>((resolve) => {
+            enter = resolve;
+          }),
+          released = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        SubtleCrypto.prototype.encrypt = async function (algorithm, key, data) {
+          const aad = (algorithm as AesGcmParams).additionalData;
+          if (!held && aad && new TextDecoder().decode(aad).includes('installed-epoch-key')) {
+            held =
+              data instanceof ArrayBuffer
+                ? new Uint8Array(data)
+                : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+            enter();
+            await released;
+          }
+          return native.call(this, algorithm, key, data);
+        };
+        (globalThis as RetirementSurface).nativeBorrow = {
+          entered,
+          release,
+          zero() {
+            if (!held) throw Error('no native borrow');
+            return held.every((byte) => byte === 0);
+          },
+        };
+      });
+      await page.evaluate(async () => {
+        const p = (globalThis as RetirementSurface).RetirementFixture.personal;
+        await p.boot('create-or-open', true);
+        await p.bootRuntime();
+      });
+      const action = (a: string) =>
+        page.evaluate(
+          (command) =>
+            (globalThis as RetirementSurface).RetirementFixture.personal.runtimeInvoke(command),
+          a
+        );
+      try {
+        expect((await action('prepare')).ok).toBe(true);
+        expect(
+          (
+            await page.evaluate(() =>
+              (globalThis as RetirementSurface).RetirementFixture.personal.invoke('approve')
+            )
+          ).ok
+        ).toBe(true);
+        for (const a of ['claim', 'open', 'startReceive'])
+          expect((await action(a)).ok, a).toBe(true);
+        await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.entered);
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.retirePersonal()
+        );
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.personal.invoke('waitCloseBudget')
+        );
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.personal.invoke('advanceCloseBudget')
+        );
+        expect(
+          await page.evaluate(() =>
+            (globalThis as RetirementSurface).RetirementFixture.closeOutcome()
+          )
+        ).toBe('close-incomplete');
+        expect(
+          await page.evaluate(() =>
+            (globalThis as RetirementSurface).RetirementFixture.ordinaryDraft()
+          )
+        ).toEqual({ opened: true, body: 'ordinary draft remains writable' });
+        expect(
+          await page.evaluate(() =>
+            (globalThis as RetirementSurface).RetirementFixture.samePhysicalIdentity()
+          )
+        ).toEqual({ blocked: true, sameOwner: true });
+        expect(
+          await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.zero())
+        ).toBe(false);
+        expect(
+          await page.evaluate(async () => {
+            const name = (await navigator.locks.query()).held![0]!.name!;
+            return navigator.locks.request(name, { ifAvailable: true }, (lock) => lock === null);
+          })
+        ).toBe(true);
+        await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.release());
+        await action('workResult');
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.finishRetirement()
+        );
+        expect(
+          await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.zero())
+        ).toBe(true);
+        expect((await action('open')).ok).toBe(true);
+        await action('close');
+      } finally {
+        await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.release());
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.personal.invoke('expireCloseWaiters')
+        );
+        await action('workResult');
+        await action('close');
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.personal.stop()
+        );
+      }
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+// The browser fixture uses components' build aliases; only serialized public outcomes cross this driver boundary.
+type CacheSurface = typeof globalThis & {
+  CustodyCacheFixture: {
+    personal: Fixture;
+    boot(mode: 'create-or-open' | 'open-existing'): Promise<void>;
+    signOut(): Promise<{ ok: boolean }>;
+    clear(enumerable: boolean, hard?: boolean): Promise<void>;
+    savedOriginals(): Promise<string>;
+    reopen(): Promise<{ ok: boolean; status?: unknown; reason?: unknown }>;
+  };
+};
+it.each(['chromium', 'webkit'] as const)(
+  'preserves actual custody and immutable originals through logout and cache recovery in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-custody-cache-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [
+          fileURLToPath(
+            new URL('../../components/tests/browser/custody-cache-fixture.ts', import.meta.url)
+          ),
+        ],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'CustodyCacheFixture',
+        target: 'safari16.4',
+        external: ['node:fs/promises'],
+        write: false,
+        logLevel: 'silent',
+        alias: { '@': fileURLToPath(new URL('../../components/src', import.meta.url)) },
+        define: {
+          'import.meta.env': JSON.stringify({ BASE_URL: '/', VITE_LODY_PLATFORM: 'cloud' }),
+        },
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      let page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      const operation = (command: string) =>
+        page.evaluate(
+          (commandName) =>
+            (globalThis as CacheSurface).CustodyCacheFixture.personal.runtimeInvoke(commandName),
+          command
+        );
+      await page.evaluate(() =>
+        (globalThis as CacheSurface).CustodyCacheFixture.boot('create-or-open')
+      );
+      expect((await operation('prepare')).ok).toBe(true);
+      expect(
+        (
+          await page.evaluate(() =>
+            (globalThis as CacheSurface).CustodyCacheFixture.personal.invoke('approve')
+          )
+        ).ok
+      ).toBe(true);
+      for (const command of ['claim', 'open', 'receive'])
+        expect((await operation(command)).ok, command).toBe(true);
+      const status = (await operation('status')).value as { signingPublicKey: string };
+      expect(
+        (
+          await page.evaluate(() =>
+            (globalThis as CacheSurface).CustodyCacheFixture.personal.invoke('addMachine')
+          )
+        ).ok
+      ).toBe(true);
+      expect((await operation('refresh')).ok).toBe(true);
+      const pending = await operation('rpc');
+      expect(pending.ok).toBe(true);
+      expect(pending.value).toMatchObject({
+        requestId: expect.any(String),
+        frameHex: expect.any(String),
+      });
+      await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.personal.stop());
+      expect(
+        (await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.signOut())).ok
+      ).toBe(true);
+      await page.evaluate(() =>
+        (globalThis as CacheSurface).CustodyCacheFixture.boot('open-existing')
+      );
+      expect((await operation('open')).ok, 'logout keeps actual identity').toBe(true);
+      expect((await operation('status')).value).toMatchObject({
+        signingPublicKey: status.signingPublicKey,
+        hasCurrentKey: true,
+      });
+      await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.personal.stop());
+      const originals = await page.evaluate(() =>
+        (globalThis as CacheSurface).CustodyCacheFixture.savedOriginals()
+      );
+      for (const enumerable of [true, false]) {
+        await page.evaluate(
+          (canEnumerate) => (globalThis as CacheSurface).CustodyCacheFixture.clear(canEnumerate),
+          enumerable
+        );
+        const after = await page.evaluate(() =>
+          (globalThis as CacheSurface).CustodyCacheFixture.savedOriginals()
+        );
+        await context.close();
+        context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+          join(directory, 'profile'),
+          { headless: true }
+        );
+        page = await context.newPage();
+        await page.goto(pathToFileURL(file).href);
+        const reopened = await page.evaluate(() =>
+          (globalThis as CacheSurface).CustodyCacheFixture.reopen()
+        );
+        expect(reopened, 'cache recovery reopens actual wrappers').toMatchObject({
+          ok: true,
+          status: { signingPublicKey: status.signingPublicKey, hasCurrentKey: true },
+        });
+        expect(
+          after,
+          'cache must preserve installation, wrappers, pins and pending originals'
+        ).toBe(originals);
+        expect(
+          await operation('rpc'),
+          'unconfirmed signed request must retry exact original'
+        ).toEqual(pending);
+        await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.personal.stop());
+      }
+      await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.clear(true, true));
+      expect(
+        await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.savedOriginals())
+      ).toBe('empty');
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+/**
+ * The shared UI's encrypted schedule save on this real portable host: the real
+ * repository asks the host to sign the declaration it writes beside the definition,
+ * and the stored record verifies as this device's signature over that definition.
+ */
+type SignedStatus = { workspaceId: string; genesisHash: string; signingPublicKey: string };
+async function savesSignedSchedule(
+  page: Page,
+  host: {
+    status: () => Promise<SignedStatus>;
+    sign: 'runtimeSignDeclaration' | 'joinerSignDeclaration';
+  } = {
+    status: async () => (await good(page, 'status')) as SignedStatus,
+    sign: 'runtimeSignDeclaration',
+  }
+) {
+  const status = await host.status();
+  const docs = new Map<string, LoroDoc>();
+  const rows = new Map<string, unknown>();
+  const port: ScheduleRepositoryPort = {
+    openPersistedDoc: async (id) => {
+      if (!docs.has(id)) docs.set(id, new LoroDoc());
+      return { doc: docs.get(id)! };
+    },
+    openFlockDoc: async () => ({
+      flock: {
+        scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+        get: (key) => rows.get(JSON.stringify(key)),
+        set: (key, value) => rows.set(JSON.stringify(key), value),
+      },
+    }),
+    flush: async () => {},
+  };
+  const repository = new ScheduleRepository(port, status.workspaceId as WorkspaceId, {
+    protectedContent: true,
+    signDeclaration: async (document, manualRunKey) => {
+      const signed = await page.evaluate(
+        ({ document, manualRunKey, sign }) =>
+          (globalThis as Surface).HostFixture[sign](document, manualRunKey),
+        { document, manualRunKey, sign: host.sign }
+      );
+      if (!signed.ok || typeof signed.value !== 'string')
+        throw new Error(String('reason' in signed ? signed.reason : 'unsigned'));
+      return signed.value;
+    },
+  });
+  const saved = repository.save({
+    scheduleId: 'portable-schedule',
+    draft: {
+      title: 'Synthetic schedule',
+      machineId: 'fixture-machine',
+      trigger: { kind: 'interval', everyMs: 60_000, anchorAt: '2026-01-01T00:00:00Z' },
+      agent: { agentConfigId: 'synthetic-agent' },
+      misfirePolicy: { kind: 'skip' },
+      overlapPolicy: 'queue_one',
+      retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+      prompt: 'synthetic prompt',
+    },
+    actorId: 'owner',
+    now: 1,
+    activationId: 'activation',
+    activityId: 'created',
+    create: true,
+  });
+  await expect(saved).resolves.toMatchObject({ prompt: 'synthetic prompt' });
+  const document = await saved;
+  const declared = readScheduleAuthorization(docs.get(getScheduleRoomId('portable-schedule'))!);
+  const record = decodeE2eeIntentRecord((declared?.value as { e2eeIntent?: string })?.e2eeIntent);
+  expect(record?.kind).toBe(E2EE_INTENT_KIND.scheduleDeclaration);
+  expect(Buffer.from(record!.signer).toString('hex')).toBe(status.signingPublicKey);
+  const subject = scheduleDeclarationSubject(document);
+  const verified = verifyExecutionIntent(
+    {
+      ...subject,
+      genesis: Result.getOrThrow(Bytes.genesisHash(Buffer.from(status.genesisHash, 'hex'))),
+      workspaceId: status.workspaceId,
+      contentDigest: Buffer.from(subject.contentDigest, 'hex'),
+    },
+    record!.signer,
+    record!.signature
+  );
+  expect(Result.isSuccess(verified)).toBe(true);
+}
+
+it.each(['chromium', 'webkit'] as const)(
+  'a teammate joins from a link invitation on the portable runtime in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-member-join-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      // Ledger user ids encode Crockford base32 account ids; the owner is another account.
+      const teammate = 'teammate';
+      await page.evaluate(async (account) => {
+        localStorage.setItem('qualify-approval-history', 'true');
+        await (globalThis as Surface).HostFixture.boot(
+          'create-or-open',
+          false,
+          'joiner',
+          account,
+          'abc'
+        );
+        await (globalThis as Surface).HostFixture.bootJoiner(account);
+      }, teammate);
+      const joining = async (action: string) => {
+        const result = await page.evaluate(
+          ([a, account]) => (globalThis as Surface).HostFixture.joinInvoke(a, account),
+          [action, teammate] as const
+        );
+        return result;
+      };
+      const ok = async (action: string) => {
+        const result = await joining(action);
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+        return (result as { value: unknown }).value;
+      };
+
+      const request = (await ok('prepare')) as { requestId: string; keyPackageHex: string };
+      expect(request).toMatchObject({ accountId: teammate, state: 'pending' });
+      // A retry resubmits the retained original; nothing is signed again.
+      expect(await ok('prepare')).toMatchObject({ keyPackageHex: request.keyPackageHex });
+      expect(await ok('submitted')).toEqual([request.keyPackageHex, request.keyPackageHex]);
+      const waiting = await ok('pending');
+      expect(waiting).toMatchObject({
+        requestId: request.requestId,
+        offer: { mode: 'link', token: 'cd'.repeat(32) },
+      });
+      // Not admitted yet: a reopened page resumes waiting, not as joined.
+      expect(waiting).not.toHaveProperty('joined');
+      expect(await ok('claim')).toEqual({ ready: false, state: 'pending' });
+      // The relay's word is not admission: only the signed history can admit this device.
+      await ok('relayClaimsEarly');
+      expect((await joining('claim')).ok).toBe(false);
+      expect((await joining('open')).ok).toBe(false);
+      await ok('relayHonest');
+
+      await ok('ownerAdmits');
+      expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });
+      expect(await ok('open')).toEqual({
+        deviceKind: 'personal',
+        memberRole: 'member',
+        membershipId: request.requestId,
+      });
+      // The joined member signs its schedule declarations as its own device.
+      const joined = (await ok('status')) as SignedStatus;
+      expect(joined.signingPublicKey).toBe(await ok('signingKey'));
+      await savesSignedSchedule(page, {
+        status: async () => joined,
+        sign: 'joinerSignDeclaration',
+      });
+      // Accepted once; a later claim reuses the retained approval.
+      expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });
+      // A reopened join page learns this device is already joined before it claims.
+      expect(await ok('pending')).toMatchObject({ requestId: request.requestId, joined: true });
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
+  'a rejected teammate joins again from a new invitation in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-member-rejoin-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      // Ledger user ids encode Crockford base32 account ids; the owner is another account.
+      const teammate = 'teammate';
+      await page.evaluate(async (account) => {
+        localStorage.setItem('qualify-approval-history', 'true');
+        await (globalThis as Surface).HostFixture.boot(
+          'create-or-open',
+          false,
+          'joiner',
+          account,
+          'abc'
+        );
+        await (globalThis as Surface).HostFixture.bootJoiner(account);
+      }, teammate);
+      const joining = async (action: string) => {
+        const result = await page.evaluate(
+          ([a, account]) => (globalThis as Surface).HostFixture.joinInvoke(a, account),
+          [action, teammate] as const
+        );
+        return result;
+      };
+      const ok = async (action: string) => {
+        const result = await joining(action);
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+        return (result as { value: unknown }).value;
+      };
+
+      const first = (await ok('prepare')) as { requestId: string };
+      const device = await ok('signingKey');
+      // A new invitation while the first request is still live keeps refusing.
+      await ok('secondInvite');
+      expect((await joining('prepare')).reason).toBe('conflict');
+      // Once the relay confirms the first request ended, a replacement identity asks for
+      // the new membership: the old device's credential stays pinned to the ended one.
+      await ok('relayRejects');
+      const second = (await ok('prepare')) as { requestId: string; state: string };
+      expect(second).toMatchObject({ state: 'pending' });
+      expect(second.requestId).not.toBe(first.requestId);
+      expect(await ok('signingKey')).not.toBe(device);
+      expect(await ok('retires')).toBe(2);
+      expect(await ok('pending')).toMatchObject({
+        requestId: second.requestId,
+        offer: { token: 'ef'.repeat(32) },
+      });
+      await ok('ownerAdmits');
+      expect(await ok('claim')).toEqual({ ready: true, state: 'committed' });
+      expect(await ok('open')).toEqual({
+        deviceKind: 'personal',
+        memberRole: 'member',
+        membershipId: second.requestId,
+      });
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+// Several recipients wait at the same epoch. Each delivery borrows the installed epoch key,
+// and the browser custody refuses a second concurrent holder instead of queueing it, so
+// one key round must still send every waiting envelope, not just the one that won.
+it('one key round sends every envelope waiting at the current epoch', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-batch-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    const page = opened.page;
+    const second = await good(page, 'memberNextApplicant');
+    expect(await good(page, 'memberList')).toEqual([second]);
+    expect(await good(page, 'memberApprove')).toMatchObject({ admitted: true });
+    // Both approvals' own rounds ended with nothing stored.
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).sleeps, {
+        timeout: 30_000,
+      })
+      .toEqual([KEY_DELIVERY_RETRY_DELAYS[0], KEY_DELIVERY_RETRY_DELAYS[0]]);
+    await good(page, 'memberAcceptKeys');
+    await good(page, 'receive');
+    expect(((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept).toBe(2);
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// The approval page closed before its delivery succeeded. When the workspace opens again on
+// this owner device, a background key round sends the waiting envelope without anyone
+// approving or retrying, and a further open within the interval adds no round.
+it('reopening the workspace on the approving device delivers a key its closed approval page did not', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-reopen-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    const page = opened.page;
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).items[0]?.code, {
+        timeout: 30_000,
+      })
+      .toBe('e2ee_key_not_sent');
+    // The approval page closes. The next open returns at once; its background round waits.
+    await good(page, 'close');
+    await good(page, 'memberAcceptKeys');
+    expect(await good(page, 'open')).toMatchObject({ hasCurrentKey: true });
+    expect(await good(page, 'openRound')).toEqual({ sleeps: [30_000], diagnostics: [] });
+    // That page closes too before the round starts: the round finds no reader, opens none,
+    // and only reports it.
+    await good(page, 'close');
+    await good(page, 'openRoundRelease');
+    await expect
+      .poll(
+        async () => ((await good(page, 'openRound')) as { diagnostics: string[] }).diagnostics,
+        { timeout: 30_000 }
+      )
+      .toEqual(['e2ee-open-key-round']);
+    expect(((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept).toBe(0);
+    // Opening the workspace again sends the waiting envelope with no approval or retry.
+    await good(page, 'open');
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept, {
+        timeout: 30_000,
+      })
+      .toBe(1);
+    // Within the interval another open starts no round.
+    await good(page, 'open');
+    expect(await good(page, 'openRound')).toEqual({
+      sleeps: [30_000, 30_000],
+      diagnostics: ['e2ee-open-key-round'],
+    });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// Another device rotated the key before this owner device reopens the workspace: the open
+// reports no current key yet, and the background round still receives the new key, installs
+// it and sends the waiting member that epoch's envelope.
+it('reopening after another device rotated the key installs it and delivers to the waiting member', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-member-key-rotated-'));
+  let context: BrowserContext | undefined;
+  try {
+    const opened = await approvedWhileMailboxRefuses(directory, true);
+    context = opened.context;
+    const page = opened.page;
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).items[0]?.code, {
+        timeout: 30_000,
+      })
+      .toBe('e2ee_key_not_sent');
+    // The owner's other device rotates; the new key waits in its staged group.
+    expect((await raw(page, 'rotateRemote')).ok).toBe(true);
+    expect((await raw(page, 'stageCurrent')).ok).toBe(true);
+    expect(await good(page, 'refresh')).toMatchObject({ epoch: 1, hasCurrentKey: false });
+    // The approval page closes; an earlier open's waiting round finds no reader.
+    await good(page, 'close');
+    await good(page, 'memberAcceptKeys');
+    await good(page, 'openRoundRelease');
+    await expect
+      .poll(
+        async () => ((await good(page, 'openRound')) as { diagnostics: string[] }).diagnostics,
+        { timeout: 30_000 }
+      )
+      .toEqual(['e2ee-open-key-round']);
+    // Reopening, still without the current key, installs it and sends the member's envelope.
+    expect(await good(page, 'open')).toMatchObject({ epoch: 1, hasCurrentKey: false });
+    await expect
+      .poll(async () => ((await good(page, 'memberDeliveries')) as Deliveries).storedSinceAccept, {
+        timeout: 30_000,
+      })
+      .toBe(1);
+    expect(await good(page, 'status')).toMatchObject({ epoch: 1, hasCurrentKey: true });
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+/** A fresh Chromium page with the host fixture, booted with an owned host and runtime. */
+async function bootedFixture(directory: string, qualifyHistory = false) {
+  const output = await build({
+    entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    globalName: 'HostFixture',
+    target: 'safari16.4',
+    write: false,
+    logLevel: 'silent',
+  });
+  const file = join(directory, 'index.html');
+  await writeFile(
+    file,
+    '<!doctype html><script>' +
+      output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+      '</script>'
+  );
+  const context = await chromium.launchPersistentContext(join(directory, 'profile'), {
+    headless: true,
+  });
+  const page = await context.newPage();
+  await page.goto(pathToFileURL(file).href);
+  await page.evaluate(async (qualify) => {
+    if (qualify) localStorage.setItem('qualify-approval-history', 'true');
+    await (globalThis as Surface).HostFixture.boot();
+    await (globalThis as Surface).HostFixture.bootRuntime();
+  }, qualifyHistory);
+  return { context, page };
+}
+
+it('a revoked personal device reports exact revocation, then re-pairs with a verified replacement', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-revoked-repair-'));
+  let context: BrowserContext | undefined;
+  try {
+    const booted = await bootedFixture(directory);
+    context = booted.context;
+    const page = booted.page;
+    const first = (await raw(page, 'prepare')).value as { requestHex: string };
+    expect((await raw(page, 'approve')).ok).toBe(true);
+    expect((await raw(page, 'claim')).ok).toBe(true);
+    expect((await raw(page, 'open')).ok).toBe(true);
+    const old = await good(page, 'open');
+    expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true });
+    expect((await raw(page, 'rememberBinding')).value).toBe(
+      (old as { signingPublicKey: string }).signingPublicKey
+    );
+    // The owner revokes this device. Every admitted operation reports the exact loss
+    // from the verified ledger; ledger reads stay usable for the control page.
+    expect((await raw(page, 'revokeOpened')).ok).toBe(true);
+    expect((await call(page, 'refresh')).reason).toBe('e2ee_device_revoked');
+    expect((await call(page, 'status')).reason).toBe('e2ee_device_revoked');
+    expect((await call(page, 'grant')).reason).toBe('e2ee_device_revoked');
+    expect((await call(page, 'seal')).reason).toBe('e2ee_device_revoked');
+    expect(await good(page, 'ledger')).toMatchObject({ status: { membershipId: null } });
+    await good(page, 'close');
+    expect((await call(page, 'open')).reason).toBe('e2ee_device_revoked');
+    // A forged genesis never prepares an identity.
+    expect((await call(page, 'repairForgedGenesis')).reason).toBe('scope-mismatch');
+    // A new offer prepares a replacement identity; retries reuse it exactly.
+    const candidate = (await good(page, 'repairPrepare')) as { signingPublicKey: string };
+    expect(candidate.signingPublicKey).not.toBe(
+      (old as { signingPublicKey: string }).signingPublicKey
+    );
+    expect(await good(page, 'repairPrepare')).toEqual(candidate);
+    expect(await good(page, 'repairClaim')).toEqual({ ready: false, status: 'pending' });
+    // Approval evidence must be the complete genuine history admitting the candidate.
+    expect((await raw(page, 'approveCandidate')).ok).toBe(true);
+    expect((await raw(page, 'forgeCandidateHistory')).ok).toBe(true);
+    expect((await call(page, 'repairClaim')).ok).toBe(false);
+    expect((await raw(page, 'currentDevice')).value).toBe(
+      (old as { signingPublicKey: string }).signingPublicKey
+    );
+    expect((await raw(page, 'restoreCandidateHistory')).ok).toBe(true);
+    expect(await good(page, 'repairClaim')).toEqual({ ready: true, status: 'approved' });
+    // Opening activates it: the old incarnation drains and the current identity switches
+    // atomically, while the replaced identity's originals stay retained.
+    expect(await good(page, 'open')).toMatchObject({
+      signingPublicKey: candidate.signingPublicKey,
+    });
+    expect((await raw(page, 'currentDevice')).value).toBe(candidate.signingPublicKey);
+    expect((await raw(page, 'preservedOriginal')).value).toBe(first.requestHex);
+    expect(await good(page, 'receive')).toMatchObject({ hasCurrentKey: true });
+    expect((await call(page, 'seal')).ok).toBe(true);
+    await good(page, 'close');
+    await page.evaluate(() => (globalThis as Surface).HostFixture.stop());
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('account pairing replaces a revoked identity only on verified history evidence', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-account-repair-'));
+  let context: BrowserContext | undefined;
+  try {
+    const booted = await bootedFixture(directory, true);
+    context = booted.context;
+    const page = booted.page;
+    expect((await raw(page, 'accountApproveAndAccept')).ok).toBe(true);
+    expect((await raw(page, 'accountOpen')).ok).toBe(true);
+    const old = (await raw(page, 'openedDevice')).value as string;
+    expect((await raw(page, 'rememberBinding')).value).toBe(old);
+    expect((await raw(page, 'revokeOpened')).ok).toBe(true);
+    // Without verified evidence of the loss, the retained identity is reused.
+    expect(record(await raw(page, 'accountPrepare')).signingPublicKey).toBe(old);
+    expect(record(await raw(page, 'accountPrepareWithStaleHistory')).signingPublicKey).toBe(old);
+    expect((await raw(page, 'accountPrepareWithForgedHistory')).ok).toBe(false);
+    expect((await raw(page, 'currentDevice')).value).toBe(old);
+    // The complete signed history shows the revocation: a fresh identity, never the old key.
+    const replacement = record(await raw(page, 'accountPrepareWithHistory'));
+    expect(replacement.signingPublicKey).not.toBe(old);
+    expect(record(await raw(page, 'accountPrepare')).signingPublicKey).toBe(
+      replacement.signingPublicKey
+    );
+    expect((await raw(page, 'accountAdmitReplacement')).value).toBe(replacement.signingPublicKey);
+    expect((await raw(page, 'accountOpen')).ok).toBe(true);
+    expect((await raw(page, 'openedDevice')).value).toBe(replacement.signingPublicKey);
+    expect((await raw(page, 'currentDevice')).value).toBe(replacement.signingPublicKey);
+    // Reopening finds the activated identity under its own account offer.
+    expect((await raw(page, 'accountOpen')).ok).toBe(true);
+    expect((await raw(page, 'openedDevice')).value).toBe(replacement.signingPublicKey);
+    await page.evaluate(() => (globalThis as Surface).HostFixture.stop());
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('a stalled remote round times out, releases the workspace and resumes its exact originals', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lody-stalled-round-'));
+  let context: BrowserContext | undefined;
+  try {
+    const booted = await bootedFixture(directory);
+    context = booted.context;
+    const page = booted.page;
+    expect((await raw(page, 'prepare')).ok).toBe(true);
+    expect((await raw(page, 'approve')).ok).toBe(true);
+    expect((await raw(page, 'claim')).ok).toBe(true);
+    await good(page, 'open');
+    await good(page, 'receive');
+    // A refresh whose ledger read never answers ends at its deadline as retryable, and
+    // the next refresh runs at once instead of waiting behind it.
+    expect((await raw(page, 'hangFeed')).ok).toBe(true);
+    await good(page, 'startRefresh');
+    expect((await raw(page, 'expireDeadlines')).ok).toBe(true);
+    expect(await good(page, 'workResult')).toEqual({ ok: false, reason: 'network' });
+    expect((await raw(page, 'networkBack')).ok).toBe(true);
+    expect(await good(page, 'refresh')).toMatchObject({ hasCurrentKey: true });
+    // A pairing exchange that never answers releases the host; the retry resends the
+    // exact retained request (the relay refuses a changed one) with the same identity.
+    expect((await raw(page, 'hangExchange')).ok).toBe(true);
+    await good(page, 'startRepairPrepare');
+    expect((await raw(page, 'expireDeadlines')).ok).toBe(true);
+    expect(await good(page, 'workResult')).toEqual({ ok: false, reason: 'network' });
+    expect((await raw(page, 'networkBack')).ok).toBe(true);
+    const candidate = await good(page, 'repairPrepare');
+    expect(await good(page, 'repairPrepare')).toEqual(candidate);
+    // A governance append that landed but never answered: its original stays journaled.
+    // The retry settles those exact bytes and is not signed a second time.
+    expect((await raw(page, 'hangAppendLanded')).ok).toBe(true);
+    await good(page, 'startRevokeOwner');
+    expect((await raw(page, 'expireDeadlines')).ok).toBe(true);
+    expect(await good(page, 'workResult')).toEqual({ ok: false, reason: 'network' });
+    expect((await raw(page, 'networkBack')).ok).toBe(true);
+    expect((await raw(page, 'ownerRevocations')).value).toBe(1);
+    await good(page, 'revokeOwner');
+    expect((await raw(page, 'ownerRevocations')).value).toBe(1);
+    expect(await good(page, 'refresh')).toMatchObject({ hasCurrentKey: true });
+    await good(page, 'close');
+    await page.evaluate(() => (globalThis as Surface).HostFixture.stop());
+  } finally {
+    await context?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

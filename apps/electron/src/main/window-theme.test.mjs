@@ -1,42 +1,87 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
+import Conf from 'conf'
+import { createSettingsStoreWithFallback } from './settings-store-core.ts'
 import {
   applyResolvedWindowTheme,
   getInitialMainWindowThemeSource,
-  getMainWindowBackgroundColor,
-  getMainWindowTitleBarOverlay,
-  resolveNativeWindowTheme
+  getMainWindowTitleBarOverlay
 } from './window-theme.ts'
 
-void test('forces onboarding window chrome light until the product takes over', () => {
-  assert.equal(getInitialMainWindowThemeSource('/onboarding'), 'light')
-  assert.equal(getInitialMainWindowThemeSource('/'), 'system')
-  assert.equal(getInitialMainWindowThemeSource(), 'system')
+const THEME_SETTINGS = {
+  configName: 'theme-settings',
+  defaults: { startupThemeSource: 'system' },
+  schema: {
+    startupThemeSource: { type: 'string', enum: ['light', 'dark', 'system'] }
+  }
+}
+
+void test('opens a product window on the committed theme, onboarding always light', () => {
+  assert.equal(getInitialMainWindowThemeSource('/', 'dark'), 'dark')
+  // Nothing committed yet (first launch) keeps the pre-persistence behavior.
+  assert.equal(getInitialMainWindowThemeSource('/', null), 'system')
+  assert.equal(getInitialMainWindowThemeSource('/onboarding', 'dark'), 'light')
 })
 
-void test('maps Electron shouldUseDarkColors onto the resolved window theme', () => {
-  assert.equal(resolveNativeWindowTheme(true), 'dark')
-  assert.equal(resolveNativeWindowTheme(false), 'light')
-})
-
-void test('retints window chrome when the OS appearance changes', () => {
-  const calls = []
+void test('keeps Windows caption backgrounds transparent through theme changes', () => {
   const window = {
-    setBackgroundColor: (color) => {
-      calls.push(['background', color])
+    backgroundColor: null,
+    overlay: getMainWindowTitleBarOverlay('light'),
+    setBackgroundColor(color) {
+      this.backgroundColor = color
     },
-    setTitleBarOverlay: (overlay) => {
-      calls.push(['overlay', overlay])
+    setTitleBarOverlay(overlay) {
+      this.overlay = overlay
     }
   }
 
-  applyResolvedWindowTheme(window, 'dark', 'darwin')
-  assert.deepEqual(calls, [['background', getMainWindowBackgroundColor('dark')]])
+  assert.deepEqual(window.overlay, {
+    color: '#00000000',
+    symbolColor: '#3C4048',
+    height: 36
+  })
 
-  calls.length = 0
+  applyResolvedWindowTheme(window, 'dark', 'win32')
+  assert.equal(window.backgroundColor, '#131416')
+  assert.deepEqual(window.overlay, {
+    color: '#00000000',
+    symbolColor: '#7A7D82',
+    height: 36
+  })
+
   applyResolvedWindowTheme(window, 'light', 'win32')
-  assert.deepEqual(calls, [
-    ['background', getMainWindowBackgroundColor('light')],
-    ['overlay', getMainWindowTitleBarOverlay('light')]
-  ])
+  assert.equal(window.backgroundColor, '#FFFFFF')
+  assert.deepEqual(window.overlay, {
+    color: '#00000000',
+    symbolColor: '#3C4048',
+    height: 36
+  })
+
+  applyResolvedWindowTheme(window, 'dark', 'darwin')
+  assert.equal(window.backgroundColor, '#131416')
+  assert.equal(window.overlay.symbolColor, '#3C4048')
+})
+
+// `conf` reads and validates inside its CONSTRUCTOR and, with
+// `clearInvalidConfig` at its default, rethrows. Every store is built at module
+// scope, so without the fallback either of these files stops the main process
+// from importing at all — the app fails to launch because a preference file is
+// malformed. Driven against the real `conf` and a real file for that reason.
+void test('an unreadable settings file does not stop the launch', async () => {
+  for (const contents of ['{"startupThemeSource": "da', '{"startupThemeSource": "vesper"}']) {
+    const cwd = await mkdtemp(path.join(tmpdir(), 'lody-settings-store-'))
+    try {
+      await writeFile(path.join(cwd, `${THEME_SETTINGS.configName}.json`), contents)
+      const store = createSettingsStoreWithFallback(
+        () => new Conf({ ...THEME_SETTINGS, cwd }),
+        THEME_SETTINGS
+      )
+      assert.equal(store.get('startupThemeSource'), 'system')
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  }
 })
