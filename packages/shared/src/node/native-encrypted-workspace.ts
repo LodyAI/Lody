@@ -1,10 +1,23 @@
 import { existsSync } from 'node:fs';
 import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { createLodyWorkspaceRoutes, type RepoClient } from '@loro-dev/loro-repo-client';
+import {
+  createLodyWorkspaceRoutes,
+  META_ROOM,
+  type RepoClient,
+  type RoomKey,
+} from '@loro-dev/loro-repo-client';
 import { encryptedWorkspaceNamespace } from '../workspace-streams-content';
 import { forgetDeclaredDocRooms } from './native-docs';
-import { setNativeNamespaceEncryption, setNativeNamespaceWriter } from './native-repo';
+import {
+  nativeRoomEncryption,
+  setNativeNamespaceEncryption,
+  setNativeNamespaceRemote,
+  setNativeNamespaceWriter,
+} from './native-repo';
+import { nativeFlockDocIds } from '../native-workspace-meta-ipc';
+import { getMachineFlockDocId } from '../machine-flock';
+import type { MachineId, WorkspaceId } from '../ids';
 
 /**
  * Connects one encrypted workspace's native namespace to its encrypted content
@@ -50,6 +63,22 @@ export interface NativeEncryptedWorkspaceOptions {
    * which the notification table reinstalls; forged frames never trigger it.
    */
   readonly onOpenPending?: () => void;
+  /** This process's own machine, whose Machine Flock stays live like the workspace's. */
+  readonly machineId?: string;
+  /** Runs `retry` after `delayMs` and returns its cancellation; a timer by default. */
+  readonly scheduleRetry?: (retry: () => void, delayMs: number) => () => void;
+}
+
+/**
+ * Rooms kept live while the workspace is attached, whether or not anything here
+ * observes them: Meta, the Workspace Flock, the Schedule registry and the own
+ * Machine Flock. Other rooms are pulled when first read.
+ */
+export function nativeLiveRooms(workspaceId: string, machineId?: string): RoomKey[] {
+  const flocks = nativeFlockDocIds(workspaceId);
+  if (machineId)
+    flocks.push(getMachineFlockDocId(workspaceId as WorkspaceId, machineId as MachineId));
+  return [META_ROOM, ...flocks.map((id) => ({ kind: 'flock' as const, id }))];
 }
 
 /** Open holds a ledger or key catch-up can clear (not `invalid_frame`). */
@@ -68,6 +97,18 @@ export const NATIVE_ENCRYPTED_SNAPSHOT_POLICY = {
   minUpdateBytes: 1024 * 1024,
   maxUpdateBytes: 4 * 1024 * 1024,
 } as const;
+
+/**
+ * An unconfigured remote (no content token yet: offline, or a refused grant) is
+ * retried on this backoff while attached, doubling up to five minutes.
+ */
+const REMOTE_RETRY_FIRST_MS = 1_000;
+const REMOTE_RETRY_MAX_MS = 5 * 60_000;
+const timerRetry = (retry: () => void, delayMs: number) => {
+  const timer = setTimeout(retry, delayMs);
+  timer.unref?.();
+  return () => clearTimeout(timer);
+};
 
 /** A device that may write ranks above read-only ones, so appends never use a read-only token. */
 const WRITER_TOKEN_PRIORITY = 200;
@@ -255,6 +296,13 @@ export async function attachNativeEncryptedWorkspace(
   let serial: Promise<unknown> = Promise.resolve();
   let closed = false;
   let slot: { source?: TokenSource } | undefined;
+  let interest: Promise<{ release(): Promise<void> } | undefined> | undefined;
+  const holdLiveRooms = async () => {
+    const rooms = nativeLiveRooms(workspaceId, options.machineId);
+    for (const room of rooms)
+      await client.createRoom(workspaceId, room, nativeRoomEncryption(client, workspaceId));
+    return client.holdRoomInterest(workspaceId, rooms);
+  };
   const install = async () => {
     const { mayWrite } = await options.syncKeyring();
     await client.setSnapshotPolicy(workspaceId, {
@@ -263,12 +311,22 @@ export async function attachNativeEncryptedWorkspace(
     });
     if (!closed) slot ??= await serveTokens(client, workspaceId, options.contentToken, mayWrite);
     if (!closed && !remoteConfigured) await configureContentRemote().catch(() => {});
+    if (!closed && remoteConfigured)
+      interest ??= holdLiveRooms().catch(() => {
+        interest = undefined;
+        return undefined;
+      });
   };
   const stopServing = () => {
     closed = true;
+    cancelRetry?.();
+    cancelRetry = undefined;
     offState();
     void pendingWatch?.unsubscribe().catch(() => {});
     if (slot?.source === options.contentToken) slot.source = undefined;
+    setNativeNamespaceRemote(client, workspaceId, undefined);
+    void interest?.then((held) => held?.release()).catch(() => {});
+    interest = undefined;
   };
   const run = <A>(work: () => Promise<A>): Promise<A> => {
     const next = serial.then(work, work);
@@ -277,6 +335,19 @@ export async function attachNativeEncryptedWorkspace(
   };
 
   let remoteConfigured = false;
+  let retryDelay = REMOTE_RETRY_FIRST_MS;
+  let cancelRetry: (() => void) | undefined;
+  const scheduleRetry = options.scheduleRetry ?? timerRetry;
+  const armRetry = () => {
+    if (closed || remoteConfigured || cancelRetry) return;
+    const delay = retryDelay;
+    retryDelay = Math.min(retryDelay * 2, REMOTE_RETRY_MAX_MS);
+    cancelRetry = scheduleRetry(() => {
+      cancelRetry = undefined;
+      void reinstall().catch(() => {});
+    }, delay);
+  };
+  const reinstall = () => run(install).finally(armRetry);
   const configureContentRemote = async () => {
     const grant = await options.contentToken();
     await client.configureRemote(workspaceId, {
@@ -292,8 +363,10 @@ export async function attachNativeEncryptedWorkspace(
       }),
     });
     remoteConfigured = true;
+    if (!closed) setNativeNamespaceRemote(client, workspaceId, NATIVE_CONTENT_REMOTE_ID);
   };
   await run(install);
+  armRetry();
 
   const pendingWatch = options.onOpenPending
     ? await client
@@ -315,11 +388,17 @@ export async function attachNativeEncryptedWorkspace(
 
   const offState = client.onConnectionStateChange((state) => {
     if (state !== 'connected' || closed) return;
-    void run(install).catch(() => {});
+    void reinstall().catch(() => {});
   });
 
   return {
-    refresh: () => (closed ? Promise.resolve() : run(install)),
+    refresh: () => {
+      if (closed) return Promise.resolve();
+      cancelRetry?.();
+      cancelRetry = undefined;
+      retryDelay = REMOTE_RETRY_FIRST_MS;
+      return reinstall();
+    },
     wipe: () =>
       run(async () => {
         stopServing();

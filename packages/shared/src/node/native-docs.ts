@@ -17,6 +17,7 @@ import {
   nativeWriteOptions,
   observeLoroDoc,
   observeLoroPaths,
+  syncNativeColdRooms,
 } from './native-repo';
 
 /** Type-only loro-repo use keeps its WASM out of the Electron main bundle. */
@@ -173,6 +174,7 @@ export async function observeNativeDoc(
   since?: Readonly<Record<string, number>>
 ) {
   await createDocRoom(client, namespace, docId);
+  await syncNativeColdRooms(client, namespace, [docRoom(docId)], { once: true });
   return observeLoroDoc(client, namespace, docRoom(docId), listener, since);
 }
 
@@ -235,10 +237,11 @@ export function createNativeDocs(
   };
 }
 
-/** Bounded reads and changed-path observation of one native Session document. */
 /**
  * Bounded reads, changed-path observation and schema-checked patch writes of
- * one native Session document, on the process's shared connection.
+ * one native Session document, on the process's shared connection. Each port
+ * pulls the room from the namespace's remote before its first read, since no
+ * replica of it may be live in this process.
  */
 export function createNativeRemoteHistoryPort(
   client: RepoClient,
@@ -246,7 +249,9 @@ export function createNativeRemoteHistoryPort(
   docId: string
 ): RemoteSessionDocPort {
   const room = docRoom(docId);
-  const created = createDocRoom(client, namespace, docId);
+  const created = createDocRoom(client, namespace, docId).then(() =>
+    syncNativeColdRooms(client, namespace, [room])
+  );
   const readPathAt = async (path: readonly (string | number)[]) => {
     await created;
     try {

@@ -6,10 +6,17 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDevServer } from '@loro-dev/sqlite-riverrun';
 import type { RepoClient } from '@loro-dev/loro-repo-client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectNativeRepo } from '../src/node/native-repo';
 import { LoroDoc } from 'loro-crdt';
-import { commitDocUpdates, createDocRoom } from '../src/node/native-docs';
+import {
+  commitDocUpdates,
+  createDocRoom,
+  createNativeRemoteHistoryPort,
+  observeNativeDoc,
+} from '../src/node/native-docs';
+import { nativeWriteOptions } from '../src/node/native-repo';
+import { nativeFlockDocIds } from '../src/native-workspace-meta-ipc';
 import {
   attachNativeEncryptedWorkspace,
   NATIVE_CONTENT_REMOTE_ID,
@@ -96,6 +103,8 @@ async function device(name: 'a' | 'b', baseUrl: string) {
   const network = { online: true };
   /** The verified ledger's admitted devices, as this device last ingested them. */
   const ledger = { admitted };
+  /** Remote retries the attachment scheduled; a test runs them by hand. */
+  const retries: { retry: () => void; delayMs: number }[] = [];
   const attach = (pendingWipe: NativePendingWipe = memoryWipe(), onOpenPending?: () => void) =>
     attachNativeEncryptedWorkspace({
       client,
@@ -118,19 +127,36 @@ async function device(name: 'a' | 'b', baseUrl: string) {
       },
       pendingWipe,
       onOpenPending,
+      scheduleRetry: (retry, delayMs) => {
+        const entry = { retry, delayMs };
+        retries.push(entry);
+        return () => void retries.splice(retries.indexOf(entry) >>> 0, 1);
+      },
     });
-  return { dataDir, client, writer, attach, network, ledger, syncs: () => syncs };
+  return {
+    dataDir,
+    client,
+    writer,
+    attach,
+    network,
+    ledger,
+    retries,
+    tokens: () => tokens,
+    syncs: () => syncs,
+  };
 }
 
 /** A replica's local edit, committed as the daemon and desktop commit theirs. */
-const replicas = new WeakMap<RepoClient, LoroDoc>();
-const write = (client: RepoClient, note: string) => {
-  let doc = replicas.get(client);
-  if (!doc) replicas.set(client, (doc = new LoroDoc()));
+const replicas = new WeakMap<RepoClient, Map<string, LoroDoc>>();
+const write = (client: RepoClient, note: string, docId = room.id) => {
+  let byDoc = replicas.get(client);
+  if (!byDoc) replicas.set(client, (byDoc = new Map()));
+  let doc = byDoc.get(docId);
+  if (!doc) byDoc.set(docId, (doc = new LoroDoc()));
   const from = doc.oplogVersion();
   doc.getMap('session').set('note', note);
   doc.commit();
-  return commitDocUpdates(client, ws, room.id, [doc.export({ mode: 'update', from })]);
+  return commitDocUpdates(client, ws, docId, [doc.export({ mode: 'update', from })]);
 };
 
 describe('native encrypted workspace', () => {
@@ -179,6 +205,60 @@ describe('native encrypted workspace', () => {
     expect(connected).toBe(false);
   }, 60_000);
 
+  it('a first read of a room another device wrote pulls it before answering', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const b = await device('b', baseUrl);
+    const wa = await a.attach();
+    cleanups.push(async () => wa.close());
+    const observed = 'session-0002';
+    for (const docId of [room.id, observed]) {
+      await createDocRoom(a.client, ws, docId);
+      await write(a.client, `from-a:${docId}`, docId);
+    }
+    expect((await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0);
+
+    const wb = await b.attach();
+    cleanups.push(async () => wb.close());
+    const idle = createNativeRemoteHistoryPort(b.client, ws, room.id);
+    expect(await idle.readPath(['session'])).toEqual({ note: `from-a:${room.id}` });
+
+    let first: Uint8Array | undefined;
+    const observation = await observeNativeDoc(b.client, ws, observed, (event) => {
+      if (event.kind === 'snapshot') first ??= event.file;
+    });
+    cleanups.push(() => observation.release());
+    await observation.ready;
+    const doc = new LoroDoc();
+    if (first) doc.import(first);
+    expect(doc.getMap('session').get('note')).toBe(`from-a:${observed}`);
+  }, 60_000);
+
+  it('keeps the workspace Flock live while attached, with nothing observing it', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const b = await device('b', baseUrl);
+    const wa = await a.attach();
+    const wb = await b.attach();
+    cleanups.push(async () => wa.close());
+    cleanups.push(async () => wb.close());
+    const flock = { kind: 'flock' as const, id: nativeFlockDocIds(ws)[0]! };
+    await a.client.flockBatch(
+      ws,
+      flock,
+      [{ op: 'put', key: ['agentRole', 'r1'], value: { name: 'from-a' } }],
+      nativeWriteOptions(a.client, ws)
+    );
+    expect((await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0);
+    await vi.waitFor(
+      async () =>
+        expect((await b.client.flockGet(ws, flock, ['agentRole', 'r1'])).value).toEqual({
+          name: 'from-a',
+        }),
+      { timeout: 20_000, interval: 100 }
+    );
+  }, 60_000);
+
   it('opens without a content token, keeps local writes, and uploads them once one is issued', async () => {
     const baseUrl = await streamsServer();
     const a = await device('a', baseUrl);
@@ -198,6 +278,34 @@ describe('native encrypted workspace', () => {
     await createDocRoom(b.client, ws, room.id);
     await b.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
     expect(JSON.stringify((await b.client.readDoc(ws, room)).value)).toContain('written-offline');
+  }, 60_000);
+
+  it('an attachment opened offline configures its remote on a backoff, without a refresh', async () => {
+    const baseUrl = await streamsServer();
+    const a = await device('a', baseUrl);
+    const b = await device('b', baseUrl);
+    a.network.online = false;
+    const wa = await a.attach();
+    cleanups.push(async () => wa.close());
+    await createDocRoom(a.client, ws, room.id);
+    await write(a.client, 'written-offline');
+    expect(a.retries.map((entry) => entry.delayMs)).toEqual([1_000]);
+
+    a.retries.shift()!.retry();
+    await vi.waitFor(() => expect(a.retries.map((entry) => entry.delayMs)).toEqual([2_000]));
+
+    a.network.online = true;
+    a.retries.shift()!.retry();
+    await vi.waitFor(() => expect(a.tokens()).toBeGreaterThan(0));
+    await vi.waitFor(async () =>
+      expect((await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0)
+    );
+    expect(a.retries).toEqual([]);
+    const wb = await b.attach();
+    cleanups.push(async () => wb.close());
+    expect(
+      await createNativeRemoteHistoryPort(b.client, ws, room.id).readPath(['session'])
+    ).toEqual({ note: 'written-offline' });
   }, 60_000);
 
   it('a frame from a writer the installed ledger does not admit yet asks for a catch-up, then opens', async () => {
