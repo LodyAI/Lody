@@ -600,6 +600,16 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Stops waiting when `signal` aborts; the underlying work keeps its own owner. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+    void work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
 type MachineCommandSnapshot = {
   machineMeta: MachineLegacyMetaFields | undefined;
   machineFlockRows: MachineFlockRowMap;
@@ -9170,11 +9180,21 @@ export class MessageHandler {
       if (query.kind === 'readOlderRange') {
         if (!backend.readOlderHistoryRange)
           throw new Error('Owner history page verification is unavailable');
-        const readSignal = signal
-          ? AbortSignal.any([signal, this.historyOwnerAbort.signal])
-          : this.historyOwnerAbort.signal;
-        await backend.flushLocalWrites();
-        return await backend.readOlderHistoryRange(query, readSignal);
+        // Like the revision-checked reads below, a write racing this read is
+        // retried a bounded number of times before the caller is told to refresh.
+        for (let attempt = 1; ; attempt += 1) {
+          await untilAborted(backend.flushLocalWrites(), catchupSignal);
+          try {
+            return await backend.readOlderHistoryRange(query, catchupSignal);
+          } catch (error) {
+            if (
+              attempt >= 4 ||
+              catchupSignal.aborted ||
+              !(error instanceof Error && 'code' in error && error.code === 'stale')
+            )
+              throw error;
+          }
+        }
       }
       if (
         query.kind === 'readMetadata' ||

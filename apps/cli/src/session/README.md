@@ -749,6 +749,8 @@ reply also identifies the publication at which the page was read. The cache
 can attach it at either checkpoint or across later verified changes. A page
 alone does not advance the cache checkpoint. A missing receipt interval, an
 overlapping edit, or a replacement generation requires refreshing before retry.
+The owner repeats a stale read at most four times, like other checkpoint reads,
+before reporting it superseded.
 Ordinary refresh never sweeps the whole history. Genuine reset invalidates older
 pages until fetched again, including for offline use. Complete-change repair
 preserves the retained prefix.
