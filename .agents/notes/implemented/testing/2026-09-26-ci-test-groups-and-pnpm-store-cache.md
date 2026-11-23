@@ -12,8 +12,8 @@ The `Tests` job took 6–11 minutes. Most of that was the `@lody/components`
 suite (≈351 s) followed by `apps/cli` (≈158 s), in one job on a 4-vCPU runner.
 Letting the two suites overlap in that job (`pnpm -r --no-sort`) did not help:
 the runner is CPU-saturated, so the overlapped suites took 509 s and 252 s.
-`Tests` is now a five-runner matrix: two Vitest shards of components, two Vitest
-shards of cli, and the rest, each on its own runner, with an aggregate job that
+`Tests` is now a six-runner matrix: two Vitest shards of components, two Vitest
+shards of cli, the rest, and electron, each on its own runner, with an aggregate job that
 keeps the required `Tests` check. In addition, `setup-node`'s pnpm cache matched
 only the exact lockfile key and let each PR write its own ~800 MB copy. A
 composite action now restores the store with a prefix fallback, and only `main`
@@ -51,14 +51,17 @@ and costs nothing, but it is not what shortens CI.
    - `components`: two shards, `vitest --shard=k/2 --maxWorkers=4`.
    - `cli`: two shards, `vitest --shard=k/2 --maxWorkers=4`.
    - `rest`: `test:scripts`, `@lody/site-docs`, single-boot `test:rest --maxWorkers=4`
-     across the remaining Vitest workspace projects, then `@lody/electron`.
+     across the remaining Vitest workspace projects.
+   - `electron`: `@lody/electron` alone. In the 2026-11-23 PR runs `rest` was the
+     longest job (p50 280 s): its 145 s Vitest pass was followed in the same job by
+     about 60 s of electron `node:test` suites and `test:release`.
 
    Each group runs scope selection, the YAML fail-open override, and `--plan`
    before `.github/actions/setup-workspace`, so unaffected groups skip store
    restore, `pnpm install`, and adapter preparation. Missing or invalid scope
    output still falls back to a full run. The YAML override for CI-definition
    changes passes `--full`. Active `cli` runs prepare all CLI ACP adapters,
-   while `components` and `rest` build only `acp-extension-dsh` (`acp-extension-core`
+   while `components`, `rest` and `electron` build only `acp-extension-dsh` (`acp-extension-core`
    builds during `pnpm install`). Nested `acp-extension-*` submodules are excluded
    from root test and typecheck filters. A final `Tests` job `needs` the matrix and
    succeeds only if the matrix succeeded, so the required check name is unchanged.
@@ -97,7 +100,7 @@ offline reuses the package. This pins the mechanism, not a CI timing improvement
 
 ## Trade-offs and alternatives
 
-- Five test runners instead of one. Active groups pay checkout, restore,
+- Six test runners instead of one. Active groups pay checkout, restore,
   install and adapter setup, so total runner minutes rise on full runs. Standard
   runners are free for this public repository. Unaffected groups stop after
   checkout and `--plan` without restoring the pnpm store or installing packages.
@@ -109,9 +112,10 @@ offline reuses the package. This pins the mechanism, not a CI timing improvement
 ## Verification
 
 - Locally, each group was run with `--full`. All passed; `components` and `cli`
-  each split across two Vitest shards while keeping the same five-runner matrix,
-  and `rest` runs `test:scripts`, `@lody/site-docs`, the aggregated `test:rest`
-  Vitest projects, and `@lody/electron`.
+  each split across two Vitest shards, `rest` runs `test:scripts`,
+  `@lody/site-docs` and the aggregated `test:rest` Vitest projects, and
+  `electron` runs `@lody/electron`. `run-ci-tests.test.mjs` asserts that a full
+  run assigns every package to exactly one group.
 - CI timings for the split and the cache restore are recorded in PR #992.
 
 ## Limits

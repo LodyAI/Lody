@@ -53,12 +53,14 @@ void test('full run assigns each package to exactly one group', () => {
   }
 });
 
-void test('full rest group runs repository scripts, site-docs, single-boot rest vitest, then electron', () => {
+void test('full rest group runs repository scripts, site-docs and single-boot rest vitest', () => {
   const plan = planCiTests({ scope: null, group: 'rest' });
   assert.deepEqual(plan, [
     ['test:scripts'],
     ['--filter', '@lody/site-docs', 'run', 'test'],
     ['test:rest', '--maxWorkers=4'],
+  ]);
+  assert.deepEqual(planCiTests({ scope: null, group: 'electron' }), [
     ['--filter', '@lody/electron', 'run', 'test'],
   ]);
 });
@@ -84,7 +86,8 @@ void test('affected scope runs only the groups that own a listed package', () =>
   assert.deepEqual(planCiTests({ scope, group: 'cli', shard: '1/2' }), [
     ['--filter', 'lody', 'run', 'test', '--maxWorkers=4', '--shard=1/2'],
   ]);
-  assert.deepEqual(planCiTests({ scope, group: 'rest' }), [
+  assert.deepEqual(planCiTests({ scope, group: 'rest' }), []);
+  assert.deepEqual(planCiTests({ scope, group: 'electron' }), [
     ['--filter', '@lody/electron', 'run', 'test'],
   ]);
 });
@@ -123,7 +126,9 @@ void test('a pull request touching only importable modules runs only Vitest test
   ]);
   assert.deepEqual(planCiTests({ scope, group: 'rest', related: [changed] }), [
     ['test:rest:related', '--passWithNoTests', '--maxWorkers=4', '--project=shared:*', changed],
-    // Electron's node:test suites have no import-graph selection and stay whole.
+  ]);
+  // Electron's node:test suites have no import-graph selection and stay whole.
+  assert.deepEqual(planCiTests({ scope, group: 'electron', related: [changed] }), [
     ['--filter', '@lody/electron', 'run', 'test'],
   ]);
   // A full run never narrows, even if a caller passes related files.
