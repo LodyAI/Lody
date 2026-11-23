@@ -64,11 +64,11 @@ catalogs:
       specifier: 0.6.0
       version: 0.6.0
     '@loro-dev/loro-repo-client':
-      specifier: 0.2.0-next.0
-      version: 0.2.0-next.0
+      specifier: 0.2.0-next.1
+      version: 0.2.0-next.1
     '@loro-dev/loro-repo-engine':
-      specifier: 0.2.0-next.0
-      version: 0.2.0-next.0
+      specifier: 0.2.0-next.1
+      version: 0.2.0-next.1
     '@loro-dev/roost':
       specifier: 0.3.1
       version: 0.3.1
@@ -292,7 +292,7 @@ importers:
         version: 4.0.2(effect@4.0.2)
       '@loro-dev/loro-repo-engine':
         specifier: 'catalog:'
-        version: 0.2.0-next.0
+        version: 0.2.0-next.1
       '@loro-dev/roost-node':
         specifier: 0.3.1
         version: 0.3.1
@@ -371,7 +371,7 @@ importers:
         version: 0.5.0
       '@loro-dev/loro-repo-client':
         specifier: 'catalog:'
-        version: 0.2.0-next.0(loro-crdt@1.17.0)
+        version: 0.2.0-next.1(loro-crdt@1.17.0)
       '@loro-dev/roost':
         specifier: 'catalog:'
         version: 0.3.1
@@ -1993,7 +1993,7 @@ importers:
     devDependencies:
       '@loro-dev/loro-repo-engine':
         specifier: 'catalog:'
-        version: 0.2.0-next.0
+        version: 0.2.0-next.1
       '@loro-dev/streams-client':
         specifier: 'catalog:'
         version: 0.14.0(effect@4.0.2)
@@ -2217,7 +2217,7 @@ importers:
         version: 4.0.2(effect@4.0.2)
       '@loro-dev/loro-repo-client':
         specifier: 'catalog:'
-        version: 0.2.0-next.0(loro-crdt@1.17.0)
+        version: 0.2.0-next.1(loro-crdt@1.17.0)
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.22.1(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)
@@ -2269,7 +2269,7 @@ importers:
         version: 0.5.0
       '@loro-dev/loro-repo-engine':
         specifier: 'catalog:'
-        version: 0.2.0-next.0
+        version: 0.2.0-next.1
       '@loro-dev/sqlite-riverrun':
         specifier: 0.3.0
         version: 0.3.0(patch_hash=9e80924ae904a7643f397cefaef1e404070b0dae3bac55cd525ae97e6a975536)
@@ -4633,8 +4633,8 @@ packages:
     resolution: {integrity: sha512-0hrjuGGF+PbUWEx50L2/mfVdJ1fpXZiaorD+O3tKrj912eyEHZiA21/XfkD8sU6BXGLYZ9SEsEkt2OmX7eUXNw==}
     engines: {node: '>=18'}
 
-  '@loro-dev/json-patch@0.2.0-next.0':
-    resolution: {integrity: sha512-o/cYrhkM3YFShYSQiuc1BOUiWCywhnblh5SjyP1r18lEnxaJIScUdanYTh5iJxl+4FpwwU2upVoxc1AT1B4vtw==}
+  '@loro-dev/json-patch@0.2.0-next.1':
+    resolution: {integrity: sha512-DF0jkE0U/i5OwzljAqiFZYOfI1rwJpjI6ijUF2rPYqt0YyKmSUv3Qs+lL4DWkFsURZ6rD0bFnQy8sOUN8GYZJA==}
     engines: {node: '>=20'}
     peerDependencies:
       loro-crdt: '>=1.17.0'
@@ -4647,44 +4647,44 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@loro-dev/loro-repo-client@0.2.0-next.0':
-    resolution: {integrity: sha512-YRZEBldToIp3mTBkW+rN8C8ePPIH8zCeeIkWFmKr/N1muTGMIbGrWkDOFYOT8TRNummsNGeNqT2bHryHQeohbQ==}
+  '@loro-dev/loro-repo-client@0.2.0-next.1':
+    resolution: {integrity: sha512-4/9lb2KuuwSW7k73vmFz34NUWxcxgWIbK9A9IQlTLjaM2FEoIse9jYQA6mVG8Iw+WBmFNs5aO5rdxp9F8glRig==}
     engines: {node: '>=20'}
 
-  '@loro-dev/loro-repo-engine-darwin-arm64@0.2.0-next.0':
-    resolution: {integrity: sha512-FkDvpMNas96Fkes/diMm+d1xSwit0Ij9mAAuWBimYMMxRFueauYuu1RAbM1I1E7NF41NBs/4kSLxUDR6V6Y9Hg==}
+  '@loro-dev/loro-repo-engine-darwin-arm64@0.2.0-next.1':
+    resolution: {integrity: sha512-hVV1W7E1UchkrEbaI7NdJawEccwrOBqgd+PRz/VqpS3B83B2MU2cvJVPq/p5upKOy0NCwiZQPVKaMsveN4PFzg==}
     cpu: [arm64]
     os: [darwin]
 
-  '@loro-dev/loro-repo-engine-darwin-x64@0.2.0-next.0':
-    resolution: {integrity: sha512-I7BZK4q+gtKDK0ejHdagE78Fiq7XFTRfWTPfUw9ClUHbER/oupL4TE/+paSoN2tiy+WwUFZ4F7hP+ZVWnbMKrg==}
+  '@loro-dev/loro-repo-engine-darwin-x64@0.2.0-next.1':
+    resolution: {integrity: sha512-PZhNKvReogJgj+8o03RL5T6CS4ON8fq51z7xFflZV44n2dd4jJMIZmQzP/oBZynS4XJkGeTK86Knt3FINWkwnw==}
     cpu: [x64]
     os: [darwin]
 
-  '@loro-dev/loro-repo-engine-linux-arm64-gnu@0.2.0-next.0':
-    resolution: {integrity: sha512-jdGmp46kLlVOEl/mIXpFDifopz+H3sSPFo8IMpiB4/bvwWXDHjq1P7bGltCtpDo91Fcp5/sGs6nKM4rkMc83Gg==}
+  '@loro-dev/loro-repo-engine-linux-arm64-gnu@0.2.0-next.1':
+    resolution: {integrity: sha512-4ol3QzCglM6lkOvrDmX2VezaWiB4ns1jJIJNDhvCYbLMbBY/mPg/P6R4eYsvSsMzs6gsS1WTO04+Ei6fhq14gQ==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@loro-dev/loro-repo-engine-linux-x64-gnu@0.2.0-next.0':
-    resolution: {integrity: sha512-COoFdsVViUB2GmBbqzPrEc/vXqRrgx7C95kq/7tBpoPTpY6/UFLeX0yzeuyDf+xhLv7mwxQG4EHcdAew04EqnA==}
+  '@loro-dev/loro-repo-engine-linux-x64-gnu@0.2.0-next.1':
+    resolution: {integrity: sha512-LKHK24n25z5DH/SCxcKDFuJ/xgXqzapCPfoai7G/Mk1SWYXE0P8vMq2Ua1M2ALoD0Tq83D1T1GIlyk3ZHOZD7g==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@loro-dev/loro-repo-engine-win32-arm64-msvc@0.2.0-next.0':
-    resolution: {integrity: sha512-zcEfkGnKm+xCu/b8GtZO3xjSjNMTEX22E8iC3aZMF/6DIvrMokzFzJAus1DhT7SRxSD2/efcjWC7c0UMQfNlKA==}
+  '@loro-dev/loro-repo-engine-win32-arm64-msvc@0.2.0-next.1':
+    resolution: {integrity: sha512-KZV/S+6YZ/bBKlx2LJ+HrlyOf3mtNasn19mL7/rUnhkojv2QKWifNTPxHSc3wLZAiUtEGvql4mduyVKCFuU0hQ==}
     cpu: [arm64]
     os: [win32]
 
-  '@loro-dev/loro-repo-engine-win32-x64-msvc@0.2.0-next.0':
-    resolution: {integrity: sha512-b4910m7+hbrRjHCXoKiNC2us81lrX3MO8c0RZDI+ftaYag8oOJM2ZE5Axnkw5UgbdtCoXvYHnzMF4u27LOaB+A==}
+  '@loro-dev/loro-repo-engine-win32-x64-msvc@0.2.0-next.1':
+    resolution: {integrity: sha512-evBEJKJDSa9kvpVeRhQIFaiIE0wMdW0lcZYvKBpCnwkiha526hba+jhIT1hvRpF7QCdenMPhciPES5UUgWV+xQ==}
     cpu: [x64]
     os: [win32]
 
-  '@loro-dev/loro-repo-engine@0.2.0-next.0':
-    resolution: {integrity: sha512-As+DvHIlW9ft2UntRdJ+Dk5twmEfBvPWJC29LHE+ay8AA10GL2TdW/ddszFHNg/bbF5bC18JlOHH8dXxBX5kYA==}
+  '@loro-dev/loro-repo-engine@0.2.0-next.1':
+    resolution: {integrity: sha512-J0Aq6pMvia39jYFaRcYeAe4Ms8xYDSizfhV2jnDRZ4V3Z5MQ5cAOtU4hDSmNv6Sy6EsI+i5hnefOKLOc7C2QEA==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -17389,7 +17389,7 @@ snapshots:
   '@loro-dev/flock@4.4.4':
     optional: true
 
-  '@loro-dev/json-patch@0.2.0-next.0(loro-crdt@1.17.0)':
+  '@loro-dev/json-patch@0.2.0-next.1(loro-crdt@1.17.0)':
     dependencies:
       '@msgpack/msgpack': 3.1.3
     optionalDependencies:
@@ -17402,38 +17402,38 @@ snapshots:
       js-yaml: 4.1.1
       loro-crdt: 1.17.0
 
-  '@loro-dev/loro-repo-client@0.2.0-next.0(loro-crdt@1.17.0)':
+  '@loro-dev/loro-repo-client@0.2.0-next.1(loro-crdt@1.17.0)':
     dependencies:
-      '@loro-dev/json-patch': 0.2.0-next.0(loro-crdt@1.17.0)
+      '@loro-dev/json-patch': 0.2.0-next.1(loro-crdt@1.17.0)
     transitivePeerDependencies:
       - loro-crdt
 
-  '@loro-dev/loro-repo-engine-darwin-arm64@0.2.0-next.0':
+  '@loro-dev/loro-repo-engine-darwin-arm64@0.2.0-next.1':
     optional: true
 
-  '@loro-dev/loro-repo-engine-darwin-x64@0.2.0-next.0':
+  '@loro-dev/loro-repo-engine-darwin-x64@0.2.0-next.1':
     optional: true
 
-  '@loro-dev/loro-repo-engine-linux-arm64-gnu@0.2.0-next.0':
+  '@loro-dev/loro-repo-engine-linux-arm64-gnu@0.2.0-next.1':
     optional: true
 
-  '@loro-dev/loro-repo-engine-linux-x64-gnu@0.2.0-next.0':
+  '@loro-dev/loro-repo-engine-linux-x64-gnu@0.2.0-next.1':
     optional: true
 
-  '@loro-dev/loro-repo-engine-win32-arm64-msvc@0.2.0-next.0':
+  '@loro-dev/loro-repo-engine-win32-arm64-msvc@0.2.0-next.1':
     optional: true
 
-  '@loro-dev/loro-repo-engine-win32-x64-msvc@0.2.0-next.0':
+  '@loro-dev/loro-repo-engine-win32-x64-msvc@0.2.0-next.1':
     optional: true
 
-  '@loro-dev/loro-repo-engine@0.2.0-next.0':
+  '@loro-dev/loro-repo-engine@0.2.0-next.1':
     optionalDependencies:
-      '@loro-dev/loro-repo-engine-darwin-arm64': 0.2.0-next.0
-      '@loro-dev/loro-repo-engine-darwin-x64': 0.2.0-next.0
-      '@loro-dev/loro-repo-engine-linux-arm64-gnu': 0.2.0-next.0
-      '@loro-dev/loro-repo-engine-linux-x64-gnu': 0.2.0-next.0
-      '@loro-dev/loro-repo-engine-win32-arm64-msvc': 0.2.0-next.0
-      '@loro-dev/loro-repo-engine-win32-x64-msvc': 0.2.0-next.0
+      '@loro-dev/loro-repo-engine-darwin-arm64': 0.2.0-next.1
+      '@loro-dev/loro-repo-engine-darwin-x64': 0.2.0-next.1
+      '@loro-dev/loro-repo-engine-linux-arm64-gnu': 0.2.0-next.1
+      '@loro-dev/loro-repo-engine-linux-x64-gnu': 0.2.0-next.1
+      '@loro-dev/loro-repo-engine-win32-arm64-msvc': 0.2.0-next.1
+      '@loro-dev/loro-repo-engine-win32-x64-msvc': 0.2.0-next.1
 
   '@loro-dev/roost-node-darwin-arm64@0.3.1':
     optional: true
