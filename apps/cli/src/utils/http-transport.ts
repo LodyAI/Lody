@@ -55,6 +55,9 @@ export interface CliHttpTransportOptions {
 let singletonTransport: CliHttpTransport | null = null;
 let singletonConfigKey: string | null = null;
 let undiciDiagnosticsInstalled = false;
+let activeGlobalTransport: CliHttpTransport | null = null;
+let installedGlobalFetch: CliFetch | null = null;
+let currentBaseFetch: CliFetch | null = null;
 
 const identifiedFetches = new WeakSet<CliFetch>();
 
@@ -170,16 +173,25 @@ export function createCliHttpTransport(
 export function installCliHttpGlobalDispatcher(
   options: CliHttpTransportOptions = {}
 ): CliHttpTransport | null {
-  globalThis.fetch = withCliUserAgent(globalThis.fetch);
   const logger = options.logger ?? getLogger('http-transport');
   const transport = getOrCreateCliHttpTransport(options);
   const config = resolveCliHttpTransportConfig(options.env);
 
   if (!transport) {
+    activeGlobalTransport = null;
+    globalThis.fetch = withCliUserAgent(globalThis.fetch);
     logger.debug('[http-transport] using Node default global dispatcher');
     return null;
   }
 
+  activeGlobalTransport = transport;
+  if (currentBaseFetch === null || globalThis.fetch === currentBaseFetch) {
+    const baseFetch = globalThis.fetch;
+    currentBaseFetch = baseFetch;
+    installedGlobalFetch = (input, init) =>
+      (activeGlobalTransport?.fetch ?? withCliUserAgent(baseFetch))(input, init);
+    globalThis.fetch = installedGlobalFetch;
+  }
   setGlobalDispatcher(transport.dispatcher);
 
   if (config.diagnosticsEnabled) {
@@ -201,6 +213,12 @@ export async function resetCliHttpTransportForTests(): Promise<void> {
   const previous = singletonTransport;
   singletonTransport = null;
   singletonConfigKey = null;
+  activeGlobalTransport = null;
+  if (installedGlobalFetch && globalThis.fetch === installedGlobalFetch && currentBaseFetch) {
+    globalThis.fetch = currentBaseFetch;
+  }
+  installedGlobalFetch = null;
+  currentBaseFetch = null;
   await previous?.close();
 }
 
