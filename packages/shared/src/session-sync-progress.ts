@@ -14,20 +14,32 @@ function streamOffset(offset: string): bigint | undefined {
   return /^\d{1,20}$/.test(offset) ? BigInt(offset) : undefined;
 }
 
+/** Bounds the head query that supplies a catch-up round's target offset. */
+export type LoroTailDeadline = () => AbortSignal;
+
+const defaultTailDeadline: LoroTailDeadline = () => AbortSignal.timeout(1500);
+
 function trackLoroCatchUp(
   offset: string,
   readTail: (signal: AbortSignal) => Promise<string | undefined>,
-  publish: (progress: SessionSyncProgress | null) => void
+  publish: (progress: SessionSyncProgress | null) => void,
+  tailDeadline: LoroTailDeadline
 ) {
   const start = streamOffset(offset);
   let current = start;
   let target: bigint | undefined;
   const controller = new AbortController();
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(1500)]);
+  const signal = AbortSignal.any([controller.signal, tailDeadline()]);
   const report = () => {
-    if (start === undefined || current === undefined) return;
-    const position = target !== undefined && current > target ? target : current;
-    const received = Number(position - start);
+    if (start === undefined || current === undefined || controller.signal.aborted) return;
+    // The round is over once the applied cursor reaches the observed tail;
+    // the room may stay unsynced (live poll pending), so clear it here.
+    if (target !== undefined && current >= target) {
+      controller.abort();
+      publish(null);
+      return;
+    }
+    const received = Number(current - start);
     const total = target === undefined ? undefined : Number(target - start);
     if (
       !Number.isSafeInteger(received) ||
@@ -42,12 +54,7 @@ function trackLoroCatchUp(
     .then((tail) => {
       if (signal.aborted || start === undefined || tail === undefined) return;
       const observed = streamOffset(tail);
-      if (
-        observed === undefined ||
-        observed <= start ||
-        (current !== undefined && observed < current)
-      )
-        return;
+      if (observed === undefined) return;
       target = observed;
       report();
     })
@@ -67,7 +74,10 @@ function trackLoroCatchUp(
   };
 }
 
-export function createLoroSyncProgress(publish: (progress: SessionSyncProgress | null) => void) {
+export function createLoroSyncProgress(
+  publish: (progress: SessionSyncProgress | null) => void,
+  tailDeadline: LoroTailDeadline = defaultTailDeadline
+) {
   let epoch = 0;
   let catchUp: ReturnType<typeof trackLoroCatchUp> | undefined;
   const begin = () => {
@@ -81,7 +91,7 @@ export function createLoroSyncProgress(publish: (progress: SessionSyncProgress |
   return {
     beginBootstrap: begin,
     catchUp(offset: string, readTail: (signal: AbortSignal) => Promise<string | undefined>) {
-      if (!catchUp) catchUp = trackLoroCatchUp(offset, readTail, begin());
+      if (!catchUp) catchUp = trackLoroCatchUp(offset, readTail, begin(), tailDeadline);
     },
     advance(offset: string) {
       catchUp?.advance(offset);

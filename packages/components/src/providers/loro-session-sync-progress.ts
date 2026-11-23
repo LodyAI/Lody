@@ -1,6 +1,7 @@
 import {
   createLoroSyncProgress,
   observeLoroBootstrap,
+  type LoroTailDeadline,
   type SessionSyncProgress,
 } from '@lody/shared';
 import type { RoomSyncState } from '@/lib/room-sync-state';
@@ -8,7 +9,8 @@ import type { RoomSyncState } from '@/lib/room-sync-state';
 type ReadTail = (signal: AbortSignal) => Promise<string | undefined>;
 
 export function createLoroSessionSyncProgress(
-  activeTransport: () => 'local' | 'cloud' | undefined
+  activeTransport: () => 'local' | 'cloud' | undefined,
+  options: { tailDeadline?: LoroTailDeadline } = {}
 ) {
   let snapshot: SessionSyncProgress | null = null;
   let owner = activeTransport();
@@ -31,7 +33,7 @@ export function createLoroSessionSyncProgress(
   };
   const stream = createLoroSyncProgress((value) => {
     if (activeTransport() === 'cloud') publish(value);
-  });
+  }, options.tailDeadline);
   let state: RoomSyncState = 'idle';
   let lastOffset: string | undefined;
   let readTail: ReadTail | undefined;
@@ -47,13 +49,14 @@ export function createLoroSessionSyncProgress(
   const catchingUp = () =>
     activeTransport() === 'cloud' &&
     ['idle', 'connecting', 'syncing', 'reconnecting'].includes(state);
+  const discardCursor = () => {
+    lastOffset = undefined;
+    stream.clear();
+  };
   const fetchBootstrap = observeLoroBootstrap(
     (input, init) => fetch(input, init),
     stream.beginBootstrap,
-    () => {
-      lastOffset = undefined;
-      stream.clear();
-    }
+    discardCursor
   );
 
   return {
@@ -79,7 +82,15 @@ export function createLoroSessionSyncProgress(
     },
     fetch(input: string, init?: RequestInit) {
       refreshOwner();
-      if (!catchingUp()) return fetch(input, init);
+      if (!catchingUp()) {
+        // A synced room can still lose its cursor; forget it so a later
+        // reconnect does not measure catch-up from the retired offset.
+        const retired = init?.method === 'GET' && new URL(input).searchParams.has('offset');
+        return fetch(input, init).then((response) => {
+          if (retired && response.status === 410) discardCursor();
+          return response;
+        });
+      }
       if (init?.method === 'GET' && readTail) {
         const parameters = new URL(input).searchParams;
         const offset = parameters.get('offset');
@@ -107,10 +118,11 @@ export function createLoroSessionSyncProgress(
         stream.catchUp(lastOffset, readTail);
       }
     },
+    /** Hides progress without touching `state`: that mirrors the room tracker,
+     *  which keeps a released-but-still-joined room synced until it stops. */
     clear() {
       stream.clear();
       publish(null);
-      state = 'idle';
     },
   };
 }

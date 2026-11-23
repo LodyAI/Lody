@@ -612,7 +612,10 @@ it('publishes Loro session progress from the persisted stream cursor and resets 
 
   server.room(path).batches.push(first, second);
   catchingUp = true;
-  const progress = createLoroSessionSyncProgress(() => 'cloud');
+  // The head query must not race a wall-clock deadline under test load.
+  const progress = createLoroSessionSyncProgress(() => 'cloud', {
+    tailDeadline: () => new AbortController().signal,
+  });
   const events: ReturnType<typeof progress.getSnapshot>[] = [];
   const total = first.byteLength + second.byteLength;
   const plan = Promise.withResolvers<void>();
@@ -662,6 +665,33 @@ it('publishes Loro session progress from the persisted stream cursor and resets 
     stop();
   }
 }, 10_000);
+
+it('clears Loro catch-up progress at the stream tail and keeps a still-synced reacquired room quiet', async () => {
+  const progress = createLoroSessionSyncProgress(() => 'cloud', {
+    tailDeadline: () => new AbortController().signal,
+  });
+  const planned = Promise.withResolvers<void>();
+  const stop = progress.subscribe(() => {
+    if (progress.getSnapshot()?.total !== undefined) planned.resolve();
+  });
+  try {
+    progress.updateState('syncing');
+    progress.loaded('100', async () => '300');
+    await planned.promise;
+    expect(progress.getSnapshot()).toEqual({ kind: 'updates', received: 0, total: 200 });
+    // The cursor reaches the tail before the live poll marks the room synced.
+    progress.saved('300');
+    expect(progress.getSnapshot()).toBeNull();
+
+    progress.updateState('synced');
+    // Lease released, then re-acquired before the room leaves: still synced.
+    progress.clear();
+    progress.loaded('300', async () => '400');
+    expect(progress.getSnapshot()).toBeNull();
+  } finally {
+    stop();
+  }
+});
 
 /** Synthetic reversible provider: verifies SDK AAD binding; deliberately not cryptography. */
 function testProtection(): PayloadProtectionProvider {
