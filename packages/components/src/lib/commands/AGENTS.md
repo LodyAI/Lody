@@ -21,8 +21,11 @@ only tells global dispatch to yield for events originating in its subtree.
   experiment is not a built-in: its placeholder is registered by an always-mounted
   component of that experiment, before the routes (`TodayCommandPlaceholder`), so it
   is listed only while the experiment is on and never masks the mounted command.
-- The registry is a per-id stack. Multiple `register` calls push implementations and
-  the most recently mounted one wins. Hidden retained tabs/toolbars must pass
+- The registry is a per-id stack. `get`/`execute`/palette and the binding indexes
+  reflect the most recently mounted registration, while key dispatch consults every
+  stacked entry newest-first and runs the first whose binding and command `when`s
+  accept — composer-scoped surfaces each answer their own box instead of dead-keying
+  behind the stack top. Hidden retained tabs/toolbars must still pass
   `enabled=false` to `useCommand` or they can shadow the active surface.
 - Binding-level `when` limits only the default binding. User overrides do not inherit
   it. Command-level `when` limits the command through every execution path.

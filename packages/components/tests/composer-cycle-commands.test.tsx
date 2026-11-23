@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useComposerCycleCommands } from '../src/hooks/use-composer-cycle-commands';
@@ -17,6 +17,7 @@ const testI18n = createTestI18n();
 type CycleCommandProbeProps = {
   id: string;
   enabled: boolean;
+  scoped?: boolean;
   onModeSelect: (value: string) => void;
   onModelSelect: (value: string) => void;
   onThinkEffortSelect: (value: string) => void;
@@ -45,12 +46,15 @@ class MemoryStorage {
 function CycleCommandProbe({
   id,
   enabled,
+  scoped,
   onModeSelect,
   onModelSelect,
   onThinkEffortSelect,
 }: CycleCommandProbeProps) {
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   useComposerCycleCommands({
     enabled,
+    getComposerAnchor: scoped ? () => inputRef.current : undefined,
     mode: { values: ['ask', 'auto'], current: 'ask', onSelect: onModeSelect },
     model: { values: ['model-a', 'model-b'], current: 'model-a', onSelect: onModelSelect },
     thinkEffort: {
@@ -61,7 +65,11 @@ function CycleCommandProbe({
     provider: null,
   });
 
-  return <textarea id={id} data-lody-composer-input="" />;
+  return (
+    <div data-composer-box={id}>
+      <textarea ref={inputRef} id={id} data-lody-composer-input="" />
+    </div>
+  );
 }
 
 describe('composer cycle command ownership', () => {
@@ -142,6 +150,49 @@ describe('composer cycle command ownership', () => {
     expect(first.mode).toHaveBeenCalledTimes(1);
     expect(first.model).toHaveBeenCalledTimes(1);
     expect(first.thinkEffort).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers each scoped composer box with its own registration', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    act(() => {
+      root.render(
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="first"
+              scoped
+              enabled
+              onModeSelect={vi.fn()}
+              onModelSelect={vi.fn()}
+              onThinkEffortSelect={first}
+            />
+            <CycleCommandProbe
+              id="second"
+              scoped
+              enabled
+              onModeSelect={vi.fn()}
+              onModelSelect={vi.fn()}
+              onThinkEffortSelect={second}
+            />
+          </>,
+          testI18n
+        )
+      );
+    });
+
+    container.querySelector('#first')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: "'", code: 'Quote', ctrlKey: true, bubbles: true })
+    );
+    expect(first).toHaveBeenCalledWith('high');
+    expect(second).not.toHaveBeenCalled();
+
+    container.querySelector('#second')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: "'", code: 'Quote', ctrlKey: true, bubbles: true })
+    );
+    expect(second).toHaveBeenCalledWith('high');
+    expect(first).toHaveBeenCalledTimes(1);
   });
 
   it("cycles thinking effort on ⌘' only while the composer is focused", () => {

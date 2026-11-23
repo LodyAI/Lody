@@ -19,6 +19,7 @@ import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
+import { CommandShortcutHost } from '@/lib/commands/shortcut-host';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { SettingsStoryProviders } from './settings-story-shell';
 import type { ComposerInputElement } from '@/ui/mention/composer-input';
@@ -309,38 +310,41 @@ function DemoComposer({
       : undefined);
 
   return (
-    <ChatComposer
-      title={title}
-      tone={tone}
-      variant={variant}
-      promptRef={promptRef}
-      promptValue={prompt}
-      onPromptChange={setPrompt}
-      availableCommands={showMentionCommands ? mentionStressCommands : undefined}
-      promptPlaceholder={samplePromptPlaceholder}
-      promptRows={promptRows ?? 3}
-      pastedTextDrafts={pastedTextDrafts}
-      onPastedTextDraftsChange={setPastedTextDrafts}
-      footerSelector={selectorNode}
-      primaryAction={primaryActionNode}
-      onAttachmentAddClick={attachmentsEnabled ? () => undefined : undefined}
-      imageItems={resolvedImageItems}
-      onImageRemove={attachmentsEnabled ? () => undefined : undefined}
-      onImageRetry={attachmentsEnabled ? () => undefined : undefined}
-      fileItems={resolvedFileItems}
-      onFileRemove={attachmentsEnabled ? () => undefined : undefined}
-      onFileRetry={attachmentsEnabled ? () => undefined : undefined}
-      autoResize={variant === 'session'}
-      maxRows={11}
-      secondaryAction={
-        showSecondary
-          ? {
-              label: 'Cancel',
-              onClick: () => undefined,
-            }
-          : undefined
-      }
-    />
+    <>
+      <CommandShortcutHost />
+      <ChatComposer
+        title={title}
+        tone={tone}
+        variant={variant}
+        promptRef={promptRef}
+        promptValue={prompt}
+        onPromptChange={setPrompt}
+        availableCommands={showMentionCommands ? mentionStressCommands : undefined}
+        promptPlaceholder={samplePromptPlaceholder}
+        promptRows={promptRows ?? 3}
+        pastedTextDrafts={pastedTextDrafts}
+        onPastedTextDraftsChange={setPastedTextDrafts}
+        footerSelector={selectorNode}
+        primaryAction={primaryActionNode}
+        onAttachmentAddClick={attachmentsEnabled ? () => undefined : undefined}
+        imageItems={resolvedImageItems}
+        onImageRemove={attachmentsEnabled ? () => undefined : undefined}
+        onImageRetry={attachmentsEnabled ? () => undefined : undefined}
+        fileItems={resolvedFileItems}
+        onFileRemove={attachmentsEnabled ? () => undefined : undefined}
+        onFileRetry={attachmentsEnabled ? () => undefined : undefined}
+        autoResize={variant === 'session'}
+        maxRows={11}
+        secondaryAction={
+          showSecondary
+            ? {
+                label: 'Cancel',
+                onClick: () => undefined,
+              }
+            : undefined
+        }
+      />
+    </>
   );
 }
 

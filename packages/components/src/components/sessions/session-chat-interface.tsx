@@ -3362,6 +3362,7 @@ export const SessionChatInterface = memo(
       // Session detail keeps its toolbar and inactive tabs mounted. Only the active
       // conversation may own these duplicate command ids.
       enabled: !hideMessageArea && syncEnabled,
+      getComposerAnchor: () => inputAreaRef.current?.getComposerInput() ?? null,
       mode: hideMessageArea
         ? null
         : {

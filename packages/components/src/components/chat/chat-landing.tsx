@@ -2221,6 +2221,7 @@ function WorkspaceChatLanding({
     [executorConfigs, selectedAgent?.machineId]
   );
   useComposerCycleCommands({
+    getComposerAnchor: () => promptTextareaRef.current,
     mode: {
       values: modeOptions.map((option) => option.value),
       current: selectedModeId,

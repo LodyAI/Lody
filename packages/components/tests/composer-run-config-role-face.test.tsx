@@ -425,6 +425,20 @@ describe('DesktopRunConfigMenu ⌘/ chord', () => {
       new KeyboardEvent('keydown', { key: '/', code: 'Slash', ctrlKey: true, bubbles: true })
     );
 
+  const stubFinePointer = () => {
+    originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query === '(pointer: fine)',
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => true,
+    })) as unknown as typeof window.matchMedia;
+  };
+
   const renderComposerBox = async (props: Partial<MenuProps> = {}) => {
     await act(async () => {
       root?.render(
@@ -470,17 +484,7 @@ describe('DesktopRunConfigMenu ⌘/ chord', () => {
   });
 
   it('opens into the model search on ⌘/ while its composer is focused', async () => {
-    originalMatchMedia = window.matchMedia;
-    window.matchMedia = ((query: string) => ({
-      matches: query === '(pointer: fine)',
-      media: query,
-      onchange: null,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => true,
-    })) as unknown as typeof window.matchMedia;
+    stubFinePointer();
     const view = await renderComposerBox({ modelOptions: manyModels });
     const composer = view.querySelector('[data-lody-composer-input]')!;
     expect(document.body.querySelector('[data-lody-menu-search]')).toBeNull();
@@ -500,6 +504,28 @@ describe('DesktopRunConfigMenu ⌘/ chord', () => {
     const search = document.body.querySelector('[data-lody-menu-search]');
     expect(search).not.toBeNull();
     await vi.waitFor(() => expect(document.activeElement).toBe(search));
+  });
+
+  it('keeps the row the user arrows to instead of snapping focus back to search', async () => {
+    stubFinePointer();
+    const view = await renderComposerBox({ modelOptions: manyModels });
+    const composer = view.querySelector('[data-lody-composer-input]')!;
+
+    await act(async () => {
+      pressRunConfigChord(composer);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    const search = document.body.querySelector<HTMLElement>('[data-lody-menu-search]');
+    expect(search).not.toBeNull();
+    await vi.waitFor(() => expect(document.activeElement).toBe(search));
+
+    await act(async () => {
+      search!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(document.activeElement?.getAttribute('role')).toMatch(/^menuitem/);
   });
 
   it('does not open on ⌘/ while its surface is inactive', async () => {

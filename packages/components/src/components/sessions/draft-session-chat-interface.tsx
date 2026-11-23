@@ -329,6 +329,7 @@ export const DraftSessionChatInterface = memo(
         : undefined;
       useComposerCycleCommands({
         enabled: commandsEnabled,
+        getComposerAnchor: () => inputAreaRef.current?.getComposerInput() ?? null,
         mode: {
           values: modeOptions.map((option) => option.value),
           current: selectedModeId,

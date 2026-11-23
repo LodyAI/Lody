@@ -14,6 +14,9 @@ type ResolvedBinding = {
   preventDefault: boolean;
   when?: KeyBinding['when'];
   commandId: string;
+  /** The stack entry that contributed this binding — dispatch runs ITS command, so a
+      composer-scoped binding always resolves to the surface that owns the focused box. */
+  registration: CommandRegistration;
 };
 
 type CommandRegistration = {
@@ -314,9 +317,14 @@ class CommandRegistry {
     const next: ResolvedBinding[] = [];
     const byCommand = new Map<string, string[]>();
     const byCanonical = new Map<string, string>();
-    const activeRegistrations = [...this.activeCommands.values()].sort((a, b) => a.order - b.order);
+    // Dispatch visits every stacked entry newest-first; the listing indexes keep the top.
+    const allRegistrations = [...this.commandStacks.values()]
+      .flat()
+      .sort((a, b) => a.order - b.order);
 
-    for (const { command: cmd } of activeRegistrations) {
+    for (const registration of allRegistrations) {
+      const { command: cmd } = registration;
+      const isActive = this.activeCommands.get(cmd.id) === registration;
       const override = this.userOverrides[cmd.id];
       // User overrides drop the platform/runtime filter — they were chosen on THIS device.
       const entries: ReadonlyArray<string | KeyBinding> =
@@ -327,28 +335,32 @@ class CommandRegistry {
         const binding: KeyBinding = typeof entry === 'string' ? { key: entry } : entry;
         if (!isOverride && !keybindingAppliesToEnvironment(binding, platform, runtime)) continue;
 
-        if (
-          import.meta.env?.DEV &&
-          runtime === 'web' &&
-          UNINTERCEPTABLE_WEB_KEYS.has(binding.key.toLowerCase())
-        ) {
-          console.warn(
-            `[commands] "${cmd.id}" binds "${binding.key}" but the browser claims this combo at OS level — register a web-only alternative via { runtimes: ['electron'] } and a separate web binding.`
-          );
-        }
-
         const canonical = canonicalizeBinding(binding.key);
         if (!canonical) {
           console.error(`[commands] invalid binding for "${cmd.id}": "${binding.key}"`);
           continue;
         }
-        const prior = byCanonical.get(canonical);
-        if (prior && prior !== cmd.id && import.meta.env?.DEV) {
-          console.warn(
-            `[commands] key "${binding.key}" is bound by both "${prior}" and "${cmd.id}"; later wins.`
-          );
+        if (isActive) {
+          if (
+            import.meta.env?.DEV &&
+            runtime === 'web' &&
+            UNINTERCEPTABLE_WEB_KEYS.has(binding.key.toLowerCase())
+          ) {
+            console.warn(
+              `[commands] "${cmd.id}" binds "${binding.key}" but the browser claims this combo at OS level — register a web-only alternative via { runtimes: ['electron'] } and a separate web binding.`
+            );
+          }
+          const prior = byCanonical.get(canonical);
+          if (prior && prior !== cmd.id && import.meta.env?.DEV) {
+            console.warn(
+              `[commands] key "${binding.key}" is bound by both "${prior}" and "${cmd.id}"; later wins.`
+            );
+          }
+          byCanonical.set(canonical, cmd.id);
+          const list = byCommand.get(cmd.id);
+          if (list) list.push(binding.key);
+          else byCommand.set(cmd.id, [binding.key]);
         }
-        byCanonical.set(canonical, cmd.id);
 
         next.push({
           raw: binding.key,
@@ -356,11 +368,8 @@ class CommandRegistry {
           preventDefault: binding.preventDefault ?? true,
           when: binding.when,
           commandId: cmd.id,
+          registration,
         });
-
-        const list = byCommand.get(cmd.id);
-        if (list) list.push(binding.key);
-        else byCommand.set(cmd.id, [binding.key]);
       }
     }
     this.bindings = next;
@@ -382,8 +391,7 @@ class CommandRegistry {
       const b = this.bindings[i]!;
       if (b.canonical !== canonical) continue;
       if (b.when && !b.when(event)) continue;
-      const cmd = this.activeCommands.get(b.commandId)?.command;
-      if (!cmd) continue;
+      const cmd = b.registration.command;
       if (scope && !cmd.allowInTextInput) {
         // Claimed keys (or every key, when the scope claims broadly) belong to
         // the editor. Leave the event alone — no preventDefault — so its own

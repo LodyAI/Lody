@@ -568,6 +568,8 @@ export type SessionChatInputAreaHandle = {
   addDocumentSelection: (selection: DocumentSelection) => boolean;
   setInputText: (text: string) => void;
   focusInput: () => void;
+  /** The rendered composer input; null while the composer is not mounted. */
+  getComposerInput: () => ComposerInputElement | null;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
@@ -1810,6 +1812,7 @@ export const SessionChatInputArea = memo(
         focusInput: () => {
           textareaRef.current?.focus();
         },
+        getComposerInput: () => textareaRef.current,
         addCommentReference,
         toggleCommentReference,
         addVisualAnnotationReference,

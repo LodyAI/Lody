@@ -387,7 +387,8 @@ const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>
       if (!window.matchMedia?.('(pointer: fine)').matches) return undefined;
       const claim = () => inputRef.current?.focus();
       const frame = requestAnimationFrame(claim);
-      /* A same-beat open-focus on a menu row hands the field focus back. */
+      /** A same-beat open-focus hands the field focus back; a keydown ends the
+        grace period and cancels the claim — a row the user arrowed to is theirs. */
       const onFocusIn = (event: FocusEvent) => {
         const target = event.target;
         if (
@@ -398,16 +399,16 @@ const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>
           claim();
         }
       };
-      document.addEventListener('focusin', onFocusIn);
-      const disarm = window.setTimeout(
-        () => document.removeEventListener('focusin', onFocusIn),
-        250
-      );
-      return () => {
+      const disarm = () => {
         cancelAnimationFrame(frame);
-        clearTimeout(disarm);
+        clearTimeout(disarmTimer);
         document.removeEventListener('focusin', onFocusIn);
+        window.removeEventListener('keydown', disarm, { capture: true });
       };
+      const disarmTimer = window.setTimeout(disarm, 250);
+      document.addEventListener('focusin', onFocusIn);
+      window.addEventListener('keydown', disarm, { capture: true, once: true });
+      return disarm;
     }, []);
 
     React.useEffect(() => {

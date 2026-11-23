@@ -232,6 +232,23 @@ describe('AttachmentAddMenu', () => {
     const triggerOf = (box: Element) => box.querySelector('button[aria-label="Add attachment"]');
 
     await act(async () => {
+      pressAddMenuChord(boxA.querySelector('[data-lody-composer-input]')!);
+      await vi.advanceTimersByTimeAsync(40);
+    });
+
+    expect(document.body.querySelectorAll('[role="menu"]')).toHaveLength(1);
+    expect(triggerOf(boxA)?.getAttribute('aria-expanded')).toBe('true');
+    expect(triggerOf(boxB)?.getAttribute('aria-expanded')).not.toBe('true');
+
+    await act(async () => {
+      document.body
+        .querySelector('[role="menu"]')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await vi.advanceTimersByTimeAsync(40);
+    });
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+
+    await act(async () => {
       pressAddMenuChord(boxB.querySelector('[data-lody-composer-input]')!);
       await vi.advanceTimersByTimeAsync(40);
     });
