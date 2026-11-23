@@ -17,9 +17,8 @@ import { useSessionWorkspacePath } from '@/hooks/use-session-workspace-path';
 import { usePostHog } from '@/lib/posthog-context';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
-import { downloadBytesAsFile, getDownloadFileName } from '@/lib/download-file';
+import { saveBytesAsFile } from '@/lib/download-file';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { shareFileBytesNatively } from '@/lib/session-file-native-save';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import type {
   FileWorkspaceBinarySnapshot,
@@ -570,8 +569,7 @@ export function useSessionFileActions({
       void (async () => {
         try {
           const exportBytes = async (bytes: Uint8Array) => {
-            if (nativeShell) await shareFileBytesNatively(getDownloadFileName(filePath), bytes);
-            else downloadBytesAsFile(filePath, bytes);
+            await saveBytesAsFile(filePath, bytes);
           };
           const downloadOriginal = async () => {
             if (largeDownloadInProgress.current) return true;

@@ -20,7 +20,7 @@ import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { lodyPresenceSyncStateAtom } from '../src/atoms/presence';
 import { writeTextToClipboard } from '../src/lib/clipboard';
-import { downloadBytesAsFile } from '../src/lib/download-file';
+import { saveBytesAsFile } from '../src/lib/download-file';
 import { toast } from '../src/lib/toast';
 import { writeIosSimulatorSelectedDevice } from '../src/lib/ios-simulator/ios-simulator-model';
 import { clearAllDevicePreviewCaches } from '../src/components/sessions/ios-simulator/device-preview-cache';
@@ -45,7 +45,7 @@ vi.mock('@/lib/toast', () => ({
 }));
 
 vi.mock('../src/lib/download-file', () => ({
-  downloadBytesAsFile: vi.fn(),
+  saveBytesAsFile: vi.fn(async () => ({ saved: true })),
 }));
 
 const MACHINE = 'mac-studio' as MachineId;
@@ -557,7 +557,9 @@ describe('SessionIosSimulatorPanel controls', () => {
     const viewer = await connectControlViewer();
     const toggle = labelled('Show/hide simulator keyboard')!;
     await act(async () => toggle.click());
-    expect(viewer.requests.map((r) => r.control)).toEqual([{ kind: 'button', button: 'software-keyboard' }]);
+    expect(viewer.requests.map((r) => r.control)).toEqual([
+      { kind: 'button', button: 'software-keyboard' },
+    ]);
     expect(toggle.disabled).toBe(true);
     await viewer.reply({ success: false, error: 'unavailable' });
     expect(toggle.disabled).toBe(false);
@@ -748,77 +750,95 @@ describe('SessionIosSimulatorPanel controls', () => {
     vi.unstubAllGlobals();
   });
 
-  it('attaches a screenshot to the composer without sending, trusting only its own reply', async () => {
-    vi.stubGlobal('PointerEvent', TestPointerEvent);
-    const attached: File[] = [];
-    const machine = createFakeMachine({
-      devices: [
-        device({
-          udid: 'phone',
-          name: 'iPhone 16 Pro',
-          state: 'Booted',
-          occupancy: 'this-session',
-        }),
-      ],
-      preview: READY,
-    });
-    await renderPanel({
-      machine,
-      meta: CONTROLS_META,
-      onAttachScreenshot: (file) => {
-        attached.push(file);
-        return true;
-      },
-    });
-    const frame = container?.querySelector('iframe') as HTMLIFrameElement;
-    const posted: Array<{ type: string; requestId?: string }> = [];
-    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((message: {
-      type: string;
-      requestId?: string;
-    }) => posted.push(message)) as never);
-    await act(async () => {
-      frame.dispatchEvent(new Event('load'));
-    });
-
-    await pointerClick(labelled('Screenshot')!);
-    await pointerClick(await until(() => menuItem('Attach screenshot to message'), 'the menu'));
-    const request = posted.find((message) => message.type === 'lody:ios-simulator:capture');
-    expect(request).toMatchObject({ operationId: 'op-1' });
-
-    const png = new Uint8Array(16);
-    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const reply = (requestId: string, source: MessageEventSource | null) =>
-      new MessageEvent('message', {
-        data: {
-          type: 'lody:ios-simulator:capture-result',
-          operationId: 'op-1',
-          requestId,
-          mimeType: 'image/png',
-          data: png.buffer,
-        },
-        origin: VIEWER_ORIGIN,
-        source,
+  it.each(['attach', 'save-error'])(
+    'handles screenshot %s using only its own reply',
+    async (mode) => {
+      if (mode === 'save-error')
+        vi.mocked(saveBytesAsFile).mockRejectedValueOnce(new Error('Share failed'));
+      vi.stubGlobal('PointerEvent', TestPointerEvent);
+      const attached: File[] = [];
+      const machine = createFakeMachine({
+        devices: [
+          device({
+            udid: 'phone',
+            name: 'iPhone 16 Pro',
+            state: 'Booted',
+            occupancy: 'this-session',
+          }),
+        ],
+        preview: READY,
       });
-    await act(async () => {
-      window.dispatchEvent(reply('someone-else', frame.contentWindow));
-      window.dispatchEvent(reply(request!.requestId!, window));
-    });
-    await flush();
-    expect(attached).toEqual([]);
+      await renderPanel({
+        machine,
+        meta: CONTROLS_META,
+        onAttachScreenshot: (file) => {
+          attached.push(file);
+          return true;
+        },
+      });
+      const frame = container?.querySelector('iframe') as HTMLIFrameElement;
+      const posted: Array<{ type: string; requestId?: string }> = [];
+      vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((message: {
+        type: string;
+        requestId?: string;
+      }) => posted.push(message)) as never);
+      await act(async () => {
+        frame.dispatchEvent(new Event('load'));
+      });
 
-    await act(async () => {
-      window.dispatchEvent(reply(request!.requestId!, frame.contentWindow));
-    });
-    await flush();
-    expect(attached).toHaveLength(1);
-    expect(attached[0]).toMatchObject({ type: 'image/png' });
-    expect(attached[0]?.name).toMatch(/^iPhone 16 Pro .+\.png$/);
-    // Attaching is not sending: nothing else reached the machine.
-    expect(
-      machine.commands.every((command) => command.action === 'list' || command.action === 'status')
-    ).toBe(true);
-    vi.unstubAllGlobals();
-  });
+      await pointerClick(labelled('Screenshot')!);
+      await pointerClick(
+        await until(
+          () => menuItem(mode === 'attach' ? 'Attach screenshot to message' : 'Save screenshot'),
+          'the menu'
+        )
+      );
+      const request = posted.find((message) => message.type === 'lody:ios-simulator:capture');
+      expect(request).toMatchObject({ operationId: 'op-1' });
+
+      const png = new Uint8Array(16);
+      png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const reply = (requestId: string, source: MessageEventSource | null) =>
+        new MessageEvent('message', {
+          data: {
+            type: 'lody:ios-simulator:capture-result',
+            operationId: 'op-1',
+            requestId,
+            mimeType: 'image/png',
+            data: png.buffer,
+          },
+          origin: VIEWER_ORIGIN,
+          source,
+        });
+      await act(async () => {
+        window.dispatchEvent(reply('someone-else', frame.contentWindow));
+        window.dispatchEvent(reply(request!.requestId!, window));
+      });
+      await flush();
+      expect(attached).toEqual([]);
+
+      await act(async () => {
+        window.dispatchEvent(reply(request!.requestId!, frame.contentWindow));
+      });
+      await flush();
+      if (mode === 'attach') {
+        expect(attached).toHaveLength(1);
+        expect(attached[0]).toMatchObject({ type: 'image/png' });
+        expect(attached[0]?.name).toMatch(/^iPhone 16 Pro .+\.png$/);
+      } else {
+        expect(attached).toEqual([]);
+        expect(toast.error).toHaveBeenCalledWith('Could not download that file.');
+        expect(labelled('Screenshot')?.hasAttribute('disabled')).toBe(false);
+      }
+      // Attaching is not sending: nothing else reached the machine.
+      expect(
+        machine.commands.every(
+          (command) => command.action === 'list' || command.action === 'status'
+        )
+      ).toBe(true);
+      vi.unstubAllGlobals();
+    }
+  );
 });
 
 it.each(['null', 'file://'])(
@@ -1260,7 +1280,9 @@ describe('SessionDevicePreviewPanel in-memory cache across conversation switches
           })
         );
         expect(
-          container.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns')
+          container
+            .querySelector('[data-testid="ios-simulator-device"]')
+            ?.getAttribute('data-turns')
         ).toBe('1');
 
         // 2. Switch to Session B — Session A iframe is parked alive, port stays open
@@ -1275,7 +1297,9 @@ describe('SessionDevicePreviewPanel in-memory cache across conversation switches
         expect(initCount.value).toBe(1);
         expect(portA.peer?.closed).not.toBe(true);
         expect(
-          container.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns')
+          container
+            .querySelector('[data-testid="ios-simulator-device"]')
+            ?.getAttribute('data-turns')
         ).toBe('1');
 
         // 4. Explicit Stop preview destroys the cached iframe and closes the MessagePort
@@ -1292,7 +1316,12 @@ describe('SessionDevicePreviewPanel in-memory cache across conversation switches
   it('offers split Stop preview options when machine advertises iosSimulatorShutdown and sends shutdownDevice only from menu', async () => {
     const machine = createFakeMachine({
       devices: [device({ udid: 'dev-1', name: 'iPhone 16', state: 'Booted' })],
-      preview: preview({ phase: 'ready', udid: 'dev-1', operationId: 'op-shutdown', viewerUrl: VIEWER_URL }),
+      preview: preview({
+        phase: 'ready',
+        udid: 'dev-1',
+        operationId: 'op-shutdown',
+        viewerUrl: VIEWER_URL,
+      }),
     });
     await renderPanel({
       machine,
@@ -1329,14 +1358,23 @@ describe('SessionDevicePreviewPanel in-memory cache across conversation switches
   it('omits shutdown menu when machine does not advertise iosSimulatorShutdown', async () => {
     const machine = createFakeMachine({
       devices: [device({ udid: 'dev-1', name: 'iPhone 16', state: 'Booted' })],
-      preview: preview({ phase: 'ready', udid: 'dev-1', operationId: 'op-legacy', viewerUrl: VIEWER_URL }),
+      preview: preview({
+        phase: 'ready',
+        udid: 'dev-1',
+        operationId: 'op-legacy',
+        viewerUrl: VIEWER_URL,
+      }),
     });
     await renderPanel({
       machine,
       meta: macMeta({ iosSimulator: 1 }),
     });
 
-    expect(container.querySelector('[data-testid="device-preview-disconnect-button"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="device-preview-disconnect-button-menu"]')).toBeNull();
+    expect(
+      container.querySelector('[data-testid="device-preview-disconnect-button"]')
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="device-preview-disconnect-button-menu"]')
+    ).toBeNull();
   });
 });

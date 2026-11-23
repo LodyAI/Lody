@@ -23,7 +23,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { machineOnlineStatusAtomFamily } from '@/atoms/presence';
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { downloadBytesAsFile } from '@/lib/download-file';
+import { saveBytesAsFile } from '@/lib/download-file';
 import {
   getIosSimulatorScreenshotFileName,
   type IosSimulatorCaptureError,
@@ -664,7 +664,7 @@ function SessionIosSimulatorPanelController({
           new Date()
         );
         if (target === 'save') {
-          downloadBytesAsFile(fileName, new Uint8Array(result.bytes));
+          await saveBytesAsFile(fileName, new Uint8Array(result.bytes));
           return;
         }
         const file = new File([result.bytes], fileName, { type: 'image/png' });
@@ -686,6 +686,8 @@ function SessionIosSimulatorPanelController({
             )
           );
         }
+      } catch {
+        toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
       } finally {
         setCapturing(false);
       }

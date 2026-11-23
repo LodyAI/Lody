@@ -93,7 +93,7 @@ import {
   isSessionMarkdownPath,
 } from '@/lib/session-file-language';
 import { getOfficePreviewKind } from '@/lib/session-file-office-source';
-import { downloadBytesAsFile } from '@/lib/download-file';
+import { saveBytesAsFile } from '@/lib/download-file';
 import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
@@ -1384,10 +1384,19 @@ function SessionFileContentViewImpl({
     lastCopyMarkdownRequestSeqRef.current = copyMarkdownRequestSeq;
     void handleCopyMarkdown();
   }, [copyMarkdownRequestSeq, data, handleCopyMarkdown, normalizedPath]);
-  const handleDownloadHtml = useCallback(() => {
+  const handleDownloadHtml = useCallback(async () => {
     if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
     const content = latestEditorTextRef.current ?? data.snapshot.text;
-    downloadBytesAsFile(normalizedPath, new TextEncoder().encode(content));
+    const bytes = new TextEncoder().encode(content);
+    try {
+      const { saved } = await saveBytesAsFile(normalizedPath, bytes);
+      if (!saved) return;
+    } catch {
+      toast.error(
+        tRef.current('sessions.fileActions.downloadFailed', 'Could not download that file.')
+      );
+      return;
+    }
     capturePostHogEvent(postHog, 'file_preview/downloaded', {
       file_kind: getAnalyticsFileKind(normalizedPath),
       source: 'file_viewer',

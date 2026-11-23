@@ -1,9 +1,11 @@
-import { beforeEach, expect, it, vi } from 'vitest';
-import { nativeShareState as state } from './stubs/native-share';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { nativeShareState as state, Share } from './stubs/native-share';
 import { runTouchImagePreviewAction } from '../src/lib/image-preview-export';
+import { saveBytesAsFile } from '../src/lib/download-file';
 import { shareFileBytesNatively } from '../src/lib/session-file-native-save';
 
-vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: () => true }));
+const platform = vi.hoisted(() => ({ native: true }));
+vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: () => platform.native }));
 
 vi.mock('../src/lib/session-file-upload', () => ({
   buildSessionFileDownloadUrl: () => {
@@ -14,7 +16,14 @@ vi.mock('../src/lib/session-file-upload', () => ({
 vi.mock('@capacitor/filesystem');
 vi.mock('@capacitor/share');
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
+  platform.native = true;
   state.files.clear();
   state.received = [];
   state.failure = null;
@@ -80,3 +89,51 @@ it.each(['save', 'share'] as const)(
     expect(state.files.size).toBe(0);
   }
 );
+
+it('saves generated native bytes and reports share dismissal without a browser fallback', async () => {
+  const bytes = Uint8Array.of(7, 8, 9);
+  await expect(saveBytesAsFile('/workspace/diagram.svg', bytes)).resolves.toEqual({ saved: true });
+  expect([...state.received[0].bytes]).toEqual([...bytes]);
+  expect(state.received[0].name).toMatch(/diagram\.svg$/);
+  state.failure = 'Share canceled';
+  await expect(saveBytesAsFile('diagram.svg', bytes)).resolves.toEqual({ saved: false });
+  expect(state.received).toHaveLength(1);
+  expect(state.files.size).toBe(0);
+});
+
+it('propagates native save failure and cleans staging bytes', async () => {
+  const failure = new Error('Share failed');
+  vi.spyOn(Share, 'share').mockRejectedValueOnce(failure);
+  await expect(saveBytesAsFile('diagram.png', Uint8Array.of(1))).rejects.toBe(failure);
+  expect(state.files.size).toBe(0);
+  expect(state.received).toEqual([]);
+});
+
+it('saves browser bytes with the basename through a download link', async () => {
+  platform.native = false;
+  vi.useFakeTimers();
+  let blob: Blob | undefined;
+  let downloaded: { name: string; href: string } | undefined;
+  const anchor = {
+    href: '',
+    download: '',
+    rel: '',
+    click() {
+      downloaded = { name: this.download, href: this.href };
+    },
+    remove() {},
+  };
+  vi.stubGlobal('document', { createElement: () => anchor, body: { appendChild() {} } });
+  vi.spyOn(URL, 'createObjectURL').mockImplementation((value) => {
+    blob = value as Blob;
+    return 'blob:generated-download';
+  });
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  await expect(saveBytesAsFile('/workspace/diagram.mmd', Uint8Array.of(4, 5))).resolves.toEqual({
+    saved: true,
+  });
+  expect(downloaded).toEqual({ name: 'diagram.mmd', href: 'blob:generated-download' });
+  expect([...new Uint8Array(await blob!.arrayBuffer())]).toEqual([4, 5]);
+  expect(state.received).toEqual([]);
+  vi.runAllTimers();
+});

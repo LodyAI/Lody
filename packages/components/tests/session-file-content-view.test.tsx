@@ -51,9 +51,9 @@ vi.mock('../src/lib/clipboard', () => ({
   writeTextToClipboard: vi.fn(async () => true),
 }));
 
-const downloadBytesAsFile = vi.fn();
+const saveBytesAsFile = vi.fn(async (..._args: unknown[]) => ({ saved: true }));
 vi.mock('../src/lib/download-file', () => ({
-  downloadBytesAsFile: (...args: unknown[]) => downloadBytesAsFile(...args),
+  saveBytesAsFile: (...args: unknown[]) => saveBytesAsFile(...args),
 }));
 
 const monacoMockState = vi.hoisted(() => ({
