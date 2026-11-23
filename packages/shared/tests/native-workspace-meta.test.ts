@@ -177,6 +177,20 @@ describe('native Workspace Meta', () => {
     ).toBe('already-published');
   });
 
+  it('the host process writes no core file and logs its hardening before it serves', async () => {
+    const { dataDir } = await setup();
+    const pid = await hostPid(dataDir);
+    const lines = (await readFile(join(dataDir, 'host.log'), 'utf8')).trim().split('\n');
+    const started = JSON.parse(lines.at(-1)!);
+    expect(started).toMatchObject({ event: 'start', pid, hardening: { coreDumpsDisabled: true } });
+    expect(started.hardening.platform).toBe(process.platform);
+    if (process.platform === 'linux') {
+      expect(started.hardening.dumpableCleared).toBe(true);
+      const limits = await readFile(`/proc/${pid}/limits`, 'utf8');
+      expect(limits).toMatch(/^Max core file size\s+0\s+0\s/m);
+    }
+  });
+
   it('shares one host between processes; one side closing leaves the other working', async () => {
     const { dataDir, connection } = await setup();
     const other = await peer(dataDir);

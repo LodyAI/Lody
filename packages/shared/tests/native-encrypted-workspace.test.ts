@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDevServer } from '@loro-dev/sqlite-riverrun';
-import type { RepoClient } from '@loro-dev/loro-repo-client';
+import { META_ROOM, type RepoClient } from '@loro-dev/loro-repo-client';
 import { connectEngine } from '@loro-dev/loro-repo-client/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectNativeRepo } from '../src/node/native-repo';
@@ -486,6 +486,49 @@ describe('native encrypted workspace', () => {
     hostBlocked = false;
     await expect.poll(() => marker.read(), { timeout: 60_000 }).toBe(false);
     expect(existsSync(namespaceFile(main.dataDir))).toBe(false);
+  }, 90_000);
+
+  it('Meta rows two local writers wrote before the remote was configured all upload, each under its writer', async () => {
+    const baseUrl = await streamsServer();
+    const daemon = await device('a', baseUrl, { kind: 'machine' });
+    const main = await device('b', baseUrl, { kind: 'personal', dataDir: daemon.dataDir });
+    daemon.network.online = false;
+    main.network.online = false;
+    const wd = await daemon.attach();
+    const wm = await main.attach();
+    cleanups.push(async () => wd.close());
+    cleanups.push(async () => wm.close());
+    await daemon.client.createRoom(ws, META_ROOM, 'encrypted');
+    await daemon.client.flockBatch(
+      ws,
+      META_ROOM,
+      [{ op: 'put', key: ['m', 'session-x', 'title'], value: 'by-daemon' }],
+      { writer: daemon.writer }
+    );
+    await main.client.flockBatch(
+      ws,
+      META_ROOM,
+      [{ op: 'put', key: ['m', 'session-x', 'status'], value: 'by-main' }],
+      { writer: main.writer }
+    );
+
+    daemon.network.online = true;
+    main.network.online = true;
+    await wd.refresh();
+    await wm.refresh();
+    for (const d of [daemon, main])
+      expect((await d.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0);
+    const other = await device('a', baseUrl);
+    const wo = await other.attach();
+    cleanups.push(async () => wo.close());
+    await other.client.createRoom(ws, META_ROOM, 'encrypted');
+    await other.client.syncRooms(ws, [META_ROOM], NATIVE_CONTENT_REMOTE_ID);
+    expect((await other.client.flockGet(ws, META_ROOM, ['m', 'session-x', 'title'])).value).toBe(
+      'by-daemon'
+    );
+    expect((await other.client.flockGet(ws, META_ROOM, ['m', 'session-x', 'status'])).value).toBe(
+      'by-main'
+    );
   }, 90_000);
 
   it('reinstalls keys after the host restarts, and finishes a pending wipe before reopening', async () => {
