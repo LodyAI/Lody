@@ -2,7 +2,8 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { machineSupportsLocalProjectRemovalProtocol, type MachineId } from '@lody/shared';
-import { ChevronRight, Wrench } from 'lucide-react';
+import { AlertCircle, ChevronRight, LockKeyhole, Users, Wrench } from 'lucide-react';
+import { Badge } from '@lody/ui/badge';
 import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -141,33 +142,86 @@ export function MobileLocalProjectSettings({
         upper={
           <>
             {intro}
-            {teamSharingAvailable && (
-              <MobileSettingsSection
-                title={t('workspace.projects.workspaceShareTitle', '工作区共享')}
-                description={
-                  row.canUpdateSharing
-                    ? undefined
-                    : t(
-                        'workspace.projects.sharePreparing',
-                        'Sharing will be available when this machine finishes connecting.'
+            {teamSharingAvailable &&
+              (() => {
+                const toggleLabel = t('workspace.projects.shareToggle', 'Share project with team');
+                const machinePrivate = row.machineSharedWithTeam === false;
+                const blockedByPrivateMachine =
+                  row.canUpdateSharing && row.sharedWithTeam && machinePrivate;
+                const shareHelper = !row.canUpdateSharing
+                  ? t(
+                      'workspace.projects.sharePreparing',
+                      'Sharing will be available when this machine finishes connecting.'
+                    )
+                  : blockedByPrivateMachine
+                    ? t(
+                        'workspace.projects.shareMachinePrivateWarning',
+                        'Project sharing is on, but {{machine}} is private, so teammates cannot access this project yet.',
+                        { machine: row.machineName }
                       )
-                }
-              >
-                <MobileSettingsRow label={t('workspace.projects.shareToggle', '与团队共享')}>
-                  <div className="flex items-center gap-2">
-                    {row.isUpdating ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null}
-                    <Switch
-                      checked={row.sharedWithTeam}
-                      disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}
-                      aria-label={t('workspace.projects.shareToggle', '与团队共享')}
-                      onCheckedChange={(checked) => {
-                        void onSharedWithTeamChange?.(row, checked);
-                      }}
-                    />
-                  </div>
-                </MobileSettingsRow>
-              </MobileSettingsSection>
-            )}
+                    : row.sharedWithTeam
+                      ? t(
+                          'workspace.projects.shareEnabledSummary',
+                          'Teammates can open and continue conversations in this project.'
+                        )
+                      : machinePrivate
+                        ? t(
+                            'workspace.projects.shareEnableWithMachineHint',
+                            'Turning this on also shares {{machine}}, which teammates need to open and continue conversations.',
+                            { machine: row.machineName }
+                          )
+                        : t(
+                            'workspace.projects.shareEnableHint',
+                            'Turning this on lets teammates open and continue conversations in this project.'
+                          );
+                const statusBadge = !row.canUpdateSharing ? null : blockedByPrivateMachine ? (
+                  <Badge
+                    tone="warning"
+                    icon={<AlertCircle className="h-full w-full" aria-hidden="true" />}
+                  >
+                    {t('workspace.projects.shareState.machinePrivate', 'Machine private')}
+                  </Badge>
+                ) : row.sharedWithTeam ? (
+                  <Badge
+                    tone="success"
+                    icon={<Users className="h-full w-full" aria-hidden="true" />}
+                  >
+                    {t('workspace.projects.shareState.shared', 'Shared')}
+                  </Badge>
+                ) : (
+                  <Badge
+                    tone="neutral"
+                    icon={<LockKeyhole className="h-full w-full" aria-hidden="true" />}
+                  >
+                    {t('workspace.projects.shareState.private', 'Private')}
+                  </Badge>
+                );
+
+                return (
+                  <MobileSettingsSection
+                    title={t('workspace.projects.workspaceShareTitle', '工作区共享')}
+                  >
+                    <MobileSettingsRow label={toggleLabel} helper={shareHelper}>
+                      <div className="flex items-center gap-2">
+                        {row.isUpdating ? (
+                          <Spinner className="h-4 w-4 text-muted-foreground" />
+                        ) : null}
+                        {statusBadge}
+                        <Switch
+                          checked={row.sharedWithTeam}
+                          disabled={
+                            row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange
+                          }
+                          aria-label={toggleLabel}
+                          onCheckedChange={(checked) => {
+                            void onSharedWithTeamChange?.(row, checked);
+                          }}
+                        />
+                      </div>
+                    </MobileSettingsRow>
+                  </MobileSettingsSection>
+                );
+              })()}
 
             <MobileSettingsSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
               <MobileSettingsRow
