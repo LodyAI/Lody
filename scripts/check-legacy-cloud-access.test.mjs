@@ -156,3 +156,38 @@ test('limits the imperative session-access composition exception to its owner an
     );
   }
 });
+
+test('notification admission permits only the exact GA inbox and registration operations', () => {
+  const preamble = `import { cloudOperations as api } from '@/lib/cloud-api-operations';
+    import { useWorkspaceNotificationQuery as read, useWorkspaceNotificationMutation as write } from '@/hooks/use-workspace-notifications';`;
+  for (const [method, names] of [
+    ['read', ['inbox.listMine', 'inbox.getSharingReviewState']],
+    [
+      'write',
+      [
+        'inbox.markRead',
+        'inbox.dismiss',
+        'inbox.reconcileSharingReview',
+        'inbox.suppressSharingReview',
+        'pushSubscriptions.register',
+      ],
+    ],
+  ])
+    for (const name of names) {
+      assert.deepEqual(
+        auditLegacyCloudSource(file, `${preamble} ${method}(api.${name});`).errors,
+        []
+      );
+      assert.equal(
+        auditLegacyCloudSource(file, `${preamble} useCloudMutation(api.${name});`).errors.length,
+        1
+      );
+    }
+  for (const name of [
+    'inbox.newEndpoint',
+    'machines.listVisibleMachines',
+    'notifications.syncLiveActivitySummary',
+    'pushSubscriptions.registerActivity',
+  ])
+    assert.equal(auditLegacyCloudSource(file, `${preamble} write(api.${name});`).errors.length, 1);
+});

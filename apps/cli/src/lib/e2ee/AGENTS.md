@@ -161,3 +161,5 @@ Verify member removal and persist its receipt before custody release. Drain exec
   opt-in and runtime `LODY_E2E=1`. Bind baseline requester identity to verified ledger
   state; never refresh authority or stop owners for observation. Track raw watcher
   and ACP promises after cancellation/map clearing; timeout never means drained.
+
+E2EE notification ports forward only the CLI account’s recipients. Live Activity summaries omit HTTP approval IDs; permission responses require signed in-App device actions.

@@ -1,3 +1,4 @@
+import { createLocalCloudPort, type CloudNotificationsPort } from '@lody/platform';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
 import * as httpTransport from '../src/utils/http-transport';
@@ -1439,4 +1440,90 @@ describe('CLI E2EE Round 2 optimizations', () => {
       vi.useRealTimers();
     }
   });
+});
+
+it('encrypted runtime notifications deliver only to their own account and keep HTTP approvals closed', async () => {
+  const delivered: Array<{ method: string; userId: string; items?: unknown }> = [];
+  const notifications: CloudNotificationsPort = {
+    notifySessionCompleted: async (input) => {
+      delivered.push({ method: 'completed', ...input });
+    },
+    notifyPermissionRequested: async (input) => {
+      delivered.push({ method: 'permission', ...input });
+    },
+    recordPermissionRequested: async (input) => {
+      delivered.push({ method: 'record', ...input });
+    },
+    resolvePermissionRequested: async (input) => {
+      delivered.push({ method: 'resolve', ...input });
+    },
+    syncLiveActivitySummary: async (input) => {
+      delivered.push({ method: 'summary', ...input });
+      return { sent: true, ended: false };
+    },
+  };
+  const port = encryptedRuntimeCloudPort({
+    ...createLocalCloudPort({ identity: { userId: 'account' }, workspaces: [] }),
+    notifications,
+  });
+  const input = {
+    userId: 'account',
+    sessionId: 'session' as SessionId,
+    occurrenceId: 'turn',
+    workspaceId: 'workspace' as WorkspaceId,
+    workspaceSlug: 'workspace',
+    requestId: 'request',
+    toolCallId: 'tool',
+  };
+  for (const userId of ['other', 'account']) {
+    const target = { ...input, userId };
+    await port.notifications!.notifySessionCompleted(target);
+    await port.notifications!.notifyPermissionRequested(target);
+    await port.notifications!.recordPermissionRequested(target);
+    await port.notifications!.resolvePermissionRequested(target);
+    const result = await port.notifications!.syncLiveActivitySummary({
+      ...target,
+      activityId: 'activity',
+      totalCount: 1,
+      updatedAt: 1,
+      statusCounts: { permission: 1, question: 0, running: 0, unread: 0 },
+      items: [
+        {
+          id: 'session',
+          title: 'Task',
+          status: 'permission',
+          statusLabel: 'Approval',
+          updatedAt: 1,
+          updatedAtLabel: 'now',
+          agentLogoKind: 'codex',
+          agentLogoText: 'Codex',
+          permissionRequestId: 'request',
+        },
+      ],
+    });
+    expect(result.sent).toBe(userId === 'account');
+  }
+  expect(delivered.map(({ method, userId }) => [method, userId])).toEqual([
+    ['completed', 'account'],
+    ['permission', 'account'],
+    ['record', 'account'],
+    ['resolve', 'account'],
+    ['summary', 'account'],
+  ]);
+  expect(delivered.at(-1)?.items).toEqual([
+    {
+      id: 'session',
+      title: 'Task',
+      status: 'permission',
+      statusLabel: 'Approval',
+      updatedAt: 1,
+      updatedAtLabel: 'now',
+      agentLogoKind: 'codex',
+      agentLogoText: 'Codex',
+    },
+  ]);
+  expect(port.streamsTokens).toBeNull();
+  expect(port.prAssociation).toBeNull();
+  expect(port.sessionSharing).toBeNull();
+  await expect(port.remotePreview!.verifyControl({} as never)).rejects.toThrow('unavailable');
 });

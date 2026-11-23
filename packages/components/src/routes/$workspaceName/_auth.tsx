@@ -1,3 +1,6 @@
+import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
+import { useWorkspaceNotificationMutation } from '@/hooks/use-workspace-notifications';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { createFileRoute } from '@tanstack/react-router';
@@ -211,21 +214,24 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     cloudOperations.pushSubscriptions.configuration,
     typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true ? 'skip' : {}
   );
-  const registerPush = useCloudMutation(cloudOperations.pushSubscriptions.register);
+  const registerPush = useWorkspaceNotificationMutation(cloudOperations.pushSubscriptions.register);
+  const notificationRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const notificationAdmission = useLegacyWorkspaceQueryStatus(currentWorkspaceId, true);
   const unregisterPush = useCloudMutation(cloudOperations.pushSubscriptions.unregister);
   useEffect(
     () =>
       installPushPort({
-        register: registerPush,
+        register: (input) =>
+          registerPush({ ...input, workspaceId: currentWorkspaceId ?? undefined }),
         unregister: unregisterPush,
         selfHostedEnabled: pushConfiguration?.selfHostedEnabled,
       }),
-    [registerPush, unregisterPush, pushConfiguration?.selfHostedEnabled]
+    [registerPush, unregisterPush, currentWorkspaceId, pushConfiguration?.selfHostedEnabled]
   );
 
   useEffect(() => {
     const token = session?.session?.token;
-    if (!currentUser || !token || !pushConfiguration) {
+    if (!currentUser || !token || !pushConfiguration || notificationAdmission !== 'allowed') {
       return undefined;
     }
     if (typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true) {
@@ -241,7 +247,14 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
         console.error('Push login failed', loginError);
       }
     }, AUTH_ROUTE_PUSH_LOGIN_IDLE_TIMEOUT_MS);
-  }, [currentUser, session?.session?.token, pushConfiguration?.selfHostedEnabled]);
+  }, [
+    currentUser,
+    session?.session?.token,
+    pushConfiguration?.selfHostedEnabled,
+    registerPush,
+    currentWorkspaceId,
+    notificationAdmission,
+  ]);
 
   useEffect(() => {
     if (!isNativeIOSAppShell()) {
@@ -263,12 +276,13 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     bridge
       .configurePermissionActions({
         ...(token ? { authToken: token } : {}),
+        permissionActionsEnabled: notificationRuntime?.contentMode === 'plaintext',
         convexSiteUrl,
       })
       .catch((configureError: unknown) => {
         console.error('Failed to configure Live Activity permission actions', configureError);
       });
-  }, [session?.session?.token]);
+  }, [session?.session?.token, notificationRuntime?.contentMode]);
 
   if (confirmedUnauthenticated) {
     const currentPath = getAppCurrentPathWithSearch();

@@ -3,7 +3,7 @@ import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target
 import { userAtom } from '@/atoms';
 import type { MachineId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
+import { usePlatform, usePlatformSession, usePlatformWorkspaces } from '@lody/platform/react';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useTranslation } from 'react-i18next';
 import { workspaceFeatureUnavailableMessage } from '@/lib/workspace-feature';
@@ -53,7 +53,8 @@ import { useCallback } from 'react';
  * runtime or a workspace listing cannot prove that remote plaintext APIs apply.
  */
 export function useLegacyWorkspaceQueryStatus(
-  workspaceId: string | null | undefined
+  workspaceId: string | null | undefined,
+  allowNotifications = false
 ): LegacyWorkspaceQueryStatus {
   const platform = usePlatform();
   const mode = useAtomValue(workspaceContentModeAtom);
@@ -63,6 +64,9 @@ export function useLegacyWorkspaceQueryStatus(
   const currentWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const routeSlug = useWorkspaceRouteTargetSlug() ?? currentWorkspaceSlug;
   const workspacesState = usePlatformWorkspaces();
+  const session = usePlatformSession();
+  if (allowNotifications && (session.status !== 'authenticated' || session.user.id !== accountId))
+    return 'blocked';
   return resolveLegacyWorkspaceQueryStatus({
     workspaceId,
     platformKind: platform.kind,
@@ -72,6 +76,7 @@ export function useLegacyWorkspaceQueryStatus(
     currentWorkspaceId,
     routeSlug,
     workspacesState,
+    allowNotifications,
   });
 }
 
@@ -81,7 +86,7 @@ export function useLegacyWorkspaceQueriesEnabled(workspaceId: string | null | un
 }
 
 /** Recheck live atoms at the actual operation, including callbacks retained across navigation. */
-export function useAssertLegacyWorkspaceAccess() {
+export function useAssertLegacyWorkspaceAccess(allowNotifications = false) {
   const store = useStore();
   const platform = usePlatform();
   const currentSlug = useAtomValue(currentWorkspaceSlugAtom);
@@ -91,6 +96,12 @@ export function useAssertLegacyWorkspaceAccess() {
     (workspaceId: string | null | undefined) => {
       if ((store.get(userAtom)?.id ?? null) !== accountId && platform.kind !== 'local')
         throw new LegacyWorkspaceAdmissionError('account_changed');
+      const session = platform.identity.session.get();
+      if (
+        allowNotifications &&
+        (session.status !== 'authenticated' || session.user.id !== accountId)
+      )
+        throw new LegacyWorkspaceAdmissionError('blocked');
       return assertLegacyWorkspaceAccess({
         workspaceId,
         platformKind: platform.kind,
@@ -100,8 +111,9 @@ export function useAssertLegacyWorkspaceAccess() {
         currentWorkspaceId: store.get(currentWorkspaceIdAtom),
         routeSlug,
         workspacesState: platform.workspaces.state.get(),
+        allowNotifications,
       });
     },
-    [store, platform, routeSlug, accountId]
+    [store, platform, routeSlug, accountId, allowNotifications]
   );
 }
