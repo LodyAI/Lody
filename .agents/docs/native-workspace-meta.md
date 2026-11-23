@@ -32,6 +32,17 @@ flowchart LR
   calls `ensureEngineHost`, closes its own client and exits when the engine idles out
   sixty seconds after the last connection closes. A second launch loses `files.lock`
   and exits.
+  Before anything else, it closes the descriptors it inherited and calls the
+  engine's `hardenHostProcess`. That sets a zero core-file limit, and on Linux it
+  also makes the process undumpable, so a crash leaves no core file holding keys.
+  The result, with no key material, is appended to `host.log` in the data
+  directory; the launch ignores the host's stdio.
+  The launch also maps every descriptor slot from 3 up to the launcher's highest
+  open one to /dev/null. Electron main leaves descriptors it inherited (a test
+  runner's sockets, for example) without close-on-exec, and Node marks them
+  close-on-exec as soon as the host starts. The host's own
+  `closeInheritedDescriptors()` then skips them, and the long-lived host would
+  keep the launcher's parent waiting for end-of-file until it idles out.
 - **Connection.** [`connectNativeRepo`](../../packages/shared/src/node/native-repo.ts)
   is process-wide and memoized per data directory. If no endpoint answers, it launches
   the host (the daemon with its own Node, desktop main with the embedded CLI runtime)

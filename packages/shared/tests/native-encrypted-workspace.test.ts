@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDevServer } from '@loro-dev/sqlite-riverrun';
-import type { RepoClient } from '@loro-dev/loro-repo-client';
+import { META_ROOM, type RepoClient } from '@loro-dev/loro-repo-client';
+import { connectEngine } from '@loro-dev/loro-repo-client/node';
 import { afterEach, describe, expect, it } from 'vitest';
 import { connectNativeRepo } from '../src/node/native-repo';
 import { LoroDoc } from 'loro-crdt';
@@ -81,15 +82,30 @@ function memoryWipe(initial = false): NativePendingWipe & { pending: boolean } {
   return marker;
 }
 
-/** One device: its own engine data dir, host and connection, keys installed by "core". */
-async function device(name: 'a' | 'b', baseUrl: string) {
-  const dataDir = await mkdtemp(join(tmpdir(), `lody-native-e2ee-${name}-`));
-  const connection = await connectNativeRepo({ launcher, dataDir });
-  cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
-  cleanups.push(async () => process.kill(await hostPid(dataDir), 'SIGTERM'));
-  cleanups.push(() => connection.close());
-  const client = connection.client;
-  const writer = `device-${name}`;
+/**
+ * One device: its own engine data dir, host and connection, keys installed by "core".
+ * With `installation.dataDir`, it is a second identity of that installation (desktop
+ * main beside the daemon): its own connection to the same host and namespace.
+ */
+async function device(
+  name: 'a' | 'b',
+  baseUrl: string,
+  installation: { dataDir?: string; kind?: 'machine' | 'personal' } = {}
+) {
+  const shared = installation.dataDir;
+  const dataDir = shared ?? (await mkdtemp(join(tmpdir(), `lody-native-e2ee-${name}-`)));
+  if (!shared) {
+    cleanups.push(() => rm(dataDir, { recursive: true, force: true }));
+    cleanups.push(async () => process.kill(await hostPid(dataDir), 'SIGTERM'));
+  }
+  /** A second identity is another process in production: its own connection, not the shared one. */
+  const connection = shared ? undefined : await connectNativeRepo({ launcher, dataDir });
+  const client =
+    connection?.client ?? (await connectEngine(dataDir, { queueWhileReconnecting: false }));
+  cleanups.push(() => (connection ? connection.close() : client.close()));
+  const writer = installation.kind
+    ? `${installation.kind}:${Buffer.from(publicKey(seeds[name])).toString('hex')}`
+    : `device-${name}`;
   let tokens = 0;
   let syncs = 0;
   const network = { online: true };
@@ -233,6 +249,49 @@ describe('native encrypted workspace', () => {
     hostBlocked = false;
     await expect.poll(() => marker.read(), { timeout: 60_000 }).toBe(false);
     expect(existsSync(nsFile)).toBe(false);
+  }, 90_000);
+
+  it('Meta rows two local writers wrote before the remote was configured all upload, each under its writer', async () => {
+    const baseUrl = await streamsServer();
+    const daemon = await device('a', baseUrl, { kind: 'machine' });
+    const main = await device('b', baseUrl, { kind: 'personal', dataDir: daemon.dataDir });
+    daemon.network.online = false;
+    main.network.online = false;
+    const wd = await daemon.attach();
+    const wm = await main.attach();
+    cleanups.push(async () => wd.close());
+    cleanups.push(async () => wm.close());
+    await daemon.client.createRoom(ws, META_ROOM, 'encrypted');
+    await daemon.client.flockBatch(
+      ws,
+      META_ROOM,
+      [{ op: 'put', key: ['m', 'session-x', 'title'], value: 'by-daemon' }],
+      { writer: daemon.writer }
+    );
+    await main.client.flockBatch(
+      ws,
+      META_ROOM,
+      [{ op: 'put', key: ['m', 'session-x', 'status'], value: 'by-main' }],
+      { writer: main.writer }
+    );
+
+    daemon.network.online = true;
+    main.network.online = true;
+    await wd.refresh();
+    await wm.refresh();
+    for (const d of [daemon, main])
+      expect((await d.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms).toBe(0);
+    const other = await device('a', baseUrl);
+    const wo = await other.attach();
+    cleanups.push(async () => wo.close());
+    await other.client.createRoom(ws, META_ROOM, 'encrypted');
+    await other.client.syncRooms(ws, [META_ROOM], NATIVE_CONTENT_REMOTE_ID);
+    expect((await other.client.flockGet(ws, META_ROOM, ['m', 'session-x', 'title'])).value).toBe(
+      'by-daemon'
+    );
+    expect((await other.client.flockGet(ws, META_ROOM, ['m', 'session-x', 'status'])).value).toBe(
+      'by-main'
+    );
   }, 90_000);
 
   it('reinstalls keys after the host restarts, and finishes a pending wipe before reopening', async () => {
