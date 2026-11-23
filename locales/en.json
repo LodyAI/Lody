@@ -7037,6 +7037,7 @@
   "today.openDay": "Open {{date}} alone",
   "today.zoomGone": "This node was deleted.",
   "today.zoomOut": "Back to the parent",
+  "today.addChild": "Add a child",
   "today.nodeMenu": "Node actions",
   "today.zoomIn": "Zoom in",
   "today.breadcrumb": "Location",

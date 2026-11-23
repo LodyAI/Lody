@@ -7024,6 +7024,7 @@
   "today.openDay": "单独查看 {{date}}",
   "today.zoomGone": "这个节点已被删除。",
   "today.zoomOut": "返回上一级",
+  "today.addChild": "添加子节点",
   "today.nodeMenu": "节点操作",
   "today.zoomIn": "进入节点",
   "today.breadcrumb": "位置",

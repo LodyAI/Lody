@@ -80,7 +80,7 @@ import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayLiveSessionPicker } from './today-mention-picker';
 import { TodayMembersContext } from './today-members';
 import { TodayDaySection } from './today-day-section';
-import { TodayMoreAtEndContext, todayOutline } from './outline.stylex';
+import { TodayMoreAtEndContext, todayOutline, todaySurfaceMarker } from './outline.stylex';
 import { TodayConvertDialog } from './today-convert-dialog';
 import { TodaySelectionBar } from './today-selection-bar';
 import { TodayMentionStatusMenuHost } from './today-mention-status-menu';
@@ -851,6 +851,7 @@ export function TodayOutlineSurface(props: {
   return (
     <div
       {...stylex.props(
+        todaySurfaceMarker,
         styles.scroller,
         props.placement !== undefined && props.placement !== 'page' && styles.scrollerPinned,
         props.placement === 'pinnedAtWindowEdge' && styles.scrollerAtWindowEdge
