@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { Maximize2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
 import { applyMermaidColors, resolveMermaidColors } from './markdown-mermaid';
 import type { MermaidDiagramSelection } from './mermaid-diagram-viewer';
 import {
@@ -14,6 +14,24 @@ import {
   MERMAID_CANVAS_KEY_ZOOM_STEP,
   type MermaidCanvasTransform,
 } from './mermaid-inline-canvas';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  fullscreenButton: {
+    cursor: 'pointer',
+    padding: themeSpace[1],
+    color: themeColors.mutedForeground,
+    transitionProperty: 'all',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    '@media (hover: hover)': { ':hover': { color: themeColors.foreground } },
+  },
+});
 
 /**
  * Diagram interaction for `markdown-renderer.tsx`.
@@ -562,9 +580,7 @@ export function MermaidFullscreenButton({
     <button
       type="button"
       data-testid="mermaid-fullscreen-button"
-      className={cn(
-        'cursor-pointer p-1 text-muted-foreground transition-all hover:text-foreground'
-      )}
+      className={stylex.props(styles.fullscreenButton).className}
       title={label}
       aria-label={label}
       onClick={onOpen}

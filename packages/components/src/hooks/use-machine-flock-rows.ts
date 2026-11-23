@@ -9,6 +9,8 @@ import {
   type AgentConfigId,
   type MachineFlockEvent,
   type MachineFlockRowFamily,
+  type MachineFlockRow,
+  type MachineFlockRowId,
   type MachineFlockRowMap,
   type MachineId,
   type ReadMachineFlockRowsOptions,
@@ -219,6 +221,10 @@ const SHARED_MACHINE_FLOCK_EVENTS = new WeakMap<
   WorkspaceRuntime,
   Map<MachineId, SharedMachineFlockEvents>
 >();
+const APPLIED_ACP_CAPABILITY_OVERRIDES = new WeakMap<
+  object,
+  Map<MachineId, Map<MachineFlockRowId, MachineFlockRow>>
+>();
 const EMPTY_MACHINE_IDS = new Set<MachineId>();
 let machineFlockRowsPerfMeasureSeq = 0;
 
@@ -395,6 +401,30 @@ function normalizeMachineFlockRowFamilies(
   return Array.from(new Set(families ?? [])).sort();
 }
 
+function isMachineFlockRoomBindingJoined(
+  subscription: MachineFlockRoomSubscription | null
+): boolean {
+  if (!subscription) return false;
+  const partial = subscription as Partial<MachineFlockRoomSubscription>;
+  if (typeof partial.transportIds !== 'function' || typeof partial.subscription !== 'function') {
+    return false;
+  }
+  return readinessBinding(subscription).status === 'joined';
+}
+
+export function hasActiveJoinedMachineFlockRoom(
+  runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'> | null | undefined,
+  machineId: MachineId | string | null | undefined
+): boolean {
+  const normalizedMachineId = normalizeMachineId(machineId);
+  if (!runtime || !normalizedMachineId) return false;
+  const roomsByMachineId =
+    SHARED_MACHINE_FLOCK_ROOMS.get(runtime as WorkspaceRuntime) ??
+    SHARED_MACHINE_FLOCK_ROOMS_BY_REPO.get(runtime.repo);
+  const room = roomsByMachineId?.get(normalizedMachineId);
+  return Boolean(room && room.refCount > 0 && isMachineFlockRoomBindingJoined(room.subscription));
+}
+
 function acquireMachineFlockRoom(
   runtime: WorkspaceRuntime,
   machineId: MachineId,
@@ -462,7 +492,12 @@ function acquireMachineFlockRoom(
     previousScope !== undefined && previousScope !== scope && room.firstSyncSettled;
   room.scopeByOwner.set(owner, scope);
   if (presenceAware) {
-    needsFreshCatchup ||= room.presenceCatchupRequired && room.firstSyncSettled;
+    const unjoinedSettledRoom =
+      room.presenceAwareRefCount === 0 &&
+      room.firstSyncSettled &&
+      !isMachineFlockRoomBindingJoined(room.subscription);
+    needsFreshCatchup ||=
+      (room.presenceCatchupRequired && room.firstSyncSettled) || unjoinedSettledRoom;
     room.presenceAwareRefCount += 1;
     room.presenceCatchupRequired = false;
   }
@@ -644,19 +679,65 @@ function readMachineFlockRowsSnapshot(
   );
 }
 
-/**
- * Force a fresh remote sync of a single machine's flock doc and push the result
- * into any mounted `useMachineFlockRowsByMachineIds` consumers.
- *
- * The mounted hook normally keeps a live room joined. This remains the explicit
- * catch-up path after an acknowledged mutation, and also serves callers that do
- * not currently have a mounted Machine Flock consumer.
- *
- * A failed remote sync is not an error by default: the local rows were still
- * refreshed, and callers that resync after an already-acknowledged mutation
- * (settings, onboarding) must not report their own success as a failure. Pass
- * `requireRemoteSync` when the caller retries on a stale read.
- */
+function recordAppliedCapabilityOverride(
+  runtime: Pick<WorkspaceRuntime, 'repo'>,
+  machineId: MachineId,
+  rowKey: MachineFlockRowId,
+  row: MachineFlockRow
+): void {
+  let byMachine = APPLIED_ACP_CAPABILITY_OVERRIDES.get(runtime.repo);
+  if (!byMachine) {
+    byMachine = new Map();
+    APPLIED_ACP_CAPABILITY_OVERRIDES.set(runtime.repo, byMachine);
+  }
+  let byRowKey = byMachine.get(machineId);
+  if (!byRowKey) {
+    byRowKey = new Map();
+    byMachine.set(machineId, byRowKey);
+  }
+  const existing = byRowKey.get(rowKey);
+  const existingFetchedAt = (existing?.value as { fetchedAt?: unknown } | undefined)?.fetchedAt;
+  const incomingFetchedAt = (row.value as { fetchedAt?: unknown } | undefined)?.fetchedAt;
+  if (
+    existing &&
+    typeof existingFetchedAt === 'number' &&
+    typeof incomingFetchedAt === 'number' &&
+    existingFetchedAt > incomingFetchedAt
+  ) {
+    return;
+  }
+  byRowKey.set(rowKey, row);
+}
+
+function mergeAppliedCapabilityOverrides(
+  runtime: Pick<WorkspaceRuntime, 'repo'>,
+  machineId: MachineId,
+  readOptions: ReadMachineFlockRowsOptions | undefined,
+  rows: MachineFlockRowMap
+): MachineFlockRowMap {
+  if (readOptions?.families && !readOptions.families.includes('acpCapability')) {
+    return rows;
+  }
+  const overrides = APPLIED_ACP_CAPABILITY_OVERRIDES.get(runtime.repo)?.get(machineId);
+  if (!overrides || overrides.size === 0) return rows;
+  let result: MachineFlockRowMap | null = null;
+  for (const [rowKey, overrideRow] of overrides) {
+    const existing = rows[rowKey];
+    const existingFetchedAt = (existing?.value as { fetchedAt?: unknown } | undefined)?.fetchedAt;
+    const overrideFetchedAt = (overrideRow.value as { fetchedAt?: unknown } | undefined)?.fetchedAt;
+    if (
+      !existing ||
+      (typeof overrideFetchedAt === 'number' &&
+        typeof existingFetchedAt === 'number' &&
+        overrideFetchedAt > existingFetchedAt)
+    ) {
+      result ??= { ...rows };
+      result[rowKey] = overrideRow;
+    }
+  }
+  return result ?? rows;
+}
+
 /**
  * Merge a freshly returned ACP capability into the in-memory Machine Flock cache overlay
  * without touching `openFlockDoc` or performing any network I/O.
@@ -676,13 +757,11 @@ export function applyRefreshedCapability(
   if (!runtime || !normalizedMachineId || !refreshedCapability) return;
   const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, normalizedMachineId);
   const key = machineFlockKeys.acpCapability(refreshedCapability.configId);
+  const rowKey = serializeMachineFlockKey(key);
+  const row = { key, value: refreshedCapability.value };
+  recordAppliedCapabilityOverride(runtime, normalizedMachineId, rowKey, row);
   notifyMachineFlockRowsCache(cacheKey, {
-    rows: {
-      [serializeMachineFlockKey(key)]: {
-        key,
-        value: refreshedCapability.value,
-      },
-    },
+    rows: { [rowKey]: row },
     mode: 'merge',
   });
 }
@@ -735,6 +814,19 @@ export async function waitForActiveMachineFlockRoomSync(
   }
 }
 
+/**
+ * Force a fresh remote sync of a single machine's flock doc and push the result
+ * into any mounted `useMachineFlockRowsByMachineIds` consumers.
+ *
+ * The mounted hook normally keeps a live room joined. This remains the explicit
+ * catch-up path after an acknowledged mutation, and also serves callers that do
+ * not currently have a mounted Machine Flock consumer.
+ *
+ * A failed remote sync is not an error by default: the local rows were still
+ * refreshed, and callers that resync after an already-acknowledged mutation
+ * (settings, onboarding) must not report their own success as a failure. Pass
+ * `requireRemoteSync` when the caller retries on a stale read.
+ */
 export async function resyncMachineFlockRows(
   runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'> | null | undefined,
   machineId: MachineId | string | null | undefined,
@@ -753,7 +845,13 @@ export async function resyncMachineFlockRows(
   const syncResult = await syncMachineFlockRowsOnce(cacheKey, handle, { force: true });
   const version = readMachineFlockVersion(handle.flock);
   notifyMachineFlockRowsCache(cacheKey, {
-    rows: (readOptions) => readMachineFlockRowsSnapshot(handle, readOptions, 'resync'),
+    rows: (readOptions) =>
+      mergeAppliedCapabilityOverrides(
+        runtime,
+        normalizedMachineId,
+        readOptions,
+        readMachineFlockRowsSnapshot(handle, readOptions, 'resync')
+      ),
     mode: 'merge',
     preserveExistingOnEmpty: true,
     syncedRemote: syncResult.syncedRemote,
@@ -988,7 +1086,12 @@ export function useMachineFlockRowsByMachineIdsState(
           )
         ) {
           publishSnapshot({
-            rows: readMachineFlockRowsSnapshot(handle, readOptions, 'local'),
+            rows: mergeAppliedCapabilityOverrides(
+              runtime,
+              machineId,
+              readOptions,
+              readMachineFlockRowsSnapshot(handle, readOptions, 'local')
+            ),
             mode: 'merge',
             preserveExistingOnEmpty: true,
           });
@@ -1053,7 +1156,12 @@ export function useMachineFlockRowsByMachineIdsState(
               )
             ) {
               publishSnapshot({
-                rows: readMachineFlockRowsSnapshot(handle, readOptions, 'remote'),
+                rows: mergeAppliedCapabilityOverrides(
+                  runtime,
+                  machineId,
+                  readOptions,
+                  readMachineFlockRowsSnapshot(handle, readOptions, 'remote')
+                ),
                 mode: 'merge',
                 preserveExistingOnEmpty: true,
               });

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useRef, useState } from 'react';
 import { fn } from 'storybook/test';
@@ -8,6 +9,77 @@ import {
   MobileWorkspaceTabBar,
   type MobileBottomTabBarTabSpec,
 } from '@/components/mobile/mobile-workspace-tabbar';
+const tabStory = stylex.create({
+  scroll: {
+    height: '100%',
+    overflowY: 'auto',
+    padding: 'calc(var(--spacing) * 4)',
+    paddingBottom: 'calc(var(--spacing) * 32)',
+  },
+});
+const storySpacing = stylex.create({
+  children: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 3)',
+    },
+  },
+});
+
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': 'min(852px,calc(100dvh - 3rem))' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflow: 'hidden',
+    position: 'relative',
+    translate: '0 0 0',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
+
+const storyLayout = stylex.create({
+  caption: {
+    'margin-bottom': 'calc(var(--spacing) * 4)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  frame: {
+    height: 'calc(var(--spacing) * 16)',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 40%, transparent)',
+    'background-color': 'hsl(var(--card) / 1)',
+    padding: 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+  canvas: {
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 40%, transparent)',
+    'background-color': 'hsl(var(--card) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+});
 
 type HomeTab = 'local' | 'github' | 'chat';
 type ProjectTab = 'chat' | 'files' | 'settings';
@@ -16,20 +88,23 @@ const homeTabs: MobileBottomTabBarTabSpec<HomeTab>[] = [
   {
     key: 'local',
     label: 'Local',
-    ios: <Folder className="h-5 w-5" />,
-    material: <MdFolder className="h-5 w-5" />,
+    iconSize: 'calc(var(--spacing) * 5)',
+    ios: <Folder />,
+    material: <MdFolder />,
   },
   {
     key: 'github',
     label: 'GitHub',
-    ios: <Github className="h-5 w-5" />,
-    material: <Github className="h-5 w-5" />,
+    iconSize: 'calc(var(--spacing) * 5)',
+    ios: <Github />,
+    material: <Github />,
   },
   {
     key: 'chat',
     label: 'Chat',
-    ios: <MessageCircle className="h-5 w-5" />,
-    material: <MdChat className="h-5 w-5" />,
+    iconSize: 'calc(var(--spacing) * 5)',
+    ios: <MessageCircle />,
+    material: <MdChat />,
   },
 ];
 
@@ -37,20 +112,23 @@ const projectTabs: MobileBottomTabBarTabSpec<ProjectTab>[] = [
   {
     key: 'chat',
     label: '会话',
-    ios: <MessageCircle className="h-5 w-5" />,
-    material: <MdChat className="h-5 w-5" />,
+    iconSize: 'calc(var(--spacing) * 5)',
+    ios: <MessageCircle />,
+    material: <MdChat />,
   },
   {
     key: 'files',
     label: '文件',
-    ios: <FileCode className="h-5 w-5" />,
-    material: <FileCode className="h-5 w-5" />,
+    iconSize: 'calc(var(--spacing) * 5)',
+    ios: <FileCode />,
+    material: <FileCode />,
   },
   {
     key: 'settings',
     label: '设置',
-    ios: <Settings className="h-5 w-5" />,
-    material: <MdSettings className="h-5 w-5" />,
+    iconSize: 'calc(var(--spacing) * 5)',
+    ios: <Settings />,
+    material: <MdSettings />,
   },
 ];
 
@@ -74,8 +152,8 @@ function ShellShared<T extends string>({
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="relative translate-z-0 h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[min(852px,calc(100dvh-3rem))] sm:w-[393px] sm:rounded-[34px]">
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
         <div
           ref={scrollRef}
           data-testid="dock-scroll"
@@ -87,25 +165,22 @@ function ShellShared<T extends string>({
                 }
               : undefined
           }
-          className="h-full overflow-y-auto p-4 pb-32"
+          {...stylex.props(tabStory.scroll)}
         >
-          <div className="mb-4 text-xs text-muted-foreground">
+          <div {...stylex.props(storyLayout.caption)}>
             selectedTab = <code>{String(selected)}</code> · theme = <code>{theme}</code>
             {scrollable ? ' · 滚动列表以触发 collapse' : ''}
           </div>
           {scrollable ? (
-            <div className="space-y-3">
+            <div {...stylex.props(storySpacing.children)}>
               {Array.from({ length: 40 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="h-16 rounded-xl border border-border/40 bg-card p-3 text-sm"
-                >
+                <div key={i} {...stylex.props(storyLayout.frame)}>
                   Row {i + 1}
                 </div>
               ))}
             </div>
           ) : (
-            <div className="rounded-xl border border-border/40 bg-card p-6 text-sm">
+            <div {...stylex.props(storyLayout.canvas)}>
               Mock content for the {String(selected)} tab.
             </div>
           )}

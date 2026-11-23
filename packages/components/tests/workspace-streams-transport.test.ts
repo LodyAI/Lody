@@ -2812,4 +2812,74 @@ describe('workspace Flock snapshot probe deduplication', () => {
     expect(headCalls).toBe(1);
     expect(getStreamsHttpFallbackCounts()['snapshot-probe']).toBe(1);
   });
+
+  it('retries snapshotIsCheaper probe after inconclusive HEAD errors and caches once 200 settles', async () => {
+    resetStreamsHttpFallbackCounts();
+    let headCalls = 0;
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes('probe-retry-stream') && (init?.method ?? 'GET') === 'HEAD') {
+        headCalls += 1;
+        if (headCalls === 1) {
+          return new Response(null, { status: 503 });
+        }
+        return new Response(null, {
+          status: 200,
+          headers: {
+            'Stream-Next-Offset': '00000000000000000100',
+            'Stream-Snapshot-Offset': '00000000000000000050',
+          },
+        });
+      }
+      return originalFetch(input, init);
+    });
+
+    const owner = {};
+    const targetUrl = 'https://streams.example.test/ds/bucket/probe-retry-stream';
+    const baseCursor = {
+      streamUrl: targetUrl,
+      nextOffset: '00000000000000000000',
+      serverLowerBoundVersion: {},
+      updatedAtMs: 1,
+    };
+    const wrapped = createWorkspaceStreamsTransportAdapter(
+      (persistence) => ({
+        persistence,
+        joinFlockDocRoom: vi.fn(),
+        syncFlockDoc: vi.fn(),
+      }),
+      {
+        owner,
+        auth: 'token',
+        persistence: {
+          storageFor: vi.fn() as never,
+          cursorStoreFor: () => ({
+            load: async () => baseCursor,
+            save: async () => {},
+            delete: async () => {},
+          }),
+        },
+      }
+    ) as unknown as {
+      persistence: {
+        cursorStoreFor: (target: unknown) => { load: (url: string) => Promise<unknown> };
+      };
+    };
+
+    const store = wrapped.persistence.cursorStoreFor({
+      kind: 'flock',
+      flock: { version: () => ({}) },
+    });
+
+    await expect(store.load(targetUrl)).resolves.toEqual(baseCursor);
+    expect(headCalls).toBe(1);
+
+    await expect(store.load(targetUrl)).resolves.toEqual(baseCursor);
+    expect(headCalls).toBe(2);
+
+    await expect(store.load(targetUrl)).resolves.toEqual(baseCursor);
+    expect(headCalls).toBe(2);
+    expect(getStreamsHttpFallbackCounts()['snapshot-probe']).toBe(2);
+  });
 });

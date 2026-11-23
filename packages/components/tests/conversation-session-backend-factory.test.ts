@@ -1919,6 +1919,52 @@ async function cachedRecoveryFixture(name: string, count: number, first = 0) {
   return { sessionId, workspaceId, machineId, entries, cache, doc, publish, subscribeWake, reply };
 }
 
+it('refreshes an observed history from the owner when encrypted subscriptions are unavailable', async () => {
+  const h = await cachedRecoveryFixture('encrypted-poll', 1);
+  const timers = controlledRefreshTimers();
+  const updated = { ...h.entries[0]!, items: [{ type: 'text' as const, text: 'owner update' }] };
+  let changed = false;
+  const data = createRemoteRoostSessionDataFactory({
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
+    incremental: true,
+    pollIntervalMs: 5000,
+    requestHistoryRead: async (_machine, _session, query) => {
+      if (query.kind !== 'readChanges') throw new Error('Expected a checkpoint read');
+      return h.reply(
+        changed ? 2 : 1,
+        changed
+          ? {
+              state: 'ready',
+              checkpoint: 'checkpoint-2',
+              ids: [updated.id],
+              bodies: { changed: [updated], suffix: [] },
+            }
+          : { state: 'ready', checkpoint: 'checkpoint-1', ids: [] }
+      ).responses[0]!;
+    },
+    requestHistoryWrite: async () => {
+      throw new Error('Unexpected write');
+    },
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const observer = data.history.observe(() => {});
+  try {
+    await observer.initial;
+    (await timers.next()).callback();
+    const poll = await timers.next();
+    expect(poll.delay).toBe(5000);
+    changed = true;
+    poll.callback();
+    await timers.next();
+    expect(await h.cache.readTurn(updated.id)).toMatchObject(updated);
+  } finally {
+    observer.unsubscribe();
+    data.dispose?.();
+    h.cache.dispose();
+    timers.restore();
+  }
+});
+
 it('renews an idle local subscription from the applied checkpoint and closes it with its observer', async () => {
   const h = await cachedRecoveryFixture('idle-subscription', 1);
   const timers = controlledRefreshTimers();

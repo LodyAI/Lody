@@ -630,7 +630,7 @@ function Destination({
         <Button
           variant="ghost"
           size="small"
-          className={stylex.props(styles.chatButton).className}
+          xstyle={styles.chatButton}
           title={t('schedules.openChat', 'Open chat “{{title}}”', { title: chat.title })}
           onClick={() => onOpenSession(chat.sessionId!)}
         >
@@ -753,7 +753,7 @@ function ScheduleListRow({
                   variant="ghost"
                   size="small"
                   icon
-                  className={stylex.props(styles.hoverAction).className}
+                  xstyle={styles.hoverAction}
                   onClick={primary.onClick}
                   aria-label={primary.label}
                 >
@@ -852,7 +852,7 @@ function FilterMenu<T extends string>({
             variant={active ? 'secondary' : 'ghost'}
             size="small"
             aria-label={`${label}: ${current.label}`}
-            className={stylex.props(styles.shrinkless).className}
+            xstyle={styles.shrinkless}
           />
         }
       >
@@ -1151,14 +1151,16 @@ export function ScheduleListView({
               leading={<Search {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
               aria-label={t('schedules.search', 'Search schedules')}
               placeholder={t('schedules.search', 'Search schedules')}
-              className={cn(stylex.props(styles.search).className, WINDOW_DRAG_EXEMPT_CLASS)}
+              xstyle={styles.search}
+              className={WINDOW_DRAG_EXEMPT_CLASS}
               value={localQuery}
               onChange={(event) => setLocalQuery(event.target.value)}
             />
             <Button
               variant="primary"
               size="small"
-              className={cn(stylex.props(styles.shrinkless).className, WINDOW_DRAG_EXEMPT_CLASS)}
+              xstyle={styles.shrinkless}
+              className={WINDOW_DRAG_EXEMPT_CLASS}
               onClick={onNew}
               // The label is the only text and it is hidden on narrow screens.
               aria-label={t('schedules.new', 'New schedule')}
@@ -1194,11 +1196,7 @@ export function ScheduleListView({
               {[0, 1, 2].map((index) => (
                 <div key={index} {...stylex.props(styles.skeletonRow)}>
                   <Skeleton shape="line" width={192} />
-                  <Skeleton
-                    shape="line"
-                    width={96}
-                    className={stylex.props(styles.skeletonTrailing).className}
-                  />
+                  <Skeleton shape="line" width={96} xstyle={styles.skeletonTrailing} />
                 </div>
               ))}
             </div>
@@ -1212,12 +1210,7 @@ export function ScheduleListView({
                   'Choose a prompt and a time. Your machine will start a new chat for each run.'
                 )}
               </p>
-              <Button
-                variant="secondary"
-                size="small"
-                className={stylex.props(styles.emptyAction).className}
-                onClick={onNew}
-              >
+              <Button variant="secondary" size="small" xstyle={styles.emptyAction} onClick={onNew}>
                 <Plus {...stylex.props(styles.icon14)} />
                 {t('schedules.new', 'New schedule')}
               </Button>
@@ -1265,7 +1258,7 @@ export function ScheduleListView({
                   <Button
                     variant="ghost"
                     size="small"
-                    className={stylex.props(styles.shrinkless).className}
+                    xstyle={styles.shrinkless}
                     onClick={() => {
                       setProject({ kind: 'all' });
                       setStatusFilter('all');

@@ -21,6 +21,7 @@ export type TabsSize = 'small' | 'medium' | 'large';
 
 export interface TabsRootProps extends Omit<RootBaseProps, 'className'> {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 export interface TabsListProps extends Omit<ListBaseProps, 'className' | 'children'> {
   children?: ReactNode;
@@ -29,12 +30,15 @@ export interface TabsListProps extends Omit<ListBaseProps, 'className' | 'childr
   /** Take the width on offer and split it between the tabs equally. */
   stretch?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 export interface TabsTabProps extends Omit<TabBaseProps, 'className'> {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 export interface TabsPanelProps extends Omit<PanelBaseProps, 'className'> {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 /**
@@ -67,16 +71,23 @@ const TAB_SIZES = {
 
 /** The strip and the panels it swaps, stacked with the gap between them. */
 export const TabsRoot = forwardRef<HTMLDivElement, TabsRootProps>(function TabsRoot(
-  { className, ...rest },
+  { className, xstyle, ...rest },
   ref
 ) {
-  const sx = stylex.props(surface.tabs);
+  const sx = stylex.props(surface.tabs, xstyle);
   return (
     <BaseTabs.Root
       ref={ref}
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={
+        xstyle
+          ? (state) => ({
+              ...sx.style,
+              ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+            })
+          : sx.style
+      }
     />
   );
 });
@@ -92,10 +103,10 @@ export const TabsRoot = forwardRef<HTMLDivElement, TabsRootProps>(function TabsR
  * rather than about the design.
  */
 export const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
-  { className, children, size = 'medium', stretch = false, ...rest },
+  { className, xstyle, children, size = 'medium', stretch = false, ...rest },
   ref
 ) {
-  const sx = stylex.props(surface.track, LIST_SIZES[size], stretch && surface.trackStretch);
+  const sx = stylex.props(surface.track, LIST_SIZES[size], stretch && surface.trackStretch, xstyle);
   const strip = useMemo(() => ({ size, stretch }), [size, stretch]);
   return (
     <TabsStripContext.Provider value={strip}>
@@ -103,7 +114,14 @@ export const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsL
         ref={ref}
         {...rest}
         className={appendClassName(sx.className, className)}
-        style={sx.style}
+        style={
+          xstyle
+            ? (state) => ({
+                ...sx.style,
+                ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+              })
+            : sx.style
+        }
       >
         <BaseTabs.Indicator
           className={stylex.props(surface.indicator, INDICATOR_SIZES[size]).className}
@@ -116,7 +134,7 @@ export const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsL
 
 /** One choice on the strip. It takes no fill of its own; the indicator has it. */
 export const TabsTab = forwardRef<HTMLButtonElement, TabsTabProps>(function TabsTab(
-  { className, ...rest },
+  { className, xstyle, style, ...rest },
   ref
 ) {
   const { size, stretch } = useContext(TabsStripContext);
@@ -124,6 +142,10 @@ export const TabsTab = forwardRef<HTMLButtonElement, TabsTabProps>(function Tabs
     <BaseTabs.Tab
       ref={ref}
       {...rest}
+      style={(state) => ({
+        ...stylex.props(xstyle).style,
+        ...(typeof style === 'function' ? style(state) : style),
+      })}
       className={(state) =>
         appendClassName(
           stylex.props(
@@ -133,7 +155,8 @@ export const TabsTab = forwardRef<HTMLButtonElement, TabsTabProps>(function Tabs
             stretch && surface.tabStretch,
             state.active && surface.tabActive,
             state.disabled && surface.disabled,
-            state.disabled && surface.tabDisabled
+            state.disabled && surface.tabDisabled,
+            xstyle
           ).className,
           className
         )
@@ -149,16 +172,23 @@ export const TabsTab = forwardRef<HTMLButtonElement, TabsTabProps>(function Tabs
  * arriving from the strip lands in what they just chose.
  */
 export const TabsPanel = forwardRef<HTMLDivElement, TabsPanelProps>(function TabsPanel(
-  { className, ...rest },
+  { className, xstyle, ...rest },
   ref
 ) {
-  const sx = stylex.props(surface.ring, surface.tabPanel);
+  const sx = stylex.props(surface.ring, surface.tabPanel, xstyle);
   return (
     <BaseTabs.Panel
       ref={ref}
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={
+        xstyle
+          ? (state) => ({
+              ...sx.style,
+              ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+            })
+          : sx.style
+      }
     />
   );
 });

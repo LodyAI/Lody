@@ -1,5 +1,6 @@
 import {
   isSensitiveAcpConfigOptionId,
+  resolveSessionDefaultConfigOptionValues,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineViewMeta,
@@ -24,18 +25,35 @@ export function seedScheduleAgentRunRef(
   machine: Pick<MachineViewMeta, 'acpCapabilities'> | null | undefined
 ): AgentRunRef {
   const cached = readAgentStartDefaults(config);
+  const effectiveModelId =
+    cached?.modelId ??
+    (typeof cached?.configOptionValues?.model === 'string'
+      ? cached.configOptionValues.model
+      : undefined);
+  const cachedConfigOptionValues = cached
+    ? resolveSessionDefaultConfigOptionValues(
+        {
+          ...(cached.modelId ? { modelId: cached.modelId } : {}),
+          configOptionValues: cached.configOptionValues ?? {},
+          ...(cached.modelConfigOptionValues
+            ? { modelConfigOptionValues: cached.modelConfigOptionValues }
+            : {}),
+        },
+        effectiveModelId
+      )
+    : undefined;
   const options = buildAcpSelectorOptions({
     configId: config.id,
     cliType: config.cliType,
     agentType: config.agentType,
     selectedModeId: cached?.modeId,
     selectedModelId: cached?.modelId,
-    configOptionValues: cached?.configOptionValues,
+    configOptionValues: cachedConfigOptionValues,
     runtimeOverrides: config.runtimeOverrides,
     machine: machine ?? null,
   });
   const values: NonNullable<AgentRunRef['configOptionValues']> = {};
-  for (const [id, value] of Object.entries(cached?.configOptionValues ?? {})) values[id] = value;
+  for (const [id, value] of Object.entries(cachedConfigOptionValues ?? {})) values[id] = value;
   // Seed the permission shown by the composer:
   // an advertised `_permission` option wins; otherwise the mode list; otherwise
   // a `mode`-category option (how probed custom/registry agents publish it).

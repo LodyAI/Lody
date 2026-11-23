@@ -1,5 +1,17 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SessionFileImagePreview } from '@/components/sessions/session-file-image-preview';
+const storyLayout = stylex.create({
+  frame: {
+    height: '26rem',
+    width: '100%',
+    maxWidth: '46rem',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+});
 
 /**
  * The Code Collab file preview for image files. Both the desktop side panel and
@@ -33,7 +45,7 @@ const SAMPLE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200
 /* The component fills its container, so every story gives it a bounded frame —
    the real callers are a side panel and a full-screen mobile drawer. */
 const frame = (content: React.ReactNode) => (
-  <div className="h-[26rem] w-full max-w-[46rem] border border-border bg-background">{content}</div>
+  <div {...stylex.props(storyLayout.frame)}>{content}</div>
 );
 
 export const RasterImage: Story = {

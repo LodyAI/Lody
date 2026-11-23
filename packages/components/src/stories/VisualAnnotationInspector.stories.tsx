@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Check, MousePointer2, RefreshCw, SendHorizontal, Trash2, X } from 'lucide-react';
@@ -27,6 +28,368 @@ import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-ann
 import { VisualAnnotationReferenceCard } from '@/components/ai-gui/visual-annotation-reference-card';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
+
+const storyStyles = stylex.create({
+  harness: {
+    minHeight: '820px',
+    backgroundColor: 'var(--color-slate-100)',
+    padding: 'calc(var(--spacing) * 6)',
+    color: 'var(--color-slate-900)',
+  },
+  workspace: {
+    marginInline: 'auto',
+    display: 'grid',
+    maxWidth: '1440px',
+    gap: 'calc(var(--spacing) * 5)',
+    gridTemplateColumns: {
+      default: null,
+      '@media (width >= 80rem)': 'minmax(0,1fr) 380px',
+    },
+  },
+  previewPanel: {
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-2xl)',
+    backgroundColor: 'var(--color-white)',
+    padding: 'calc(var(--spacing) * 4)',
+    boxShadow: '0 0 0 1px var(--color-slate-200), 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  previewToolbar: {
+    marginBottom: 'calc(var(--spacing) * 3)',
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  eyebrow: {
+    fontSize: '11px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.18em',
+    color: 'var(--color-slate-500)',
+  },
+  panelTitle: {
+    marginTop: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-base)',
+    lineHeight: 'var(--text-base--line-height)',
+    fontWeight: '600',
+    color: 'var(--color-slate-900)',
+  },
+  deviceSwitcher: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'var(--color-slate-100)',
+    padding: 'calc(var(--spacing) * 0.5)',
+  },
+  previewWell: {
+    overflow: 'auto',
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'color-mix(in oklab, var(--color-slate-200) 60%, transparent)',
+    padding: 'calc(var(--spacing) * 4)',
+    boxShadow: '0 0 0 1px var(--color-slate-200)',
+  },
+  previewViewport: {
+    position: 'relative',
+    marginInline: 'auto',
+  },
+  previewFrame: {
+    display: 'block',
+    height: '100%',
+    width: '100%',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'var(--color-white)',
+    boxShadow: '0 0 0 1px var(--color-slate-200), 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  controlsPanel: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 4)',
+    },
+    borderRadius: 'var(--radius-2xl)',
+    backgroundColor: 'var(--color-white)',
+    padding: 'calc(var(--spacing) * 4)',
+    boxShadow: '0 0 0 1px var(--color-slate-200), 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  controlsHeading: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  glyph: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+  },
+  twoColumns: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  metadataPanel: {
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'var(--color-slate-50)',
+    padding: 'calc(var(--spacing) * 3)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    boxShadow: '0 0 0 1px var(--color-slate-200)',
+  },
+  metadataGrid: {
+    display: 'grid',
+    gridTemplateColumns: '64px minmax(0,1fr)',
+    rowGap: 'calc(var(--spacing) * 1.5)',
+  },
+  mutedText: {
+    color: 'var(--color-slate-500)',
+  },
+  documentId: {
+    wordBreak: 'break-all',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    color: 'var(--color-slate-700)',
+  },
+  inspectorPanel: {
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'var(--color-slate-50)',
+    padding: 'calc(var(--spacing) * 3)',
+    boxShadow: '0 0 0 1px var(--color-slate-200)',
+  },
+  sectionHeading: {
+    marginBottom: 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  sectionTitle: {
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: '600',
+    color: 'var(--color-slate-900)',
+  },
+  targetBadge: {
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'var(--color-white)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 0.5)',
+    fontSize: '11px',
+    fontWeight: '500',
+    color: 'var(--color-slate-600)',
+    boxShadow: '0 0 0 1px var(--color-slate-200)',
+  },
+  targetEditor: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 3)',
+    },
+  },
+  targetSelector: {
+    wordBreak: 'break-all',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: '11px',
+    color: 'var(--color-slate-600)',
+  },
+  commentInput: {
+    minHeight: 'calc(var(--spacing) * 20)',
+    backgroundColor: 'var(--color-white)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+  fullWidth: {
+    width: '100%',
+  },
+  instructions: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: '1.625',
+    color: 'var(--color-slate-500)',
+  },
+  pendingBadge: {
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'var(--color-amber-100)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 0.5)',
+    fontSize: '11px',
+    fontWeight: '500',
+    color: 'var(--color-amber-700)',
+  },
+  commentsList: {
+    maxHeight: '240px',
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 1.5)',
+    },
+    overflow: 'auto',
+    paddingRight: 'calc(var(--spacing) * 1)',
+  },
+  commentText: {
+    minWidth: 0,
+    flex: '1',
+  },
+  commentBody: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: '500',
+    color: 'var(--color-slate-900)',
+  },
+  commentTarget: {
+    marginTop: 'calc(var(--spacing) * 0.5)',
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '10px',
+    color: 'var(--color-slate-500)',
+  },
+  emptyComments: {
+    paddingInline: 'calc(var(--spacing) * 1)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: '1.625',
+    color: 'var(--color-slate-500)',
+  },
+  commentActions: {
+    marginTop: 'calc(var(--spacing) * 2)',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  stagedBadge: {
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'var(--color-sky-100)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 0.5)',
+    fontSize: '11px',
+    fontWeight: '500',
+    color: 'var(--color-sky-700)',
+  },
+  draftStack: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2)',
+    },
+  },
+  referenceList: {
+    maxHeight: '220px',
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2)',
+    },
+    overflow: 'auto',
+    paddingRight: 'calc(var(--spacing) * 1)',
+  },
+  referenceRow: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0,1fr) auto',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'var(--color-white)',
+    padding: 'calc(var(--spacing) * 2)',
+    boxShadow: '0 0 0 1px var(--color-slate-200), 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  referenceCard: {
+    maxWidth: 'none',
+  },
+  sentBadge: {
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'var(--color-slate-100)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 0.5)',
+    fontSize: '11px',
+    fontWeight: '500',
+    color: 'var(--color-slate-600)',
+    boxShadow: '0 0 0 1px var(--color-slate-200)',
+  },
+  sentReference: {
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'var(--color-white)',
+    padding: 'calc(var(--spacing) * 2)',
+    boxShadow: '0 0 0 1px var(--color-slate-200), 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  referenceLabel: {
+    marginBottom: 'calc(var(--spacing) * 1.5)',
+    fontSize: '10px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.16em',
+    color: 'var(--color-slate-400)',
+  },
+  deviceButton: {
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    fontWeight: '500',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+  },
+  selectedDevice: {
+    backgroundColor: 'var(--color-white)',
+    color: 'var(--color-slate-900)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  idleDevice: {
+    color: {
+      default: 'var(--color-slate-500)',
+      '@media (hover: hover)': {
+        ':hover': 'var(--color-slate-700)',
+      },
+    },
+  },
+  commentRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius-lg)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    textAlign: 'left',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+  },
+  selectedComment: {
+    backgroundColor: 'var(--color-white)',
+    boxShadow: '0 0 0 1px var(--color-slate-300), 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  idleComment: {
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': {
+        ':hover': 'color-mix(in oklab, var(--color-white) 70%, transparent)',
+      },
+    },
+  },
+  statusDot: {
+    marginTop: 'calc(var(--spacing) * 1)',
+    height: 'calc(var(--spacing) * 2)',
+    width: 'calc(var(--spacing) * 2)',
+    flexShrink: 0,
+    borderRadius: 'calc(infinity * 1px)',
+  },
+  submittedDot: {
+    backgroundColor: 'var(--color-slate-400)',
+  },
+  stagedDot: {
+    backgroundColor: 'var(--color-sky-500)',
+  },
+  resolvedDot: {
+    backgroundColor: 'var(--color-emerald-500)',
+  },
+  pendingDot: {
+    backgroundColor: 'var(--color-amber-500)',
+  },
+});
 
 const storySessionId = 'session-storybook-visual-annotation' as SessionId;
 const storyTurnId = 'turn-storybook-visual-annotation';
@@ -615,28 +978,24 @@ function VisualAnnotationInspectorHarness() {
   };
 
   return (
-    <div className="min-h-[820px] bg-slate-100 p-6 text-slate-900">
-      <div className="mx-auto grid max-w-[1440px] gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="overflow-hidden rounded-2xl bg-white p-4 shadow-xs ring-1 ring-slate-200">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <div {...stylex.props(storyStyles.harness)}>
+      <div {...stylex.props(storyStyles.workspace)}>
+        <section {...stylex.props(storyStyles.previewPanel)}>
+          <div {...stylex.props(storyStyles.previewToolbar)}>
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <p {...stylex.props(storyStyles.eyebrow)}>
                 Iframe harness
               </p>
-              <h2 className="mt-1 text-base font-semibold text-slate-900">
+              <h2 {...stylex.props(storyStyles.panelTitle)}>
                 Live annotation preview
               </h2>
             </div>
-            <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5">
+            <div {...stylex.props(storyStyles.deviceSwitcher)}>
               {devices.map((device) => (
                 <button
                   key={device.id}
                   type="button"
-                  className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                    deviceId === device.id
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
+                  {...stylex.props(storyStyles.deviceButton, deviceId === device.id ? storyStyles.selectedDevice : storyStyles.idleDevice)}
                   onClick={() => {
                     setDeviceId(device.id);
                     setIframeReady(false);
@@ -650,9 +1009,9 @@ function VisualAnnotationInspectorHarness() {
             </div>
           </div>
 
-          <div className="overflow-auto rounded-xl bg-slate-200/60 p-4 ring-1 ring-slate-200">
+          <div {...stylex.props(storyStyles.previewWell)}>
             <div
-              className="relative mx-auto"
+              {...stylex.props(storyStyles.previewViewport)}
               style={{
                 width: selectedDevice.width,
                 height: selectedDevice.height,
@@ -665,7 +1024,7 @@ function VisualAnnotationInspectorHarness() {
                 title="Visual annotation preview fixture"
                 srcDoc={previewSrcDoc}
                 onLoad={attachInspector}
-                className="block h-full w-full rounded-lg bg-white shadow-xs ring-1 ring-slate-200"
+                {...stylex.props(storyStyles.previewFrame)}
               />
               <VisualAnnotationCommentsOverlay
                 comments={comments}
@@ -683,13 +1042,13 @@ function VisualAnnotationInspectorHarness() {
           </div>
         </section>
 
-        <aside className="space-y-4 rounded-2xl bg-white p-4 shadow-xs ring-1 ring-slate-200">
-          <div className="flex items-start justify-between gap-3">
+        <aside {...stylex.props(storyStyles.controlsPanel)}>
+          <div {...stylex.props(storyStyles.controlsHeading)}>
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <p {...stylex.props(storyStyles.eyebrow)}>
                 Parent controls
               </p>
-              <h2 className="mt-1 text-base font-semibold text-slate-900">Annotation mode</h2>
+              <h2 {...stylex.props(storyStyles.panelTitle)}>Annotation mode</h2>
             </div>
             <Button
               type="button"
@@ -701,12 +1060,12 @@ function VisualAnnotationInspectorHarness() {
                 setInspectorMode(next);
               }}
             >
-              <MousePointer2 className="h-3.5 w-3.5" />
+              <MousePointer2 {...stylex.props(storyStyles.glyph)} />
               {annotationMode ? 'On' : 'Off'}
             </Button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div {...stylex.props(storyStyles.twoColumns)}>
             <Button
               type="button"
               variant="secondary"
@@ -725,54 +1084,54 @@ function VisualAnnotationInspectorHarness() {
             </Button>
           </div>
 
-          <div className="rounded-xl bg-slate-50 p-3 text-xs ring-1 ring-slate-200">
-            <div className="grid grid-cols-[64px_minmax(0,1fr)] gap-y-1.5">
-              <span className="text-slate-500">Doc</span>
-              <span className="break-all font-mono text-slate-700">{storyRoomId}</span>
-              <span className="text-slate-500">Turn</span>
-              <span className="break-all font-mono text-slate-700">{storyTurnId}</span>
+          <div {...stylex.props(storyStyles.metadataPanel)}>
+            <div {...stylex.props(storyStyles.metadataGrid)}>
+              <span {...stylex.props(storyStyles.mutedText)}>Doc</span>
+              <span {...stylex.props(storyStyles.documentId)}>{storyRoomId}</span>
+              <span {...stylex.props(storyStyles.mutedText)}>Turn</span>
+              <span {...stylex.props(storyStyles.documentId)}>{storyTurnId}</span>
             </div>
           </div>
 
-          <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">Selected target</h3>
-              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200">
+          <div {...stylex.props(storyStyles.inspectorPanel)}>
+            <div {...stylex.props(storyStyles.sectionHeading)}>
+              <h3 {...stylex.props(storyStyles.sectionTitle)}>Selected target</h3>
+              <span {...stylex.props(storyStyles.targetBadge)}>
                 {selectedPayload ? selectedPayload.target.tag : 'none'}
               </span>
             </div>
             {selectedPayload ? (
-              <div className="space-y-3">
-                <p className="break-all font-mono text-[11px] text-slate-600">
+              <div {...stylex.props(storyStyles.targetEditor)}>
+                <p {...stylex.props(storyStyles.targetSelector)}>
                   {selectedPayload.target.selector}
                 </p>
                 <Textarea
                   value={draftBody}
                   onChange={(event) => setDraftBody(event.target.value)}
                   placeholder="Write a comment for this selected target..."
-                  className="min-h-20 bg-white text-sm"
+                  xstyle={storyStyles.commentInput}
                 />
-                <Button type="button" size="small" className="w-full" onClick={completeComment}>
-                  <Check className="h-3.5 w-3.5" />
+                <Button type="button" size="small" width="100%" onClick={completeComment}>
+                  <Check {...stylex.props(storyStyles.glyph)} />
                   Add comment
                 </Button>
               </div>
             ) : (
-              <p className="text-xs leading-relaxed text-slate-500">
+              <p {...stylex.props(storyStyles.instructions)}>
                 Turn annotation on, hover the iframe, then click an element. The click is captured
                 inside the iframe and posted back here.
               </p>
             )}
           </div>
 
-          <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">Comments</h3>
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+          <div {...stylex.props(storyStyles.inspectorPanel)}>
+            <div {...stylex.props(storyStyles.sectionHeading)}>
+              <h3 {...stylex.props(storyStyles.sectionTitle)}>Comments</h3>
+              <span {...stylex.props(storyStyles.pendingBadge)}>
                 {pendingCount} completed
               </span>
             </div>
-            <div className="max-h-[240px] space-y-1.5 overflow-auto pr-1">
+            <div {...stylex.props(storyStyles.commentsList)}>
               {comments.length > 0 ? (
                 comments.map((comment) => {
                   const isResolved = comment.resolvedAt !== undefined;
@@ -783,28 +1142,16 @@ function VisualAnnotationInspectorHarness() {
                       key={comment.id}
                       type="button"
                       onClick={() => setActiveCommentId(comment.id)}
-                      className={`flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors ${
-                        activeCommentId === comment.id
-                          ? 'bg-white shadow-xs ring-1 ring-slate-300'
-                          : 'hover:bg-white/70'
-                      }`}
+                      {...stylex.props(storyStyles.commentRow, activeCommentId === comment.id ? storyStyles.selectedComment : storyStyles.idleComment)}
                     >
                       <span
-                        className={`mt-1 h-2 w-2 shrink-0 rounded-full ${
-                          isSubmitted
-                            ? 'bg-slate-400'
-                            : isStaged
-                              ? 'bg-sky-500'
-                              : isResolved
-                                ? 'bg-emerald-500'
-                                : 'bg-amber-500'
-                        }`}
+                        {...stylex.props(storyStyles.statusDot, isSubmitted ? storyStyles.submittedDot : isStaged ? storyStyles.stagedDot : isResolved ? storyStyles.resolvedDot : storyStyles.pendingDot)}
                       />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium text-slate-900">
+                      <span {...stylex.props(storyStyles.commentText)}>
+                        <span {...stylex.props(storyStyles.commentBody)}>
                           {comment.body}
                         </span>
-                        <span className="mt-0.5 block truncate text-[10px] text-slate-500">
+                        <span {...stylex.props(storyStyles.commentTarget)}>
                           {comment.anchor.target.tag}
                           {isSubmitted ? ' · submitted' : isStaged ? ' · staged' : ''}
                           {isResolved ? ' · resolved' : ''}
@@ -814,13 +1161,13 @@ function VisualAnnotationInspectorHarness() {
                   );
                 })
               ) : (
-                <p className="px-1 py-2 text-xs leading-relaxed text-slate-500">
+                <p {...stylex.props(storyStyles.emptyComments)}>
                   Comments stay here until you reset the harness, simulating the preview Loro doc
                   state.
                 </p>
               )}
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-2">
+            <div {...stylex.props(storyStyles.commentActions)}>
               <Button
                 type="button"
                 variant="secondary"
@@ -828,38 +1175,38 @@ function VisualAnnotationInspectorHarness() {
                 disabled={pendingCount === 0}
                 onClick={stagePending}
               >
-                <SendHorizontal className="h-3.5 w-3.5" />
+                <SendHorizontal {...stylex.props(storyStyles.glyph)} />
                 Stage all
               </Button>
               <Button type="button" variant="secondary" size="small" onClick={resetHarness}>
                 {comments.length > 0 || selectedPayload ? (
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 {...stylex.props(storyStyles.glyph)} />
                 ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
+                  <RefreshCw {...stylex.props(storyStyles.glyph)} />
                 )}
                 Reset
               </Button>
             </div>
           </div>
 
-          <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">Composer draft</h3>
-              <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+          <div {...stylex.props(storyStyles.inspectorPanel)}>
+            <div {...stylex.props(storyStyles.sectionHeading)}>
+              <h3 {...stylex.props(storyStyles.sectionTitle)}>Composer draft</h3>
+              <span {...stylex.props(storyStyles.stagedBadge)}>
                 {stagedReferences.length} staged
               </span>
             </div>
             {stagedReferences.length > 0 ? (
-              <div className="space-y-2">
-                <div className="max-h-[220px] space-y-2 overflow-auto pr-1">
+              <div {...stylex.props(storyStyles.draftStack)}>
+                <div {...stylex.props(storyStyles.referenceList)}>
                   {stagedReferences.map((reference) => (
                     <div
                       key={reference.commentId}
-                      className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-lg bg-white p-2 shadow-xs ring-1 ring-slate-200"
+                      {...stylex.props(storyStyles.referenceRow)}
                     >
                       <VisualAnnotationReferenceCard
                         reference={reference}
-                        className="max-w-none"
+                        xstyle={storyStyles.referenceCard}
                         onClick={() => setActiveCommentId(reference.commentId)}
                       />
                       <Button
@@ -868,14 +1215,14 @@ function VisualAnnotationInspectorHarness() {
                         icon
                         onClick={() => removeStagedReference(reference.commentId)}
                       >
-                        <X className="h-3.5 w-3.5" />
+                        <X {...stylex.props(storyStyles.glyph)} />
                       </Button>
                     </div>
                   ))}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div {...stylex.props(storyStyles.twoColumns)}>
                   <Button type="button" size="small" onClick={sendStagedReferences}>
-                    <SendHorizontal className="h-3.5 w-3.5" />
+                    <SendHorizontal {...stylex.props(storyStyles.glyph)} />
                     Send
                   </Button>
                   <Button
@@ -889,36 +1236,36 @@ function VisualAnnotationInspectorHarness() {
                 </div>
               </div>
             ) : (
-              <p className="text-xs leading-relaxed text-slate-500">
+              <p {...stylex.props(storyStyles.instructions)}>
                 Paper-plane actions add visual annotation references here first. The final send
                 button moves staged references into conversation history.
               </p>
             )}
           </div>
 
-          <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">Conversation</h3>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200">
+          <div {...stylex.props(storyStyles.inspectorPanel)}>
+            <div {...stylex.props(storyStyles.sectionHeading)}>
+              <h3 {...stylex.props(storyStyles.sectionTitle)}>Conversation</h3>
+              <span {...stylex.props(storyStyles.sentBadge)}>
                 {sentReferences.length} sent
               </span>
             </div>
             {sentReferences.length > 0 ? (
-              <div className="max-h-[220px] space-y-2 overflow-auto pr-1">
+              <div {...stylex.props(storyStyles.referenceList)}>
                 {sentReferences.map((reference) => (
                   <div
                     key={reference.commentId}
-                    className="rounded-lg bg-white p-2 shadow-xs ring-1 ring-slate-200"
+                    {...stylex.props(storyStyles.sentReference)}
                   >
-                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    <p {...stylex.props(storyStyles.referenceLabel)}>
                       Session input block
                     </p>
-                    <VisualAnnotationReferenceCard reference={reference} className="max-w-none" />
+                    <VisualAnnotationReferenceCard reference={reference} xstyle={storyStyles.referenceCard} />
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-xs leading-relaxed text-slate-500">
+              <p {...stylex.props(storyStyles.instructions)}>
                 Sent visual annotation references appear here after the composer draft is submitted.
               </p>
             )}

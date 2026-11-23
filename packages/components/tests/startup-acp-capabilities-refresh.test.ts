@@ -129,8 +129,37 @@ describe('runStartupAcpCapabilitiesRefresh', () => {
 
     expect(attempts).toEqual(['answered', 'failed']);
 
-    await runStartupAcpCapabilitiesRefresh(ports, { refreshedConfigKeys });
+    const secondResult = await runStartupAcpCapabilitiesRefresh(ports, { refreshedConfigKeys });
 
     expect(attempts).toEqual(['answered', 'failed', 'failed', 'never-reached']);
+    expect(secondResult).toEqual({ hasFailures: true });
+  });
+
+  it('reports hasFailures=false when all configs succeed and hasFailures=true when a machine goes offline mid-pass', async () => {
+    const machineId = 'machine-status' as MachineId;
+    let online = true;
+    const okResult = await runStartupAcpCapabilitiesRefresh(
+      {
+        listMachineIds: async () => [machineId],
+        isMachineOnline: () => true,
+        listAgentConfigs: async () => [config('only', machineId)],
+        refreshAgentConfig: async () => {},
+      },
+      { refreshedConfigKeys: new Set() }
+    );
+    expect(okResult).toEqual({ hasFailures: false });
+
+    const offlineResult = await runStartupAcpCapabilitiesRefresh(
+      {
+        listMachineIds: async () => [machineId],
+        isMachineOnline: () => online,
+        listAgentConfigs: async () => [config('first', machineId), config('second', machineId)],
+        refreshAgentConfig: async () => {
+          online = false;
+        },
+      },
+      { refreshedConfigKeys: new Set() }
+    );
+    expect(offlineResult).toEqual({ hasFailures: true });
   });
 });

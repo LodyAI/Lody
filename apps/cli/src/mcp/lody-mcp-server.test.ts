@@ -1230,6 +1230,42 @@ describe('session MCP input schemas', () => {
       mcpServerIds: [],
       inheritSessionDefaults: false,
     });
+
+    const multiSpeedCapability = createCapability('codex');
+    multiSpeedCapability.configOptions = multiSpeedCapability.configOptions?.map((option) =>
+      option.id === 'fast-mode'
+        ? {
+            id: 'fast-mode',
+            name: 'Speed',
+            type: 'select' as const,
+            currentValue: 'off',
+            options: [
+              { value: 'off', name: 'Standard' },
+              { value: 'fast', name: 'Fast' },
+              { value: 'ultrafast', name: 'Ultrafast' },
+            ],
+          }
+        : option
+    );
+    multiSpeedCapability.declaredModelControls = {
+      'gpt-5.5': {
+        effortValues: ['low', 'medium', 'high'],
+        fastMode: true,
+        speedTiers: ['fast', 'ultrafast'],
+      },
+    };
+    expect(
+      resolveCreateConfig({ modelId: 'gpt-5.5', speedTier: 'ultrafast' }, multiSpeedCapability)
+    ).toMatchObject({
+      modelId: 'gpt-5.5',
+      configOptionValues: { 'fast-mode': 'ultrafast' },
+    });
+    expect(
+      resolveCreateConfig({ modelId: 'gpt-5.5', speedTier: 'normal' }, multiSpeedCapability)
+    ).toMatchObject({
+      modelId: 'gpt-5.5',
+      configOptionValues: { 'fast-mode': 'off' },
+    });
   });
 
   it('validates semantic reasoning against a model selected by a raw option', () => {

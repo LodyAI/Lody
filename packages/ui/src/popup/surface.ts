@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { corner, duration, ease, space, text, z } from '../tokens/scales.stylex';
+import { control, corner, duration, ease, space, text, z } from '../tokens/scales.stylex';
 import { popup } from './popup.tokens.stylex';
 
 /**
@@ -194,7 +194,7 @@ export const surface = stylex.create({
   /** Where the keyboard or the pointer is; it wins over the selected fill. */
   itemHighlighted: { backgroundColor: popup.highlight },
   /** The same 45% the whole library uses, and no pointer. */
-  itemDisabled: { opacity: 0.45, pointerEvents: 'none' },
+  itemDisabled: { opacity: control.disabledOpacity, pointerEvents: 'none' },
   /**
    * The row that owns an open surface: a submenu trigger while its submenu is
    * up. It keeps the highlight it was given when the pointer moved onto it, so
@@ -322,7 +322,7 @@ export const surface = stylex.create({
     whiteSpace: 'nowrap',
     outlineStyle: 'none',
     boxShadow: 'none',
-    opacity: { default: 1, ':disabled': 0.45 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
   },
   /** Hovered, or holding the menu that is currently up: the same one fill. */
   barItemOpen: { backgroundColor: popup.highlight },

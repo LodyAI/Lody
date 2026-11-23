@@ -13,6 +13,7 @@ export interface CheckboxProps extends Omit<
   'className' | 'render' | 'nativeButton' | 'style'
 > {
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 const styles = stylex.create({
@@ -67,7 +68,7 @@ function MixedMark() {
  * UI's hidden input beside it carrying the value into a form.
  */
 export const Checkbox = forwardRef<HTMLButtonElement, CheckboxProps>(function Checkbox(
-  { className, ...rest },
+  { className, xstyle, ...rest },
   ref
 ) {
   const ariaInvalid = rest['aria-invalid'];
@@ -77,6 +78,7 @@ export const Checkbox = forwardRef<HTMLButtonElement, CheckboxProps>(function Ch
       nativeButton
       render={<button type="button" />}
       {...rest}
+      style={stylex.props(xstyle).style}
       className={(state) => {
         const on = state.checked || state.indeterminate;
         return appendClassName(
@@ -84,7 +86,8 @@ export const Checkbox = forwardRef<HTMLButtonElement, CheckboxProps>(function Ch
             well.box,
             styles.box,
             on && well.checked,
-            isInvalid(state.valid, ariaInvalid) && (on ? well.checkedInvalid : well.invalid)
+            isInvalid(state.valid, ariaInvalid) && (on ? well.checkedInvalid : well.invalid),
+            xstyle
           ).className,
           className
         );

@@ -71,17 +71,15 @@ type UsagePerspectiveChartProps = {
   className?: string;
 };
 
+// Series hues from the chart palette so they follow the theme (see usage-calendar-visualization).
 const DEFAULT_COLORS = [
-  '#2563eb',
-  '#0ea5e9',
-  '#06b6d4',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#14b8a6',
+  'hsl(var(--chart-1))',
+  'hsl(var(--chart-2))',
+  'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))',
+  'hsl(var(--chart-5))',
 ];
-const OTHER_COLOR = '#6b7280';
+const OTHER_COLOR = 'hsl(var(--muted-foreground))';
 const OTHER_ID = '__other__';
 
 const CHART_HEIGHT_DESKTOP = 224;
@@ -174,6 +172,7 @@ const styles = stylex.create({
   markerMedium: { width: '10px', height: '10px' },
   loadingSvg: { position: 'absolute', inset: 0, width: '100%', height: '100%' },
   loadingPlot: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--primary) / 1) 6%, transparent)',
     position: 'relative',
     overflow: 'hidden',
   },
@@ -423,12 +422,7 @@ function ChartLoadingPlaceholder({ chartHeight }: { chartHeight: number }) {
       <div {...stylex.props(styles.plotInset)}>
         {/* Same footprint as the real chart: a full-height plot with layered
            area silhouettes, gridlines, and axis tick placeholders. */}
-        <Skeleton
-          shape="block"
-          width="100%"
-          height={chartHeight}
-          {...withClassName(stylex.props(styles.loadingPlot), 'bg-primary/[0.06]')}
-        >
+        <Skeleton shape="block" width="100%" height={chartHeight} xstyle={styles.loadingPlot}>
           <svg
             aria-hidden="true"
             {...stylex.props(styles.loadingSvg)}

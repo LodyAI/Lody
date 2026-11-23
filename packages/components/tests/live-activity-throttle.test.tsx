@@ -20,8 +20,9 @@ const testAtoms = await vi.hoisted(async () => {
     agentConfigsAtom: atom<AgentConfigMeta[]>([]),
     userAtom: atom<{ id: string } | null>({ id: 'user-1' }),
     liveActivitiesEnabledAtom: atom<boolean>(true),
-    runtimeAtom: atom<{ workspaceId: string; contentMode?: string } | null>({
+    runtimeAtom: atom<{ workspaceId: string; contentMode?: string; accountId?: string } | null>({
       workspaceId: 'ws-1',
+      accountId: 'user-1',
       contentMode: 'plaintext',
     }),
     workspaceIdAtom: atom<string | null>('ws-1'),
@@ -165,46 +166,49 @@ describe('useLodyLiveActivity summary throttling', () => {
     });
   };
 
-  it('never publishes encrypted titles or commands and ends an existing activity on mode change', async () => {
-    await setSessions([session('secret', { title: 'Secret title', status: { type: 'running' } })]);
+  it('publishes admitted encrypted summaries with session links and no HTTP permission actions', async () => {
+    store.set(testAtoms.runtimeAtom, {
+      workspaceId: 'ws-1',
+      accountId: 'user-1',
+      contentMode: 'e2ee',
+    });
+    await setSessions([
+      session('secret', {
+        title: 'Decrypted title',
+        status: { type: 'requestPermission' },
+      } as Partial<SessionMeta>),
+    ]);
+    await setPresence(presence('secret', { type: 'requestPermission' }, NOW_MS));
+    await mount();
+    await advance(SYNC_DEBOUNCE_MS);
+    expect(syncedPayloads.at(-1)).toMatchObject({
+      contentMode: 'e2ee',
+      workspaceId: 'ws-1',
+      items: [
+        expect.objectContaining({ id: 'secret', title: 'Decrypted title', status: 'permission' }),
+      ],
+    });
+    expect(syncedPayloads.at(-1)?.items[0]).not.toHaveProperty('permissionRequestId');
+    expect(syncedPayloads.at(-1)?.permissionAlert).toBeUndefined();
+    expect(endedActivityIds).toEqual([]);
+  });
+
+  it.each([
+    null,
+    { workspaceId: 'other', contentMode: 'plaintext' },
+    { workspaceId: 'ws-1' },
+    { workspaceId: 'ws-1', accountId: 'other', contentMode: 'e2ee' },
+  ])('ends activity and blocks publication for unadmitted runtime %j', async (runtime) => {
     await mount();
     await advance(SYNC_DEBOUNCE_MS);
     expect(syncedPayloads.length).toBeGreaterThan(0);
     syncedPayloads.length = 0;
-    await act(async () => {
-      store.set(testAtoms.runtimeAtom, { workspaceId: 'ws-1', contentMode: 'e2ee' });
-    });
-    await setSessions([
-      session('secret', { title: 'Decrypted title', status: { type: 'requestPermission' } }),
-    ]);
-    await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS + SYNC_DEBOUNCE_MS);
-    expect(syncedPayloads).toEqual([]);
-    expect(endedActivityIds).toContain(ACTIVITY_ID_WS_1);
-  });
-
-  it('does not publish when mounted in an encrypted workspace', async () => {
-    store.set(testAtoms.runtimeAtom, { workspaceId: 'ws-1', contentMode: 'e2ee' });
+    await act(async () => store.set(testAtoms.runtimeAtom, runtime));
     await setSessions([session('secret', { title: 'Decrypted title' })]);
-    await mount();
     await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS + SYNC_DEBOUNCE_MS);
     expect(syncedPayloads).toEqual([]);
     expect(endedActivityIds).toContain(ACTIVITY_ID_WS_1);
   });
-
-  it.each([null, { workspaceId: 'other', contentMode: 'plaintext' }, { workspaceId: 'ws-1' }])(
-    'ends activity and blocks publication for unadmitted runtime %j',
-    async (runtime) => {
-      await mount();
-      await advance(SYNC_DEBOUNCE_MS);
-      expect(syncedPayloads.length).toBeGreaterThan(0);
-      syncedPayloads.length = 0;
-      await act(async () => store.set(testAtoms.runtimeAtom, runtime));
-      await setSessions([session('secret', { title: 'Decrypted title' })]);
-      await advance(LIVE_ACTIVITY_SUMMARY_THROTTLE_MS + SYNC_DEBOUNCE_MS);
-      expect(syncedPayloads).toEqual([]);
-      expect(endedActivityIds).toContain(ACTIVITY_ID_WS_1);
-    }
-  );
 
   beforeEach(async () => {
     vi.useFakeTimers();
@@ -357,7 +361,11 @@ describe('useLodyLiveActivity summary throttling', () => {
     await advance(100);
     await act(async () => {
       store.set(testAtoms.workspaceIdAtom as PrimitiveAtom<string | null>, 'ws-2');
-      store.set(testAtoms.runtimeAtom, { workspaceId: 'ws-2', contentMode: 'plaintext' });
+      store.set(testAtoms.runtimeAtom, {
+        workspaceId: 'ws-2',
+        accountId: 'user-1',
+        contentMode: 'plaintext',
+      });
       store.set(testAtoms.sessionsAtom as PrimitiveAtom<SessionMeta[]>, [session('z')]);
     });
     await advance(SYNC_DEBOUNCE_MS);

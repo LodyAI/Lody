@@ -81,6 +81,7 @@ export type SessionAutoDeliveryStallReason =
   | 'pr_draft'
   | 'pr_not_created'
   | 'multiple_prs'
+  | 'workspace_unpushed'
   | 'stopped'
   | 'request_failed';
 

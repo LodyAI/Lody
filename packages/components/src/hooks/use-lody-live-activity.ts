@@ -31,6 +31,7 @@ export type LodyLiveActivitySyncPayload = {
   activityId: string;
   workspaceId: string;
   workspaceName: string;
+  contentMode?: 'plaintext' | 'e2ee';
   totalCount: number;
   statusCounts: LiveActivityStatusCounts;
   items: LiveActivityConversationItem[];
@@ -45,6 +46,7 @@ export type LodyLiveActivitySyncResult = {
 
 export type LodyLiveActivityPermissionActionsConfig = {
   authToken?: string;
+  permissionActionsEnabled?: boolean;
   convexSiteUrl: string;
 };
 
@@ -214,7 +216,8 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
     liveActivitiesEnabled &&
     runtime !== null &&
     runtime.workspaceId === activityTarget.workspaceId &&
-    runtime.contentMode === 'plaintext';
+    runtime.accountId === userId &&
+    (runtime.contentMode === 'plaintext' || runtime.contentMode === 'e2ee');
 
   /**
    * One pass over the presence snapshot instead of one `findFreshSessionPresenceState`
@@ -315,11 +318,25 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
       activityId,
       workspaceId,
       workspaceName,
+      contentMode: runtime?.contentMode,
       totalCount,
       statusCounts,
-      items,
+      items:
+        runtime?.contentMode === 'e2ee'
+          ? items.map(({ permissionRequestId: _requestId, ...item }) => item)
+          : items,
     };
-  }, [activityTarget, defaultTitle, enabled, i18n.language, now, t, throttledInput, workspaceName]);
+  }, [
+    activityTarget,
+    defaultTitle,
+    enabled,
+    i18n.language,
+    now,
+    t,
+    throttledInput,
+    workspaceName,
+    runtime?.contentMode,
+  ]);
 
   useEffect(() => {
     if (!payload) return undefined;

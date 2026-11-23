@@ -289,7 +289,10 @@ describe('harness models page', () => {
 
     for (const machineId of ['machine-a', 'machine-b']) {
       expect(defaultsOn(machineId)).toEqual({
-        configOptionValues: { model: 'gateway/meridian-2', thought_level: 'high' },
+        configOptionValues: { model: 'gateway/meridian-2' },
+        modelConfigOptionValues: {
+          'gateway/meridian-2': { thought_level: 'high' },
+        },
       });
     }
     expect(new Set(reprobed)).toEqual(new Set(['machine-a', 'machine-b']));

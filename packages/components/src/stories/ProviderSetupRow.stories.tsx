@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import {
   getServerNow,
@@ -8,6 +9,12 @@ import {
 } from '@lody/shared';
 
 import { ProviderSetupRow } from '@/components/settings/provider-setup-row';
+const storyLayout = stylex.create({
+  frame: {
+    width: '560px',
+    'max-width': 'calc(100vw - 2rem)',
+  },
+});
 
 const machineId = 'machine-provider-setup' as MachineId;
 const now = getServerNow();
@@ -45,7 +52,7 @@ const meta = {
   component: ProviderSetupRow,
   decorators: [
     (Story) => (
-      <div className="w-[560px] max-w-[calc(100vw-2rem)]">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

@@ -1,9 +1,10 @@
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useGithubWorkspaceQuery } from '@/hooks/use-github-workspace';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { dialog as dialogTokens } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
 import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
@@ -48,7 +49,7 @@ import {
 } from './prompt-shortcut-form';
 import { ScopePills } from './prompt-shortcut-scope';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
@@ -120,6 +121,12 @@ const styles = stylex.create({
    * The prompt field is the composer's mention textarea, so it is given the
    * well by hand: the recess, and the ring on `:focus-within` because the
    * element that takes focus is the textarea inside it.
+   *
+   * A mention chip covers the textarea's glyphs with `--mention-chip-surface`,
+   * which has to be opaque and equal to what shows through the well. The well is
+   * translucent ink over the dialog. Two native background layers paint that
+   * same composition over an opaque dialog backdrop, independent of the
+   * well's alpha and the active palette.
    */
   promptWell: {
     boxSizing: 'border-box',
@@ -133,8 +140,11 @@ const styles = stylex.create({
     },
     borderRadius: radius.medium,
     cornerShape: corner.round,
+    '--mention-chip-surface': dialogTokens.background,
+    '--mention-chip-overlay': `linear-gradient(${colors.wellBackground},${colors.wellBackground})`,
   },
   promptInput: {
+    boxShadow: { default: null, ':focus-visible': 'none' },
     minHeight: '112px',
     width: '100%',
     padding: 0,
@@ -174,7 +184,7 @@ function PromptShortcutsSettingContent({
 }) {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const { runtime, entries, loading } = state;
+  const { runtime, entries, loading, canWrite } = state;
   const scope = useShortcutScopeOptions(runtime?.workspaceId);
   const [editor, setEditor] = useState<{
     value: PromptShortcut;
@@ -196,7 +206,7 @@ function PromptShortcutsSettingContent({
     }
   };
   const create = () => {
-    if (!runtime) return;
+    if (!runtime || !canWrite) return;
     const now = getServerNow();
     setEditor({
       base: null,
@@ -216,7 +226,7 @@ function PromptShortcutsSettingContent({
       },
     });
   };
-  const owned = shownEditor ? shownEditor.value.ownerUserId === runtime?.userId : false;
+  const owned = canWrite && shownEditor ? shownEditor.value.ownerUserId === runtime?.userId : false;
   return (
     <div {...stylex.props(surface.container)}>
       <SettingsPageLead>
@@ -229,7 +239,7 @@ function PromptShortcutsSettingContent({
         currentUserId={runtime?.userId ?? null}
         loading={loading}
         busy={busy}
-        canCreate={!!runtime}
+        canCreate={!!runtime && canWrite}
         onCreate={create}
         onOpen={(entry) => void edit(entry)}
         onDelete={setRemoval}
@@ -245,7 +255,7 @@ function PromptShortcutsSettingContent({
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
           centerOn={settingsPane}
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          xstyle={settingsEditorDialogStyles.panel}
         >
           <Dialog.Header>
             <Dialog.Title>
@@ -261,10 +271,12 @@ function PromptShortcutsSettingContent({
                     'settings.promptShortcuts.editorHelp',
                     'Saved to this workspace and sent as one message.'
                   )
-                : t(
-                    'settings.promptShortcuts.readOnlyHelp',
-                    'Shared by another member. Only its author can change it.'
-                  )}
+                : !canWrite
+                  ? t('settings.promptShortcuts.readOnly', 'Read-only')
+                  : t(
+                      'settings.promptShortcuts.readOnlyHelp',
+                      'Shared by another member. Only its author can change it.'
+                    )}
             </Dialog.Description>
           </Dialog.Header>
           {shownEditor && runtime ? (
@@ -277,6 +289,7 @@ function PromptShortcutsSettingContent({
                 scope={scope}
                 onCancel={() => setEditor(null)}
                 onSave={async (value) => {
+                  if (!canWrite) return;
                   setBusy(true);
                   try {
                     await runtime.save({
@@ -328,10 +341,10 @@ function PromptShortcutsSettingContent({
           <AlertDialog.Footer>
             <AlertDialog.Cancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
             <Button
-              disabled={busy}
+              disabled={busy || !canWrite}
               variant="destructive"
               onClick={() => {
-                if (!runtime || !removal) return;
+                if (!runtime || !removal || !canWrite) return;
                 setBusy(true);
                 const deleted = removal;
                 void runtime
@@ -425,7 +438,7 @@ export function PromptShortcutsList({
               <PromptShortcutRow
                 entry={entry}
                 options={options}
-                canManage={entry.ownerUserId === currentUserId}
+                canManage={canCreate && entry.ownerUserId === currentUserId}
                 busy={busy}
                 onOpen={() => onOpen(entry)}
                 onDelete={() => onDelete(entry)}
@@ -598,7 +611,7 @@ function useShortcutScopeOptions(workspaceIdInput?: string) {
     workspaceId ? { workspaceId } : undefined
   );
   const configs = useAtomValue(getAllAgentConfigAtom);
-  const repositories = useLegacyWorkspaceQuery(
+  const repositories = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   );
@@ -741,13 +754,12 @@ export function ShortcutPromptField({
       disabled={disabled}
       rows={4}
       // A value holder, so the well every other field in the form is.
-      containerClassName={stylex.props(styles.promptWell).className}
+      appearance="bare"
+      containerXstyle={styles.promptWell}
       // The wrapper owns this field's focus ring; suppress the shell's global
       // inset focus shadow on the textarea inside it.
-      className={
-        withClassName(stylex.props(styles.promptInput), 'input-scrollbar focus-visible:shadow-none')
-          .className
-      }
+      className="input-scrollbar"
+      xstyle={styles.promptInput}
       skillAgent={skillAgent}
       onMentionRangesChange={(ranges) => editor.onRangesChange(toPersistedMentionRanges(ranges))}
     />

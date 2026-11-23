@@ -792,4 +792,254 @@ describe('startup network behavior', () => {
 
     await runtime.dispose();
   });
+
+  it('resyncs via resyncMachineFlockRows when no active joined live room exists and keeps fresher capability across later family mounts', async () => {
+    const workspaceId = 'ws-startup-fallback-cap' as WorkspaceId;
+    const machineId = 'machine-fallback-cap-1' as MachineId;
+    const configId = 'cfg-fallback-cap-1' as AgentConfigId;
+    const staleCap = {
+      cliType: 'builtin' as const,
+      agentType: 'claude',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime' as const,
+      sourceVersion: 'builtin:claude:0.9',
+      modes: [{ id: 'stale', name: 'Stale' }],
+      models: [{ modelId: 'claude-stale', name: 'Stale' }],
+      configOptions: [],
+      fetchedAt: 5,
+    };
+    const refreshedCap = {
+      cliType: 'builtin' as const,
+      agentType: 'claude',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime' as const,
+      sourceVersion: 'builtin:claude:1.0',
+      modes: [{ id: 'code', name: 'Code' }],
+      models: [{ modelId: 'claude-sonnet', name: 'Claude Sonnet' }],
+      configOptions: [],
+      fetchedAt: 500,
+    };
+    const agentConfig: AgentConfigMeta = {
+      id: configId,
+      machineId,
+      name: 'Claude',
+      cliType: 'builtin',
+      agentType: 'claude',
+      env: {},
+      prompt: '',
+    };
+
+    const syncOnce = vi.fn(async () => ({
+      ok: true,
+      transports: [],
+    }));
+    const openFlockDoc = vi.fn(async () => ({
+      flock: {
+        scan: vi.fn(() => [
+          { key: machineFlockKeys.agentConfig(configId), value: agentConfig },
+          { key: machineFlockKeys.acpCapability(configId), value: staleCap },
+        ]),
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      syncOnce,
+      joinRoom: vi.fn(),
+    }));
+    mocks.setOpenFlockDocImpl(openFlockDoc);
+    mocks.setListDocImpl(async () => [
+      { docId: `machine-${machineId}`, meta: { id: machineId }, exists: true },
+    ]);
+    mocks.setRpcRefreshImpl(async (options) => ({
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId,
+      configId: options.configId,
+      cliType: 'builtin',
+      agentType: 'claude',
+      success: true,
+      capability: refreshedCap,
+    }));
+
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+      getAuthorizedMachineIds: () => new Set([machineId]),
+    });
+
+    mocks.emitPresenceSnapshot({
+      [`machine:${machineId}`]: {
+        kind: 'machine',
+        machineId,
+        updatedAt: Date.now() + 60_000,
+      },
+    });
+    publishPresenceState('synced');
+    mocks.runCooldown();
+    await flushPromises();
+    await vi.waitFor(() => expect(syncOnce).toHaveBeenCalledTimes(2));
+    await flushPromises();
+    await flushPromises();
+
+    const store = createStore();
+    store.set(runtimeAtom, runtime as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, 'workspace');
+    let observedRows: Record<string, { value: unknown }> = {};
+    function FamilyReader() {
+      observedRows = useMachineFlockRows(machineId, {
+        families: ['agentConfig', 'acpCapability'],
+        syncRemote: false,
+      });
+      return null;
+    }
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(createElement(Provider, { store }, createElement(FamilyReader)));
+      await flushPromises();
+    });
+
+    const capRowKey = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
+    await vi.waitFor(() => expect(observedRows[capRowKey]?.value).toEqual(refreshedCap));
+
+    await runtime.dispose();
+  });
+
+  it('releases Electron Web Lock once startup pass completes and retries in a second window when an earlier pass fails', async () => {
+    const workspaceId = 'ws-lock-lifecycle' as WorkspaceId;
+    const machineId = 'machine-lock-lifecycle' as MachineId;
+    const configId = 'cfg-lock-lifecycle' as AgentConfigId;
+    const agentConfig: AgentConfigMeta = {
+      id: configId,
+      machineId,
+      name: 'Claude',
+      cliType: 'builtin',
+      agentType: 'claude',
+      env: {},
+      prompt: '',
+    };
+
+    window.__LODY_ELECTRON__ = true;
+    let lockHeld = false;
+    vi.stubGlobal('navigator', {
+      onLine: true,
+      locks: {
+        request: vi.fn(
+          async (
+            _name: string,
+            _opts: unknown,
+            callback: (lock: object | null) => Promise<void>
+          ) => {
+            if (lockHeld) {
+              await callback(null);
+              return;
+            }
+            lockHeld = true;
+            try {
+              await callback({ name: _name });
+            } finally {
+              lockHeld = false;
+            }
+          }
+        ),
+      },
+    });
+
+    mocks.setListDocImpl(async () => [
+      { docId: `machine-${machineId}`, meta: { id: machineId }, exists: true },
+    ]);
+    mocks.setOpenFlockDocImpl(async () => ({
+      flock: {
+        scan: vi.fn(() => [{ key: machineFlockKeys.agentConfig(configId), value: agentConfig }]),
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      syncOnce: vi.fn(async () => ({
+        ok: true,
+        transports: [{ transportId: 'cloud', ok: true, failures: [] }],
+      })),
+      joinRoom: vi.fn(),
+    }));
+    let attempt = 0;
+    mocks.setRpcRefreshImpl(async (options) => {
+      attempt += 1;
+      if (attempt === 1) {
+        return {
+          type: 'machine/acp-capabilities-refresh_response',
+          machineId,
+          configId: options.configId,
+          cliType: 'builtin',
+          agentType: 'claude',
+          success: false,
+          error: 'transient error',
+        };
+      }
+      return {
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId,
+        configId: options.configId,
+        cliType: 'builtin',
+        agentType: 'claude',
+        success: true,
+      };
+    });
+
+    const runtime1 = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+      getAuthorizedMachineIds: () => new Set([machineId]),
+    });
+
+    mocks.emitPresenceSnapshot({
+      [`machine:${machineId}`]: {
+        kind: 'machine',
+        machineId,
+        updatedAt: Date.now() + 60_000,
+      },
+    });
+    publishPresenceState('synced');
+    mocks.runCooldown();
+    await flushPromises();
+    await vi.waitFor(() => expect(attempt).toBe(1));
+    await vi.waitFor(() => expect(lockHeld).toBe(false));
+
+    const runtime2 = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+      getAuthorizedMachineIds: () => new Set([machineId]),
+    });
+
+    mocks.emitPresenceSnapshot({
+      [`machine:${machineId}`]: {
+        kind: 'machine',
+        machineId,
+        updatedAt: Date.now() + 60_000,
+      },
+    });
+    publishPresenceState('synced');
+    mocks.runCooldown();
+    await flushPromises();
+    await vi.waitFor(() => expect(attempt).toBe(2));
+    await vi.waitFor(() => expect(lockHeld).toBe(false));
+
+    let thirdAcquired = false;
+    await navigator.locks.request(
+      `lody:workspace-startup-acp:${workspaceId}`,
+      { ifAvailable: true },
+      async (lock) => {
+        thirdAcquired = Boolean(lock);
+      }
+    );
+    expect(thirdAcquired).toBe(true);
+
+    await runtime1.dispose();
+    await runtime2.dispose();
+  });
 });

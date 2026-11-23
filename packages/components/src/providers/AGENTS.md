@@ -28,9 +28,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Workspace switching
 
-- Prompt Shortcut instances retire on effect cleanup and never cross platform, capability,
-  retry generation, account/session or workspace boundaries. Legacy admission gates cloud
-  work: unknown waits, encrypted disables; preserve local stores. V2 token owners retain
+- Prompt Shortcuts retire on cleanup and never cross platform, capability,
+  retry generation, account/session or workspace boundaries. Plaintext requires legacy admission; encrypted shortcuts require verified admission,
+  protection, ledger roles and identity-scoped storage. V2 owners retain
   local retry counts and one diagnostic per fault until success, notify auth recovery,
   and never cache authorization; see [retry reporting](../../../../.agents/notes/implemented/bug-fix/2026-11-17-shortcut-token-retry-diagnostics.md).
 - The `$workspaceName` route owns the render-time target slug. Workspace-scoped UI must
@@ -88,7 +88,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Unknown workspace mode permits local Repo access, never ordinary body egress.
   Preserve drafts until authenticated classification; retire and cancel provisional
   transports before recording an encrypted or contradictory verdict.
-- Open E2EE locally; keep host keys, a dedicated bucket, Loro history and waiting-key
+- Open E2EE locally; keep host keys, a dedicated bucket and waiting-key
   leases. No plaintext bypass. Keep already sealed old-epoch sends and historical reads;
   hosts prefer installed current keys; genuine absence permits retained published keys within
   the durable fifteen-minute grace, then fails for retry. Cached hints never select write keys. Never persist content tokens; forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.
@@ -108,10 +108,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Cloud Electron dual runtimes await the first **Run local agent** snapshot; encrypted
   runtimes always sync through cloud and ignore the setting. Enabled uses dual sync;
   disabled uses cloud-only sync without the local data plane or reconnect state.
-- Meta attachment is single-flight; retries use `recovery`. External wakes preserve
-  outage history; sustained health resets loop backoff. Periodic cloud repair honors per-`kind:id`
-  error backoff (30s–5min), clears it on leaving error, and charges only attempted rooms.
-  Waiting rooms cannot delay new failures or be revived by periodic global reconnect.
+- Meta-room attachment is single-flight per runtime. Token/network/visibility retries preserve
+  outage history; sustained health alone resets backoff. Attempts after first use `recovery`,
+  including token rotation. Periodic repair honors per-`kind:id` error backoff (30s–5min), clears
+  it on leaving error, charges attempted rooms only, and cannot revive waiting rooms or delay failures.
   [Recovery](../../../../.agents/docs/components-package.md#cloud-room-recovery).
 - Workspace-level rooms without a machine owner use the platform fallback.
   Returning no transport silently disables synchronization for those rooms.
@@ -126,7 +126,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Attachment transfer ownership
 
-The Loro pending queue admits new protected images/files and validates their manifests before writing history. Queue records remain bound to their originating workspace; Roost remains unavailable in protected mode.
+Validate protected attachment manifests before writing history. Queue records bind their workspace. Encrypted Roost requires the owner’s advertised capability and persists the signed input before delivery.
 
 `sendResources` owns preparation/I/O/borrows; cancel/join before transports/caches
 close. Only caches dispose stores. Loro commits locally, then dispatches best-effort.

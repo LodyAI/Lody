@@ -1,9 +1,15 @@
 import { HANDLED_SHORTCUT_TOKEN_ERROR, isConvexUnauthenticatedError } from '../auth';
+import type { WorkspaceStreamsContent } from '../workspace-streams-content';
 import {
-  requirePlaintextWorkspaceStreamsContent,
-  type WorkspaceStreamsMode,
-} from '../workspace-streams-content';
-import type { CrdtAdapter, JsonObject, TransportSubscription } from '@loro-dev/streams-crdt';
+  encodeStreamsRoomAdditionalData,
+  type StreamsRoomIdentity,
+} from 'loro-repo/transport/streams';
+import {
+  type CrdtAdapter,
+  type JsonObject,
+  type PayloadProtectionProvider,
+  type TransportSubscription,
+} from '@loro-dev/streams-crdt';
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import { createFlockAdapter } from '@loro-dev/streams-crdt/flock';
 import type { LoroRepo } from 'loro-repo';
@@ -12,7 +18,10 @@ import {
   getLoroStreamsShardUrls,
   LORO_STREAMS_BUCKET_ID,
 } from '../loro-streams-routing';
-import { loroStreamsWebSocketOptions } from '../loro-streams-websocket';
+import {
+  loroStreamsWebSocketOptions,
+  type LoroStreamsWebSocketOptions,
+} from '../loro-streams-websocket';
 import { createStreamsCrdt } from '../streams-crdt-factory';
 import { getShortcutResourceStreamId, type ShortcutResource } from './access';
 import { PromptShortcutError } from './model';
@@ -23,6 +32,7 @@ export type ShortcutStreamGrant = {
   expiresIn: number;
   gatewayBaseUrl: string;
   streamId: string;
+  bucketId?: string;
   shardHostSuffix?: string;
 };
 
@@ -64,11 +74,14 @@ export class ShortcutSyncTransportError extends Error {
   }
 }
 
+let nextInstancePoolId = 0;
+
 /**
  * Each live room has one CRDT/transport/lease per access mode, independent of React consumers.
  */
 export class PromptShortcutSync {
   private readonly lifetime = new ShortcutLifetime();
+  private readonly instancePoolId = ++nextInstancePoolId;
   private rooms = new Map<
     string,
     { refs: number; write: boolean; opening: Promise<ShortcutSyncRoom> }
@@ -77,7 +90,8 @@ export class PromptShortcutSync {
 
   constructor(
     private readonly options: {
-      content: WorkspaceStreamsMode;
+      content: WorkspaceStreamsContent;
+      canWrite?: () => boolean;
       repo: LoroRepo;
       grant: (
         resource: ShortcutResource,
@@ -87,12 +101,21 @@ export class PromptShortcutSync {
       now: () => number;
       workspaceId?: string;
       webSocketEnabled?: boolean;
+      webSocketAuth?: LoroStreamsWebSocketOptions['auth'];
       shardHostSuffix?: string;
     }
   ) {}
 
   async acquire(resource: ShortcutResource, write: boolean): Promise<ShortcutSyncLease> {
-    requirePlaintextWorkspaceStreamsContent(this.options.content);
+    if (this.options.content.mode === 'protected') {
+      if (resource.kind === 'index' || resource.kind === 'body')
+        throw new PromptShortcutError(
+          'forbidden',
+          'Encrypted shortcuts require workspace resources'
+        );
+      if (write && this.options.canWrite?.() !== true)
+        throw new PromptShortcutError('forbidden', 'Workspace prompts are read-only');
+    }
     if (this.disposed) throw new Error('Shortcut sync is disposed');
     const streamId = getShortcutResourceStreamId(resource);
     const key = `${write ? 'w' : 'r'}:${streamId}`;
@@ -143,13 +166,58 @@ export class PromptShortcutSync {
     let grant = await this.lifetime.wait(this.options.grant(resource, write, false));
     if (grant.streamId !== streamId)
       throw new PromptShortcutError('forbidden', 'Grant does not match the requested stream');
+    const content = this.options.content;
+    const bucketId = content.mode === 'protected' ? grant.bucketId : LORO_STREAMS_BUCKET_ID;
+    if (!bucketId || (content.mode === 'protected' && bucketId === LORO_STREAMS_BUCKET_ID))
+      throw new PromptShortcutError('forbidden', 'Encrypted shortcut bucket unavailable');
     const gatewayBaseUrl = grant.gatewayBaseUrl;
     const shardHostSuffix = grant.shardHostSuffix ?? this.options.shardHostSuffix;
+    let provider: PayloadProtectionProvider | undefined;
+    if (content.mode === 'protected') {
+      const room: StreamsRoomIdentity =
+        resource.kind === 'workspace-index'
+          ? { kind: 'flock', flockDocId: streamId }
+          : { kind: 'doc', docId: streamId };
+      const protection = content.resolve(room);
+      if (protection.mode !== 'protected')
+        throw new PromptShortcutError('forbidden', 'Shortcut room protection unavailable');
+      const selected = protection.config.provider;
+      provider = {
+        maxSealOverheadBytes: selected.maxSealOverheadBytes,
+        seal: (request) =>
+          selected.seal({
+            ...request,
+            additionalData: (header) =>
+              encodeStreamsRoomAdditionalData(
+                content.namespace,
+                room,
+                request.additionalData(header)
+              ),
+          }),
+        open: (request) =>
+          selected.open({
+            ...request,
+            additionalData: encodeStreamsRoomAdditionalData(
+              content.namespace,
+              room,
+              request.additionalData
+            ),
+          }),
+      };
+    }
     let expiresAt = this.options.now() + grant.expiresIn * 1000;
     const auth = async (force: boolean) => {
+      if (content.mode === 'protected' && write && this.options.canWrite?.() !== true)
+        throw new PromptShortcutError('forbidden', 'Workspace prompts are read-only');
       if (force || this.options.now() >= expiresAt - 5000) {
         grant = await this.lifetime.wait(this.options.grant(resource, write, force));
-        if (grant.streamId !== streamId || grant.gatewayBaseUrl !== gatewayBaseUrl) {
+        if (
+          grant.streamId !== streamId ||
+          grant.gatewayBaseUrl !== gatewayBaseUrl ||
+          (content.mode === 'protected' &&
+            (grant.bucketId !== bucketId ||
+              (grant.shardHostSuffix ?? this.options.shardHostSuffix) !== shardHostSuffix))
+        ) {
           throw new PromptShortcutError('forbidden', 'Stream grant changed its resource');
         }
         expiresAt = this.options.now() + grant.expiresIn * 1000;
@@ -169,12 +237,19 @@ export class PromptShortcutSync {
           : this.options.repo.persistFlockDocNow(streamId, lease.flock);
       const isWorkspaceRoom =
         resource.kind === 'workspace-index' || resource.kind === 'workspace-body';
+      const authPoolBase =
+        this.options.workspaceId ??
+        (resource.kind === 'workspace-index' ? resource.workspaceId : '');
+      const authPoolKey = this.options.webSocketAuth
+        ? authPoolBase
+        : authPoolBase
+          ? `${authPoolBase}:shortcut:${this.instancePoolId}`
+          : `shortcut:${this.instancePoolId}`;
       const { webSocket } = loroStreamsWebSocketOptions(
         this.options.webSocketEnabled === true && resource.kind === 'workspace-index',
         gatewayBaseUrl,
-        resource.kind === 'workspace-index'
-          ? (this.options.workspaceId ?? resource.workspaceId)
-          : ''
+        authPoolKey,
+        this.options.webSocketAuth
       );
       const shardUrls = isWorkspaceRoom
         ? (getLoroStreamsShardUrls(gatewayBaseUrl, shardHostSuffix) ?? 'disabled')
@@ -182,11 +257,23 @@ export class PromptShortcutSync {
       const transport = createStreamsCrdt({
         streamUrl: createLoroStreamUrl({
           baseUrl: gatewayBaseUrl,
-          bucketId: LORO_STREAMS_BUCKET_ID,
+          bucketId,
           streamId,
         }),
         webSocket: webSocket ?? 'disabled',
         shardUrls,
+        ...(content.mode === 'protected'
+          ? {
+              e2ee: {
+                readPolicy: 'encrypted-only' as const,
+                writePolicy: 'encrypt' as const,
+                provider: provider!,
+              },
+              payloadProtectionRequired: true,
+              snapshotCodec: content.snapshotCodec,
+              snapshotUpload: write ? content.snapshotUpload : { canUpload: async () => false },
+            }
+          : {}),
         adapter: write ? adapter : readonlyShortcutAdapter(adapter),
         auth: (context) => auth(context?.reason === 'unauthorized'),
         createStreamIfMissing: write,

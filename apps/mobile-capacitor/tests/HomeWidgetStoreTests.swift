@@ -10,6 +10,23 @@ enum HomeWidgetStoreTests {
         }
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
+        precondition(LodyLiveActivityPermissionActionStore.permissionActionConfiguration(from: defaults) == nil)
+        LodyLiveActivityPermissionActionStore.save(
+            authToken: "synthetic-session", convexSiteUrl: "https://example.invalid",
+            permissionActionsEnabled: false, to: defaults
+        )
+        precondition(LodyLiveActivityPermissionActionStore.configuration(from: reader)?.authToken == "synthetic-session")
+        precondition(LodyLiveActivityPermissionActionStore.permissionActionConfiguration(from: reader) == nil)
+        LodyLiveActivityPermissionActionStore.save(
+            authToken: "synthetic-session", convexSiteUrl: "https://example.invalid",
+            permissionActionsEnabled: true, to: defaults
+        )
+        precondition(LodyLiveActivityPermissionActionStore.permissionActionConfiguration(from: reader)?.authToken == "synthetic-session")
+        LodyLiveActivityPermissionActionStore.save(
+            authToken: nil, convexSiteUrl: "https://example.invalid", to: defaults
+        )
+        precondition(LodyLiveActivityPermissionActionStore.configuration(from: reader) == nil)
+        precondition(LodyLiveActivityPermissionActionStore.permissionActionConfiguration(from: reader) == nil)
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         func item(
             _ id: String = "synthetic-session", title: String = "Fix session sync",

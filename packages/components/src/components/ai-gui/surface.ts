@@ -3,6 +3,24 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { conversation } from './conversation.tokens.stylex';
 
+/**
+ * The visually-hidden block: present to a screen reader, absent from the page.
+ * Tailwind's `sr-only`, in StyleX.
+ */
+export const visuallyHidden = stylex.create({
+  hidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+});
+
 export const conversationSurface = stylex.create({
   message: { paddingBlock: conversation.messagePadding },
   userMessage: { paddingTop: 0, paddingBottom: conversation.responseGap },

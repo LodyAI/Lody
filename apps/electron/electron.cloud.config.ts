@@ -10,9 +10,8 @@ import type { UserConfig } from 'electron-vite'
 import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
 import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
-import tailwindcss from '@tailwindcss/vite'
 import stylex from '@stylexjs/unplugin'
-import { stylexOptions } from '../../packages/ui/stylex-options'
+import { componentsStylexOptions } from '../../packages/components/stylex-options'
 import {
   loroCrdtBundlerAlias,
   loroCrdtWasmUrlWorkaround
@@ -302,8 +301,7 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
         cloudRendererCspHtmlPlugin({
           env: runtimeEnv
         }),
-        tailwindcss(),
-        stylex.vite(stylexOptions),
+        stylex.vite(componentsStylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),

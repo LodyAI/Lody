@@ -144,3 +144,64 @@ await test('missing OS token has a bounded timeout and does not enable ActivityK
   assert.match((await result).message, /timed out/);
   assert.equal(t.timers.size, 0);
 });
+
+await test('encrypted Live Activity keeps session navigation while removing HTTP permission actions', async () => {
+  const payloads = [];
+  const configurations = [];
+  const context = vm.createContext({ window: {} });
+  const bridgeSource = ts.transpileModule(
+    readFileSync(new URL('./live-activity.ts', import.meta.url), 'utf8'),
+    {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+    }
+  ).outputText;
+  const entry = new vm.SourceTextModule(bridgeSource, { context });
+  await entry.link(
+    () =>
+      new vm.SyntheticModule(
+        ['registerPlugin'],
+        function () {
+          this.setExport('registerPlugin', () => ({
+            syncConversationSummary: async (payload) => {
+              payloads.push(payload);
+              return { activityId: payload.activityId };
+            },
+            configurePermissionActions: async (config) => {
+              configurations.push(config);
+            },
+          }));
+        },
+        { context }
+      )
+  );
+  await entry.evaluate();
+  entry.namespace.initLiveActivityBridge();
+  const bridge = context.window.__LODY_LIVE_ACTIVITY__;
+  const item = {
+    id: 'session',
+    title: 'Task',
+    status: 'permission',
+    permissionRequestId: 'request',
+  };
+  const input = {
+    activityId: 'activity',
+    workspaceId: 'workspace',
+    contentMode: 'e2ee',
+    items: [item],
+    permissionAlert: { key: 'request' },
+  };
+  await bridge.configurePermissionActions({
+    authToken: 'synthetic',
+    convexSiteUrl: 'https://example.invalid',
+    permissionActionsEnabled: false,
+  });
+  await bridge.syncConversationSummary(input);
+  assert.equal(payloads[0].items[0].id, 'session');
+  assert.equal(payloads[0].items[0].permissionRequestId, undefined);
+  assert.equal(payloads[0].permissionAlert, undefined);
+  assert.equal(item.permissionRequestId, 'request');
+  assert.equal(configurations[0].permissionActionsEnabled, false);
+  assert.equal(configurations[0].authToken, 'synthetic');
+  await bridge.syncConversationSummary({ ...input, contentMode: 'plaintext' });
+  assert.equal(payloads[1].items[0].permissionRequestId, 'request');
+});

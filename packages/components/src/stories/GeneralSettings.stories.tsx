@@ -9,6 +9,63 @@ import { Provider, createStore } from 'jotai';
 import { useState } from 'react';
 import { userAtom } from '@/atoms';
 import { RoutedStory, SettingsStoryProviders } from './settings-story-shell';
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'hsl(var(--secondary) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--secondary-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  navigation: {
+    display: { default: 'none', '@media (min-width: 48rem)': 'block' },
+    width: 'calc(var(--spacing) * 64)',
+    borderRightWidth: '1px',
+    borderRightStyle: 'solid',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  navigationList: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 1)',
+    },
+  },
+  navigationItem: {
+    borderRadius: 'var(--radius-lg)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': {
+        ':hover': 'color-mix(in oklab, hsl(var(--secondary) / 1) 50%, transparent)',
+      },
+    },
+  },
+  autoLaunch: {
+    width: '640px',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  row: {
+    display: 'flex',
+    height: '100vh',
+  },
+  section: {
+    flex: '1',
+    overflow: 'auto',
+  },
+});
 
 /**
  * GeneralSettings 组件的 Storybook 故事
@@ -162,27 +219,19 @@ export const DarkModeMobile: Story = {
  */
 export const InSettingsLayout: Story = {
   render: () => (
-    <div className="h-screen flex">
+    <div {...stylex.props(storyLayout.row)}>
       {/* 模拟左侧导航栏 */}
-      <div className="w-64 border-r bg-background p-4 hidden md:block">
-        <div className="space-y-1">
-          <div className="rounded-lg px-3 py-2 bg-secondary text-secondary-foreground text-sm font-medium">
-            General
-          </div>
-          <div className="rounded-lg px-3 py-2 text-muted-foreground hover:bg-secondary/50 text-sm font-medium">
-            Workspace
-          </div>
-          <div className="rounded-lg px-3 py-2 text-muted-foreground hover:bg-secondary/50 text-sm font-medium">
-            Agent Configurations
-          </div>
-          <div className="rounded-lg px-3 py-2 text-muted-foreground hover:bg-secondary/50 text-sm font-medium">
-            Integrations
-          </div>
+      <div {...stylex.props(storyLayout.navigation)}>
+        <div {...stylex.props(storyLayout.navigationList)}>
+          <div {...stylex.props(storyLayoutStyles.canvas)}>General</div>
+          <div {...stylex.props(storyLayout.navigationItem)}>Workspace</div>
+          <div {...stylex.props(storyLayout.navigationItem)}>Agent Configurations</div>
+          <div {...stylex.props(storyLayout.navigationItem)}>Integrations</div>
         </div>
       </div>
 
       {/* 主内容区域 */}
-      <div className="flex-1 overflow-auto">
+      <div {...stylex.props(storyLayout.section)}>
         <GeneralSettingsComponent />
       </div>
     </div>
@@ -207,10 +256,7 @@ const autoLaunchState = {
 function AutoLaunchStory({ state }: { state: Partial<typeof autoLaunchState> }) {
   const { t } = useTranslation();
   return (
-    <div
-      data-settings-surface=""
-      className={`${stylex.props(settingsFlat).className ?? ''} w-[640px] bg-background p-8`}
-    >
+    <div data-settings-surface="" {...stylex.props(settingsFlat, storyLayout.autoLaunch)}>
       <CompactSection title={t('settings.general.sections.thisComputer', 'This computer')}>
         <AutoLaunchSettingRows autoLaunch={{ ...autoLaunchState, ...state }} />
       </CompactSection>

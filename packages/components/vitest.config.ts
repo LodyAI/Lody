@@ -4,7 +4,7 @@ import stylex from '@stylexjs/unplugin';
 import { defineConfig } from 'vitest/config';
 import wasm from 'vite-plugin-wasm';
 import type { Plugin } from 'vite';
-import { stylexOptions } from '../ui/stylex-options';
+import { componentsStylexOptions as stylexOptions } from './stylex-options';
 import { loroCrdtWasmUrlWorkaround, VITEST_INLINE_WASM_DEPS } from './vite-wasm-workarounds';
 
 // Inline Vitest projects do not carry the root plugin named `vitest` in v3.
@@ -38,6 +38,7 @@ const isolatedFiles = new Set([
   'tests/session-side-panel-tab-bar.test.tsx',
   'tests/session-tab-bar.test.tsx',
   'tests/dropdown-menu.test.tsx',
+  'tests/prompt-shortcut-form.test.tsx',
 ]);
 const reusable = { node: [] as string[], jsdom: [] as string[] };
 for (const file of testFiles) {

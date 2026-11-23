@@ -38,7 +38,11 @@ import {
 } from '@/atoms/session-dispatch-delivery';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { isElectronRenderer } from '@/lib/electron';
-import { encryptedLocalNamespace, type E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
+import {
+  encryptedLocalInstance,
+  encryptedLocalNamespace,
+  type E2eeLocalDataIdentity,
+} from '../lib/e2ee-local-data';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import {
   getMachineRoomId,
@@ -207,12 +211,18 @@ import { createLocalLoroDataPlaneConnection } from './local-loro-data-plane-conn
 import { createWorkspaceMachineRpcFacade } from './workspace-machine-rpc-facade';
 import {
   applyRefreshedCapability,
+  hasActiveJoinedMachineFlockRoom,
   resyncMachineFlockRows,
   waitForActiveMachineFlockRoomSync,
 } from '@/hooks/use-machine-flock-rows';
 import { createCodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { getIpcServices, onIpcEvent, sendLocalSessionControl } from '@/lib/electron-ipc-client';
-import { createRoostSessionDataFactoryForMachine } from '@/lib/roost-session-bridge';
+import { requireEncryptedRoostOwner } from '../lib/encrypted-roost-history';
+import {
+  createRemoteRoostSessionDataFactory,
+  createRoostSessionDataFactoryForMachine,
+  type RemoteRoostSessionBridgeOptions,
+} from '@/lib/roost-session-bridge';
 
 declare global {
   interface Window {
@@ -268,6 +278,10 @@ export type WorkspaceE2eeTransport = {
   supportsRpc?: boolean;
   /** Verified ledger file role; absent means read-only. Never an authorization. */
   codeCollabRole?: ProtectedCodeCollabRole;
+  memberRole?: {
+    get(): 'owner' | 'admin' | 'member' | 'guest' | null;
+    subscribe(listener: () => void): () => void;
+  };
   attachmentToken?: () => Promise<string>;
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   createRpcTokenProvider(
@@ -614,9 +628,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return { promise, resolve, reject };
   };
 
-  // Use workspaceId for database names - ensures consistent data access even if slug changes.
-  // Open SQLite connection for metadata storage (flock-sqlite mode for better performance)
-  // Using OPFS (Origin Private File System) for persistent storage with custom database names
   // Routing is resolved lazily through the router (constructed right below);
   // until then the default all-transports route is fine because no transport
   // is registered yet.
@@ -757,7 +768,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let cloudAttachDroppedSuspectCheckpoint = false;
   const metaSyncState = (): RoomSyncState => metaTracker?.getSyncState() ?? 'idle';
 
-  // workspaceId is required and provided at initialization
   const workspaceId: WorkspaceId = deps.workspaceId;
 
   // Analytics is side-effect-only: never let a capture path throw into the
@@ -843,7 +853,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Grace period before disposing an idle session store (and leaving its room).
   // Long enough to survive session switching without reconnecting.
   const STORE_RELEASE_DELAY_MS = 600_000;
-  // Idle Today pages kept warm while scrolling the day stream.
   const TODAY_IDLE_PAGE_CAP = 12;
   // A Today page's failed registration or join backs off to 5 minutes: many open
   // pages retrying every 30s added up to real backend load.
@@ -861,7 +870,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Short grace period before leaving an inactive session room. This avoids
   // reconnect churn during quick tab switches while keeping SSE fan-out bounded.
   const SESSION_ROOM_SYNC_RELEASE_DELAY_MS = 2_000;
-  // Slow reconcile interval for the reconnect-loop backstop tick.
   const RECONNECT_BACKSTOP_INTERVAL_MS = 60_000;
   let disposePromise: Promise<void> | null = null;
   let disposeAttempt: Promise<void> | null = null;
@@ -1942,10 +1950,36 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const getWorkspaceStreamsGrant = async (options?: {
     forceRefresh?: boolean;
     signal?: AbortSignal;
-  }): Promise<{ token: string; gatewayBaseUrl: string; shardHostSuffix?: string }> => {
+    write?: boolean;
+  }): Promise<{
+    token: string;
+    gatewayBaseUrl: string;
+    bucketId?: string;
+    shardHostSuffix?: string;
+  }> => {
     await waitForContentAdmission(options?.signal);
     if (!cloudPlaneEnabled) {
       throw new Error('Streams access is disabled in local-only sync mode');
+    }
+    if (protectedContent) {
+      const bucketId = deps.e2ee?.bucketId();
+      if (!bucketId || bucketId === LORO_STREAMS_BUCKET_ID)
+        throw new Error('e2ee_content_bucket_unavailable');
+      if (options?.write && deps.e2ee?.codeCollabRole?.get() !== 'write')
+        throw new Error('e2ee_shortcuts_read_only');
+      const provider = ensureStreamsTokenProvider();
+      if (options?.forceRefresh) provider.invalidate('unauthorized');
+      const token = await provider.getToken(options?.signal);
+      if (disposePromise || provider !== streamsTokenProvider || deps.e2ee?.bucketId() !== bucketId)
+        throw new SupersededAttachError();
+      if (options?.write && deps.e2ee?.codeCollabRole?.get() !== 'write')
+        throw new Error('e2ee_shortcuts_read_only');
+      return {
+        token,
+        bucketId,
+        gatewayBaseUrl: getStreamsBaseUrlForProvider(provider),
+        shardHostSuffix: getStreamsShardHostSuffixForProvider(provider),
+      };
     }
     requirePlaintextWorkspaceStreamsContent(deps.content);
     if (electronLocalDataPlane) {
@@ -2235,8 +2269,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     ...(protectedRpcAvailable
       ? {
           requestEncryptedFeature: async (
-            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
-          ) => (await ensureEncryptedRpc()).requestFeature(request),
+            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+            options?: { requestId: string }
+          ) => (await ensureEncryptedRpc()).requestFeature(request, options),
         }
       : {}),
   });
@@ -3490,10 +3525,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const startupAcpCapabilitiesRefreshedConfigKeys = new Set<string>();
   let startupAcpCapabilitiesRefreshAbortController: AbortController | null = null;
   let cancelDelayedStartupAcpCapabilitiesRefresh: (() => void) | null = null;
-  let startupAcpWindowLockHeld = false;
   let startupAcpWindowLockPending = false;
-  let releaseStartupAcpWindowLock: (() => void) | null = null;
-  const startStartupAcpCapabilitiesRefresh = (): void => {
+  const executeStartupAcpCapabilitiesPass = async (): Promise<void> => {
     if (
       startupAcpCapabilitiesRefreshCompleted ||
       startupAcpCapabilitiesRefreshAbortController ||
@@ -3503,13 +3536,149 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     ) {
       return;
     }
+    const abortController = new AbortController();
+    startupAcpCapabilitiesRefreshAbortController = abortController;
+
+    try {
+      const result = await runStartupAcpCapabilitiesRefresh(
+        {
+          listMachineIds: async () => {
+            const authorizedMachineIds = deps.getAuthorizedMachineIds?.() ?? null;
+            if (!authorizedMachineIds) return [];
+            const { machines } = await readSessionAndMachineMetas(repo, deps.readDocMetaCache);
+            return Object.keys(machines)
+              .map((roomId) => roomId.slice(MACHINE_DOC_PREFIX.length).trim() as MachineId)
+              .filter((machineId) => machineId.length > 0 && authorizedMachineIds.has(machineId));
+          },
+          isMachineOnline: (machineId) =>
+            !abortController.signal.aborted &&
+            presenceTransport.getSyncState() === 'synced' &&
+            collectOnlineMachineIdsFromPresence(latestPresenceStates, getServerNow()).has(
+              machineId
+            ),
+          listAgentConfigs: async (machineId) => {
+            const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+            const liveSynced = await waitForActiveMachineFlockRoomSync(
+              { repo, workspaceId },
+              machineId,
+              {
+                timeoutMs: STARTUP_FLOCK_ROOM_SYNC_DEADLINE_MS,
+                signal: abortController.signal,
+              }
+            );
+            if (!liveSynced && !abortController.signal.aborted) {
+              recordStreamsHttpFallback('forced-sync');
+              await handle.syncOnce().catch((error: unknown) => {
+                console.warn(
+                  'createWorkspaceRuntime: startup ACP config sync failed; using local rows',
+                  {
+                    workspaceId,
+                    machineId,
+                    error,
+                  }
+                );
+              });
+            }
+            return Object.values(
+              getMachineFlockAgentConfigs(
+                readMachineFlockRowsFromFlock(handle.flock, { families: ['agentConfig'] })
+              )
+            );
+          },
+          refreshAgentConfig: async (machineId, config, signal = abortController.signal) => {
+            if (disposePromise || signal.aborted) {
+              return;
+            }
+            const response = await requestMachineAcpCapabilitiesRefresh(
+              {
+                type: 'machine/acp-capabilities-refresh',
+                machineId,
+                workspaceId,
+                configId: config.id,
+              },
+              { signal }
+            );
+            if (signal.aborted) return;
+            if (!response?.success) {
+              throw new Error(
+                response?.error ?? 'ACP capability refresh did not return a response'
+              );
+            }
+            if (signal.aborted) return;
+            if (
+              response.capability &&
+              hasActiveJoinedMachineFlockRoom({ repo, workspaceId }, machineId)
+            ) {
+              applyRefreshedCapability({ repo, workspaceId }, machineId, {
+                configId: response.configId,
+                value: response.capability,
+              });
+            } else {
+              await resyncMachineFlockRows(
+                { repo, workspaceId },
+                machineId,
+                response.capability
+                  ? {
+                      refreshedCapability: {
+                        configId: response.configId,
+                        value: response.capability,
+                      },
+                    }
+                  : undefined
+              );
+            }
+          },
+          onError: (error, context) => {
+            console.warn('createWorkspaceRuntime: startup ACP capability refresh failed', {
+              workspaceId,
+              ...context,
+              error,
+            });
+          },
+        },
+        {
+          refreshedConfigKeys: startupAcpCapabilitiesRefreshedConfigKeys,
+          machineConcurrency: ACP_CAPABILITIES_STARTUP_MACHINE_CONCURRENCY,
+          signal: abortController.signal,
+        }
+      );
+      if (!abortController.signal.aborted && !result.hasFailures) {
+        startupAcpCapabilitiesRefreshCompleted = true;
+      }
+    } catch (error: unknown) {
+      console.warn('createWorkspaceRuntime: startup ACP capability refresh aborted', {
+        workspaceId,
+        error,
+      });
+    } finally {
+      if (startupAcpCapabilitiesRefreshAbortController === abortController) {
+        startupAcpCapabilitiesRefreshAbortController = null;
+      }
+      if (
+        abortController.signal.aborted &&
+        !disposePromise &&
+        presenceTransport.getSyncState() === 'synced'
+      ) {
+        scheduleStartupAcpCapabilitiesRefresh();
+      }
+    }
+  };
+  const startStartupAcpCapabilitiesRefresh = (): void => {
     if (
-      !startupAcpWindowLockHeld &&
+      startupAcpCapabilitiesRefreshCompleted ||
+      startupAcpCapabilitiesRefreshAbortController ||
+      startupAcpWindowLockPending ||
+      disposePromise ||
+      !workspaceMetaFirstSynced ||
+      presenceTransport.getSyncState() !== 'synced'
+    ) {
+      return;
+    }
+    if (
       isElectronRenderer() &&
       typeof navigator !== 'undefined' &&
       typeof navigator.locks?.request === 'function'
     ) {
-      if (startupAcpWindowLockPending) return;
       startupAcpWindowLockPending = true;
       void navigator.locks
         .request(
@@ -3518,11 +3687,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           async (lock) => {
             startupAcpWindowLockPending = false;
             if (!lock || disposePromise) return;
-            startupAcpWindowLockHeld = true;
-            startStartupAcpCapabilitiesRefresh();
-            await new Promise<void>((resolve) => {
-              releaseStartupAcpWindowLock = resolve;
-            });
+            await executeStartupAcpCapabilitiesPass();
           }
         )
         .catch(() => {
@@ -3530,117 +3695,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         });
       return;
     }
-    const abortController = new AbortController();
-    startupAcpCapabilitiesRefreshAbortController = abortController;
-
-    void runStartupAcpCapabilitiesRefresh(
-      {
-        listMachineIds: async () => {
-          const authorizedMachineIds = deps.getAuthorizedMachineIds?.() ?? null;
-          if (!authorizedMachineIds) return [];
-          const { machines } = await readSessionAndMachineMetas(repo, deps.readDocMetaCache);
-          return Object.keys(machines)
-            .map((roomId) => roomId.slice(MACHINE_DOC_PREFIX.length).trim() as MachineId)
-            .filter((machineId) => machineId.length > 0 && authorizedMachineIds.has(machineId));
-        },
-        isMachineOnline: (machineId) =>
-          !abortController.signal.aborted &&
-          presenceTransport.getSyncState() === 'synced' &&
-          collectOnlineMachineIdsFromPresence(latestPresenceStates, getServerNow()).has(machineId),
-        listAgentConfigs: async (machineId) => {
-          const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
-          const liveSynced = await waitForActiveMachineFlockRoomSync(
-            { repo, workspaceId },
-            machineId,
-            {
-              timeoutMs: STARTUP_FLOCK_ROOM_SYNC_DEADLINE_MS,
-              signal: abortController.signal,
-            }
-          );
-          if (!liveSynced && !abortController.signal.aborted) {
-            recordStreamsHttpFallback('forced-sync');
-            await handle.syncOnce().catch((error: unknown) => {
-              console.warn(
-                'createWorkspaceRuntime: startup ACP config sync failed; using local rows',
-                {
-                  workspaceId,
-                  machineId,
-                  error,
-                }
-              );
-            });
-          }
-          return Object.values(
-            getMachineFlockAgentConfigs(
-              readMachineFlockRowsFromFlock(handle.flock, { families: ['agentConfig'] })
-            )
-          );
-        },
-        refreshAgentConfig: async (machineId, config, signal = abortController.signal) => {
-          if (disposePromise || signal.aborted) {
-            return;
-          }
-          const response = await requestMachineAcpCapabilitiesRefresh(
-            {
-              type: 'machine/acp-capabilities-refresh',
-              machineId,
-              workspaceId,
-              configId: config.id,
-            },
-            { signal }
-          );
-          if (signal.aborted) return;
-          if (!response?.success) {
-            throw new Error(response?.error ?? 'ACP capability refresh did not return a response');
-          }
-          if (signal.aborted) return;
-          if (response.capability) {
-            applyRefreshedCapability({ repo, workspaceId }, machineId, {
-              configId: response.configId,
-              value: response.capability,
-            });
-          }
-        },
-        onError: (error, context) => {
-          console.warn('createWorkspaceRuntime: startup ACP capability refresh failed', {
-            workspaceId,
-            ...context,
-            error,
-          });
-        },
-      },
-      {
-        refreshedConfigKeys: startupAcpCapabilitiesRefreshedConfigKeys,
-        machineConcurrency: ACP_CAPABILITIES_STARTUP_MACHINE_CONCURRENCY,
-        signal: abortController.signal,
-      }
-    )
-      .then(() => {
-        if (!abortController.signal.aborted) {
-          startupAcpCapabilitiesRefreshCompleted = true;
-        }
-      })
-      .catch((error: unknown) => {
-        if (!abortController.signal.aborted) {
-          startupAcpCapabilitiesRefreshCompleted = true;
-        }
-        console.warn('createWorkspaceRuntime: startup ACP capability refresh aborted', {
-          workspaceId,
-          error,
-        });
-      })
-      .finally(() => {
-        if (startupAcpCapabilitiesRefreshAbortController === abortController) {
-          startupAcpCapabilitiesRefreshAbortController = null;
-        }
-        if (
-          abortController.signal.aborted &&
-          !disposePromise &&
-          presenceTransport.getSyncState() === 'synced'
-        ) {
-          scheduleStartupAcpCapabilitiesRefresh();
-        }
-      });
+    void executeStartupAcpCapabilitiesPass();
   };
   const scheduleStartupAcpCapabilitiesRefresh = (): void => {
     if (
@@ -5261,7 +5316,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     const backendKind = resolveSessionHistoryBackendKind(sessionMeta);
-    let rendererSessionDataFactory = deps.createSessionData;
+    let rendererSessionDataFactory =
+      protectedContent && backendKind === 'roost' ? undefined : deps.createSessionData;
     let disposeReaderObservation = () => {};
     let conversation: ReturnType<typeof createConversationSession>;
     try {
@@ -5270,6 +5326,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         if (!machineId) {
           throw new Error(`Roost session ${sessionId} has no owning machine`);
         }
+        if (protectedContent)
+          requireEncryptedRoostOwner({
+            protocolCapabilities: await getMachineProtocolCapabilities(machineId),
+          });
         const machineRoomId = getMachineRoomId(machineId);
         let ownerMachineMeta: MachineMeta | undefined;
         const readerWakes = new Set<() => void>();
@@ -5311,12 +5371,18 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           window.removeEventListener('offline', wakeReader);
           readerWakes.clear();
         };
-        rendererSessionDataFactory = createRoostSessionDataFactoryForMachine({
+        const bridge: RemoteRoostSessionBridgeOptions = {
           coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
-          live: () => machineSupportsSessionHistorySubscription(ownerMachineMeta),
-          subscribeHistory: subscribeSessionHistory,
+          cacheNamespace: protectedContent
+            ? encryptedLocalInstance(deps.e2eeLocalIdentity!)
+            : undefined,
+          live: () =>
+            !protectedContent && machineSupportsSessionHistorySubscription(ownerMachineMeta),
+          ...(protectedContent
+            ? { pollIntervalMs: 5000 }
+            : { subscribeHistory: subscribeSessionHistory }),
           active: () =>
             document.visibilityState !== 'hidden' &&
             (targetRouter.getPlaneForMachine(machineId) === 'local' || isBrowserOnline()),
@@ -5329,18 +5395,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           accountId: deps.accountId,
           workspaceId,
           machineId,
-          resolvePlane: async (targetMachineId) => {
-            await waitForContentAdmission();
-            const plane = await targetRouter.resolvePlaneForMachine(targetMachineId, {
-              timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
-            });
-            if (plane === 'local' && !getIpcServices()) {
-              throw new Error(
-                `Roost session ${sessionId} is local, but the Electron session-control bridge is unavailable`
-              );
-            }
-            return plane;
-          },
           requestHistoryRead: async (targetMachineId, targetSessionId, query) =>
             await requestSessionHistoryRead(targetMachineId, targetSessionId, query),
           requestHistoryWrite: async ({
@@ -5354,7 +5408,24 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
               operation,
               payload,
             }),
-        });
+        };
+        rendererSessionDataFactory = protectedContent
+          ? createRemoteRoostSessionDataFactory(bridge)
+          : createRoostSessionDataFactoryForMachine({
+              ...bridge,
+              resolvePlane: async (targetMachineId) => {
+                await waitForContentAdmission();
+                const plane = await targetRouter.resolvePlaneForMachine(targetMachineId, {
+                  timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+                });
+                if (plane === 'local' && !getIpcServices()) {
+                  throw new Error(
+                    `Roost session ${sessionId} is local, but the Electron session-control bridge is unavailable`
+                  );
+                }
+                return plane;
+              },
+            });
       }
       conversation = createConversationSession(sessionDoc, {
         sessionId,
@@ -5979,7 +6050,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     ]);
   };
 
-  // --- Background eager-sync coordinator ports -----------------------------
   // These adapters wire the pure BackgroundSyncCoordinator to runtime internals:
   // session metadata (activity), the isolated worker (one-shot prefetch),
   // and browser online/visibility (env). The coordinator itself imports none of
@@ -6292,10 +6362,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         cancelDelayedStartupAcpCapabilitiesRefresh = null;
         startupAcpCapabilitiesRefreshAbortController?.abort();
         startupAcpCapabilitiesRefreshAbortController = null;
-        startupAcpWindowLockHeld = false;
         startupAcpWindowLockPending = false;
-        releaseStartupAcpWindowLock?.();
-        releaseStartupAcpWindowLock = null;
         for (const entry of inFlightAcpCapabilitiesRefreshes.values()) {
           entry.controller.abort();
         }
@@ -6377,9 +6444,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         for (const handle of watchHandles) {
           try {
             handle.unsubscribe();
-          } catch {
-            // ignore
-          }
+          } catch {}
         }
         watchHandles.length = 0;
       });
@@ -6617,6 +6682,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     protectedRpcAvailable,
     ...(protectedContent
       ? {
+          protectedMemberRole: deps.e2ee?.memberRole,
           protectedCodeCollabRole: deps.e2ee?.codeCollabRole ?? {
             get: () => 'read' as const,
             subscribe: () => () => undefined,
@@ -6624,12 +6690,22 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         }
       : {}),
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
-    cloudStreamsEnabled: cloudPlaneEnabled && !protectedContent,
+    streamsContent: deps.content,
+    ...(protectedContent
+      ? {
+          localDataScope: { ...deps.e2eeLocalIdentity!, windowId: desktopWindowId() },
+          shortcutRole: deps.e2ee?.codeCollabRole ?? {
+            get: () => 'read' as const,
+            subscribe: () => () => undefined,
+          },
+        }
+      : {}),
+    cloudStreamsEnabled: cloudPlaneEnabled,
     streamsWebSocketEnabled: isLoroStreamsWebSocketEnabled(
       deps.streamsWebSocketEnabled,
       import.meta.env.VITE_LORO_STREAMS_WS_ENABLED
     ),
-    ...(cloudPlaneEnabled && !protectedContent ? { getWorkspaceStreamsGrant } : {}),
+    ...(cloudPlaneEnabled ? { getWorkspaceStreamsGrant } : {}),
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     ...(protectedContent && deps.e2ee?.signScheduleDeclaration
       ? { signScheduleDeclaration: deps.e2ee.signScheduleDeclaration }

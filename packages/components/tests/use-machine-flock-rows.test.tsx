@@ -1313,4 +1313,186 @@ describe('Machine Flock Phase 0 optimizations', () => {
     firstSync.resolve();
     await expect(waiting).resolves.toBe(true);
   });
+
+  it('preserves fresher applyRefreshedCapability override across unmounted startup and subsequent handle.flock local reads', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const store = createStore();
+    const workspaceId = 'workspace-override-fresher' as WorkspaceId;
+    const workspaceSlug = 'workspace-override-fresher';
+    const machineId = 'machine-override-fresher' as MachineId;
+    const configId = 'config-override-fresher' as AgentConfigId;
+    const staleCap: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'claude',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      sourceVersion: 'builtin:claude:old',
+      modes: [{ id: 'old', name: 'Old' }],
+      models: [{ modelId: 'claude-old', name: 'Claude Old' }],
+      configOptions: [],
+      fetchedAt: 10,
+    };
+    const freshCap: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'claude',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      sourceVersion: 'builtin:claude:new',
+      modes: [{ id: 'new', name: 'New' }],
+      models: [{ modelId: 'claude-new', name: 'Claude New' }],
+      configOptions: [],
+      fetchedAt: 200,
+    };
+    const keyId = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
+
+    const openFlockDoc = vi.fn(async () => ({
+      flock: {
+        scan: vi.fn(() => [
+          {
+            key: machineFlockKeys.acpCapability(configId),
+            value: staleCap,
+          },
+        ]),
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      syncOnce: vi.fn(async () => ({ ok: true, transports: [] })),
+      joinRoom: liveRoom(Promise.resolve()).joinRoom,
+    }));
+    const runtime = {
+      workspaceId,
+      workspaceSlug,
+      repo: { openFlockDoc },
+    } as unknown as WorkspaceRuntime;
+
+    store.set(runtimeAtom, runtime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+    applyRefreshedCapability(runtime, machineId, {
+      configId,
+      value: freshCap,
+    });
+    applyRefreshedCapability(runtime, machineId, {
+      configId,
+      value: staleCap,
+    });
+
+    const updates: MachineFlockRowMap[] = [];
+    render(
+      createElement(
+        Provider,
+        { store },
+        createElement(RowsProbe, {
+          machineId,
+          families: ['agentConfig', 'acpCapability'],
+          syncRemote: false,
+          onRows: (rows) => updates.push(rows),
+        })
+      )
+    );
+    await flushMicrotasks();
+
+    expect(updates.at(-1)?.[keyId]?.value).toEqual(freshCap);
+  });
+
+  it('triggers fresh catchup when presenceAware transitions 0 -> 1 onto a settled but non-joined live room', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const store = createStore();
+    const workspaceId = 'workspace-reconnecting-room-catchup' as WorkspaceId;
+    const workspaceSlug = 'workspace-reconnecting-room-catchup';
+    const machineId = 'machine-reconnecting-room-catchup' as MachineId;
+    const catchupDeferred = deferred();
+    let bindingStatus: 'joined' | 'reconnecting' = 'joined';
+    const unsubscribe = vi.fn();
+    const binding = {
+      transportId: 'cloud',
+      get status() {
+        return bindingStatus;
+      },
+      onStatusChange: vi.fn(() => vi.fn()),
+      firstSyncedWithRemote: Promise.resolve(),
+      waitUntilSynced: async () => undefined,
+      rejoin: async () => undefined,
+    };
+    const joinRoom = vi.fn(async () => ({
+      unsubscribe,
+      firstSyncedWithRemote: Promise.resolve(),
+      waitUntilSynced: async () => undefined,
+      transportIds: () => ['cloud'],
+      subscription: () => binding,
+      subscriptions: () => [binding],
+    }));
+    const syncOnce = vi.fn(async () => {
+      await catchupDeferred.promise;
+      return { ok: true, transports: [{ transportId: 'cloud', ok: true, failures: [] }] };
+    });
+
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug,
+      repo: {
+        openFlockDoc: vi.fn(async () => ({
+          flock: {
+            scan: vi.fn(() => []),
+            subscribe: vi.fn(() => vi.fn()),
+          },
+          syncOnce,
+          joinRoom,
+        })),
+      },
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+    const readinessUpdates: boolean[] = [];
+    render(
+      createElement(
+        Provider,
+        { store },
+        createElement(RowsProbe, {
+          key: 'unscoped',
+          machineId,
+          onRows: () => undefined,
+        })
+      )
+    );
+    await flushMicrotasks();
+    expect(joinRoom).toHaveBeenCalledTimes(1);
+    expect(syncOnce).not.toHaveBeenCalled();
+
+    bindingStatus = 'reconnecting';
+    act(() => {
+      root?.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(
+            Fragment,
+            null,
+            createElement(RowsProbe, {
+              key: 'unscoped',
+              machineId,
+              onRows: () => undefined,
+            }),
+            createElement(RowsStateProbe, {
+              key: 'presence-aware',
+              machineId,
+              remoteMachineIds: [machineId],
+              onRemoteSynced: (remoteSynced) => readinessUpdates.push(remoteSynced),
+            })
+          )
+        )
+      );
+    });
+    await flushMicrotasks();
+
+    expect(syncOnce).toHaveBeenCalledTimes(1);
+    expect(readinessUpdates.at(-1)).toBe(false);
+
+    catchupDeferred.resolve();
+    await flushMicrotasks();
+    expect(readinessUpdates.at(-1)).toBe(true);
+  });
 });

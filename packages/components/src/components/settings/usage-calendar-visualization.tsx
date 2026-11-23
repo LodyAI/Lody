@@ -161,6 +161,7 @@ const styles = stylex.create({
   },
   selectedMark: { boxShadow: '0 0 0 1px hsl(var(--foreground))' },
   dayBarInteractive: {
+    default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',
@@ -173,6 +174,7 @@ const styles = stylex.create({
     },
   },
   weekDotInteractive: {
+    default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',
@@ -376,7 +378,13 @@ const styles = stylex.create({
   weekColumn: { minWidth: 0, flex: 1 },
   mutedHalf: { color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 60%, transparent)' },
   foreground: { color: 'hsl(var(--foreground))' },
-  peakLine: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: '12px', rowGap: '4px' },
+  peakLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: '12px',
+    rowGap: '4px',
+  },
   rangeFrame: { position: 'relative', minHeight: '10.5rem', minWidth: 0 },
   fixedReadout: {
     display: 'flex',
@@ -551,6 +559,12 @@ const styles = stylex.create({
     borderRadius: 'var(--radius-lg)',
     backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
     padding: space[4],
+  },
+  detailCloseOffset: {
+    position: 'absolute',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    right: 'calc(var(--spacing) * 2)',
+    top: 'calc(var(--spacing) * 2)',
   },
   detailCloseIcon: {
     width: '14px',
@@ -1184,7 +1198,10 @@ function UsageWeekMatrix({
   const formats = useCalendarFormats();
   const { buckets } = timeline;
   const timeZone = formats.timeline.resolvedOptions().timeZone;
-  const { labels, rows } = useMemo(() => groupUsageWeekBuckets(buckets, timeZone), [buckets, timeZone]);
+  const { labels, rows } = useMemo(
+    () => groupUsageWeekBuckets(buckets, timeZone),
+    [buckets, timeZone]
+  );
 
   // One tab stop for the grid. Vertical arrows stay in the same clock column.
   const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -1230,9 +1247,7 @@ function UsageWeekMatrix({
         {rows.map(({ dateMs }) => (
           <span key={dateMs} {...stylex.props(styles.gutterLabel, styles.weekRow)}>
             <span>{formats.weekday.format(dateMs)}</span>
-            <span {...stylex.props(styles.dimmedText)}>
-              {formats.dayOfMonth.format(dateMs)}
-            </span>
+            <span {...stylex.props(styles.dimmedText)}>{formats.dayOfMonth.format(dateMs)}</span>
           </span>
         ))}
       </div>
@@ -1307,8 +1322,21 @@ function UsageWeekMatrix({
 }
 
 const COMPOSITION_SEGMENT_LIMIT = 5;
-const MODEL_SERIES_COLORS = ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'] as const;
-const MEMBER_SERIES_COLORS = ['#7c3aed', '#9333ea', '#a855f7', '#c084fc', '#e9d5ff'] as const;
+// Per-subject alpha over the chart palette so series hues follow the theme.
+const MODEL_SERIES_COLORS = [
+  'hsl(var(--chart-1))',
+  'hsl(var(--chart-1) / 0.82)',
+  'hsl(var(--chart-1) / 0.64)',
+  'hsl(var(--chart-1) / 0.46)',
+  'hsl(var(--chart-1) / 0.28)',
+] as const;
+const MEMBER_SERIES_COLORS = [
+  'hsl(var(--chart-3))',
+  'hsl(var(--chart-3) / 0.82)',
+  'hsl(var(--chart-3) / 0.64)',
+  'hsl(var(--chart-3) / 0.46)',
+  'hsl(var(--chart-3) / 0.28)',
+] as const;
 
 type UsageCompositionSegment = {
   id: string;
@@ -2302,7 +2330,9 @@ function UsageDayDetailPanel({
           icon
           variant="ghost"
           aria-label={t('common.close')}
-          className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
+          height="calc(var(--spacing) * 6)"
+          width="calc(var(--spacing) * 6)"
+          xstyle={styles.detailCloseOffset}
           onClick={onClose}
         >
           <X {...stylex.props(styles.detailCloseIcon)} />
@@ -2877,10 +2907,7 @@ export function UsageCalendarVisualization({
             letting the old view vanish before the new one starts. */}
         {/* Keep the containing block even after the hourly-only grid goes away:
             popLayout's measured offsets must retain the same coordinate system. */}
-        <div
-          data-usage-view-frame
-          {...stylex.props(styles.viewFrame, rings && styles.ringLayout)}
-        >
+        <div data-usage-view-frame {...stylex.props(styles.viewFrame, rings && styles.ringLayout)}>
           {/* Hourly ranges only: the ring runs its own plain fade, independent
               of the matrix container's fade. popLayout pops the
               leaving ring out of flow at its old spot — otherwise the grid
