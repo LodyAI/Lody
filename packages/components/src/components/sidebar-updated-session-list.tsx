@@ -1446,14 +1446,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         <div
           className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
         >
-          <SessionRowLeadingSlot
-            showMenuButton={hasMenuActions}
-            menuLabel={contextMenuLabels.moreActions}
-            openedByTree={openedByTree}
-            fadeClassName={stylex.props(updatedStyles.rowFade).className}
-            restPointerClassName={stylex.props(updatedStyles.rowRestPointer).className}
-            revealClassName={stylex.props(updatedStyles.rowReveal).className}
-          />
+          <SessionRowLeadingSlot openedByTree={openedByTree} />
         </div>
         {item.owner ? (
           <span
@@ -1517,7 +1510,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             needsAttention={item.deliveryStalled}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
-            fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
+            fadeClassName={stylex.props(updatedStyles.rowFade).className}
             restIcon={
               snoozeCountdown ||
               showPr ||
@@ -1566,7 +1559,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
               hasMenuActions ? (
                 <SessionRowMenuButton
                   label={contextMenuLabels.moreActions}
-                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                  revealClassName={stylex.props(updatedStyles.rowReveal).className}
                 />
               ) : undefined
             }
@@ -1576,7 +1569,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   label={contextMenuLabels.settle}
                   icon={<CheckCircle2 {...stylex.props(themeStyles.glyph2)} aria-hidden="true" />}
                   onConfirm={() => onSettle?.(item.id)}
-                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                  revealClassName={stylex.props(updatedStyles.rowReveal).className}
                 />
               ) : showInlineArchive ? (
                 <SidebarRowArchiveButton
@@ -1989,15 +1982,6 @@ const updatedStyles = stylex.create({
         [stylex.when.ancestor(':is([data-sidebar-updated-id]):hover')]: 0,
       },
       [stylex.when.ancestor(':is([data-sidebar-updated-id][data-menu-open])')]: 0,
-    },
-  },
-  rowRestPointer: {
-    pointerEvents: {
-      default: null,
-      '@media (hover: hover)': {
-        [stylex.when.ancestor(':is([data-sidebar-updated-id]):hover')]: 'none',
-      },
-      [stylex.when.ancestor(':is([data-sidebar-updated-id][data-menu-open])')]: 'none',
     },
   },
   rowReveal: {
