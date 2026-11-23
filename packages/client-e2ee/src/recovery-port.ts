@@ -118,7 +118,8 @@ export function recoveryWorkspacesPort(host: RecoveryWorkspacesPortHost) {
   const batch = (
     start: (
       observe: (progress: RecoveryWorkspaceProgress) => void
-    ) => Effect.Effect<RecoveryWorkspaceResult[], unknown>
+    ) => Effect.Effect<RecoveryWorkspaceResult[], unknown>,
+    view?: (rows: readonly RecoveryWorkspaceResult[]) => void
   ) =>
     new Promise<RecoveryWorkspaceResult[]>((resolve, reject) => {
       let answered = false;
@@ -128,7 +129,12 @@ export function recoveryWorkspacesPort(host: RecoveryWorkspacesPortHost) {
         resolve(rows);
       };
       host
-        .run(start((progress) => !progress.waiting && answer(progress.results)))
+        .run(
+          start((progress) => {
+            view?.(progress.results);
+            if (!progress.waiting) answer(progress.results);
+          })
+        )
         .then(answer, (error) => {
           if (answered) return;
           answered = true;
@@ -215,19 +221,64 @@ export function recoveryWorkspacesPort(host: RecoveryWorkspacesPortHost) {
             })
           )
       : null,
-    restore: (method: Method, options?: UnlockOptions) =>
+    setPassword: (input: { password: string; method: Method; currentPassword?: string }) =>
+      unlocked(
+        input.method,
+        input.currentPassword === undefined ? undefined : { password: input.currentPassword },
+        (engine, unlock) =>
+          host.run(
+            Effect.as(engine.setPassword(unlock, input.password), { outcome: 'updated' as const })
+          )
+      ),
+    removePassword: (method: Method, options?: UnlockOptions) =>
+      unlocked(method, options, (engine, unlock) =>
+        host.run(
+          Effect.map(engine.removePassword(unlock), (result) => ({
+            outcome: result.removed ? ('removed' as const) : ('incomplete' as const),
+            pending: result.pending,
+          }))
+        )
+      ),
+    /**
+     * Restores every workspace the plan leaves uncovered. Each row carries its workspace
+     * ID and any partial key recovery. `onResult` sees each settled row as it arrives,
+     * until this call returns or `observationSignal` aborts; neither cancels a producer.
+     */
+    restore: (
+      method: Method,
+      options?: UnlockOptions,
+      onResult?: (result: RecoveryWorkspaceResult) => void,
+      observationSignal?: AbortSignal
+    ) =>
       unlocked(method, options, async (engine, unlock) => {
         const plan = await host.run(engine.plan());
         const ids = plan.uncovered.map((workspace) => workspace.id);
-        const rows = ids.length
-          ? await batch((observe) => engine.restore(unlock, ids, observe))
-          : [];
-        return {
-          outcome: 'restored' as const,
-          // The section shows `Unconfirmed` (producer still running) as waiting and
-          // `not-backed-up` as not covered by this file yet.
-          results: rows.map((row) => ({ name: row.name, outcome: row.outcome })),
+        let observing = true;
+        const seen = new Map<string, string>();
+        const observe = (rows: readonly RecoveryWorkspaceResult[]) => {
+          if (!observing || observationSignal?.aborted || !onResult) return;
+          for (const row of rows) {
+            const key = `${row.outcome}:${row.partialEpochKey === true}`;
+            if (seen.get(row.workspaceId) === key) continue;
+            seen.set(row.workspaceId, key);
+            try {
+              onResult(row);
+            } catch {
+              /* A view cannot cancel a producer or replace its result. */
+            }
+          }
         };
+        try {
+          const rows = ids.length
+            ? await batch((progress) => engine.restore(unlock, ids, progress), observe)
+            : [];
+          return {
+            outcome: 'restored' as const,
+            results: rows,
+          };
+        } finally {
+          observing = false;
+        }
       }),
     setupWorkspace: async (
       workspaceId: string,

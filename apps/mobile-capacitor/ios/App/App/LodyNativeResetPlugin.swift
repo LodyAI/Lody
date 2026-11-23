@@ -86,9 +86,27 @@ public final class LodyNativeResetPlugin: CAPPlugin, CAPBridgedPlugin, WKNavigat
                 call.reject("Reset state changed before recovery completed")
                 return
             }
-            UserDefaults.standard.removeObject(forKey: Self.resultKey)
-            self.credentials.resetFailureCount()
-            call.resolve()
+            let acknowledge = { [weak self] (custodyCleanupFailed: Bool) in
+                // The purge settles asynchronously: a reset started meanwhile owns the result.
+                guard let self = self, self.resetCall == nil,
+                    UserDefaults.standard.string(forKey: Self.resultKey) == outcome
+                else {
+                    call.reject("Reset state changed before recovery completed")
+                    return
+                }
+                UserDefaults.standard.removeObject(forKey: Self.resultKey)
+                self.credentials.resetFailureCount()
+                call.resolve(["custodyCleanupFailed": custodyCleanupFailed])
+            }
+            guard outcome == "fallback" else {
+                acknowledge(false)
+                return
+            }
+            // The shared web wipe has just run and the app is not imported yet: the
+            // wrapped originals are gone, so their KEKs follow. Best effort, like that
+            // wipe; a failure never blocks boot, is reported in the result, and the next
+            // full reset retries it.
+            self.clearCustody { cleared in acknowledge(!cleared) }
         }
     }
 
@@ -229,7 +247,10 @@ public final class LodyNativeResetPlugin: CAPPlugin, CAPBridgedPlugin, WKNavigat
             store.fetchDataRecords(ofTypes: types) { records in
                 guard let self = self else { return }
                 if records.isEmpty {
-                    self.finish(error: nil)
+                    // Custody goes only once its wrapped originals are verifiably gone.
+                    self.clearCustody { cleared in
+                        self.finish(error: cleared ? nil : "Encrypted workspace keys could not be cleared")
+                    }
                 } else if retry {
                     self.removeAndVerify(store: store, retry: false)
                 } else {
@@ -238,6 +259,16 @@ public final class LodyNativeResetPlugin: CAPPlugin, CAPBridgedPlugin, WKNavigat
                     self.finish(error: "WebKit data remains after two reset attempts")
                 }
             }
+        }
+    }
+
+    /// Every E2EE KEK and receipt, after any LodyKek call the outgoing renderer admitted
+    /// has returned. KEKs only protect originals stored in WebKit storage, which a full
+    /// reset deletes; leaving them would orphan device-bound keys from a signed-out identity.
+    private func clearCustody(_ done: @escaping (Bool) -> Void) {
+        LodyKekCallQueue.shared.fenced(on: .global(qos: .userInitiated)) {
+            let cleared = LodyKeychainKekStorage.purgeAll()
+            DispatchQueue.main.async { done(cleared) }
         }
     }
 

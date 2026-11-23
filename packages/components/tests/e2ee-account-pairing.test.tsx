@@ -685,6 +685,76 @@ describe('automatic pairing product flow', () => {
     expect(cancelled).toEqual([]);
   });
 
+  it('keeps a settling or failed restore of this workspace away from deletion, and opens a partial key restore', async () => {
+    const cancelled: string[] = [];
+    let recovered = 0,
+      checked = 0;
+    const runtime = waitingRuntime(cancelled);
+    let restoreResults: {
+      workspaceId?: string;
+      name: string;
+      outcome: string;
+      partialEpochKey?: boolean;
+    }[] = [{ workspaceId: 'w1', name: 'Alpha', outcome: 'Unconfirmed' }];
+    await renderWaiting(runtime, {
+      workspaceName: 'Alpha',
+      accountRole: 'owner',
+      recovery: {
+        passkeyAvailable: true,
+        restore: async () => ({ outcome: 'restored', results: restoreResults }),
+        onRecovered: () => {
+          recovered++;
+        },
+        onCheck: () => {
+          checked++;
+        },
+      },
+      onBackToWorkspaces: () => {},
+      onRemoved: () => {},
+    });
+    await click('e2ee.lostAccess.entry');
+    await pressInDialog('e2ee.lostAll.continue');
+    let results = testId('e2ee-lost-all-results');
+    expect(results?.querySelector('[data-lost-all-result="Unconfirmed"]')?.textContent).toContain(
+      'e2ee.lostAll.result.waiting'
+    );
+    expect(testId('e2ee-lost-all-still-waiting')).not.toBeNull();
+    expect(results?.textContent).not.toContain('e2ee.lostAll.result.askAdmin');
+    expect(testId('e2ee-lost-all-current-pending')).toBeNull();
+    expect(inDialog('e2ee.lostAll.cannotRestore')).toBeUndefined();
+    await pressInDialog('e2ee.lostAll.check');
+    expect(checked).toBe(1);
+
+    await pressInDialog('e2ee.lostAll.tryAnother');
+    restoreResults = [{ workspaceId: 'w1', name: 'Alpha', outcome: 'Failed' }];
+    await pressInDialog('e2ee.lostAll.continue');
+    expect(testId('e2ee-lost-all-results')?.textContent).toContain('e2ee.lostAll.result.failed');
+    expect(inDialog('e2ee.lostAll.cannotRestore')).toBeUndefined();
+
+    await pressInDialog('e2ee.lostAll.tryAnother');
+    restoreResults = [{ workspaceId: 'w1', name: 'Alpha', outcome: 'not-backed-up' }];
+    await pressInDialog('e2ee.lostAll.continue');
+    expect(testId('e2ee-lost-all-results')?.textContent).toContain(
+      'e2ee.lostAll.result.notBackedUp'
+    );
+    expect(inDialog('e2ee.lostAll.cannotRestore')).toBeDefined();
+
+    await pressInDialog('e2ee.lostAll.tryAnother');
+    restoreResults = [
+      { workspaceId: 'w1', name: 'Alpha', outcome: 'Committed', partialEpochKey: true },
+    ];
+    await pressInDialog('e2ee.lostAll.continue');
+    results = testId('e2ee-lost-all-results');
+    expect(results?.querySelector('[data-lost-all-partial]')?.textContent).toContain(
+      'e2ee.lostAll.result.partial'
+    );
+    expect(testId('e2ee-lost-all-current-partial')).not.toBeNull();
+    expect(cancelled).toEqual([]);
+    await pressInDialog('e2ee.lostAll.open');
+    expect(cancelled).toEqual(['w1']);
+    expect(recovered).toBe(1);
+  });
+
   it('falls back to recovery password when passkey is unavailable and validates password restore', async () => {
     const cancelled: string[] = [];
     const attempts: Array<{ method: string; password?: string }> = [];

@@ -11,6 +11,10 @@ import {
   unlockVaultWithPasskey,
 } from '@lody/e2ee-client/passkey-unlock';
 import { E2eePasskeyCancelled, type E2eePasskeyPort } from '@lody/platform/e2ee-passkey';
+import {
+  removeVaultPasswordGuarded,
+  setVaultPasswordVerified,
+} from '@lody/e2ee-client/recovery-password';
 import { clientRecoveryJournal } from './recovery-journal';
 import { MAX_VAULT_PASSWORD_GENERATIONS, passwordWrapEntryId } from '@lody/e2ee-core/protocol';
 
@@ -535,6 +539,20 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
       ),
     remove: (unlock: ClientRecoveryUnlock, entryId: string) =>
       use(unlock, true, (vault) => vault.removePasskey(entryId)),
+    /** Set or rotate the current vault's password wrap, then prove it opens that vault. */
+    setPassword: (unlock: ClientRecoveryUnlock, password: string) =>
+      use(unlock, true, (vault) =>
+        Effect.flatMap(setVaultPasswordVerified(vault, { password }), (reopened) =>
+          Effect.ignore(rememberMethods(reopened))
+        )
+      ),
+    /** Remove the password wrap once a file or passkey still unlocks the vault. */
+    removePassword: (unlock: ClientRecoveryUnlock) =>
+      use(unlock, true, (vault) =>
+        removeVaultPasswordGuarded(vault).pipe(
+          Effect.tap(() => Effect.ignore(rememberMethods(vault)))
+        )
+      ),
     dispose: () => {
       retired = true;
     },

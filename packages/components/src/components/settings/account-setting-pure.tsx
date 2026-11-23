@@ -104,6 +104,46 @@ export type WorkspaceDeleteBillingGuard =
   | { kind: 'active-subscription' }
   | { kind: 'cancel-scheduled'; formattedPeriodEnd: string | null };
 
+/** The billing-overview fields the workspace deletion guard reads. */
+export type WorkspaceDeleteBillingOverview = {
+  readonly effectivePlanTier: string;
+  readonly entitlementSource: string;
+  readonly autoRenewAfterGift: boolean;
+  readonly cancelAtPeriodEnd: boolean;
+  readonly giftEndsAt: number | null;
+  readonly currentPeriodEnd: number | null;
+};
+
+/**
+ * The billing-aware guard on deleting a workspace: a live subscription blocks deletion
+ * (cancel first); a cancel-scheduled one gets a warning that deletion preserves its
+ * scheduled end and any accrued charges. A subscription belongs to the workspace, not to
+ * its content mode, so encrypted workspaces are guarded exactly like plaintext ones.
+ * No overview (loading, no billing capability, or none for this workspace) means no guard.
+ */
+export function deriveWorkspaceDeleteBillingGuard(
+  overview: WorkspaceDeleteBillingOverview | null | undefined,
+  now: number
+): WorkspaceDeleteBillingGuard | null {
+  if (
+    !overview ||
+    overview.effectivePlanTier === 'free' ||
+    (overview.entitlementSource === 'stripe_gift' && !overview.autoRenewAfterGift)
+  )
+    return null;
+  if (!overview.cancelAtPeriodEnd) return { kind: 'active-subscription' };
+  const entitlementEnd =
+    overview.giftEndsAt && overview.giftEndsAt > now
+      ? overview.giftEndsAt
+      : overview.currentPeriodEnd;
+  return {
+    kind: 'cancel-scheduled',
+    formattedPeriodEnd: entitlementEnd
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(entitlementEnd))
+      : null,
+  };
+}
+
 export type AccountSettingsSurface = 'account' | 'workspace';
 
 export interface AccountSettingsPureProps {

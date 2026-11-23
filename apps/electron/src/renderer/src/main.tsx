@@ -13,6 +13,7 @@ import { useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
 import { createRouter } from '@lody/components/router'
+import { RecoveryAccountPage } from '@lody/components/components/settings/e2ee/recovery-host'
 import {
   detectBrowserLanguage,
   fallbackLanguage,
@@ -240,6 +241,7 @@ try {
   if (devbar?.enabled) document.documentElement.setAttribute('data-desktop-devbar', '')
   const router = createRouter({
     authClient,
+    recoveryPage: RecoveryAccountPage,
     history: usesHashHistory ? createHashHistory() : undefined
   })
   installWarmWindowBinding(router)

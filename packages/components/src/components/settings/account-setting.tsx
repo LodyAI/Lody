@@ -38,9 +38,10 @@ import {
 } from '@/lib/organization-member-role';
 import {
   AccountSettingsPure,
+  deriveWorkspaceDeleteBillingGuard,
   type AccountSettingsSurface,
-  type WorkspaceDeleteBillingGuard,
 } from './account-setting-pure';
+import { useE2eeRecoverySection } from './e2ee/recovery-host';
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { DeletedWorkspaceBilling } from './deleted-workspace-billing';
@@ -124,8 +125,9 @@ function CloudAccountSettings({
   const signOut = useAuthSignOut();
   const router = useRouter();
   const closeSettings = useSetAtom(settingsDialogOpenAtom);
+  const recoverySection = useE2eeRecoverySection();
   const recoveryEntry =
-    surface === 'account' && router?.options?.context?.recoveryPage ? (
+    surface === 'account' && recoverySection && router?.options?.context?.recoveryPage ? (
       <Button
         variant="secondary"
         onClick={() => {
@@ -169,37 +171,15 @@ function CloudAccountSettings({
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
     activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  // Deleting a paid workspace needs a billing-aware guard: a live subscription
-  // blocks deletion (cancel first); a cancel-scheduled one gets a warning that
-  // deletion preserves its scheduled end and any accrued charges.
+  // Not skipped for encrypted workspaces: the subscription guard on deletion still applies.
   const billingOverview = useCloudQuery(
     cloudOperations.billing.getBillingOverview,
-    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  const deleteBillingGuard: WorkspaceDeleteBillingGuard | null = useMemo(() => {
-    if (
-      !billingOverview ||
-      billingOverview.effectivePlanTier === 'free' ||
-      (billingOverview.entitlementSource === 'stripe_gift' && !billingOverview.autoRenewAfterGift)
-    ) {
-      return null;
-    }
-    if (billingOverview.cancelAtPeriodEnd) {
-      const entitlementEnd =
-        billingOverview.giftEndsAt && billingOverview.giftEndsAt > Date.now()
-          ? billingOverview.giftEndsAt
-          : billingOverview.currentPeriodEnd;
-      return {
-        kind: 'cancel-scheduled',
-        formattedPeriodEnd: entitlementEnd
-          ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(
-              new Date(entitlementEnd)
-            )
-          : null,
-      };
-    }
-    return { kind: 'active-subscription' };
-  }, [billingOverview]);
+  const deleteBillingGuard = useMemo(
+    () => deriveWorkspaceDeleteBillingGuard(billingOverview, Date.now()),
+    [billingOverview]
+  );
 
   const sortedMembers = useMemo(() => {
     const members = activeOrganization?.members ?? [];

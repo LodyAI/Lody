@@ -9,6 +9,7 @@ type CachedAppInfo = {
   build?: string;
   last_native_reset_outcome?: 'success' | 'fallback';
   native_reset_credential_cleanup_failed?: boolean;
+  native_reset_custody_cleanup_failed?: boolean;
 };
 
 // Spec §8f.2 mobile failure_kind taxonomy: chunk_load / offline / unknown.
@@ -68,6 +69,7 @@ function getMobileBuildInfo(): Record<string, string> {
   if (app.build) info['App build'] = app.build;
   if (app.last_native_reset_outcome) info['Last native reset'] = app.last_native_reset_outcome;
   if (app.native_reset_credential_cleanup_failed) info['Native credential cleanup'] = 'failed';
+  if (app.native_reset_custody_cleanup_failed) info['Native key cleanup'] = 'failed';
   return info;
 }
 
@@ -164,6 +166,7 @@ function postMobileBootFailedBeacon(failureKind: MobileBootFailureKind, error: u
         install_id: installId,
         last_native_reset_outcome: app.last_native_reset_outcome ?? null,
         native_reset_credential_cleanup_failed: app.native_reset_credential_cleanup_failed ?? null,
+        native_reset_custody_cleanup_failed: app.native_reset_custody_cleanup_failed ?? null,
       },
     };
 

@@ -8,8 +8,9 @@ import { Input } from '@lody/ui/input';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 
+import type { RecoveryRestoreResult as RestoreResult } from '@/components/settings/e2ee/recovery-port';
+
 type Method = 'passkey' | 'password' | 'file';
-type RestoreResult = { workspaceId?: string; name: string; outcome: string };
 type Restored =
   | { outcome: 'cancelled' }
   | {
@@ -85,12 +86,20 @@ const styles = stylex.create({
   split: { justifyContent: 'space-between', alignItems: 'center' },
 });
 
-const resultBadge = (outcome: string): { key: string; tone: BadgeTone } =>
-  outcome === 'Committed'
-    ? { key: 'e2ee.lostAll.result.restored', tone: 'success' }
-    : outcome === 'Pending'
+/** `Pending` and `Unconfirmed` are restores still settling on this device: neither is a
+ * failure, and neither may lead the person towards deleting or leaving the workspace. */
+const isWaiting = (outcome: string) => outcome === 'Pending' || outcome === 'Unconfirmed';
+
+const resultBadge = (row: RestoreResult): { key: string; tone: BadgeTone } =>
+  row.outcome === 'Committed'
+    ? row.partialEpochKey
+      ? { key: 'e2ee.lostAll.result.partial', tone: 'neutral' }
+      : { key: 'e2ee.lostAll.result.restored', tone: 'success' }
+    : isWaiting(row.outcome)
       ? { key: 'e2ee.lostAll.result.waiting', tone: 'neutral' }
-      : { key: 'e2ee.lostAll.result.failed', tone: 'warning' };
+      : row.outcome === 'not-backed-up'
+        ? { key: 'e2ee.lostAll.result.notBackedUp', tone: 'neutral' }
+        : { key: 'e2ee.lostAll.result.failed', tone: 'warning' };
 
 const failureKey = (code: string, method: Method) =>
   code.includes('e2ee_recovery_missing')
@@ -163,15 +172,20 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
 
   if (results) {
     const restored = results.filter((row) => row.outcome === 'Committed').length;
-    const unfinished = results.length - restored;
+    const waiting = results.filter((row) => isWaiting(row.outcome)).length;
+    const unfinished = results.length - restored - waiting;
+    const identified = results.some((row) => row.workspaceId !== undefined);
     // Matched by ID: names are display text and may repeat.
-    const current = results.some(
-      (row) => row.workspaceId === props.workspaceId && row.outcome === 'Committed'
-    );
+    const currentRow = results.find((row) => row.workspaceId === props.workspaceId);
+    const current = currentRow?.outcome === 'Committed';
+    const currentPartial = current && currentRow?.partialEpochKey === true;
+    const currentWaiting = currentRow ? isWaiting(currentRow.outcome) : !identified && waiting > 0;
     // Hosts that report no IDs cannot say which row is this workspace; only a fresh
     // read of this device's status can, and it never ends the pending request.
-    const unidentified =
-      !current && restored > 0 && results.every((row) => row.workspaceId === undefined);
+    const unidentified = !current && restored > 0 && !identified;
+    const notCovered = identified
+      ? !currentRow || currentRow.outcome === 'not-backed-up'
+      : results.every((row) => row.outcome === 'not-backed-up');
     return (
       <div data-testid="e2ee-lost-all-results" {...stylex.props(styles.root)}>
         <h3 {...stylex.props(styles.heading)}>
@@ -182,11 +196,12 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
         {results.length > 0 && (
           <ul {...stylex.props(styles.list)}>
             {results.map((row) => {
-              const badge = resultBadge(row.outcome);
+              const badge = resultBadge(row);
               return (
                 <li
                   key={row.workspaceId ?? row.name}
                   data-lost-all-result={row.outcome}
+                  {...(row.partialEpochKey ? { 'data-lost-all-partial': '' } : {})}
                   {...stylex.props(styles.row)}
                 >
                   <span>{row.name}</span>
@@ -199,7 +214,17 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
         {(unfinished > 0 || results.length === 0) && (
           <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.result.askAdmin')}</p>
         )}
-        {restored > 0 && !current && !unidentified && (
+        {waiting > 0 && (
+          <p data-testid="e2ee-lost-all-still-waiting" {...stylex.props(styles.lead)}>
+            {t('e2ee.lostAll.result.stillWaiting')}
+          </p>
+        )}
+        {currentPartial && (
+          <p data-testid="e2ee-lost-all-current-partial" {...stylex.props(styles.lead)}>
+            {t('e2ee.lostAll.result.partialHelp')}
+          </p>
+        )}
+        {restored > 0 && !current && !currentWaiting && !unidentified && (
           <p data-testid="e2ee-lost-all-current-pending" {...stylex.props(styles.lead)}>
             {t('e2ee.lostAll.result.currentPending')}
           </p>
@@ -211,7 +236,7 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
           <p {...stylex.props(styles.lead)}>{t('e2ee.lostAll.result.revokeHint')}</p>
         )}
         <div {...stylex.props(styles.actions)}>
-          {!current && props.onNoBackup && unfinished > 0 && (
+          {!current && !currentWaiting && props.onNoBackup && notCovered && (
             <Button variant="secondary" onClick={props.onNoBackup}>
               {t('e2ee.lostAll.cannotRestore')}
             </Button>
@@ -221,7 +246,7 @@ export function E2eeLostAllRecovery(props: E2eeLostAllRecoveryProps) {
               {t('e2ee.lostAll.tryAnother')}
             </Button>
           )}
-          {unidentified && props.onCheck && (
+          {(unidentified || currentWaiting) && props.onCheck && (
             <Button data-testid="e2ee-lost-all-check" onClick={props.onCheck}>
               {t('e2ee.lostAll.check')}
             </Button>

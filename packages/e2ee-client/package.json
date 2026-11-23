@@ -15,6 +15,7 @@
     "./errors": "./src/errors.ts",
     "./maintenance": "./src/maintenance.ts",
     "./recovery-restore": "./src/recovery-restore.ts",
+    "./recovery-password": "./src/recovery-password.ts",
     "./vault-replacement": "./src/vault-replacement.ts",
     "./passkey-unlock": "./src/passkey-unlock.ts",
     "./passkey-browser": "./src/passkey-browser.ts"

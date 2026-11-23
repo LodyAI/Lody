@@ -78,7 +78,11 @@
 
 - `personalEntryRecovery` borrows the same registry/runtime as content. It exposes
   only setup/restore commands, releases only its own setup reader and marks pins
-  ready only after verified committed restore; it never creates a second host.
+  ready only after a verified committed restore that installed the current epoch key;
+  it never creates a second host. A partial restore leaves the pin unready and its
+  journal partial, so the plan keeps offering the restore. A restore never routes to a
+  cancelled pin's offer. Exact loss of a retained identity during restore cancels its
+  pin, and the engine retries once with the account offer so the host replaces it.
 - `makeClientRecovery` and `makeRecoveryWorkspaces` bound remote Convex RPCs at 90 s
   (leaving file/passkey ceremonies uncapped) so a dead WebSocket releases `commands`
   and `active` instead of wedging recovery. `makeRecoveryWorkspaces` unlocks the vault
@@ -91,7 +95,9 @@
   persistence.
 - `recoveryWorkspacesPort` serves the console's recovery port from that engine. It picks
   the file before any await, wipes it after the command, returns outcomes only, and
-  answers once each workspace has a result, `Unconfirmed` included.
+  answers once each workspace has a result, `Unconfirmed` included. Restore rows carry
+  workspace IDs and partial key markers and stream to `onResult` until the call returns
+  or its observation signal aborts.
 
 - Account pairing and recovery history use the same bounded public-history DTO
   projection as ordinary history reads. Strip backend advisory fields at the network boundary

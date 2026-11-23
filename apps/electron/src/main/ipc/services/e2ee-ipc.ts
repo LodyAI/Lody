@@ -68,6 +68,7 @@ import {
   adoptRecoveredWorkspace,
   recoveryVaultEnabled,
   recoveryVaultFailure,
+  recoveryVaultLocator,
   restoreAccountWorkspaces,
   saveAccountRecoveryFile,
   saveRecoveryFile,
@@ -3008,7 +3009,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     if (await this.recoveryOperation(({ exists }) => exists))
       throw new Error('e2ee_recovery_exists')
     const method = input?.method ?? 'file'
-    const locator = import.meta.env.VITE_CONVEX_DEPLOY_URL ?? ''
+    const locator = recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
     if (method === 'passkey') {
       const label = passkeyLabel(
         input?.label ??
@@ -3082,6 +3083,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       throw new Error('e2ee_recovery_invalid-input')
     if (method !== 'file' && method !== 'passkey' && method !== 'password')
       throw new Error('e2ee_recovery_invalid-input')
+    recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
     const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
     const dialogOptions = {
       defaultPath: 'lody-recovery.lodyrecovery',
@@ -3199,6 +3201,7 @@ export class E2eeIpc extends ProductWindowIpcService {
   async beginRecoveryReplacement() {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const locator = recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
     const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
     const options = {
       defaultPath: 'lody-recovery.lodyrecovery',
@@ -3214,7 +3217,7 @@ export class E2eeIpc extends ProductWindowIpcService {
         store,
         journalPath,
         replacement,
-        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
+        locator,
         persist: (file) =>
           Effect.tryPromise(async () => {
             await saveRecoveryFile(path, file)
@@ -3244,13 +3247,13 @@ export class E2eeIpc extends ProductWindowIpcService {
     if (method === 'passkey')
       return {
         passkey: this.passkeyPort(),
-        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? ''
+        locator: recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
       }
     if (method === 'password') {
       if (typeof options?.password !== 'string') throw new Error('e2ee_recovery_invalid-input')
       return {
         password: options.password,
-        locator: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? ''
+        locator: recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
       }
     }
     if (method !== 'file') throw new Error('e2ee_recovery_invalid-input')
