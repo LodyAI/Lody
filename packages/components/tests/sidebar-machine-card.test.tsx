@@ -167,4 +167,33 @@ describe('sidebar machine group', () => {
     );
     expect(container.querySelector('[data-session-row-indicator]')).toBeNull();
   });
+
+  it('overlays a desktop section menu over the folded activity mark and keeps mark clicks toggling', async () => {
+    const onToggleCollapsed = vi.fn();
+    await render(
+      <SidebarSectionHeader
+        label="Ops"
+        collapsed
+        activity={{ failed: 0, waiting: 0, working: 0, sending: 0, unread: 2 }}
+        menu={<button type="button">Section actions</button>}
+        onToggleCollapsed={onToggleCollapsed}
+      />
+    );
+
+    const menuButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Section actions'
+    );
+    const mark = container.querySelector('[data-sidebar-group-activity]');
+    expect(menuButton).toBeDefined();
+    expect(mark).not.toBeNull();
+    expect(mark?.closest('[role="button"]')).toBeNull();
+    expect(mark?.closest('.group\\/section-menu')).toBe(
+      menuButton?.closest('.group\\/section-menu')
+    );
+
+    await act(async () => {
+      mark?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onToggleCollapsed).toHaveBeenCalledOnce();
+  });
 });

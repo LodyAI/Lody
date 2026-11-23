@@ -105,6 +105,7 @@ type SharedListProps = Omit<
   | 'onToggleBucket'
   | 'toggleBucketLabel'
   | 'headerAction'
+  | 'headerMenu'
   | 'pinSectionMenu'
   | 'pinSectionId'
   | 'onDropPinnedSession'
@@ -535,10 +536,8 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
               headerOnly ||
               (isDefault ? defaultCollapsed : Boolean(collapsedSectionIds?.[sectionId]));
             const label = isDefault ? defaultLabel : section.name;
-            const action = withHeaderAction(
-              sectionMenuFor(section),
-              index === 0 ? headerAction : null
-            );
+            const menu = sectionMenuFor(section);
+            const action = index === 0 ? headerAction : undefined;
             const hiddenCount = collapsed ? 0 : (hiddenCounts?.[sectionKey] ?? 0);
             const list = (renderHeader?: (header: ReactElement) => ReactNode) => (
               <SidebarUpdatedSessionList
@@ -568,6 +567,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                         : undefined
                 }
                 toggleBucketLabel={label}
+                headerMenu={menu}
                 headerAction={action}
                 footer={
                   hiddenCount > 0 ? (
@@ -834,18 +834,6 @@ function SortablePinSection({
   );
 }
 
-function withHeaderAction(menu: ReactNode, action: ReactNode): ReactNode {
-  if (menu && action) {
-    return (
-      <span className="flex items-center">
-        {menu}
-        {action}
-      </span>
-    );
-  }
-  return menu ?? action ?? undefined;
-}
-
 function PinSectionHeaderMenu({
   label,
   revealOnHover,
@@ -880,7 +868,7 @@ function PinSectionHeaderMenu({
         className={cn(
           'inline-flex',
           revealOnHover &&
-            'opacity-0 transition-opacity duration-100 group-hover/section-header:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-popup-open]]:opacity-100'
+            'pointer-events-none opacity-0 transition-opacity duration-100 group-hover/section-header:pointer-events-auto group-hover/section-header:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 has-[[data-popup-open]]:pointer-events-auto has-[[data-popup-open]]:opacity-100'
         )}
       >
         <Menu.Trigger
