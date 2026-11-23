@@ -2474,6 +2474,10 @@ it('retries only a timed-out page and commits the exact repair despite a newer r
     ...h.entries[0]!,
     id: `missed-${index}`,
   }));
+  const repairedHead = {
+    ...h.entries[0]!,
+    items: [{ type: 'text' as const, text: 'repaired cached body' }],
+  };
   const readPages: number[] = [];
   const tail = suffix.at(-1)!;
   const newTail = { ...tail, items: [{ type: 'text' as const, text: 'new revision' }] };
@@ -2488,7 +2492,12 @@ it('retries only a timed-out page and commits the exact repair despite a newer r
     requestHistoryRead: async (_owner, _session, query) => {
       if (query.kind === 'readChanges') {
         if (query.checkpoint === 'checkpoint-1')
-          return reply(2, { state: 'ready', checkpoint: 'checkpoint-2', ids: [], from: 1 });
+          return reply(2, {
+            state: 'ready',
+            checkpoint: 'checkpoint-2',
+            ids: [repairedHead.id],
+            from: 1,
+          });
         expect(query.checkpoint).toBe('checkpoint-2');
         return reply(3, {
           state: 'ready',
@@ -2520,6 +2529,8 @@ it('retries only a timed-out page and commits the exact repair despite a newer r
           suffix.slice(query.from - 1, query.to - 1).map((turn) => ({ state: 'ready', turn }))
         );
       }
+      if (query.kind === 'readTurn' && query.turnId === repairedHead.id && query.atCheckpoint)
+        return reply(2, { state: 'ready', turn: repairedHead });
       if (query.kind === 'readTurn' && query.turnId === tail.id && !query.atCheckpoint)
         return reply(3, { state: 'ready', turn: newTail });
       throw new Error(`Unexpected ${query.kind}`);
@@ -2528,6 +2539,11 @@ it('retries only a timed-out page and commits the exact repair despite a newer r
       throw new Error('Unexpected write');
     },
   })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const progress = data.historySyncProgress!;
+  const progressUpdates: ReturnType<typeof progress.getSnapshot>[] = [];
+  const unsubscribeProgress = progress.subscribe(() =>
+    progressUpdates.push(progress.getSnapshot())
+  );
   const observation = data.history.observe(() => {
     void h.cache.getHead().then((head) => {
       if (head?.checkpoint === 'checkpoint-3') nextCommitted.resolve();
@@ -2537,10 +2553,18 @@ it('retries only a timed-out page and commits the exact repair despite a newer r
     await observation.initial;
     (await timers.next()).callback();
     await lastPageStarted.promise;
+    expect(progress.getSnapshot()).toEqual({ received: 501, total: 502 });
     expect(await data.history.readTurn(tail.id)).toMatchObject({ state: 'ready', turn: newTail });
     expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-1', count: 1 });
     releaseLastPage.resolve();
     const followup = await timers.next();
+    expect(progressUpdates).toEqual([
+      { received: 0, total: 502 },
+      { received: 1, total: 502 },
+      { received: 501, total: 502 },
+      { received: 502, total: 502 },
+      null,
+    ]);
     expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-2', count: 502 });
     expect(await h.cache.readTurn(tail.id)).toEqual(tail);
     expect(readPages).toEqual([1, 501, 501]);
@@ -2548,11 +2572,108 @@ it('retries only a timed-out page and commits the exact repair despite a newer r
     await nextCommitted.promise;
     expect(await h.cache.readTurn(tail.id)).toEqual(newTail);
     expect((await h.cache.readRows(0, 501))?.map((row) => row.turn)).toEqual([
-      ...h.entries,
+      repairedHead,
       ...suffix.slice(0, -1),
     ]);
   } finally {
+    unsubscribeProgress();
     releaseLastPage.resolve();
+    observation.unsubscribe();
+    data.dispose?.();
+    h.cache.dispose();
+    timers.restore();
+  }
+});
+
+it('clears partial history progress before recovering a replaced checkpoint', async () => {
+  const h = await cachedRecoveryFixture('progress-reset', 1);
+  const timers = controlledRefreshTimers();
+  const secondPageStarted = Promise.withResolvers<void>();
+  const replaceCheckpoint = Promise.withResolvers<void>();
+  const applied = Promise.withResolvers<void>();
+  const replacement = { ...h.entries[0]!, id: 'new-generation' };
+  const atCatchUpCheckpoint = (result: unknown) => ({
+    ok: true as const,
+    responses: [{ ...h.reply(2, result).responses[0]!, historyCount: 602 }],
+  });
+  let replaced = false;
+
+  const data = createLocalRoostSessionDataFactory({
+    incremental: true,
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
+    sendControl: async (request) => {
+      if (request.type !== 'session/history-read') throw new Error('Unexpected write');
+      const query = request.query;
+      if (query.kind === 'readChanges') {
+        expect(query.checkpoint).toBe('checkpoint-1');
+        return replaced
+          ? h.reply(3, { state: 'reset', checkpoint: 'checkpoint-3' })
+          : atCatchUpCheckpoint({ state: 'ready', checkpoint: 'checkpoint-2', ids: [], from: 1 });
+      }
+      if (query.kind === 'readLatestPage' && replaced) {
+        return h.reply(
+          3,
+          {
+            checkpoint: 'checkpoint-3',
+            startPosition: 0,
+            totalCount: 1,
+            rows: [createRoostDirectoryRow(0, replacement as never)],
+            hasMoreOlder: false,
+            cursor: null,
+          },
+          [replacement]
+        );
+      }
+      if (query.kind === 'readRange') {
+        if (query.from === 1) {
+          return atCatchUpCheckpoint(
+            Array.from({ length: query.to - query.from }, (_, index) => ({
+              state: 'ready',
+              turn: { ...h.entries[0]!, id: `missing-${index}` },
+            }))
+          );
+        }
+        secondPageStarted.resolve();
+        await replaceCheckpoint.promise;
+        replaced = true;
+        return {
+          ok: true,
+          responses: [
+            {
+              type: 'session/history-read_response',
+              sessionId: h.sessionId,
+              success: false,
+              retryReason: 'superseded',
+              error: 'History checkpoint was superseded',
+            },
+          ],
+        };
+      }
+      throw new Error(`Unexpected ${query.kind}`);
+    },
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const progress = data.historySyncProgress!;
+  const observation = data.history.observe(() => {
+    void h.cache.getHead().then((head) => {
+      if (head?.checkpoint === 'checkpoint-3') applied.resolve();
+    });
+  });
+  try {
+    await observation.initial;
+    (await timers.next()).callback();
+    await secondPageStarted.promise;
+    expect(progress.getSnapshot()).toEqual({ received: 500, total: 601 });
+    replaceCheckpoint.resolve();
+    const retry = await timers.next();
+    expect(progress.getSnapshot()).toBeNull();
+    expect((await h.cache.getHead())?.checkpoint).toBe('checkpoint-1');
+    retry.callback();
+    await applied.promise;
+    expect(progress.getSnapshot()).toBeNull();
+    expect(await data.history.readAt(0)).toMatchObject({ turn: { id: 'new-generation' } });
+  } finally {
+    replaceCheckpoint.resolve();
     observation.unsubscribe();
     data.dispose?.();
     h.cache.dispose();

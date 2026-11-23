@@ -128,6 +128,7 @@ function StoryHarness({
   actionLabels,
   mergeAction = false,
   syncing = false,
+  historyProgress,
 }: {
   status?: SessionStatusStripState | null;
   machine?: SessionMachineInfo;
@@ -155,6 +156,7 @@ function StoryHarness({
   actionLabels?: string[];
   mergeAction?: boolean;
   syncing?: boolean;
+  historyProgress?: { received: number; total: number };
 }) {
   const [currentGoal, setCurrentGoal] = useState(goal);
   const [mergeMethod, setMergeMethod] = useState<GitHubMergeMethod>('merge');
@@ -218,6 +220,11 @@ function StoryHarness({
         }
         diffStat={diffStat}
         syncing={syncing}
+        historySyncProgress={
+          historyProgress
+            ? { getSnapshot: () => historyProgress, subscribe: () => () => {} }
+            : undefined
+        }
       />
       <div className="h-14 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
         (composer placeholder)
@@ -710,6 +717,14 @@ export const SyncOnly: Story = {
     diffStat: null,
     syncing: true,
   },
+};
+
+export const RoostHistoryCatchUp: Story = {
+  args: { syncing: true, historyProgress: { received: 500, total: 1240 } },
+};
+
+export const RoostHistoryApplying: Story = {
+  args: { width: 390, historyProgress: { received: 1240, total: 1240 } },
 };
 
 /** With no items and no syncing the bar still hides entirely. */

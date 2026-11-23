@@ -238,6 +238,15 @@ labelClassName`) so the stage diffstat never clips. Wired from
     with the green bordered Mergeable pill; the active row hides both because the
     Info Bar owns the merge control.
 
+## History catch-up progress
+
+Multi-page Roost catch-up uses the ambient slot above the composer. The reader
+fixes the total to the retained bodies it will stage at one checkpoint and
+advances the count after validating each page. A retry of the current page
+preserves the count. The bar says Applying while the completed range commits to
+the local cache, then clears when the attempt finishes or its checkpoint is
+superseded. The existing sync and cache owners still control readiness.
+
 ## Related-Sessions chip
 
 `session-relations-chip.tsx` renders a `MessagesSquare` chip in the info bar's

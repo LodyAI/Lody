@@ -2339,6 +2339,8 @@
   "sessions.tabs.empty": "No conversation open",
   "sessions.tabWaitingForSync": "Waiting for this conversation to sync…",
   "sessions.contentSync.updating": "Syncing",
+  "sessions.contentSync.historyReadingProgress": "History {{received}} / {{total}}",
+  "sessions.contentSync.historyApplyingProgress": "Applying {{received}} / {{total}}",
   "sessions.contentSync.loadingConversation": "Loading conversation",
   "sessions.usage.context": "Context",
   "sessions.usage.compacting": "Compacting",

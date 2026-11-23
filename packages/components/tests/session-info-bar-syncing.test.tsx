@@ -121,6 +121,49 @@ describe('SessionInfoBar ambient information', () => {
     expect(container.textContent).toBe('');
   });
 
+  it('shows the exact history count through application and then hides the readout', () => {
+    let snapshot: { received: number; total: number } | null = null;
+    let notify = () => {};
+    const historySyncProgress = {
+      getSnapshot: () => snapshot,
+      subscribe(listener: () => void) {
+        notify = listener;
+        return () => {
+          notify = () => {};
+        };
+      },
+    };
+    act(() =>
+      root.render(
+        withTestI18n(
+          <SessionInfoBar {...CONTEXT_LESS_PROPS} historySyncProgress={historySyncProgress} />,
+          testI18n
+        )
+      )
+    );
+    expect(container.querySelector('[role="progressbar"]')).toBeNull();
+
+    act(() => {
+      snapshot = { received: 500, total: 1240 };
+      notify();
+    });
+    const bar = container.querySelector('[role="progressbar"]');
+    expect(bar?.textContent).toContain('History 500 / 1,240');
+    expect(bar?.getAttribute('aria-valuenow')).toBe('500');
+    expect(bar?.getAttribute('aria-valuemax')).toBe('1240');
+
+    act(() => {
+      snapshot = { received: 1240, total: 1240 };
+      notify();
+    });
+    expect(bar?.textContent).toContain('Applying 1,240 / 1,240');
+    act(() => {
+      snapshot = null;
+      notify();
+    });
+    expect(container.querySelector('[role="progressbar"]')).toBeNull();
+  });
+
   it.each([false, true])(
     'chooses either simulator from one popover (compact=%s)',
     (compactMachineInfo) => {

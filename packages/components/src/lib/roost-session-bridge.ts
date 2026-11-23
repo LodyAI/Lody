@@ -21,7 +21,6 @@ import {
   type HistoryAction,
   type HistoryImportInput,
   type ReplaceEditableTailInput,
-  type RoostSessionData,
   type SessionActionResult,
   type SessionDataChangeListener,
   type SessionDirectoryRow,
@@ -49,7 +48,10 @@ import {
   roostCachedChangesSince,
   type RoostCachedHead,
 } from './roost-history-cache';
-import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
+import type {
+  ConversationSessionDataFactory,
+  HistorySyncProgress,
+} from './conversation-view/create-conversation-session';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
 import { SessionHistoryChangesSchema } from '@lody/shared';
 
@@ -311,6 +313,19 @@ const createRoostSessionDataFactoryFromTransport =
     const pendingReads = new Map<string, Promise<SessionHistoryReadResponse>>();
     const listeners = new Set<SessionDataChangeListener>();
     const snapshotProvenance = new WeakSet<object>();
+    let historySyncProgress: HistorySyncProgress | null = null;
+    const progressListeners = new Set<() => void>();
+    const setHistorySyncProgress = (progress: HistorySyncProgress | null) => {
+      if (progress === historySyncProgress) return;
+      historySyncProgress = progress;
+      for (const listener of progressListeners) {
+        try {
+          listener();
+        } catch (error) {
+          console.error('Roost history progress observer failed', error);
+        }
+      }
+    };
 
     let ownerPublication: SessionHistoryPublication | undefined;
     const takeInline = (query: SessionHistoryReadQuery) => {
@@ -569,6 +584,7 @@ const createRoostSessionDataFactoryFromTransport =
       // A different reader committed this projection. Fence reads and cursors
       // from the previous local view, including a retired owner generation.
       historyEpoch++;
+      setHistorySyncProgress(null);
       ownerRevision = head.revision;
       observedHistoryRevision = head.revision;
       observedHistoryCount = head.count;
@@ -846,6 +862,11 @@ const createRoostSessionDataFactoryFromTransport =
           }
           if (change.state === 'ready') {
             const from = change.from === undefined ? undefined : Math.min(change.from, count);
+            const start =
+              prior.start >= count && count > 0
+                ? Math.max(0, count - 40)
+                : Math.min(prior.start, count);
+            const first = from === undefined ? undefined : Math.max(start, from);
             const readBody = async (
               query: Extract<SessionHistoryReadQuery, { kind: 'readTurn' | 'readRange' }>
             ) => {
@@ -857,8 +878,24 @@ const createRoostSessionDataFactoryFromTransport =
                 return read();
               }
             };
-            const affected = (await cached(() => cache.readAffected(change.ids))) ?? [];
+            const cachedAffected = await cached(() => cache.readAffected(change.ids));
+            const affected = (cachedAffected ?? []).filter(
+              (row) => from === undefined || row.position < from
+            );
             const replacements: { position: number; turn: SessionHistoryInput }[] = [];
+            const total =
+              cachedAffected !== undefined &&
+              change.bodies === undefined &&
+              first !== undefined &&
+              count - first > READ_PAGE_SIZE
+                ? affected.length + count - first
+                : undefined;
+            const reportProgress = () => {
+              if (total !== undefined && !disposed && epoch === historyEpoch) {
+                setHistorySyncProgress({ received: replacements.length, total });
+              }
+            };
+            reportProgress();
             const patches = new Map(
               withPatches && change.patches && change.patches.baseCheckpoint === prior.checkpoint
                 ? change.patches.turns.map((patch) => [patch.turnId, patch.operations])
@@ -873,7 +910,6 @@ const createRoostSessionDataFactoryFromTransport =
                     )
                   );
             for (const row of affected) {
-              if (from !== undefined && row.position >= from) continue;
               const operations = patches.get(row.turnId);
               if (operations) {
                 let prepared: SessionHistoryInput | undefined;
@@ -907,12 +943,7 @@ const createRoostSessionDataFactoryFromTransport =
                 throw new Error('Roost incremental turn is unavailable');
               replacements.push({ position: row.position, turn: turn.turn as SessionHistoryInput });
             }
-            const start =
-              prior.start >= count && count > 0
-                ? Math.max(0, count - 40)
-                : Math.min(prior.start, count);
             if (change.bodies !== undefined) {
-              const first = from === undefined ? undefined : Math.max(start, Math.min(from, count));
               const suffix = validateHistory(change.bodies.suffix, 'Roost incremental suffix');
               if (
                 change.bodies.from !== first ||
@@ -922,12 +953,9 @@ const createRoostSessionDataFactoryFromTransport =
               suffix.forEach((turn, offset) =>
                 replacements.push({ position: first! + offset, turn })
               );
-            } else if (from !== undefined) {
-              for (
-                let position = Math.max(start, Math.min(from, count));
-                position < count;
-                position += READ_PAGE_SIZE
-              ) {
+            } else if (first !== undefined) {
+              if (replacements.length > 0) reportProgress();
+              for (let position = first; position < count; position += READ_PAGE_SIZE) {
                 const read = await readBody({
                   kind: 'readRange',
                   from: position,
@@ -949,6 +977,7 @@ const createRoostSessionDataFactoryFromTransport =
                     turn: turn.turn as SessionHistoryInput,
                   });
                 });
+                reportProgress();
               }
             }
             const applied = await cached(() =>
@@ -1074,6 +1103,7 @@ const createRoostSessionDataFactoryFromTransport =
           retryDelay = Math.min(10_000, Math.max(250, retryDelay) * 2);
         }
       } finally {
+        setHistorySyncProgress(null);
         refreshing = false;
         if (refreshRequested && !disposed && listeners.size > 0 && active()) {
           refreshTimerDelay = retryDelay;
@@ -1390,6 +1420,8 @@ const createRoostSessionDataFactoryFromTransport =
       },
       dispose: () => {
         disposed = true;
+        setHistorySyncProgress(null);
+        progressListeners.clear();
         stopSubscription();
         unsubscribeWake?.();
         if (refreshTimer) clearTimeout(refreshTimer);
@@ -1398,7 +1430,19 @@ const createRoostSessionDataFactoryFromTransport =
         listeners.clear();
       },
     });
-    return sessionData as RoostSessionData;
+    return {
+      ...sessionData,
+      historySyncProgress: {
+        getSnapshot: () => historySyncProgress,
+        subscribe(listener) {
+          if (disposed) return () => {};
+          progressListeners.add(listener);
+          return () => {
+            progressListeners.delete(listener);
+          };
+        },
+      },
+    };
   };
 
 const historyCacheScope = (options: LocalRoostSessionBridgeOptions, sessionId: SessionId) =>

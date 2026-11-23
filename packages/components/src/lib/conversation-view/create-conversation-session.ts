@@ -11,7 +11,18 @@ import {
 import type { CreateConversationViewFromReaderOptions } from './create-conversation-view-from-reader';
 import { createConversationViewFromReader } from './create-conversation-view-from-reader';
 
+export type HistorySyncProgress = {
+  readonly received: number;
+  readonly total: number;
+};
+
+export type HistorySyncProgressView = {
+  readonly getSnapshot: () => HistorySyncProgress | null;
+  readonly subscribe: (listener: () => void) => () => void;
+};
+
 export type ConversationSessionData = SessionData & {
+  readonly historySyncProgress?: HistorySyncProgressView;
   /** Optional storage-owned cleanup for composed backend data. */
   readonly dispose?: () => void;
 };

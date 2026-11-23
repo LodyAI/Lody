@@ -2680,6 +2680,7 @@ export const SessionChatInterface = memo(
     const {
       doc: sessionDoc,
       history: conversationView,
+      historySyncProgress,
       addHistory: addSessionHistory,
       pushMessageQueue,
       removeMessageQueueItem,
@@ -7938,6 +7939,7 @@ export const SessionChatInterface = memo(
                             : undefined
                         }
                         diffStat={infoBarDiffStat}
+                        historySyncProgress={isVisible ? historySyncProgress : undefined}
                         // Desktop only: mobile already shows catch-up in its header.
                         syncStatus={
                           isMobile
