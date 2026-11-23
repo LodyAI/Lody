@@ -157,7 +157,6 @@ fn main() -> ExitCode {
                 let svc = Arc::clone(&runtime) as Arc<dyn ApplicationService>;
                 let res =
                     serve_local_daemon(&effective_data_dir, env!("CARGO_PKG_VERSION"), svc).await;
-                runtime.shutdown().await;
                 match res {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {

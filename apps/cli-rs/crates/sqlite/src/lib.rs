@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
 use lody_ports::{
-    AdmissionVerdict, AdmittedTurnInput, HistoryPort, HistoryTurnRecord, InboxCategory,
-    InboxStorePort, LocalProjectId, LocalProjectRecord, PortError, PortErrorKind, PortResult,
-    ProjectStorePort, SessionId, SubmissionStage, TurnId, UserId, WorkspaceId,
+    AdmissionVerdict, AdmittedTurnInput, CustomCommandSpec, HistoryPort, HistoryTurnRecord,
+    InboxCategory, InboxStorePort, LocalProjectId, LocalProjectRecord, PortError, PortErrorKind,
+    PortResult, ProjectStorePort, SessionId, SubmissionStage, TurnId, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::fs;
@@ -69,6 +69,9 @@ impl SqliteStore {
                  priority INTEGER NOT NULL,
                  verified_requester TEXT NOT NULL,
                  prompt_text TEXT NOT NULL,
+                 adapter_id TEXT NOT NULL,
+                 custom_acp_json TEXT,
+                 signed_intent_verified INTEGER NOT NULL DEFAULT 1,
                  stage TEXT NOT NULL,
                  UNIQUE(workspace_id, session_id, turn_id)
              );
@@ -147,6 +150,23 @@ impl InboxStorePort for SqliteStore {
     }
 
     fn admit_turn(&self, input: &AdmittedTurnInput) -> PortResult<AdmissionVerdict> {
+        let custom_acp_json = input
+            .custom_acp
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+
+        let initial_record = HistoryTurnRecord {
+            turn_id: input.turn_id.clone(),
+            author_user_id: Some(input.verified_requester.clone()),
+            user_prompt: input.prompt_text.clone(),
+            assistant_blocks: Vec::new(),
+            outcome: None,
+        };
+        let initial_record_json = serde_json::to_string(&initial_record)
+            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+
         let mut conn = self.conn.lock().expect("sqlite lock");
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -156,8 +176,9 @@ impl InboxStorePort for SqliteStore {
         let inserted = tx
             .execute(
                 "INSERT OR IGNORE INTO lody_inbox_turns
-                 (workspace_id, session_id, turn_id, category, priority, verified_requester, prompt_text, stage)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'prepared')",
+                 (workspace_id, session_id, turn_id, category, priority, verified_requester,
+                  prompt_text, adapter_id, custom_acp_json, signed_intent_verified, stage)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'prepared')",
                 params![
                     &input.workspace_id.0,
                     &input.session_id.0,
@@ -166,9 +187,24 @@ impl InboxStorePort for SqliteStore {
                     priority,
                     &input.verified_requester.0,
                     &input.prompt_text,
+                    &input.adapter_id,
+                    custom_acp_json.as_deref(),
+                    i64::from(input.signed_intent_verified),
                 ],
             )
             .map_err(map_sql_err)?;
+
+        tx.execute(
+            "INSERT OR IGNORE INTO lody_session_turns (workspace_id, session_id, turn_id, record_json)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                &input.workspace_id.0,
+                &input.session_id.0,
+                &input.turn_id.0,
+                &initial_record_json,
+            ],
+        )
+        .map_err(map_sql_err)?;
 
         if inserted > 0 && matches!(input.category, InboxCategory::Human) {
             tx.execute(
@@ -212,20 +248,52 @@ impl InboxStorePort for SqliteStore {
             return Ok(None);
         }
 
-        let row: Option<(i64, String, String, String, String)> = tx
+        #[allow(clippy::type_complexity)]
+        let row: Option<(
+            i64,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            i64,
+        )> = tx
             .query_row(
-                "SELECT seq, turn_id, category, verified_requester, prompt_text
+                "SELECT seq, turn_id, category, verified_requester, prompt_text,
+                        adapter_id, custom_acp_json, signed_intent_verified
                  FROM lody_inbox_turns
                  WHERE workspace_id = ?1 AND session_id = ?2 AND stage = 'prepared'
                  ORDER BY priority ASC, seq ASC
                  LIMIT 1",
                 params![&workspace_id.0, &session_id.0],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                    ))
+                },
             )
             .optional()
             .map_err(map_sql_err)?;
 
-        let Some((seq, turn_id, cat_raw, requester, prompt_text)) = row else {
+        let Some((
+            seq,
+            turn_id,
+            cat_raw,
+            requester,
+            prompt_text,
+            adapter_id,
+            custom_acp_json,
+            signed_flag,
+        )) = row
+        else {
             return Ok(None);
         };
 
@@ -237,6 +305,12 @@ impl InboxStorePort for SqliteStore {
 
         tx.commit().map_err(map_sql_err)?;
 
+        let custom_acp: Option<CustomCommandSpec> = custom_acp_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+
         Ok(Some(AdmittedTurnInput {
             workspace_id: workspace_id.clone(),
             session_id: session_id.clone(),
@@ -244,6 +318,9 @@ impl InboxStorePort for SqliteStore {
             category: category_from_wire(&cat_raw),
             verified_requester: UserId(requester),
             prompt_text,
+            adapter_id,
+            custom_acp,
+            signed_intent_verified: signed_flag != 0,
         }))
     }
 
@@ -320,7 +397,13 @@ impl ProjectStorePort for SqliteStore {
             .query_row(
                 "SELECT project_id, name, default_branch FROM lody_local_projects WHERE root_path = ?1",
                 params![root_str.as_ref()],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
             )
             .optional()
             .map_err(map_sql_err)?

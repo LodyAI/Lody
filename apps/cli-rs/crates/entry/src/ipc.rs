@@ -631,6 +631,9 @@ pub async fn serve_local_daemon(
 
     let _ = tokio::join!(probe_srv, control_srv);
 
+    let svc_for_drain = Arc::clone(&shared.service);
+    let _ = tokio::task::spawn_blocking(move || svc_for_drain.drain_for_shutdown()).await;
+
     if DaemonRunMetadata::read(data_dir).is_some_and(|m| m.pid == my_pid) {
         let _ = fs::remove_file(&run_file);
         let _ = fs::remove_file(&probe_path);

@@ -20,6 +20,9 @@ fn duplicate_admission_pause_gate_and_human_over_automation_priority_persist_acr
             category: InboxCategory::Automation,
             verified_requester: UserId("u_1".to_string()),
             prompt_text: "auto".to_string(),
+            adapter_id: "codex".to_string(),
+            custom_acp: None,
+            signed_intent_verified: true,
         };
         assert_eq!(store.admit_turn(&auto).unwrap(), AdmissionVerdict::Admitted);
         assert_eq!(
@@ -37,6 +40,9 @@ fn duplicate_admission_pause_gate_and_human_over_automation_priority_persist_acr
             category: InboxCategory::Human,
             verified_requester: UserId("u_1".to_string()),
             prompt_text: "human".to_string(),
+            adapter_id: "claude".to_string(),
+            custom_acp: None,
+            signed_intent_verified: true,
         };
         assert_eq!(
             store.admit_turn(&human).unwrap(),
@@ -50,12 +56,14 @@ fn duplicate_admission_pause_gate_and_human_over_automation_priority_persist_acr
         .unwrap()
         .expect("human unpaused inbox");
     assert_eq!(first.turn_id.0, "t_human");
+    assert_eq!(first.adapter_id, "claude");
 
     let second = reopened
         .claim_next_runnable(&ws, &sid)
         .unwrap()
         .expect("automation runs after human");
     assert_eq!(second.turn_id.0, "t_auto");
+    assert_eq!(second.adapter_id, "codex");
     assert!(reopened.claim_next_runnable(&ws, &sid).unwrap().is_none());
 }
 

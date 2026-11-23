@@ -13,9 +13,8 @@ use lody_app::{
 };
 use lody_kernel::{FrozenTurnInvocation, TurnSourceKind};
 use lody_ports::{
-    AcpLauncherPort, AdmissionVerdict, AdmittedTurnInput, ArtifactRegistryPort, BackendPort,
-    DiffStorePort, EnginePort, HistoryPort, InboxCategory, InboxStorePort, ProjectStorePort,
-    WorktreePort,
+    AcpLauncherPort, AdmittedTurnInput, ArtifactRegistryPort, BackendPort, DiffStorePort,
+    EnginePort, HistoryPort, InboxCategory, InboxStorePort, ProjectStorePort, WorktreePort,
 };
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -250,33 +249,39 @@ impl DaemonRuntime {
         prompt: String,
     ) -> PortResult<AppResponse> {
         let requester = Self::verified_requester(caller);
-        let verdict = self.deps.inbox.admit_turn(&AdmittedTurnInput {
+        let signed_intent_verified = matches!(
+            caller,
+            VerifiedPrincipal::LocalHost { .. } | VerifiedPrincipal::EncryptedMember { .. }
+        );
+        let _ = self.deps.inbox.admit_turn(&AdmittedTurnInput {
             workspace_id: workspace_id.clone(),
             session_id: session_id.clone(),
             turn_id: turn_id.clone(),
             category: InboxCategory::Human,
             verified_requester: requester.clone(),
             prompt_text: prompt.clone(),
+            adapter_id,
+            custom_acp: custom_acp.clone(),
+            signed_intent_verified,
         })?;
 
-        if verdict == AdmissionVerdict::DuplicateIgnored {
-            return Ok(AppResponse::SessionAccepted {
-                session_id,
-                turn_id,
-            });
+        if !self
+            .deps
+            .history
+            .is_user_turn_durable(&workspace_id, &session_id, &turn_id)?
+        {
+            self.deps.history.upsert_turn_record(
+                &workspace_id,
+                &session_id,
+                &HistoryTurnRecord {
+                    turn_id: turn_id.clone(),
+                    author_user_id: Some(requester),
+                    user_prompt: prompt,
+                    assistant_blocks: Vec::new(),
+                    outcome: None,
+                },
+            )?;
         }
-
-        self.deps.history.upsert_turn_record(
-            &workspace_id,
-            &session_id,
-            &HistoryTurnRecord {
-                turn_id: turn_id.clone(),
-                author_user_id: Some(requester),
-                user_prompt: prompt,
-                assistant_blocks: Vec::new(),
-                outcome: None,
-            },
-        )?;
 
         let handle = self.ensure_session_actor(
             &workspace_id,
@@ -284,12 +289,9 @@ impl DaemonRuntime {
             depth,
             local_project_id,
             use_worktree,
-            custom_acp.clone(),
+            custom_acp,
         )?;
-        if let Some(spec) = custom_acp {
-            handle.set_custom_acp(spec).await?;
-        }
-        handle.wake_inbox(adapter_id).await?;
+        handle.wake_inbox().await?;
 
         Ok(AppResponse::SessionAccepted {
             session_id,
@@ -574,5 +576,13 @@ impl ApplicationService for DaemonRuntime {
 
     fn query(&self, caller: &VerifiedPrincipal, query: AppQuery) -> PortResult<AppResponse> {
         self.query_sync(caller, query)
+    }
+
+    fn drain_for_shutdown(&self) {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            tokio::task::block_in_place(|| handle.block_on(self.shutdown()));
+        } else if let Some(rt) = &self.owned_tokio {
+            rt.block_on(self.shutdown());
+        }
     }
 }

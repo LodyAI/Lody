@@ -225,4 +225,5 @@ pub fn enforce_command_policy(
 pub trait ApplicationService: Send + Sync {
     fn execute(&self, caller: &VerifiedPrincipal, cmd: AppCommand) -> PortResult<AppResponse>;
     fn query(&self, caller: &VerifiedPrincipal, query: AppQuery) -> PortResult<AppResponse>;
+    fn drain_for_shutdown(&self) {}
 }

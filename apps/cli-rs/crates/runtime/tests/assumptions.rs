@@ -96,12 +96,16 @@ impl HistoryPort for MemoryHistory {
         sid: &SessionId,
         record: &HistoryTurnRecord,
     ) -> PortResult<()> {
-        self.upsert_calls.fetch_add(1, Ordering::SeqCst);
         let mut guard = self.turns.lock().expect("history lock");
         let list = guard.entry((ws.clone(), sid.clone())).or_default();
         if let Some(existing) = list.iter_mut().find(|r| r.turn_id == record.turn_id) {
+            if existing.outcome.is_some() && record.outcome.is_none() {
+                return Ok(());
+            }
+            self.upsert_calls.fetch_add(1, Ordering::SeqCst);
             *existing = record.clone();
         } else {
+            self.upsert_calls.fetch_add(1, Ordering::SeqCst);
             list.push(record.clone());
         }
         Ok(())
@@ -227,6 +231,7 @@ impl WorktreePort for NoopWorktree {
     }
     fn acquire_worktree(
         &self,
+        _: &WorkspaceId,
         _: &LocalProjectId,
         _: &Path,
         _: &SessionId,

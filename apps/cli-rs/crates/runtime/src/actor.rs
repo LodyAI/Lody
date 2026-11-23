@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
+use tokio::time::MissedTickBehavior;
 
 const STREAM_FLUSH_BYTES: usize = 4096;
 const STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(150);
@@ -33,9 +34,6 @@ pub enum ControlCommand {
         invocation: FrozenTurnInvocation,
         reply: oneshot::Sender<PortResult<SteerVerdict>>,
     },
-    SetCustomAcp {
-        spec: CustomCommandSpec,
-    },
     Archive {
         reply: oneshot::Sender<PortResult<()>>,
     },
@@ -48,9 +46,7 @@ pub enum ControlCommand {
 }
 
 enum ActorEvent {
-    WakeInbox {
-        adapter_id: String,
-    },
+    WakeInbox,
     Kernel(KernelEvent),
     PrepareCompleted {
         generation: Generation,
@@ -68,11 +64,9 @@ pub struct SessionHandle {
 }
 
 impl SessionHandle {
-    pub async fn wake_inbox(&self, adapter_id: impl Into<String>) -> PortResult<()> {
+    pub async fn wake_inbox(&self) -> PortResult<()> {
         self.event_tx
-            .send(ActorEvent::WakeInbox {
-                adapter_id: adapter_id.into(),
-            })
+            .send(ActorEvent::WakeInbox)
             .await
             .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor closed"))
     }
@@ -88,13 +82,6 @@ impl SessionHandle {
         self.event_tx
             .try_send(ActorEvent::Kernel(event))
             .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session event queue full"))
-    }
-
-    pub async fn set_custom_acp(&self, spec: CustomCommandSpec) -> PortResult<()> {
-        self.control_tx
-            .send(ControlCommand::SetCustomAcp { spec })
-            .await
-            .map_err(|_| PortError::new(PortErrorKind::Unavailable, "session actor closed"))
     }
 
     pub async fn cancel(&self, pause_inbox: bool) -> PortResult<()> {
@@ -247,7 +234,6 @@ struct SessionActor {
     deps: Arc<DaemonDependencies>,
     acp_start_semaphore: Arc<Semaphore>,
     state: SessionState,
-    preferred_adapter_id: String,
     live_agent: Option<LiveAgentSlot>,
     prepare_abort: Option<AbortHandle>,
     worktree_lease: Option<WorktreeLease>,
@@ -276,7 +262,6 @@ pub fn spawn_session_actor(
         deps,
         acp_start_semaphore,
         state,
-        preferred_adapter_id: "default".to_string(),
         live_agent: None,
         prepare_abort: None,
         worktree_lease: None,
@@ -299,18 +284,24 @@ impl SessionActor {
         self.active_turn.as_ref().is_some_and(|b| b.dirty)
     }
 
-    fn flush_active_turn(&mut self) {
-        if let Some(buf) = &mut self.active_turn
-            && buf.dirty
-            && self
-                .deps
-                .history
-                .upsert_turn_record(&self.opts.workspace_id, &self.opts.session_id, &buf.record)
-                .is_ok()
+    fn flush_active_turn(&mut self) -> bool {
+        let Some(buf) = &mut self.active_turn else {
+            return true;
+        };
+        if !buf.dirty {
+            return true;
+        }
+        if self
+            .deps
+            .history
+            .upsert_turn_record(&self.opts.workspace_id, &self.opts.session_id, &buf.record)
+            .is_ok()
         {
             buf.dirty = false;
             buf.unflushed_bytes = 0;
+            return true;
         }
+        false
     }
 
     fn abort_pending_prepare(&mut self) {
@@ -320,6 +311,10 @@ impl SessionActor {
     }
 
     async fn run(mut self) {
+        let mut flush_interval = tokio::time::interval(STREAM_FLUSH_INTERVAL);
+        flush_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let _ = flush_interval.tick().await;
+
         loop {
             let dirty = self.has_dirty_turn();
             tokio::select! {
@@ -340,21 +335,18 @@ impl SessionActor {
                         None => break,
                     }
                 }
-                () = tokio::time::sleep(STREAM_FLUSH_INTERVAL), if dirty => {
-                    self.flush_active_turn();
+                _ = flush_interval.tick(), if dirty => {
+                    let _ = self.flush_active_turn();
                 }
             }
         }
-        self.flush_active_turn();
+        let _ = self.flush_active_turn();
         self.cleanup_resources();
     }
 
     async fn handle_actor_event(&mut self, actor_ev: ActorEvent) {
         match actor_ev {
-            ActorEvent::WakeInbox { adapter_id } => {
-                if !adapter_id.is_empty() {
-                    self.preferred_adapter_id = adapter_id;
-                }
+            ActorEvent::WakeInbox => {
                 self.maybe_claim_from_durable_inbox().await;
             }
             ActorEvent::Kernel(ev) => {
@@ -414,7 +406,7 @@ impl SessionActor {
     }
 
     async fn maybe_claim_from_durable_inbox(&mut self) {
-        if !matches!(self.state.phase, SessionPhase::Idle { .. }) {
+        if !matches!(self.state.phase, SessionPhase::Idle { .. }) || self.has_dirty_turn() {
             return;
         }
         let Ok(Some(admitted)) = self
@@ -424,6 +416,10 @@ impl SessionActor {
         else {
             return;
         };
+
+        if let Some(custom) = admitted.custom_acp.clone() {
+            self.opts.custom_acp = Some(custom);
+        }
 
         self.active_turn = Some(ActiveTurnBuffer {
             record: HistoryTurnRecord {
@@ -463,9 +459,9 @@ impl SessionActor {
             requester_user_id: admitted.verified_requester.0,
             prompt_text: admitted.prompt_text,
             source,
-            adapter_id: self.preferred_adapter_id.clone(),
+            adapter_id: admitted.adapter_id,
             mcp_selection_digest: "default".to_string(),
-            signed_intent_verified: true,
+            signed_intent_verified: admitted.signed_intent_verified,
         };
         self.process_event_loop(KernelEvent::SubmitInput { invocation })
             .await;
@@ -473,10 +469,6 @@ impl SessionActor {
 
     async fn handle_control(&mut self, cmd: ControlCommand) -> bool {
         match cmd {
-            ControlCommand::SetCustomAcp { spec } => {
-                self.opts.custom_acp = Some(spec);
-                false
-            }
             ControlCommand::Cancel { pause_inbox, reply } => {
                 self.abort_pending_prepare();
                 let _ = self.deps.inbox.set_inbox_paused(
@@ -486,7 +478,7 @@ impl SessionActor {
                 );
                 self.process_event_loop(KernelEvent::CancelRequested { pause_inbox })
                     .await;
-                self.flush_active_turn();
+                let _ = self.flush_active_turn();
                 self.maybe_claim_from_durable_inbox().await;
                 let _ = reply.send(());
                 false
@@ -506,7 +498,7 @@ impl SessionActor {
                         }
                     }
                 }
-                self.flush_active_turn();
+                let _ = self.flush_active_turn();
                 self.process_event_loop(KernelEvent::UserRepliedPermission {
                     request_id: decision.request_id,
                     selected_option_id: decision.selected_option_id,
@@ -525,7 +517,7 @@ impl SessionActor {
                 self.abort_pending_prepare();
                 self.process_event_loop(KernelEvent::CancelRequested { pause_inbox: true })
                     .await;
-                self.flush_active_turn();
+                let _ = self.flush_active_turn();
                 self.cleanup_resources();
                 let res = self.release_worktree_if_held();
                 let _ = reply.send(res);
@@ -539,7 +531,7 @@ impl SessionActor {
                 self.abort_pending_prepare();
                 self.process_event_loop(KernelEvent::CancelRequested { pause_inbox: false })
                     .await;
-                self.flush_active_turn();
+                let _ = self.flush_active_turn();
                 self.cleanup_resources();
                 let _ = reply.send(());
                 true
@@ -615,6 +607,9 @@ impl SessionActor {
                     category: InboxCategory::Human,
                     verified_requester: UserId(invocation.requester_user_id.clone()),
                     prompt_text: invocation.prompt_text.clone(),
+                    adapter_id: invocation.adapter_id.clone(),
+                    custom_acp: self.opts.custom_acp.clone(),
+                    signed_intent_verified: invocation.signed_intent_verified,
                 });
                 let rec = HistoryTurnRecord {
                     turn_id: TurnId(invocation.turn_id.clone()),
@@ -714,13 +709,15 @@ impl SessionActor {
                 let deps = Arc::clone(&self.deps);
                 let tx = self.event_tx.clone();
                 let task = tokio::spawn(async move {
-                    let _permit = sem.acquire_owned().await;
-                    let result =
-                        tokio::task::spawn_blocking(move || deps.acp.launch_session(&spec, sink))
-                            .await
-                            .unwrap_or_else(|e| {
-                                Err(PortError::new(PortErrorKind::Internal, e.to_string()))
-                            });
+                    let permit = sem.acquire_owned().await;
+                    let result = tokio::task::spawn_blocking(move || {
+                        let _held_permit = permit;
+                        deps.acp.launch_session(&spec, sink)
+                    })
+                    .await
+                    .unwrap_or_else(|e| {
+                        Err(PortError::new(PortErrorKind::Internal, e.to_string()))
+                    });
                     let _ = tx
                         .send(ActorEvent::PrepareCompleted {
                             generation,
@@ -803,7 +800,7 @@ impl SessionActor {
                     false
                 };
                 if should_flush {
-                    self.flush_active_turn();
+                    let _ = self.flush_active_turn();
                 }
             }
             KernelAction::RecordToolStatus {
@@ -849,7 +846,7 @@ impl SessionActor {
                         });
                     buf.dirty = true;
                 }
-                self.flush_active_turn();
+                let _ = self.flush_active_turn();
             }
             KernelAction::ForwardPermissionReply {
                 request_id,
@@ -909,13 +906,14 @@ impl SessionActor {
                     buf.record.outcome = Some(outcome);
                     buf.dirty = true;
                 }
-                self.flush_active_turn();
-                let _ = self.deps.inbox.update_submission_stage(
-                    &self.opts.workspace_id,
-                    &self.opts.session_id,
-                    &TurnId(turn_id),
-                    SubmissionStage::Settled,
-                );
+                if self.flush_active_turn() {
+                    let _ = self.deps.inbox.update_submission_stage(
+                        &self.opts.workspace_id,
+                        &self.opts.session_id,
+                        &TurnId(turn_id),
+                        SubmissionStage::Settled,
+                    );
+                }
             }
             KernelAction::CancelPendingPermission { .. }
             | KernelAction::SendAgentSteer { .. }
@@ -934,10 +932,13 @@ impl SessionActor {
         if self.opts.use_worktree
             && let (Some(pid), Some(root)) = (&self.opts.local_project_id, &self.opts.project_root)
         {
-            let lease =
-                self.deps
-                    .worktree
-                    .acquire_worktree(pid, root, &self.opts.session_id, None)?;
+            let lease = self.deps.worktree.acquire_worktree(
+                &self.opts.workspace_id,
+                pid,
+                root,
+                &self.opts.session_id,
+                None,
+            )?;
             let path = lease.worktree_path.clone();
             self.worktree_lease = Some(lease);
             return Ok(path);

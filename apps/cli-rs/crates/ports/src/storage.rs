@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::error::PortResult;
+use crate::execution::CustomCommandSpec;
 use crate::identity::{LocalProjectId, SessionId, TurnId, UserId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -45,6 +46,9 @@ pub struct AdmittedTurnInput {
     pub category: InboxCategory,
     pub verified_requester: UserId,
     pub prompt_text: String,
+    pub adapter_id: String,
+    pub custom_acp: Option<CustomCommandSpec>,
+    pub signed_intent_verified: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
