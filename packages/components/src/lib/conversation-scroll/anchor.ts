@@ -1,11 +1,6 @@
 import type { Geometry } from './geometry';
 import type { EngineRow, ReadingAnchor } from './types';
 
-/**
- * Exact/identity resolution (rules 1–3 or matching fixed row) preserves
- * `offsetPx` and `screenY`; fallbacks (rules 4–7 or missing fixed row) always
- * align to row top (`offsetPx: 0`) and viewport top (`screenY = 0`).
- */
 export type ResolvedAnchor =
   | { index: number; offsetPx: number; fellBack: false }
   | { index: number; offsetPx: 0; fellBack: true };

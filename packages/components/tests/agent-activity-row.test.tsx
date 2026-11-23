@@ -336,7 +336,6 @@ describe('live agent status', () => {
 
   const openTurnInfo = async () => {
     const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
-    // Row overlays mount once their row is armed by a pointer entry.
     await act(async () => {
       info!
         .closest('[data-virtual-index]')!
@@ -589,8 +588,6 @@ describe('live agent status', () => {
     );
     // Token usage alone is enough to offer the turn details.
     const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
-    // Row overlays mount once their row is armed by a pointer entry, as in the
-    // app; arming remounts the trigger, so click the live one.
     await act(async () => {
       info!
         .closest('[data-virtual-index]')!
@@ -631,12 +628,10 @@ describe('live agent status', () => {
       disclosureButtons().find((btn) => btn.textContent?.includes('Ran 1 command'))!;
     expect(groupButton().getAttribute('aria-expanded')).toBe('false');
 
-    // Expand the thought group while the turn is still running.
     await act(async () => groupButton().click());
     expect(groupButton().getAttribute('aria-expanded')).toBe('true');
     expect(container.textContent).toContain('Investigating scroll anchor state.');
 
-    // Turn finishes with a final answer: outer WorkedGroup stays open so the expanded thought remains visible.
     await render(
       liveTurn([...work, { type: 'text' as const, text: 'All fixed.' }], {
         id: turnId,
@@ -651,13 +646,11 @@ describe('live agent status', () => {
     expect(container.textContent).toContain('Investigating scroll anchor state.');
     expect(container.textContent).toContain('All fixed.');
 
-    // Collapsing the inner thought group later keeps the outer WorkedGroup open.
     await act(async () => groupButton().click());
     expect(workedButton().getAttribute('aria-expanded')).toBe('true');
     expect(groupButton().getAttribute('aria-expanded')).toBe('false');
     expect(container.textContent).not.toContain('Investigating scroll anchor state.');
 
-    // Explicitly collapsing the outer WorkedGroup still works.
     await act(async () => workedButton().click());
     expect(workedButton().getAttribute('aria-expanded')).toBe('false');
   });

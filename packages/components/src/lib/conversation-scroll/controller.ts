@@ -723,7 +723,6 @@ export class ScrollController {
     return this.geometry.size(index);
   }
 
-  /** Full per-session scroll snapshot persisted across unmount/remount (sent saves as follow). */
   savedState(): SavedScrollState {
     const sizes = this.geometry.snapshot();
     if (this.intent.kind !== 'read') {

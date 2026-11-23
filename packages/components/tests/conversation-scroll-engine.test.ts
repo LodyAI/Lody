@@ -1015,7 +1015,6 @@ describe('session switch & restore', () => {
     sim.render();
     sim.settle();
 
-    // Send turn 3 near top with reply room, then expand its live thought header.
     sim.task(() => sim.controller.anchorToRow(20));
     sim.settle();
     const headerBefore = sim.screenTop('thought-3')!;
@@ -1034,8 +1033,6 @@ describe('session switch & restore', () => {
       expect(saved.intent.disclosureSpace).toBe(true);
     }
 
-    // Remount while turn 3 is still short: reply room holds the thought header in place
-    // instead of clamping upward into turns 1 and 2.
     const remountShort = new ScrollSim(
       initialRows.map((row) => ({ ...row })),
       V,
@@ -1046,8 +1043,6 @@ describe('session switch & restore', () => {
     expect(remountShort.replyRoom).toBeGreaterThan(0);
     expectHealthy(remountShort);
 
-    // Remount after new thought output filled the viewport while away:
-    // anchor stays at the same screenY and replyRoom shrinks back to 0.
     const grownRows: SimRow[] = [
       ...initialRows.map((row) => ({ ...row })),
       { key: 'thought-3-detail', turnId: 'a3', turnIndex: 21, height: 900, estimate: 120 },
@@ -1074,7 +1069,6 @@ describe('session switch & restore', () => {
     sim.render();
     sim.settle();
 
-    // Put the thought header near the bottom of the viewport and preserve its disclosure.
     sim.controller.release('reader-up');
     const thoughtOffset = sim.controller.getItemOffset(21);
     sim.nativeScroll(sim.contentTop + thoughtOffset - 500);
@@ -1085,11 +1079,9 @@ describe('session switch & restore', () => {
     sim.settle();
     const saved = sim.controller.savedState();
 
-    // While away, the thought row folds away and only the turn's worked header + answer remain.
     const foldedRows = rows.filter((row) => row.key !== 'a3-thought').map((row) => ({ ...row }));
     const remount = new ScrollSim(foldedRows, V, { savedState: saved });
     remount.render();
-    // Fallback row starts at the top of the viewport, not pushed down by the old 500px screenY.
     expect(remount.screenTop('a3-worked')).toBe(0);
     expectHealthy(remount);
   });
@@ -1108,14 +1100,11 @@ describe('session switch & restore', () => {
     expect(sim.screenTop('t15')).toBe(0);
     const saved = sim.controller.savedState();
 
-    // While unmounted, a same-key row above the anchor grew from 100px to 400px
-    // and the anchor row itself grew from 100px to 300px.
     const updatedRows = rows.map((row) => ({ ...row }));
     updatedRows[14]!.height = 400;
     updatedRows[15]!.height = 300;
 
     const remount = new ScrollSim(updatedRows, V, { savedState: saved });
-    // Only run the mount commit (no frame / ResizeObserver delivery yet).
     remount.render();
     expect(remount.controller.getItemSize(14)).toBe(400);
     expect(remount.controller.getItemSize(15)).toBe(300);
@@ -1140,7 +1129,6 @@ describe('session switch & restore', () => {
     sim.rows[14]!.height = 350;
     sim.rows[15]!.height = 260;
 
-    // Showing the tab again must re-measure synchronously before ResizeObserver fires.
     sim.setHidden(false);
     expect(sim.controller.getItemSize(14)).toBe(350);
     expect(sim.controller.getItemSize(15)).toBe(260);
@@ -1177,8 +1165,6 @@ describe('session switch & restore', () => {
     sim.settle();
     const saved = sim.controller.savedState();
 
-    // Another item was inserted ahead in the same turn, shifting itemIndex and rowKey
-    // while keeping the same toolCallId (`itemIdentity`).
     const reindexed: SimRow[] = [
       ...turnRows(
         20,
@@ -1199,7 +1185,6 @@ describe('session switch & restore', () => {
     ];
     const remount = new ScrollSim(reindexed, V, { savedState: saved });
     remount.render();
-    // Same item keeps both offsetPx (15) and screenY (240 + 15 => row top at 240).
     expect(remount.screenTop('a3-tool-new')).toBe(240);
     expectHealthy(remount);
   });
@@ -1221,7 +1206,6 @@ describe('session switch & restore', () => {
     const saved = first.controller.savedState();
     expect(saved.sizes?.sizes[0]).toBe(137);
 
-    // Remount at row 30 so row 0 stays offscreen and unverified in this mount.
     const sameWidth = new ScrollSim(
       rows.map((row) => ({ ...row })),
       V,
@@ -1231,7 +1215,6 @@ describe('session switch & restore', () => {
     expect(sameWidth.mounted.has('t0')).toBe(false);
     expect(sameWidth.controller.savedState().sizes?.sizes[0]).toBe(137);
 
-    // Changing layoutVersion drops stale offscreen sizes to UNCACHED.
     sameWidth.controller.setLayoutVersion('1000|md');
     expect(sameWidth.controller.savedState().sizes?.sizes[0]).toBe(UNCACHED);
   });

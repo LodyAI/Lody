@@ -298,7 +298,10 @@ states, and the "no output" status).
 
 Opening or closing a work group, tool group, command detail or terminal detail
 switches the conversation to reading mode and holds the clicked header at its
-screen position. This also applies at the bottom: manually inspecting work takes
+screen position. Expanding an inner activity group also records its segment's
+`WorkedGroup` as open when previously unset, so live-opened thoughts/tools stay
+open when the turn finishes and collapsing the inner group later does not fold
+the outer region out from under the clicked header (explicit outer toggles still win). This also applies at the bottom: manually inspecting work takes
 precedence over following new output. The reader can resume following by scrolling
 to the real bottom or using the scroll-to-latest control.
 

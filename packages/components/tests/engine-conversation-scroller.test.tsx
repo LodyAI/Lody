@@ -487,10 +487,6 @@ it('returns to following with the handle and keeps the latest row on screen as i
   }
 });
 
-// ---- Reader input -----------------------------------------------------------
-// Real events on the mounted DOM; the observable result is the mode (the
-// sticky state) and whether new rows at the end move the viewport.
-
 const BOTTOM = (count: number) => count * ROW - VIEWPORT;
 
 /** Append two rows; a following viewport moves to the new end, a reading one stays. */
@@ -1030,8 +1026,6 @@ it('persists disclosure reply room across unmount and remount, and shrinks it on
     unmount(first);
   }
 
-  // Remount while the turn is still short: reply room keeps r29 at the same screenY
-  // instead of clamping back into earlier rows.
   const second = mount(sessionId, keys, undefined, {
     disclosure: { key: 'r29', headerOffset: 0, headerHeight: 20 },
   });
@@ -1048,7 +1042,6 @@ it('persists disclosure reply room across unmount and remount, and shrinks it on
     unmount(second);
   }
 
-  // Remount after more rows streamed below r29: screenY is preserved and reply room shrinks to 0.
   const grownKeys = [...keys, 'r30', 'r31', 'r32', 'r33', 'r34', 'r35', 'r36', 'r37'];
   const third = mount(sessionId, grownKeys, undefined, {
     disclosure: { key: 'r29', headerOffset: 0, headerHeight: 20 },

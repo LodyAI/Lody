@@ -7,12 +7,9 @@ export type { SavedSizes };
 /**
  * Row sizes and offsets in item space (0 = the top of the rows container).
  *
- * Sizes follow row keys, so a placeholder that becomes several rows, or a row
- * that comes back, starts at a size seen before. A size counts as measured
- * only after it is read from the live DOM under the current measurement epoch
- * (mount, reshow, or layout-version change); restored sizes and pre-hide sizes
- * serve as warm initial estimates and survive in `snapshot()` for offscreen
- * rows whose layout version still matches.
+ * Sizes follow row keys, so restored or pre-hide sizes warm initial estimates
+ * and survive in `snapshot()` while layoutVersion matches, but count as
+ * measured only after a live DOM read in the current epoch.
  */
 export class Geometry {
   private readonly layout: ListLayout;
@@ -89,7 +86,6 @@ export class Geometry {
     return true;
   }
 
-  /** Require mounted rows to be re-measured from the live DOM (e.g. after reshow). */
   invalidateLiveMeasurements(): void {
     this.epoch += 1;
   }
@@ -114,7 +110,6 @@ export class Geometry {
     return this.layout.$findIndex(y);
   }
 
-  /** Measured from the live DOM in the current layout version and mount/visible epoch. */
   isMeasured(index: number): boolean {
     const key = this.keys[index];
     return key !== undefined && this.records.get(key)?.epoch === this.epoch;
