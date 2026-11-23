@@ -4,7 +4,12 @@ import {
   requirePlaintextWorkspaceStreamsContent,
   type WorkspaceStreamsMode,
 } from '@lody/shared/workspace-streams-content';
-import { StreamsCrdt, type CrdtAdapter, type JsonObject as Version } from '@loro-dev/streams-crdt';
+import {
+  type StreamsCrdt,
+  type CrdtAdapter,
+  type JsonObject as Version,
+} from '@loro-dev/streams-crdt';
+import { createStreamsCrdt } from '@lody/shared/streams-crdt-factory';
 import { StreamsClient, type Result, type StreamError } from '@loro-dev/streams-client';
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import { createFlockAdapter } from '@loro-dev/streams-crdt/flock';
@@ -127,13 +132,14 @@ export async function openMigrationTarget(
       retry: { maxAttempts: 0 },
     });
   const make = (id: string, adapter: CrdtAdapter<Version>, signal?: AbortSignal) => {
-    const stream = new StreamsCrdt({
+    const stream = createStreamsCrdt({
       streamUrl: urlFor(id),
       adapter,
       auth: provider.createAuthCallback(),
       fetch: fetchFor(signal),
       snapshotCodec: streamsSnapshotCodec,
-      shardUrls: getLoroStreamsShardUrls(baseUrl, provider.getShardHostSuffix()),
+      webSocket: 'disabled',
+      shardUrls: getLoroStreamsShardUrls(baseUrl, provider.getShardHostSuffix()) ?? 'disabled',
     });
     streams.add(stream);
     return stream;

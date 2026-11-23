@@ -18,6 +18,7 @@ import {
   machineFlockRowsByWorkspaceAtom,
   setMachineFlockRowsForMachineAtom,
 } from '@/atoms/machine-flock';
+import { recordStreamsHttpFallback } from '@lody/shared/streams-transport-diagnostics';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { deferredPostHog } from '@/lib/deferred-posthog';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -124,7 +125,6 @@ type SharedMachineFlockRoom = {
   firstSyncedWithRemote: Promise<void>;
   firstSyncSettled: boolean;
   freshCatchupPromise: Promise<void> | null;
-  hasHadPresenceAwareLease: boolean;
   presenceAwareRefCount: number;
   presenceCatchupRequired: boolean;
   scopeByOwner: WeakMap<object, object>;
@@ -209,6 +209,10 @@ const SHARED_MACHINE_FLOCK_HANDLES = new WeakMap<
 >();
 const SHARED_MACHINE_FLOCK_ROOMS = new WeakMap<
   WorkspaceRuntime,
+  Map<MachineId, SharedMachineFlockRoom>
+>();
+const SHARED_MACHINE_FLOCK_ROOMS_BY_REPO = new WeakMap<
+  object,
   Map<MachineId, SharedMachineFlockRoom>
 >();
 const SHARED_MACHINE_FLOCK_EVENTS = new WeakMap<
@@ -402,12 +406,14 @@ function acquireMachineFlockRoom(
 ): MachineFlockRoomLease {
   let roomsByMachineId = SHARED_MACHINE_FLOCK_ROOMS.get(runtime);
   if (!roomsByMachineId) {
-    roomsByMachineId = new Map();
+    roomsByMachineId = SHARED_MACHINE_FLOCK_ROOMS_BY_REPO.get(runtime.repo) ?? new Map();
     SHARED_MACHINE_FLOCK_ROOMS.set(runtime, roomsByMachineId);
+  }
+  if (runtime.repo && !SHARED_MACHINE_FLOCK_ROOMS_BY_REPO.has(runtime.repo)) {
+    SHARED_MACHINE_FLOCK_ROOMS_BY_REPO.set(runtime.repo, roomsByMachineId);
   }
 
   let room = roomsByMachineId.get(machineId);
-  const reusedRoom = room !== undefined;
   if (!room) {
     const subscriptionPromise = joinRoom();
     room = {
@@ -419,7 +425,6 @@ function acquireMachineFlockRoom(
       }),
       firstSyncSettled: false,
       freshCatchupPromise: null,
-      hasHadPresenceAwareLease: false,
       presenceAwareRefCount: 0,
       presenceCatchupRequired: false,
       scopeByOwner: new WeakMap(),
@@ -457,10 +462,6 @@ function acquireMachineFlockRoom(
     previousScope !== undefined && previousScope !== scope && room.firstSyncSettled;
   room.scopeByOwner.set(owner, scope);
   if (presenceAware) {
-    if (!room.hasHadPresenceAwareLease) {
-      room.hasHadPresenceAwareLease = true;
-      needsFreshCatchup ||= reusedRoom && room.firstSyncSettled;
-    }
     needsFreshCatchup ||= room.presenceCatchupRequired && room.firstSyncSettled;
     room.presenceAwareRefCount += 1;
     room.presenceCatchupRequired = false;
@@ -580,6 +581,7 @@ async function syncMachineFlockRowsOnce(
     // perfectly good local sync. Ask the cloud leg — the one that means
     // "reached a remote" — and treat a zero-transport (offline) report as
     // unconfirmed.
+    recordStreamsHttpFallback('forced-sync');
     const report = await handle.syncOnce();
     const cloud = report.transports.find((transport) => transport.transportId === 'cloud');
     return {
@@ -655,6 +657,84 @@ function readMachineFlockRowsSnapshot(
  * (settings, onboarding) must not report their own success as a failure. Pass
  * `requireRemoteSync` when the caller retries on a stale read.
  */
+/**
+ * Merge a freshly returned ACP capability into the in-memory Machine Flock cache overlay
+ * without touching `openFlockDoc` or performing any network I/O.
+ */
+export function applyRefreshedCapability(
+  runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'> | null | undefined,
+  machineId: MachineId | string | null | undefined,
+  refreshedCapability:
+    | {
+        configId: AgentConfigId;
+        value: AcpCapabilityCacheEntry;
+      }
+    | null
+    | undefined
+): void {
+  const normalizedMachineId = normalizeMachineId(machineId);
+  if (!runtime || !normalizedMachineId || !refreshedCapability) return;
+  const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, normalizedMachineId);
+  const key = machineFlockKeys.acpCapability(refreshedCapability.configId);
+  notifyMachineFlockRowsCache(cacheKey, {
+    rows: {
+      [serializeMachineFlockKey(key)]: {
+        key,
+        value: refreshedCapability.value,
+      },
+    },
+    mode: 'merge',
+  });
+}
+
+/**
+ * Wait for an active live Machine Flock room's first sync (or active catch-up) within `timeoutMs`.
+ * Returns true when the live room settled before the deadline; false when no live room exists,
+ * the room sync failed, or waiting timed out / was aborted.
+ */
+export async function waitForActiveMachineFlockRoomSync(
+  runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'> | null | undefined,
+  machineId: MachineId | string | null | undefined,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<boolean> {
+  const normalizedMachineId = normalizeMachineId(machineId);
+  if (!runtime || !normalizedMachineId) return false;
+  const signal = options.signal;
+  if (signal?.aborted) return false;
+  const roomsByMachineId =
+    SHARED_MACHINE_FLOCK_ROOMS.get(runtime as WorkspaceRuntime) ??
+    SHARED_MACHINE_FLOCK_ROOMS_BY_REPO.get(runtime.repo);
+  const room = roomsByMachineId?.get(normalizedMachineId);
+  if (!room || room.refCount <= 0) return false;
+  const target = room.freshCatchupPromise ?? room.firstSyncedWithRemote;
+  const timeoutMs = Math.max(1, options.timeoutMs ?? 10_000);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    const outcome = await Promise.race([
+      target.then(
+        () => 'synced' as const,
+        () => 'failed' as const
+      ),
+      new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), timeoutMs);
+      }),
+      ...(signal
+        ? [
+            new Promise<'aborted'>((resolve) => {
+              onAbort = () => resolve('aborted');
+              signal.addEventListener('abort', onAbort, { once: true });
+            }),
+          ]
+        : []),
+    ]);
+    return outcome === 'synced';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort && signal) signal.removeEventListener('abort', onAbort);
+  }
+}
+
 export async function resyncMachineFlockRows(
   runtime: Pick<WorkspaceRuntime, 'repo' | 'workspaceId'> | null | undefined,
   machineId: MachineId | string | null | undefined,
@@ -679,18 +759,7 @@ export async function resyncMachineFlockRows(
     syncedRemote: syncResult.syncedRemote,
     version,
   });
-  if (options.refreshedCapability) {
-    const key = machineFlockKeys.acpCapability(options.refreshedCapability.configId);
-    notifyMachineFlockRowsCache(cacheKey, {
-      rows: {
-        [serializeMachineFlockKey(key)]: {
-          key,
-          value: options.refreshedCapability.value,
-        },
-      },
-      mode: 'merge',
-    });
-  }
+  applyRefreshedCapability(runtime, normalizedMachineId, options.refreshedCapability);
   if (options.requireRemoteSync && !syncResult.syncedRemote) {
     throw new Error(`Failed to sync Machine Flock rows for ${normalizedMachineId}`);
   }

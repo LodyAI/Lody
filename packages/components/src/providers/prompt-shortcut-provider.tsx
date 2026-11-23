@@ -18,10 +18,7 @@ import {
 } from 'react';
 import { useAtomValue } from 'jotai';
 import type { LoroRepo } from 'loro-repo';
-import type {
-  PromptShortcutRuntime,
-  ShortcutRuntimeSnapshot,
-} from '@lody/shared/prompt-shortcuts';
+import type { PromptShortcutRuntime, ShortcutRuntimeSnapshot } from '@lody/shared/prompt-shortcuts';
 import { getShortcutResourceStreamId } from '@lody/shared/prompt-shortcuts/access';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -114,6 +111,7 @@ export function PromptShortcutProvider({
   const userId = session.status === 'authenticated' ? session.user.id : null;
   const cloud = platform.capabilities.has('cloudAccount');
   const cloudSyncEnabled = cloud && workspaceRuntime?.cloudStreamsEnabled !== false;
+  const streamsWebSocketEnabled = workspaceRuntime?.streamsWebSocketEnabled === true;
   const legacyStatus = useLegacyWorkspaceQueryStatus(scope.workspaceId);
   const auth = useOptionalAuthenticatedConvex();
   const tokenSession = useRef({ userId, id: auth?.authSessionId ?? null });
@@ -250,6 +248,8 @@ export function PromptShortcutProvider({
         ? new PromptShortcutSync({
             content: { mode: 'plaintext' },
             repo,
+            workspaceId,
+            webSocketEnabled: streamsWebSocketEnabled,
             now: Date.now,
             grant: async (resource, write, force) => {
               check();
@@ -258,13 +258,14 @@ export function PromptShortcutProvider({
                 if (!getWorkspaceGrant) {
                   throw new Error('Workspace Streams grant provider unavailable');
                 }
-                const { token, gatewayBaseUrl } = await getWorkspaceGrant({
+                const { token, gatewayBaseUrl, shardHostSuffix } = await getWorkspaceGrant({
                   forceRefresh: force,
                 });
                 check();
                 return {
                   token,
                   gatewayBaseUrl,
+                  shardHostSuffix,
                   expiresIn: 300,
                   streamId: getShortcutResourceStreamId(resource),
                 };
@@ -341,7 +342,15 @@ export function PromptShortcutProvider({
         if (closingDatabases.get(databaseName) === closing) closingDatabases.delete(databaseName);
       });
     };
-  }, [workspaceId, userId, authSessionId, cloudSyncEnabled, platform, generation]);
+  }, [
+    workspaceId,
+    userId,
+    authSessionId,
+    cloudSyncEnabled,
+    streamsWebSocketEnabled,
+    platform,
+    generation,
+  ]);
 
   useEffect(() => {
     if (runtime && directory) void runtime.setDirectory(directory);

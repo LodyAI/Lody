@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getLoroStreamsRemoteCursorUrlAliases } from './loro-streams-routing';
+import { recordStreamsHttpFallback } from './streams-transport-diagnostics';
 import type { IncompleteRecoveryStore } from '@loro-dev/streams-crdt';
 import type { JsonObject, RemoteCursor, StreamsAuthProvider } from '@loro-dev/streams-crdt';
 import type {
@@ -12,7 +13,12 @@ const SNAPSHOT_COST_FACTOR = 2n;
 const PROBE_TIMEOUT_MS = 1500;
 const recoveryByOwner = new WeakMap<
   object,
-  { forced: WeakSet<object>; recovered: WeakSet<object> }
+  {
+    forced: WeakSet<object>;
+    recovered: WeakSet<object>;
+    probedUrls: Set<string>;
+    inFlightProbes: Map<string, Promise<boolean>>;
+  }
 >();
 // Stream positions are twenty decimal byte digits, beyond Number's exact range.
 const byteOffset = (value: string | null | undefined): bigint | null =>
@@ -46,6 +52,7 @@ async function snapshotIsCheaper(
 ): Promise<boolean> {
   const local = byteOffset(cursor.nextOffset);
   if (local === null) return false;
+  recordStreamsHttpFallback('snapshot-probe');
   const signal = AbortSignal.timeout(PROBE_TIMEOUT_MS);
   let rejectAbort!: (reason: unknown) => void;
   const aborted = new Promise<never>((_resolve, reject) => {
@@ -122,10 +129,29 @@ export function createWorkspaceStreamsTransportAdapter<
   const owner = options.owner;
   let recovery = recoveryByOwner.get(owner);
   if (!recovery) {
-    recovery = { forced: new WeakSet(), recovered: new WeakSet() };
+    recovery = {
+      forced: new WeakSet(),
+      recovered: new WeakSet(),
+      probedUrls: new Set(),
+      inFlightProbes: new Map(),
+    };
     recoveryByOwner.set(owner, recovery);
   }
-  const { forced, recovered } = recovery;
+  const { forced, recovered, probedUrls, inFlightProbes } = recovery;
+  const probeSnapshotOnce = async (url: string, cursor: RemoteCursor): Promise<boolean> => {
+    if (byteOffset(cursor.nextOffset) === null) return false;
+    if (probedUrls.has(url)) return false;
+    const inFlight = inFlightProbes.get(url);
+    if (inFlight) return inFlight;
+    const probe = snapshotIsCheaper(url, cursor, options.auth).finally(() => {
+      probedUrls.add(url);
+      if (inFlightProbes.get(url) === probe) {
+        inFlightProbes.delete(url);
+      }
+    });
+    inFlightProbes.set(url, probe);
+    return probe;
+  };
   const adapter = createAdapter({
     ...persistence,
     cursorStoreFor: (target) => {
@@ -140,7 +166,7 @@ export function createWorkspaceStreamsTransportAdapter<
           if (
             forced.has(target.flock) ||
             (covers(target.flock.version(), cursor.serverLowerBoundVersion) &&
-              (await snapshotIsCheaper(url, cursor, options.auth)) &&
+              (await probeSnapshotOnce(url, cursor)) &&
               covers(target.flock.version(), cursor.serverLowerBoundVersion))
           ) {
             // Delete progress only. Bootstrap merges into the same replica;

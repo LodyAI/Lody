@@ -3,16 +3,17 @@ import {
   requirePlaintextWorkspaceStreamsContent,
   type WorkspaceStreamsMode,
 } from '../workspace-streams-content';
-import {
-  StreamsCrdt,
-  type CrdtAdapter,
-  type JsonObject,
-  type TransportSubscription,
-} from '@loro-dev/streams-crdt';
+import type { CrdtAdapter, JsonObject, TransportSubscription } from '@loro-dev/streams-crdt';
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import { createFlockAdapter } from '@loro-dev/streams-crdt/flock';
 import type { LoroRepo } from 'loro-repo';
-import { createLoroStreamUrl, LORO_STREAMS_BUCKET_ID } from '../loro-streams-routing';
+import {
+  createLoroStreamUrl,
+  getLoroStreamsShardUrls,
+  LORO_STREAMS_BUCKET_ID,
+} from '../loro-streams-routing';
+import { loroStreamsWebSocketOptions } from '../loro-streams-websocket';
+import { createStreamsCrdt } from '../streams-crdt-factory';
 import { getShortcutResourceStreamId, type ShortcutResource } from './access';
 import { PromptShortcutError } from './model';
 import { ShortcutLifetime } from './lifetime';
@@ -22,6 +23,7 @@ export type ShortcutStreamGrant = {
   expiresIn: number;
   gatewayBaseUrl: string;
   streamId: string;
+  shardHostSuffix?: string;
 };
 
 /** Prevent background echo writes as well as relying on the gateway's read-only grant. */
@@ -83,6 +85,9 @@ export class PromptShortcutSync {
         force?: boolean
       ) => Promise<ShortcutStreamGrant>;
       now: () => number;
+      workspaceId?: string;
+      webSocketEnabled?: boolean;
+      shardHostSuffix?: string;
     }
   ) {}
 
@@ -139,6 +144,7 @@ export class PromptShortcutSync {
     if (grant.streamId !== streamId)
       throw new PromptShortcutError('forbidden', 'Grant does not match the requested stream');
     const gatewayBaseUrl = grant.gatewayBaseUrl;
+    const shardHostSuffix = grant.shardHostSuffix ?? this.options.shardHostSuffix;
     let expiresAt = this.options.now() + grant.expiresIn * 1000;
     const auth = async (force: boolean) => {
       if (force || this.options.now() >= expiresAt - 5000) {
@@ -161,12 +167,26 @@ export class PromptShortcutSync {
         'doc' in lease
           ? this.options.repo.persistDocNow(streamId, lease.doc)
           : this.options.repo.persistFlockDocNow(streamId, lease.flock);
-      const transport = new StreamsCrdt({
+      const isWorkspaceRoom =
+        resource.kind === 'workspace-index' || resource.kind === 'workspace-body';
+      const { webSocket } = loroStreamsWebSocketOptions(
+        this.options.webSocketEnabled === true && resource.kind === 'workspace-index',
+        gatewayBaseUrl,
+        resource.kind === 'workspace-index'
+          ? (this.options.workspaceId ?? resource.workspaceId)
+          : ''
+      );
+      const shardUrls = isWorkspaceRoom
+        ? (getLoroStreamsShardUrls(gatewayBaseUrl, shardHostSuffix) ?? 'disabled')
+        : 'disabled';
+      const transport = createStreamsCrdt({
         streamUrl: createLoroStreamUrl({
           baseUrl: gatewayBaseUrl,
           bucketId: LORO_STREAMS_BUCKET_ID,
           streamId,
         }),
+        webSocket: webSocket ?? 'disabled',
+        shardUrls,
         adapter: write ? adapter : readonlyShortcutAdapter(adapter),
         auth: (context) => auth(context?.reason === 'unauthorized'),
         createStreamIfMissing: write,
@@ -205,7 +225,11 @@ export class PromptShortcutSync {
             const result = await transport.join();
             if (!result.ok) throw toTransportError(result.error);
             subscription = result.value;
-            if (closed) subscription.unsubscribe();
+            if (closed) {
+              subscription.unsubscribe();
+              return;
+            }
+            await persist();
           })().catch((error: unknown) => {
             joining = undefined;
             throw error;

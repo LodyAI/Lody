@@ -37,6 +37,7 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { desktopWindowId } from '@/lib/desktop-window';
+import { isElectronRenderer } from '@/lib/electron';
 import { encryptedLocalNamespace, type E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import {
@@ -67,7 +68,9 @@ import {
   machineSupportsProtocolCapability,
 } from '@lody/shared';
 import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
-import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
+import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
+import { createStreamsCrdt } from '@lody/shared/streams-crdt-factory';
+import { recordStreamsHttpFallback } from '@lody/shared/streams-transport-diagnostics';
 import type { PlatformSyncMode } from '@lody/platform';
 import {
   createLoroStreamsJsonStreamClient,
@@ -202,7 +205,11 @@ import { META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX } from '@/lib/clear-local-
 import { runStartupAcpCapabilitiesRefresh } from './startup-acp-capabilities-refresh';
 import { createLocalLoroDataPlaneConnection } from './local-loro-data-plane-connection';
 import { createWorkspaceMachineRpcFacade } from './workspace-machine-rpc-facade';
-import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
+import {
+  applyRefreshedCapability,
+  resyncMachineFlockRows,
+  waitForActiveMachineFlockRoomSync,
+} from '@/hooks/use-machine-flock-rows';
 import { createCodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { getIpcServices, onIpcEvent, sendLocalSessionControl } from '@/lib/electron-ipc-client';
 import { createRoostSessionDataFactoryForMachine } from '@/lib/roost-session-bridge';
@@ -1935,7 +1942,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const getWorkspaceStreamsGrant = async (options?: {
     forceRefresh?: boolean;
     signal?: AbortSignal;
-  }): Promise<{ token: string; gatewayBaseUrl: string }> => {
+  }): Promise<{ token: string; gatewayBaseUrl: string; shardHostSuffix?: string }> => {
     await waitForContentAdmission(options?.signal);
     if (!cloudPlaneEnabled) {
       throw new Error('Streams access is disabled in local-only sync mode');
@@ -1954,7 +1961,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       throw new SupersededAttachError();
     }
     const gatewayBaseUrl = transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(provider);
-    return { token, gatewayBaseUrl };
+    return {
+      token,
+      gatewayBaseUrl,
+      shardHostSuffix: getStreamsShardHostSuffixForProvider(provider),
+    };
   };
 
   const createMachineRpcJsonStreamClient = (
@@ -2598,22 +2609,27 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
   };
 
-  const requestMachineAcpCapabilitiesRefresh = async (
+  type AcpCapabilitiesRefreshInFlightEntry = {
+    readonly controller: AbortController;
+    readonly promise: Promise<MachineAcpCapabilitiesRefreshResponse | null>;
+    readonly consumers: Set<{
+      readonly onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
+    }>;
+  };
+  const inFlightAcpCapabilitiesRefreshes = new Map<string, AcpCapabilitiesRefreshInFlightEntry>();
+
+  const executeMachineAcpCapabilitiesRefresh = async (
     message: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
     options: {
-      signal?: AbortSignal;
-      onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
-    } = {}
-  ): Promise<MachineAcpCapabilitiesRefreshResponse | null> => {
-    const { signal } = options;
-    if (signal?.aborted) return null;
-    const routeReady = waitForMachineRouteIfNeeded(message.machineId);
-    if (signal) {
-      await waitForPromiseOrAbort(routeReady, signal);
-    } else {
-      await routeReady;
+      signal: AbortSignal;
+      onProgress: (progress: MachineAcpBinaryProgressMessage) => void;
     }
-    if (signal?.aborted) return null;
+  ): Promise<MachineAcpCapabilitiesRefreshResponse | null> => {
+    const { signal, onProgress } = options;
+    if (signal.aborted) return null;
+    const routeReady = waitForMachineRouteIfNeeded(message.machineId);
+    await waitForPromiseOrAbort(routeReady, signal);
+    if (signal.aborted) return null;
 
     // Both planes parse this request strictly on the machine, so `force` is
     // negotiated once here rather than per transport. A daemon that did not
@@ -2625,12 +2641,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       ...baseMessage
     } = message;
     const protocolCapabilities = await getMachineProtocolCapabilities(message.machineId);
+    if (signal.aborted) return null;
     const negotiatedMessage = {
       ...baseMessage,
       ...negotiatedAcpCapabilitiesRefreshForce({ protocolCapabilities }, requestedForce),
       ...negotiatedAcpModelOptionsRead({ protocolCapabilities }, requestedModelOptions),
     };
-    if (signal?.aborted) return null;
 
     if (targetRouter.getPlaneForMachine(message.machineId) === 'local') {
       if (!canUseLocalSessionControl(message)) {
@@ -2646,13 +2662,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       }
       const localRequest = requestLocalSessionControl(negotiatedMessage, {
         onProgress: (progress) => {
-          if (!signal?.aborted) options.onProgress?.(progress);
+          if (!signal.aborted) onProgress(progress);
         },
       });
-      const localResult = signal
-        ? await waitForPromiseOrAbort(localRequest, signal)
-        : await localRequest;
-      if (!localResult || signal?.aborted) return null;
+      const localResult = await waitForPromiseOrAbort(localRequest, signal);
+      if (!localResult || signal.aborted) return null;
       if (!localResult.ok) {
         return {
           type: 'machine/acp-capabilities-refresh_response',
@@ -2667,7 +2681,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       for (const response of localResult.responses) {
         if (response.type === 'machine/acp-binary-progress') {
           handleMachineAcpBinaryProgress(response);
-          options.onProgress?.(response);
+          onProgress(response);
         }
       }
       return (
@@ -2713,7 +2727,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             if (progress.machineId !== message.machineId)
               throw new Error('ACP progress machine mismatch');
             handleMachineAcpBinaryProgress({ ...progress, machineId: message.machineId });
-            options.onProgress?.({ ...progress, machineId: message.machineId });
+            onProgress({ ...progress, machineId: message.machineId });
           },
         });
         const response = MachineAcpCapabilitiesRefreshResponseSchema.parse(await operation.result);
@@ -2727,7 +2741,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           configId: message.configId,
         } as MachineAcpCapabilitiesRefreshResponse;
       } catch (error) {
-        if (signal?.aborted) return null;
+        if (signal.aborted) return null;
         return {
           type: 'machine/acp-capabilities-refresh_response',
           machineId: message.machineId,
@@ -2739,8 +2753,109 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         };
       }
     }
-    const request = performMachineAcpCapabilitiesRefreshViaRpc(negotiatedMessage, options);
-    return signal ? waitForPromiseOrAbort(request, signal) : request;
+    const request = performMachineAcpCapabilitiesRefreshViaRpc(negotiatedMessage, {
+      signal,
+      onProgress,
+    });
+    return waitForPromiseOrAbort(request, signal);
+  };
+
+  const requestMachineAcpCapabilitiesRefresh = async (
+    message: Extract<ClientToServer, { type: 'machine/acp-capabilities-refresh' }>,
+    options: {
+      signal?: AbortSignal;
+      onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
+    } = {}
+  ): Promise<MachineAcpCapabilitiesRefreshResponse | null> => {
+    const { signal, onProgress } = options;
+    if (signal?.aborted || disposePromise) return null;
+    const dedupeKey = JSON.stringify([
+      message.machineId,
+      message.configId,
+      Boolean(message.force),
+      Boolean(message.readModelOptions),
+    ]);
+    let entry = inFlightAcpCapabilitiesRefreshes.get(dedupeKey);
+    if (entry?.controller.signal.aborted) {
+      inFlightAcpCapabilitiesRefreshes.delete(dedupeKey);
+      entry = undefined;
+    }
+    if (!entry) {
+      const controller = new AbortController();
+      const consumers = new Set<{
+        readonly onProgress?: (progress: MachineAcpBinaryProgressMessage) => void;
+      }>();
+      const createdEntry: AcpCapabilitiesRefreshInFlightEntry = {
+        controller,
+        consumers,
+        promise: executeMachineAcpCapabilitiesRefresh(message, {
+          signal: controller.signal,
+          onProgress: (progress) => {
+            for (const consumer of consumers) {
+              consumer.onProgress?.(progress);
+            }
+          },
+        }).finally(() => {
+          if (inFlightAcpCapabilitiesRefreshes.get(dedupeKey) === createdEntry) {
+            inFlightAcpCapabilitiesRefreshes.delete(dedupeKey);
+          }
+        }),
+      };
+      inFlightAcpCapabilitiesRefreshes.set(dedupeKey, createdEntry);
+      entry = createdEntry;
+    }
+
+    const activeEntry = entry;
+    const consumer = { onProgress };
+    activeEntry.consumers.add(consumer);
+    const detach = () => {
+      activeEntry.consumers.delete(consumer);
+      if (activeEntry.consumers.size === 0 && !activeEntry.controller.signal.aborted) {
+        if (inFlightAcpCapabilitiesRefreshes.get(dedupeKey) === activeEntry) {
+          inFlightAcpCapabilitiesRefreshes.delete(dedupeKey);
+        }
+        activeEntry.controller.abort();
+      }
+    };
+
+    if (!signal) {
+      try {
+        return await activeEntry.promise;
+      } finally {
+        activeEntry.consumers.delete(consumer);
+      }
+    }
+    if (signal.aborted) {
+      detach();
+      return null;
+    }
+    return await new Promise<MachineAcpCapabilitiesRefreshResponse | null>((resolve, reject) => {
+      let settled = false;
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        detach();
+        resolve(null);
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      void activeEntry.promise.then(
+        (result) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener('abort', onAbort);
+          activeEntry.consumers.delete(consumer);
+          resolve(result);
+        },
+        (error) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener('abort', onAbort);
+          activeEntry.consumers.delete(consumer);
+          reject(error);
+        }
+      );
+    });
   };
 
   const dispatchEncryptedAcpAuthentication = async (
@@ -3371,9 +3486,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // latches when a whole pass survives to its end, and presence leaving 'synced'
   // aborts the pass and re-arms it, so without this set every presence reconnect
   // re-probed every agent config — a real ACP process per config, forever.
+  const STARTUP_FLOCK_ROOM_SYNC_DEADLINE_MS = 10_000;
   const startupAcpCapabilitiesRefreshedConfigKeys = new Set<string>();
   let startupAcpCapabilitiesRefreshAbortController: AbortController | null = null;
   let cancelDelayedStartupAcpCapabilitiesRefresh: (() => void) | null = null;
+  let startupAcpWindowLockHeld = false;
+  let startupAcpWindowLockPending = false;
+  let releaseStartupAcpWindowLock: (() => void) | null = null;
   const startStartupAcpCapabilitiesRefresh = (): void => {
     if (
       startupAcpCapabilitiesRefreshCompleted ||
@@ -3382,6 +3501,33 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       !workspaceMetaFirstSynced ||
       presenceTransport.getSyncState() !== 'synced'
     ) {
+      return;
+    }
+    if (
+      !startupAcpWindowLockHeld &&
+      isElectronRenderer() &&
+      typeof navigator !== 'undefined' &&
+      typeof navigator.locks?.request === 'function'
+    ) {
+      if (startupAcpWindowLockPending) return;
+      startupAcpWindowLockPending = true;
+      void navigator.locks
+        .request(
+          `lody:workspace-startup-acp:${workspaceId}`,
+          { ifAvailable: true },
+          async (lock) => {
+            startupAcpWindowLockPending = false;
+            if (!lock || disposePromise) return;
+            startupAcpWindowLockHeld = true;
+            startStartupAcpCapabilitiesRefresh();
+            await new Promise<void>((resolve) => {
+              releaseStartupAcpWindowLock = resolve;
+            });
+          }
+        )
+        .catch(() => {
+          startupAcpWindowLockPending = false;
+        });
       return;
     }
     const abortController = new AbortController();
@@ -3403,16 +3549,27 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           collectOnlineMachineIdsFromPresence(latestPresenceStates, getServerNow()).has(machineId),
         listAgentConfigs: async (machineId) => {
           const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
-          await handle.syncOnce().catch((error: unknown) => {
-            console.warn(
-              'createWorkspaceRuntime: startup ACP config sync failed; using local rows',
-              {
-                workspaceId,
-                machineId,
-                error,
-              }
-            );
-          });
+          const liveSynced = await waitForActiveMachineFlockRoomSync(
+            { repo, workspaceId },
+            machineId,
+            {
+              timeoutMs: STARTUP_FLOCK_ROOM_SYNC_DEADLINE_MS,
+              signal: abortController.signal,
+            }
+          );
+          if (!liveSynced && !abortController.signal.aborted) {
+            recordStreamsHttpFallback('forced-sync');
+            await handle.syncOnce().catch((error: unknown) => {
+              console.warn(
+                'createWorkspaceRuntime: startup ACP config sync failed; using local rows',
+                {
+                  workspaceId,
+                  machineId,
+                  error,
+                }
+              );
+            });
+          }
           return Object.values(
             getMachineFlockAgentConfigs(
               readMachineFlockRowsFromFlock(handle.flock, { families: ['agentConfig'] })
@@ -3437,12 +3594,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             throw new Error(response?.error ?? 'ACP capability refresh did not return a response');
           }
           if (signal.aborted) return;
-          await resyncMachineFlockRows({ repo, workspaceId }, machineId, {
-            requireRemoteSync: true,
-            refreshedCapability: response.capability
-              ? { configId: response.configId, value: response.capability }
-              : undefined,
-          });
+          if (response.capability) {
+            applyRefreshedCapability({ repo, workspaceId }, machineId, {
+              configId: response.configId,
+              value: response.capability,
+            });
+          }
         },
         onError: (error, context) => {
           console.warn('createWorkspaceRuntime: startup ACP capability refresh failed', {
@@ -4834,18 +4991,18 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const streamsBaseUrl = transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(provider);
 
     const attemptCreate = async (): Promise<void> => {
-      const transport = new StreamsCrdt({
+      const transport = createStreamsCrdt({
         streamUrl: createLoroStreamUrl({
           bucketId: LORO_STREAMS_BUCKET_ID,
           streamId,
           baseUrl: streamsBaseUrl,
         }),
+        webSocket: 'disabled',
         auth: provider.createAuthCallback(),
         adapter: createLoroDocAdapter(new LoroDoc()),
-        shardUrls: getLoroStreamsShardUrls(
-          streamsBaseUrl,
-          getStreamsShardHostSuffixForProvider(provider)
-        ),
+        shardUrls:
+          getLoroStreamsShardUrls(streamsBaseUrl, getStreamsShardHostSuffixForProvider(provider)) ??
+          'disabled',
         snapshotCodec: streamsSnapshotCodec,
       });
       try {
@@ -6135,6 +6292,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         cancelDelayedStartupAcpCapabilitiesRefresh = null;
         startupAcpCapabilitiesRefreshAbortController?.abort();
         startupAcpCapabilitiesRefreshAbortController = null;
+        startupAcpWindowLockHeld = false;
+        startupAcpWindowLockPending = false;
+        releaseStartupAcpWindowLock?.();
+        releaseStartupAcpWindowLock = null;
+        for (const entry of inFlightAcpCapabilitiesRefreshes.values()) {
+          entry.controller.abort();
+        }
+        inFlightAcpCapabilitiesRefreshes.clear();
         backgroundSyncCoordinator?.stop();
         backgroundSyncCoordinator = null;
         backgroundSyncHighWaterStore?.close();
@@ -6460,6 +6625,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       : {}),
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
     cloudStreamsEnabled: cloudPlaneEnabled && !protectedContent,
+    streamsWebSocketEnabled: isLoroStreamsWebSocketEnabled(
+      deps.streamsWebSocketEnabled,
+      import.meta.env.VITE_LORO_STREAMS_WS_ENABLED
+    ),
     ...(cloudPlaneEnabled && !protectedContent ? { getWorkspaceStreamsGrant } : {}),
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     ...(protectedContent && deps.e2ee?.signScheduleDeclaration

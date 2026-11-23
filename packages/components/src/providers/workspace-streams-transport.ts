@@ -1,4 +1,5 @@
 import { createWorkspaceStreamsTransportAdapter } from '@lody/shared/workspace-streams-persistence';
+import { recordStreamsHttpFallback } from '@lody/shared/streams-transport-diagnostics';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import type { IncompleteRecoveryStore, RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
@@ -97,6 +98,10 @@ export const createWorkspaceStreamsTransport = (
           typeof content.snapshotCodec?.decompress !== 'function')))
   ) {
     throw new WorkspaceStreamsConfigurationError('Incomplete workspace Streams content protection');
+  }
+
+  if (options.webSocketEnabled !== true) {
+    recordStreamsHttpFallback('no-ws');
   }
 
   return createWorkspaceStreamsTransportAdapter(

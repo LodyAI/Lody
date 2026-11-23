@@ -127,6 +127,7 @@ describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
     const serverRepo = await LoroRepo.create({});
     const clientRepo = await LoroRepo.create({});
     const acquired: Array<{ streamId: string; write: boolean }> = [];
+    const leaseOps: Array<{ streamId: string; op: 'sync' | 'join' | 'release' }> = [];
     const existingStreams = new Set<string>();
     const revokedLegacy: unknown[] = [];
 
@@ -173,9 +174,17 @@ describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
         const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
         acquired.push({ streamId, write });
         return {
-          sync: () => syncStream(streamId, write, isFlock),
-          join: async () => {},
-          release: async () => {},
+          sync: async () => {
+            leaseOps.push({ streamId, op: 'sync' });
+            await syncStream(streamId, write, isFlock);
+          },
+          join: async () => {
+            leaseOps.push({ streamId, op: 'join' });
+            await syncStream(streamId, write, isFlock);
+          },
+          release: async () => {
+            leaseOps.push({ streamId, op: 'release' });
+          },
         };
       },
       revokeLegacy: async (entry) => {
@@ -190,6 +199,7 @@ describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
       store,
       runtime,
       acquired,
+      leaseOps,
       existingStreams,
       revokedLegacy,
       cleanup: async () => {
@@ -318,6 +328,235 @@ describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
       expect(h.runtime.getSnapshot().entries).toEqual([]);
     } finally {
       await h.cleanup();
+    }
+  });
+});
+
+describe('PromptShortcut phase-0 HTTP reduction', () => {
+  it('joins workspace-index directly without pre-syncing and pulls legacy index via one-shot sync without join', async () => {
+    const serverRepo = await LoroRepo.create({});
+    const clientRepo = await LoroRepo.create({});
+    const leaseOps: Array<{ streamId: string; op: 'sync' | 'join' | 'release' }> = [];
+    const store = await LocalShortcutStore.open({
+      repo: clientRepo,
+      workspaceId: 'ws-opt',
+      userId: 'viewer-user',
+    });
+    const legacyDomain = {
+      workspaceId: 'ws-opt',
+      ownerUserId: 'author-user',
+      visibility: 'workspace' as const,
+    };
+    const legacyIndexStream = getShortcutIndexStreamId(legacyDomain);
+    const legacyShortcut = makeShortcut({
+      id: 'sc-leg-1',
+      workspaceId: 'ws-opt',
+      ownerUserId: 'author-user',
+      slug: 'leg-cmd',
+      prompt: 'Legacy text',
+      revision: 'rev-leg',
+    });
+    const sLeg = await serverRepo.acquireFlockDoc(legacyIndexStream);
+    try {
+      sLeg.flock.set(['promptShortcut', 'sc-leg-1'], {
+        kind: 'active',
+        entry: { ...projectShortcutIndex(legacyShortcut, 'leg-body-1'), visibility: 'workspace' },
+      });
+      sLeg.flock.commit();
+    } finally {
+      await sLeg.release();
+    }
+
+    const syncStream = async (streamId: string, isFlock: boolean) => {
+      if (!isFlock) return;
+      const s = await serverRepo.acquireFlockDoc(streamId);
+      const c = await clientRepo.acquireFlockDoc(streamId);
+      try {
+        c.flock.importFile(s.flock.exportFile());
+      } finally {
+        await c.release();
+        await s.release();
+      }
+    };
+
+    const runtime = new PromptShortcutRuntime(store, {
+      acquire: async (resource, _write) => {
+        const streamId = getShortcutResourceStreamId(resource);
+        const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
+        return {
+          sync: async () => {
+            leaseOps.push({ streamId, op: 'sync' });
+            await syncStream(streamId, isFlock);
+          },
+          join: async () => {
+            leaseOps.push({ streamId, op: 'join' });
+            await syncStream(streamId, isFlock);
+          },
+          release: async () => {
+            leaseOps.push({ streamId, op: 'release' });
+          },
+        };
+      },
+      dispose: async () => {},
+    });
+
+    try {
+      await runtime.start();
+      await runtime.setDirectory([
+        {
+          shortcutId: 'sc-leg-1',
+          bodyDocId: 'leg-body-1',
+          ownerUserId: 'author-user',
+          visibility: 'workspace',
+          revision: 'rev-leg',
+        },
+      ]);
+
+      const wsIndexOps = leaseOps
+        .filter((x) => x.streamId === 'ws-opt:shortcut-index')
+        .map((x) => x.op);
+      expect(wsIndexOps).toEqual(['join']);
+
+      const legacyOps = leaseOps.filter((x) => x.streamId === legacyIndexStream).map((x) => x.op);
+      expect(legacyOps).toEqual(['sync', 'release']);
+      expect(runtime.getSnapshot().entries.map((e) => e.id)).toEqual(['sc-leg-1']);
+    } finally {
+      await runtime.dispose();
+      await clientRepo.destroy();
+      await serverRepo.destroy();
+    }
+  });
+
+  it('re-syncs legacy index when directory signature updates while an earlier sync is in flight', async () => {
+    const clientRepo = await LoroRepo.create({});
+    const serverRepo = await LoroRepo.create({});
+    const leaseOps: Array<{ streamId: string; op: 'sync' | 'join' | 'release' }> = [];
+    const store = await LocalShortcutStore.open({
+      repo: clientRepo,
+      workspaceId: 'ws-race',
+      userId: 'viewer-user',
+    });
+    const legacyDomain = {
+      workspaceId: 'ws-race',
+      ownerUserId: 'author-user',
+      visibility: 'workspace' as const,
+    };
+    const legacyIndexStream = getShortcutIndexStreamId(legacyDomain);
+    const rev1Shortcut = makeShortcut({
+      id: 'sc-race-1',
+      workspaceId: 'ws-race',
+      ownerUserId: 'author-user',
+      slug: 'race-cmd',
+      prompt: 'Prompt v1',
+      revision: 'rev-1',
+    });
+    const rev2Shortcut = makeShortcut({
+      id: 'sc-race-1',
+      workspaceId: 'ws-race',
+      ownerUserId: 'author-user',
+      slug: 'race-cmd',
+      prompt: 'Prompt v2',
+      revision: 'rev-2',
+    });
+
+    const writeServerEntry = async (shortcut: PromptShortcut, bodyDocId: string) => {
+      const sLeg = await serverRepo.acquireFlockDoc(legacyIndexStream);
+      try {
+        sLeg.flock.set(['promptShortcut', shortcut.id], {
+          kind: 'active',
+          entry: { ...projectShortcutIndex(shortcut, bodyDocId), visibility: 'workspace' },
+        });
+        sLeg.flock.commit();
+      } finally {
+        await sLeg.release();
+      }
+    };
+    await writeServerEntry(rev1Shortcut, 'body-1');
+
+    let firstSyncStartedResolve!: () => void;
+    const firstSyncStarted = new Promise<void>((r) => {
+      firstSyncStartedResolve = r;
+    });
+    let releaseFirstSync!: () => void;
+    const firstSyncGate = new Promise<void>((r) => {
+      releaseFirstSync = r;
+    });
+    let legacySyncCount = 0;
+
+    const syncStream = async (streamId: string, isFlock: boolean) => {
+      if (!isFlock) return;
+      if (streamId === legacyIndexStream) {
+        legacySyncCount++;
+        if (legacySyncCount === 1) {
+          firstSyncStartedResolve();
+          await firstSyncGate;
+        }
+      }
+      const s = await serverRepo.acquireFlockDoc(streamId);
+      const c = await clientRepo.acquireFlockDoc(streamId);
+      try {
+        c.flock.importFile(s.flock.exportFile());
+      } finally {
+        await c.release();
+        await s.release();
+      }
+    };
+
+    const runtime = new PromptShortcutRuntime(store, {
+      acquire: async (resource, _write) => {
+        const streamId = getShortcutResourceStreamId(resource);
+        const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
+        return {
+          sync: async () => {
+            leaseOps.push({ streamId, op: 'sync' });
+            await syncStream(streamId, isFlock);
+          },
+          join: async () => {
+            leaseOps.push({ streamId, op: 'join' });
+            await syncStream(streamId, isFlock);
+          },
+          release: async () => {
+            leaseOps.push({ streamId, op: 'release' });
+          },
+        };
+      },
+      dispose: async () => {},
+    });
+
+    try {
+      await runtime.start();
+      const p1 = runtime.setDirectory([
+        {
+          shortcutId: 'sc-race-1',
+          bodyDocId: 'body-1',
+          ownerUserId: 'author-user',
+          visibility: 'workspace',
+          revision: 'rev-1',
+        },
+      ]);
+      await firstSyncStarted;
+
+      await writeServerEntry(rev2Shortcut, 'body-2');
+      const p2 = runtime.setDirectory([
+        {
+          shortcutId: 'sc-race-1',
+          bodyDocId: 'body-2',
+          ownerUserId: 'author-user',
+          visibility: 'workspace',
+          revision: 'rev-2',
+        },
+      ]);
+
+      releaseFirstSync();
+      await Promise.all([p1, p2]);
+
+      const legacyOps = leaseOps.filter((x) => x.streamId === legacyIndexStream).map((x) => x.op);
+      expect(legacyOps).toEqual(['sync', 'release', 'sync', 'release']);
+      expect(runtime.getSnapshot().entries.map((e) => e.revision)).toEqual(['rev-2']);
+    } finally {
+      await runtime.dispose();
+      await clientRepo.destroy();
+      await serverRepo.destroy();
     }
   });
 });

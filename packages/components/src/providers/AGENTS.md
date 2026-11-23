@@ -24,6 +24,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   Re-arm aborted passes after presence recovers; never re-probe answered configs. Probes launch real agents. Refresh defaults to machine
   cache; only user or setup/authentication actions set `force`.
   Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
+- Already-joined live rooms never perform polling catch-ups; reserve one-shot `syncOnce()` for unjoined or one-shot documents via allowlisted helpers (post-mutation `resyncMachineFlockRows`, offline-to-online recovery, or bounded startup fallback), and construct product `StreamsCrdt` instances via `createStreamsCrdt` with explicit WebSocket and shard policies.
 
 ## Workspace switching
 

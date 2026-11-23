@@ -28,9 +28,11 @@ import { setMachineFlockRowsForMachineAtom } from '../src/atoms/machine-flock';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
+  applyRefreshedCapability,
   resyncMachineFlockRows,
   useMachineFlockRows,
   useMachineFlockRowsByMachineIdsState,
+  waitForActiveMachineFlockRoomSync,
 } from '../src/hooks/use-machine-flock-rows';
 import { useSessionForkCapabilities } from '../src/hooks/use-session-fork-capabilities';
 import { useSessionAcpSelectorContext } from '../src/hooks/use-session-acp-selector-context';
@@ -1130,5 +1132,189 @@ describe('session ACP catalogs from Machine Flock', () => {
       store.set(setMachineFlockRowsForMachineAtom, { workspaceId, machineId, rows: remaining });
     });
     expectCatalog(false);
+  });
+});
+
+describe('Machine Flock Phase 0 optimizations', () => {
+  it('does not trigger syncOnce when a presenceAware consumer joins an already-settled unscoped room', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const store = createStore();
+    const workspaceId = 'workspace-no-initial-lease-catchup' as WorkspaceId;
+    const workspaceSlug = 'workspace-no-initial-lease-catchup';
+    const machineId = 'machine-no-initial-lease-catchup' as MachineId;
+    const { joinRoom } = liveRoom(Promise.resolve());
+    const syncOnce = vi.fn(async () => ({
+      ok: true,
+      transports: [{ transportId: 'cloud', ok: true, failures: [] }],
+    }));
+    const openFlockDoc = vi.fn(async () => ({
+      flock: {
+        scan: vi.fn(() => []),
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      syncOnce,
+      joinRoom,
+    }));
+
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug,
+      repo: { openFlockDoc },
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+    const probe = (remoteMachineIds: readonly MachineId[]) =>
+      createElement(
+        Provider,
+        { store },
+        createElement(
+          Fragment,
+          null,
+          // Unscoped lease creates & settles the live room first.
+          createElement(RowsProbe, {
+            key: 'unscoped',
+            machineId,
+            onRows: () => undefined,
+          }),
+          // Presence arrives later: must reuse the settled live room without syncOnce().
+          createElement(RowsStateProbe, {
+            key: 'presence-aware',
+            machineId,
+            remoteMachineIds,
+            onRemoteSynced: () => undefined,
+          })
+        )
+      );
+
+    render(probe([]));
+    await flushMicrotasks();
+    expect(joinRoom).toHaveBeenCalledTimes(1);
+    expect(syncOnce).not.toHaveBeenCalled();
+
+    act(() => root?.render(probe([machineId])));
+    await flushMicrotasks();
+    expect(joinRoom).toHaveBeenCalledTimes(1);
+    expect(syncOnce).not.toHaveBeenCalled();
+  });
+
+  it('applies refreshed ACP capability into overlay with zero flock open or sync I/O', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const store = createStore();
+    const workspaceId = 'workspace-apply-capability-zero-io' as WorkspaceId;
+    const workspaceSlug = 'workspace-apply-capability-zero-io';
+    const machineId = 'machine-apply-capability-zero-io' as MachineId;
+    const configId = 'config-apply-capability-zero-io' as AgentConfigId;
+    const openFlockDoc = vi.fn(async () => ({
+      flock: {
+        scan: vi.fn(() => []),
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      syncOnce: vi.fn(async () => ({ ok: true, transports: [] })),
+      joinRoom: liveRoom(Promise.resolve()).joinRoom,
+    }));
+    const runtime = {
+      workspaceId,
+      workspaceSlug,
+      repo: { openFlockDoc },
+    } as unknown as WorkspaceRuntime;
+
+    store.set(runtimeAtom, runtime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+    const updates: MachineFlockRowMap[] = [];
+    render(
+      createElement(
+        Provider,
+        { store },
+        createElement(RowsProbe, {
+          machineId,
+          syncRemote: false,
+          onRows: (rows) => updates.push(rows),
+        })
+      )
+    );
+    await flushMicrotasks();
+    const callsBefore = openFlockDoc.mock.calls.length;
+
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'claude',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      sourceVersion: 'builtin:claude:1',
+      modes: [{ id: 'default', name: 'Default' }],
+      models: [{ modelId: 'claude-sonnet', name: 'Claude Sonnet' }],
+      configOptions: [],
+      fetchedAt: 100,
+    };
+
+    act(() => {
+      applyRefreshedCapability(runtime, machineId, {
+        configId,
+        value: capability,
+      });
+    });
+    await flushMicrotasks();
+
+    expect(openFlockDoc.mock.calls.length).toBe(callsBefore);
+    const keyId = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
+    expect(updates.at(-1)?.[keyId]?.value).toEqual(capability);
+  });
+
+  it('waitForActiveMachineFlockRoomSync awaits active live room sync and returns false when absent or timed out', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const store = createStore();
+    const workspaceId = 'workspace-wait-active-room' as WorkspaceId;
+    const workspaceSlug = 'workspace-wait-active-room';
+    const machineId = 'machine-wait-active-room' as MachineId;
+    const missingMachineId = 'machine-not-joined' as MachineId;
+    const firstSync = deferred();
+    const { joinRoom } = liveRoom(firstSync.promise);
+    const runtime = {
+      workspaceId,
+      workspaceSlug,
+      repo: {
+        openFlockDoc: vi.fn(async () => ({
+          flock: { scan: vi.fn(() => []), subscribe: vi.fn(() => vi.fn()) },
+          syncOnce: vi.fn(),
+          joinRoom,
+        })),
+      },
+    } as unknown as WorkspaceRuntime;
+
+    expect(
+      await waitForActiveMachineFlockRoomSync(runtime, missingMachineId, { timeoutMs: 50 })
+    ).toBe(false);
+
+    store.set(runtimeAtom, runtime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+    render(
+      createElement(
+        Provider,
+        { store },
+        createElement(RowsProbe, {
+          machineId,
+          onRows: () => undefined,
+        })
+      )
+    );
+    await flushMicrotasks();
+
+    // Timeout while firstSync is still pending returns false cleanly.
+    expect(await waitForActiveMachineFlockRoomSync(runtime, machineId, { timeoutMs: 10 })).toBe(
+      false
+    );
+
+    // Waiting while firstSync resolves returns true.
+    const waiting = waitForActiveMachineFlockRoomSync(runtime, machineId, { timeoutMs: 5000 });
+    firstSync.resolve();
+    await expect(waiting).resolves.toBe(true);
   });
 });

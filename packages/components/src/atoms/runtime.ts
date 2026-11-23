@@ -235,10 +235,11 @@ export type WorkspaceRuntime = {
   };
   readonly attachmentToken?: () => Promise<string>;
   readonly cloudStreamsEnabled?: boolean;
+  readonly streamsWebSocketEnabled?: boolean;
   readonly getWorkspaceStreamsGrant?: (options?: {
     forceRefresh?: boolean;
     signal?: AbortSignal;
-  }) => Promise<{ token: string; gatewayBaseUrl: string }>;
+  }) => Promise<{ token: string; gatewayBaseUrl: string; shardHostSuffix?: string }>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
