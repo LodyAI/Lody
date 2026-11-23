@@ -39,7 +39,11 @@ import { useMemoryAssociations } from '@/hooks/use-memory-associations';
 import { Dialog } from '@/ui/dialog';
 import { AgentRoleForm, MachineStatusDot, type AddMachineItemProps } from './agent-role-form';
 import { useSettingsPane } from './settings-page-header';
-import { SETTINGS_EDITOR_DIALOG_LAYOUT, SETTINGS_EDITOR_DIALOG_WIDTH } from './surface';
+import {
+  settingsEditorDialogStyles,
+  SETTINGS_EDITOR_DIALOG_WIDTH,
+} from './surface';
+
 
 /**
  * A `create` carries its id from the moment the form opens.
@@ -290,7 +294,7 @@ export function AgentRoleEditorDialog({
       <Dialog.Content
         width={SETTINGS_EDITOR_DIALOG_WIDTH}
         centerOn={settingsPane}
-        className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        xstyle={settingsEditorDialogStyles.panel}
         style={{ height: 'min(680px, 88dvh)' }}
       >
         <Dialog.Header>

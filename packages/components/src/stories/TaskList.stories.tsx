@@ -1,7 +1,24 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { TaskList } from '@/components/task-list';
 import type { TaskListProps } from '@/components/task-list';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
+const migrationStyles = stylex.create({
+  frame: {
+    width: '360px',
+    borderRadius: 'var(--radius-xl)',
+    padding: 'calc(var(--spacing) * 3)',
+    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+    backgroundColor: 'hsl(var(--card) / 1)',
+    color: 'hsl(var(--card-foreground) / 1)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  scrolling: { maxHeight: '520px', overflow: 'auto' },
+  longList: { height: '760px', overflowY: 'auto' },
+});
 
 const meta = {
   title: 'Components/TaskList',
@@ -17,6 +34,7 @@ type Story = StoryObj<typeof meta>;
 
 type TaskListDemoProps = TaskListProps & {
   containerClassName?: string;
+  containerXstyle?: stylex.StyleXStyles;
 };
 
 function TaskListDemo({
@@ -25,6 +43,7 @@ function TaskListDemo({
   isLoading,
   selectedTaskId,
   containerClassName,
+  containerXstyle,
 }: TaskListDemoProps) {
   const [selectedId, setSelectedId] = useState<string | null>(selectedTaskId ?? null);
   const [repoState, setRepoState] = useState(repos);
@@ -82,19 +101,13 @@ function TaskListDemo({
     setSelectedId(taskId);
   };
 
-  const frameClassName = useMemo(
-    () =>
-      [
-        'w-[360px] rounded-xl p-3 shadow-lg',
-        'bg-card text-card-foreground',
-        'border border-border/60',
-        containerClassName,
-      ].join(' '),
-    [containerClassName]
-  );
+  const frameProps = stylex.props(migrationStyles.frame, containerXstyle);
 
   return (
-    <div className={frameClassName}>
+    <div
+      {...frameProps}
+      className={[frameProps.className, containerClassName].filter(Boolean).join(' ')}
+    >
       <TaskList
         tasks={taskState}
         repos={repoState}
@@ -354,7 +367,11 @@ function buildLongListTasks(): TaskListProps {
 export const VeryLongList: Story = {
   args: buildLongListTasks(),
   render: (args) => (
-    <TaskListDemo {...args} containerClassName="scrollbar-pro max-h-[520px] overflow-auto" />
+    <TaskListDemo
+      {...args}
+      containerClassName="scrollbar-pro"
+      containerXstyle={migrationStyles.scrolling}
+    />
   ),
 };
 
@@ -604,6 +621,10 @@ export const AllDiffAndPrStates: Story = {
   name: 'All Diff and PR States',
   args: ALL_DIFF_AND_PR_STATES_ARGS,
   render: (args) => (
-    <TaskListDemo {...args} containerClassName="scrollbar-pro h-[760px] overflow-y-auto" />
+    <TaskListDemo
+      {...args}
+      containerClassName="scrollbar-pro"
+      containerXstyle={migrationStyles.longList}
+    />
   ),
 };

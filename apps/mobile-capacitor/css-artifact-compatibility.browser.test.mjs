@@ -5,7 +5,7 @@ import { buildCssFixture } from './css-compatibility-fixture.mjs';
 
 // Current WebKit checks that lowering preserves appearance and CSS layer order;
 // the parser test separately rejects syntax unavailable on the 16.4 floor.
-void test('lowered PDF, Monaco, Tailwind and StyleX styles preserve layout and both themes', async () => {
+void test('lowered PDF, Monaco, base and StyleX styles preserve layout and both themes', async () => {
   const original = await buildCssFixture(false);
   const lowered = await buildCssFixture();
   const browser = await webkit.launch({ headless: true });
@@ -20,7 +20,7 @@ void test('lowered PDF, Monaco, Tailwind and StyleX styles preserve layout and b
             <div class="textLayer" data-text-selectable><span id="pdf-text">PDF text</span></div>
             <button id="pdf-button" class="secondaryButton">PDF action</button>
             <div class="monaco-diff-editor"><div class="gutter"><div id="monaco" class="gutterItem showAlways">action</div></div></div>
-            <div id="tailwind" class="flex px-4 bg-background text-foreground">Tailwind</div>
+            <div id="product">Product tokens</div>
             <div id="stylex">StyleX</div>
             <nav><span id="chrome-text">Sidebar</span></nav>
             <div data-text-selectable><b id="reading-text">Prose</b><button id="reading-button"><span id="reading-button-label">Copy</span></button></div>
@@ -43,7 +43,7 @@ void test('lowered PDF, Monaco, Tailwind and StyleX styles preserve layout and b
                     'pdf-text',
                     'pdf-button',
                     'monaco',
-                    'tailwind',
+                    'product',
                     'stylex',
                     'chrome-text',
                     'reading-text',
@@ -93,17 +93,18 @@ void test('lowered PDF, Monaco, Tailwind and StyleX styles preserve layout and b
       assert.equal(light['editor-text'].userSelect, 'text');
       assert.equal(light.monaco.position, 'absolute');
       assert.equal(light.monaco.opacity, '1');
-      assert.equal(light.tailwind.display, 'flex');
+      assert.equal(light.product.display, 'flex');
+      assert.equal(light.product.padding, '0px 16px');
       assert.equal(light.stylex.display, 'flex');
       assert.equal(light.stylex.padding, '12px');
       assert.equal(light.stylex.radius, '6px');
       assert.equal(
         light.stylex.color,
-        light.tailwind.color,
+        light.product.color,
         'StyleX keeps the light product palette'
       );
-      assert.equal(dark.stylex.color, dark.tailwind.color, 'StyleX keeps the dark product palette');
-      for (const id of ['tailwind', 'stylex']) {
+      assert.equal(dark.stylex.color, dark.product.color, 'StyleX keeps the dark product palette');
+      for (const id of ['product', 'stylex']) {
         assert.notEqual(
           light[id].color,
           dark[id].color,

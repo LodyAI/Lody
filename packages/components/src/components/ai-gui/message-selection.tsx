@@ -12,10 +12,70 @@ import {
 import { useTranslation } from 'react-i18next';
 import { ImageIcon } from 'lucide-react';
 import type { ConversationMessage } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  overlay: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    zIndex: 20,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: themeColors.primary,
+    backgroundColor: 'hsl(var(--primary) / 0.15)',
+  },
+  row: { position: 'relative' },
+  rowSelectable: {
+    display: 'flow-root',
+    userSelect: 'none',
+    cursor: 'default',
+  },
+  rowSelected: { backgroundColor: 'hsl(var(--primary) / 0.1)' },
+  rowBody: { paddingLeft: themeSpace[7] },
+  checkboxColumn: {
+    pointerEvents: 'none',
+    position: 'relative',
+    height: 0,
+  },
+  checkboxMobile: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: themeSpace[3],
+    top: themeSpace[3],
+  },
+  checkboxDesktop: {
+    pointerEvents: 'auto',
+    position: 'absolute',
+    left: 0,
+    top: themeSpace[3],
+  },
+  toolbar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    paddingTop: themeSpace[3],
+    paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+  },
+  toolbarCount: {
+    marginRight: 'auto',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  toolbarActionWide: { width: '100%' },
+  glyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+});
 
 type SelectionGesture = {
   anchor: string;
@@ -251,7 +311,7 @@ export function MessageSelectionOverlay() {
       hidden
       aria-hidden="true"
       data-message-selection-overlay=""
-      className="pointer-events-none absolute z-20 border border-primary bg-primary/15"
+      className={stylex.props(styles.overlay).className}
     />
   );
 }
@@ -273,7 +333,11 @@ export function MessageSelectionRow({
   const selected = !!id && selection?.ids.has(id);
   return (
     <div
-      className={`relative ${selectable ? 'flow-root select-none cursor-default' : ''} ${selected ? 'bg-primary/10' : ''}`}
+      className={stylex.props(
+        styles.row,
+        selectable && styles.rowSelectable,
+        selected && styles.rowSelected
+      ).className}
       data-message-selection-id={selectable ? id : undefined}
       onPointerDownCapture={
         selectable
@@ -322,7 +386,7 @@ export function MessageSelectionRow({
       }
     >
       {selectable && first ? (
-        <ConversationColumn className="pointer-events-none relative h-0">
+        <ConversationColumn className={stylex.props(styles.checkboxColumn).className}>
           {/* On a handset the left edge belongs to the session drawer's
               back-swipe strip (EDGE_ZONE_PX), so the box cannot be a tap
               target there — it drops to a passive state badge inside the
@@ -332,11 +396,9 @@ export function MessageSelectionRow({
               rows use. */}
           <Checkbox
             data-message-selection-checkbox=""
-            className={
-              isMobile
-                ? 'pointer-events-none absolute left-3 top-3'
-                : 'pointer-events-auto absolute left-0 top-3'
-            }
+            className={stylex.props(
+              isMobile ? styles.checkboxMobile : styles.checkboxDesktop
+            ).className}
             checked={selected}
             onCheckedChange={isMobile ? undefined : () => selection?.toggle(id)}
             tabIndex={isMobile ? -1 : undefined}
@@ -347,7 +409,9 @@ export function MessageSelectionRow({
           />
         </ConversationColumn>
       ) : null}
-      <div className={selectable ? 'pl-7' : undefined}>{children}</div>
+      <div className={selectable ? stylex.props(styles.rowBody).className : undefined}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -382,8 +446,8 @@ export function MessageSelectionToolbar({
   // row makes (h-8 text-xs is a desktop density).
   const actionSize = isMobile ? 'medium' : 'small';
   return (
-    <ConversationColumn className="flex flex-wrap items-center gap-2 border-t py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-      <span className="mr-auto text-sm" role="status">
+    <ConversationColumn className={stylex.props(styles.toolbar).className}>
+      <span {...stylex.props(styles.toolbarCount)} role="status">
         {t('sessions.shareImage.selectedCount', '{{count}} selected', {
           count: selection.messages.length,
         })}
@@ -401,11 +465,11 @@ export function MessageSelectionToolbar({
           half-orphaned one. */}
       <Button
         size={actionSize}
-        className={isMobile ? 'w-full' : undefined}
+        className={isMobile ? stylex.props(styles.toolbarActionWide).className : undefined}
         disabled={!selection.messages.length}
         onClick={selection.confirm}
       >
-        <ImageIcon className="size-4" />
+        <ImageIcon {...stylex.props(styles.glyph)} />
         {t('sessions.shareImage.preview', 'Preview image')}
       </Button>
     </ConversationColumn>

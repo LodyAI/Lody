@@ -1,3 +1,4 @@
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import * as React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import * as stylex from '@stylexjs/stylex';
@@ -30,6 +31,21 @@ import {
   type MachineId,
 } from '@lody/shared';
 
+const sessionRendering = stylex.create({
+  frame: {
+    backgroundColor: 'hsl(var(--input) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  input: {
+    width: '100%',
+    resize: 'none',
+    padding: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-base)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+  },
+});
+
 /* The menu body only renders inside a <Mention> root (its rows read the mention
    context). The harness mounts a forced-open root over a small textarea and
    renders the body directly, so every level and state is screenshot-verifiable
@@ -38,6 +54,19 @@ import {
    Candidates come from the real registry mappers, so a story breaks if the
    insert-text or detail mapping drifts. */
 
+const menuStory = stylex.create({
+  frame: { height: 460, width: 760, padding: 'calc(var(--spacing) * 6)' },
+  narrow: { width: 320, padding: 'calc(var(--spacing) * 3)' },
+  input: {
+    width: '100%',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--input-border) / 1)',
+    backgroundColor: 'hsl(var(--input) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
 const SKILL_LABELS = {
   author: 'Author',
   path: 'Path',
@@ -354,7 +383,7 @@ function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }:
   const inputValue = `@${search}`;
 
   return (
-    <div className={narrow ? 'h-[460px] w-[320px] p-3' : 'h-[460px] w-[760px] p-6'}>
+    <div {...stylex.props(menuStory.frame, narrow && menuStory.narrow)}>
       <Mention
         open
         triggers={['@']}
@@ -371,7 +400,7 @@ function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }:
         <MentionInput
           value={inputValue}
           onChange={() => {}}
-          className="w-full rounded-md border border-input-border bg-input p-2"
+          xstyle={menuStory.input}
           aria-label="composer"
         />
         <div
@@ -520,7 +549,7 @@ function FloatingHarness({
           <MentionInput
             value={value}
             onChange={() => {}}
-            className="w-full rounded-md border border-input-border bg-input p-2"
+            xstyle={menuStory.input}
             aria-label="composer"
             rows={3}
           />
@@ -584,7 +613,7 @@ function EditorBehaviourHarness({
             aria-label="composer"
             placeholder="Message"
             rows={3}
-            className="w-full resize-none rounded-md border border-input-border bg-input p-2 text-sm leading-6"
+            xstyle={mentionSceneStyles.input}
           />
           <MentionTwoLevelMenu
             categories={FLOATING_CATEGORIES}
@@ -647,7 +676,7 @@ function SessionMentionRenderingHarness() {
     },
   ]);
   return (
-    <div className="bg-input text-foreground p-4" data-testid="session-mention-rendering">
+    <div {...stylex.props(sessionRendering.frame)} data-testid="session-mention-rendering">
       <Mention
         inputValue={value}
         onInputValueChange={setValue}
@@ -661,7 +690,7 @@ function SessionMentionRenderingHarness() {
           aria-label="Message"
           placeholder="Message"
           rows={5}
-          className="w-full resize-none p-2 text-base leading-6"
+          xstyle={sessionRendering.input}
         />
       </Mention>
     </div>
@@ -1018,3 +1047,5 @@ export const AgentRoleOnSeveralMachines: Story = {
     ],
   },
 };
+
+const mentionSceneStyles = stylex.create({ input: { width: '100%', resize: 'none', borderWidth: 0, borderRadius: field.radiusMedium, backgroundColor: field.background, color: field.value, boxShadow: field.well, padding: 'calc(var(--spacing) * 2)' } });

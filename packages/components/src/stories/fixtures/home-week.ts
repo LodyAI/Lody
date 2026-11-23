@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { createElement, type ReactNode } from 'react';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import type { AgentConfigCliType } from '@lody/shared';
@@ -9,6 +10,10 @@ import {
   type HomeWeekRow,
 } from '@/lib/home-week';
 import { buildHomeNow, type HomeNowModel, type HomeNowPr, type HomeNowRow } from '@/lib/home-now';
+
+const fixtureStyles = stylex.create({
+  agentIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+});
 
 /** A fixed Friday, so the week in Storybook never drifts with the real calendar. */
 export const HOME_WEEK_NOW = new Date(2026, 9, 16, 10, 0, 0);
@@ -102,7 +107,7 @@ export function homeWeekAgentIcon(agent: { cliType: string; agentType: string })
   return createElement(AgentIcon, {
     cliType: agent.cliType as AgentConfigCliType,
     agentType: agent.agentType,
-    className: 'size-4',
+    ...stylex.props(fixtureStyles.agentIcon),
   });
 }
 

@@ -66,6 +66,7 @@ const PANEL_STYLE: CSSProperties = {
 const WASH = (percent: number) => `color-mix(in oklab, transparent, ${colors.label} ${percent}%)`;
 
 const styles = stylex.create({
+  backdrop: { backgroundColor: 'oklab(0 0 0 / 0.3)' },
   root: { display: 'flex', flexDirection: 'column', minHeight: 0, color: colors.label },
   field: {
     display: 'flex',
@@ -223,7 +224,8 @@ export function CommandPaletteView({
         closeButton={false}
         noAnimation
         style={PANEL_STYLE}
-        backdropClassName="z-[var(--z-command-palette,85)] bg-black/30"
+        backdropXstyle={styles.backdrop}
+        backdropStyle={{ zIndex: 'var(--z-command-palette,85)' }}
         onKeyDownCapture={(event) => {
           // Base UI can focus the popup itself, outside the cmdk subtree. Handle
           // Escape at the dialog boundary so dismissal does not depend on focus.

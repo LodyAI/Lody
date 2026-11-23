@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 
 import { afterEach, describe, expect, test } from 'vitest';
@@ -35,6 +36,8 @@ function strip(size?: 'small' | 'medium' | 'large') {
     </Tabs.Root>
   );
 }
+
+const extension = stylex.create({ offset: (offset: number) => ({ marginInlineStart: offset }) });
 
 describe('Tabs', () => {
   test('the keyboard walks the strip, and taking a tab is a second act', async () => {
@@ -91,6 +94,59 @@ describe('Tabs', () => {
       expect.arrayContaining(classesFor(surface.disabled, surface.tabDisabled))
     );
     expect(classesOf(tabs()[0])).not.toEqual(expect.arrayContaining(classesFor(surface.disabled)));
+  });
+
+  test('keeps dynamic variables and caller styles on each extended part', async () => {
+    function Example() {
+      const [vertical, setVertical] = useState(false);
+      return (
+        <>
+          <button data-vertical onClick={() => setVertical(true)}>
+            Vertical
+          </button>
+          <Tabs.Root
+            data-extension-root
+            defaultValue="a"
+            orientation={vertical ? 'vertical' : 'horizontal'}
+            xstyle={extension.offset(13)}
+            style={(state) => ({ marginTop: state.orientation === 'vertical' ? 9 : 7 })}
+          >
+            <Tabs.List xstyle={extension.offset(15)} style={{ marginTop: 8 }}>
+              <Tabs.Tab value="a">A</Tabs.Tab>
+              <Tabs.Tab value="b">B</Tabs.Tab>
+            </Tabs.List>
+            <Tabs.Panel
+              value="a"
+              xstyle={extension.offset(17)}
+              style={(state) => ({ marginTop: state.orientation === 'vertical' ? 13 : 11 })}
+            >
+              Panel A
+            </Tabs.Panel>
+            <Tabs.Panel value="b">Panel B</Tabs.Panel>
+          </Tabs.Root>
+        </>
+      );
+    }
+    mounted = await mount(<Example />);
+    const root = mounted.container.querySelector<HTMLElement>('[data-extension-root]')!;
+    const list = one('[role="tablist"]'),
+      content = panel();
+    for (const [node, offset, margin] of [
+      [root, 13, 7],
+      [list, 15, 8],
+      [content, 17, 11],
+    ] as const) {
+      expect(node.style.marginTop).toBe(`${margin}px`);
+      const vars = stylex.props(extension.offset(offset)).style!;
+      expect(Object.keys(vars).length).toBeGreaterThan(0);
+      for (const [key, value] of Object.entries(vars))
+        expect(node.style.getPropertyValue(key)).toBe(String(value));
+    }
+    await click(one('[data-vertical]'));
+    expect(root.style.marginTop).toBe('9px');
+    expect(list.style.marginTop).toBe('8px');
+    expect(content.style.marginTop).toBe('13px');
+    expect(list.getAttribute('aria-orientation')).toBe('vertical');
   });
 });
 

@@ -1,22 +1,38 @@
 import * as stylex from '@stylexjs/stylex';
+import { card } from '@lody/ui/card/card.tokens.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease } from '@lody/ui/tokens/scales.stylex';
+import { themeSpace } from '../../style/theme-scale.stylex';
 
-/**
- * The composer's box. Exported so surfaces that cannot mount the real
- * `ChatComposer` — the anonymous share reader, which must stay free of mention,
- * attachment and agent-control machinery — still render the same object the
- * product's composer is, instead of a look-alike that drifts from it.
- *
- * Focus, mention-chip surface colour and every interactive concern stay in
- * `chat-composer.tsx`; this is only the resting surface.
- */
-export const COMPOSER_ELEVATION_CLASS =
-  'shadow-[0_10px_28px_-14px_lch(0%_0_0/0.16),0_1px_2px_lch(0%_0_0/0.05)] dark:shadow-none';
-
-export const INFO_BAR_ELEVATION_CLASS =
-  'shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] dark:shadow-none';
-
-export const COMPOSER_SESSION_SURFACE_CLASS = `@container/composer-box flex flex-col gap-1 rounded-2xl border px-2.5 py-2 transition-colors duration-150 border-foreground/[0.10] bg-[hsl(var(--composer))] ${COMPOSER_ELEVATION_CLASS} dark:border-input-border/70 dark:bg-input/90`;
+/** Shared card material for the composer and related conversation chrome. */
+export const composerSurfaceStyles = stylex.create({
+  composerElevation: {
+    backgroundColor: card.background,
+    boxShadow: card.shadow,
+    borderWidth: 0,
+    borderStyle: 'none',
+    borderRadius: card.radius,
+    cornerShape: corner.round,
+  },
+  infoBarElevation: {
+    backgroundColor: colors.secondaryBackground,
+    borderWidth: 0,
+    borderStyle: 'none',
+    boxShadow: 'none',
+  },
+  sessionSurface: {
+    containerType: 'inline-size',
+    containerName: 'composer-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[1],
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[2],
+    transitionProperty: 'background-color, box-shadow',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+});
 
 const styles = stylex.create({
   shell: {
@@ -35,15 +51,19 @@ const styles = stylex.create({
 });
 
 /** Both new-chat and in-session composers own exactly one keyboard/safe-area inset. */
-export function getSessionChatInputAreaShellClassName({
+export function getSessionChatInputAreaShellStyles({
   protectFromEdgeBackZone = false,
   liftAboveKeyboard = false,
-}: { protectFromEdgeBackZone?: boolean; liftAboveKeyboard?: boolean } = {}): string {
-  return (
-    stylex.props(
-      styles.shell,
-      liftAboveKeyboard && styles.shellKeyboardLift,
-      protectFromEdgeBackZone && styles.shellEdgeBackLayer
-    ).className ?? ''
-  );
+}: { protectFromEdgeBackZone?: boolean; liftAboveKeyboard?: boolean } = {}): stylex.StyleXStyles {
+  return [
+    styles.shell,
+    liftAboveKeyboard && styles.shellKeyboardLift,
+    protectFromEdgeBackZone && styles.shellEdgeBackLayer,
+  ];
+}
+
+export function getSessionChatInputAreaShellClassName(
+  options: { protectFromEdgeBackZone?: boolean; liftAboveKeyboard?: boolean } = {}
+): string {
+  return stylex.props(getSessionChatInputAreaShellStyles(options)).className ?? '';
 }

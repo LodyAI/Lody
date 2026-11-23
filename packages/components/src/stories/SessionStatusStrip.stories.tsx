@@ -1,8 +1,15 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import {
   SessionStatusStrip,
   resolveSessionStatusStripState,
 } from '@/components/sessions/session-status-strip';
+const storyLayout = stylex.create({
+  frame: {
+    width: '560px',
+    'max-width': '100%',
+  },
+});
 
 const meta = {
   title: 'Sessions/SessionStatusStrip',
@@ -11,7 +18,7 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="w-[560px] max-w-full">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

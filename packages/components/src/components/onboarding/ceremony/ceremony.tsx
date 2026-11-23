@@ -1,7 +1,18 @@
 import { useEffect } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { IntroSequence } from './intro-sequence';
 import type { OnboardingAudio } from './use-onboarding-audio';
 import { unlockSound } from './ui-sounds';
+
+const styles = stylex.create({
+  root: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 10,
+    overflow: 'hidden',
+    color: 'var(--color-slate-950)',
+  },
+});
 
 // The onboarding ceremony: the opening title sequence, and nothing else.
 //
@@ -45,7 +56,7 @@ export function OnboardingCeremony({
   }, [playing, startAudio]);
 
   return (
-    <div className="fixed inset-0 z-10 overflow-hidden text-slate-950">
+    <div {...stylex.props(styles.root)}>
       <IntroSequence
         playing={playing}
         onStart={onFinish}

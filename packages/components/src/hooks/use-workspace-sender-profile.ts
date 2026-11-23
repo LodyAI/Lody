@@ -61,7 +61,8 @@ export function useWorkspaceSenderProfile({
   );
 
   const subscribeDirectory = useCallback(
-    (onChange: () => void) => subscribeRetainedWorkspaceMembers(platform.cloudApi, scopeKey, onChange),
+    (onChange: () => void) =>
+      subscribeRetainedWorkspaceMembers(platform.cloudApi, scopeKey, onChange),
     [platform.cloudApi, scopeKey]
   );
   const getDirectorySnapshot = useCallback(

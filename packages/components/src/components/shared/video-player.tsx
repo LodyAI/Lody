@@ -53,6 +53,7 @@ export interface VideoPlayerProps {
 }
 
 const styles = stylex.create({
+  glyph: { width: space[4], height: space[4] },
   root: {
     display: 'flex',
     flexDirection: 'column',
@@ -441,7 +442,7 @@ export function VideoPlayer({
             onClick={onDownload}
             disabled={isDownloading}
           >
-            {isDownloading ? <Spinner className="size-4" /> : <Download className="size-4" />}
+            {isDownloading ? <Spinner size="small" /> : <Download {...stylex.props(styles.glyph)} />}
             {t('sessions.fileDownload', 'Download')}
           </Button>
         ) : null}
@@ -519,7 +520,7 @@ export function VideoPlayer({
         />
         {isBuffering ? (
           <div {...stylex.props(styles.bufferingOverlay)} role="status">
-            <Spinner className="size-5" />
+            <Spinner diameter="20px" />
           </div>
         ) : null}
       </div>
@@ -564,7 +565,7 @@ export function VideoPlayer({
                 : t('sessions.videoPreview.play', 'Play')
             }
           >
-            {isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
+            {isPlaying ? <Pause {...stylex.props(styles.glyph)} /> : <Play {...stylex.props(styles.glyph)} />}
           </Button>
 
           <span {...stylex.props(styles.timeLabel)} data-testid="video-player-time">
@@ -587,9 +588,9 @@ export function VideoPlayer({
               }
             >
               {muted || volume === 0 ? (
-                <VolumeX className="size-4" />
+                <VolumeX {...stylex.props(styles.glyph)} />
               ) : (
-                <Volume2 className="size-4" />
+                <Volume2 {...stylex.props(styles.glyph)} />
               )}
             </Button>
             <input
@@ -654,7 +655,7 @@ export function VideoPlayer({
                   : t('sessions.videoPreview.fullscreen', 'Fullscreen')
               }
             >
-              {isFullscreen ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
+              {isFullscreen ? <Minimize {...stylex.props(styles.glyph)} /> : <Maximize {...stylex.props(styles.glyph)} />}
             </Button>
           ) : null}
         </div>

@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { colors, shadow, sheen } from '../tokens/colors.stylex';
-import { focus, radius, space, text } from '../tokens/scales.stylex';
+import { control, focus, radius, space, text } from '../tokens/scales.stylex';
 
 /**
  * One token group for the three ways a surface shows one thing out of several:
@@ -66,8 +66,8 @@ export const disclosure = stylex.defineVars({
   panelGap: space[2],
   ring: colors.accent,
   ringWidth: focus.ringWidth,
-  // The family's one disabled value; the rules give the whole control 45%.
-  disabledOpacity: '0.45',
+  // Preserve the family token while sharing the control scale's disabled state.
+  disabledOpacity: control.disabledOpacity,
 });
 
 /**

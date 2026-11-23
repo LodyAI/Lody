@@ -56,9 +56,10 @@
   `form` reasons sit beside Save and disable it; everything else lets Save
   run the guard, mark and focus the first empty field. There is no project
   mark: beside the project chip it reads as "a project is required".
-- Time and date are typed only: the native picker button is hidden
-  (`[&::-webkit-calendar-picker-indicator]:hidden`). Prompt: no resize handle;
-  grow from 4 lines to `max(6lh, 50dvh)`, then scroll. Field marks are absolute.
+- Time/date: typed only. `display: none` on
+  `::-webkit-calendar-picker-indicator` removes Chromium's popup. Prompt: no
+  resize handle; grow from 4 lines to `max(6lh, 50dvh)`, then scroll.
+  Absolute field marks never narrow text.
 - No time zone control. Input, preview and kind changes use `MachineMeta.timeZone`
   (device zone for older CLIs). Once retains its instant across machine changes;
   calendar rules retain wall time. [Time contract](../../../../../specs/schedule-time.md).

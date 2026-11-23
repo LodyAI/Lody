@@ -232,7 +232,11 @@ const createRuntime = (options?: {
     type: 'session/preview-revoke_response' as const,
     sessionId: session.id,
     success: true as const,
-    connection: { ...remoteConnection, status: 'closed' as const, closedReason: 'revoked' as const },
+    connection: {
+      ...remoteConnection,
+      status: 'closed' as const,
+      closedReason: 'revoked' as const,
+    },
   }));
   const runtime = {
     workspaceSlug: 'workspace-browser',
@@ -1046,9 +1050,9 @@ describe('SessionBrowserPanel controller', () => {
     const reopened = await renderPanel(testRuntime.runtime, { candidateNavigationRequestId: 1 });
 
     // Preview is visible immediately from cache; never stalled on machine resolution or creating a new link
-    expect(reopened.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')).toBe(
-      'https://browser-preview.trycloudflare.com/settings?__lody_preview_token=remote-token'
-    );
+    expect(
+      reopened.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
+    ).toBe('https://browser-preview.trycloudflare.com/settings?__lody_preview_token=remote-token');
     expect(reopened.textContent).not.toContain('Resolving the session machine');
     expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
 
@@ -1118,9 +1122,9 @@ describe('SessionBrowserPanel controller', () => {
       await flushMicrotasks();
     });
     expect(testRuntime.requestSessionPreviewCreate).toHaveBeenCalledTimes(1);
-    expect(rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')).toBe(
-      'https://fresh-preview.trycloudflare.com/settings?__lody_preview_token=fresh-token'
-    );
+    expect(
+      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
+    ).toBe('https://fresh-preview.trycloudflare.com/settings?__lody_preview_token=fresh-token');
   });
 
   it('shows regenerate action without auto-rebuilding when a cached preview link is already expired', async () => {
@@ -1155,9 +1159,9 @@ describe('SessionBrowserPanel controller', () => {
       await flushMicrotasks();
     });
     expect(testRuntime.requestSessionPreviewCreate).toHaveBeenCalledTimes(1);
-    expect(rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')).toBe(
-      'https://renewed-preview.trycloudflare.com/settings?__lody_preview_token=renewed-token'
-    );
+    expect(
+      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
+    ).toBe('https://renewed-preview.trycloudflare.com/settings?__lody_preview_token=renewed-token');
   });
 
   it('keeps the cached preview visible and reports unconfirmed status when background check times out', async () => {
@@ -1178,7 +1182,9 @@ describe('SessionBrowserPanel controller', () => {
     const rendered = await renderPanel(testRuntime.runtime);
 
     // Current preview stays visible even though background check timed out
-    expect(rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')).toBe(
+    expect(
+      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
+    ).toBe(
       'https://browser-preview.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=remote-token'
     );
     expect(
@@ -1223,14 +1229,19 @@ describe('SessionBrowserPanel controller', () => {
     // Now opening the browser panel while status check is slow should open immediately from cached preload link
     testRuntime.requestSessionPreviewStatus.mockReturnValue(statusPending.promise);
     const rendered = await renderPanel(testRuntime.runtime, { candidateNavigationRequestId: 1 });
-    expect(rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')).toBe(
+    expect(
+      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
+    ).toBe(
       'https://browser-preview.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=remote-token'
     );
     expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
   });
 
   it('offers split disconnect options when machine supports previewStopProcess and keeps primary click safe', async () => {
-    const testRuntime = createRuntime({ plane: 'cloud', preview: { connection: remoteConnection } });
+    const testRuntime = createRuntime({
+      plane: 'cloud',
+      preview: { connection: remoteConnection },
+    });
     rememberSessionBrowserResumeState(session.id, {
       currentAddress: parseBrowserAddress('http://127.0.0.1:5173/dashboard?mode=dev'),
       machinePlane: 'cloud',
@@ -1263,7 +1274,10 @@ describe('SessionBrowserPanel controller', () => {
   });
 
   it('sends stopProcess: true when selecting Close preview and stop server from the disconnect menu', async () => {
-    const testRuntime = createRuntime({ plane: 'cloud', preview: { connection: remoteConnection } });
+    const testRuntime = createRuntime({
+      plane: 'cloud',
+      preview: { connection: remoteConnection },
+    });
     rememberSessionBrowserResumeState(session.id, {
       currentAddress: parseBrowserAddress('http://127.0.0.1:5173/dashboard?mode=dev'),
       machinePlane: 'cloud',
@@ -1301,7 +1315,10 @@ describe('SessionBrowserPanel controller', () => {
   });
 
   it('hides the disconnect dropdown menu when the machine lacks previewStopProcess capability', async () => {
-    const testRuntime = createRuntime({ plane: 'cloud', preview: { connection: remoteConnection } });
+    const testRuntime = createRuntime({
+      plane: 'cloud',
+      preview: { connection: remoteConnection },
+    });
     rememberSessionBrowserResumeState(session.id, {
       currentAddress: parseBrowserAddress('http://127.0.0.1:5173/dashboard?mode=dev'),
       machinePlane: 'cloud',

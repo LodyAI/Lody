@@ -5,6 +5,8 @@ import { createRoot } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ReviewRenderer } from '../src/react';
+import { Button } from '../src/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '../src/ui/toggle-group';
 import type { ReviewBundle } from '../src/types';
 
 vi.mock('@pierre/diffs/react', () => ({
@@ -189,3 +191,100 @@ const bundle: ReviewBundle = {
     },
   ],
 };
+
+it('preserves caller and Slot styles, events and state when spacing fields update', async () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const native = React.createRef<HTMLButtonElement>();
+  const slot = React.createRef<HTMLButtonElement>();
+  function Controls({ enabled }: { enabled: boolean }) {
+    const [events, setEvents] = React.useState(0);
+    return (
+      <>
+        <Button
+          ref={native}
+          data-spacing="native"
+          gap={enabled ? 6 : undefined}
+          paddingInline={enabled ? 10 : undefined}
+          style={{ gap: 11 }}
+        >
+          Native
+        </Button>
+        <Button
+          asChild
+          ref={slot}
+          data-spacing="slot"
+          gap={enabled ? 6 : undefined}
+          paddingInline={enabled ? 10 : undefined}
+          onClick={() => setEvents((x) => x + 1)}
+        >
+          <a
+            href="#spacing"
+            style={{ gap: 13, paddingInline: 23 }}
+            onClick={(event) => {
+              event.preventDefault();
+              setEvents((x) => x + 10);
+            }}
+          >
+            Child
+          </a>
+        </Button>
+        <ToggleGroup
+          type="single"
+          defaultValue="first"
+          data-spacing="root"
+          gap={enabled ? 2 : undefined}
+          padding={enabled ? 3 : undefined}
+          style={{ padding: 17 }}
+        >
+          <ToggleGroupItem
+            value="first"
+            data-spacing="item"
+            gap={enabled ? 6 : undefined}
+            style={{ gap: 15 }}
+          >
+            First
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            asChild
+            value="second"
+            data-spacing="item-slot"
+            gap={enabled ? 7 : undefined}
+          >
+            <span style={{ gap: 21 }}>Second</span>
+          </ToggleGroupItem>
+        </ToggleGroup>
+        <output>{events}</output>
+      </>
+    );
+  }
+  try {
+    await act(async () => root.render(<Controls enabled />));
+    const get = (key: string) => host.querySelector<HTMLElement>('[data-spacing="' + key + '"]')!;
+    expect(native.current?.tagName).toBe('BUTTON');
+    expect(slot.current?.tagName).toBe('A');
+    expect([get('native').style.gap, get('native').style.paddingInline]).toEqual(['11px', '10px']);
+    expect([get('slot').style.gap, get('slot').style.paddingInline]).toEqual(['13px', '23px']);
+    expect([get('root').style.gap, get('root').style.padding]).toEqual(['2px', '17px']);
+    expect(get('item').style.gap).toBe('15px');
+    expect(get('item-slot').style.gap).toBe('21px');
+    for (const element of host.querySelectorAll('*')) {
+      expect(element.hasAttribute('gap')).toBe(false);
+      expect(element.hasAttribute('padding')).toBe(false);
+      expect(element.hasAttribute('paddingInline')).toBe(false);
+    }
+    await act(async () => get('slot').click());
+    expect(host.querySelector('output')?.textContent).toBe('11');
+    await act(async () => get('item-slot').click());
+    expect(get('item-slot').getAttribute('data-state')).toBe('on');
+    await act(async () => root.render(<Controls enabled={false} />));
+    expect([get('native').style.gap, get('native').style.paddingInline]).toEqual(['11px', '']);
+    expect([get('root').style.gap, get('root').style.padding]).toEqual(['', '17px']);
+    expect(get('item-slot').getAttribute('data-state')).toBe('on');
+    expect(host.querySelector('output')?.textContent).toBe('11');
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});

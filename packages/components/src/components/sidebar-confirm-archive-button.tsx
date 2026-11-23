@@ -10,15 +10,109 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontWeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../style/theme-scale.stylex';
 
 const CONFIRM_RESET_DELAY_MS = 3500;
+
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const styles = stylex.create({
+  button: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    // The button's focus ring was a Tailwind `focus-visible:ring-2`, which
+    // painted nothing and erased the app's global focus ring. It keeps no
+    // focus indicator, exactly as before.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  /** Armed: the label sits on a destructive pill. */
+  confirming: {
+    position: 'relative',
+    zIndex: 10,
+    height: themeSpace[5],
+    minWidth: themeSpace[14],
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--destructive) / 0.2)',
+      ':hover': 'hsl(var(--destructive) / 0.25)',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--destructive) / 1) 30%, transparent)',
+    },
+    backgroundColor: themeColors.sidebar,
+    paddingInline: themeSpace[2],
+    fontSize: '11px',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1,
+    color: {
+      default: themeColors.destructive,
+      [DARK_SCOPE]: 'hsl(var(--destructive-foreground) / 1)',
+    },
+    boxShadow: themeShadow.xs,
+    transitionProperty: 'none',
+  },
+  /** At rest: a quiet archive glyph that comes up to the row's ink. */
+  idle: {
+    height: themeSpace[5],
+    width: themeSpace[5],
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+      ':hover': themeColors.sidebarForeground,
+      [DARK_SCOPE]: 'hsl(var(--destructive-foreground) / 1)',
+    },
+    transitionProperty: 'opacity, color, background-color, border-color, width',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  /** The pill's fill, behind the label. */
+  fill: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: themeRadius.full,
+    backgroundColor: {
+      default: 'hsl(var(--destructive) / 0.12)',
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--destructive) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--destructive) / 1) 35%, transparent)',
+      },
+    },
+  },
+  label: {
+    position: 'relative',
+    zIndex: 10,
+  },
+  glyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+});
 
 type SidebarConfirmArchiveButtonProps = {
   label: string;
   confirmLabel: string;
   className?: string;
   iconClassName?: string;
+  xstyle?: stylex.StyleXStyles;
   onConfirm: () => void;
 } & Omit<ComponentPropsWithoutRef<'button'>, 'type' | 'onConfirm'>;
 
@@ -31,6 +125,7 @@ export const SidebarConfirmArchiveButton = forwardRef<
     confirmLabel,
     className,
     iconClassName,
+    xstyle,
     onConfirm,
     onBlur,
     onClick,
@@ -107,19 +202,21 @@ export const SidebarConfirmArchiveButton = forwardRef<
     }
   };
 
+  const buttonStyle = stylex.props(
+    styles.button,
+    isConfirming ? styles.confirming : styles.idle,
+    xstyle
+  );
+  const fillStyle = stylex.props(styles.fill);
+  const glyphStyle = stylex.props(styles.glyph);
+
   return (
     <button
       {...buttonProps}
       ref={ref}
       type="button"
-      className={cn(
-        'inline-flex items-center justify-center rounded-sm',
-        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40',
-        isConfirming
-          ? 'relative z-10 h-5 min-w-14 overflow-hidden whitespace-nowrap rounded-full border border-destructive/20 bg-sidebar px-2 text-[11px] font-medium leading-none text-destructive shadow-xs transition-none hover:border-destructive/25 hover:bg-sidebar hover:text-destructive dark:border-destructive/30 dark:text-destructive-foreground'
-          : 'h-5 w-5 text-sidebar-foreground-muted/80 transition-[opacity,color,background-color,border-color,width] duration-100 hover:text-sidebar-foreground',
-        className
-      )}
+      {...buttonStyle}
+      className={clsx(buttonStyle.className, className)}
       aria-label={isConfirming ? `Confirm ${label}` : label}
       onClick={handleClick}
       onBlur={handleBlur}
@@ -128,14 +225,11 @@ export const SidebarConfirmArchiveButton = forwardRef<
     >
       {isConfirming ? (
         <>
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 rounded-full bg-destructive/12 dark:bg-destructive/35"
-          />
-          <span className="relative z-10">{confirmLabel}</span>
+          <span aria-hidden="true" {...fillStyle} />
+          <span {...stylex.props(styles.label)}>{confirmLabel}</span>
         </>
       ) : (
-        <Archive className={cn('h-3.5 w-3.5', iconClassName)} />
+        <Archive {...glyphStyle} className={clsx(glyphStyle.className, iconClassName)} />
       )}
     </button>
   );
