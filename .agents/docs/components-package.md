@@ -21,6 +21,18 @@ and durable state/cursor retention. This [P10 preparation](../notes/implemented/
 does not supply historical-author authorization, a production signer, host snapshot
 admission or client recovery from an unusable remote snapshot.
 
+Prompt Shortcuts use their own Repo. Ordinary workspaces retain legacy dual-read
+and the `lody` bucket. Encrypted workspaces use only workspace-prefixed shortcut
+rooms, the verified content token and dedicated encrypted bucket, and room-bound
+AAD for updates and snapshots. Guest or missing ledger role permits reads only;
+local save/delete and background publication also enforce this role. Their
+IndexedDB name includes account, workspace, genesis, signing key and window.
+Credential-confirmed removal/revocation closes that exact shortcut writer before
+deleting its database; ordinary cache clearing still preserves shortcut data.
+The settings GitHub scope picker keeps the legacy query wrapper and therefore
+returns no repositories in encrypted mode, without blocking other scope choices.
+Shortcut analytics contains only scope enums and structural counts.
+
 ## Cloud room recovery
 
 The dual-plane renderer enumerates every `cloud` binding, including rooms whose

@@ -5,10 +5,23 @@ import { getWorkspaceFlockDocId } from '../src/workspace-flock';
 import type { MachineId, WorkspaceId } from '../src/ids';
 import {
   encryptedWorkspaceRoom,
+  encryptedWorkspaceResolver,
+  workspaceSupports,
   createWorkspaceEpochTransitionLegacy,
 } from '../src/workspace-streams-content';
 
 describe('encrypted workspace room domains', () => {
+  it('admits protected shortcut index and body rooms', () => {
+    const resolve = encryptedWorkspaceResolver('workspace', () => native(0));
+    expect(workspaceSupports({ mode: 'protected' }, 'shortcuts')).toBe(true);
+    expect(resolve({ kind: 'flock', flockDocId: 'workspace:shortcut-index' }).mode).toBe(
+      'protected'
+    );
+    expect(
+      encryptedWorkspaceRoom('workspace', { kind: 'doc', docId: 'workspace:shortcut:body' })
+    ).toEqual({ resource: 'doc:workspace:shortcut:body', model: 'loro' });
+    expect(() => resolve({ kind: 'flock', flockDocId: 'other:shortcut-index' })).toThrow();
+  });
   const workspace = 'room-owner' as WorkspaceId;
   it('rejects other workspaces and all unimplemented Flock domains', () => {
     for (const flockDocId of [

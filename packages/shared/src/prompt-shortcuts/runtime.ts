@@ -19,6 +19,7 @@ import { ShortcutLifetime } from './lifetime';
 
 export type { ShortcutDirectoryEntry } from './local-store';
 export type ShortcutPublicationPort = {
+  canWrite?: () => boolean;
   acquire(resource: ShortcutResource, write: boolean): Promise<ShortcutSyncLease>;
   /** Optional Phase 1 legacy Convex revocation when deleting an unmigrated legacy shortcut. */
   revokeLegacy?(
@@ -92,6 +93,16 @@ export class PromptShortcutRuntime {
       this.listeners.delete(listener);
     };
   };
+
+  get canWrite(): boolean {
+    return this.remote?.canWrite?.() ?? true;
+  }
+
+  private assertWritable() {
+    this.assertActive();
+    if (!this.canWrite)
+      throw new PromptShortcutError('forbidden', 'Workspace prompts are read-only');
+  }
 
   private assertActive() {
     if (this.disposed) throw new Error('Shortcut runtime disposed');
@@ -290,7 +301,7 @@ export class PromptShortcutRuntime {
     const next = (async () => {
       const sync = await this.remote!.acquire(
         { kind: 'workspace-index', workspaceId: this.workspaceId },
-        true
+        this.canWrite
       );
       let releaseReplica: (() => Promise<void>) | undefined;
       let unsubscribe: (() => void) | undefined;
@@ -556,7 +567,7 @@ export class PromptShortcutRuntime {
     base: PromptShortcutIndexEntry | null;
     bodyDocId?: string;
   }): Promise<PromptShortcutIndexEntry> {
-    this.assertActive();
+    this.assertWritable();
     if (
       input.base &&
       JSON.stringify(this.snapshot.entries.find((row) => row.id === input.base!.id)) !==
@@ -581,7 +592,7 @@ export class PromptShortcutRuntime {
   }
 
   remove(entry: PromptShortcutIndexEntry): Promise<void> {
-    this.assertActive();
+    this.assertWritable();
     return this.track(
       (async () => {
         await this.store.remove(entry);
@@ -597,7 +608,7 @@ export class PromptShortcutRuntime {
     this.flushing = this.track(
       (async () => {
         const attempted = new Set<string>();
-        while (!this.disposed) {
+        while (!this.disposed && this.canWrite) {
           const record = this.store
             .list()
             .find(
@@ -636,14 +647,14 @@ export class PromptShortcutRuntime {
   }
 
   private async mutateWorkspaceIndex(mutate: (catalog: PromptShortcutCatalog) => void) {
-    this.assertActive();
+    this.assertWritable();
     const sync = await this.remote!.acquire(
       { kind: 'workspace-index', workspaceId: this.workspaceId },
       true
     );
     try {
       await sync.sync();
-      this.assertActive();
+      this.assertWritable();
       const id = getWorkspaceShortcutIndexStreamId(this.workspaceId);
       const lease = await this.store.repo.acquireFlockDoc(id);
       try {
@@ -688,7 +699,7 @@ export class PromptShortcutRuntime {
     );
     try {
       await body.sync();
-      this.assertActive();
+      this.assertWritable();
       const lease = await this.store.repo.acquireDoc(bodyStreamId);
       try {
         const remoteDoc = new PromptShortcutDocument(lease.doc);

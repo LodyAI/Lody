@@ -27,9 +27,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Workspace switching
 
-- Prompt Shortcut instances retire on effect cleanup and never cross platform, capability,
-  retry generation, account/session or workspace boundaries. Legacy admission gates cloud
-  work: unknown waits, encrypted disables; preserve local stores. V2 token owners retain
+- Prompt Shortcuts retire on cleanup and never cross platform, capability,
+  retry generation, account/session or workspace boundaries. Plaintext requires legacy admission; encrypted shortcuts require verified admission,
+  protection, ledger roles and identity-scoped storage. V2 owners retain
   local retry counts and one diagnostic per fault until success, notify auth recovery,
   and never cache authorization; see [retry reporting](../../../../.agents/notes/implemented/bug-fix/2026-11-17-shortcut-token-retry-diagnostics.md).
 - The `$workspaceName` route owns the render-time target slug. Workspace-scoped UI must

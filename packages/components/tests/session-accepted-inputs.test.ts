@@ -1,3 +1,7 @@
+import {
+  promptShortcutDatabaseName,
+  registerPromptShortcutDatabase,
+} from '../src/lib/prompt-shortcut-storage';
 import { createHistoryWriter } from '@lody/shared/history-writer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
@@ -6,7 +10,8 @@ import { createLoroSessionData } from '@lody/shared/session-data';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getMachineRoomId,
-  getSessionRoomId} from '@lody/shared';
+  getSessionRoomId,
+} from '@lody/shared';
 import { createConversationSession } from '../src/lib/conversation-view';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
@@ -1273,7 +1278,30 @@ it('member removal deletes only the stopped workspace input and replica namespac
       db.close();
     }
   }
-  await removeEncryptedWorkspaceLocalData(scope);
+  const shortcutName = promptShortcutDatabaseName(scope.workspaceId, scope.accountId, scope);
+  const plaintextName = promptShortcutDatabaseName(scope.workspaceId, scope.accountId);
+  const otherShortcutName = promptShortcutDatabaseName(scope.workspaceId, scope.accountId, {
+    ...scope,
+    windowId: 'other-window',
+  });
+  const shortcut = await database(shortcutName);
+  const ordinary = await database(plaintextName);
+  ordinary.close();
+  const otherShortcut = await database(otherShortcutName);
+  otherShortcut.close();
+  const unregister = registerPromptShortcutDatabase(shortcutName, async () => {
+    shortcut.close();
+  });
+  try {
+    await removeEncryptedWorkspaceLocalData(scope);
+  } finally {
+    unregister();
+  }
+  const shortcutNames = (await factory.databases()).map((row) => row.name);
+  expect(shortcutNames).not.toContain(shortcutName);
+  expect(shortcutNames).toContain(plaintextName);
+  expect(shortcutNames).toContain(otherShortcutName);
+  expect(plaintextName).toBe('lody-shortcut-data-input-workspace:input-account');
   expect(await removed.list()).toEqual([]);
   expect((await otherAccount.list()).map((row) => row.id)).toEqual(['other-account']);
   expect((await otherWorkspace.list()).map((row) => row.id)).toEqual(['other-workspace']);
