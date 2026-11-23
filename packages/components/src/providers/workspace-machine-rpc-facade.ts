@@ -1634,8 +1634,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
 
   /**
    * One authenticated Machine RPC for every simulator command. The local plane
-   * goes straight to this machine's daemon and never touches the cloud; the
-   * remote plane signs the exact command with the preview-control proof.
+   * goes straight to this machine's daemon and never touches the cloud; encrypted
+   * remote plane uses signed feature RPC; ordinary remote control uses a preview proof.
    */
   const requestIosSimulatorControl = async ({
     machineId,
@@ -1674,6 +1674,20 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           'unsupported',
           'Update Lody on this machine to preview simulators.'
         );
+      }
+      assertProtectedPreviewControl();
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'ios-simulator/control',
+          params: { sessionId, requestedByUserId, command },
+          timeoutMs,
+        });
+        if (!response.ok) throw new Error(response.error);
+        const result = IosSimulatorResponseSchema.parse(response.result);
+        if (result.sessionId !== sessionId) throw new Error('Simulator Session mismatch.');
+        return result;
       }
       const responseRecipient = await createRpcSecretRecipient();
       const response = await (
@@ -1714,8 +1728,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
 
   /**
    * One authenticated Machine RPC for every simulator command. The local plane
-   * goes straight to this machine's daemon and never touches the cloud; the
-   * remote plane signs the exact command with the preview-control proof.
+   * goes straight to this machine's daemon and never touches the cloud; encrypted
+   * remote plane uses signed feature RPC; ordinary remote control uses a preview proof.
    */
   const requestAndroidEmulatorControl = async ({
     machineId,
@@ -1754,6 +1768,20 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           'unsupported',
           'Update Lody on this machine to preview simulators.'
         );
+      }
+      assertProtectedPreviewControl();
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'android-emulator/control',
+          params: { sessionId, requestedByUserId, command },
+          timeoutMs,
+        });
+        if (!response.ok) throw new Error(response.error);
+        const result = AndroidEmulatorResponseSchema.parse(response.result);
+        if (result.sessionId !== sessionId) throw new Error('Simulator Session mismatch.');
+        return result;
       }
       const responseRecipient = await createRpcSecretRecipient();
       const response = await (

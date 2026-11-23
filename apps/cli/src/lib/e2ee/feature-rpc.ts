@@ -200,6 +200,9 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     admission[lane]++;
     active.add(envelope.id);
     const target = e2eeFeatureTarget(opened.input.request);
+    const devicePreview =
+      opened.input.request.method === 'ios-simulator/control' ||
+      opened.input.request.method === 'android-emulator/control';
     const sharedWork = target.kind === 'session' || target.kind === 'project';
     const refused = Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const });
     const authorize: AuthorizeEncryptedExecution =
@@ -230,15 +233,21 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
         })),
         (owner) => {
           const work = Effect.tryPromise({
-            try: () =>
-              (owner.raw = options.handle(opened.input.request, {
+            try: () => {
+              if (
+                devicePreview &&
+                (!authority || authority.signal.aborted || !authority.isCurrent())
+              )
+                throw new Error('e2ee_feature_authority_withdrawn');
+              return (owner.raw = options.handle(opened.input.request, {
                 requestId: opened.requestId,
                 requesterDevice: opened.requesterDevice,
                 expiresAt: opened.expiresAt,
                 signal: owner.controller.signal,
                 authority,
                 ...(requester ? { requester } : {}),
-              })),
+              }));
+            },
             catch: (cause) => cause,
           });
           return read
@@ -304,7 +313,8 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       }
       if (
         authority._tag !== 'Authorized' ||
-        ((opened.input.request.method === 'machine/acp-interaction' ||
+        ((devicePreview ||
+          opened.input.request.method === 'machine/acp-interaction' ||
           opened.input.request.method === 'session/history-write' ||
           target.kind === 'session-read') &&
           (!authority.isCurrent ||

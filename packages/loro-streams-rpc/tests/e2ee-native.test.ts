@@ -959,6 +959,16 @@ it('refuses remote control for a target without e2eeRemoteControl before signing
       },
       supportsRemoteControl: async () => supported,
     });
+  for (const platform of ['ios-simulator', 'android-emulator']) {
+    expect(
+      await call(
+        `${platform}/control`,
+        { sessionId: 'synthetic-session', requestedByUserId: 'owner', command: { action: 'list' } },
+        false
+      )
+    ).toMatchObject({ error: { code: 'e2ee_machine_update_required' } });
+    expect(sent).toEqual([]);
+  }
   const steer = {
     sessionId: 'synthetic-session',
     expectedTurnId: 'assistant-1',
@@ -1297,3 +1307,70 @@ it('rejects expired feature requests before admitting even a single chunk', asyn
     vi.useRealTimers();
   }
 });
+
+it.each(['ios-simulator', 'android-emulator'] as const)(
+  'retains and authenticates %s preview URLs only for the bound session',
+  async (platform) => {
+    const f = fixture();
+    const input = E2eeFeatureInputSchema.parse({
+      requestId: 'b'.repeat(32),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: `${platform}/control`,
+        params: {
+          sessionId: f.input.sessionId,
+          requestedByUserId: 'owner',
+          command: { action: 'status' },
+        },
+      },
+    });
+    const prepared = await Effect.runPromise(f.sender.prepareFeature(input));
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, prepared.frameHex));
+    if (!opened) throw new Error('missing signed preview request');
+    expect(opened.input).toEqual(input);
+    const result = LocalMachineRpcResponseSchema.parse({
+      ok: true,
+      result: {
+        type: `${platform}/control_response`,
+        sessionId: f.input.sessionId,
+        success: true,
+        preview: {
+          operationId: 'operation',
+          ...(platform === 'ios-simulator'
+            ? { udid: '00000000-0000-4000-8000-000000000001' }
+            : { id: 'Pixel_A' }),
+          phase: 'ready',
+          transport: 'remote',
+          viewerUrl: 'https://preview.example.test/viewer#synthetic',
+        },
+      },
+    });
+    await expect(
+      Effect.runPromise(
+        f.receiver.sealFeatureResult(f.machineId, opened, {
+          ok: true,
+          result: {
+            type: `${platform}/control_response`,
+            sessionId: 'foreign-session',
+            success: true,
+          },
+        } as never)
+      )
+    ).rejects.toThrow();
+    const frames = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, opened, result)
+    );
+    expect(
+      await Effect.runPromise(
+        f.sender.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+      )
+    ).toEqual(result);
+    for (const options of [{ guest: true }, { teammate: true }]) {
+      const refused = encryptedRpcFixture(options);
+      fixtures.push(refused);
+      const sender = options.teammate ? refused.native('teammate') : refused.sender;
+      await expect(Effect.runPromise(sender.prepareFeature(input))).rejects.toThrow();
+    }
+  }
+);
