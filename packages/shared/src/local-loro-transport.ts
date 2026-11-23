@@ -118,6 +118,10 @@ type RoomState = {
   // and on connection loss: frames of an interrupted transfer must never be
   // concatenated with a later transfer's.
   docChunkAssembler: DocUpdateChunkAssembler | null;
+  docReceiveTarget: VersionVector | null;
+  docReceiveConfirmed: boolean;
+  docReceiveRepairSent: boolean;
+  docReceiveStallTimer: unknown | null;
   pendingJoinRequestId: string | null;
   /** Timer for the currently sent join, retained through Flock reconciliation. */
   joinAttemptTimer: unknown | null;
@@ -136,6 +140,8 @@ export type LocalLoroTransportAdapterOptions = {
   maxPayloadBytes?: number;
   /** Bounded lifetime for one connected join attempt (defaults to 120 seconds). */
   joinAttemptTimeoutMs?: number;
+  receiveStallTimeoutMs?: number;
+  onDocReceiveConfirmed?: (docId: string, confirmed: boolean) => void;
   /** Injectable scheduling seam for deterministic lifecycle tests. */
   scheduleTimeout?: (callback: () => void, delayMs: number) => unknown;
   cancelTimeout?: (handle: unknown) => void;
@@ -147,6 +153,8 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   private readonly connection: LocalLoroDataPlaneConnection;
   private readonly maxPayloadBytes: number;
   private readonly joinAttemptTimeoutMs: number;
+  private readonly receiveStallTimeoutMs: number;
+  private readonly onDocReceiveConfirmed?: (docId: string, confirmed: boolean) => void;
   private readonly scheduleTimeout: (callback: () => void, delayMs: number) => unknown;
   private readonly cancelTimeout: (handle: unknown) => void;
   private readonly rooms = new Map<string, RoomState>();
@@ -163,6 +171,11 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     if (!Number.isFinite(this.joinAttemptTimeoutMs) || this.joinAttemptTimeoutMs <= 0) {
       throw new RangeError('joinAttemptTimeoutMs_must_be_a_positive_finite_number');
     }
+    this.receiveStallTimeoutMs = options.receiveStallTimeoutMs ?? 15_000;
+    if (!Number.isFinite(this.receiveStallTimeoutMs) || this.receiveStallTimeoutMs <= 0) {
+      throw new RangeError('receiveStallTimeoutMs_must_be_a_positive_finite_number');
+    }
+    this.onDocReceiveConfirmed = options.onDocReceiveConfirmed;
     this.scheduleTimeout =
       options.scheduleTimeout ?? ((callback, delayMs) => setTimeout(callback, delayMs));
     this.cancelTimeout =
@@ -314,6 +327,10 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       flockFlushChain: Promise.resolve(),
       flockFlushQueued: false,
       docChunkAssembler: null,
+      docReceiveTarget: null,
+      docReceiveConfirmed: false,
+      docReceiveRepairSent: false,
+      docReceiveStallTimer: null,
       pendingJoinRequestId: null,
       joinAttemptTimer: null,
       joinAttemptGeneration: null,
@@ -707,9 +724,19 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     if (!state || state.closed || !sameRoom(state.room, message.room)) {
       return;
     }
-    if (state.isDoc && message.serverVersion) {
-      state.serverVersion = VersionVector.decode(base64ToBytes(message.serverVersion));
-    } else if (!state.isDoc && message.serverVersion) {
+    if (state.isDoc) {
+      if (message.serverVersion) {
+        state.serverVersion = VersionVector.decode(base64ToBytes(message.serverVersion));
+        state.docReceiveTarget = state.serverVersion;
+      }
+      try {
+        this.applyPayload(state, message.payload);
+      } finally {
+        this.reconcileDocReceive(state, { applied: true });
+      }
+      return;
+    }
+    if (message.serverVersion) {
       // The server already holds everything under the frontier it pushed with
       // this delta — advance our up-sync baseline so we never re-upload it.
       state.serverFlockVersion = mergeFlockVersions(
@@ -733,6 +760,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       if (serverVersion) {
         state.serverVersion = VersionVector.decode(base64ToBytes(serverVersion));
       }
+      state.docReceiveTarget = state.serverVersion;
       if (payload) {
         try {
           this.applyPayload(state, payload);
@@ -751,6 +779,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       this.clearJoinAttemptDeadline(state);
       this.setRoomStatus(state, 'joined');
       state.firstSynced.resolve();
+      this.reconcileDocReceive(state, { applied: payload !== undefined });
       // Join is the reconciliation point: up-sync whatever the server is
       // missing relative to its returned version — regardless of `dirty`, so
       // offline writes from a previous process run (or frames the relay
@@ -951,6 +980,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   private closeRoom(state: RoomState): void {
     state.closed = true;
     this.clearJoinAttemptDeadline(state);
+    this.clearReceiveStall(state);
     state.pendingJoinRequestId = null;
     state.syncGeneration += 1;
     state.unsubscribeLocal();
@@ -964,5 +994,70 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     }
     state.status = status;
     notify(state.statusListeners, status);
+    this.reconcileDocReceive(state, { applied: false });
   }
+
+  private reconcileDocReceive(state: RoomState, options: { applied: boolean }): void {
+    if (!state.isDoc || state.room.scope !== 'doc') {
+      return;
+    }
+    const live = !state.closed && state.joined && state.status === 'joined';
+    const covered =
+      state.docReceiveTarget === null ||
+      versionCovers((state.target as LoroDoc).oplogVersion(), state.docReceiveTarget);
+    const confirmed = live && state.docChunkAssembler === null && covered;
+    if (confirmed || !live) {
+      this.clearReceiveStall(state);
+    }
+    if (confirmed) {
+      state.docReceiveRepairSent = false;
+    }
+    if (state.docReceiveConfirmed !== confirmed) {
+      state.docReceiveConfirmed = confirmed;
+      this.onDocReceiveConfirmed?.(state.room.docId, confirmed);
+    }
+    if (confirmed || !live) {
+      return;
+    }
+    if (options.applied && state.docChunkAssembler === null && !state.docReceiveRepairSent) {
+      state.docReceiveRepairSent = true;
+      this.repairDocReceive(state);
+      return;
+    }
+    if (options.applied || state.docReceiveStallTimer === null) {
+      this.armReceiveStall(state);
+    }
+  }
+
+  private armReceiveStall(state: RoomState): void {
+    this.clearReceiveStall(state);
+    const generation = state.syncGeneration;
+    state.docReceiveStallTimer = this.scheduleTimeout(() => {
+      state.docReceiveStallTimer = null;
+      if (state.closed || state.syncGeneration !== generation || state.docReceiveConfirmed) {
+        return;
+      }
+      this.repairDocReceive(state);
+    }, this.receiveStallTimeoutMs);
+  }
+
+  private clearReceiveStall(state: RoomState): void {
+    if (state.docReceiveStallTimer !== null) {
+      this.cancelTimeout(state.docReceiveStallTimer);
+    }
+    state.docReceiveStallTimer = null;
+  }
+
+  private repairDocReceive(state: RoomState): void {
+    if (state.closed || state.terminalError || state.pendingJoinRequestId) {
+      return;
+    }
+    state.docChunkAssembler = null;
+    this.rejoinRoom(state);
+  }
+}
+
+function versionCovers(local: VersionVector, target: VersionVector): boolean {
+  const comparison = local.compare(target);
+  return comparison !== undefined && comparison >= 0;
 }

@@ -420,15 +420,29 @@ describe('local data plane doc-update chunking', () => {
       maxPayloadBytes: MAX_PAYLOAD_BYTES,
     });
 
+    route: (message: LocalLoroDataPlaneServerMessage) => 'deliver' | 'hold' | 'drop' = () =>
+      'deliver';
+    private readonly held: LocalLoroDataPlaneServerMessage[] = [];
+
     private readonly sharedConnection = {
       id: 'dp:relay:1',
       send: (message: LocalLoroDataPlaneServerMessage) => {
         this.pushed.push(message);
-        this.tasks.push(() => {
-          for (const listener of this.rendererListeners) listener(message);
-        });
+        const route = this.route(message);
+        if (route === 'hold') this.held.push(message);
+        if (route === 'deliver') this.deliver(message);
       },
     };
+
+    private deliver(message: LocalLoroDataPlaneServerMessage): void {
+      this.tasks.push(() => {
+        for (const listener of this.rendererListeners) listener(message);
+      });
+    }
+
+    releaseHeld(): void {
+      for (const message of this.held.splice(0)) this.deliver(message);
+    }
 
     serverDoc(docId: string): LoroDoc {
       const existing = this.serverDocs.get(docId);
@@ -438,7 +452,10 @@ describe('local data plane doc-update chunking', () => {
       return doc;
     }
 
-    createAdapter(peerId: string): LocalLoroTransportAdapter {
+    createAdapter(
+      peerId: string,
+      onDocReceiveConfirmed?: (docId: string, confirmed: boolean) => void
+    ): LocalLoroTransportAdapter {
       const connection = {
         send: (message: LocalLoroDataPlaneClientMessage) => {
           this.tasks.push(async () => {
@@ -458,6 +475,7 @@ describe('local data plane doc-update chunking', () => {
         peerId,
         connection,
         maxPayloadBytes: MAX_PAYLOAD_BYTES,
+        onDocReceiveConfirmed,
       });
     }
 
@@ -485,32 +503,109 @@ describe('local data plane doc-update chunking', () => {
   const errorFrames = (pushed: LocalLoroDataPlaneServerMessage[]) =>
     pushed.filter((m) => m.type === 'error');
 
-  it('an oversized join catch-up is chunked and converges instead of failing terminally', async () => {
+  const isLastChunk = (message: LocalLoroDataPlaneServerMessage): boolean =>
+    message.type === 'update' &&
+    message.payload.kind === 'doc-update-chunk' &&
+    message.payload.chunkIndex + 1 === message.payload.chunkCount;
+  const isDocUpdate = (message: LocalLoroDataPlaneServerMessage): boolean =>
+    message.type === 'update' && message.payload.kind === 'doc-update';
+  const joinsSent = (pushed: LocalLoroDataPlaneServerMessage[]) =>
+    pushed.filter((m) => m.type === 'joined').length;
+
+  it('an oversized join catch-up is chunked and confirms receipt only after its last chunk', async () => {
     const harness = new ChunkHarness();
     appendText(harness.serverDoc('doc-1'), bigText('server-history '));
+    harness.route = (message) => (isLastChunk(message) ? 'hold' : 'deliver');
 
-    const renderer = harness.createAdapter('renderer:a');
+    const receipts: boolean[] = [];
+    const renderer = harness.createAdapter('renderer:a', (_docId, confirmed) =>
+      receipts.push(confirmed)
+    );
     const docA = new LoroDoc();
     const sub = renderer.joinDocRoom('doc-1', docA);
     await harness.settle();
 
     expect(errorFrames(harness.pushed)).toEqual([]);
-    expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
     expect(sub.status).toBe('joined');
+    expect(text(docA)).toBe('');
+    expect(receipts).toEqual([]);
+
+    harness.route = () => 'deliver';
+    harness.releaseHeld();
+    await harness.settle();
+    expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
+    expect(receipts).toEqual([true]);
   });
 
-  it('an oversized live push after join is chunked and converges', async () => {
+  it('withdraws receipt while a live chunked push is incomplete', async () => {
     const harness = new ChunkHarness();
-    const renderer = harness.createAdapter('renderer:a');
+    const receipts: boolean[] = [];
+    const renderer = harness.createAdapter('renderer:a', (_docId, confirmed) =>
+      receipts.push(confirmed)
+    );
+    const docA = new LoroDoc();
+    renderer.joinDocRoom('doc-1', docA);
+    await harness.settle();
+    expect(receipts).toEqual([true]);
+
+    harness.route = (message) => (isLastChunk(message) ? 'hold' : 'deliver');
+    appendText(harness.serverDoc('doc-1'), bigText('live-burst '));
+    await harness.settle();
+    expect(errorFrames(harness.pushed)).toEqual([]);
+    expect(text(docA)).toBe('');
+    expect(receipts).toEqual([true, false]);
+
+    harness.route = () => 'deliver';
+    harness.releaseHeld();
+    await harness.settle();
+    expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
+    expect(receipts).toEqual([true, false, true]);
+  });
+
+  it('rejoins a stalled live transfer whose last chunk never arrives instead of staying unconfirmed', async () => {
+    const harness = new ChunkHarness();
+    const receipts: boolean[] = [];
+    const renderer = harness.createAdapter('renderer:a', (_docId, confirmed) =>
+      receipts.push(confirmed)
+    );
     const docA = new LoroDoc();
     renderer.joinDocRoom('doc-1', docA);
     await harness.settle();
 
-    appendText(harness.serverDoc('doc-1'), bigText('live-burst '));
+    harness.route = (message) => (isLastChunk(message) ? 'drop' : 'deliver');
+    appendText(harness.serverDoc('doc-1'), bigText('lost-tail '));
+    await harness.settle();
+    expect(receipts.at(-1)).toBe(false);
+    expect(joinsSent(harness.pushed)).toBe(1);
+
+    harness.route = () => 'deliver';
+    await vi.advanceTimersByTimeAsync(15_000);
+    await harness.settle();
+    expect(joinsSent(harness.pushed)).toBe(2);
+    expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
+    expect(receipts.at(-1)).toBe(true);
+  });
+
+  it('rejoins when an applied push leaves operations waiting for a dropped predecessor', async () => {
+    const harness = new ChunkHarness();
+    const receipts: boolean[] = [];
+    const renderer = harness.createAdapter('renderer:a', (_docId, confirmed) =>
+      receipts.push(confirmed)
+    );
+    const docA = new LoroDoc();
+    renderer.joinDocRoom('doc-1', docA);
     await harness.settle();
 
-    expect(errorFrames(harness.pushed)).toEqual([]);
-    expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
+    harness.route = (message) => (isDocUpdate(message) ? 'drop' : 'deliver');
+    appendText(harness.serverDoc('doc-1'), 'first ');
+    await harness.settle();
+    harness.route = () => 'deliver';
+    appendText(harness.serverDoc('doc-1'), 'second');
+    await harness.settle();
+
+    expect(joinsSent(harness.pushed)).toBe(2);
+    expect(text(docA)).toBe('first second');
+    expect(receipts).toEqual([true, false, true]);
   });
 
   it('a sibling window converges through a chunked relay of another window’s upload', async () => {

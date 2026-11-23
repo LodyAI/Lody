@@ -187,6 +187,42 @@ vi.mock('loro-repo', async (importOriginal) => {
   };
 });
 
+const localReceipts = vi.hoisted(() => ({
+  publish: undefined as ((docId: string, confirmed: boolean) => void) | undefined,
+}));
+
+vi.mock('@lody/shared/local-loro-transport', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lody/shared/local-loro-transport')>();
+  class ReceiptCapturingAdapter extends actual.LocalLoroTransportAdapter {
+    constructor(options: ConstructorParameters<typeof actual.LocalLoroTransportAdapter>[0]) {
+      super(options);
+      localReceipts.publish = options.onDocReceiveConfirmed;
+    }
+  }
+  return { ...actual, LocalLoroTransportAdapter: ReceiptCapturingAdapter };
+});
+
+/**
+ * A stand-in local transport confirms receipt the way LocalLoroTransportAdapter
+ * does: only while a doc room is joined after its first sync.
+ */
+function withLocalReceipts(adapter: TransportAdapter): TransportAdapter {
+  return {
+    ...adapter,
+    joinDocRoom: (docId, doc, params) => {
+      const sub = adapter.joinDocRoom(docId, doc, params);
+      let firstSynced = false;
+      const publish = () => localReceipts.publish?.(docId, firstSynced && sub.status === 'joined');
+      void sub.firstSyncedWithRemote.then(() => {
+        firstSynced = true;
+        publish();
+      });
+      sub.onStatusChange(publish);
+      return sub;
+    },
+  };
+}
+
 vi.mock('loro-repo/storage/indexeddb', () => ({
   IndexedDBStorageAdaptor: class IndexedDBStorageAdaptor {
     constructor(readonly options: unknown) {}
@@ -835,7 +871,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     };
     const add = repo.addTransport.bind(repo);
     vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
-      add(id, adapter, options)
+      add(id, withLocalReceipts(adapter), options)
     );
     mocks.repoOverride = repo;
     enableElectronLocalDataPlane();
@@ -939,7 +975,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     };
     const add = repo.addTransport.bind(repo);
     vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
-      add(id, adapter, options)
+      add(id, withLocalReceipts(adapter), options)
     );
     mocks.repoOverride = repo;
     enableElectronLocalDataPlane();
@@ -1051,7 +1087,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     };
     const add = repo.addTransport.bind(repo);
     vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
-      add(id, adapter, options)
+      add(id, withLocalReceipts(adapter), options)
     );
     mocks.repoOverride = repo;
     enableElectronLocalDataPlane();
@@ -1142,7 +1178,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     };
     const add = repo.addTransport.bind(repo);
     vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
-      add(id, adapter, options)
+      add(id, withLocalReceipts(adapter), options)
     );
     mocks.repoOverride = repo;
     enableElectronLocalDataPlane();

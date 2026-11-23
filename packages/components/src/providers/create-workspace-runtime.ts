@@ -170,7 +170,12 @@ import {
 } from './local-reconnect-loop';
 import { createCloudRoomRecovery } from './cloud-room-recovery';
 import { resolveWorkspaceControlConnectionState } from './control-connection-state';
-import { createRoomSyncTracker, type RoomSyncTracker } from './room-sync-tracker';
+import {
+  createReceiveConfirmationHub,
+  createRoomSyncTracker,
+  type ReceiveConfirmationSource,
+  type RoomSyncTracker,
+} from './room-sync-tracker';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { createRoomSyncRegistry } from './room-sync-registry';
 import {
@@ -716,6 +721,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let localStartupPromise: Promise<void> | null = null;
   let initialTokenAttachPromise: Promise<void> | null = null;
   let localLoroTransport: LocalLoroTransportAdapter | null = null;
+  const localDocReceive = createReceiveConfirmationHub();
   let localMachineMonitorTransport: WorkspaceLocalMachineMonitorTransport | null = null;
   let localDataPlaneConnectionDispose: (() => void) | null = null;
   let localPresenceUnsubscribe: (() => void) | null = null;
@@ -1179,6 +1185,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // sync regardless of which one the tracker watches.
   const readinessBindingForDocRoom = (sub: RepoRoomSubscription, roomId: string) =>
     sub.subscription(targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId }));
+
+  const receiveConfirmationForDocRoom = (
+    transportId: string,
+    roomId: string
+  ): ReceiveConfirmationSource | undefined =>
+    transportId === 'local' ? localDocReceive.source(roomId) : undefined;
 
   /**
    * Sync wait for a doc store. A binding whose transport is not attached
@@ -3763,6 +3775,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       workspaceId,
       peerId,
       connection: localConnection.connection,
+      onDocReceiveConfirmed: localDocReceive.publish,
     });
     localMachineMonitorTransport = new WorkspaceLocalMachineMonitorTransport({
       workspaceId,
@@ -5376,7 +5389,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
                   return;
                 }
                 roomSub = joinedSub;
-                syncTracker.attach(readinessBindingForDocRoom(joinedSub, roomId));
+                const binding = readinessBindingForDocRoom(joinedSub, roomId);
+                syncTracker.attach(
+                  binding,
+                  receiveConfirmationForDocRoom(binding.transportId, roomId)
+                );
                 cloudRepairUnsubscribe?.();
                 cloudRepairUnsubscribe = watchCloudBindingForRepair(joinedSub);
               },

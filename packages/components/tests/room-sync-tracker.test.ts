@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TransportRoomStatus, TransportSubscription, RepoRoomSubscription } from 'loro-repo';
-import { createRoomSyncTracker } from '../src/providers/room-sync-tracker';
+import {
+  createReceiveConfirmationHub,
+  createRoomSyncTracker,
+} from '../src/providers/room-sync-tracker';
 import { readinessBinding } from '../src/lib/room-readiness';
 import { waitForRoomToSync, type SyncRoomSubscription } from '../src/providers/room-sync';
 
@@ -140,6 +143,34 @@ describe('room-sync-tracker', () => {
 
       expect(tracker.getSyncState()).toBe('error');
       expect(tracker.needsReconnect()).toBe(true);
+    });
+
+    it('reports a joined conversation as syncing until its transport confirms the received state is applied', () => {
+      const receipts = createReceiveConfirmationHub();
+      const tracker = createRoomSyncTracker('session:s1');
+      const subscription = createControlledSubscription('joined');
+      tracker.attach(subscription.sub, receipts.source('session:s1'));
+      tracker.markFirstSynced();
+      expect(tracker.getSyncState()).toBe('syncing');
+
+      receipts.publish('session:s1', true);
+      expect(tracker.getSyncState()).toBe('synced');
+
+      receipts.publish('session:s1', false);
+      subscription.emit('reconnecting');
+      subscription.emit('joined');
+      expect(tracker.getSyncState()).toBe('syncing');
+      receipts.publish('session:s2', true);
+      expect(tracker.getSyncState()).toBe('syncing');
+
+      receipts.publish('session:s1', true);
+      expect(tracker.getSyncState()).toBe('synced');
+
+      tracker.markStopped();
+      tracker.attach(subscription.sub);
+      tracker.markFirstSynced();
+      receipts.publish('session:s1', false);
+      expect(tracker.getSyncState()).toBe('synced');
     });
 
     it('clears the stopped latch when a subsequent re-join fails before attaching', () => {
