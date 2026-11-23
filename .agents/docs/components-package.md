@@ -331,6 +331,14 @@ opening its history store on that path. Background delivery persists the trusted
 and control queues preserve the same provenance-before-activation ordering.
 Receipt lookup stays read-only.
 
+Encrypted Roost requires `e2eeRoostHistory` v1 on the owner. Desktop, browser and
+Capacitor use the protected feature client even when the owner is on the same
+computer. Attachment preparation completes before the device signs the input.
+The durable input record retains this signature across retries. An observed
+conversation refreshes from its owner while visible. Its IndexedDB projection
+belongs to the account, workspace, genesis and device. Authenticated access loss
+records cleanup before disposal and retries it on the next open.
+
 Ordinary Roost sends negotiate `sessionInputDispatch` v1 and use one
 `accept_input_and_dispatch` owner request. The native writer queue commits trusted
 human provenance and immutable history, checks current status/metadata, and publishes

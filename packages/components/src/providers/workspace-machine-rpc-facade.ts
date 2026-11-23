@@ -1,3 +1,6 @@
+import { requireEncryptedRoostOwner } from '../lib/encrypted-roost-history';
+import { RoostHistoryError } from '../lib/roost-history-error';
+import { v5 as uuidv5 } from 'uuid';
 import {
   type CodeCollabOpenDiffManifestRequest,
   type CodeCollabOpenDiffManifestResponse,
@@ -70,6 +73,8 @@ import {
   type IosSimulatorResponse,
   machineSupportsSessionHistoryProtocol,
   SessionHistoryReadQuerySchema,
+  SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   sessionHistoryWriteIntentDigest,
   type MachineProtocolCapabilities,
   type AgentConfigId,
@@ -166,7 +171,8 @@ type LspRequest = {
 export type WorkspaceMachineRpcFacadeDeps = {
   waitForContentAdmission?: () => Promise<void>;
   requestEncryptedFeature?: (
-    request: LocalMachineRpcRequest
+    request: LocalMachineRpcRequest,
+    options?: { requestId: string }
   ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse>;
   getSessionToken?: () => string | null;
   /** Encrypted content: remote file work uses only `requestEncryptedFeature`, when the host has it. */
@@ -312,11 +318,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       : { ownerSessionId: options.ownerSessionId.toString() };
 
   const requireSessionHistoryCapability = async (machineId: MachineId): Promise<void> => {
-    if (
-      !machineSupportsSessionHistoryProtocol({
-        protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
-      })
-    ) {
+    await deps.waitForContentAdmission?.();
+    const machine = { protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId) };
+    if (deps.protectedContent) return requireEncryptedRoostOwner(machine);
+    if (!machineSupportsSessionHistoryProtocol(machine)) {
       throw new Error('This machine does not support Roost session history. Update the machine.');
     }
   };
@@ -328,10 +333,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     options?: { timeoutMs?: number }
   ): Promise<SessionHistoryReadResponse> => {
     await requireSessionHistoryCapability(machineId);
-    const plane = await resolveMachineTargetPlane(machineId);
-    if (plane === 'local') {
-      throw new Error('Local Roost history must use the local session control bridge.');
-    }
     if (deps.protectedContent) {
       if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
       const response = await deps.requestEncryptedFeature({
@@ -342,7 +343,14 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         timeoutMs: options?.timeoutMs ?? 30_000,
       });
       if (!response.ok) throw new Error(response.code ?? 'session_history_read_denied');
-      return response.result as SessionHistoryReadResponse;
+      const read = SessionHistoryReadResponseSchema.parse(response.result);
+      if (read.sessionId !== sessionId) throw new Error('e2ee_rpc_request_binding');
+      if (!read.success) throw new RoostHistoryError('read', read.error ?? '', read.retryReason);
+      return read as SessionHistoryReadResponse;
+    }
+    const plane = await resolveMachineTargetPlane(machineId);
+    if (plane === 'local') {
+      throw new Error('Local Roost history must use the local session control bridge.');
     }
     const readProof = await mintSessionHistoryReadProof(
       { workspaceId, machineId, sessionId },
@@ -403,11 +411,45 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     options?: { timeoutMs?: number }
   ): Promise<SessionHistoryWriteResponse> => {
     await requireSessionHistoryCapability(machineId);
+    if (deps.protectedContent) {
+      const { sessionId, operation, payload } = args;
+      const entry = payload.entry;
+      if (
+        !deps.requestEncryptedFeature ||
+        (operation !== 'accept_input' && operation !== 'accept_input_and_dispatch') ||
+        !entry ||
+        typeof entry !== 'object' ||
+        !('id' in entry) ||
+        typeof entry.id !== 'string' ||
+        !('e2eeIntent' in entry) ||
+        !entry.e2eeIntent
+      )
+        throw new Error('e2ee_history_write_unavailable');
+      const requestId = uuidv5(
+        JSON.stringify([workspaceId, machineId, sessionId, operation, entry.id]),
+        uuidv5.URL
+      ).replaceAll('-', '');
+      const response = await deps.requestEncryptedFeature(
+        {
+          method: 'session/history-write',
+          workspaceId,
+          machineId,
+          params: { sessionId, operation, payload: { entry: { ...entry } } },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        },
+        { requestId }
+      );
+      if (!response.ok) throw new Error(response.code ?? response.error);
+      const write = SessionHistoryWriteResponseSchema.parse(response.result);
+      if (write.sessionId !== sessionId || write.operation !== operation)
+        throw new Error('e2ee_rpc_request_binding');
+      if (!write.success) throw new RoostHistoryError('write', write.error ?? '');
+      return write as SessionHistoryWriteResponse;
+    }
     const plane = await resolveMachineTargetPlane(machineId);
     if (plane === 'local') {
       throw new Error('Local Roost history must use the local session control bridge.');
     }
-    if (deps.protectedContent) throw new Error('e2ee_history_write_unavailable');
     const requestId = crypto.randomUUID();
     const intentDigest = await sessionHistoryWriteIntentDigest(
       requestId,
