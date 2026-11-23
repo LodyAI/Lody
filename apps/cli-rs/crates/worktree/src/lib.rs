@@ -2,7 +2,7 @@
 
 use lody_ports::{
     DiffStorePort, LocalProjectId, PortError, PortErrorKind, PortResult, SessionId,
-    TurnDiffSummary, TurnId, WorkspaceId, WorktreeLease, WorktreePort,
+    TurnDiffSummary, TurnId, WorktreeLease, WorktreePort,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,12 +24,6 @@ impl Default for GitWorktreeManager {
     fn default() -> Self {
         Self::new(".lody-oss/worktrees")
     }
-}
-
-fn sanitize_segment(raw: &str) -> String {
-    raw.chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect()
 }
 
 fn verify_existing_worktree_belongs_to_repo(worktree_path: &Path, project_root: &Path) -> bool {
@@ -65,25 +59,22 @@ impl WorktreePort for GitWorktreeManager {
 
     fn acquire_worktree(
         &self,
-        workspace_id: &WorkspaceId,
         project_id: &LocalProjectId,
         project_root: &Path,
         session_id: &SessionId,
         base_branch: Option<&str>,
     ) -> PortResult<WorktreeLease> {
-        let sanitized_ws = sanitize_segment(&workspace_id.0);
-        let sanitized_sid = sanitize_segment(&session_id.0);
-        let branch_name = format!("lody/{sanitized_ws}/session-{sanitized_sid}");
-        let worktree_path = self
-            .worktrees_root
-            .join(&sanitized_ws)
-            .join(&project_id.0)
-            .join(&sanitized_sid);
+        let sanitized_sid: String = session_id
+            .0
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
+        let branch_name = format!("lody/session-{sanitized_sid}");
+        let worktree_path = self.worktrees_root.join(&project_id.0).join(&sanitized_sid);
 
         if worktree_path.exists() {
             if verify_existing_worktree_belongs_to_repo(&worktree_path, project_root) {
                 return Ok(WorktreeLease {
-                    workspace_id: workspace_id.clone(),
                     session_id: session_id.clone(),
                     project_id: project_id.clone(),
                     branch_name,
@@ -131,7 +122,6 @@ impl WorktreePort for GitWorktreeManager {
         }
 
         Ok(WorktreeLease {
-            workspace_id: workspace_id.clone(),
             session_id: session_id.clone(),
             project_id: project_id.clone(),
             branch_name,

@@ -531,17 +531,7 @@ impl DaemonRuntime {
                 session_id,
             } => {
                 let turns = if workspace_id.0.is_empty() || workspace_id.0 == "*" {
-                    match self
-                        .deps
-                        .history
-                        .resolve_unique_workspace_for_session(&session_id)?
-                    {
-                        Some(resolved_ws) => self
-                            .deps
-                            .history
-                            .read_session_turns(&resolved_ws, &session_id)?,
-                        None => Vec::new(),
-                    }
+                    self.deps.history.read_turns_by_session_id(&session_id)?
                 } else {
                     self.deps
                         .history

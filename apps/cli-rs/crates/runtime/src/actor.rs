@@ -932,13 +932,10 @@ impl SessionActor {
         if self.opts.use_worktree
             && let (Some(pid), Some(root)) = (&self.opts.local_project_id, &self.opts.project_root)
         {
-            let lease = self.deps.worktree.acquire_worktree(
-                &self.opts.workspace_id,
-                pid,
-                root,
-                &self.opts.session_id,
-                None,
-            )?;
+            let lease =
+                self.deps
+                    .worktree
+                    .acquire_worktree(pid, root, &self.opts.session_id, None)?;
             let path = lease.worktree_path.clone();
             self.worktree_lease = Some(lease);
             return Ok(path);

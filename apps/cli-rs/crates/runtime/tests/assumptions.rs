@@ -231,7 +231,6 @@ impl WorktreePort for NoopWorktree {
     }
     fn acquire_worktree(
         &self,
-        _: &WorkspaceId,
         _: &LocalProjectId,
         _: &Path,
         _: &SessionId,

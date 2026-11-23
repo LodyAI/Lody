@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::error::PortResult;
-use crate::identity::{LocalProjectId, SessionId, WorkspaceId};
+use crate::identity::{LocalProjectId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -116,7 +116,6 @@ pub trait AcpLauncherPort: Send + Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorktreeLease {
-    pub workspace_id: WorkspaceId,
     pub session_id: SessionId,
     pub project_id: LocalProjectId,
     pub branch_name: String,
@@ -127,7 +126,6 @@ pub trait WorktreePort: Send + Sync {
     fn supports_git_worktree(&self) -> bool;
     fn acquire_worktree(
         &self,
-        workspace_id: &WorkspaceId,
         project_id: &LocalProjectId,
         project_root: &Path,
         session_id: &SessionId,
