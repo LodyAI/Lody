@@ -21,8 +21,11 @@ import {
 import { scheduleDeclarationSubject } from '../src/e2ee-execution-intent';
 import { readScheduleAuthorization } from '../src/schedule-authorization';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
-import { zonedLocalInputToInstant, instantToZonedLocalInput } from '../src/schedule-recurrence';
-import { applyScheduleEditProposal } from '../src/schedule-recurrence';
+import {
+  applyScheduleEditProposal,
+  zonedLocalInputToInstant,
+  instantToZonedLocalInput,
+} from '../src/schedule-recurrence';
 
 const definition = () =>
   ScheduleDefinitionSchema.parse({
@@ -310,6 +313,7 @@ describe('Schedule persistence contract', () => {
       });
     interruptPublication = true;
     await expect(applyEdit()).rejects.toThrow('interrupted publication');
+    expect((await repo.list())[0]?.title).toBe(d.title);
     interruptPublication = false;
     await applyEdit();
     expect((await repo.list())[0]?.title).toBe('Renamed');

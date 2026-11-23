@@ -213,6 +213,8 @@ describe('applying an edit proposal', () => {
     const edited = document([activity('create', 'created'), activity('edit', 'edited')]);
     expect(apply(edited, 'apply')).toBe(null);
     expect(apply(edited, 'edit')?.title).toBe('Daily');
+    const editedAgain = document([...edited.timeline, activity('later', 'edited')]);
+    expect(apply(editedAgain, 'edit')?.title).toBe('Daily');
   });
 });
 

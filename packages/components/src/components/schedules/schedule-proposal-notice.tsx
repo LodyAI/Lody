@@ -33,7 +33,7 @@ import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
-import { useScheduleDocument } from '@/hooks/use-schedules';
+import { useScheduleDocument, useSchedules } from '@/hooks/use-schedules';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useWorkspaceAgentRoles } from '@/hooks/use-workspace-agent-roles';
@@ -715,6 +715,7 @@ export function ScheduleEditProposalNotice({
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const local = useVisibleLocalProjects({ includeMachineFlock: true });
   const { document, ready } = useScheduleDocument(meta.outcome ? undefined : meta.scheduleId);
+  const registry = useSchedules();
   const [busy, setBusy] = useState(false);
   const { patch } = meta;
   const activityId = scheduleEditProposalActivityId(notice.sessionId, meta.proposalId);
@@ -799,12 +800,14 @@ export function ScheduleEditProposalNotice({
   const definition = document?.definition;
   const machine = definition ? machines.get(definition.machineId as MachineId) : undefined;
   const machineTimeZone = machine?.timeZone ?? getDeviceTimeZone();
-  const revision = document ? scheduleContentRevision(document) : meta.baseActivityId;
+  // A deleted schedule keeps its document; only the registry row goes.
+  const listed = !registry.ready || registry.rows.some((row) => row.scheduleId === meta.scheduleId);
   const reasons = !ready
     ? []
-    : !definition
+    : !document || !definition || !listed
       ? [t('schedules.notFound', 'This schedule is unavailable or deleted.')]
-      : revision !== meta.baseActivityId && revision !== activityId
+      : scheduleContentRevision(document) !== meta.baseActivityId &&
+          !document.timeline.some((entry) => entry.id === activityId)
         ? [stale]
         : collectScheduleSaveBlockers(
             {

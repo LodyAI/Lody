@@ -719,6 +719,25 @@ describe('proposing a change to an existing schedule', () => {
       create: true,
     });
     await expect(proposeEdit(h, undefined, 'theirs')).rejects.toThrow('Only the Schedule owner');
+    await expect(proposeEdit(h, { prompt: '  ' })).rejects.toThrow('must contain text');
+    await expect(proposeEdit(h, { prompt: 'é'.repeat(20_000) })).rejects.toThrow('32 KiB');
+    await h.repository.save({
+      scheduleId: 'message',
+      draft: {
+        ...h.draft,
+        message: { inputBlocks: [{ type: 'text', text: 'Synthetic prompt' }] },
+        trigger: { kind: 'once', at: '2026-10-27T09:00:00Z' },
+        destination: { kind: 'existing_session', sessionId: 'chat' },
+      },
+      actorId: 'owner',
+      now: 1,
+      activationId: 'message',
+      activityId: 'create-message',
+      create: true,
+    });
+    await expect(proposeEdit(h, undefined, 'message')).rejects.toThrow('has its own editor');
+    await h.repository.delete('schedule', 'owner', 2);
+    await expect(proposeEdit(h)).rejects.toThrow('Schedule not found');
     expect(h.history()).toEqual([]);
   });
 });

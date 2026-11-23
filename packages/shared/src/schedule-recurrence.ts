@@ -491,7 +491,8 @@ export function scheduleContentRevision(document: Pick<ScheduleDocument, 'timeli
  * The draft an edit proposal means for the schedule as it is now: the proposed
  * fields over everything else unchanged. `null` when the schedule was edited
  * after the agent read it, so a stale proposal never overwrites a newer edit.
- * When `activityId` already wrote the schedule, the draft is the saved content: a replay.
+ * When `activityId` is already in the timeline, that save landed: the draft is the
+ * content as it is now, so a retried Apply completes the write and changes nothing.
  */
 export function applyScheduleEditProposal(
   proposal: Pick<ScheduleEditProposalMeta, 'patch' | 'baseActivityId'>,
@@ -500,9 +501,9 @@ export function applyScheduleEditProposal(
   machineTimeZone: string,
   activityId: string
 ): ScheduleDraft | null {
-  const revision = scheduleContentRevision(document);
-  if (revision !== activityId && revision !== proposal.baseActivityId) return null;
-  const patch: ScheduleEditProposalMeta['patch'] = revision === activityId ? {} : proposal.patch;
+  const landed = document.timeline.some((entry) => entry.id === activityId);
+  if (!landed && scheduleContentRevision(document) !== proposal.baseActivityId) return null;
+  const patch: ScheduleEditProposalMeta['patch'] = landed ? {} : proposal.patch;
   const current = document.definition;
   return {
     title: patch.title ?? current.title,
