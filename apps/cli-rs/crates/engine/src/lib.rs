@@ -1,11 +1,18 @@
 #![forbid(unsafe_code)]
 
 use lody_ports::{
-    EnginePort, EpochKeyMaterial, HistoryPort, HistoryTurnRecord, PortError, PortErrorKind,
-    PortResult, QueuedDraftItem, SessionId, SessionMetaSnapshot, TurnId, WorkspaceId,
-    WorkspaceSecurityMode,
+    EnginePort, EpochKeyMaterial, HistoryPort, HistoryTurnRecord, LocalProjectId,
+    LocalProjectRecord, PortError, PortErrorKind, PortResult, ProjectStorePort, QueuedDraftItem,
+    SessionId, SessionMetaSnapshot, TurnId, WorkspaceId, WorkspaceSecurityMode,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+fn not_wired(component: &str) -> PortError {
+    PortError::new(
+        PortErrorKind::Unavailable,
+        format!("{component} is pending official Rust engine integration"),
+    )
+}
 
 pub struct RepoEngineClient {
     socket_path: Option<PathBuf>,
@@ -23,14 +30,14 @@ impl RepoEngineClient {
 
 impl EnginePort for RepoEngineClient {
     fn is_connected(&self) -> bool {
-        self.socket_path.is_some()
+        false
     }
 
     fn read_workspace_security_mode(
         &self,
         _workspace_id: &WorkspaceId,
     ) -> PortResult<WorkspaceSecurityMode> {
-        Ok(WorkspaceSecurityMode::Plaintext)
+        Err(not_wired("loro-repo-rs workspace security mode"))
     }
 
     fn read_session_meta(
@@ -38,14 +45,11 @@ impl EnginePort for RepoEngineClient {
         _workspace_id: &WorkspaceId,
         _session_id: &SessionId,
     ) -> PortResult<Option<SessionMetaSnapshot>> {
-        Ok(None)
+        Err(not_wired("loro-repo-rs session meta"))
     }
 
     fn upsert_session_meta(&self, _meta: &SessionMetaSnapshot) -> PortResult<()> {
-        Err(PortError::new(
-            PortErrorKind::Unavailable,
-            "loro-repo-engine client not yet wired",
-        ))
+        Err(not_wired("loro-repo-rs session meta"))
     }
 
     fn promote_next_queued_draft(
@@ -53,7 +57,7 @@ impl EnginePort for RepoEngineClient {
         _workspace_id: &WorkspaceId,
         _session_id: &SessionId,
     ) -> PortResult<Option<QueuedDraftItem>> {
-        Ok(None)
+        Err(not_wired("loro-repo-rs messageQueue"))
     }
 
     fn set_message_queue_paused(
@@ -62,7 +66,7 @@ impl EnginePort for RepoEngineClient {
         _session_id: &SessionId,
         _paused: bool,
     ) -> PortResult<()> {
-        Ok(())
+        Err(not_wired("loro-repo-rs messageQueue"))
     }
 
     fn install_workspace_epoch_keys(
@@ -70,10 +74,24 @@ impl EnginePort for RepoEngineClient {
         _workspace_id: &WorkspaceId,
         _keys: &[EpochKeyMaterial],
     ) -> PortResult<()> {
-        Err(PortError::new(
-            PortErrorKind::Unavailable,
-            "loro-repo-engine keyring channel not yet wired",
-        ))
+        Err(not_wired("loro-repo-rs keyring"))
+    }
+}
+
+#[derive(Default)]
+pub struct FlockProjectStore;
+
+impl ProjectStorePort for FlockProjectStore {
+    fn register_project(&self, _name: &str, _root_path: &Path) -> PortResult<LocalProjectRecord> {
+        Err(not_wired("Flock project catalog"))
+    }
+
+    fn get_project(&self, _project_id: &LocalProjectId) -> PortResult<Option<LocalProjectRecord>> {
+        Err(not_wired("Flock project catalog"))
+    }
+
+    fn list_projects(&self) -> PortResult<Vec<LocalProjectRecord>> {
+        Err(not_wired("Flock project catalog"))
     }
 }
 
@@ -91,7 +109,7 @@ impl HistoryPort for RoostHistoryStore {
         _session_id: &SessionId,
         _turn_id: &TurnId,
     ) -> PortResult<bool> {
-        Ok(true)
+        Err(not_wired("Roost session history"))
     }
 
     fn read_session_turns(
@@ -99,7 +117,7 @@ impl HistoryPort for RoostHistoryStore {
         _workspace_id: &WorkspaceId,
         _session_id: &SessionId,
     ) -> PortResult<Vec<HistoryTurnRecord>> {
-        Ok(Vec::new())
+        Err(not_wired("Roost session history"))
     }
 
     fn upsert_turn_record(
@@ -108,9 +126,10 @@ impl HistoryPort for RoostHistoryStore {
         _session_id: &SessionId,
         _record: &HistoryTurnRecord,
     ) -> PortResult<()> {
-        Err(PortError::new(
-            PortErrorKind::Unavailable,
-            "roost history store not yet wired",
-        ))
+        Err(not_wired("Roost session history"))
+    }
+
+    fn erase_workspace_turns(&self, _workspace_id: &WorkspaceId) -> PortResult<()> {
+        Err(not_wired("Roost session history"))
     }
 }

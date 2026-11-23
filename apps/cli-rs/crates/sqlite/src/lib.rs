@@ -1,9 +1,8 @@
 #![forbid(unsafe_code)]
 
 use lody_ports::{
-    AdmissionVerdict, AdmittedTurnInput, CustomCommandSpec, HistoryPort, HistoryTurnRecord,
-    InboxCategory, InboxStorePort, LocalProjectId, LocalProjectRecord, PortError, PortErrorKind,
-    PortResult, ProjectStorePort, SessionId, SubmissionStage, TurnId, UserId, WorkspaceId,
+    AdmissionVerdict, AdmittedTurnInput, CustomCommandSpec, InboxCategory, InboxStorePort,
+    PortError, PortErrorKind, PortResult, SessionId, SubmissionStage, TurnId, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -20,20 +19,6 @@ pub fn sha256_hex(input: &str) -> String {
         let _ = write!(out, "{b:02x}");
     }
     out
-}
-
-pub fn create_local_project_id(canonical_root: &Path) -> LocalProjectId {
-    let normalized = canonical_root
-        .to_string_lossy()
-        .trim_end_matches(['/', '\\'])
-        .to_string();
-    let root_for_hash = if normalized.is_empty() {
-        canonical_root.to_string_lossy().into_owned()
-    } else {
-        normalized
-    };
-    let hex = sha256_hex(&root_for_hash);
-    LocalProjectId(format!("local-project-{}", &hex[..24]))
 }
 
 #[derive(Debug, Clone)]
@@ -161,21 +146,7 @@ impl SqliteStore {
              CREATE TABLE IF NOT EXISTS inbox_members(
                  batch_id TEXT NOT NULL REFERENCES inbox_batches(batch_id),
                  sequence INTEGER NOT NULL REFERENCES inbox_results(sequence),
-                 PRIMARY KEY(batch_id,sequence));
-             CREATE TABLE IF NOT EXISTS lody_local_projects (
-                 project_id TEXT PRIMARY KEY,
-                 name TEXT NOT NULL,
-                 root_path TEXT NOT NULL UNIQUE,
-                 default_branch TEXT
-             );
-             CREATE TABLE IF NOT EXISTS lody_session_turns (
-                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
-                 workspace_id TEXT NOT NULL,
-                 session_id TEXT NOT NULL,
-                 turn_id TEXT NOT NULL,
-                 record_json TEXT NOT NULL,
-                 UNIQUE(session_id, turn_id)
-             );",
+                 PRIMARY KEY(batch_id,sequence));",
         )
         .map_err(map_sql_err)?;
 
@@ -240,16 +211,6 @@ impl InboxStorePort for SqliteStore {
         let cfg_json = serde_json::to_string(&cfg)
             .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
 
-        let initial_record = HistoryTurnRecord {
-            turn_id: input.turn_id.clone(),
-            author_user_id: Some(input.verified_requester.clone()),
-            user_prompt: input.prompt_text.clone(),
-            assistant_blocks: Vec::new(),
-            outcome: None,
-        };
-        let initial_record_json = serde_json::to_string(&initial_record)
-            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
-
         let mut conn = self.conn.lock().expect("sqlite lock");
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -293,18 +254,6 @@ impl InboxStorePort for SqliteStore {
             )
             .map_err(map_sql_err)?;
         }
-
-        tx.execute(
-            "INSERT OR IGNORE INTO lody_session_turns (workspace_id, session_id, turn_id, record_json)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![
-                &input.workspace_id.0,
-                &input.session_id.0,
-                &input.turn_id.0,
-                &initial_record_json,
-            ],
-        )
-        .map_err(map_sql_err)?;
 
         if inserted > 0 && matches!(input.category, InboxCategory::Human) {
             tx.execute(
@@ -475,209 +424,6 @@ impl InboxStorePort for SqliteStore {
         if auto_db.exists() {
             let _ = fs::remove_file(auto_db);
         }
-        Ok(())
-    }
-}
-
-impl ProjectStorePort for SqliteStore {
-    fn register_project(&self, name: &str, root_path: &Path) -> PortResult<LocalProjectRecord> {
-        let canonical = fs::canonicalize(root_path).unwrap_or_else(|_| root_path.to_path_buf());
-        let root_str = canonical.to_string_lossy();
-        let deterministic_id = create_local_project_id(&canonical);
-        let conn = self.conn.lock().expect("sqlite lock");
-
-        if let Some((existing_id, existing_name, branch)) = conn
-            .query_row(
-                "SELECT project_id, name, default_branch FROM lody_local_projects WHERE root_path = ?1",
-                params![root_str.as_ref()],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(map_sql_err)?
-        {
-            return Ok(LocalProjectRecord {
-                project_id: LocalProjectId(existing_id),
-                name: existing_name,
-                root_path: canonical,
-                default_branch: branch,
-            });
-        }
-
-        conn.execute(
-            "INSERT INTO lody_local_projects (project_id, name, root_path, default_branch)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![
-                &deterministic_id.0,
-                name,
-                root_str.as_ref(),
-                Option::<String>::None
-            ],
-        )
-        .map_err(map_sql_err)?;
-
-        Ok(LocalProjectRecord {
-            project_id: deterministic_id,
-            name: name.to_string(),
-            root_path: canonical,
-            default_branch: None,
-        })
-    }
-
-    fn get_project(&self, project_id: &LocalProjectId) -> PortResult<Option<LocalProjectRecord>> {
-        let conn = self.conn.lock().expect("sqlite lock");
-        let row = conn
-            .query_row(
-                "SELECT project_id, name, root_path, default_branch FROM lody_local_projects WHERE project_id = ?1",
-                params![&project_id.0],
-                |r| {
-                    Ok(LocalProjectRecord {
-                        project_id: LocalProjectId(r.get(0)?),
-                        name: r.get(1)?,
-                        root_path: PathBuf::from(r.get::<_, String>(2)?),
-                        default_branch: r.get(3)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(map_sql_err)?;
-        Ok(row)
-    }
-
-    fn list_projects(&self) -> PortResult<Vec<LocalProjectRecord>> {
-        let conn = self.conn.lock().expect("sqlite lock");
-        let mut stmt = conn
-            .prepare(
-                "SELECT project_id, name, root_path, default_branch FROM lody_local_projects ORDER BY rowid ASC",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok(LocalProjectRecord {
-                    project_id: LocalProjectId(r.get(0)?),
-                    name: r.get(1)?,
-                    root_path: PathBuf::from(r.get::<_, String>(2)?),
-                    default_branch: r.get(3)?,
-                })
-            })
-            .map_err(map_sql_err)?;
-        let mut out = Vec::new();
-        for item in rows {
-            out.push(item.map_err(map_sql_err)?);
-        }
-        Ok(out)
-    }
-}
-
-impl HistoryPort for SqliteStore {
-    fn backend_name(&self) -> &'static str {
-        "sqlite-local"
-    }
-
-    fn is_user_turn_durable(
-        &self,
-        workspace_id: &WorkspaceId,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-    ) -> PortResult<bool> {
-        let conn = self.conn.lock().expect("sqlite lock");
-        let exists: Option<i64> = conn
-            .query_row(
-                "SELECT 1 FROM lody_session_turns
-                 WHERE workspace_id = ?1 AND session_id = ?2 AND turn_id = ?3",
-                params![&workspace_id.0, &session_id.0, &turn_id.0],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(map_sql_err)?;
-        Ok(exists.is_some())
-    }
-
-    fn read_session_turns(
-        &self,
-        workspace_id: &WorkspaceId,
-        session_id: &SessionId,
-    ) -> PortResult<Vec<HistoryTurnRecord>> {
-        let conn = self.conn.lock().expect("sqlite lock");
-        let mut stmt = conn
-            .prepare(
-                "SELECT record_json FROM lody_session_turns
-                 WHERE workspace_id = ?1 AND session_id = ?2
-                 ORDER BY seq ASC",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map(params![&workspace_id.0, &session_id.0], |r| {
-                r.get::<_, String>(0)
-            })
-            .map_err(map_sql_err)?;
-        let mut turns = Vec::new();
-        for row in rows {
-            let raw = row.map_err(map_sql_err)?;
-            let parsed: HistoryTurnRecord = serde_json::from_str(&raw)
-                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
-            turns.push(parsed);
-        }
-        Ok(turns)
-    }
-
-    fn read_turns_by_session_id(
-        &self,
-        session_id: &SessionId,
-    ) -> PortResult<Vec<HistoryTurnRecord>> {
-        let conn = self.conn.lock().expect("sqlite lock");
-        let mut stmt = conn
-            .prepare(
-                "SELECT record_json FROM lody_session_turns
-                 WHERE session_id = ?1
-                 ORDER BY seq ASC",
-            )
-            .map_err(map_sql_err)?;
-        let rows = stmt
-            .query_map(params![&session_id.0], |r| r.get::<_, String>(0))
-            .map_err(map_sql_err)?;
-        let mut turns = Vec::new();
-        for row in rows {
-            let raw = row.map_err(map_sql_err)?;
-            let parsed: HistoryTurnRecord = serde_json::from_str(&raw)
-                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
-            turns.push(parsed);
-        }
-        Ok(turns)
-    }
-
-    fn upsert_turn_record(
-        &self,
-        workspace_id: &WorkspaceId,
-        session_id: &SessionId,
-        record: &HistoryTurnRecord,
-    ) -> PortResult<()> {
-        let json = serde_json::to_string(record)
-            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
-        let conn = self.conn.lock().expect("sqlite lock");
-        conn.execute(
-            "INSERT INTO lody_session_turns (workspace_id, session_id, turn_id, record_json)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(session_id, turn_id) DO UPDATE SET record_json = excluded.record_json
-             WHERE lody_session_turns.workspace_id = excluded.workspace_id",
-            params![&workspace_id.0, &session_id.0, &record.turn_id.0, &json],
-        )
-        .map_err(map_sql_err)?;
-        Ok(())
-    }
-
-    fn erase_workspace_turns(&self, workspace_id: &WorkspaceId) -> PortResult<()> {
-        let conn = self.conn.lock().expect("sqlite lock");
-        conn.execute(
-            "DELETE FROM lody_session_turns WHERE workspace_id = ?1",
-            params![&workspace_id.0],
-        )
-        .map_err(map_sql_err)?;
         Ok(())
     }
 }

@@ -46,28 +46,17 @@ impl DaemonRunMetadata {
     }
 }
 
-pub fn ensure_bootstrap_files(data_dir: &Path) -> io::Result<String> {
+pub fn ensure_machine_id(data_dir: &Path) -> io::Result<String> {
     fs::create_dir_all(data_dir)?;
     let machine_id_path = data_dir.join("machine-id");
-    let machine_id = match fs::read_to_string(&machine_id_path) {
-        Ok(existing) if !existing.trim().is_empty() => existing.trim().to_string(),
+    match fs::read_to_string(&machine_id_path) {
+        Ok(existing) if !existing.trim().is_empty() => Ok(existing.trim().to_string()),
         _ => {
             let generated = format!("machine-{:x}", hash_path(data_dir));
             fs::write(&machine_id_path, &generated)?;
-            generated
+            Ok(generated)
         }
-    };
-
-    let catalog_path = data_dir.join("workspace-catalog.json");
-    if !catalog_path.exists() {
-        let catalog = json!({
-            "workspaces": [
-                { "id": "local", "name": "Local Workspace" }
-            ]
-        });
-        fs::write(&catalog_path, serde_json::to_vec_pretty(&catalog)?)?;
     }
-    Ok(machine_id)
 }
 
 fn hash_path(path: &Path) -> u64 {
@@ -605,7 +594,7 @@ pub async fn serve_local_daemon(
     }
 
     let my_pid = std::process::id();
-    let machine_id = ensure_bootstrap_files(data_dir).map_err(|e| {
+    let machine_id = ensure_machine_id(data_dir).map_err(|e| {
         lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
     })?;
     let (probe_path, control_path) = resolve_socket_paths(data_dir).map_err(|e| {

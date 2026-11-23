@@ -2,11 +2,10 @@
 
 use lody_acp::{ManagedArtifactInstaller, StdioAcpLauncher};
 use lody_app::ApplicationService;
-use lody_engine::RepoEngineClient;
+use lody_engine::{FlockProjectStore, RepoEngineClient, RoostHistoryStore};
 use lody_entry::{
-    DispatchPlan, ensure_bootstrap_files, execute_offline_oneshot, parse_cli_args,
-    probe_live_daemon, serve_local_daemon, start_daemon_detached, stop_running_daemon,
-    try_execute_via_live_daemon,
+    DispatchPlan, ensure_machine_id, execute_offline_oneshot, parse_cli_args, probe_live_daemon,
+    serve_local_daemon, start_daemon_detached, stop_running_daemon, try_execute_via_live_daemon,
 };
 use lody_env::HostEnv;
 use lody_ports::{BackendPort, ManagedArtifactSource, PortResult, StorageLeaseMode};
@@ -68,7 +67,7 @@ fn compose_runtime(
     backend: Option<Arc<dyn BackendPort>>,
     lease_mode: StorageLeaseMode,
 ) -> PortResult<DaemonRuntime> {
-    let machine_id = ensure_bootstrap_files(&effective_data_dir).map_err(|e| {
+    let machine_id = ensure_machine_id(&effective_data_dir).map_err(|e| {
         lody_ports::PortError::new(lody_ports::PortErrorKind::Unavailable, e.to_string())
     })?;
     let artifact_source = resolve_artifact_source(host_env, backend.as_ref());
@@ -80,9 +79,9 @@ fn compose_runtime(
     Ok(DaemonRuntime::new(DaemonDependencies {
         storage_lease_mode: lease_mode,
         engine: Arc::new(RepoEngineClient::new(None)),
-        history: Arc::clone(&sqlite) as Arc<dyn lody_ports::HistoryPort>,
-        inbox: Arc::clone(&sqlite) as Arc<dyn lody_ports::InboxStorePort>,
-        projects: sqlite as Arc<dyn lody_ports::ProjectStorePort>,
+        history: Arc::new(RoostHistoryStore),
+        inbox: sqlite as Arc<dyn lody_ports::InboxStorePort>,
+        projects: Arc::new(FlockProjectStore),
         diff_store: Arc::new(LocalTurnDiffStore),
         artifacts: Arc::new(ManagedArtifactInstaller::new(artifact_source)),
         acp: Arc::new(StdioAcpLauncher::default()),

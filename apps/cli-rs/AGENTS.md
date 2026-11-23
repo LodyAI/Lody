@@ -11,6 +11,7 @@ Root `AGENTS.md` and [`specs/rust-cli-daemon-architecture.md`](../../specs/rust-
 - `crates/entry` depends on `lody-app` only; `bins/lody` is the sole composition root, and its default build must not link `lody-backend` (`connected` Cargo feature only).
 - Define and read all environment variable keys and values exclusively inside `crates/env` (`lody-env`); direct calls to `std::env::var*` or `std::env::set_var` outside `lody-env` are forbidden and rejected by `clippy.toml`.
 - Preserve existing SQLite filenames and schemas during the rollout so a shared `LODY_DATA_DIR` can switch between the Node CLI and the Rust daemon without data loss.
+- Do not create substitute SQLite, JSON, or in-memory implementations for Loro documents, Flock catalogs, or Roost session history; keep `crates/engine` as explicit `Unavailable` port stubs until the official Rust implementations are integrated.
 - `SessionId` values are globally unique across workspaces; do not add extra path nesting, disambiguation queries, or tests assuming two workspaces share the same `SessionId`.
 
 ## Engineering, code style, and testing rules
