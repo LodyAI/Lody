@@ -195,6 +195,8 @@ import {
   createWorkspaceStreamsTransport,
   getWorkspaceMetaStreamUrl,
   getWorkspaceDocStreamUrl,
+  revalidateStreamsDocReceive,
+  streamsDocReceiptsSupported,
 } from './workspace-streams-transport';
 import { scheduleAfterStartupNavigationCooldown } from './startup-network-idle';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
@@ -722,6 +724,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let initialTokenAttachPromise: Promise<void> | null = null;
   let localLoroTransport: LocalLoroTransportAdapter | null = null;
   const localDocReceive = createReceiveConfirmationHub();
+  const cloudDocReceive = createReceiveConfirmationHub();
+  let latestCloudTransport: StreamsTransportAdapter | null = null;
   let localMachineMonitorTransport: WorkspaceLocalMachineMonitorTransport | null = null;
   let localDataPlaneConnectionDispose: (() => void) | null = null;
   let localPresenceUnsubscribe: (() => void) | null = null;
@@ -1189,8 +1193,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const receiveConfirmationForDocRoom = (
     transportId: string,
     roomId: string
-  ): ReceiveConfirmationSource | undefined =>
-    transportId === 'local' ? localDocReceive.source(roomId) : undefined;
+  ): ReceiveConfirmationSource | undefined => {
+    if (transportId === 'local') return localDocReceive.source(roomId);
+    if (transportId === 'cloud' && streamsDocReceiptsSupported) {
+      return cloudDocReceive.source(roomId);
+    }
+    return undefined;
+  };
 
   /**
    * Sync wait for a doc store. A binding whose transport is not attached
@@ -3832,7 +3841,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     streamsBaseUrl: string
   ): StreamsTransportAdapter => {
     durableStreamsBaseUrl = streamsBaseUrl;
-    return createWorkspaceStreamsTransport({
+    latestCloudTransport = createWorkspaceStreamsTransport({
       incompleteRecoveryStore,
       webSocketEnabled: isLoroStreamsWebSocketEnabled(
         deps.streamsWebSocketEnabled,
@@ -3848,7 +3857,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       auth: activeStreamsTokenProvider.createAuthCallback(),
       streamsBaseUrl,
       shardHostSuffix: getStreamsShardHostSuffixForProvider(activeStreamsTokenProvider),
+      onDocReceiveConfirmed: cloudDocReceive.publish,
     });
+    return latestCloudTransport;
   };
 
   const attachCloudMetaHealthTracker = (): void => {
@@ -5494,6 +5505,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       subscribe: (listener) => mirror.subscribe(listener as never),
       history,
       sessionData,
+      revalidateReceive: () => {
+        const binding = roomSub ? readinessBindingForDocRoom(roomSub, roomId) : null;
+        if (binding?.transportId !== 'cloud' || binding.status !== 'joined') return;
+        if (!latestCloudTransport) return;
+        void revalidateStreamsDocReceive(latestCloudTransport, roomId).catch(() => {});
+      },
       dispose: () => {
         disposed = true;
         sharedWindowDocuments.delete(roomId);

@@ -549,3 +549,22 @@ receive no WS option. The pinned `loro-repo` 0.26.0, `@loro-dev/streams-crdt` 0.
 and `@loro-dev/streams-client` 0.14.0 packages implement URL override and Repo
 forwarding while keeping WS default off. Physical connection reuse is not proven by
 HTTP compatibility tests.
+
+## Conversation receive confirmation
+
+A conversation shows Synced only while the transport behind its readiness binding
+confirms that what it received is applied. Room status is not enough: Streams reports
+`joined` as soon as a reconnected read opens. The runtime keeps one receipt hub per
+plane, so a replaced transport cannot leave a stale confirmation behind.
+
+- Local plane: `LocalLoroTransportAdapter` `onDocReceiveConfirmed`; see
+  [the local data plane](cli-lib-local-loro-data-plane.md#renderer-receive-confirmation).
+- Cloud plane: loro-repo `onDocReceiveConfirmed`, forwarded from streams-crdt
+  `onReceiveConfirmed`. It is false while updates wait for dependencies, and a torn-down
+  session withdraws it. `streamsDocReceiptsSupported` keeps older loro-repo releases,
+  which never confirm, on the previous status-only behavior.
+
+When the tab becomes visible, only the conversation on screen (`revalidateOnWake`) asks
+for one debounced forced catch-up (`revalidateDocReceive`). That catch-up does not
+reopen the live read or change room status, so a current conversation does not flicker
+to Syncing.

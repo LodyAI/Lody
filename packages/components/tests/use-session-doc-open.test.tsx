@@ -11,7 +11,11 @@ import {
   type WorkspaceRuntime,
 } from '../src/atoms/runtime';
 import { activeWorkspaceRuntimeAtom } from '../src/atoms/runtime';
-import { useSessionDoc } from '../src/hooks/use-session-doc';
+import {
+  SESSION_RECEIVE_REVALIDATE_DEBOUNCE_MS,
+  useSessionDoc,
+  type UseSessionDocOptions,
+} from '../src/hooks/use-session-doc';
 import type { ConversationView } from '../src/lib/conversation-view';
 import {
   FIXTURE_SESSION_ID,
@@ -56,7 +60,7 @@ async function openStore(): Promise<SessionDocStore> {
   } as unknown as SessionDocStore;
 }
 
-function renderSessionDoc(runtime: Partial<WorkspaceRuntime>) {
+function renderSessionDoc(runtime: Partial<WorkspaceRuntime>, options: UseSessionDocOptions = {}) {
   const store = createStore();
   store.set(runtimeAtom, {
     workspaceId: 'workspace-id',
@@ -66,7 +70,7 @@ function renderSessionDoc(runtime: Partial<WorkspaceRuntime>) {
   expect(store.get(activeWorkspaceRuntimeAtom)).not.toBeNull();
   const commits: { ready: boolean; turns: number }[] = [];
   function Probe() {
-    const { ready, history } = useSessionDoc(FIXTURE_SESSION_ID);
+    const { ready, history } = useSessionDoc(FIXTURE_SESSION_ID, options);
     commits.push({ ready, turns: history?.turnCount ?? 0 });
     return null;
   }
@@ -98,5 +102,68 @@ describe('useSessionDoc opening', () => {
     // The first render only reads; the effect still takes the reference.
     await act(async () => {});
     expect(acquired).toBe(1);
+  });
+});
+
+describe('useSessionDoc wake revalidation', () => {
+  const setVisibility = (state: DocumentVisibilityState) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'visibilityState');
+    vi.useRealTimers();
+  });
+
+  it('revalidates the conversation on screen once per wake burst and never while hidden', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const open = await openStore();
+    const revalidations: string[] = [];
+    const store = {
+      ...open,
+      revalidateReceive: () => revalidations.push(open.sessionId),
+    } as SessionDocStore;
+    const runtime: Partial<WorkspaceRuntime> = {
+      peekSessionStore: () => store,
+      acquireSessionStore: async () => store,
+      releaseSessionStoreRef: () => {},
+    };
+    renderSessionDoc(runtime, { revalidateOnWake: true });
+    await act(async () => {});
+
+    setVisibility('hidden');
+    setVisibility('visible');
+    setVisibility('hidden');
+    setVisibility('visible');
+    vi.advanceTimersByTime(SESSION_RECEIVE_REVALIDATE_DEBOUNCE_MS - 1);
+    expect(revalidations).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(revalidations).toEqual([FIXTURE_SESSION_ID]);
+
+    setVisibility('visible');
+    setVisibility('hidden');
+    vi.advanceTimersByTime(SESSION_RECEIVE_REVALIDATE_DEBOUNCE_MS);
+    expect(revalidations).toEqual([FIXTURE_SESSION_ID]);
+  });
+
+  it('leaves conversations that are not on screen alone on wake', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const open = await openStore();
+    const revalidations: string[] = [];
+    const store = {
+      ...open,
+      revalidateReceive: () => revalidations.push(open.sessionId),
+    } as SessionDocStore;
+    renderSessionDoc({
+      peekSessionStore: () => store,
+      acquireSessionStore: async () => store,
+      releaseSessionStoreRef: () => {},
+    });
+    await act(async () => {});
+
+    setVisibility('visible');
+    vi.advanceTimersByTime(SESSION_RECEIVE_REVALIDATE_DEBOUNCE_MS);
+    expect(revalidations).toEqual([]);
   });
 });

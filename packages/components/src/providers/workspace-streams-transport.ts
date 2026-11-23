@@ -50,7 +50,21 @@ export type WorkspaceStreamsTransportOptions = {
   /** Explicit transport policy, separate from workspace admission evidence. */
   content: WorkspaceStreamsContent;
   bucketId?: string;
+  onDocReceiveConfirmed?: (docId: string, confirmed: boolean) => void;
 };
+
+/** Older loro-repo releases ignore `onDocReceiveConfirmed` and would never confirm. */
+export const streamsDocReceiptsSupported =
+  typeof (StreamsTransportAdapter.prototype as { revalidateDocReceive?: unknown })
+    .revalidateDocReceive === 'function';
+
+export const revalidateStreamsDocReceive = (
+  transport: StreamsTransportAdapter,
+  docId: string
+): Promise<void> =>
+  (transport as { revalidateDocReceive?: (docId: string) => Promise<void> }).revalidateDocReceive?.(
+    docId
+  ) ?? Promise.resolve();
 
 /** The key under which the transport checkpoints this workspace's Meta room. */
 export const getWorkspaceMetaStreamUrl = (
@@ -146,6 +160,9 @@ export const createWorkspaceStreamsTransport = (
             }
           : { payloadProtection: undefined }),
         persistence,
+        ...(options.onDocReceiveConfirmed
+          ? { onDocReceiveConfirmed: options.onDocReceiveConfirmed }
+          : {}),
       }),
     {
       auth: options.auth,

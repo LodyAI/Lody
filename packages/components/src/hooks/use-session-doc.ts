@@ -96,7 +96,11 @@ export type UseSessionDocResult = {
 export type UseSessionDocOptions = {
   enabled?: boolean;
   syncEnabled?: boolean;
+  /** Set only for the conversation on screen: one debounced revalidation per wake. */
+  revalidateOnWake?: boolean;
 };
+
+export const SESSION_RECEIVE_REVALIDATE_DEBOUNCE_MS = 1_000;
 
 export type UseSessionDocSyncStateResult = {
   ready: boolean;
@@ -125,6 +129,7 @@ export function useSessionDoc(
 ): UseSessionDocResult {
   const enabled = options.enabled ?? true;
   const syncEnabled = options.syncEnabled ?? enabled;
+  const revalidateOnWake = options.revalidateOnWake ?? false;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const browserOnline = useAtomValue(browserOnlineAtom);
   const fallbackDoc = useMemo<SessionDocInput>(
@@ -271,6 +276,27 @@ export function useSessionDoc(
     }
     return loadedStore.acquireSync();
   }, [enabled, loadedStore, syncEnabled]);
+
+  useEffect(() => {
+    if (!enabled || !syncEnabled || !revalidateOnWake || !loadedStore) {
+      return undefined;
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onVisibilityChange = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      if (document.visibilityState !== 'visible') return;
+      timer = setTimeout(() => {
+        timer = null;
+        loadedStore.revalidateReceive();
+      }, SESSION_RECEIVE_REVALIDATE_DEBOUNCE_MS);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [enabled, loadedStore, revalidateOnWake, syncEnabled]);
 
   const history = loadedStore?.history ?? null;
 
