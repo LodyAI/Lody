@@ -547,6 +547,7 @@ export type CloudApi = {
       E2eeWorkspaceBatchReply<E2eeAppendRecordReply>
     >;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
+    deleteWorkspace: Action<{ workspaceId: string }, { workspaceId: string; deleted: true }>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
     reportDeviceProfile: Mutation<
       | E2eeDeviceProfileUpdate

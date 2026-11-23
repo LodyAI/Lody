@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { usePersonalGitHubAuthorization } from '../src/hooks/use-personal-github-authorization';
 import { storePersonalGitHubProof } from '../src/components/settings/github-personal-authorization';
 import { ErrorBoundary } from '../src/components/error-boundary';
@@ -237,6 +238,7 @@ it('keeps unknown-mode catalogs pending while the real local composer stays usab
       describe: async () => {
         throw new Error('The UI must consume the runtime admission, never start another describe');
       },
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },

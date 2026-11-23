@@ -201,7 +201,7 @@ export function MobileCreateWorkspaceSheet({
         port,
         storage: localStorage,
         pending: request,
-        deleteWorkspace: deleteOrganization,
+        deleteWorkspace: (id) => deleteOrganization(id, { isEncrypted: true }),
         isCurrent: () => accountRef.current === accountId,
       });
       if (accountRef.current !== accountId) return;

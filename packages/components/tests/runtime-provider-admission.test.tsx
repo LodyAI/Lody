@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import {
   authorizePlaintextAttachmentUpload,
   installAttachmentWorkspaceAccess,
@@ -315,6 +316,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
           contentMode: 'plaintext',
           contentModeVersion: 1,
         }),
+        deleteWorkspace: unexpectedE2eeWorkspaceOperation,
         create: async () => {
           throw new Error('unused');
         },
@@ -1068,6 +1070,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
             })
           : Promise.resolve({ workspaceId, contentMode: 'plaintext', contentModeVersion: 1 });
       },
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },
@@ -1334,6 +1337,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
         new Promise((resolve) => {
           resolveMode = resolve;
         }),
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },
@@ -1378,6 +1382,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
             contentModeVersion: 2,
           } as never;
         },
+        deleteWorkspace: unexpectedE2eeWorkspaceOperation,
         create: async () => {
           throw new Error('unused');
         },
@@ -1414,6 +1419,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
                 contentModeVersion: 1,
               }
             : { workspaceId: 'workspace-encrypted', admission: 'legacy-unclassified' },
+        deleteWorkspace: unexpectedE2eeWorkspaceOperation,
         create: async () => {
           throw new Error('unused');
         },
@@ -1446,6 +1452,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
       describe: async () => {
         throw new Error('Network offline');
       },
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },
@@ -1494,6 +1501,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
     const admission = { workspaceId: 'local:workspace', admission: 'legacy-unclassified' as const };
     environment.e2eeWorkspaces = {
       describe: async () => admission,
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },
@@ -1521,6 +1529,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
       describe: async () => {
         throw new Error('Offline');
       },
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },
@@ -1545,6 +1554,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
               resolveOld = resolve;
             })
           : { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },
