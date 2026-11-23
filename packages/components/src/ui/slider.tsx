@@ -18,14 +18,12 @@ const styles = stylex.create({
     '::-webkit-slider-runnable-track': {
       height: themeSpace[1],
       borderRadius: themeRadius.full,
-      backgroundImage:
-        'linear-gradient(to right, hsl(var(--primary)) var(--lody-slider-fill), hsl(var(--muted)) var(--lody-slider-fill))',
+      backgroundImage: `linear-gradient(to right, ${themeColors.primary} var(--lody-slider-fill), ${themeColors.muted} var(--lody-slider-fill))`,
     },
     '::-moz-range-track': {
       height: themeSpace[1],
       borderRadius: themeRadius.full,
-      backgroundImage:
-        'linear-gradient(to right, hsl(var(--primary)) var(--lody-slider-fill), hsl(var(--muted)) var(--lody-slider-fill))',
+      backgroundImage: `linear-gradient(to right, ${themeColors.primary} var(--lody-slider-fill), ${themeColors.muted} var(--lody-slider-fill))`,
     },
     '::-webkit-slider-thumb': {
       marginTop: `calc(${themeSpace[1.5]} * -1)`,
@@ -52,8 +50,8 @@ const styles = stylex.create({
     },
     '@media (hover: hover)': {
       ':hover': {
-        '::-webkit-slider-thumb': { borderColor: 'hsl(var(--primary) / 0.6)' },
-        '::-moz-range-thumb': { borderColor: 'hsl(var(--primary) / 0.6)' },
+        '::-webkit-slider-thumb': { borderColor: `hsl(from ${themeColors.primary} h s l / 0.6)` },
+        '::-moz-range-thumb': { borderColor: `hsl(from ${themeColors.primary} h s l / 0.6)` },
       },
     },
     ':focus-visible': {
