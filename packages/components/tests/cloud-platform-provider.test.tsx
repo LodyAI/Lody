@@ -465,7 +465,7 @@ describe('CloudPlatformProvider', () => {
   });
 
   it.each(['owner', 'admin'])(
-    'keeps encrypted email admission running for an authenticated %s',
+    'does not automatically approve pending email invitations for an authenticated %s',
     async (role) => {
       fixture.electron = true;
       fixture.usePreload = true;
@@ -474,27 +474,27 @@ describe('CloudPlatformProvider', () => {
       fixture.organization.organizations = [
         { id: 'workspace-a', name: 'Encrypted', contentMode: 'e2ee', role },
       ];
-      const completed = Promise.withResolvers<void>();
       const approvals: unknown[][] = [];
+      const calls: string[] = [];
       fixture.invoke = async (channel, ...args) => {
-        if (channel === 'e2ee.open') return { readerOwner: 'inbox-reader' };
-        if (channel === 'e2ee.refresh') return undefined;
-        if (channel === 'e2ee.status') return { deviceKind: 'personal', memberRole: role };
+        calls.push(channel);
         if (channel === 'e2ee.memberJoinRequests')
           return { items: [{ requestId: 'email-request', source: 'email' }] };
         if (channel === 'e2ee.approveMemberJoin') {
           approvals.push(args);
           return undefined;
         }
-        if (channel === 'e2ee.close') {
-          completed.resolve();
-          return undefined;
-        }
+        if (channel === 'e2ee.open') return { readerOwner: 'inbox-reader' };
+        if (channel === 'e2ee.refresh' || channel === 'e2ee.close') return undefined;
+        if (channel === 'e2ee.status') return { deviceKind: 'personal', memberRole: role };
         throw new Error(`unexpected IPC invocation: ${channel}`);
       };
       await render();
-      await completed.promise;
-      expect(approvals).toEqual([['workspace-a', 'email-request', 'automatic']]);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(approvals).toEqual([]);
+      expect(calls).not.toContain('e2ee.approveMemberJoin');
       expect(seen.at(-1)!.workspaces.state.get()).toMatchObject({
         status: 'ready',
         workspaces: [{ id: 'workspace-a', contentMode: 'e2ee' }],

@@ -6,7 +6,6 @@ import { E2eeAutomaticPairingInbox } from '@/components/pages/e2ee-automatic-pai
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { assertLegacyWorkspaceAccess } from '@/lib/legacy-workspace-admission';
 import { e2eeAccessLoss } from '@/lib/e2ee-member-removal';
-import { E2eeTeamInboxHost } from '@/components/e2ee/email-admission-worker';
 import {
   useCallback,
   useEffect,
@@ -32,7 +31,6 @@ import {
   createStore,
   type PlatformProvider,
   type MutableStore,
-  type E2eeWorkspaceRuntime,
   type E2eeRuntimeFactory,
   type PlatformE2eeWorkspaces,
   type PlatformSessionState,
@@ -635,8 +633,6 @@ export function CloudPlatformProvider({
       <CloudWorkspaceBridge
         organizationRef={organizationRef}
         workspacesStore={workspacesStore}
-        runtime={e2eeWorkspaces.runtime}
-        accountId={session.data?.user.id}
       />
       <E2eeAutomaticPairingInbox
         key={session.data?.user.id ?? 'signed-out'}
@@ -651,8 +647,6 @@ export function CloudPlatformProvider({
 type CloudWorkspaceBridgeProps = {
   organizationRef: RefObject<ReturnType<typeof useOrganization> | null>;
   workspacesStore: MutableStore<WorkspacesState>;
-  runtime: E2eeWorkspaceRuntime | undefined;
-  accountId: string | undefined;
 };
 
 // Standalone login has session/Convex contexts but no authenticated-query context.
@@ -665,8 +659,6 @@ function CloudWorkspaceBridge(props: CloudWorkspaceBridgeProps) {
 function AuthenticatedCloudWorkspaceBridge({
   organizationRef,
   workspacesStore,
-  runtime,
-  accountId,
 }: CloudWorkspaceBridgeProps) {
   const organization = useOrganization();
   useLayoutEffect(() => {
@@ -713,19 +705,5 @@ function AuthenticatedCloudWorkspaceBridge({
     workspacesStore,
   ]);
 
-  return accountId && runtime
-    ? organization.organizations?.map((workspace) =>
-        'contentMode' in workspace &&
-        workspace.contentMode === 'e2ee' &&
-        'role' in workspace &&
-        ['owner', 'admin'].includes(String(workspace.role)) ? (
-          <E2eeTeamInboxHost
-            key={`${accountId}:${workspace.id}`}
-            runtime={runtime}
-            workspaceId={workspace.id}
-            accountId={accountId}
-          />
-        ) : null
-      )
-    : null;
+  return null;
 }

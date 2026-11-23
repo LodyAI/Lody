@@ -91,7 +91,7 @@ import {
 } from '@lody/shared/e2ee-execution-intent';
 import type { ScheduleDocument } from '@lody/shared';
 import { encodePersonalInvitation } from './pairing';
-import { decodeMemberKeyPackage, signMemberOffer, verifyAutomaticMemberAdmission } from './member';
+import { decodeMemberKeyPackage, signMemberOffer } from './member';
 import { irohTargetDevice, makePersonalIrohRoute } from './iroh-route';
 import type { PersonalIrohEndpoint } from './platform';
 
@@ -1200,12 +1200,12 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             return { ...result, items };
           })
         ),
-      /** The ledger command admitting this listed request, or null when the verified ledger
-       * already admits exactly this device. Automatic mode admits only an applicant whose
-       * signed email invitation this client verifies (`verifyAutomaticMemberAdmission`). */
+      /** The ledger command admitting this explicitly approved request, or null when the
+       * verified ledger already admits this device. Unattended automatic admission is refused. */
       admission: (requestId: string, mode: 'automatic' | 'explicit') =>
         run(
           Effect.gen(function* () {
+            if (mode !== 'explicit') return yield* fail('invalid-input');
             const port = yield* membersPort();
             const material = yield* port.read(memberAccess(), requestId);
             if (
@@ -1227,22 +1227,6 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               )
                 return yield* fail('conflict');
               return null;
-            }
-            // Unattended admission only for an invitation this client can verify: signed by a
-            // currently eligible endorser, email-mode, unexpired and not used before. Anything
-            // else stays pending for an explicit approval.
-            if (mode === 'automatic') {
-              const checked = verifyAutomaticMemberAdmission({
-                view: yield* admitted(),
-                workspaceId: prepared.binding.workspaceId,
-                approver: device.publicKey,
-                offer: material.offer,
-                request: proof.request,
-                now: yield* Clock.currentTimeMillis,
-              });
-              // The precise refusal is the product code, so the request shows why it needs
-              // an explicit approval; nothing is signed and nothing is retried here.
-              if (Result.isFailure(checked)) return yield* fail(checked.failure);
             }
             // Only the package this session listed and showed for this very request may be signed.
             if (memberPreviews.get(requestId) !== material.keyPackageHex)

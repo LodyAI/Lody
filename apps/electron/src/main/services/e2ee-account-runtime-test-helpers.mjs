@@ -1679,7 +1679,7 @@ async function rotatedTeam(t, latency) {
   await f.approver.open('team')
   const joined = async (joiner, submitted, accountId) => {
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     let claimed = await joiner.claimMemberJoin('team', submitted.requestId)
     for (let attempt = 0; !claimed.ready && attempt < 3; attempt++)

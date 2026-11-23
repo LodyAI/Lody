@@ -6,8 +6,7 @@ import {
   encodeMemberKeyPackage,
   MemberOfferPinsSchema,
   MemberOfferSchema,
-  signMemberOffer,
-  verifyAutomaticMemberAdmission
+  signMemberOffer
 } from '@lody/e2ee-client/member'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
@@ -35,10 +34,6 @@ const ok = Result.getOrThrow
 const fail = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code })
 // One public format for desktop and the portable runtime.
 export { decodeMemberKeyPackage, MemberOfferSchema }
-/** Desktop error code of an automatic-admission refusal, e.g. `member_invitation_used`. */
-export const desktopAdmissionRefusal = (
-  refusal: import('@lody/e2ee-client/member').AutomaticAdmissionRefusal
-) => `member_${refusal.replaceAll('-', '_')}` as const
 function sql<A>(work: () => A): Effect.Effect<A, unknown> {
   return Effect.try({
     try: work,
@@ -300,13 +295,12 @@ export function makeDesktopMemberApprovals(input: {
         input.signer
       )
     }),
-    /** `automatic` carries the relay's copy of the invitation: unattended admission signs
-     * only when this device verifies it (signed by a currently eligible endorser, email,
-     * unexpired, unused); otherwise the applicant waits for an explicit approval. */
+    /** Unattended automatic admission is disabled; explicit approval only. */
     prepare: Effect.fnUntraced(function* (
       keyPackageHex: string,
       automatic?: { offer: unknown; now: number }
     ) {
+      if (automatic) return yield* Effect.fail(fail('invalid-input'))
       const proof = yield* sql(() => decodeMemberKeyPackage(keyPackageHex))
       const requestId = hex(proof.request.requestId.toBytes())
       yield* Effect.fromResult(
@@ -332,19 +326,6 @@ export function makeDesktopMemberApprovals(input: {
         )
           return yield* Effect.fail(fail('conflict'))
         return null
-      }
-      if (automatic) {
-        const checked = verifyAutomaticMemberAdmission({
-          view,
-          workspaceId: input.workspaceId,
-          approver: input.signer.publicKey,
-          offer: automatic.offer,
-          request: proof.request,
-          now: automatic.now
-        })
-        // The precise refusal is the public code; nothing is signed and nothing is retried.
-        if (Result.isFailure(checked))
-          return yield* Effect.fail(fail(desktopAdmissionRefusal(checked.failure)))
       }
       // Only the package this approver listed and showed for this request may be signed.
       yield* sql(() => {
