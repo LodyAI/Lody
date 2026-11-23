@@ -29,7 +29,12 @@ const styles = stylex.create({
   opened: { paddingInline: themeSpace[4], paddingBottom: themeSpace[3] },
   passkeyNone: { paddingInline: themeSpace[4], paddingBottom: themeSpace[4] },
   notice: { padding: themeSpace[4] },
-  refreshActions: { marginTop: themeSpace[2], display: 'flex', flexWrap: 'wrap', gap: themeSpace[2] },
+  refreshActions: {
+    marginTop: themeSpace[2],
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: themeSpace[2],
+  },
 });
 
 /** Account-scoped panel. It never keeps a recovery file or an unlocked session in React state. */

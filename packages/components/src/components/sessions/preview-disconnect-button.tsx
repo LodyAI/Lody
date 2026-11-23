@@ -231,6 +231,12 @@ export function PreviewDisconnectButton({
 }
 
 const themeStyles = stylex.create({
-  panel: { width: appSpace[5], flexShrink: 0, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, paddingInline: 0 },
+  panel: {
+    width: appSpace[5],
+    flexShrink: 0,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    paddingInline: 0,
+  },
   panel2: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
 });
