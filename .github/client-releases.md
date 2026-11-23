@@ -6,6 +6,10 @@ draft until the dependencies below are integrated and the owner completes cutove
 It does not change the local-only default build, private web deployment, or legacy
 cross-repository publishers.
 
+`MOBILE_IOS_RELEASE_ENABLED=true` belongs in Repository Variables: the stable
+iOS job checks it before entering `cloud-production`, so an Environment-only
+value cannot enable that job.
+
 ## Entry points and order
 
 ```mermaid
