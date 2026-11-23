@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.115.0](https://github.com/LodyAI/Lody/compare/lody-cli-v0.114.1...lody-cli-v0.115.0) (2026-11-23)
+
+
+### Features
+
+* [risk:high] enable E2EE GitHub integration ([#3221](https://github.com/LodyAI/Lody/issues/3221)) ([58d150a](https://github.com/LodyAI/Lody/commit/58d150a785a9022888d7ea874e6871d602eedd0c))
+* [risk:high] enable E2EE push, live activity and inbox clients ([#3224](https://github.com/LodyAI/Lody/issues/3224)) ([4477241](https://github.com/LodyAI/Lody/commit/4477241aaa8eddc1fed2bacf736793aad8f08a54))
+* [risk:high] migrate OSS snapshots into encrypted workspaces ([#3222](https://github.com/LodyAI/Lody/issues/3222)) ([9ebc37b](https://github.com/LodyAI/Lody/commit/9ebc37b6023ca3441d00be7cb7c6114fc220ca6c))
+* [risk:high] support machine-owned encrypted Roost history ([#3215](https://github.com/LodyAI/Lody/issues/3215)) ([f5c6473](https://github.com/LodyAI/Lody/commit/f5c64737cc7b929aaf917e9b4d549ec0086d4368))
+* [risk:medium] enable E2EE usage and transfer billing advice ([#3216](https://github.com/LodyAI/Lody/issues/3216)) ([6ffccfb](https://github.com/LodyAI/Lody/commit/6ffccfbae729c0adcddef98d920331aa35a035d4))
+
+
+### Bug Fixes
+
+* [risk:medium] address E2EE GA setup and disclosure gaps ([#3207](https://github.com/LodyAI/Lody/issues/3207)) ([59c9bd7](https://github.com/LodyAI/Lody/commit/59c9bd752df17ff79ae8e559d82143199ddc2c7e))
+* **cli:** restore Claude quota refresh through proxies ([#3242](https://github.com/LodyAI/Lody/issues/3242)) ([8dde1e7](https://github.com/LodyAI/Lody/commit/8dde1e77b0fb25e6258b27cee313041fb858309e))
+* make Auto delivery act only on evidence it can trust ([#3208](https://github.com/LodyAI/Lody/issues/3208)) ([f4acbfb](https://github.com/LodyAI/Lody/commit/f4acbfb355ef87bc5b038a2b23d7451af1099c92))
+* scope model-dependent ACP config per model and confirm local Flock reads ([#3218](https://github.com/LodyAI/Lody/issues/3218)) ([8d3ba52](https://github.com/LodyAI/Lody/commit/8d3ba5224520bbf3f1c5d95dd9075678d98c0793))
+
 ## [0.114.1](https://github.com/LodyAI/Lody/compare/lody-cli-v0.114.0...lody-cli-v0.114.1) (2026-11-23)
 
 

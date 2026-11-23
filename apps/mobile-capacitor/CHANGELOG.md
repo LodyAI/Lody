@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.115.0](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.114.1...lody-mobile-v0.115.0) (2026-11-23)
+
+
+### Features
+
+* [risk:high] enable E2EE push, live activity and inbox clients ([#3224](https://github.com/LodyAI/Lody/issues/3224)) ([4477241](https://github.com/LodyAI/Lody/commit/4477241aaa8eddc1fed2bacf736793aad8f08a54))
+* **e2ee:** [risk:high] support portable remote CLI pairing ([#3220](https://github.com/LodyAI/Lody/issues/3220)) ([a2d065f](https://github.com/LodyAI/Lody/commit/a2d065f20057232fe36707d7bcf6497e82e9509e))
+
+
+### Bug Fixes
+
+* [risk:medium] address E2EE GA setup and disclosure gaps ([#3207](https://github.com/LodyAI/Lody/issues/3207)) ([59c9bd7](https://github.com/LodyAI/Lody/commit/59c9bd752df17ff79ae8e559d82143199ddc2c7e))
+* **e2ee:** gate account recovery entry to encrypted workspaces and align layout ([#3232](https://github.com/LodyAI/Lody/issues/3232)) ([3916e9d](https://github.com/LodyAI/Lody/commit/3916e9d6384089c4031b6ea2841554cf924c188d))
+
 ## [0.114.1](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.114.0...lody-mobile-v0.114.1) (2026-11-23)
 
 
