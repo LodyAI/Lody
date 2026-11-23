@@ -8076,8 +8076,10 @@ export const SessionChatInterface = memo(
                             : undefined
                         }
                         diffStat={infoBarDiffStat}
-                        sessionSyncProgress={isVisible ? sessionSyncProgress : undefined}
                         // Desktop only: mobile already shows catch-up in its header.
+                        sessionSyncProgress={
+                          isVisible && !isMobile ? sessionSyncProgress : undefined
+                        }
                         syncStatus={
                           isMobile
                             ? null

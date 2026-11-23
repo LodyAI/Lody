@@ -240,16 +240,20 @@ labelClassName`) so the stage diffstat never clips. Wired from
 
 ## Session sync progress
 
-Web, Electron, iOS and Android use the trailing slot above the composer for
-Roost and Loro. Roost fixes the total to the records it will stage at one
-checkpoint, advances after validating each page, and preserves the count on a
-page retry. Loro counts received bootstrap response bytes, then advances by
-stream offsets after importing incremental updates. A bounded head query
-provides a target for that round when available. The bar stays indeterminate
-while the total is unknown. Local Electron counts validated Loro update chunks.
-The Streams transport observes the existing document fetch and persisted cursor
-without creating another history reader. Readiness stays with the existing
-owners. The bar clears after application or when a round is abandoned.
+Desktop Web, Electron, iOS and Android use the trailing slot above the
+composer for Roost and Loro. The mobile Web layout omits it because its
+session header already shows catch-up. Roost fixes the total to the records it
+will stage at one checkpoint, advances as each affected row and validated page
+is staged, and preserves the count on a page retry. Loro counts received
+bootstrap response bytes, then advances by stream offsets after importing
+incremental updates. A bounded head query provides a target for that round
+when available; the round ends once the applied cursor reaches that target.
+The bar stays indeterminate while the total is unknown. Local Electron counts
+validated Loro update chunks. The Streams transport observes the existing
+document fetch and persisted cursor without creating another history reader.
+Readiness stays with the existing owners. Steps under 1% of the total are not
+drawn, and only the indicator re-renders for a step. The bar clears after
+application or when a round is abandoned.
 
 ## Related-Sessions chip
 
