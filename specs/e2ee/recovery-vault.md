@@ -1,7 +1,7 @@
 # Recovery vault
 
-Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#same-origin-web-recovery)
-Previously approved revision: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-vault-whole-vault-replacement)
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-file-service-locator)
+Previously approved revision: [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#same-origin-web-recovery)
 Translation: current
 
 [中文](recovery-vault.zh.md)
@@ -21,6 +21,20 @@ One canonical CBOR `vault-v1` recovery file opens an encrypted vault. Its fixed 
 `lody-e2ee/vault-v1/<purpose>\0`; wrap V with XChaCha20-Poly1305. The file is a
 vault unlock capability, not a seed from which future workspace identities can be
 regenerated. Missing cloud ciphertext cannot be recreated from this file.
+
+`serviceLocator` names the service the file belongs to: the canonical origin of the
+product site the client is signed in to, `https://lody.ai` for Lody Cloud and the
+normalized `SITE_URL` origin for a self-hosted deployment (scheme, lower-case host and
+non-default port; HTTPS, or HTTP only on a loopback development host). Desktop, mobile
+and Web write the same value, so a file created on one opens on the others. It is never
+a backend deployment URL, which can change while the site stays, nor an account ID.
+Opening a file compares its `serviceLocator` exactly with the signed-in client's own value
+and stops before reading any vault entry when they differ; the client never connects to
+the file's value. A client without a usable site origin offers no recovery. Files written
+with another value, including earlier development files naming a Convex deployment URL or
+an account ID, are rejected without migration, because E2EE is not in production. A
+deployment that changes its site origin must have users replace their recovery files.
+The owner approved this binding on 2026-11-23 ([approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#recovery-file-service-locator)).
 
 Further wrapping entries may wrap the same V, one per passkey, only after real
 WebAuthn ceremonies meet the [ceremony contract](#passkey-unlock): registration
@@ -516,6 +530,14 @@ workspace-entry and index ciphertexts, the `formatVersion: 1` package and the pa
 index, with inputs that must be rejected. `recovery-package.test.ts` opens it through
 the recovery file and through a passkey PRF. Its nonces are fixed only for
 reproducibility.
+
+Inspected and executed on 2026-11-23 against synthetic services only: `openRecoveryVault`
+takes the caller's locator and rejects a different file locator as `locator-mismatch`
+before any store read (`recovery-package.test.ts`). Hosts derive the value with
+[`recoveryServiceLocator`](../../packages/e2ee-client/src/recovery-locator.ts); the
+client-e2ee, Electron and mobile recovery tests open files written for the same site through
+the other hosts' path and reject staging, Convex-URL and account-ID files without a vault
+read. No deployed service or device ran.
 
 External sources: [WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) for `enabled`,
 optional registration results, the user-verified PRF, `user.id` overwrite and RP scope;

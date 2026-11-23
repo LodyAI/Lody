@@ -211,3 +211,9 @@ Owner 批准了[原子移除](../../../../specs/e2ee/atomic-removal.zh.md)、[�
 2026-11-10，owner Zixuan Chen（zxch3n）在[来源会话](lody://session/f30b51f2-390b-43b6-852d-76f4305015a4?workspace=jh72yg4msgbn3rzzfbtxxeb1rn84zhhm)批准 [PR #2528](https://github.com/LodyAI/Lody/pull/2528) 在确切 head `122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1` 的移动端修订，时间约为 `2026-11-10T16:52Z`。答复经该会话的提问对话框给出，不作为单独的 Lody 历史消息保存：owner 选择了“批准 (Recommended)”；问题写明了原先“种子不进 WebView”的表述、方案 B 的交接方式及其代价。该 head 上获批的 blob：`specs/e2ee-foundations.md` `5aa7066c4ae3fe8c1b2161a506664c693d5985ae`、`specs/e2ee-foundations.zh.md` `4e9f09ef3cb4c9c70395ac41a5c19cf049980cfa`。
 
 范围：移动端由 WebView 中的 portable host 每个会话把设备种子交给一个用途受限的原生插件一次（打开、连接状态、发送、接收），插件从不回传种子，bridge 日志关闭；接受的代价是一份无法擦除的 JavaScript 种子字符串，直到被垃圾回收；移动端只拨号、关闭端口映射。本提交只改批准元数据；原生插件、模拟器和真机验收均不由本记录批准。
+
+## 恢复文件服务定位符
+
+2026-11-23，owner Zixuan Chen（zxch3n）在[来源会话](lody://session/49b4cef2-3589-4485-97ca-a906de23fba4?workspace=jh72yg4msgbn3rzzfbtxxeb1rn84zhhm)为决定 D6 选择方案 A。Lody 历史核实了人类消息 `a8a43efa-dfa1-4a18-8bdb-8a1862afb9d9`，时间 `2026-11-23T08:45:42.976Z`，全文为“A”。此前的提问说明桌面端把 Convex 部署 URL、移动端/Web 把账号 ID 写入 `serviceLocator`，core 也不比较它，并推荐方案 A：各端统一写入稳定的产品站点 origin（`https://lody.ai`，自托管为 `SITE_URL` 的 origin），`openRecoveryVault` 遇到不一致即拒绝。
+
+获批的[恢复 vault](../../../../specs/e2ee/recovery-vault.zh.md#恢复材料与密文) 修订规定了该规范 origin、在读取任何 vault 之前精确比较、没有可用站点 origin 时拒绝，以及不迁移、直接拒绝早期开发文件（提问指出这些文件没有生产用户）。文件格式、账本和 `formatVersion: 1` 不变。功能开关、部署和真机验收均不由本记录批准。
