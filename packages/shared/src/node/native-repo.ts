@@ -7,6 +7,7 @@ import {
   engineSatisfies,
   readEngineEndpoint,
 } from '@loro-dev/loro-repo-client/node';
+import { RepoRpcError } from '@loro-dev/loro-repo-client';
 import type {
   FlockChangesUpdate,
   FlockKey,
@@ -65,6 +66,85 @@ export function setNativeNamespaceWriter(client: RepoClient, namespace: string, 
   if (!byNamespace) namespaceWriter.set(client, (byNamespace = new Map()));
   byNamespace.set(namespace, writer);
 }
+/**
+ * Whether this process's writer is bound on the current connection. The engine
+ * refuses a local write to an encrypted room that names a writer whose seed this
+ * connection has not installed (`WRITER_NOT_BOUND`). That is the case after a
+ * reconnect or a host restart, until the attachment's install reinstalls the seed.
+ * `read-only` (Guest, recovery, no sealable epoch) and `retired` (revoked) have no
+ * seed to wait for.
+ */
+type WriterState = 'pending' | 'bound' | 'read-only' | 'retired';
+const writerStates = new WeakMap<
+  RepoClient,
+  Map<string, { state: WriterState; changed: Promise<void>; wake: () => void }>
+>();
+const writerEntry = (client: RepoClient, namespace: string) => {
+  let byNamespace = writerStates.get(client);
+  if (!byNamespace) writerStates.set(client, (byNamespace = new Map()));
+  let entry = byNamespace.get(namespace);
+  if (!entry) {
+    let wake!: () => void;
+    const changed = new Promise<void>((resolve) => (wake = resolve));
+    entry = { state: 'pending', changed, wake };
+    byNamespace.set(namespace, entry);
+  }
+  return entry;
+};
+export function setNativeWriterState(client: RepoClient, namespace: string, state: WriterState) {
+  const entry = writerEntry(client, namespace);
+  if (entry.state === state) return;
+  entry.state = state;
+  const wake = entry.wake;
+  entry.changed = new Promise<void>((resolve) => (entry.wake = resolve));
+  wake();
+}
+
+/** A write waits this long for its writer's reinstall; the host restart and install fit easily. */
+export const NATIVE_WRITER_WAIT_MS = 30_000;
+const isWriterNotBound = (error: unknown) =>
+  error instanceof RepoRpcError && /WRITER_NOT_BOUND/.test(`${error.message} ${error.detail}`);
+
+/**
+ * Runs a local write that names this process's writer once that writer is bound,
+ * and runs it again if the engine still refuses it as unbound (the connection
+ * dropped in between). Bounded: past the wait, the last refusal is thrown. A
+ * namespace without a writer (plaintext) writes at once.
+ */
+export async function withNativeWriter<A>(
+  client: RepoClient,
+  namespace: string,
+  write: () => Promise<A>,
+  waitMs = NATIVE_WRITER_WAIT_MS
+): Promise<A> {
+  if (!namespaceWriter.get(client)?.get(namespace)) return write();
+  const deadline = Date.now() + waitMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const untilChanged = async (entry: ReturnType<typeof writerEntry>) => {
+    const left = deadline - Date.now();
+    if (left <= 0) return false;
+    return Promise.race([
+      entry.changed.then(() => true),
+      new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), left))),
+    ]).finally(() => clearTimeout(timer));
+  };
+  for (;;) {
+    const entry = writerEntry(client, namespace);
+    if (entry.state === 'pending') {
+      if (await untilChanged(entry)) continue;
+      return write();
+    }
+    try {
+      return await write();
+    } catch (error) {
+      if (!isWriterNotBound(error) || entry.state !== 'bound') throw error;
+      if (writerEntry(client, namespace).state === 'bound')
+        setNativeWriterState(client, namespace, 'pending');
+      if (!(await untilChanged(writerEntry(client, namespace)))) throw error;
+    }
+  }
+}
+
 /** Write options for a local edit: this process's writer, when the namespace has one. */
 export const nativeWriteOptions = (client: RepoClient, namespace: string) => {
   const writer = namespaceWriter.get(client)?.get(namespace);

@@ -500,7 +500,12 @@ describe('native encrypted workspace', () => {
 
     process.kill(await hostPid(a.dataDir), 'SIGKILL');
     await expect.poll(() => a.syncs() > before, { timeout: 30_000 }).toBe(true);
+    /** Inside the reinstall window: a replica's streamed edit and a checked patch, as the daemon and main write. */
     await write(a.client, 'after-crash');
+    await createNativeRemoteHistoryPort(a.client, ws, room.id).applyPatch(
+      [{ op: 'set', path: ['session', 'patched'], value: 'after-crash-patch' }],
+      { mode: 'rebase', base_room_tx_id: 0 }
+    );
     await expect
       .poll(async () => (await a.client.syncNamespace(ws, NATIVE_CONTENT_REMOTE_ID)).blockedRooms, {
         timeout: 30_000,
@@ -519,5 +524,6 @@ describe('native encrypted workspace', () => {
     await createDocRoom(a.client, ws, room.id);
     await a.client.syncRooms(ws, [room], NATIVE_CONTENT_REMOTE_ID);
     expect(JSON.stringify((await a.client.readDoc(ws, room)).value)).toContain('after-crash');
+    expect(JSON.stringify((await a.client.readDoc(ws, room)).value)).toContain('after-crash-patch');
   }, 90_000);
 });

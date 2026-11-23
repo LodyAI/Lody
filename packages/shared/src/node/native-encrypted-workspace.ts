@@ -14,6 +14,7 @@ import {
   setNativeNamespaceEncryption,
   setNativeNamespaceRemote,
   setNativeNamespaceWriter,
+  setNativeWriterState,
 } from './native-repo';
 import { nativeFlockDocIds } from '../native-workspace-meta-ipc';
 import { getMachineFlockDocId } from '../machine-flock';
@@ -431,6 +432,7 @@ export async function attachNativeEncryptedWorkspace(
   if (await options.pendingWipe.read()) await finishNativeWipe(options);
   setNativeNamespaceEncryption(client, workspaceId, 'encrypted');
   setNativeNamespaceWriter(client, workspaceId, options.writer);
+  setNativeWriterState(client, workspaceId, 'pending');
   await options.identities.record(options.writer);
 
   let serial: Promise<unknown> = Promise.resolve();
@@ -445,6 +447,7 @@ export async function attachNativeEncryptedWorkspace(
   };
   const install = async () => {
     const { mayWrite } = await options.syncKeyring();
+    if (!closed) setNativeWriterState(client, workspaceId, mayWrite ? 'bound' : 'read-only');
     await client.setSnapshotPolicy(workspaceId, {
       ...NATIVE_ENCRYPTED_SNAPSHOT_POLICY,
       enabled: mayWrite,
@@ -527,7 +530,11 @@ export async function attachNativeEncryptedWorkspace(
     : undefined;
 
   const offState = client.onConnectionStateChange((state) => {
-    if (state !== 'connected' || closed) return;
+    if (closed) return;
+    if (state !== 'connected') {
+      setNativeWriterState(client, workspaceId, 'pending');
+      return;
+    }
     void reinstall().catch(() => {});
   });
 
@@ -546,6 +553,7 @@ export async function attachNativeEncryptedWorkspace(
       }),
     retireWriter: () =>
       run(async () => {
+        setNativeWriterState(client, workspaceId, 'retired');
         await client.keyringHoldSealing(workspaceId, options.writer);
         await client.keyringRemoveSigner(workspaceId, options.writer);
       }),
