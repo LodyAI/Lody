@@ -281,8 +281,7 @@ function JoinSession({
   else if (ready) message = 'e2ee.team.ready';
   else if (terminal) message = 'e2ee.team.rejected';
   else if (request?.state === 'committed') message = 'e2ee.team.waitingKey';
-  else if (request)
-    message = offer.mode === 'email' ? 'e2ee.team.waitingAdminDevice' : 'e2ee.team.waitingApproval';
+  else if (request) message = 'e2ee.team.waitingApproval';
   else if (!pinMatches) message = 'e2ee.team.unavailable';
   else if (available?.matchesRecipient === false) message = 'e2ee.team.wrongEmail';
   return (

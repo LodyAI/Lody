@@ -4,7 +4,7 @@ import {
   bytesToHex,
   type VerifiedLedgerHistory,
 } from '@/lib/e2ee-ledger-history';
-import { e2eeErrorCode, useAutomaticAdmissionRefusal } from '@/lib/e2ee-admission-refusals';
+import { e2eeErrorCode } from '@/lib/e2ee-admission-refusals';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -322,7 +322,9 @@ function TeamSession({
               <span {...stylex.props(styles.identity)}>
                 {request.applicantName || request.applicantEmail || t('e2ee.team.applicant')}
               </span>
-              <AdmissionMode workspaceId={workspaceId} request={request} />
+              <span data-testid="e2ee-join-admission-mode" {...stylex.props(styles.label)}>
+                {t('e2ee.team.approvalRequired')}
+              </span>
             </div>
             {request.applicantEmail && (
               <span {...stylex.props(styles.label)}>{request.applicantEmail}</span>
@@ -404,7 +406,7 @@ function TeamSession({
                     {t('e2ee.team.submitting')}
                   </span>
                 ) : (
-                  <AdmissionAction workspaceId={workspaceId} request={request} />
+                  t('e2ee.team.approve')
                 )}
               </Button>
               {request.state === 'pending' && (
@@ -539,32 +541,6 @@ function TeamSession({
         ))}
       </div>
     </Card.Root>
-  );
-}
-
-type JoinRequestRow = Pick<E2eeMemberReplies['pending']['items'][number], 'requestId' | 'source'>;
-/** Email requests are admitted automatically only until the host refuses one; then the row
- * says it needs an explicit approval and keeps the refusal's original code. */
-function AdmissionMode(props: { workspaceId: string; request: JoinRequestRow }) {
-  const { t } = useTranslation();
-  const refused = useAutomaticAdmissionRefusal(props.workspaceId, props.request.requestId);
-  return (
-    <span data-testid="e2ee-join-admission-mode" {...stylex.props(styles.label)}>
-      {props.request.source !== 'email'
-        ? t('e2ee.team.approvalRequired')
-        : refused
-          ? t('e2ee.team.automaticRefused', { code: refused })
-          : t('e2ee.team.automatic')}
-    </span>
-  );
-}
-function AdmissionAction(props: { workspaceId: string; request: JoinRequestRow }) {
-  const { t } = useTranslation();
-  const refused = useAutomaticAdmissionRefusal(props.workspaceId, props.request.requestId);
-  return t(
-    props.request.source === 'email' && !refused
-      ? 'e2ee.team.continueAdmission'
-      : 'e2ee.team.approve'
   );
 }
 

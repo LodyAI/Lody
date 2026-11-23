@@ -1,7 +1,9 @@
 # Where invitation trust comes from: server-delivered versus self-delivered
 
-Status: draft
+Status: draft · Deferred Post-GA ([2026-11-24 decision](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ga-control-plane-outage-and-explicit-email-approval))
 Translation: current
+
+> **GA scope note (2026-11-24):** Unattended automatic email admission is disabled for GA (both email and link invitations enter the pending approval list and require explicit Owner/Admin approval). Persistent "unverified" email badges and 128-bit fragment-secret self-delivered link auto-admission are deferred Post-GA and do not change ledger v1 format.
 
 [中文](invitation-trust.zh.md)
 
@@ -24,7 +26,7 @@ A link the administrator copies and sends does not have the first problem: it is
 
 ### 1. Email invitations: trust equals the server until verified
 
-Email invitations stay, and so does automatic admission (conditions in whitepaper §4). They are a convenience, not independent verification:
+Under this deferred proposal, email invitations stay alongside optional automatic admission; in GA, however, email invitations require explicit Owner/Admin approval and do not run unattended automatic admission. They are a convenience, not independent verification:
 
 - A member who joined by email is marked "unverified" in the member list; the invitee's own workspace shows "not yet verified with a team member".
 - The mark restricts nothing. This matches the whitepaper's existing principle: use may begin after normal approval and machine checks, manual verification may come later, and an unverified state must be shown honestly.

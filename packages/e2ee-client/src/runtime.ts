@@ -564,8 +564,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           run(
             withSession(id, (session) =>
               Effect.gen(function* () {
-                if (mode !== 'automatic' && mode !== 'explicit')
-                  return yield* fail('invalid-input');
+                if (mode !== 'explicit') return yield* fail('invalid-input');
                 // An earlier approval whose reply was lost left its signed original in the
                 // journal: resubmit those exact bytes and settle them before anything new.
                 const resumed = yield* session.resume();
