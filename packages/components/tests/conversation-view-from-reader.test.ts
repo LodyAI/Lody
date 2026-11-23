@@ -6,7 +6,8 @@ import type { SessionHistory } from '@lody/shared';
 import {
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
-  resolveSessionConversationSourceFence} from '@lody/shared';
+  resolveSessionConversationSourceFence,
+} from '@lody/shared';
 import {
   createLoroSessionData,
   setFieldTo,
@@ -30,6 +31,55 @@ import {
 } from './conversation-view-fixtures';
 
 /** Exercise the shipped reader against real Loro storage. */
+
+it('yields to input within a large catch-up hydration batch and cancels the unread remainder', async () => {
+  const doc = buildSessionDoc(buildFixtureHistory(10));
+  const data = createLoroSessionData({ doc, sessionId: FIXTURE_SESSION_ID });
+  let clock = 0;
+  let reads = 0;
+  let resume!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  const view = createConversationViewFromReader(
+    {
+      ...data.history,
+      readTurnForDisplay(id) {
+        reads++;
+        clock += 3;
+        return data.history.readTurnForDisplay(id);
+      },
+    },
+    {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 0,
+      scheduleIdle: () => () => {},
+      workNow: () => clock,
+      workBudgetMs: 4,
+      yieldToEventLoop: () => gate,
+    }
+  );
+  try {
+    await flushReaderChanges();
+    const range = view.acquireRange(0, 8);
+    expect(reads).toBe(2);
+    // The UI can handle this action before the other six bodies are decoded.
+    range.release();
+    resume();
+    await range.ready;
+    expect(reads).toBe(2);
+    expect(view.turn(7)).toBeUndefined();
+    const next = view.acquireRange(6, 8);
+    await next.ready;
+    expect(view.turn(7)?.id).toBe('a-3');
+    next.release();
+  } finally {
+    resume();
+    view.dispose();
+    data.dispose();
+    doc.free();
+  }
+});
 
 type Backend = {
   name: string;

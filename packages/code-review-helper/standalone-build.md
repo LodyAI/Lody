@@ -16,6 +16,36 @@ over `file://` with no server. It backs `lody review <file>.review.md` (CLI) and
 `dist-standalone/` is gitignored and regenerated. The `build` script runs
 `build:standalone`, so `pnpm -r build` (topological) builds it before dependents.
 
+## Style extraction and single-file output
+
+The renderer, Storybook, standalone bundle and Vitest share
+[`stylex-options.ts`](stylex-options.ts). Owned styles read the helper's local
+CSS variables. The stylesheet supplies ordinary CSS defaults and base resets;
+there is no utility compiler or CSS-macro stage.
+
+| Styling boundary             | Owner                                                | Contract                                                    |
+| ---------------------------- | ---------------------------------------------------- | ----------------------------------------------------------- |
+| Renderer and local controls  | Local StyleX blocks                                  | Native layout, state and Slot behavior                      |
+| Palette/default values       | `src/react/styles.css` and the theme provider        | HSL variables remain host-overridable                       |
+| Private writer/reader chains | Renderer StyleX and explicit `--crh-*` registrations | Original initialization, inheritance and CSS-wide semantics |
+| Diff internals               | `@pierre/diffs`                                      | Its shadow-root styles remain independent                   |
+
+The literal composer and annotation fonts remain element-local custom properties:
+the locked CSS optimizer expands direct `system-ui` declarations for its Android
+target, so replacing those variables changes the font stack.
+
+Standalone StyleX source transforms run in the pre phase. The same plugin
+instance's `generateBundle` hook runs in a post companion immediately before
+`viteSingleFile()`: Vite emits CSS after pre plugins, and extraction must happen
+before the inliner consumes the assets. Keep this shared plugin closure so no
+unused CSS sidecar is produced.
+
+Verify the emitted HTML over `file://` using a synthetic review injected by
+`injectReviewSnapshot`. Check real layout, navigation, checklist/menu interactions
+and absence of external stylesheet requests. Storybook rendering alone does not
+establish the single-file contract. The provider uses fixed Vesper; an embedded
+host may instead supply the existing HSL variables.
+
 ## How the viewer reaches the CLI
 
 The ~8 MB `standalone.html` is NOT bundled into `lody`. The sibling package

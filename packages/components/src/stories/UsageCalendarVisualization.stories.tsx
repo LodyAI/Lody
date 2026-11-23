@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent, within } from 'storybook/test';
 import { UsageCalendarVisualization } from '@/components/settings/usage-calendar-visualization';
@@ -9,6 +10,18 @@ import type {
   SettingsUsageRange,
   SettingsUsageTimelineData,
 } from '@/components/settings/settings-data-cache';
+const storyLayout = stylex.create({
+  canvas: {
+    'margin-inline': 'auto',
+    'max-width': '64rem',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  row: {
+    display: 'flex',
+    gap: 'calc(var(--spacing) * 2)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -231,7 +244,7 @@ function Harness({
   const calendar = buildCalendar(shape);
   const timeline = buildTimeline(calendar, range);
   return (
-    <div className="mx-auto max-w-5xl p-6">
+    <div {...stylex.props(storyLayout.canvas)}>
       <UsageCalendarVisualization
         calendar={calendar}
         timeline={
@@ -286,7 +299,7 @@ export const RangeSwitching: Story = {
     const [range, setRange] = useState<SettingsUsageRange>('week');
     return (
       <>
-        <div className="flex gap-2 p-6">
+        <div {...stylex.props(storyLayout.row)}>
           {(['day', 'week', 'month', 'total'] as const).map((value, index) => (
             <Button key={value} onClick={() => setRange(value)} aria-pressed={range === value}>
               {['24h', '7d', '30d', 'All'][index]}

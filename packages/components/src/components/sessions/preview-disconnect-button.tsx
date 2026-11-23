@@ -1,3 +1,4 @@
+import { themeSpace as appSpace } from '../../style/theme-scale.stylex';
 import { ChevronDown, OctagonX, Power } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
@@ -106,7 +107,7 @@ export function PreviewDisconnectButton({
                 disabled={disabled}
                 aria-label={menuAriaLabel}
                 data-testid={testId ? `${testId}-menu` : undefined}
-                className="w-5 shrink-0 rounded-l-none px-0"
+                xstyle={themeStyles.panel}
               >
                 <ChevronDown {...stylex.props(styles.chevronCompact)} aria-hidden />
               </Button>
@@ -157,7 +158,7 @@ export function PreviewDisconnectButton({
         size={buttonSize}
         disabled={disabled}
         data-testid={testId}
-        className="rounded-r-none border-r-0"
+        xstyle={themeStyles.panel2}
         onClick={onDisconnectOnly}
       >
         {primaryLabel}
@@ -203,3 +204,8 @@ export function PreviewDisconnectButton({
     </div>
   );
 }
+
+const themeStyles = stylex.create({
+  panel: { width: appSpace[5], flexShrink: 0, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, paddingInline: 0 },
+  panel2: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+});

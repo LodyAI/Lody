@@ -6,6 +6,12 @@ import { RouterProvider } from '@tanstack/react-router';
 import { createRouter } from '@lody/components/router';
 import '@lody/components/tailwind/index.css';
 import { jotaiStore } from '@lody/components/lib';
+import {
+  detectBrowserLanguage,
+  fallbackLanguage,
+  initI18n,
+  readStoredLanguagePreference,
+} from '@lody/components/i18n';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@lody/components/atoms/settings';
 import { Provider } from 'jotai';
 import { isNativePlatform } from 'better-auth-capacitor/client';
@@ -88,23 +94,27 @@ try {
         return runtime;
       }
     : undefined;
-  const recovery: MobileRecoveryConfig | null =
-    window.__LODY_NATIVE__ && Capacitor.getPlatform() === 'ios'
-      ? {
-          enabled: () => jotaiStore.get(e2eeRecoveryVaultFeatureEnabledAtom),
-          client: convexClient,
-          run: Effect.runPromise,
-          passkey: nativePasskeyPort({ enabled: true }),
-          defaultLabel: async () => {
-            const info = await Device.getInfo();
-            const device = info.model.startsWith('iPad') ? 'iPad' : 'iPhone';
-            return /^\d+(?:\.\d+){0,3}$/.test(info.osVersion)
-              ? `${device} · iOS ${info.osVersion}`
-              : device;
-          },
-          runtime: () => recoveryRuntime,
-        }
-      : null;
+  const recovery: MobileRecoveryConfig | null = window.__LODY_NATIVE__
+    ? {
+        enabled: () => jotaiStore.get(e2eeRecoveryVaultFeatureEnabledAtom),
+        client: convexClient,
+        run: Effect.runPromise,
+        passkey: nativePasskeyPort({ enabled: Capacitor.getPlatform() === 'ios' }),
+        defaultLabel: async () => {
+          const info = await Device.getInfo();
+          const android = info.platform === 'android';
+          const device = android
+            ? info.model.trim() || 'Android'
+            : info.model.startsWith('iPad')
+              ? 'iPad'
+              : 'iPhone';
+          return /^\d+(?:\.\d+){0,3}$/.test(info.osVersion)
+            ? `${device} · ${android ? 'Android' : 'iOS'} ${info.osVersion}`
+            : device;
+        },
+        runtime: () => recoveryRuntime,
+      }
+    : null;
   const router = createRouter({
     basepath,
     authClient,
@@ -154,6 +164,8 @@ try {
     void cacheAppInfoForDiagnostics();
   }
 
+  await initI18n(readStoredLanguagePreference() ?? detectBrowserLanguage() ?? fallbackLanguage);
+
   const rootElement = document.getElementById('root');
   if (!rootElement) {
     throw new Error('Missing #root element.');
@@ -171,7 +183,7 @@ try {
     </ErrorBoundary>
   );
 
-  // The synchronous boot path completed: React committed either the app or its
+  // The boot path completed: React committed either the app or its
   // error-boundary fallback — either way the screen isn't blank — so cancel the
   // inline watchdog.
   bootGuard?.markBooted();

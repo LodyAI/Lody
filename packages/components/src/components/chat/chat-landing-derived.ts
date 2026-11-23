@@ -697,6 +697,7 @@ export type ChatLandingSearch = {
    * the page, not a one-shot event, so selection mirroring keeps it.
    */
   coordinator?: true;
+  pinSection?: string;
 };
 
 export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
@@ -717,6 +718,8 @@ export function parseChatLandingSearch(search: Record<string, unknown>): ChatLan
     ...(search.coordinator === true || search.coordinator === 'true'
       ? { coordinator: true as const }
       : {}),
+    pinSection:
+      typeof search.pinSection === 'string' && search.pinSection ? search.pinSection : undefined,
   };
 }
 

@@ -7,6 +7,7 @@ import type {
   WorkspaceId,
   ProjectRef,
   LocalProjectId,
+  LocalProjectBranchListResult,
   LocalProjectGitState,
   LocalProjectHistoryCatalogItem,
   LocalProjectHistoryProvider,
@@ -814,13 +815,6 @@ export interface SessionHistoryReadRequest {
 /** Bounded logical reads over the owner session's active history branch. */
 export type SessionHistoryReadQuery =
   | SessionHistoryInspectionQuery
-  | {
-      readonly kind: 'watchChanges';
-      readonly checkpoint: string;
-      readonly includeBodiesFrom?: number;
-      readonly withPatches?: true;
-      readonly waitMs: number;
-    }
   | { readonly kind: 'inputAcceptance'; readonly entry: unknown }
   | { readonly kind: 'count'; readonly withCheckpoint?: true }
   | { readonly kind: 'readAt'; readonly position: number }
@@ -915,6 +909,46 @@ export interface SessionHistoryReadResponse {
   error?: string;
 }
 
+export type SessionHistorySubscription = {
+  readonly id: string;
+} & (
+  | {
+      readonly action: 'open';
+      readonly checkpoint?: string;
+      readonly includeBodiesFrom?: number;
+      readonly withPatches?: true;
+    }
+  | { readonly action: 'close' }
+);
+
+export interface SessionHistoryPublication {
+  readonly checkpoint: string;
+  readonly revision: number;
+  readonly delta?: {
+    readonly baseCheckpoint: string;
+    readonly includeBodiesFrom: number;
+    readonly withPatches?: true;
+    readonly response: SessionHistoryReadResponse;
+  };
+}
+
+export interface SessionHistorySubscriptionRequest {
+  readonly type: 'session/history-subscription';
+  readonly workspaceId: WorkspaceId;
+  readonly machineId: MachineId;
+  readonly sessionId: SessionId;
+  readonly subscription: SessionHistorySubscription;
+}
+
+export type SessionHistorySubscriptionResponse = {
+  readonly type: 'session/history-subscription_response';
+  readonly sessionId: SessionId;
+  readonly subscriptionId: string;
+} & (
+  | { readonly event: 'publication'; readonly publication: SessionHistoryPublication }
+  | { readonly event: 'closed'; readonly error?: string }
+);
+
 export type SessionHistoryWriteOperation =
   | 'accept_input'
   | 'accept_input_and_dispatch'
@@ -975,6 +1009,7 @@ export type LocalSessionControlRequest =
   | SessionImageResolveLocalRequest
   | SessionAttachmentPrepareRequest
   | SessionHistoryReadRequest
+  | SessionHistorySubscriptionRequest
   | SessionHistoryWriteRequest
   | PreviewCandidateReportRequest
   | SessionPreviewCreateRequest
@@ -1008,6 +1043,7 @@ export type LocalSessionControlResponse =
   | SessionImageResolveLocalResponse
   | SessionAttachmentPrepareResponse
   | SessionHistoryReadResponse
+  | SessionHistorySubscriptionResponse
   | SessionHistoryWriteResponse
   | PreviewCandidateReportResponse
   | SessionPreviewCreateResponse
@@ -1016,6 +1052,13 @@ export type LocalSessionControlResponse =
 
 export type LocalProjectFileListResult = {
   paths: string[];
+  truncated: boolean;
+};
+
+export type LocalProjectFileSearchResult = {
+  /** Best matches first, at most the requested limit. */
+  paths: string[];
+  /** The host's file index hit its size cap, so a match may be missing. */
   truncated: boolean;
 };
 
@@ -1203,11 +1246,36 @@ export type LocalProjectControlRequest =
       localProjectId: LocalProjectId;
     }
   | {
+      type: 'local-project/list-branches';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      query?: string;
+      limit?: number;
+      cursor?: string;
+      requestedByUserId?: string;
+    }
+  | {
       type: 'local-project/list-files';
       machineId: MachineId;
       workspaceId: WorkspaceId;
       localProjectId: LocalProjectId;
       maxFiles?: number;
+      requestedByUserId?: string;
+    }
+  | {
+      /**
+       * Host-side path search: the machine matches `query` against its own
+       * file list and returns only the best `limit` paths, so a client never
+       * pulls the full list to filter it. Older daemons reject this type; the
+       * client then falls back to `local-project/list-files`.
+       */
+      type: 'local-project/search-files';
+      machineId: MachineId;
+      workspaceId: WorkspaceId;
+      localProjectId: LocalProjectId;
+      query: string;
+      limit?: number;
       requestedByUserId?: string;
     }
   | {
@@ -1225,12 +1293,14 @@ export type LocalProjectControlRequest =
       workspaceId: WorkspaceId;
       localProjectId: LocalProjectId;
       skillDirs: string[];
+      knownFingerprint?: string;
       requestedByUserId?: string;
     }
   | {
       type: 'local-project/list-global-skills';
       machineId: MachineId;
       workspaceId: WorkspaceId;
+      knownFingerprint?: string;
       requestedByUserId?: string;
     }
   | {
@@ -1390,7 +1460,9 @@ export type LocalProjectControlResponse =
       { workspaces: LocalProjectWorkspaceSummary[] }
     >
   | LocalProjectControlOkResponse<'local-project/git-state', LocalProjectGitState>
+  | LocalProjectControlOkResponse<'local-project/list-branches', LocalProjectBranchListResult>
   | LocalProjectControlOkResponse<'local-project/list-files', LocalProjectFileListResult>
+  | LocalProjectControlOkResponse<'local-project/search-files', LocalProjectFileSearchResult>
   | LocalProjectControlOkResponse<'local-project/list-dir', LocalProjectDirectoryListResult>
   | LocalProjectControlOkResponse<'local-project/list-skills', ProjectSkillsResult>
   | LocalProjectControlOkResponse<'local-project/list-global-skills', ProjectSkillsResult>

@@ -163,9 +163,12 @@ describe('video preview lifecycle', () => {
     await render('clip.WEBM');
     const video = container.querySelector('video')!;
     expect(video).not.toBeNull();
-    expect(video.controls).toBe(true);
+    expect(video.controls).toBe(false);
     expect(video.playsInline).toBe(true);
     expect(video.autoplay).toBe(false);
+    expect(container.querySelector('button[aria-label="Play"]')).not.toBeNull();
+    expect(container.querySelector('input[aria-label="Seek"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Mute"]')).not.toBeNull();
     expect(blobs.get(video.src)).toMatchObject({ type: 'video/webm', size: bytes.length });
     Object.defineProperty(video, 'paused', { configurable: true, value: false });
     await render('clip.WEBM', false);

@@ -38,9 +38,17 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { runCommandTextLegacy } from '@lody/shared/node/process';
+import { searchLocalProjectFilePaths } from './local-project-file-search';
 
 const DEFAULT_LOCAL_PROJECT_MAX_FILES = 80_000;
 const HARD_LOCAL_PROJECT_MAX_FILES = 200_000;
+const DEFAULT_LOCAL_PROJECT_SEARCH_LIMIT = 100;
+const HARD_LOCAL_PROJECT_SEARCH_LIMIT = 1_000;
+/**
+ * Consecutive keystrokes reuse one scan of the project instead of re-running
+ * `git ls-files` (or the directory walk) per character.
+ */
+const LOCAL_PROJECT_SEARCH_INDEX_TTL_MS = 10_000;
 const DEFAULT_LOCAL_PROJECT_LIST_DIR_LIMIT = 1_000;
 const HARD_LOCAL_PROJECT_LIST_DIR_LIMIT = 10_000;
 const DEFAULT_LOCAL_PROJECT_BROWSE_DIR_LIMIT = 500;
@@ -915,19 +923,29 @@ async function resolveProjectEntry(
   };
 }
 
-async function readSkillMarkdownFile(
+/**
+ * A `SKILL.md` found by the stat-only scan. Its body is read only when the
+ * caller's fingerprint no longer matches (see `materializeSkillGroup`).
+ */
+type SkillCandidate = {
+  displaySkillDir: string;
+  relativePath: string;
+  realPath: string;
+  isSymlink: boolean;
+};
+
+type ScannedSkillGroup = {
+  scope: ProjectSkillScope;
+  dir: string;
+  candidates: SkillCandidate[];
+  truncated: boolean;
+  skippedExternalSymlinks: number;
+};
+
+async function statSkillMarkdownFile(
   rootRealPath: string,
   absolutePath: string
-): Promise<
-  | {
-      content: string;
-      stat: fs.Stats;
-      realPath: string;
-      isSymlink: boolean;
-    }
-  | null
-  | 'external-symlink'
-> {
+): Promise<{ stat: fs.Stats; realPath: string; isSymlink: boolean } | null | 'external-symlink'> {
   const resolved = await resolveProjectEntry(rootRealPath, absolutePath);
   if (!resolved) {
     return null;
@@ -941,11 +959,11 @@ async function readSkillMarkdownFile(
   if (resolved.stat.size > DEFAULT_LOCAL_PROJECT_SKILL_MD_MAX_BYTES) {
     throw new Error('SKILL.md is too large to read.');
   }
+  return { stat: resolved.stat, realPath: resolved.realPath, isSymlink: resolved.isSymlink };
+}
 
-  const handle = await fs.promises.open(
-    resolved.realPath,
-    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-  );
+async function readSkillMarkdownContent(realPath: string): Promise<string | null> {
+  const handle = await fs.promises.open(realPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) {
@@ -954,12 +972,7 @@ async function readSkillMarkdownFile(
     if (stat.size > DEFAULT_LOCAL_PROJECT_SKILL_MD_MAX_BYTES) {
       throw new Error('SKILL.md is too large to read.');
     }
-    return {
-      content: await handle.readFile('utf8'),
-      stat,
-      realPath: resolved.realPath,
-      isSymlink: resolved.isSymlink,
-    };
+    return await handle.readFile('utf8');
   } finally {
     await handle.close();
   }
@@ -972,11 +985,11 @@ async function addProjectSkillFromDirectory(args: {
   displaySkillDir: string;
   realSkillDir: string;
   inheritedSymlink: boolean;
-  skills: ProjectSkill[];
+  candidates: SkillCandidate[];
   fingerprintParts: SkillFingerprintPart[];
 }): Promise<'added' | 'missing' | 'external-symlink'> {
   const skillMdPath = path.join(args.realSkillDir, 'SKILL.md');
-  const skillMd = await readSkillMarkdownFile(args.rootRealPath, skillMdPath);
+  const skillMd = await statSkillMarkdownFile(args.rootRealPath, skillMdPath);
   if (skillMd === null) {
     return 'missing';
   }
@@ -985,21 +998,12 @@ async function addProjectSkillFromDirectory(args: {
   }
 
   const relativePath = normalizeProjectRelativePath(`${args.displaySkillDir}/SKILL.md`);
-  const isSymlink = args.inheritedSymlink || skillMd.isSymlink;
-  const skill = buildProjectSkill({
-    groupDir: args.groupDir,
+  args.candidates.push({
     displaySkillDir: args.displaySkillDir,
-    markdown: skillMd.content,
     relativePath,
-    // Home-scoped skills (global + system) carry the absolute SKILL.md path for
-    // prompt expansion; project-relative skills intentionally omit it.
-    absolutePath: args.scope === 'project' ? undefined : skillMd.realPath,
-    isSymlink,
-    symlinkTarget: isSymlink
-      ? toProjectRelativePath(args.rootRealPath, path.dirname(skillMd.realPath))
-      : undefined,
+    realPath: skillMd.realPath,
+    isSymlink: args.inheritedSymlink || skillMd.isSymlink,
   });
-  args.skills.push(skill);
   args.fingerprintParts.push({
     groupDir: args.groupDir,
     scope: args.scope,
@@ -1017,7 +1021,7 @@ async function scanProjectSkillGroup(args: {
   skillDir: string;
   shouldIgnorePath: ((relativePath: string) => boolean) | null;
   fingerprintParts: SkillFingerprintPart[];
-}): Promise<ProjectSkillGroup | null> {
+}): Promise<ScannedSkillGroup | null> {
   const groupDir = normalizeSkillScanDir(args.skillDir);
   if (shouldExcludeLocalProjectRelativePath(groupDir, args.shouldIgnorePath)) {
     return null;
@@ -1034,7 +1038,7 @@ async function scanProjectSkillGroup(args: {
     return {
       scope: args.scope,
       dir: groupDir,
-      skills: [],
+      candidates: [],
       truncated: false,
       skippedExternalSymlinks: 1,
     };
@@ -1051,7 +1055,7 @@ async function scanProjectSkillGroup(args: {
     return null;
   }
 
-  const skills: ProjectSkill[] = [];
+  const candidates: SkillCandidate[] = [];
 
   // No realpath dedup: a symlinked skill or a duplicate that resolves to the
   // same target as another entry is still listed under its own path, so the UI
@@ -1063,7 +1067,7 @@ async function scanProjectSkillGroup(args: {
     displaySkillDir: groupDir,
     realSkillDir: resolvedGroup.realPath,
     inheritedSymlink: resolvedGroup.isSymlink,
-    skills,
+    candidates,
     fingerprintParts: args.fingerprintParts,
   });
   if (rootSkillResult === 'external-symlink') {
@@ -1115,7 +1119,7 @@ async function scanProjectSkillGroup(args: {
       displaySkillDir,
       realSkillDir: resolvedChild.realPath,
       inheritedSymlink: resolvedGroup.isSymlink || resolvedChild.isSymlink,
-      skills,
+      candidates,
       fingerprintParts: args.fingerprintParts,
     });
     if (addResult === 'external-symlink') {
@@ -1177,7 +1181,7 @@ async function scanProjectSkillGroup(args: {
         realSkillDir: resolvedNested.realPath,
         inheritedSymlink:
           resolvedGroup.isSymlink || resolvedChild.isSymlink || resolvedNested.isSymlink,
-        skills,
+        candidates,
         fingerprintParts: args.fingerprintParts,
       });
       if (nestedAddResult === 'external-symlink') {
@@ -1186,48 +1190,98 @@ async function scanProjectSkillGroup(args: {
     }
   }
 
+  if (candidates.length === 0 && skippedExternalSymlinks === 0 && !truncated) {
+    return null;
+  }
+
+  return { scope: args.scope, dir: groupDir, candidates, truncated, skippedExternalSymlinks };
+}
+
+/** Reads the bodies the stat-only scan found and builds the wire group. */
+async function materializeSkillGroup(
+  rootRealPath: string,
+  scanned: ScannedSkillGroup
+): Promise<ProjectSkillGroup> {
+  const skills: ProjectSkill[] = [];
+  try {
+    for (const candidate of scanned.candidates) {
+      const markdown = await readSkillMarkdownContent(candidate.realPath);
+      if (markdown === null) continue;
+      skills.push(
+        buildProjectSkill({
+          groupDir: scanned.dir,
+          displaySkillDir: candidate.displaySkillDir,
+          markdown,
+          relativePath: candidate.relativePath,
+          // Home-scoped skills (global + system) carry the absolute SKILL.md path for
+          // prompt expansion; project-relative skills intentionally omit it.
+          absolutePath: scanned.scope === 'project' ? undefined : candidate.realPath,
+          isSymlink: candidate.isSymlink,
+          symlinkTarget: candidate.isSymlink
+            ? toProjectRelativePath(rootRealPath, path.dirname(candidate.realPath))
+            : undefined,
+        })
+      );
+    }
+  } catch (error) {
+    return {
+      scope: scanned.scope,
+      dir: scanned.dir,
+      skills: [],
+      truncated: false,
+      error: formatErrorMessage(error),
+    };
+  }
+
   skills.sort((left, right) => {
     const nameCompare = left.name.localeCompare(right.name);
     return nameCompare === 0 ? left.relativePath.localeCompare(right.relativePath) : nameCompare;
   });
 
-  if (skills.length === 0 && skippedExternalSymlinks === 0 && !truncated) {
-    return null;
-  }
-
   return {
-    scope: args.scope,
-    dir: groupDir,
+    scope: scanned.scope,
+    dir: scanned.dir,
     skills,
-    truncated,
-    ...(skippedExternalSymlinks > 0 ? { skippedExternalSymlinks } : {}),
+    truncated: scanned.truncated,
+    ...(scanned.skippedExternalSymlinks > 0
+      ? { skippedExternalSymlinks: scanned.skippedExternalSymlinks }
+      : {}),
   };
 }
 
+type ScannedSkillGroupResult =
+  | { kind: 'scanned'; rootRealPath: string; group: ScannedSkillGroup }
+  | { kind: 'error'; group: ProjectSkillGroup };
+
+/**
+ * Built from paths and `SKILL.md` stats only, so the host can tell an unchanged
+ * catalog apart without reading (or sending) any Markdown body.
+ */
 function buildProjectSkillsFingerprint(
-  groups: readonly ProjectSkillGroup[],
+  groups: readonly ScannedSkillGroupResult[],
   fingerprintParts: readonly SkillFingerprintPart[]
 ): string {
   return createHash('sha256')
     .update(
       JSON.stringify({
-        groups: groups.map((group) => ({
-          dir: group.dir,
-          scope: group.scope,
-          skills: group.skills.map((skill) => ({
-            id: skill.id,
-            name: skill.name,
-            description: skill.description,
-            version: skill.version,
-            author: skill.author,
-            relativePath: skill.relativePath,
-            isSymlink: skill.isSymlink,
-            symlinkTarget: skill.symlinkTarget,
-          })),
-          truncated: group.truncated,
-          skippedExternalSymlinks: group.skippedExternalSymlinks ?? 0,
-          error: group.error,
-        })),
+        groups: groups
+          .map((entry) =>
+            entry.kind === 'error'
+              ? { dir: entry.group.dir, scope: entry.group.scope, error: entry.group.error }
+              : {
+                  dir: entry.group.dir,
+                  scope: entry.group.scope,
+                  skills: entry.group.candidates.map((candidate) => ({
+                    relativePath: candidate.relativePath,
+                    isSymlink: candidate.isSymlink,
+                  })),
+                  truncated: entry.group.truncated,
+                  skippedExternalSymlinks: entry.group.skippedExternalSymlinks,
+                }
+          )
+          .sort((left, right) =>
+            `${left.scope}:${left.dir}`.localeCompare(`${right.scope}:${right.dir}`)
+          ),
         files: [...fingerprintParts].sort((left, right) =>
           `${left.scope}:${left.relativePath}`.localeCompare(`${right.scope}:${right.relativePath}`)
         ),
@@ -1236,64 +1290,79 @@ function buildProjectSkillsFingerprint(
     .digest('hex');
 }
 
+async function finishSkillsResult(
+  scanned: readonly ScannedSkillGroupResult[],
+  fingerprintParts: readonly SkillFingerprintPart[],
+  knownFingerprint: string | undefined,
+  toWireGroup: (group: ProjectSkillGroup) => ProjectSkillGroup = (group) => group
+): Promise<ProjectSkillsResult> {
+  const contentFingerprint = buildProjectSkillsFingerprint(scanned, fingerprintParts);
+  if (knownFingerprint !== undefined && knownFingerprint === contentFingerprint) {
+    return { groups: [], contentFingerprint, unchanged: true };
+  }
+  const groups = await Promise.all(
+    scanned.map(async (entry) =>
+      entry.kind === 'error'
+        ? entry.group
+        : toWireGroup(await materializeSkillGroup(entry.rootRealPath, entry.group))
+    )
+  );
+  groups.sort((left, right) => left.dir.localeCompare(right.dir));
+  return { groups: applyProjectSkillsResultBudget(groups), contentFingerprint };
+}
+
 async function listProjectSkillsAtRootPath(
   rootPath: string,
-  skillDirs: readonly string[]
+  skillDirs: readonly string[],
+  knownFingerprint?: string
 ): Promise<ProjectSkillsResult> {
   const normalizedRootPath = normalizeRootPath(rootPath);
   const rootRealPath = await fs.promises.realpath(normalizedRootPath);
   const shouldIgnorePath = buildGitignoreMatcher(rootRealPath);
-  const groups: ProjectSkillGroup[] = [];
   const fingerprintParts: SkillFingerprintPart[] = [];
   const uniqueSkillDirs = [
     ...new Set(skillDirs.map((skillDir) => normalizeSkillScanDir(skillDir))),
   ];
 
   // The known skill dirs (dozens of candidates, mostly nonexistent) are
-  // independent, so scan them concurrently. Order is irrelevant: `groups` is
-  // sorted below and `fingerprintParts` is sorted before hashing.
+  // independent, so scan them concurrently. Order is irrelevant: groups and
+  // `fingerprintParts` are sorted before hashing and before returning.
   const scannedGroups = await Promise.all(
-    uniqueSkillDirs.map(async (skillDir): Promise<ProjectSkillGroup | null> => {
+    uniqueSkillDirs.map(async (skillDir): Promise<ScannedSkillGroupResult | null> => {
       try {
-        return await scanProjectSkillGroup({
+        const group = await scanProjectSkillGroup({
           rootRealPath,
           scope: 'project',
           skillDir,
           shouldIgnorePath,
           fingerprintParts,
         });
+        return group ? { kind: 'scanned', rootRealPath, group } : null;
       } catch (error) {
         return {
-          scope: 'project',
-          dir: normalizeSkillScanDir(skillDir),
-          skills: [],
-          truncated: false,
-          error: formatErrorMessage(error),
+          kind: 'error',
+          group: {
+            scope: 'project',
+            dir: normalizeSkillScanDir(skillDir),
+            skills: [],
+            truncated: false,
+            error: formatErrorMessage(error),
+          },
         };
       }
     })
   );
-  for (const group of scannedGroups) {
-    if (group) {
-      groups.push(group);
-    }
-  }
 
-  groups.sort((left, right) => left.dir.localeCompare(right.dir));
-
-  return {
-    groups: applyProjectSkillsResultBudget(groups),
-    contentFingerprint: buildProjectSkillsFingerprint(groups, fingerprintParts),
-  };
+  return await finishSkillsResult(
+    scannedGroups.filter((entry): entry is ScannedSkillGroupResult => entry !== null),
+    fingerprintParts,
+    knownFingerprint
+  );
 }
 
-function toHomeSkillGroup(
-  group: ProjectSkillGroup,
-  scope: Extract<ProjectSkillScope, 'global' | 'system'>
-): ProjectSkillGroup {
+function toHomeSkillGroup(group: ProjectSkillGroup): ProjectSkillGroup {
   return {
     ...group,
-    scope,
     dir: toHomeDisplayPath(group.dir),
     skills: group.skills.map((skill) => ({
       ...skill,
@@ -1309,7 +1378,7 @@ async function scanHomeSkillDirs(
   knownSkillDirs: readonly string[],
   scope: Extract<ProjectSkillScope, 'global' | 'system'>,
   fingerprintParts: SkillFingerprintPart[]
-): Promise<ProjectSkillGroup[]> {
+): Promise<ScannedSkillGroupResult[]> {
   const uniqueSkillDirs = [
     ...new Map(
       knownSkillDirs.map((skillDir) => {
@@ -1320,7 +1389,7 @@ async function scanHomeSkillDirs(
   ];
 
   const scannedGroups = await Promise.all(
-    uniqueSkillDirs.map(async (skillDir): Promise<ProjectSkillGroup | null> => {
+    uniqueSkillDirs.map(async (skillDir): Promise<ScannedSkillGroupResult | null> => {
       try {
         const group = await scanProjectSkillGroup({
           rootRealPath: homeRealPath,
@@ -1329,19 +1398,22 @@ async function scanHomeSkillDirs(
           shouldIgnorePath: null,
           fingerprintParts,
         });
-        return group ? toHomeSkillGroup(group, scope) : null;
+        return group ? { kind: 'scanned', rootRealPath: homeRealPath, group } : null;
       } catch (error) {
         return {
-          scope,
-          dir: skillDir.displayDir,
-          skills: [],
-          truncated: false,
-          error: formatErrorMessage(error),
+          kind: 'error',
+          group: {
+            scope,
+            dir: skillDir.displayDir,
+            skills: [],
+            truncated: false,
+            error: formatErrorMessage(error),
+          },
         };
       }
     })
   );
-  return scannedGroups.filter((group): group is ProjectSkillGroup => group !== null);
+  return scannedGroups.filter((entry): entry is ScannedSkillGroupResult => entry !== null);
 }
 
 /**
@@ -1350,7 +1422,10 @@ async function scanHomeSkillDirs(
  * machine RPC. System dirs are tagged with the dedicated `'system'` scope so
  * the UI can present them separately from `global`.
  */
-async function listGlobalSkillsAtHomePath(homePath: string): Promise<ProjectSkillsResult> {
+async function listGlobalSkillsAtHomePath(
+  homePath: string,
+  knownFingerprint?: string
+): Promise<ProjectSkillsResult> {
   const homeRealPath = await fs.promises.realpath(homePath);
   const fingerprintParts: SkillFingerprintPart[] = [];
 
@@ -1358,14 +1433,13 @@ async function listGlobalSkillsAtHomePath(homePath: string): Promise<ProjectSkil
     scanHomeSkillDirs(homeRealPath, ALL_KNOWN_GLOBAL_SKILL_DIRS, 'global', fingerprintParts),
     scanHomeSkillDirs(homeRealPath, ALL_KNOWN_SYSTEM_SKILL_DIRS, 'system', fingerprintParts),
   ]);
-  const groups = [...globalGroups, ...systemGroups];
 
-  groups.sort((left, right) => left.dir.localeCompare(right.dir));
-
-  return {
-    groups: applyProjectSkillsResultBudget(groups),
-    contentFingerprint: buildProjectSkillsFingerprint(groups, fingerprintParts),
-  };
+  return await finishSkillsResult(
+    [...globalGroups, ...systemGroups],
+    fingerprintParts,
+    knownFingerprint,
+    toHomeSkillGroup
+  );
 }
 
 function resolveSessionWorktreeRootPath(repoKey: string, sessionId: string): string | null {
@@ -1389,8 +1463,21 @@ function resolveSessionWorktreeRootPath(repoKey: string, sessionId: string): str
   }
 }
 
+type LocalProjectSearchIndex = {
+  readonly createdAtMs: number;
+  readonly result: Promise<LocalProjectFileListResult>;
+};
+
 export class LocalProjectControlService {
-  constructor(private readonly logger: Logger) {}
+  private readonly searchIndexes = new Map<string, LocalProjectSearchIndex>();
+  private readonly now: () => number;
+
+  constructor(
+    private readonly logger: Logger,
+    options: { now?: () => number } = {}
+  ) {
+    this.now = options.now ?? Date.now;
+  }
 
   prepareProject(rootPath: string): {
     localProjectId: LocalProjectId;
@@ -1416,6 +1503,13 @@ export class LocalProjectControlService {
 
   async getProjectGitState(rootPath: string): Promise<LocalProjectGitState> {
     return await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
+  }
+
+  async listProjectBranches(
+    rootPath: string,
+    options?: { query?: string; limit?: number; cursor?: string }
+  ) {
+    return await localProjectsLegacy.listLocalProjectBranchesAtRootPath(rootPath, options);
   }
 
   async listBrowseRoots(): Promise<LocalProjectBrowseRootsResult> {
@@ -1516,10 +1610,18 @@ export class LocalProjectControlService {
 
       const entryPath = path.join(directoryRealPath, name);
       const isSymlink = dirent.isSymbolicLink();
-      if (!dirent.isDirectory() && !isSymlink) {
+      if (dirent.isDirectory()) {
+        // The parent is already canonical and this entry is not a link, so its
+        // joined path is its real path; it needs no I/O until it lands on a page.
+        candidates.push({ name, absolutePath: entryPath, isSymlink: false, hidden });
+        continue;
+      }
+      if (!isSymlink) {
         continue;
       }
 
+      // Only a link has to be resolved before paging: whether it is listed at
+      // all depends on its target being a directory.
       let entryRealPath: string;
       let entryStat: fs.Stats;
       try {
@@ -1594,6 +1696,46 @@ export class LocalProjectControlService {
     return await listFilesAtRootPath(rootPath, maxFiles);
   }
 
+  async searchProjectFiles(
+    rootPath: string,
+    options: { query: string; limit?: number }
+  ): Promise<LocalProjectFileListResult> {
+    const limit = clampInteger(
+      options.limit,
+      1,
+      HARD_LOCAL_PROJECT_SEARCH_LIMIT,
+      DEFAULT_LOCAL_PROJECT_SEARCH_LIMIT
+    );
+    const index = await this.getSearchIndex(rootPath);
+    return {
+      paths: searchLocalProjectFilePaths(index.paths, options.query, limit),
+      truncated: index.truncated,
+    };
+  }
+
+  private async getSearchIndex(rootPath: string): Promise<LocalProjectFileListResult> {
+    const key = normalizeRootPath(rootPath);
+    const nowMs = this.now();
+    for (const [cachedKey, cached] of this.searchIndexes) {
+      if (nowMs - cached.createdAtMs > LOCAL_PROJECT_SEARCH_INDEX_TTL_MS) {
+        this.searchIndexes.delete(cachedKey);
+      }
+    }
+    const cached = this.searchIndexes.get(key);
+    if (cached) return await cached.result;
+
+    const result = listFilesAtRootPath(key, DEFAULT_LOCAL_PROJECT_MAX_FILES);
+    const entry: LocalProjectSearchIndex = { createdAtMs: nowMs, result };
+    this.searchIndexes.set(key, entry);
+    try {
+      return await result;
+    } catch (error) {
+      // A failed scan is not reused: the next keystroke starts a new attempt.
+      if (this.searchIndexes.get(key) === entry) this.searchIndexes.delete(key);
+      throw error;
+    }
+  }
+
   async listProjectDirectory(
     rootPath: string,
     relativePath: string,
@@ -1611,13 +1753,20 @@ export class LocalProjectControlService {
 
   async listProjectSkills(
     rootPath: string,
-    skillDirs: readonly string[]
+    skillDirs: readonly string[],
+    options?: { knownFingerprint?: string }
   ): Promise<ProjectSkillsResult> {
-    return await listProjectSkillsAtRootPath(rootPath, skillDirs);
+    return await listProjectSkillsAtRootPath(rootPath, skillDirs, options?.knownFingerprint);
   }
 
-  async listGlobalSkills(options?: { homePath?: string }): Promise<ProjectSkillsResult> {
-    return await listGlobalSkillsAtHomePath(options?.homePath ?? os.homedir());
+  async listGlobalSkills(options?: {
+    homePath?: string;
+    knownFingerprint?: string;
+  }): Promise<ProjectSkillsResult> {
+    return await listGlobalSkillsAtHomePath(
+      options?.homePath ?? os.homedir(),
+      options?.knownFingerprint
+    );
   }
 
   readProjectFile(

@@ -348,8 +348,13 @@ safe. `abandonVaultReplacement` gives up on the device that started, and
 
 `browserPasskeyPort` implements the platform passkey port over `navigator.credentials`.
 It reports what the browser returned and decides nothing: a browser without PRF reports
-`prfEnabled: false` and no result, and `passkey-unlock` refuses it. Its test runs real
-Chromium on the `lody.ai` origin with a CDP virtual authenticator. No page uses it yet.
+`prfEnabled: false` and no result, and `passkey-unlock` refuses it. `available()` is true
+only when `PublicKeyCredential.getClientCapabilities()` reports `extension:prf`; WebAuthn
+alone is not enough (Safari 16.4–17.x and older Firefox create passkeys without PRF), and a
+missing or failing capability API counts as unavailable. Its test runs real Chromium on the
+`lody.ai` origin with a CDP virtual authenticator, including replaced capability reports.
+Browser-shaped hosts inject it as the recovery engine's `passkey`; the iOS shell injects
+its native port (`apps/mobile-capacitor/src/e2ee/passkey.ts`) instead.
 
 ## Verification and limits
 
@@ -382,7 +387,11 @@ real recovery test. Its key maintenance reads the latest verified epoch after se
 advances the ledger. Recovery history rejects empty/incomplete pages and verifies
 the first page's declared checkpoint against the complete signed history. `restoreRecovery` accepts an exact retained offer for a device
 whose protected identity remains but workspace keys are missing; package pins still
-must match, and recovery never replaces the identity.
+must match. An account-pairing offer, retained or derived from the package, always
+restores through the account identity, so an interrupted replacement resumes and one
+the verified history shows revoked restores as its replacement. A retained ordinary
+offer whose identity that history shows lost fails as access loss: the caller cancels
+its pin and restores with the account offer.
 
 `personalRuntimeAccountRequester` and `personalRuntimeRecovery` adapt the existing
 runtime owner for account pairing and closed recovery commands. They do not create a

@@ -98,7 +98,7 @@ describe('session group opened-by tree', () => {
       makeRow({ sessionId: 'opener' }),
       makeRow({ sessionId: 'opened', openedBySessionId: 'opener' }),
     ];
-    const visible = getVisibleSessionGroupRows(buildRepoGroup(rows), false).map(
+    const visible = getVisibleSessionGroupRows(buildRepoGroup(rows), 0).map(
       (row) => row.sessionId
     );
     expect(visible).toHaveLength(MAX_VISIBLE_SESSIONS);
@@ -388,7 +388,7 @@ describe('Workspace placement under openers across groups', () => {
     const [group] = buildGroups(placed.repoSessions, [], false);
     expect(group?.repoFullName).toBe(REPO);
     expect(
-      getVisibleSessionGroupTree(group!, true).map((node) => `${node.id}@${node.depth}`)
+      getVisibleSessionGroupTree(group!, 1000).map((node) => `${node.id}@${node.depth}`)
     ).toEqual(['repo-opener@0', 'local-child@1']);
   });
 

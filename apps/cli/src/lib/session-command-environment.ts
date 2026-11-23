@@ -243,6 +243,27 @@ const encryptedCommandAccess = new AsyncLocalStorage<EncryptedCommandAccess>();
 export const runWithEncryptedCommandAccess = <T>(access: EncryptedCommandAccess, run: () => T): T =>
   encryptedCommandAccess.run(access, run);
 
+const encryptedCommandManagers = new AsyncLocalStorage<{
+  workspaceId: string;
+  manager: LoroDocumentManager;
+}>();
+/** A one-shot command lends the encrypted workspace manager it opened. */
+export const runWithEncryptedCommandManager = <T>(
+  owner: { workspaceId: string; manager: LoroDocumentManager },
+  run: () => T
+): T => encryptedCommandManagers.run(owner, run);
+/** The encrypted manager this process holds for `workspaceId`, daemon or one-shot. Its
+ * feature channel is the only Machine RPC; callers never fall back to plaintext. */
+export const resolveEncryptedMachineRpc = (
+  workspaceId: string
+): LoroDocumentManager | undefined => {
+  const daemon = getDaemonWorkspace();
+  if (daemon?.workspaceId === workspaceId && daemon.manager.isEncryptedWorkspace())
+    return daemon.manager;
+  const command = encryptedCommandManagers.getStore();
+  return command?.workspaceId === workspaceId ? command.manager : undefined;
+};
+
 const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();
 export const runWithDaemonWorkspace = <T>(workspace: DaemonWorkspace, run: () => T): T =>
   daemonWorkspaces.run(workspace, run);

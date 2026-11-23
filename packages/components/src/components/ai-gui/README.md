@@ -426,7 +426,8 @@ Session data and action controls continue updating. This is independent of
 `message-selection.tsx`, which selects messages for image sharing.
 
 The chat quote action floats above the first visible selected line, centered on
-that line. It measures its rendered size, flips below the selection when there is
+that line, and stays beneath modal backdrops and panels. It measures its rendered
+size, flips below the selection when there is
 no room above, and stays inside the conversation and safe viewport bounds. A
 continuous selection may span text rows of the same turn when every intervening
 row is mounted and contains quoteable text. Other cross-region selections request
@@ -448,7 +449,7 @@ records lifecycle, alternatives, and platform verification limits.
 
 `message-author-identity.tsx` renders frozen Agent/Role identity in input avatars.
 Assistant replies do not show an author identity entry or its popover. It reads no catalogs or source documents. When session navigation is available, `view.tsx` also renders an inline source-conversation return link in the user message metadata row using the cached session title (or the generic source label). Human profiles remain
-in `view.tsx`; execution controls continue to describe the receiving turn. The
+in `view.tsx`, shared by `PendingMessageRow` and `UserMessageRowView` across local send, attachment preparation and hydrated history, and gated on multi-member workspaces ([human sender identity](../../../../../.agents/notes/implemented/feature/2026-09-08-chat-sender-identity.md)); execution controls continue to describe the receiving turn. The
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.
 

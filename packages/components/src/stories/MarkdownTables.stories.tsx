@@ -1,7 +1,35 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { MarkdownFileResources } from '@/components/ai-gui/markdown-file-image';
 import { createFakeFileWorkspaceProvider } from '@/lib/file-workspace-provider';
+const tableStory = stylex.create({
+  bounds: { outlineWidth: 1, outlineStyle: 'dashed', outlineColor: 'hsl(var(--border) / 1)' },
+});
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    height: '100%',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 8)',
+    'overflow-y': 'auto',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  stack2: {
+    display: 'flex',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+});
 
 const svg = (width: number, height: number, label: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="#324967"/><text x="24" y="${Math.round(height / 2)}" fill="white" font-size="28">${label}</text></svg>`;
@@ -159,11 +187,11 @@ function TableGallery({ width }: { width: number }) {
   return (
     // The preview pins html/body/#storybook-root at overflow:hidden to match
     // production, so the gallery owns its own scroller.
-    <div className="scrollbar-pro flex h-full flex-col gap-8 overflow-y-auto p-6">
+    <div className={clsx(stylex.props(storyLayout.stack).className, 'scrollbar-pro')}>
       {SCENARIOS.map(([title, markdown]) => (
-        <section key={title} className="flex flex-col gap-2">
-          <div className="text-xs text-muted-foreground">{title}</div>
-          <div style={{ width }} className="outline outline-1 outline-dashed outline-border">
+        <section key={title} {...stylex.props(storyLayout.stack2)}>
+          <div {...stylex.props(storyLayoutStyles.caption)}>{title}</div>
+          <div style={{ width }} {...stylex.props(tableStory.bounds)}>
             <MarkdownFileResources
               provider={provider}
               documentPath="docs/tables.md"

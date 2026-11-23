@@ -152,6 +152,37 @@ describe('Today convert-to-task prompt', () => {
   });
 });
 
+describe('Today Mod+A on a block selection', () => {
+  it('climbs one ancestor per press, to the common ancestor of several, then the whole day, then stops', async () => {
+    const { escalateSelection } = await import('../src/components/today/editor/block-selection');
+    const { visible, id } = outline('a\n  b\n    c\n    d\n  e\nf');
+    expect(escalateSelection(visible, [id('c')])).toEqual([id('b')]);
+    expect(escalateSelection(visible, [id('b')])).toEqual([id('a')]);
+    expect(escalateSelection(visible, [id('c'), id('e')])).toEqual([id('a')]);
+    expect(escalateSelection(visible, [id('a')])).toEqual([id('a'), id('f')]);
+    expect(escalateSelection(visible, [id('c'), id('f')])).toEqual([id('a'), id('f')]);
+    expect(escalateSelection(visible, [id('a'), id('f')])).toBeNull();
+  });
+});
+
+describe('Today convert-to-task prompt with ancestors', () => {
+  it('nests the node and its subtree under its parents, outermost first', async () => {
+    const { buildConvertPrompt } = await import('../src/components/today/editor/block-selection');
+    const { model, id } = outline(
+      'Launch\n  Docs\n    Write the guide\n      cover install\n    other'
+    );
+    const [fragment] = model.extract([id('Write the guide')]);
+    const ancestors = [id('Launch'), id('Docs')].map((nodeId) => {
+      const node = model.getNode(nodeId)!;
+      return { text: node.text, mentions: [...node.mentions] };
+    });
+    expect(buildConvertPrompt(fragment!, () => '', ancestors)).toBe(
+      '- Launch\n  - Docs\n    - Write the guide\n      - cover install'
+    );
+    expect(buildConvertPrompt(fragment!, () => '')).toBe('Write the guide\n- cover install');
+  });
+});
+
 describe('Today block selection covers subtrees', () => {
   it('shows every descendant of a selected parent as selected, since it is deleted with it', async () => {
     const { selectionCovers } = await import('../src/components/today/editor/block-selection');

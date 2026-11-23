@@ -4,6 +4,7 @@ import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { dialog as dialogTokens } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
 import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
@@ -12,7 +13,6 @@ import { usePostHog } from '@/lib/posthog-context';
 import { usePlatformCapability } from '@lody/platform/react';
 import { getServerNow, type LocalProjectId, type MachineId, type WorkspaceId } from '@lody/shared';
 import {
-  getShortcutEmoji,
   getShortcutMentionGate,
   getShortcutMentionScopeIssues,
   type PromptShortcut,
@@ -40,7 +40,7 @@ import { Dialog } from '@/ui/dialog';
 import { Dialog as UiDialog } from '@lody/ui/dialog';
 import { AlertDialog } from '@/ui/dialog';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Section } from './form-primitives';
 import {
   PromptShortcutForm,
@@ -49,7 +49,7 @@ import {
 } from './prompt-shortcut-form';
 import { ScopePills } from './prompt-shortcut-scope';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
@@ -57,11 +57,27 @@ import {
 import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
-  /** The row's body is two columns that wrap, so its glyph sits on the first line. */
   rowMainTop: { alignItems: 'flex-start', paddingBlock: '10px' },
-  actionsTop: { alignSelf: 'flex-start', paddingBlock: space[2] },
+  actionsTop: { alignSelf: 'flex-start', paddingBlock: space[1.5] },
   body: { gap: space[1] },
   titleLine: { rowGap: space[1] },
+  /**
+   * Deleting is the row's second action, so it waits for the pointer or the
+   * keyboard to reach the row; a touch screen has no hover and always shows it.
+   * The slot keeps its width on every row, so the scope column never shifts.
+   */
+  reveal: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      [stylex.when.ancestor(':focus-within')]: 1,
+      '@media (hover: none)': 1,
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  deleteSlot: { display: 'flex', justifyContent: 'center', width: '28px' },
   slug: {
     flexShrink: 0,
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
@@ -69,22 +85,13 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   scope: { flexShrink: 0, marginInlineStart: 'auto' },
-  statusLine: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: space[3],
-    rowGap: space[1],
-    minWidth: 0,
-  },
   warning: {
     flexShrink: 0,
-    marginInlineStart: 'auto',
     fontSize: uiText.footnoteSize,
     lineHeight: type.leading,
     color: colors.warning,
   },
-  /** The read-only view's identity line: the glyph, the name, the command. */
+  /** The read-only view's identity line: the name and the command. */
   identity: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -93,7 +100,6 @@ const styles = stylex.create({
     rowGap: space[1],
     minWidth: 0,
   },
-  identityGlyph: { fontSize: '14px', lineHeight: 1 },
   identityName: {
     minWidth: 0,
     overflow: 'hidden',
@@ -115,6 +121,12 @@ const styles = stylex.create({
    * The prompt field is the composer's mention textarea, so it is given the
    * well by hand: the recess, and the ring on `:focus-within` because the
    * element that takes focus is the textarea inside it.
+   *
+   * A mention chip covers the textarea's glyphs with `--mention-chip-surface`,
+   * which has to be opaque and equal to what shows through the well. The well is
+   * translucent ink over the dialog. Two native background layers paint that
+   * same composition over an opaque dialog backdrop, independent of the
+   * well's alpha and the active palette.
    */
   promptWell: {
     boxSizing: 'border-box',
@@ -128,8 +140,11 @@ const styles = stylex.create({
     },
     borderRadius: radius.medium,
     cornerShape: corner.round,
+    '--mention-chip-surface': dialogTokens.background,
+    '--mention-chip-overlay': `linear-gradient(${colors.wellBackground},${colors.wellBackground})`,
   },
   promptInput: {
+    boxShadow: { default: null, ':focus-visible': 'none' },
     minHeight: '112px',
     width: '100%',
     padding: 0,
@@ -141,6 +156,9 @@ const styles = stylex.create({
     '::placeholder': { color: colors.tertiaryLabel },
   },
 });
+
+/** The row the delete action waits on: its hover and focus reveal it. */
+const ROW_MARKER = stylex.props(stylex.defaultMarker()).className;
 
 export function PromptShortcutsSetting() {
   const allowed = useWorkspaceFeature('shortcuts');
@@ -237,15 +255,15 @@ function PromptShortcutsSettingContent({
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
           centerOn={settingsPane}
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          xstyle={settingsEditorDialogStyles.panel}
         >
           <Dialog.Header>
             <Dialog.Title>
               {!shownEditor?.base
-                ? t('settings.promptShortcuts.new', 'New Prompt Shortcut')
+                ? t('settings.promptShortcuts.new', 'New Prompt')
                 : owned
-                  ? t('settings.promptShortcuts.edit', 'Edit Prompt Shortcut')
-                  : t('settings.promptShortcuts.view', 'Prompt Shortcut')}
+                  ? t('settings.promptShortcuts.edit', 'Edit Prompt')
+                  : t('settings.promptShortcuts.view', 'Prompt')}
             </Dialog.Title>
             <Dialog.Description>
               {owned
@@ -307,7 +325,7 @@ function PromptShortcutsSettingContent({
         <AlertDialog.Content>
           <AlertDialog.Header>
             <AlertDialog.Title>
-              {t('settings.promptShortcuts.deleteTitle', 'Delete Prompt Shortcut')}
+              {t('settings.promptShortcuts.deleteTitle', 'Delete Prompt')}
             </AlertDialog.Title>
             <AlertDialog.Description>
               {t('settings.promptShortcuts.deleteHelp', {
@@ -382,7 +400,7 @@ export function PromptShortcutsList({
   onDelete: (entry: PromptShortcutIndexEntry) => void;
 }) {
   const { t } = useTranslation();
-  const addLabel = t('settings.promptShortcuts.new', 'New Prompt Shortcut');
+  const addLabel = t('settings.promptShortcuts.new', 'New Prompt');
   const showEmpty = entries.length === 0 && !loading;
   const addButton = (
     <Button size="small" variant="secondary" disabled={!canCreate || busy} onClick={onCreate}>
@@ -406,7 +424,7 @@ export function PromptShortcutsList({
       {entries.length === 0 ? (
         showEmpty ? (
           <SettingsEmptyState
-            title={t('settings.promptShortcuts.empty', 'No Prompt Shortcuts yet')}
+            title={t('settings.promptShortcuts.empty', 'No saved Prompts yet')}
             action={addButton}
           />
         ) : null
@@ -461,7 +479,7 @@ export function PromptShortcutRow({
     (target) => getShortcutMentionScopeIssues(entry.scope, target).length > 0
   );
   return (
-    <div {...stylex.props(catalog.row, surface.pressableLine)}>
+    <div {...withClassName(stylex.props(catalog.row, surface.pressableLine), ROW_MARKER)}>
       <button
         type="button"
         onClick={onOpen}
@@ -469,12 +487,8 @@ export function PromptShortcutRow({
         aria-label={canManage ? t('common.edit', 'Edit') : t('common.view', 'View')}
         {...stylex.props(catalog.rowMain, styles.rowMainTop)}
       >
-        <span aria-hidden="true" {...stylex.props(catalog.glyph)}>
-          {getShortcutEmoji(entry)}
-        </span>
-        {/* Two columns, not one stack: identity reads down the left, and what
-            the author set plus what is happening to it sit against the right
-            edge. Both halves wrap instead of relying on a viewport breakpoint —
+        {/* Identity reads down the left and the scope sits against the right
+            edge. Both wrap instead of relying on a viewport breakpoint —
             settings render in a panel far narrower than the window. */}
         <span {...stylex.props(catalog.body, styles.body)}>
           <span {...stylex.props(catalog.titleLine, styles.titleLine)}>
@@ -485,48 +499,45 @@ export function PromptShortcutRow({
             {canManage ? null : (
               <Badge>{t('settings.promptShortcuts.readOnly', 'Read-only')}</Badge>
             )}
+            {/* The one status worth a row: the Shortcut's own references no
+                longer fit the scope it was saved with, which only its author
+                can repair. It sits with the name it is about. Publication
+                state is deliberately absent — a local save is already durable
+                and the runtime retries on its own. */}
+            {outOfScope ? (
+              <span {...stylex.props(styles.warning)}>
+                {t('settings.promptShortcuts.needsAttention', 'A reference is outside this scope')}
+              </span>
+            ) : null}
+            {/* Only a narrowed scope earns a pill; "anywhere" is the default
+                and needs no mark on every row. */}
             <span {...stylex.props(styles.scope)}>
               <ScopePills scope={entry.scope} options={options} />
             </span>
           </span>
-          {entry.description || outOfScope ? (
-            <span {...stylex.props(styles.statusLine)}>
-              {entry.description ? (
-                <span {...stylex.props(catalog.meta)}>
-                  <span {...stylex.props(catalog.truncate)}>{entry.description}</span>
-                </span>
-              ) : null}
-              {/* The one status worth a row: the Shortcut's own references no
-                  longer fit the scope it was saved with, which only its author
-                  can repair. Publication state is deliberately absent — a local
-                  save is already durable and the runtime retries on its own. */}
-              {outOfScope ? (
-                <span {...stylex.props(styles.warning)}>
-                  {t(
-                    'settings.promptShortcuts.needsAttention',
-                    'A reference is outside this scope'
-                  )}
-                </span>
-              ) : null}
+          {entry.description ? (
+            <span {...stylex.props(catalog.meta)}>
+              <span {...stylex.props(catalog.truncate)}>{entry.description}</span>
             </span>
           ) : null}
         </span>
       </button>
       <div {...stylex.props(catalog.actions, styles.actionsTop)}>
-        {canManage ? (
-          <Button
-            type="button"
-            size="small"
-            icon
-            variant="ghost"
-            tone="destructive"
-            disabled={busy}
-            aria-label={t('settings.promptShortcuts.delete', 'Delete shortcut')}
-            onClick={onDelete}
-          >
-            <Trash2 {...stylex.props(catalog.icon)} />
-          </Button>
-        ) : null}
+        <span {...stylex.props(styles.deleteSlot, styles.reveal)}>
+          {canManage ? (
+            <Button
+              type="button"
+              size="small"
+              icon
+              variant="ghost"
+              disabled={busy}
+              aria-label={t('settings.promptShortcuts.delete', 'Delete Prompt')}
+              onClick={onDelete}
+            >
+              <Trash2 {...stylex.props(catalog.icon)} />
+            </Button>
+          ) : null}
+        </span>
       </div>
     </div>
   );
@@ -555,9 +566,6 @@ export function PromptShortcutReadOnlyView({
     <div {...withClassName(stylex.props(catalog.editorForm), className)}>
       <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
         <div {...stylex.props(styles.identity)}>
-          <span aria-hidden="true" {...stylex.props(styles.identityGlyph)}>
-            {getShortcutEmoji(shortcut)}
-          </span>
           <span {...stylex.props(styles.identityName)}>{shortcut.name}</span>
           <span {...stylex.props(styles.slug)}>/{shortcut.slug}</span>
           <Badge>{t('settings.promptShortcuts.readOnly', 'Read-only')}</Badge>
@@ -566,7 +574,7 @@ export function PromptShortcutReadOnlyView({
           <p {...stylex.props(styles.description)}>{shortcut.description}</p>
         ) : null}
         <Section title={t('settings.promptShortcuts.scope', 'Applies to')}>
-          <ScopePills scope={shortcut.scope} options={options} />
+          <ScopePills scope={shortcut.scope} options={options} showUnscoped />
         </Section>
         <Section title={t('settings.promptShortcuts.prompt', 'Prompt')}>
           {/* Same type as the editor's own prompt field: one Shortcut should not
@@ -731,7 +739,7 @@ export function ShortcutPromptField({
       aria-label={t('settings.promptShortcuts.prompt', 'Prompt')}
       placeholder={t(
         'settings.promptShortcuts.promptPlaceholder',
-        'Write the prompt you would otherwise retype.'
+        'Write the prompt you would otherwise retype. @ mentions a file or Role, $ a skill, # an issue.'
       )}
       value={editor.value}
       onValueChange={editor.onValueChange}
@@ -743,13 +751,12 @@ export function ShortcutPromptField({
       disabled={disabled}
       rows={4}
       // A value holder, so the well every other field in the form is.
-      containerClassName={stylex.props(styles.promptWell).className}
+      appearance="bare"
+      containerXstyle={styles.promptWell}
       // The wrapper owns this field's focus ring; suppress the shell's global
       // inset focus shadow on the textarea inside it.
-      className={
-        withClassName(stylex.props(styles.promptInput), 'input-scrollbar focus-visible:shadow-none')
-          .className
-      }
+      className="input-scrollbar"
+      xstyle={styles.promptInput}
       skillAgent={skillAgent}
       onMentionRangesChange={(ranges) => editor.onRangesChange(toPersistedMentionRanges(ranges))}
     />

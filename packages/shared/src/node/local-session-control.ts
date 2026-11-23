@@ -744,7 +744,7 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
     );
   }
 
-  if (value.type === 'session/history-read') {
+  if (value.type === 'session/history-read' || value.type === 'session/history-subscription') {
     return (
       typeof value.machineId === 'string' &&
       typeof value.workspaceId === 'string' &&
@@ -1244,6 +1244,15 @@ export function isLocalSessionControlResponse(
           typeof value.historyRevision === 'number' &&
           typeof value.historyCount === 'number')) &&
       isOptionalString(value.error)
+    );
+  }
+
+  if (value.type === 'session/history-subscription_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.subscriptionId === 'string' &&
+      ((value.event === 'publication' && isObjectRecord(value.publication)) ||
+        (value.event === 'closed' && isOptionalString(value.error)))
     );
   }
 

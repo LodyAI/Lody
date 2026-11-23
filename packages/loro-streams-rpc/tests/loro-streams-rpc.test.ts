@@ -2030,6 +2030,74 @@ describe('LoroStreamsMachineRpcClient', () => {
       })
     );
 
+    const listPromise = client.requestLocalProjectBranches({
+      localProjectId: 'local-project-1' as LocalProjectId,
+      requestedByUserId: 'user-1',
+      query: 'feature',
+      limit: 20,
+      cursor: '20',
+      timeoutMs: 5000,
+    });
+    await vi.waitFor(() => {
+      expect(fake.appended).toHaveLength(2);
+    });
+    const listRequest = fake.appended[1]?.value as {
+      id: string;
+      method: string;
+      params?: Record<string, unknown>;
+    };
+    expect(listRequest.method).toBe('local-project/list-branches');
+    expect(listRequest.params).toEqual({
+      localProjectId: 'local-project-1',
+      requestedByUserId: 'user-1',
+      query: 'feature',
+      limit: 20,
+      cursor: '20',
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: listRequest.id,
+          method: 'local-project/list-branches',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'local-project/list-branches_response',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            localProjectId: 'local-project-1',
+            success: true,
+            observedAtMs: 456,
+            result: {
+              git: true,
+              currentBranch: 'feature/a',
+              defaultBranch: 'main',
+              pinnedBranches: ['main', 'feature/a'],
+              branches: ['feature/a', 'feature/b'],
+              truncated: true,
+              nextCursor: '40',
+              totalCount: 65,
+            },
+          },
+        },
+      ],
+      nextOffset: '5',
+      cursor: 'cursor-5',
+      upToDate: true,
+    });
+    await expect(listPromise).resolves.toEqual(
+      expect.objectContaining({
+        type: 'local-project/list-branches_response',
+        success: true,
+        result: expect.objectContaining({
+          git: true,
+          branches: ['feature/a', 'feature/b'],
+          nextCursor: '40',
+        }),
+      })
+    );
+
     client.stop();
   });
 

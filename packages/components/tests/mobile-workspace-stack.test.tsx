@@ -55,6 +55,7 @@ describe('mobile new-chat presentation', () => {
   let container: HTMLDivElement;
   beforeEach(async () => {
     await initI18n('en');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frames.push(callback);
       return frames.length;
@@ -66,7 +67,11 @@ describe('mobile new-chat presentation', () => {
   });
   const frames: FrameRequestCallback[] = [];
   afterEach(async () => {
-    await act(async () => root.unmount());
+    await act(async () => {
+      root.unmount();
+      await vi.runOnlyPendingTimersAsync();
+    });
+    vi.useRealTimers();
     container.remove();
     frames.length = 0;
     vi.unstubAllGlobals();

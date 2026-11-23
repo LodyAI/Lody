@@ -64,6 +64,10 @@ export type CreateConversationViewFromReaderOptions = {
    * many items with the rest of the tail following in the first idle chunk.
    */
   hydrateItemBudget?: number;
+  /** Maximum elapsed work before yielding between individual body reads. */
+  workBudgetMs?: number;
+  /** Monotonic clock for the body-read budget, independently of activity time. */
+  workNow?: () => number;
   /** Clock for `lastUpdateAt`; defaults to `Date.now`. */
   now?: () => number;
 };
@@ -146,6 +150,8 @@ export function createConversationViewFromReader(
   const yieldToEventLoop = options.yieldToEventLoop ?? defaultYield;
   const hydrateChunkSize = options.hydrateChunkSize ?? 64;
   const hydrateItemBudget = options.hydrateItemBudget ?? 320;
+  const workBudgetMs = options.workBudgetMs ?? 4;
+  const workNow = options.workNow ?? (() => performance.now());
   const now = options.now ?? Date.now;
   let lastUpdateAt: number | null = null;
 
@@ -186,6 +192,7 @@ export function createConversationViewFromReader(
   const displayBody = (read: Extract<SessionTurnRead, { state: 'ready' }>): SessionHistory => {
     const turn = read.turn as unknown as SessionHistory;
     if (!displayReader) return turn;
+    if (!(turn.items ?? []).some((item) => item?.type === 'subagent_task' && item.run)) return turn;
     const items = (turn.items ?? []).map((item) => {
       if (!item || typeof item !== 'object' || !('type' in item) || item.type !== 'subagent_task')
         return item;
@@ -419,9 +426,20 @@ export function createConversationViewFromReader(
         if (disposed || cancelled?.()) return;
         const chunk = pending.slice(start, start + hydrateChunkSize);
         const tokens = chunk.map((id) => turnToken(id));
-        const reads: readonly SessionTurnRead[] = await Promise.all(
-          chunk.map((id) => readBody(id))
-        );
+        const pendingReads: Promise<SessionTurnRead>[] = [];
+        let sliceStarted = workNow();
+        for (const id of chunk) {
+          if (pendingReads.length > 0 && workNow() - sliceStarted >= workBudgetMs) {
+            await yieldToEventLoop();
+            if (disposed || cancelled?.()) return;
+            sliceStarted = workNow();
+          }
+          const read = Promise.resolve(readBody(id));
+          // Observe rejections during yields; Promise.all still propagates them.
+          void read.catch(() => {});
+          pendingReads.push(read);
+        }
+        const reads = await Promise.all(pendingReads);
         if (disposed || cancelled?.()) return;
         let lo = Infinity;
         let hi = -1;
@@ -511,8 +529,7 @@ export function createConversationViewFromReader(
   const applyHydratedReplacement = async (idsToReRead: readonly string[]): Promise<void> => {
     let pending = [...new Set(idsToReRead)];
     let pass = 0;
-    // Same lifecycle as `hydrateIds`: keep the request owned until each identity
-    // is current or terminal, yielding between passes rather than capping.
+    // Keep ownership until every identity is current or terminal; yield between retries.
     while (pending.length > 0) {
       if (disposed) return;
       if (pass > 0) await yieldToEventLoop();
@@ -520,7 +537,16 @@ export function createConversationViewFromReader(
       const stale: string[] = [];
       const nextPending: string[] = [];
       const loPositions: number[] = [];
+      let sliceStarted = workNow();
+      let sliceRead = false;
       for (const id of pending) {
+        if (sliceRead && workNow() - sliceStarted >= workBudgetMs) {
+          await yieldToEventLoop();
+          if (disposed) return;
+          sliceStarted = workNow();
+          sliceRead = false;
+        }
+        sliceRead = true;
         const token = turnToken(id);
         let read: SessionTurnRead;
         try {

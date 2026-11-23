@@ -21,6 +21,7 @@ import i18next from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { Avatar } from '@lody/ui/avatar';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
@@ -159,7 +160,7 @@ const styles = stylex.create({
     '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
   },
   selectedMark: { boxShadow: '0 0 0 1px hsl(var(--foreground))' },
-  dayBarInteractive: {
+  dayBarInteractive: { default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',
@@ -171,7 +172,7 @@ const styles = stylex.create({
       [stylex.when.ancestor(':focus-visible')]: '0 0 0 2px hsl(var(--ring))',
     },
   },
-  weekDotInteractive: {
+  weekDotInteractive: { default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',
@@ -375,7 +376,13 @@ const styles = stylex.create({
   weekColumn: { minWidth: 0, flex: 1 },
   mutedHalf: { color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 60%, transparent)' },
   foreground: { color: 'hsl(var(--foreground))' },
-  peakLine: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: '12px', rowGap: '4px' },
+  peakLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: '12px',
+    rowGap: '4px',
+  },
   rangeFrame: { position: 'relative', minHeight: '10.5rem', minWidth: 0 },
   fixedReadout: {
     display: 'flex',
@@ -550,6 +557,12 @@ const styles = stylex.create({
     borderRadius: 'var(--radius-lg)',
     backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
     padding: space[4],
+  },
+  detailCloseOffset: {
+    position: 'absolute',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    right: 'calc(var(--spacing) * 2)',
+    top: 'calc(var(--spacing) * 2)',
   },
   detailCloseIcon: {
     width: '14px',
@@ -1183,7 +1196,10 @@ function UsageWeekMatrix({
   const formats = useCalendarFormats();
   const { buckets } = timeline;
   const timeZone = formats.timeline.resolvedOptions().timeZone;
-  const { labels, rows } = useMemo(() => groupUsageWeekBuckets(buckets, timeZone), [buckets, timeZone]);
+  const { labels, rows } = useMemo(
+    () => groupUsageWeekBuckets(buckets, timeZone),
+    [buckets, timeZone]
+  );
 
   // One tab stop for the grid. Vertical arrows stay in the same clock column.
   const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -1229,9 +1245,7 @@ function UsageWeekMatrix({
         {rows.map(({ dateMs }) => (
           <span key={dateMs} {...stylex.props(styles.gutterLabel, styles.weekRow)}>
             <span>{formats.weekday.format(dateMs)}</span>
-            <span {...stylex.props(styles.dimmedText)}>
-              {formats.dayOfMonth.format(dateMs)}
-            </span>
+            <span {...stylex.props(styles.dimmedText)}>{formats.dayOfMonth.format(dateMs)}</span>
           </span>
         ))}
       </div>
@@ -2301,7 +2315,9 @@ function UsageDayDetailPanel({
           icon
           variant="ghost"
           aria-label={t('common.close')}
-          className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
+          height="calc(var(--spacing) * 6)"
+          width="calc(var(--spacing) * 6)"
+          xstyle={styles.detailCloseOffset}
           onClick={onClose}
         >
           <X {...stylex.props(styles.detailCloseIcon)} />
@@ -2410,7 +2426,7 @@ function UsageDayDetailPanel({
                       tokens: row.tokens,
                       icon: (
                         <Avatar.Root size="mini">
-                          {user?.image ? <Avatar.Image src={user.image} alt="" /> : null}
+                          <CachedAvatarImage src={user?.image} alt="" />
                           <Avatar.Fallback>{label.slice(0, 2).toUpperCase()}</Avatar.Fallback>
                         </Avatar.Root>
                       ),
@@ -2876,10 +2892,7 @@ export function UsageCalendarVisualization({
             letting the old view vanish before the new one starts. */}
         {/* Keep the containing block even after the hourly-only grid goes away:
             popLayout's measured offsets must retain the same coordinate system. */}
-        <div
-          data-usage-view-frame
-          {...stylex.props(styles.viewFrame, rings && styles.ringLayout)}
-        >
+        <div data-usage-view-frame {...stylex.props(styles.viewFrame, rings && styles.ringLayout)}>
           {/* Hourly ranges only: the ring runs its own plain fade, independent
               of the matrix container's fade. popLayout pops the
               leaving ring out of flow at its old spot — otherwise the grid

@@ -15,7 +15,7 @@ import { FloatingFocusManager, type VirtualElement } from '@floating-ui/react';
 import * as stylex from '@stylexjs/stylex';
 import * as React from 'react';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { getDataState, useMentionContext } from './mention-root';
 import { MentionMobilePanel, useIsMentionMobile } from './mention-mobile-content';
 
@@ -493,7 +493,7 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
               data-state={getDataState(context.open)}
               dir={context.dir}
               {...positionerContext.getFloatingProps(contentProps)}
-              className={cn(
+              className={clsx(
                 contentProps.className,
                 topCaretMaxHeight !== undefined &&
                   placedSide === 'top' &&

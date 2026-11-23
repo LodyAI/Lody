@@ -56,6 +56,14 @@ describe('iOS Simulator availability', () => {
     ).toBe('hidden');
   });
 
+  it('hides both capable and older Macs in an encrypted workspace', () => {
+    for (const protocolCapabilities of [undefined, { iosSimulator: 1 as const }]) {
+      expect(getIosSimulatorPanelAvailability({ os: 'darwin', protocolCapabilities }, 'e2ee')).toBe(
+        'hidden'
+      );
+    }
+  });
+
   it('keeps the tab on an old Mac so it can ask for an update', () => {
     expect(getIosSimulatorPanelAvailability({ os: 'darwin' })).toBe('upgrade-required');
     expect(

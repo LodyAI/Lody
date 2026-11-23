@@ -16,6 +16,8 @@ import { Bytes } from '@lody/e2ee-core/protocol';
 import { commitEpochKey, sealHistoryPacket } from '../../src/internal/keys/history';
 import { contentPermissions } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from './fixture';
+import { extendLedger } from '@lody/e2ee-core/protocol';
+import { issueWorkspaceInvitation, verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core';
 const ok = Result.getOrThrow;
 const dirs: string[] = [];
 const file = () => {
@@ -583,6 +585,67 @@ it.each(['read', 'recover'] as const)(
     wiped(native.plains);
   }
 );
+
+it('separates a missing pre-snapshot key from an unauthorized device on an endorsed snapshot', async () => {
+  const { f, keys } = rotatedHistoryFixture();
+  const before = f.view();
+  let saved: Effect.Success<ReturnType<typeof issueWorkspaceInvitation>>['receipt'] | null = null;
+  const issued = await Effect.runPromise(
+    issueWorkspaceInvitation({
+      workspaceId: 'workspace-A',
+      signer: f.owner.signer,
+      ledger: () => Effect.succeed(before),
+      offset: () => Effect.succeed('opaque-origin'),
+      requestId: ok(Bytes.requestId(new Uint8Array(16).fill(9))),
+      mailbox: {
+        put: (_id, receipt) =>
+          Effect.sync(() => {
+            saved = { ...receipt, snapshot: new Uint8Array(receipt.snapshot) };
+          }),
+        read: () => Effect.succeed(saved),
+      },
+    })
+  );
+  const snapshot = ok(verifyWorkspaceInvitationSnapshot(issued.pin, issued.receipt)).view;
+  expect(snapshot.verification).toBe('endorsed-snapshot');
+  let selected = snapshot;
+  const ledger = () => Effect.succeed(selected);
+  const native = synthetic();
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const store = yield* makeSqliteProtectedEpochKeys({
+          ...config(f, native.protector),
+          ledger,
+          path: file(),
+          mode: 'create',
+        });
+        const history = yield* makeInstalledEpochHistory({
+          genesis: f.context.genesis,
+          ledger,
+          installed: store,
+        });
+        expect(yield* Effect.flip(history.read(1))).toMatchObject({ reason: 'missing-key' });
+        yield* store.saveAndReload(5, keys[5]!);
+        const restored = yield* history.read(1);
+        expect(ok(commitEpochKey(f.context.genesis, 1, restored))).toEqual(
+          ok(commitEpochKey(f.context.genesis, 1, keys[1]!))
+        );
+        disposeEpochKey(restored);
+        f.append([5, f.phone.raw]);
+        const after = f.view();
+        selected = ok(
+          extendLedger(snapshot, f.records().slice(before.length), {
+            head: after.head,
+            length: after.length,
+          })
+        );
+        expect(yield* Effect.flip(history.read(1))).toMatchObject({ reason: 'unauthorized' });
+      })
+    )
+  );
+  wiped(native.plains);
+});
 
 it.each([5, 4, 2])(
   'does not skip a corrupt installed K%s to recover from a lower key',

@@ -22,7 +22,7 @@ export const loadAppearanceSettingsComponent = settingsCodeLoader(() =>
   import('./appearance-setting').then((module) => ({ default: module.AppearanceSettingsComponent }))
 );
 export const loadAccountSettingsComponent = settingsCodeLoader(() =>
-  import('./account-setting').then((module) => ({ default: module.AccountSettingsComponent }))
+  import('@/components/settings/account-setting').then((module) => ({ default: module.AccountSettingsComponent }))
 );
 export const loadBillingSettingsComponent = settingsCodeLoader(() =>
   import('./billing-setting').then((module) => ({ default: module.BillingSettingsComponent }))

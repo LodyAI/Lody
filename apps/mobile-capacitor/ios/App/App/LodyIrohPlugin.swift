@@ -19,6 +19,11 @@ public final class LodyIrohPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let maxFrame = 2 * 1024 * 1024 + 4096
     private let registry = LodyIrohRegistry()
 
+    deinit {
+        let registry = registry
+        Task.detached { await registry.shutdown() }
+    }
+
     private static func reject(_ call: CAPPluginCall, _ error: Error) {
         // Only fixed codes cross the bridge; never native messages or arguments.
         let code: String
@@ -57,7 +62,7 @@ public final class LodyIrohPlugin: CAPPlugin, CAPBridgedPlugin {
             // test build's VITE_IROH_PROXY_URL; release builds never set it.
             let proxy = call.getString("proxyUrl")
             let endpoint = try await openMobileEndpoint(seed: seed, relayUrls: relays, relayToken: token, proxyUrl: proxy)
-            return ["handle": await registry.add(endpoint: endpoint)]
+            return ["handle": try await registry.add(endpoint: endpoint)]
         }
     }
     @objc public func connectionPath(_ call: CAPPluginCall) {
@@ -87,7 +92,7 @@ public final class LodyIrohPlugin: CAPPlugin, CAPBridgedPlugin {
             let started = try await endpoint.call(
                 endpointId: try Self.string(call, "endpointId"), request: request,
                 connectTimeoutMs: try Self.millis(call, "connectTimeoutMs"))
-            return ["call": await registry.add(call: started)]
+            return ["call": try await registry.add(call: started)]
         }
     }
     @objc public func nextReply(_ call: CAPPluginCall) {
@@ -119,15 +124,37 @@ public final class LodyIrohPlugin: CAPPlugin, CAPBridgedPlugin {
 
 /// Handles stay native; JS only sees random identifiers.
 actor LodyIrohRegistry {
+    private var closed = false
     private var endpoints: [String: MobileIrohEndpoint] = [:]
     private var calls: [String: MobileIrohCall] = [:]
 
-    func add(endpoint: MobileIrohEndpoint) -> String {
+    func shutdown() async {
+        closed = true
+        let closing = Array(endpoints.values)
+        endpoints.removeAll()
+        calls.values.forEach { $0.cancel() }
+        calls.removeAll()
+        await withTaskGroup(of: Void.self) { group in
+            for endpoint in closing {
+                group.addTask { await endpoint.shutdown() }
+            }
+        }
+    }
+
+    func add(endpoint: MobileIrohEndpoint) async throws -> String {
+        guard !closed else {
+            await endpoint.shutdown()
+            throw IrohError.Failed(code: "iroh_closed")
+        }
         let id = UUID().uuidString
         endpoints[id] = endpoint
         return id
     }
-    func add(call: MobileIrohCall) -> String {
+    func add(call: MobileIrohCall) throws -> String {
+        guard !closed else {
+            call.cancel()
+            throw IrohError.Failed(code: "iroh_closed")
+        }
         let id = UUID().uuidString
         calls[id] = call
         return id

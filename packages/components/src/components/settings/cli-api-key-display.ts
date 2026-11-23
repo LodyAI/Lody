@@ -85,3 +85,15 @@ export function describeCliApiKey(
     lastUsed: lastUsed ? t('settings.account.cliAuth.lastUsed', { at: lastUsed }) : null,
   };
 }
+
+export function partitionCliApiKeys(apiKeys: readonly CliApiKeyRecord[]): {
+  listed: CliApiKeyRecord[];
+  signIn: CliApiKeyRecord[];
+} {
+  const listed: CliApiKeyRecord[] = [];
+  const signIn: CliApiKeyRecord[] = [];
+  for (const apiKey of apiKeys) {
+    (apiKey.source === 'auto' ? signIn : listed).push(apiKey);
+  }
+  return { listed, signIn };
+}

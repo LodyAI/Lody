@@ -35,6 +35,14 @@ Both paths use the same user turn and original frame; the CLI's existing
 `agent-start:<userTurnId>` journal and current membership authorization decide
 whether execution can start. A progress ACK confirms receipt, not execution.
 
+Request appends and CLI response delivery (`makeEncryptedStreamsEnvelopeDelivery`,
+which covers response-stream setup too) go through `retryTransientGateway`. It
+retries an explicit gateway status from `@lody/shared/transient-gateway` (502/503/504,
+60 ms then 150 ms) on Effect's clock, inside the caller's receipt deadline; the
+Electron and client-e2ee cloud clients use the same statuses and delays. Other statuses,
+refusals and raw network errors are not retried. A duplicate append is harmless
+because receivers journal the exact original and requesters settle each request id once.
+
 Scope close aborts and drains raw reads before releasing tokens. One rejected
 request does not stop the workspace. Originals and execution evidence are not
 automatically collected. See the [implementation decision and validation limits](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-streams-dispatch.md).

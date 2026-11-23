@@ -167,6 +167,45 @@ description: Checks diffs
     }
   });
 
+  it('answers a matching knownFingerprint without sending skill bodies', async () => {
+    const rootPath = await createTempProject();
+    try {
+      const skillPath = join(rootPath, '.agents', 'skills', 'review', 'SKILL.md');
+      await mkdir(join(rootPath, '.agents', 'skills', 'review'), { recursive: true });
+      await writeFile(skillPath, '---\nname: Review Bot\n---\nCheck the diff.\n');
+      const service = new LocalProjectControlService(createLogger());
+
+      const first = await service.listProjectSkills(rootPath, ['.agents/skills']);
+      expect(first.groups[0]?.skills[0]).toMatchObject({
+        name: 'Review Bot',
+        content: 'Check the diff.',
+      });
+      expect(first.unchanged).toBeUndefined();
+
+      const repeat = await service.listProjectSkills(rootPath, ['.agents/skills'], {
+        knownFingerprint: first.contentFingerprint,
+      });
+      expect(repeat).toEqual({
+        groups: [],
+        contentFingerprint: first.contentFingerprint,
+        unchanged: true,
+      });
+
+      await writeFile(skillPath, '---\nname: Review Bot 2\n---\nCheck every diff.\n');
+      const edited = await service.listProjectSkills(rootPath, ['.agents/skills'], {
+        knownFingerprint: first.contentFingerprint,
+      });
+      expect(edited.unchanged).toBeUndefined();
+      expect(edited.contentFingerprint).not.toBe(first.contentFingerprint);
+      expect(edited.groups[0]?.skills[0]).toMatchObject({
+        name: 'Review Bot 2',
+        content: 'Check every diff.',
+      });
+    } finally {
+      await rm(rootPath, { recursive: true, force: true });
+    }
+  });
+
   it('skips dangling skill symlinks as missing entries', async () => {
     const rootPath = await createTempProject();
     try {
@@ -380,6 +419,36 @@ name: browser
       expect(
         result.groups.find((group) => group.dir === '~/.gemini/antigravity-cli/builtin/skills')
       ).toMatchObject({ scope: 'system', skills: [{ name: 'browser' }] });
+    } finally {
+      await rm(homePath, { recursive: true, force: true });
+    }
+  });
+
+  it('answers an unchanged global skill scan with its fingerprint only', async () => {
+    const homePath = await createTempProject();
+    try {
+      await mkdir(join(homePath, '.claude', 'skills', 'deploy'), { recursive: true });
+      await writeFile(
+        join(homePath, '.claude', 'skills', 'deploy', 'SKILL.md'),
+        '---\nname: Deploy\n---\nShip it.\n'
+      );
+      const service = new LocalProjectControlService(createLogger());
+
+      const first = await service.listGlobalSkills({ homePath });
+      expect(first.groups.some((group) => group.dir === '~/.claude/skills')).toBe(true);
+
+      const repeat = await service.listGlobalSkills({
+        homePath,
+        knownFingerprint: first.contentFingerprint,
+      });
+      expect(repeat).toEqual({
+        groups: [],
+        contentFingerprint: first.contentFingerprint,
+        unchanged: true,
+      });
+
+      const stale = await service.listGlobalSkills({ homePath, knownFingerprint: 'stale' });
+      expect(stale.groups).toEqual(first.groups);
     } finally {
       await rm(homePath, { recursive: true, force: true });
     }

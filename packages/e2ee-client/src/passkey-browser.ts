@@ -1,7 +1,8 @@
 /**
  * The browser `E2eePasskeyPort`, over `navigator.credentials`. It reports what the browser
  * returned and decides nothing: `@lody/e2ee-client/passkey-unlock` judges the result.
- * A browser without PRF returns `prfEnabled: false` and no result, never a substitute.
+ * A browser without PRF returns `prfEnabled: false` and no result, never a substitute;
+ * `available` is false where the browser does not itself report PRF support.
  */
 import {
   E2eePasskeyCancelled,
@@ -49,12 +50,34 @@ async function ceremony<A>(work: () => Promise<A>) {
   }
 }
 
+type ClientCapabilities = () => Promise<Readonly<Record<string, boolean | undefined>>>;
+
+/**
+ * Only a real ceremony proves PRF; this says whether one can succeed in this browser.
+ * WebAuthn alone is not enough: Safari 16.4–17.x and older Firefox create passkeys
+ * without PRF. Only the browser's own `extension:prf` capability claims support, so a
+ * browser without `getClientCapabilities` (or one that throws) is not offered passkeys.
+ */
+async function browserPrfAvailable(): Promise<boolean> {
+  if (
+    typeof PublicKeyCredential === 'undefined' ||
+    typeof navigator.credentials?.get !== 'function'
+  )
+    return false;
+  const capabilities = (PublicKeyCredential as unknown as { getClientCapabilities?: unknown })
+    .getClientCapabilities;
+  if (typeof capabilities !== 'function') return false;
+  try {
+    const reported = await (capabilities as ClientCapabilities).call(PublicKeyCredential);
+    return reported?.['extension:prf'] === true;
+  } catch {
+    return false;
+  }
+}
+
 export function browserPasskeyPort(): E2eePasskeyPort {
   return {
-    // Only a real ceremony proves PRF; this says only whether a ceremony can be attempted.
-    available: async () =>
-      typeof PublicKeyCredential !== 'undefined' &&
-      typeof navigator.credentials?.get === 'function',
+    available: browserPrfAvailable,
     register: async (request): Promise<E2eePasskeyRegistration> => {
       const created = await ceremony(() =>
         navigator.credentials.create({

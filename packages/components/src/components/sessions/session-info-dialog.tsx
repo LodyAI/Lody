@@ -1,3 +1,6 @@
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { themeSpace as appSpace } from '../../style/theme-scale.stylex';
 import type { ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Copy } from 'lucide-react';
@@ -6,8 +9,6 @@ import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@lody/ui/dialog';
 import { Spinner } from '@lody/ui/spinner';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space, text } from '@lody/ui/tokens/scales.stylex';
 import type { WorkspaceMember } from '@/hooks/use-workspace-members';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -153,9 +154,7 @@ export function SessionInfoDialog({
 
   const showBaseBranch = Boolean(baseBranch && baseBranch !== currentBranch);
   const branch = currentBranch || baseBranch || '';
-  const prMeta = pullRequest
-    ? (PR_STATUS_META[pullRequest.status] ?? PR_STATUS_META.open)
-    : null;
+  const prMeta = pullRequest ? (PR_STATUS_META[pullRequest.status] ?? PR_STATUS_META.open) : null;
   const ownerMember = owner?.members.find((member) => member.userId === owner.ownerUserId);
 
   return (
@@ -273,9 +272,13 @@ export function SessionInfoDialog({
             >
               {ownerMember ? (
                 <UserAvatar
-                  user={{ id: ownerMember.userId, name: ownerMember.name, image: ownerMember.image }}
+                  user={{
+                    id: ownerMember.userId,
+                    name: ownerMember.name,
+                    image: ownerMember.image,
+                  }}
                   size="mini"
-                  className="shrink-0"
+                  {...stylex.props(themeStyles.layout)}
                 />
               ) : null}
               <span {...stylex.props(styles.truncate)}>
@@ -306,7 +309,7 @@ function SessionOwnerPicker({
           </Button>
         }
       />
-      <Menu.Content align="end" className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
+      <Menu.Content align="end" xstyle={themeStyles.glyph}>
         <Menu.RadioGroup
           value={owner.ownerUserId}
           onValueChange={(userId) => {
@@ -332,12 +335,12 @@ function SessionOwnerPicker({
                 title={disabledReason ?? member.email ?? member.name}
                 indicator="check"
                 indicatorSide="end"
-                endContent={isPending ? <Spinner className="h-3.5 w-3.5 shrink-0" /> : undefined}
+                endContent={isPending ? <Spinner className={stylex.props(themeStyles.glyph2).className} /> : undefined}
               >
                 <UserAvatar
                   user={{ id: member.userId, name: member.name, image: member.image }}
                   size="mini"
-                  className="shrink-0"
+                  {...stylex.props(themeStyles.layout)}
                 />
                 {member.name}
                 {disabledReason ? <span>{disabledReason}</span> : null}
@@ -349,3 +352,9 @@ function SessionOwnerPicker({
     </Menu.Root>
   );
 }
+
+const themeStyles = stylex.create({
+  layout: { flexShrink: 0 },
+  glyph: { maxHeight: 'calc(var(--spacing) * 72)', minWidth: '200px', maxWidth: '280px', overflowY: 'auto' },
+  glyph2: { height: appSpace[3.5], width: appSpace[3.5], flexShrink: 0 },
+});

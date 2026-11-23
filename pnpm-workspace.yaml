@@ -32,7 +32,7 @@ catalog:
   '@loro-dev/loro-cli': 0.6.0
   '@loro-dev/roost': 0.3.1
   '@loro-dev/streams-client': 0.14.0
-  '@loro-dev/streams-crdt': 0.22.1
+  '@loro-dev/streams-crdt': 0.23.0
   '@tanstack/react-router': ^1.127.9
   '@tanstack/react-router-devtools': ^1.127.9
   '@tanstack/router-plugin': ^1.127.9
@@ -53,7 +53,7 @@ catalog:
   loro-mirror: 2.3.2
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
-  loro-repo: 0.26.0
+  loro-repo: 0.28.0
   loro-websocket: ^0.6.2
   lucide-react: ^0.523.0
   react: 19.2.0
@@ -87,16 +87,16 @@ minimumReleaseAgeExclude:
   - '@earendil-works/pi-ai@1.6.0'
   - '@earendil-works/pi-schema@1.6.0'
   - '@earendil-works/pi-telemetry@1.6.0'
-  # Claude 2.1.316 includes OAuth renewal fixes; limit the exception to this release.
-  - '@anthropic-ai/claude-agent-sdk@0.3.316'
-  - '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.316'
-  - '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.316'
-  - '@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.316'
-  - '@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.316'
-  - '@anthropic-ai/claude-agent-sdk-linux-x64@0.3.316'
-  - '@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.316'
-  - '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.316'
-  - '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.316'
+  # Keep Claude SDK exceptions exact and in one rule per package.
+  - '@anthropic-ai/claude-agent-sdk@0.3.316 || 0.3.321 || 0.3.327'
+  - '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.316 || 0.3.321 || 0.3.327'
+  - '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.316 || 0.3.321 || 0.3.327'
+  - '@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.316 || 0.3.321 || 0.3.327'
+  - '@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.316 || 0.3.321 || 0.3.327'
+  - '@anthropic-ai/claude-agent-sdk-linux-x64@0.3.316 || 0.3.321 || 0.3.327'
+  - '@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.316 || 0.3.321 || 0.3.327'
+  - '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.316 || 0.3.321 || 0.3.327'
+  - '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.316 || 0.3.321 || 0.3.327'
   - '@typescript-eslint/project-service@8.72.2'
   - '@typescript-eslint/scope-manager@8.72.2'
   - '@typescript-eslint/tsconfig-utils@8.72.2'
@@ -180,21 +180,12 @@ minimumReleaseAgeExclude:
   - '@vitest/mocker@5.0.2 || 5.1.0'
   - '@vitest/spy@5.0.2 || 5.1.0'
   - loro-crdt@1.17.0
-  - '@loro-dev/streams-crdt@0.22.1'
+  - '@loro-dev/streams-crdt@0.22.1 || 0.23.0'
   - '@loro-dev/streams-client@0.14.0'
-  - loro-repo@0.26.0
+  - loro-repo@0.26.0 || 0.28.0
   - '@loro-dev/flock-wasm@0.5.0'
   - '@lobehub/streamdown@1.4.0'
   - virtua@0.52.7
-  - '@anthropic-ai/claude-agent-sdk@0.3.316 || 0.3.321 || 0.3.327'
-  - '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.316 || 0.3.321 || 0.3.327'
-  - '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.316 || 0.3.321 || 0.3.327'
-  - '@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.316 || 0.3.321 || 0.3.327'
-  - '@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.316 || 0.3.321 || 0.3.327'
-  - '@anthropic-ai/claude-agent-sdk-linux-x64@0.3.316 || 0.3.321 || 0.3.327'
-  - '@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.316 || 0.3.321 || 0.3.327'
-  - '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.316 || 0.3.321 || 0.3.327'
-  - '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.316 || 0.3.321 || 0.3.327'
   - '@devframes/agentic@1.0.0'
   - '@devframes/hub-ui@1.0.0'
   - '@devframes/hub@1.0.0'
@@ -240,7 +231,7 @@ overrides:
   '@storybook/builder-vite@>=10.6.0 <10.6.2': 10.6.2
   '@loro-dev/streams-crdt>@loro-dev/flock-wasm': ^0.5.0
   'loro-repo>@loro-dev/flock-wasm': ^0.5.0
-  'loro-repo>@loro-dev/streams-crdt': 0.22.1
+  'loro-repo>@loro-dev/streams-crdt': 0.23.0
   '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
   '@opencode/codemode>effect': 4.0.2
   '@peculiar/x509>@peculiar/asn1-schema': 2.10.0

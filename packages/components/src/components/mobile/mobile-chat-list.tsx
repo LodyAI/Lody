@@ -1,4 +1,4 @@
-import * as stylex from '@stylexjs/stylex';
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -40,7 +40,16 @@ import {
   toggleSidebarCollapsedOpenedBySessionAtom,
 } from '@/atoms/focus-layer';
 import { buildSessionRowOpenedByTreeSlot } from '@/components/sidebar-row-shared';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeEasing,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
 import { AlertDialog } from '@/ui/dialog';
@@ -111,7 +120,7 @@ const PIN_SECTION_BUCKET_PREFIX = `${PINNED_BUCKET_ID}:`;
 const isPinnedBucketId = (id: string): boolean =>
   id === PINNED_BUCKET_ID || id.startsWith(PIN_SECTION_BUCKET_PREFIX);
 
-/* Rows a bucket shows before it collapses behind "Show all (N)".
+/* Rows a bucket shows before it collapses behind "Show more".
    Same value as the desktop sidebar's `MAX_VISIBLE_SESSIONS`
    (`../session-list.tsx`) — deliberately duplicated rather than imported so
    the mobile bundle does not pull in the desktop session-list module.
@@ -141,9 +150,10 @@ const CHAT_OPENED_BY_TREE_ACCESSORS = {
    on. How many rows a mobile bucket previews is a property of this surface
    alone and must not leak into the sidebar. */
 export type MobileChatPreviewState = {
-  /** True once the user expanded this bucket past the preview cap. */
-  showAll: boolean;
-  onToggle: () => void;
+  /** Extra top-level rows "Show more" has uncovered beyond the preview cap. */
+  revealedRows: number;
+  onShowMore: () => void;
+  onShowLess: () => void;
   /** Top-level rows shown before the toggle; defaults to {@link MOBILE_CHAT_PREVIEW_MAX_ROOTS}. */
   maxRoots?: number;
 };
@@ -169,16 +179,17 @@ export type MobileChatCardStatus = {
   isLocked: () => boolean;
 };
 
-/* Group fold + "Show all" state for one list surface. Held in an atom, not
+/* Group fold + reveal state for one list surface. Held in an atom, not
    component state, because leaving the home screen (e.g. into Settings)
    unmounts the list and would otherwise re-expand every folded group on
    return. In-memory only: it survives navigation, not an app reload. */
 type MobileChatBucketUiState = {
   collapsed: ReadonlySet<string>;
-  expanded: ReadonlySet<string>;
+  /** Extra top-level rows each bucket has revealed beyond its preview cap. */
+  revealed: Readonly<Record<string, number>>;
 };
 const createBucketUiStateAtom = () =>
-  atom<MobileChatBucketUiState>({ collapsed: new Set<string>(), expanded: new Set<string>() });
+  atom<MobileChatBucketUiState>({ collapsed: new Set<string>(), revealed: {} });
 const mobileChatBucketUiStateAtomFamily = atomFamily((_stateKey: string) =>
   createBucketUiStateAtom()
 );
@@ -212,14 +223,254 @@ const DATE_MONTH_PREFIX = 'date:month:';
    non-project group buckets. */
 /* Group labels sit at 18px (16+2) so their left edge optically lines
    up with the search field — plain `px-4` read ~2px left of the bar. */
-const GROUP_HEADING_X = 'ps-[18px] pe-4';
+const groupHeadingBox = {
+  paddingInlineStart: '18px',
+  paddingInlineEnd: themeSpace[4],
+};
 
 /* Group label type size — slightly under session-row 15px so sections
    stay secondary, but large enough to scan. */
-const GROUP_HEADING_TEXT = 'text-[14px] font-semibold tracking-tight text-muted-foreground';
+const groupHeadingText = {
+  fontSize: '14px',
+  fontWeight: themeFontWeight.semibold,
+  letterSpacing: '-0.025em',
+  color: themeColors.mutedForeground,
+};
+
+const styles = stylex.create({
+  selectionCheck: { pointerEvents: 'none' },
+  sectionHeading: {
+    ...groupHeadingBox,
+    ...groupHeadingText,
+    paddingBottom: themeSpace[1.5],
+    paddingTop: themeSpace[5],
+  },
+  /* Chevron for group collapse state: points right when collapsed,
+     rotates 90° to point down when expanded. Same muted color as the
+     section label + folder mark so the cluster reads as one unit. */
+  chevron: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: '150ms',
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  chevronExpanded: { transform: 'rotate(90deg)' },
+  collapsibleRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingBottom: themeSpace[1.5],
+    ...groupHeadingBox,
+  },
+  collapsibleRowCompact: { paddingTop: themeSpace[2] },
+  collapsibleRowTall: { paddingTop: themeSpace[4] },
+  collapsibleButton: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    textAlign: 'left',
+    opacity: { default: 1, ':active': 0.7 },
+    ...groupHeadingText,
+  },
+  labelCluster: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+  truncate: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  bucketLabel: {
+    ...groupHeadingText,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  bucketMarkImage: {
+    width: themeSpace[5],
+    height: themeSpace[5],
+    flexShrink: 0,
+    borderRadius: 'var(--radius)',
+    objectFit: 'cover',
+  },
+  bucketMarkIcon: {
+    width: themeSpace[5],
+    height: themeSpace[5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  bucketRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingBottom: themeSpace[1.5],
+    ...groupHeadingBox,
+  },
+  bucketRowCompact: { paddingTop: themeSpace[2] },
+  bucketRowTall: { paddingTop: themeSpace[4] },
+  bucketButton: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    textAlign: 'left',
+    opacity: { default: 1, ':active': 0.7 },
+  },
+  bucketBody: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  privateBadge: {
+    display: 'inline-flex',
+    minHeight: themeSpace[7],
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.full,
+    paddingInline: themeSpace[1.5],
+    fontSize: '0.68rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+    backgroundColor: { default: 'transparent', ':active': themeColors.muted },
+  },
+  privateBadgeIcon: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  badgeGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+  helpIcon: { width: themeSpace[3], height: themeSpace[3] },
+  rowShell: {
+    overflow: 'hidden',
+    backgroundColor: themeColors.background,
+  },
+  previewToggle: {
+    display: 'flex',
+    minHeight: themeSpace[11],
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[2.5],
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[2],
+    textAlign: 'left',
+    fontSize: '13px',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+    backgroundColor: {
+      default: themeColors.background,
+      ':active': 'hsl(var(--muted) / 0.4)',
+    },
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  previewSpacer: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+  },
+  flatHeadingRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingBottom: themeSpace[1.5],
+    paddingTop: themeSpace[5],
+    ...groupHeadingBox,
+  },
+  flatHeadingText: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    ...groupHeadingText,
+  },
+  trailing: { flexShrink: 0 },
+  flatTailRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: themeSpace[1.5],
+    ...groupHeadingBox,
+  },
+  flatTailRowCompact: { paddingTop: themeSpace[2] },
+  flatTailRowTall: { paddingTop: themeSpace[4] },
+  selectionToolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[4],
+    paddingBottom: themeSpace[1.5],
+    paddingTop: themeSpace[5],
+  },
+  selectAllButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  selectionActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+  cancelButton: {
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+    backgroundColor: { default: 'transparent', ':active': 'hsl(var(--muted) / 0.6)' },
+  },
+  deleteButton: {
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.destructive,
+    backgroundColor: { default: 'transparent', ':active': 'hsl(var(--destructive) / 0.1)' },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
+  },
+});
 
 export function MobileChatSectionHeading({ children }: { children: ReactNode }) {
-  return <div className={cn(GROUP_HEADING_X, 'pb-1.5 pt-5', GROUP_HEADING_TEXT)}>{children}</div>;
+  return <div {...stylex.props(styles.sectionHeading)}>{children}</div>;
 }
 
 /* Chevron for group collapse state: points right when collapsed,
@@ -228,10 +479,7 @@ export function MobileChatSectionHeading({ children }: { children: ReactNode }) 
 function GroupChevron({ expanded }: { expanded: boolean }) {
   return (
     <ChevronRight
-      className={cn(
-        'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-150',
-        expanded && 'rotate-90'
-      )}
+      className={stylex.props(styles.chevron, expanded && styles.chevronExpanded).className}
       strokeWidth={2.25}
       aria-hidden="true"
     />
@@ -260,28 +508,24 @@ function CollapsibleSectionHeading({
 }) {
   return (
     <div
-      className={cn(
-        'flex w-full items-center gap-2 pb-1.5',
-        GROUP_HEADING_X,
-        compactTop ? 'pt-2' : 'pt-4'
+      {...stylex.props(
+        styles.collapsibleRow,
+        compactTop ? styles.collapsibleRowCompact : styles.collapsibleRowTall
       )}
     >
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className={cn(
-          'flex min-w-0 flex-1 items-center text-left active:opacity-70',
-          GROUP_HEADING_TEXT
-        )}
+        {...stylex.props(styles.collapsibleButton)}
       >
         {/* Label + chevron as a tight cluster (not row-end). */}
-        <span className="flex min-w-0 max-w-full items-center gap-1">
-          <span className="min-w-0 truncate">{children}</span>
+        <span {...stylex.props(styles.labelCluster)}>
+          <span {...stylex.props(styles.truncate)}>{children}</span>
           <GroupChevron expanded={expanded} />
         </span>
       </button>
-      {trailing ? <div className="shrink-0">{trailing}</div> : null}
+      {trailing ? <div {...stylex.props(styles.trailing)}>{trailing}</div> : null}
     </div>
   );
 }
@@ -342,7 +586,7 @@ function ProjectBucketHeading({
           src={avatarUrl}
           alt=""
           loading="lazy"
-          className="h-5 w-5 shrink-0 rounded object-cover"
+          className={stylex.props(styles.bucketMarkImage).className}
         />
       );
     } else if (isLocal) {
@@ -351,52 +595,44 @@ function ProjectBucketHeading({
       const FolderIcon = expanded ? FolderOpen : Folder;
       mark = (
         <FolderIcon
-          className="h-5 w-5 shrink-0 text-muted-foreground"
+          className={stylex.props(styles.bucketMarkIcon).className}
           strokeWidth={1.75}
           aria-hidden="true"
         />
       );
     } else {
-      mark = (
-        <MobileInitialLetterAvatar
-          name={label}
-          hashSeed={hashSeed ?? label}
-          size="sm"
-          /* Match 20px folder/avatar mark; `sm` defaults to 24px. */
-          className="h-5 w-5 rounded text-[0.68rem]"
-        />
-      );
+      mark = <MobileInitialLetterAvatar name={label} hashSeed={hashSeed ?? label} size="xs" />;
     }
   }
-  const rowClassName = cn(
-    'flex w-full items-center gap-2 pb-1.5',
-    GROUP_HEADING_X,
-    compactTop ? 'pt-2' : 'pt-4'
-  );
   const labelCluster = (
     <>
       {mark}
       {/* Label + chevron share a tight cluster so the chevron sits
           immediately after the text, not at the row's far right. */}
-      <span className="flex min-w-0 max-w-full items-center gap-1">
-        <span className={cn('min-w-0 truncate', GROUP_HEADING_TEXT)}>{label}</span>
+      <span {...stylex.props(styles.labelCluster)}>
+        <span {...stylex.props(styles.bucketLabel)}>{label}</span>
         {onToggle ? <GroupChevron expanded={expanded} /> : null}
       </span>
     </>
   );
   return (
-    <div className={rowClassName}>
+    <div
+      {...stylex.props(
+        styles.bucketRow,
+        compactTop ? styles.bucketRowCompact : styles.bucketRowTall
+      )}
+    >
       {onToggle ? (
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left active:opacity-70"
+          {...stylex.props(styles.bucketButton)}
         >
           {labelCluster}
         </button>
       ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">{labelCluster}</div>
+        <div {...stylex.props(styles.bucketBody)}>{labelCluster}</div>
       )}
       {isPrivate ? (
         onPrivateHelp ? (
@@ -404,17 +640,20 @@ function ProjectBucketHeading({
             type="button"
             onClick={onPrivateHelp}
             aria-label={privateHelpAriaLabel ?? privateLabel}
-            className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-full px-1.5 text-[0.68rem] font-medium text-muted-foreground active:bg-muted"
+            {...stylex.props(styles.privateBadge)}
           >
-            <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
+            <LockKeyhole className={stylex.props(styles.badgeGlyph).className} aria-hidden="true" />
             {privateLabel ? <span>{privateLabel}</span> : null}
-            <CircleHelp className="h-3 w-3" aria-hidden="true" />
+            <CircleHelp className={stylex.props(styles.helpIcon).className} aria-hidden="true" />
           </button>
         ) : (
-          <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <LockKeyhole
+            className={stylex.props(styles.privateBadgeIcon).className}
+            aria-hidden="true"
+          />
         )
       ) : null}
-      {trailing ? <div className="shrink-0">{trailing}</div> : null}
+      {trailing ? <div {...stylex.props(styles.trailing)}>{trailing}</div> : null}
     </div>
   );
 }
@@ -424,7 +663,7 @@ function ProjectBucketHeading({
 function NoProjectBucketLeading() {
   return (
     <MessageCircle
-      className="h-5 w-5 shrink-0 text-muted-foreground"
+      className={stylex.props(styles.bucketMarkIcon).className}
       strokeWidth={1.75}
       aria-hidden="true"
     />
@@ -504,7 +743,7 @@ export function MobileChatListCard({
      sections. */
   selection?: ChatSelectionState;
   /** Caps the bucket at {@link MOBILE_CHAT_PREVIEW_MAX_ROOTS} top-level rows
-     and appends a "Show all (N)" toggle. Omit to render every row (what a
+     and appends a "Show more" stepper. Omit to render every row (what a
      standalone card without a `MobileChatList` around it does). */
   preview?: MobileChatPreviewState;
 }) {
@@ -535,9 +774,9 @@ export function MobileChatListCard({
      rows. `maxRoots` is applied AFTER `rootRank`, so the preview keeps the
      pinned-first / latest-activity order the bucket already promises — it
      truncates that order rather than reshuffling it. */
-  const showAll = preview?.showAll ?? false;
+  const revealedRows = preview?.revealedRows ?? 0;
   const previewEnabled = preview != null;
-  const capped = previewEnabled && !showAll;
+  const capped = previewEnabled;
   const maxRoots = preview?.maxRoots ?? MOBILE_CHAT_PREVIEW_MAX_ROOTS;
   const treeNodes = useMemo(
     () =>
@@ -553,13 +792,13 @@ export function MobileChatListCard({
               rootRank: (chat: MobileConversationItem) =>
                 pinnedFirstRootRank(chat.latestMessageAt ?? 0, chat.isPinned),
             }),
-        ...(capped ? { maxRoots } : {}),
+        ...(capped ? { maxRoots: maxRoots + revealedRows } : {}),
       }),
-    [capped, chats, collapsedOpeners, maxRoots, preserveOrder]
+    [capped, chats, collapsedOpeners, maxRoots, preserveOrder, revealedRows]
   );
   /* Gate the toggle on TOP-LEVEL rows, matching what the cap actually limits:
      five openers plus the Sessions they opened is not an overflowing bucket,
-     so it must not sprout a "Show all" the tap would not change.
+     so it must not sprout a "Show more" the tap would not change.
 
      Deliberately NOT wrapped in `useMemo`. `MobileChatList` calls `groupChats`
      in its render body, so every bucket receives a freshly built `chats` array
@@ -569,8 +808,11 @@ export function MobileChatListCard({
      worse than the O(rows) scan it fails to avoid. `previewEnabled` exists for
      the same reason: `preview` is a new object literal each render, so only the
      one bit of it that matters may be read. */
-  const overflowsPreview =
-    previewEnabled && countOpenedByTreeRoots(chats, CHAT_OPENED_BY_TREE_ACCESSORS) > maxRoots;
+  const rootCount = previewEnabled
+    ? countOpenedByTreeRoots(chats, CHAT_OPENED_BY_TREE_ACCESSORS)
+    : 0;
+  const overflowsPreview = rootCount > maxRoots;
+  const hasMoreRows = rootCount > maxRoots + revealedRows;
   return (
     /* Flat list — no rounded card shell or inter-row dividers. Rows
        sit directly on the page canvas; `ConversationRow` supplies its
@@ -599,7 +841,7 @@ export function MobileChatListCard({
       <AnimatePresence
         initial={false}
         custom={shownIds}
-        key={`${archived ? 'archived' : 'active'}:${capped ? 'preview' : 'full'}`}
+        key={`${archived ? 'archived' : 'active'}:${capped ? `preview:${revealedRows}` : 'full'}`}
       >
         {treeNodes.map((node, nodeIndex) => {
           const conversation = node.item;
@@ -670,7 +912,7 @@ export function MobileChatListCard({
               /* `overflow-hidden` lets `height: 0` actually clip the
                  row content while it collapses. Canvas bg matches the
                  page so exit-collapse never flashes a seam. */
-              className="overflow-hidden bg-background"
+              {...stylex.props(styles.rowShell)}
               {...(status
                 ? {
                     'data-status-row-id': conversation.id,
@@ -745,9 +987,10 @@ export function MobileChatListCard({
       {status?.dropBeforeId === null ? <MobileStatusDropIndicator /> : null}
       {overflowsPreview && preview ? (
         <MobileChatPreviewToggle
-          showAll={showAll}
-          totalCount={chats.length}
-          onToggle={preview.onToggle}
+          revealedRows={revealedRows}
+          hasMoreRows={hasMoreRows}
+          onShowMore={preview.onShowMore}
+          onShowLess={preview.onShowLess}
         />
       ) : null}
     </>
@@ -803,7 +1046,7 @@ function MobileStatusDropIndicator() {
 
    Geometry: the label starts on the row-title x (px-4 + the 16px leading slot
    + gap-2.5 = 42px) via an empty spacer, exactly as the desktop sidebar's
-   "Show all" does. The slot stays EMPTY on purpose — it is the column that
+   "Show more" does. The slot stays EMPTY on purpose — it is the column that
    carries a row's status indicator and an opener's fold chevron, so a chevron
    here would read as one of those. The label alone says which way it goes.
 
@@ -812,17 +1055,19 @@ function MobileStatusDropIndicator() {
    sections, then this. Full-width `min-h-11` keeps a thumb target the size of
    a row. */
 function MobileChatPreviewToggle({
-  showAll,
-  totalCount,
-  onToggle,
+  revealedRows,
+  hasMoreRows,
+  onShowMore,
+  onShowLess,
 }: {
-  showAll: boolean;
-  totalCount: number;
-  onToggle: () => void;
+  revealedRows: number;
+  hasMoreRows: boolean;
+  onShowMore: () => void;
+  onShowLess: () => void;
 }) {
   const { t } = useTranslation();
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const wasShowingAll = useRef(showAll);
+  const buttonRef = useRef<HTMLDivElement | null>(null);
+  const wasRevealed = useRef(revealedRows > 0);
   /* Collapsing removes rows ABOVE this button, so on a long bucket the tap
      target — and everything the user was reading — jumps off the top of the
      viewport. Pull it back into view minimally (`nearest` is a no-op when it
@@ -831,26 +1076,40 @@ function MobileChatPreviewToggle({
      Chrome's native scroll anchoring would cover this on its own; WebKit has
      never shipped `overflow-anchor`, and iOS is the surface this list is for. */
   useLayoutEffect(() => {
-    if (wasShowingAll.current && !showAll) {
+    const revealed = revealedRows > 0;
+    if (wasRevealed.current && !revealed) {
       buttonRef.current?.scrollIntoView?.({ block: 'nearest' });
     }
-    wasShowingAll.current = showAll;
-  }, [showAll]);
-  const label = showAll
-    ? t('sessions.showLess', 'Show less')
-    : t('sessions.showAll', 'Show all ({{count}})', { count: totalCount });
+    wasRevealed.current = revealed;
+  }, [revealedRows]);
   return (
-    <button
-      ref={buttonRef}
-      type="button"
-      data-chat-list-preview-toggle=""
-      aria-expanded={showAll}
-      onClick={onToggle}
-      className="flex min-h-11 w-full items-center gap-2.5 bg-background px-4 py-2 text-left text-[13px] font-medium text-muted-foreground transition-colors active:bg-muted/40"
-    >
-      <span className="h-4 w-4 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 truncate">{label}</span>
-    </button>
+    <div ref={buttonRef}>
+      {hasMoreRows ? (
+        <button
+          type="button"
+          data-chat-list-preview-toggle=""
+          aria-expanded={revealedRows > 0}
+          onClick={onShowMore}
+          {...stylex.props(styles.previewToggle)}
+        >
+          <span {...stylex.props(styles.previewSpacer)} aria-hidden="true" />
+          <span {...stylex.props(styles.truncate)}>{t('sessions.showMore', 'Show more')}</span>
+        </button>
+      ) : null}
+      {revealedRows > 0 ? (
+        <button
+          type="button"
+          data-chat-list-preview-collapse=""
+          aria-expanded="true"
+          onClick={onShowLess}
+          {...stylex.props(styles.previewToggle)}
+        >
+          <span {...stylex.props(styles.previewSpacer)} aria-hidden="true" />
+          <span {...stylex.props(styles.truncate)}>{t('sessions.showLess', 'Show less')}</span>
+        </button>
+      ) : null}
+    </div>
+
   );
 }
 
@@ -1255,7 +1514,7 @@ export function MobileChatList({
      clearing its selection state. */
   onPermanentDelete?: (chatIds: string[]) => void | Promise<void>;
   /** Caps every bucket at {@link MOBILE_CHAT_PREVIEW_MAX_ROOTS} top-level rows
-     behind a "Show all (N)" toggle. On for the workspace home list, where
+     behind a "Show more" stepper. On for the workspace home list, where
      buckets compete for the screen and one busy project would otherwise push
      every other project and worktree below the fold. Off inside a single
      project's page: the user drilled in to read exactly that list, and there
@@ -1272,7 +1531,7 @@ export function MobileChatList({
      mode and the cap disappears. `groupBy` also defaults to `none`, so a new
      caller would silently opt out. */
   capGroupPreviews?: boolean;
-  /** Keeps group fold / "Show all" state across unmounts (navigating to
+  /** Keeps group fold / reveal state across unmounts (navigating to
      Settings and back). Surfaces sharing a key share that state; omit it to
      scope the state to this mount. */
   bucketStateKey?: string;
@@ -1325,12 +1584,18 @@ export function MobileChatList({
     bucketStateKey ? mobileChatBucketUiStateAtomFamily(bucketStateKey) : localBucketUiStateAtom
   );
   const collapsedBucketIds = bucketUiState.collapsed;
-  const expandedBucketIds = bucketUiState.expanded;
+  const revealedRowsByBucket = bucketUiState.revealed;
   const toggleBucket = (bucketId: string) => {
     setBucketUiState((prev) => ({ ...prev, collapsed: toggleInSet(prev.collapsed, bucketId) }));
   };
-  const toggleBucketPreview = (bucketId: string) => {
-    setBucketUiState((prev) => ({ ...prev, expanded: toggleInSet(prev.expanded, bucketId) }));
+  const showMoreBucketRows = (bucketId: string, step: number) => {
+    setBucketUiState((prev) => ({
+      ...prev,
+      revealed: { ...prev.revealed, [bucketId]: (prev.revealed[bucketId] ?? 0) + step },
+    }));
+  };
+  const showLessBucketRows = (bucketId: string) => {
+    setBucketUiState((prev) => ({ ...prev, revealed: { ...prev.revealed, [bucketId]: 0 } }));
   };
   /* Pending permanent-delete confirmation. Drives one shared
      alert-dialog for two entry points: the multi-select toolbar
@@ -1447,9 +1712,11 @@ export function MobileChatList({
       }
     />
   ) : flatHeading != null && groupBy === 'none' ? (
-    <div className={cn('flex w-full items-center gap-2 pb-1.5 pt-5', GROUP_HEADING_X)}>
-      <div className={cn('min-w-0 flex-1', GROUP_HEADING_TEXT)}>{flatHeading}</div>
-      {firstGroupTrailing ? <div className="shrink-0">{firstGroupTrailing}</div> : null}
+    <div {...stylex.props(styles.flatHeadingRow)}>
+      <div {...stylex.props(styles.flatHeadingText)}>{flatHeading}</div>
+      {firstGroupTrailing ? (
+        <div {...stylex.props(styles.trailing)}>{firstGroupTrailing}</div>
+      ) : null}
     </div>
   ) : null;
 
@@ -1525,8 +1792,15 @@ export function MobileChatList({
       (groupBy === 'status' && id !== STATUS_BUCKET_SETTLED)
         ? undefined
         : {
-            showAll: expandedBucketIds.has(id),
-            onToggle: () => toggleBucketPreview(id),
+            revealedRows: revealedRowsByBucket[id] ?? 0,
+            onShowMore: () =>
+              showMoreBucketRows(
+                id,
+                id === STATUS_BUCKET_SETTLED
+                  ? STATUS_VIEW_SETTLED_FOLD_THRESHOLD
+                  : MOBILE_CHAT_PREVIEW_MAX_ROOTS
+              ),
+            onShowLess: () => showLessBucketRows(id),
             ...(id === STATUS_BUCKET_SETTLED
               ? { maxRoots: STATUS_VIEW_SETTLED_FOLD_THRESHOLD }
               : {}),
@@ -1555,10 +1829,9 @@ export function MobileChatList({
         <Fragment key={id}>
           {trailing ? (
             <div
-              className={cn(
-                'flex w-full items-center justify-end pb-1.5',
-                GROUP_HEADING_X,
-                compactTop ? 'pt-2' : 'pt-4'
+              {...stylex.props(
+                styles.flatTailRow,
+                compactTop ? styles.flatTailRowCompact : styles.flatTailRowTall
               )}
             >
               {trailing}
@@ -1807,28 +2080,20 @@ function SelectionToolbar({
     /* `px-4` matches each `ConversationRow`; `gap-2.5` mirrors the row
        leading status → title gap so the checkbox lines up with the
        status column. */
-    <div className="flex items-center justify-between gap-2 px-4 pb-1.5 pt-5">
-      <button
-        type="button"
-        onClick={onToggleAll}
-        className="inline-flex items-center gap-2 text-sm font-medium text-foreground"
-      >
-        <Checkbox checked={allSelected} tabIndex={-1} className="pointer-events-none" />
+    <div {...stylex.props(styles.selectionToolbar)}>
+      <button type="button" onClick={onToggleAll} {...stylex.props(styles.selectAllButton)}>
+        <Checkbox checked={allSelected} tabIndex={-1} xstyle={styles.selectionCheck} />
         <span>{countLabel}</span>
       </button>
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-md px-2 py-1 text-sm font-medium text-foreground active:bg-muted/60"
-        >
+      <div {...stylex.props(styles.selectionActions)}>
+        <button type="button" onClick={onCancel} {...stylex.props(styles.cancelButton)}>
           {labels?.cancel ?? '取消'}
         </button>
         <button
           type="button"
           onClick={onDeleteClick}
           disabled={!anySelected}
-          className="rounded-md px-2 py-1 text-sm font-semibold text-destructive active:bg-destructive/10 disabled:opacity-40"
+          {...stylex.props(styles.deleteButton)}
         >
           {labels?.deleteAction ?? '删除'}
         </button>

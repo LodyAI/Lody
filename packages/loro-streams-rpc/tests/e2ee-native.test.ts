@@ -13,6 +13,7 @@ import {
 import { e2eeRpcResource } from '../src/e2ee-resource';
 import { makeE2eeRpcNative, E2eeRpcOriginals, e2eeRpcDigest } from '../src/e2ee-native';
 import { encryptedRpcFixture } from './fixtures/e2ee-native-fixture';
+import { callEncryptedReadFeature } from '../src/e2ee-read-adapter';
 import { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { Bytes } from '@lody/e2ee-core/protocol';
 import { Result } from 'effect';
@@ -457,6 +458,130 @@ describe('trusted-host encrypted dispatch originals', () => {
     );
   });
 
+  it("completes another member's Session and project work, while machine work stays the owner's", async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    const teammate = f.native('teammate', 'teammate', () => Effect.fail(new Error('offline')));
+    const sessionId = f.input.sessionId;
+    const request = (id: string, method: string, params: unknown) =>
+      E2eeFeatureInputSchema.parse({
+        requestId: id.repeat(16),
+        request: { workspaceId: f.workspaceId, machineId: f.machineId, method, params },
+      });
+    const shared = [
+      request('b1', 'session/fork', {
+        sourceSessionId: sessionId,
+        sourceTurnId: 'assistant-1',
+        targetSessionId: '00000000-0000-4000-8000-0000000000f5',
+        requestedByUserId: 'member-account',
+      }),
+      request('b2', 'session/cancel', { sessionId, turnId: 'assistant-1', subagentTaskId: 't1' }),
+      request('b3', 'session/steer', {
+        sessionId,
+        expectedTurnId: 'assistant-1',
+        userTurnId: 'user-2',
+        userId: 'member-account',
+        timestamp: '2026-11-13T00:00:00.000Z',
+        inputConfig: { prompt: 'SYNTHETIC_STEER' },
+      }),
+      request('b4', 'session/terminate', { sessionId }),
+      request('b5', 'local-project/git-state', {
+        localProjectId: 'project-1',
+        requestedByUserId: 'member-account',
+      }),
+      request('b6', 'session/live-status', { sessionId }),
+    ];
+    for (const input of shared) {
+      const original = await Effect.runPromise(teammate.prepareFeature(input));
+      const opened = await Effect.runPromise(
+        f.receiver.openFeature(f.machineId, original.frameHex)
+      );
+      if (!opened) throw new Error(`missing ${input.request.method}`);
+      expect(opened.input).toEqual(input);
+      const result = { ok: false as const, error: 'SYNTHETIC_REFUSAL' };
+      const frames = await Effect.runPromise(
+        f.receiver.sealFeatureResult(f.machineId, opened, result)
+      );
+      expect(
+        await Effect.runPromise(
+          teammate.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+        )
+      ).toEqual(result);
+    }
+    for (const input of [
+      request('c1', 'machine/pi-extensions', {}),
+      request('c2', 'machine/acp-binary-install', { agentType: 'codex' }),
+      request('c3', 'local-project/control', {
+        request: { type: 'local-project/list', machineId: f.machineId },
+      }),
+      request('c4', 'file/list-dir', { v: 3, sessionId, path: '' }),
+    ])
+      await expect(Effect.runPromise(teammate.prepareFeature(input))).rejects.toThrow(
+        /^e2ee_machine_not_owned$/
+      );
+  });
+
+  it("refuses a Guest's writes and project reads before signing, but signs its Session reads", async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    f.ledger.append([3, new Uint8Array(16).fill(13), 3]);
+    const guest = f.native('teammate');
+    const request = (id: string, method: string, params: unknown) =>
+      E2eeFeatureInputSchema.parse({
+        requestId: id.repeat(16),
+        request: { workspaceId: f.workspaceId, machineId: f.machineId, method, params },
+      });
+    const sessionId = f.input.sessionId;
+    for (const input of [
+      request('d1', 'session/cancel', { sessionId, turnId: 'assistant-1' }),
+      request('d2', 'session/goal', { sessionId, action: 'pause', userId: 'member-account' }),
+      request('d3', 'project/probe-local-member', { localProjectId: 'project-1' }),
+    ])
+      await expect(Effect.runPromise(guest.prepareFeature(input))).rejects.toThrow(
+        /^e2ee_rpc_denied$/
+      );
+    for (const input of [
+      request('d5', 'code-collab/save-text', {
+        sessionId,
+        requestedByUserId: 'member-account',
+        path: 'a.ts',
+        baseDigest: `sha256:${'1'.repeat(64)}`,
+        text: { encoding: 'plain', text: 'x', rawBytes: 1 },
+      }),
+      request('d6', 'code-collab/init-directory', { sessionId, path: 'src' }),
+      request('d7', 'code-collab/open-current-diff', { sessionId, path: 'a.ts' }),
+    ])
+      await expect(Effect.runPromise(guest.prepareFeature(input))).rejects.toThrow(
+        /^e2ee_rpc_denied$/
+      );
+    for (const input of [
+      request('d4', 'session/live-status', { sessionId }),
+      request('d8', 'code-collab/open-diff-manifest', { sessionId, path: 'a.ts' }),
+      request('d9', 'code-collab/read-blob', {
+        sessionId,
+        key: `sha256:${'1'.repeat(64)}`,
+        offset: 0,
+        length: 100,
+      }),
+    ]) {
+      const original = await Effect.runPromise(guest.prepareFeature(input));
+      const opened = await Effect.runPromise(
+        f.receiver.openFeature(f.machineId, original.frameHex)
+      );
+      if (!opened) throw new Error(`missing ${input.request.method}`);
+      expect(opened.input).toEqual(input);
+      const result = { ok: false as const, error: 'SYNTHETIC_REFUSAL' };
+      const frames = await Effect.runPromise(
+        f.receiver.sealFeatureResult(f.machineId, opened, result)
+      );
+      expect(
+        await Effect.runPromise(
+          guest.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+        )
+      ).toEqual(result);
+    }
+  });
+
   it("signs another member's dispatch on a host with no sharing policy reader", async () => {
     const f = encryptedRpcFixture({ teammate: true });
     fixtures.push(f);
@@ -775,6 +900,49 @@ it.each(['member', 'guest'] as const)(
   }
 );
 
+it('refuses remote control for a target without e2eeRemoteControl before signing', async () => {
+  const sent: unknown[] = [];
+  const call = (method: string, params: unknown, supported: boolean) =>
+    callEncryptedReadFeature({
+      workspaceId: 'synthetic-workspace',
+      machineId: 'fixture-machine',
+      method,
+      params,
+      timeoutMs: 5_000,
+      request: async (request) => {
+        sent.push(request);
+        return { ok: false, error: 'SYNTHETIC' };
+      },
+      supportsRemoteControl: async () => supported,
+    });
+  const steer = {
+    sessionId: 'synthetic-session',
+    expectedTurnId: 'assistant-1',
+    userTurnId: 'user-2',
+    userId: 'account',
+    timestamp: '2026-11-13T00:00:00.000Z',
+    inputConfig: { prompt: 'SYNTHETIC' },
+  };
+  expect(await call('session/steer', steer, false)).toEqual({
+    result: {
+      type: 'session/steer_response',
+      sessionId: 'synthetic-session',
+      userTurnId: 'user-2',
+      applied: false,
+      disposition: 'unsupported',
+      error: 'This machine cannot receive an encrypted steer.',
+    },
+  });
+  expect(
+    await call('session/cancel', { sessionId: 'synthetic-session', turnId: 't' }, false)
+  ).toMatchObject({ error: { code: 'e2ee_machine_update_required' } });
+  expect(sent).toEqual([]);
+  // Reads outside the remote-control set, and capable targets, are sent.
+  await call('machine/status', {}, false);
+  await call('session/steer', steer, true);
+  expect(sent).toHaveLength(2);
+});
+
 it('protects feature requests and chunked results with workspace signatures and exact retained originals', async () => {
   const f = fixture();
   const input = {
@@ -831,7 +999,7 @@ it('protects feature requests and chunked results with workspace signatures and 
   ).rejects.toThrow('intent_conflict');
 });
 
-it.each([true, false])('retains diff manifest/blob writer authority (guest=%s)', async (guest) => {
+it.each([true, false])('classifies diff reads; refuses Guest saves (guest=%s)', async (guest) => {
   const f = encryptedRpcFixture({ guest });
   fixtures.push(f);
   const requests = [
@@ -854,10 +1022,6 @@ it.each([true, false])('retains diff manifest/blob writer authority (guest=%s)',
       requestId: (index + 40).toString(16).padStart(32, '0'),
       request: { workspaceId: f.workspaceId, machineId: f.machineId, ...request },
     };
-    if (guest) {
-      await expect(Effect.runPromise(f.sender.prepareFeature(input))).rejects.toThrow();
-      continue;
-    }
     const original = await Effect.runPromise(f.sender.prepareFeature(input));
     const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
     expect(opened?.input).toEqual(input);

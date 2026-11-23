@@ -187,9 +187,12 @@ function useWorktreeScriptConfigState(cache: WorktreeScriptConfigCache) {
  * `ProjectSettingsComponent` and exposes the sections + handlers it
  * needs. Both `ProjectSettingsComponent` and `MobileLocalProjectSettings`
  * call this hook so they share the same data model and produce
- * identical `ProjectSettingsRow` shapes.
+ * identical `ProjectSettingsRow` shapes. Script reads are opt-in: pass only the
+ * project whose worktree editor is visible; list-only consumers omit the key.
  */
-export function useLocalProjectsAdmin(): LocalProjectsAdminData {
+export function useLocalProjectsAdmin(
+  worktreeProjectKey: string | null = null
+): LocalProjectsAdminData {
   const { t } = useTranslation();
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -269,9 +272,10 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   }, [accessByProjectKey, sharingByKey]);
 
   useEffect(() => {
-    if (!runtime || !workspaceId || !currentUserId) return;
+    if (!worktreeProjectKey || !runtime || !workspaceId || !currentUserId) return;
     if (typeof window !== 'undefined' && window.__LODY_ELECTRON__ && !localMachineId) return;
-    const ownedEntries = Array.from(projects.values()).filter((entry) => {
+    const target = projects.get(worktreeProjectKey);
+    const ownedEntries = (target ? [target] : []).filter((entry) => {
       if (entry.machine.ownerUserId !== currentUserId) return false;
       // Offline remotes have no RPC stream. Probing them surfaces
       // `machine_rpc_unavailable` in the worktree editors. The local
@@ -291,7 +295,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         cache: WorktreeScriptConfigCache;
       }
     ) => {
-      /* Reconcile every owned project against the CLI exactly once per mount.
+      /* Reconcile only the visible project against the CLI once per mount.
          The cache may already populate `byKey`, so dedup on the requested-set
          rather than on value presence — otherwise cached entries would never
          refetch. */
@@ -392,6 +396,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
       cache: worktreeCleanupConfigCache,
     });
   }, [
+    worktreeProjectKey,
     currentUserId,
     localMachineId,
     onlineMachineIds,
@@ -490,6 +495,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         shell: resolveWorktreeSetupShellForPlatform(entry.machine.os),
         project: entry.project,
         sharedWithTeam: sharingUpdate?.desired ?? access?.sharedWithTeam ?? false,
+        machineSharedWithTeam: accessByMachineId.get(entry.machineId)?.sharedWithTeam ?? false,
         conversationCount: conversationCountByKey.get(entry.key) ?? 0,
         // Keep the control locked until the reactive query confirms the write.
         // This prevents a second toggle from racing a delayed first query result.

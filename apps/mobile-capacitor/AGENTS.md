@@ -77,6 +77,9 @@ See [composition and adoption](../../packages/platform/AGENTS.md#telemetry-priva
   `<html>`. Boot failures dismiss it.
   Read [startup appearance](BUILDING.md#startup-appearance) before editing
   native theme storage, launch screens, scene startup or splash handoff.
+- `src/main.tsx` awaits `initI18n` before `createRoot`, as Electron does: a
+  component rendered before react-i18next has its instance skips its hooks and
+  crashes on its next render, including the ErrorBoundary fallback.
 
 ## Blank screen recovery
 
@@ -93,6 +96,8 @@ credential removal and diagnostic ID preservation. Never delete files under a
 live WebView. Contract and device checks: [native-reset.md](native-reset.md).
 
 ## E2EE custody
+
+`CAPPlugin` follows the `CAPBridge` lifetime; a WebView soft reload does not trigger plugin `deinit`.
 
 `LodyKek`: scoped KEK operations only; never export KEKs or enable bridge logs.
 Keep calls owned until actual settlement. [iOS](e2ee-custody.md) / [Android](e2ee-android-custody.md).
@@ -112,6 +117,10 @@ App icon catalogs and Live Activity marks: [BUILDING.md](BUILDING.md#ios-app-ico
 Read those invariants before editing their Swift or image assets.
 
 ## Home Screen widgets
+
+Live Activity summaries and widget publication require a matching, explicitly plaintext
+runtime; other states clear existing native snapshots; decrypted workspace content never enters ActivityKit
+or App Group storage.
 
 Require matched auth/runtime/workspace; latch logout per page. Token queries use
 identity; metadata reads require readiness. Pending may retain only decoded

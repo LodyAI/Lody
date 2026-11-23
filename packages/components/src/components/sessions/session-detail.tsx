@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
@@ -6,7 +7,11 @@ import { copyTextToClipboard, writeTextToClipboard } from '@/lib/clipboard';
 import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
-import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useLegacyWorkspaceQueryStatus, useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { cloudOperations } from '@/lib/cloud-api-operations';
+import { resolveLinkedWorkspaceGitHubRepo, resolveSessionRepoFullName } from '@/lib/session-repo';
+import { usePlatformCapability } from '@lody/platform/react';
 import {
   useArchiveConfirmationRequest,
   useArchiveSessionWithConfirmation,
@@ -71,6 +76,7 @@ import {
   type LocalProjectId,
   type LocalProjectMeta,
   type ProjectRef,
+  type SessionFilePayload,
   type SessionId,
   type SessionMeta,
   type SessionStatus,
@@ -211,6 +217,7 @@ import { toast } from '@/lib/toast';
 
 import { SessionConversationDiffPanel } from './session-conversation-diff-panel';
 import { SessionFileContentView, type SessionFileSaveViewState } from './session-file-content-view';
+import { SessionFileAttachmentPane } from '../ai-gui/session-file-attachment';
 import { SessionFileQuickOpen } from './session-file-quick-open';
 import { PrTabContainer } from './pr-tab-container';
 import { SessionBrowserPanel } from './session-browser-panel';
@@ -235,7 +242,7 @@ import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
 import type { SemanticActionRouter } from '@/lib/commands/semantic-action-router';
 import { allChangesDiffScopeAtom, semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
-import { cn, getBasename } from '@/lib';
+import { getBasename } from '@/lib';
 
 import {
   resolveSessionFileOpenTarget,
@@ -349,10 +356,7 @@ import {
   resolveSessionDetailPresenceState,
   resolveSessionDetailVisibilityState,
 } from '@/lib/session-detail-presence';
-import {
-  getSessionDetailSkipTargetId,
-  getSessionDetailTouchIconButtonClassName,
-} from '@/lib/session-detail-a11y';
+import { getSessionDetailSkipTargetId } from '@/lib/session-detail-a11y';
 import {
   canUseProjectHistoryProjectControl,
   importProjectHistoryForLocalProject,
@@ -458,7 +462,27 @@ type ViewerTab =
       type: 'url';
       url: string;
       label: string;
+    }
+  | {
+      /** A message attachment: bytes come from the attachment store, not a workspace path. */
+      id: string;
+      type: 'attachment';
+      file: SessionFilePayload;
+      /** The Session whose message carried it; `file.storageSessionId` wins when set. */
+      sessionId: SessionId;
+      label: string;
     };
+
+const getViewerTabAnalyticsType = (tabId: string): 'file' | 'diff' | 'attachment' | 'pr' | 'url' =>
+  tabId.startsWith('file:')
+    ? 'file'
+    : tabId.startsWith('attachment:')
+      ? 'attachment'
+      : tabId.startsWith('pr:')
+        ? 'pr'
+        : tabId.startsWith('url:')
+          ? 'url'
+          : 'diff';
 
 type SessionDetailOpenFileOptions = {
   /** Analytics only. */
@@ -590,6 +614,26 @@ const PR_SIDEBAR_MIN_WIDTH_PX = 500;
 const DEVICE_SPLIT_SIDEBAR_MIN_WIDTH_PX = 720;
 
 const detailStyles = stylex.create({
+  muted: { color: 'hsl(var(--muted-foreground) / 1)' },
+  confirmSmall: { maxWidth: '24rem' },
+  confirmMedium: { maxWidth: '28rem' },
+  mobileHeader: {
+    position: 'absolute',
+    insetInline: 'calc(var(--spacing) * 0)',
+    top: 'calc(var(--spacing) * 0)',
+    zIndex: 30,
+    borderBottomWidth: 0,
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 55%, transparent)',
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+  fullDrawer: {
+    width: '100%',
+    maxWidth: 'none',
+    inset: 'calc(var(--spacing) * 0)',
+    borderWidth: 0,
+    borderRadius: 0,
+  },
+  touchBackButton: { marginLeft: 'calc(var(--spacing) * -1)', flexShrink: 0 },
   projectInfo: {
     display: 'flex',
     minWidth: 0,
@@ -912,6 +956,16 @@ const areViewerTabsEquivalent = (prev: ViewerTab, next: ViewerTab): boolean => {
     );
   }
 
+  if (prev.type === 'attachment' && next.type === 'attachment') {
+    // A re-click hands over a fresh payload object for the same upload; keeping
+    // the existing tab avoids refetching the preview it already shows.
+    return (
+      prev.sessionId === next.sessionId &&
+      prev.file.fileId === next.file.fileId &&
+      prev.file.storageSessionId === next.file.storageSessionId
+    );
+  }
+
   if (prev.type === 'diff' && next.type === 'diff') {
     return (
       prev.turnId === next.turnId &&
@@ -1068,7 +1122,7 @@ function AdaptiveMobileSessionHeader({
     <BaseHeader
       truncateTitle={false}
       hideMenuButton
-      className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/90 backdrop-blur-xl"
+      xstyle={detailStyles.mobileHeader}
       style={{ height: inset, paddingTop: 'var(--safe-area-top, 0px)' }}
       leading={sideRailVisible ? undefined : <MobileSessionHeaderBackButton onBack={onBack} />}
       title={title}
@@ -1411,6 +1465,35 @@ const SessionDetail = ({
   const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
   const docMetaCacheSettled = useAtomValue(sessionMetaCacheSettledAtomFamily(sessionId));
   const activeSession = session ?? null;
+  const hasHostedGitHub = usePlatformCapability('githubIntegration');
+  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(currentWorkspaceId);
+  const workspaceRepositories = useLegacyWorkspaceQuery(
+    cloudOperations.github.getWorkspaceRepositories,
+    currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
+  );
+  const activeSessionRepoFullName = useMemo(
+    () => (activeSession ? resolveSessionRepoFullName(activeSession) : ''),
+    [activeSession]
+  );
+  const activeSessionLinkedRepo = useMemo(
+    () => resolveLinkedWorkspaceGitHubRepo(activeSessionRepoFullName, workspaceRepositories),
+    [activeSessionRepoFullName, workspaceRepositories]
+  );
+  const activeSessionIsRepoLinked = useMemo(() => {
+    if (!activeSessionRepoFullName || !hasHostedGitHub || legacyQueryStatus === 'blocked') {
+      return false;
+    }
+    if (activeSession?.project?.kind === 'local') return Boolean(activeSessionLinkedRepo);
+    if (workspaceRepositories !== undefined) return Boolean(activeSessionLinkedRepo);
+    return undefined;
+  }, [
+    activeSession?.project?.kind,
+    activeSessionLinkedRepo,
+    activeSessionRepoFullName,
+    hasHostedGitHub,
+    legacyQueryStatus,
+    workspaceRepositories,
+  ]);
   const activeSessionSharing = useMemo(
     () => (showSessionSharing && activeSession ? resolveSessionSharing(activeSession) : null),
     [activeSession, resolveSessionSharing, showSessionSharing]
@@ -2002,20 +2085,44 @@ const SessionDetail = ({
     }
     return sourceByTarget;
   }, [pendingForks]);
+  // `useResolvedMachineMeta` already merged the Machine Flock local-project rows
+  // (honouring deletions) into `sessionMachine`; do not re-scan the raw rows.
+  const sessionMachineLocalProjects = sessionMachine?.localProjects ?? EMPTY_LOCAL_PROJECTS;
+  const getSourceLocalProjectMeta = useCallback(
+    (source: SessionMeta): LocalProjectMeta | null => {
+      if (source.project?.kind !== 'local') return null;
+      if (sessionMachine?.id === source.machineId) {
+        return sessionMachineLocalProjects[source.project.localProjectId] ?? null;
+      }
+      return null;
+    },
+    [sessionMachine?.id, sessionMachineLocalProjects]
+  );
   const getForkWorktreeAvailability = useCallback(
     (source: SessionMeta): SessionForkWorktreeAvailability => {
       if (!canForkSessionToWorktree(source)) return 'hidden';
       if (source.project?.kind === 'github') return 'available';
+      if (source.project?.kind === 'local') {
+        if (source.isWorktree === true || source.project.useWorktree === true) {
+          return 'available';
+        }
+        const projectMeta = getSourceLocalProjectMeta(source);
+        if (projectMeta?.git === true) return 'available';
+        if (projectMeta?.git === false) return 'hidden';
+      }
       const cached = worktreeAvailabilityBySessionId[source.id];
       if (cached === 'unavailable') return 'hidden';
       if (cached === 'available') return 'available';
       return 'checking';
     },
-    [canForkSessionToWorktree, worktreeAvailabilityBySessionId]
+    [canForkSessionToWorktree, getSourceLocalProjectMeta, worktreeAvailabilityBySessionId]
   );
   const resolveForkWorktreeAvailability = useCallback(
     async (source: SessionMeta) => {
       if (!canForkSessionToWorktree(source) || source.project?.kind !== 'local') return;
+      if (source.isWorktree === true || source.project.useWorktree === true) return;
+      const projectMeta = getSourceLocalProjectMeta(source);
+      if (typeof projectMeta?.git === 'boolean') return;
       if (!runtime || !user?.id) return;
       if (worktreeAvailabilityRequestRef.current.has(source.id)) return;
       worktreeAvailabilityRequestRef.current.add(source.id);
@@ -2024,13 +2131,13 @@ const SessionDetail = ({
         [source.id]: 'checking',
       }));
       try {
-        const gitState = await runtime.requestLocalProjectGitState(
+        const response = await runtime.requestLocalProjectBranches(
           source.machineId,
           source.project.localProjectId,
           user.id,
-          { timeoutMs: 15_000 }
+          { limit: 1, timeoutMs: 15_000 }
         );
-        const available = gitState?.success === true && gitState.state.git === true;
+        const available = response?.success === true && response.result.git === true;
         setWorktreeAvailabilityBySessionId((current) => ({
           ...current,
           [source.id]: available ? 'available' : 'unavailable',
@@ -2044,7 +2151,7 @@ const SessionDetail = ({
         });
       }
     },
-    [canForkSessionToWorktree, runtime, user?.id]
+    [canForkSessionToWorktree, getSourceLocalProjectMeta, runtime, user?.id]
   );
   const handleForkDestination = useCallback(
     (source: SessionMeta, turnId: string, destination: SessionForkDestination = 'shared') => {
@@ -2087,9 +2194,6 @@ const SessionDetail = ({
       ),
     [isActiveSessionLocalMachine, localHomeDir, machineFlockRows]
   );
-  // `useResolvedMachineMeta` already merged the Machine Flock local-project rows
-  // (honouring deletions) into `sessionMachine`; do not re-scan the raw rows.
-  const sessionMachineLocalProjects = sessionMachine?.localProjects ?? EMPTY_LOCAL_PROJECTS;
   const sessionMachineSupportsLocalProjectHistoryRpc =
     sessionMachine?.supportsLocalProjectHistoryRpc === true;
   const resolvedLocalProjectMeta = useMemo(() => {
@@ -2137,11 +2241,14 @@ const SessionDetail = ({
     getMachineMetaByIdAtomFamily(simulatorOwnerSession?.machineId)
   );
   const activeIosSimulatorSession =
-    simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine) !== 'hidden'
+    simulatorOwnerSession &&
+    getIosSimulatorPanelAvailability(iosSimulatorMachine, runtime?.contentMode) !== 'hidden'
       ? simulatorOwnerSession
       : null;
   const activeAndroidEmulatorSession =
-    simulatorOwnerSession && machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
+    simulatorOwnerSession &&
+    (runtime?.contentMode !== 'e2ee' || simulatorOwnerSession.machineId === localMachineId) &&
+    machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
       ? simulatorOwnerSession
       : null;
   const [androidEmulatorOpen, setAndroidEmulatorOpen] = useState(false);
@@ -4336,6 +4443,21 @@ const SessionDetail = ({
     });
   });
 
+  /** Desktop opens a message attachment as a side-panel tab; mobile keeps its Drawer. */
+  const handleOpenFileAttachment = useStableCallback(
+    (file: SessionFilePayload, chatSessionId: SessionId): boolean => {
+      if (isMobile) return false;
+      upsertViewerTab({
+        id: `attachment:${file.storageSessionId ?? chatSessionId}:${file.fileId}`,
+        type: 'attachment',
+        file,
+        sessionId: chatSessionId,
+        label: file.fileName,
+      });
+      return true;
+    }
+  );
+
   /**
    * Every entry point whose path came from the file index. Kept stable so the
    * file tree's memoized rows do not re-render on each parent commit.
@@ -4631,7 +4753,7 @@ const SessionDetail = ({
       }
       captureSessionDetailEvent('session/viewer_tab_selected', {
         viewer_tab_id: tabId,
-        viewer_tab_type: tabId.startsWith('file:') ? 'file' : 'diff',
+        viewer_tab_type: getViewerTabAnalyticsType(tabId),
       });
     },
     [captureSessionDetailEvent, isMobile, revealRightSidebar, selectSidePanelTab]
@@ -4765,9 +4887,15 @@ const SessionDetail = ({
     () =>
       viewerTabs.map((tab) => ({
         id: tab.id,
-        type: tab.type,
+        // An attachment tab reads as a file tab: same glyph by name, same strip slot.
+        type: tab.type === 'diff' ? 'diff' : 'file',
         label: tab.label,
-        filePath: tab.type === 'file' ? tab.filePath : undefined,
+        filePath:
+          tab.type === 'file'
+            ? tab.filePath
+            : tab.type === 'attachment'
+              ? tab.file.fileName
+              : undefined,
         dirty: tab.type === 'file' ? viewerTabSaveStates[tab.id]?.dirty === true : false,
         saving: tab.type === 'file' ? viewerTabSaveStates[tab.id]?.saving === true : false,
         conflict:
@@ -4985,13 +5113,7 @@ const SessionDetail = ({
         }
         captureSessionDetailEvent('session/viewer_tab_closed', {
           viewer_tab_id: tabId,
-          viewer_tab_type: tabId.startsWith('file:')
-            ? 'file'
-            : tabId.startsWith('pr:')
-              ? 'pr'
-              : tabId.startsWith('url:')
-                ? 'url'
-                : 'diff',
+          viewer_tab_type: getViewerTabAnalyticsType(tabId),
           remaining_viewer_tab_count: Math.max(0, viewerTabs.length - 1),
         });
       }
@@ -5314,8 +5436,10 @@ const SessionDetail = ({
         : activeTabSessionId;
     writeStoredLastActiveTabState(sessionId, {
       sessionTabId: persistedSessionTabId,
+      // Attachment, owned-session file, PR, and URL tabs are not restored across reloads.
       viewerTab:
         !activeViewerTab ||
+        activeViewerTab.type === 'attachment' ||
         (activeViewerTab.type === 'file' && activeViewerTab.ownerSessionId) ||
         activeViewerTab.type === 'pr' ||
         activeViewerTab.type === 'url'
@@ -5673,9 +5797,8 @@ const SessionDetail = ({
       if (!trimmed || isMobile) return false;
 
       if (workspaceSlug) {
-        const appSessionMatch = /^https?:\/\/[^/]+\/([^/]+)\/sessions\/([A-Za-z0-9_-]+)(?:[/?#].*)?$/i.exec(
-          trimmed
-        );
+        const appSessionMatch =
+          /^https?:\/\/[^/]+\/([^/]+)\/sessions\/([A-Za-z0-9_-]+)(?:[/?#].*)?$/i.exec(trimmed);
         if (appSessionMatch) {
           const [, linkWorkspaceSlug, linkedSessionId] = appSessionMatch;
           if (
@@ -5716,7 +5839,14 @@ const SessionDetail = ({
         return false;
       }
     },
-    [handleOpenOwnedPrTab, handleOpenPanelSession, isMobile, sessionId, upsertViewerTab, workspaceSlug]
+    [
+      handleOpenOwnedPrTab,
+      handleOpenPanelSession,
+      isMobile,
+      sessionId,
+      upsertViewerTab,
+      workspaceSlug,
+    ]
   );
 
   /** A file link in a panel-hosted conversation opens a tab on that conversation's workspace. */
@@ -6340,7 +6470,10 @@ const SessionDetail = ({
     <div {...stylex.props(detailStyles.loading)}>
       {showPendingChildTabState ? (
         <>
-          <Spinner className="h-5 w-5 text-muted-foreground" />
+          <Spinner
+            diameter="calc(var(--spacing) * 5)"
+            className={stylex.props(detailStyles.muted).className}
+          />
           <p {...stylex.props(detailStyles.loadingText)}>
             {t('sessions.tabWaitingForSync', 'Waiting for this conversation to sync…')}
           </p>
@@ -6354,7 +6487,7 @@ const SessionDetail = ({
 
   const deleteConfirmDialog = (
     <Dialog.Root open={deleteConfirmOpen} onOpenChange={(open) => setDeleteConfirmOpen(open)}>
-      <Dialog.Content className={cn(isMobile ? '' : 'max-w-sm')}>
+      <Dialog.Content xstyle={!isMobile && detailStyles.confirmSmall}>
         <Dialog.Header>
           <Dialog.Title>{t('archive.deleteConfirm.title', 'Delete permanently?')}</Dialog.Title>
           <Dialog.Description>
@@ -6422,7 +6555,7 @@ const SessionDetail = ({
         if (!open) cancelDirtyFork();
       }}
     >
-      <Dialog.Content className={cn(isMobile ? '' : 'max-w-md')}>
+      <Dialog.Content xstyle={!isMobile && detailStyles.confirmMedium}>
         <Dialog.Header>
           <Dialog.Title>{t('sessions.forkDirty.title', 'Uncommitted changes found')}</Dialog.Title>
           <Dialog.Description>
@@ -6466,8 +6599,20 @@ const SessionDetail = ({
     />
   );
 
-  const renderViewerTabContent = (tab: ViewerTab, className = 'h-full', active = true) =>
-    tab.type === 'file' && tab.ownerSessionId ? (
+  const renderViewerTabContent = (
+    tab: ViewerTab,
+    className = stylex.props(detailStyles.rootFill).className,
+    active = true
+  ) =>
+    tab.type === 'attachment' ? (
+      <SessionFileAttachmentPane
+        key={`${activeSession.id}:${tab.id}`}
+        file={tab.file}
+        sessionId={tab.sessionId}
+        active={active}
+        className={className}
+      />
+    ) : tab.type === 'file' && tab.ownerSessionId ? (
       <OwnedSessionFileViewer
         ownerSessionId={tab.ownerSessionId}
         filePath={tab.filePath}
@@ -6674,7 +6819,7 @@ const SessionDetail = ({
           ) : activeSessionSharing.visibility === 'private' ? (
             <LockKeyhole {...stylex.props(detailStyles.icon14)} />
           ) : (
-            <Spinner className="h-3.5 w-3.5" />
+            <Spinner diameter="calc(var(--spacing) * 3.5)" />
           ),
         label: t('sessions.sharing.visibility', 'Visibility'),
         value: `${getSessionSharingLabel(t, activeSessionSharing)} — ${getSessionSharingDescription(t, activeSessionSharing)}`,
@@ -6698,7 +6843,7 @@ const SessionDetail = ({
           mobileMenuActions.push({
             id: 'fork',
             icon: pendingFork ? (
-              <Spinner className="h-3.5 w-3.5" />
+              <Spinner diameter="calc(var(--spacing) * 3.5)" />
             ) : (
               <GitFork {...stylex.props(detailStyles.icon14)} />
             ),
@@ -6819,7 +6964,7 @@ const SessionDetail = ({
         id: 'share-with-team',
         icon:
           activeSessionSharing.visibility === 'unknown' ? (
-            <Spinner className="h-3.5 w-3.5" />
+            <Spinner diameter="calc(var(--spacing) * 3.5)" />
           ) : activeSessionSharing.privateReason === 'machine-not-registered' ? (
             <Monitor {...stylex.props(detailStyles.icon14)} />
           ) : activeSessionSharing.canManage ? (
@@ -7053,6 +7198,8 @@ const SessionDetail = ({
                   ref={(el) => setChatTabRef(draft.id, el)}
                   draft={draft}
                   parentSession={activeSession}
+                  isRepoPublic={activeSessionLinkedRepo?.isPublic}
+                  isRepoLinked={activeSessionIsRepoLinked}
                   commandsEnabled={isActive}
                   onDraftChange={handleDraftChange}
                   onSendDraft={handleSendDraft}
@@ -7214,7 +7361,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -7227,7 +7375,9 @@ const SessionDetail = ({
                     type="button"
                     variant="ghost"
                     icon
-                    className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                    width="calc(var(--spacing) * 11)"
+                    height="calc(var(--spacing) * 11)"
+                    xstyle={detailStyles.touchBackButton}
                     /* Same order as the edge swipe: pop a directory level
                        first, close the drawer only at the root. */
                     onClick={() => {
@@ -7282,7 +7432,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -7302,7 +7453,9 @@ const SessionDetail = ({
                       type="button"
                       variant="ghost"
                       icon
-                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      width="calc(var(--spacing) * 11)"
+                      height="calc(var(--spacing) * 11)"
+                      xstyle={detailStyles.touchBackButton}
                       onClick={handleClosePrTab}
                       aria-label={t('common.back', 'Back')}
                     >
@@ -7335,7 +7488,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -7370,7 +7524,9 @@ const SessionDetail = ({
                       type="button"
                       variant="ghost"
                       icon
-                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      width="calc(var(--spacing) * 11)"
+                      height="calc(var(--spacing) * 11)"
+                      xstyle={detailStyles.touchBackButton}
                       onClick={handleCloseBrowserTab}
                       aria-label={t('common.back', 'Back')}
                     >
@@ -7394,7 +7550,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -7414,7 +7571,9 @@ const SessionDetail = ({
                       type="button"
                       variant="ghost"
                       icon
-                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      width="calc(var(--spacing) * 11)"
+                      height="calc(var(--spacing) * 11)"
+                      xstyle={detailStyles.touchBackButton}
                       onClick={handleCloseIosSimulator}
                       aria-label={t('common.back', 'Back')}
                     >
@@ -7437,7 +7596,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -7458,7 +7618,9 @@ const SessionDetail = ({
                       type="button"
                       variant="ghost"
                       icon
-                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      width="calc(var(--spacing) * 11)"
+                      height="calc(var(--spacing) * 11)"
+                      xstyle={detailStyles.touchBackButton}
                       onClick={() => setAndroidEmulatorOpen(false)}
                       aria-label={t('common.back', 'Back')}
                     >
@@ -7707,7 +7869,7 @@ const SessionDetail = ({
       onMentionSession={handleInsertDroppedSessionMention}
       leftSlot={leftSidebarExpandButton}
       rightSlot={desktopHeaderToolbar}
-      className={cn(
+      className={clsx(
         stylex.props(
           detailStyles.topBarHeight,
           detailStyles.parentActiveScope,
@@ -7750,6 +7912,7 @@ const SessionDetail = ({
       onFileDiffClick: handleOpenFileDiffForChat,
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
+      onOpenFileAttachment: handleOpenFileAttachment,
       onOpenIosSimulator: () => handleOpenIosSimulator(),
       onOpenAndroidEmulator: () => handleOpenAndroidEmulator(),
       onOpenBrowser: previewAllowed ? () => handleOpenBrowser(chatSession.id, true) : undefined,
@@ -7882,6 +8045,8 @@ const SessionDetail = ({
               ref={(el) => setChatTabRef(draft.id, el)}
               draft={draft}
               parentSession={activeSession}
+              isRepoPublic={activeSessionLinkedRepo?.isPublic}
+              isRepoLinked={activeSessionIsRepoLinked}
               commandsEnabled={isActive}
               onDraftChange={handleDraftChange}
               onSendDraft={handleSendDraft}
@@ -7967,7 +8132,7 @@ const SessionDetail = ({
     <div
       data-lody-session-tab-region="side-panel"
       data-lody-action-scope="side-panel"
-      className={cn(
+      className={clsx(
         'group/close-scope',
         stylex.props(stylex.defaultMarker(), detailStyles.desktopPanelShell).className
       )}
@@ -7993,7 +8158,7 @@ const SessionDetail = ({
           />
         }
         endSlot={sidebarToggleButton}
-        className={cn(
+        className={clsx(
           stylex.props(detailStyles.sideTabBar).className,
           // Right panel is never under the macOS traffic lights (top-left) —
           // it must not reserve the titlebar inset the left sidebar needs. It

@@ -57,9 +57,11 @@ Recovery enablement does not enable native passkey signing, a backend switch or 
 - File creation and later offline-file backup use Capacitor Filesystem Cache and
   the system share sheet (choose Save to Files). A fresh explicit tap selects the
   saved `.lodyrecovery` file. Exact byte verification precedes uploading its wrap;
-  cancellation or mismatch cannot create a stranded vault. Temporaries are removed
-  after the native share call settles, including failure/cancellation. Files are not
-  held in React state. A process termination can leave a Cache temporary for OS eviction.
+  cancellation or mismatch cannot create a stranded vault. iOS removes temporaries
+  after the native share call settles, including failure/cancellation. Android retains
+  them because chooser completion can precede the receiving app reading its URI;
+  the next export removes prior recovery temporaries, including those from a prior process.
+  Files are not held in React state. OS eviction may also clear Cache temporaries.
 - Account settings still manage unlock/passkeys only. Whole-vault replacement is
   unsupported on mobile; opening a vault is not device recovery acceptance.
 

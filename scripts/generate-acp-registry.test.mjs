@@ -59,6 +59,15 @@ void describe('ACP registry icon generation', () => {
     );
   });
 
+  void it('bundles SVG 1.1 registry icons without their external DTD declaration', () => {
+    const doctype =
+      '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">';
+    const prolog = '<?xml version="1.0" standalone="no"?>';
+    assert.equal(validateRegistryIconSvg(prolog + doctype + SAFE_SVG, 'qoder'), SAFE_SVG + '\n');
+    assert.throws(() => validateRegistryIconSvg(doctype.replace('>', ' []>') + SAFE_SVG, 'custom'));
+    assert.throws(() => validateRegistryIconSvg(doctype.replace('svg11.dtd', 'other.dtd') + SAFE_SVG, 'custom'));
+  });
+
   void it('strips a benign XML declaration from registry SVGs', () => {
     assert.equal(
       validateRegistryIconSvg(`<?xml version="1.0" standalone="no" ?>\n${SAFE_SVG}`, 'xml-agent'),

@@ -308,7 +308,8 @@ submissions never retry. Exact-instance retirement detaches lifecycle listeners 
 termination, preserving the assistant entry and output owner through resume. Until retirement
 succeeds, the disconnected-execution release path retains the old Session for cleanup,
 including missing-session errors and Stop. Success clears the old prompt's cancellation drain,
-so Stop reaches the reusable replacement.
+republishes running presence and status before the retry, and lets Stop reach the reusable
+replacement.
 
 History promotion and activation can fail independently. `promotion-failed` preserves proof
 of non-delivery. `recoveryOwned` tells the renderer not to publish a conflicting activation;
@@ -475,7 +476,11 @@ See [the contract](../../../../specs/github-identity-fallback.md) and
 retries once, and returns personal identity disabled after two failures. Startup publishes
 `Resolving Git identity`; cancellation interrupts the waiter and fences identity updates
 and agent launch. Late policy results have no side effects. This deadline also covers
-per-turn identity refresh; it is separate from network credential fallback.
+per-turn identity refresh. The workspace token manager reuses its last confirmed disabled
+commit preference for the same requester and machine for up to 30 seconds from lookup
+start. Enabling personal attribution can take that long to appear. Approvals and failures
+are checked again on the next turn. Global invalidation and shutdown discard the entry.
+Network credential selection remains independent.
 
 Precedence: for owner turns, the workdir repository's own configured identity; then an approved
 ("Act as you") requester; then the owner's other native Git identity; then neutral LodyAI (`session.ts` `updateGitIdentity`, re-applied per turn via the execution
@@ -668,10 +673,34 @@ full catch-up and recovery. No private SDK index formats are copied into Lody.
 See the [atomic metadata decision](../../../../.agents/notes/implemented/architecture/2026-10-21-roost-atomic-commit-metadata.md).
 
 Normal repairs request affected bodies with the change interval in one reply, bounded at
-500 changed/suffix bodies. Larger repairs use checkpoint-protected ranges. The renderer
-atomically commits bodies, positions, revision and checkpoint. Coherent replies may advance
-behind newer control hints and immediately catch up again, so streaming does not need to
-stop for a stable observation. Body-only edits retain cached directory cursor validity.
+500 changed/suffix bodies. The owner verifies receipts for a fixed checkpoint outside
+the writer queue and stops reading new receipt pages on cancellation. The serialized
+body read can add up to 128 newer events to the verified interval. A larger advance
+triggers another scan outside the queue.
+
+For a larger repair, the owner retains the needed bodies at the verified checkpoint.
+It releases the writer queue between body pages. A final receipt scan identifies any
+changed IDs and structural suffix that need to be reread at the new published head.
+The final serialized repair batches the remaining body reads within one page's limit.
+When more changed bodies need repair, the verified interval still supports current-head
+paging. Inline-only subscription reads never reserve catch-up pages.
+Requests for that exact checkpoint page through the retained bodies while the Agent
+commits later updates. A capture holds at most 4,000 bodies and 16 MiB of encoded data
+and expires after two minutes or owner disposal. The daemon budgets 16 concurrent
+captures and 64 MiB across retained and in-progress captures. Requests from the same
+applied checkpoint and retained window share preparation through caller timeouts
+and newer publications. Each caller can cancel its own wait. The owner cancels
+unfinished preparation after two minutes, on generation retirement, or on disposal.
+In-progress work keeps its quota until it settles.
+When a capture cannot fit those bounds, the verified interval still permits paging
+against the matching current head. Superseded pages preserve the cache and retry
+from the last applied checkpoint. A reset requires missing or invalid change coverage.
+The renderer atomically commits bodies, positions, revision and checkpoint against its original
+cache head. Exact-checkpoint pages are validated against the repair's revision and
+count. If a body read times out, the reader can retry that request once at the
+same checkpoint and keep its verified pages. A newer observation schedules the
+next repair while this checkpoint can still be committed.
+Body-only edits retain cached directory cursor validity.
 A successful delta repair finishes even for a partial tail cache, without rereading
 the unchanged latest page.
 
@@ -696,7 +725,8 @@ send intake. Detailed decision and verification:
 
 Initial population and missing or rejected coverage read only the latest coherent window.
 An explicit reset atomically replaces the active cache in the other slot even when its
-Native publication revision is equal or consecutive, provided the captured head has not changed.
+Native publication revision is equal or lower after an explicit reset, provided the
+captured head has not changed.
 Last-change hints cannot repair unknown coverage. Older pages load on demand, using a
 checkpoint-protected absolute range where supported; ordinary refresh never sweeps the
 whole history. Genuine reset invalidates old pages until fetched again, including for
@@ -708,15 +738,22 @@ pending until explicit identity or the session's selected metadata source restor
 An empty history list is not legacy evidence. Owner capabilities remain live.
 Restoration is a finite identity barrier; a still-missing owner or a known Roost
 cursor waits for metadata changes rather than selecting legacy history.
-Independently negotiated `sessionHistoryWatch` v1 observes the committed checkpoint
-through local `watchChanges` or encrypted remote `session/history-watch`. Publication
-wakes the wait immediately; a 15-second deadline bounds idle waits without occupying
-the native Worker or writer queue. Actual body reads acquire bounded read capacity after
-waking, and idle replies transfer no history bodies. Active readers therefore recover
-through Native publications, independently of the session control document. Each bridge owns one refresh; release and
-hidden/offline remote views stop new observations. Local IPC remains usable offline.
+Independently negotiated `sessionHistorySubscription` sends committed checkpoints
+over local `session/history-subscription` and remote `session/history-subscribe`.
+The owner wakes subscriptions on Native publication. A write failure also wakes
+them to reconcile a potentially committed result. Bounded leases release parked
+observers and renew from the reader's applied checkpoint. An exact-base delta can
+travel with the checkpoint. Subscription reads only prepare inline deltas. The
+reader's incremental request repairs larger intervals and resets lost coverage.
+After a body read times out, the reader can retry that request once at the same
+checkpoint and keep the pages it already verified. It commits the window
+atomically against its starting cache head. Readers sharing that cache can apply
+the recorded invalidation when it starts at their displayed checkpoint. A reset
+or a gap without a matching invalidation rebuilds the displayed range.
+One viewer's lease does not retain Native worker or writer capacity. Local IPC
+remains usable offline.
 [Peer-reader readiness and observation](../../../../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md)
-records the lifecycle, protocol limits and verification.
+records the lifecycle and limits.
 
 ### Immutable input acceptance
 
@@ -982,7 +1019,7 @@ not trigger a reload loop. A fresh bootstrap hint closes the private-load/admiss
 Observers wait outside the serial Native request lane and never retain a SQLite transaction.
 Unsubscribe does not stop writers. These wakes cover the shared Store owner, not independent
 processes opening the same file. The command RPC reader and renderer resume from their
-persisted scoped checkpoints through the existing `watchChanges` transport.
+persisted scoped checkpoints through the owner subscription.
 
 ### Project worktree preparation
 

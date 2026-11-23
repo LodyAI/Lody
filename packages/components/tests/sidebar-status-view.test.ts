@@ -242,6 +242,7 @@ describe('Status view row actions', () => {
     root = undefined;
     container?.remove();
     container = undefined;
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -295,6 +296,34 @@ describe('Status view row actions', () => {
     expect(row).not.toBeNull();
     return row!;
   }
+
+  it('dismisses the session info card while the row menu is open', () => {
+    vi.useFakeTimers();
+    renderList({ onSnoozeItem: vi.fn() });
+    const row = rowOf('focus-row');
+    const infoCardTitle = () => document.body.querySelector('span[title="Focus conversation"]');
+    const hoverRow = () =>
+      row.dispatchEvent(
+        new MouseEvent('pointerover', { bubbles: true, relatedTarget: document.body })
+      );
+
+    flushSync(hoverRow);
+    flushSync(() => vi.advanceTimersByTime(700));
+    expect(infoCardTitle()).not.toBeNull();
+
+    flushSync(() => {
+      row.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })
+      );
+    });
+    const menu = document.body.querySelector('[role="menu"]');
+    expect(menu?.textContent).toContain('Later');
+    expect(infoCardTitle()).toBeNull();
+
+    flushSync(hoverRow);
+    flushSync(() => vi.advanceTimersByTime(700));
+    expect(infoCardTitle()).toBeNull();
+  });
 
   it('shows a one-click settle button on Focus and Later rows and keeps Archive on Settled rows', () => {
     const onSettleItem = vi.fn();

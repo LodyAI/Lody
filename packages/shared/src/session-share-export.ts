@@ -1,3 +1,4 @@
+import { stripEncryptedAttachmentMetadata } from './encrypted-attachment';
 import {
   SHARE_LIMITS,
   SESSION_SHARE_FILE_ATTACHMENTS_ENABLED,
@@ -249,6 +250,7 @@ export async function prepareSharePackage(options: {
     captured,
     async (source, index, signal) => {
       const historyObjectId = `h${index + 1}`;
+      stripEncryptedAttachmentMetadata(source.history);
       const raw = encodeShareJson(source.history, SHARE_LIMITS.historyBytes);
       const compressed = options.compressHistory ? await options.compressHistory(raw) : raw;
       signal.throwIfAborted();

@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-loro-repo 0.20.0 treated the Flock version vector as proof that everything below it had been saved. Lody added three cursor/data mismatches of its own: the CLI saved Streams cursors before the matching SQLite write, one-shot CLI commands resumed from the daemon's cursor rows, and web tabs shared one repo database and one cursor database. Each could make a replica skip remote data permanently. Lody now binds every Meta/Flock Streams checkpoint to the replica that loaded it and stores the checkpoint atomically with that replica's data: IndexedDB in the renderer, SQLite in the CLI. Each cursor is saved only after a real per-resource persistence barrier, and LoroDoc cursors are shared and durable only in the daemon. It shipped in three PRs: the library upgrade (#1049), the renderer (#1058), and the CLI on loro-repo 0.21.0 (#1066). No cursor was migrated. Each Meta/Flock room bootstraps once on its first 0.21.0 open, which also repairs caches that were already damaged; while an older release keeps writing, affected rooms can bootstrap again. Remaining limits: durability is proven with fake-indexeddb, real-Chromium ordering and injected SQLite failures, not power loss; and LoroDoc cursors are not bound to a replica, so a one-shot command bootstraps each document it opens.
+loro-repo 0.20.0 treated the Flock version vector as proof that everything below it had been saved. Lody added three cursor/data mismatches of its own: the CLI saved Streams cursors before the matching SQLite write, one-shot CLI commands resumed from the daemon's cursor rows, and web tabs shared one repo database and one cursor database. Each could make a replica skip remote data permanently. Lody now binds every Meta/Flock Streams checkpoint to the replica that loaded it and stores the checkpoint atomically with that replica's data: IndexedDB in the renderer, SQLite in the CLI. Each cursor is saved only after a real per-resource persistence barrier, and only the daemon writes shared durable LoroDoc cursors. It shipped in three PRs: the library upgrade (#1049), the renderer (#1058), and the CLI on loro-repo 0.21.0 (#1066). No cursor was migrated. Each Meta/Flock room bootstraps once on its first 0.21.0 open, which also repairs caches that were already damaged; while an older release keeps writing, affected rooms can bootstrap again. Remaining limits: durability is proven with fake-indexeddb, real-Chromium ordering and injected SQLite failures, not power loss; and uncovered or empty LoroDoc cursor versions still require bootstrap; covered one-shot replicas resume incrementally.
 
 ## Upstream change (0.20.0 → 0.20.3, `main` at `5862a2b`)
 
@@ -44,7 +44,7 @@ Evidence is from the loro-repo repository. Its design record is `docs/flock-pers
   - The unreleased 0.20.4 (#134) removes redundant version-vector reads on Streams imports.
   - All required Flock APIs (`recoverFromFile`, `inclusiveVersion`, `getEntry`) exist in `@loro-dev/flock-wasm` 0.4.3, which Lody already pins.
 
-## Lody's current composition
+## Lody's composition before migration
 
 **Renderer**
 
@@ -79,7 +79,7 @@ Evidence is from the loro-repo repository. Its design record is `docs/flock-pers
 
 **Adjacent, out of scope.** The local data plane sends Flock deltas as `exportJson(from: version())` (`packages/shared/src/local-loro-transport.ts:578-580`, `local-loro-data-plane-server.ts`). It relies on the same "equal version vector means complete" assumption, so it cannot repair a same-version hole between the renderer and CLI replicas. It needs its own decision.
 
-## Proposal
+## Decision
 
 ### Phase 0: library upgrade only
 
@@ -245,7 +245,7 @@ Separately, a real full disk makes the CLI daemon exit through an uncaught log-t
 - **Phase 2 was skipped.** #137 merged before Phase 2 started, and replica-bound persistence already awaits a real per-resource barrier before every cursor save. A separate Phase 2 would only have been rewritten.
 - **Wiring.** `createCliStreamsTransport` now takes the repo and the LoroDoc cursor store and passes `createRepoStreamsPersistence(repo, { documentRemoteCursorStore })`.
   - `CliSqliteRepoStore.remoteCursorStore` becomes `documentRemoteCursorStore`. LoroDoc rooms keep the `AliasedRemoteCursorStore` URL-alias fallback.
-  - Meta and Flock checkpoints are keyed by the exact URL, so a gateway flip costs those rooms one bootstrap.
+  - Meta and Flock checkpoints resolve recognized gateway aliases through `resolveStreamUrlAliases` in both native storage adapters (loro-repo 0.28.0); alias changes preserve replica-bound checkpoints.
 - **Coalescer removed.** The schedule-only `onPersist*` callbacks, `PersistCoalescer` and the `remote-*` persist reasons are gone.
 - **Measured barrier cost on SQLite** (WAL, `synchronous=NORMAL`, real disk, 5k meta docs, a 65 KB session doc, 300 remote batches; rows verified written):
 
@@ -264,11 +264,14 @@ Separately, a real full disk makes the CLI daemon exit through an uncaught log-t
   - with the shared-cursor two-argument factory, the stale replica ends without A;
   - with a schedule-only barrier, the sync reports success while the write failed;
   - with ephemeral cursors, every restart bootstraps.
-- **Review fix (P1): LoroDoc cursors are daemon-only when shared.** loro-repo does not bind LoroDoc cursors to the doc bytes, so a one-shot command that opened a doc before the daemon advanced it would resume from the daemon's shared `remote_cursors` row and keep missing the daemon's data.
-  - `LoroDocumentManager.create` now takes `documentCursorScope`. Only the daemon (`lib/lody.ts`) passes `shared-durable`; the default `process` keeps LoroDoc progress in memory, so one-shot commands bootstrap each doc they open once and never write shared cursors.
-  - The shared cursors therefore only ever describe the daemon's own replica. Data written by one-shot commands can run ahead of them, which only replays.
-  - Regression: a two-process `syncDoc` test (one-shot hydrates an empty doc, the daemon bootstraps A and advances the shared cursor, then the one-shot syncs and must receive A through a second bootstrap). With shared LoroDoc cursors the one-shot ends empty. The manager-create test asserts one-shot callers get an in-memory store by default.
-  - A LoroDoc replica-bound checkpoint upstream would remove the per-command bootstrap; it is not required for correctness.
+- **LoroDoc cursors retain daemon-only writes and causally checked command reads.** [Implementation](https://github.com/LodyAI/Lody/pull/3103). LoroDoc bytes and `remote_cursors` are separate. Reading a shared cursor without checking the command's actual replica can permanently skip updates received by the daemon after that command loaded its document.
+  - Only the daemon (`lib/lody.ts`) passes `documentCursorScope: 'shared-durable'`. The default `process` store is created before Repo loading. loro-repo 0.28.0's `createProcessDocumentCursorStore` captures each cursor in the same synchronous IMMEDIATE transaction as `loadDoc`; a daemon advance afterwards cannot change the captured seed. Older Lody databases lack `docCursorIndex` associations, so a read-only URL lookup on the pinned SDK connection supplies this workspace/document/bucket's existing stream URLs inside that transaction. It never reads the cursor payload separately or repairs shared rows. The outer store still checks that the exact synchronized document's applied `version()` covers every peer clock of a nonempty `serverLowerBoundVersion` and has no pending updates. Invalid or future clocks require bootstrap. The `persistDocNow` barrier remains required for daemon writes.
+  - Process saves and tombstone deletions stay in memory; neither changes the shared table. A cursor read racing with a local save/delete cannot overwrite newer local state. Replica replacement invalidates local progress rather than carrying it to a different document instance.
+  - Rejected: sharing the daemon's store directly, or validating a newly opened disk snapshot instead of the synchronized in-memory instance. Both can resume an older replica past data it lacks.
+  - One-shot `withWorkspaceManager` disables cloud presence, machine-monitor and prompt-suggestion sinks, including the repo transport's ephemeral capability. Local state and durable sync remain available; daemons retain those sinks. Token ownership, serialized attach/detach, rollback and independent cleanup remain unchanged. No new gate, retry owner or Effect migration is needed for this configuration and storage-adapter fix.
+  - Node CLI fetch adds only `lody-cli/<version> (daemon|oneshot)` as User-Agent; `start` is the execution host and other CLI commands are one-shot. This covers SDK global fetch and the native-transport fallback without browser/mobile changes or user identifiers.
+  - `tests/cli-streams-replica-checkpoints.test.ts` exercises real SQLite and Streams with deterministic responses: covered large-document resume, multi-peer stale-replica recovery, process-only saves/deletes and ephemeral opt-out. HTTP transport tests cover mode attribution and authorization preservation. These are local contract tests, not measured production egress savings.
+- **Persistent incomplete recovery.** streams-crdt 0.23.0 receives a separate `IncompleteRecoveryStore`: daemon-owned atomic JSON files in the workspace storage directory, and a namespaced IndexedDB in the renderer. Known URL aliases share a key. Commands read disk metadata but keep mutations in memory; this avoids new SQLite writers and never changes shared cursors. Records contain only stream identity, tail/snapshot offsets, attempts and time. They are advisory negative facts, never CRDT state or authorization. Failed persistence falls back to ordinary recovery; IndexedDB waits are bounded and late connections close. SDK HEAD checks suppress unchanged-tail bootstrap across restarts, while tail progress and writers with missing data bypass that suppression. The existing owner still governs live subscriptions, and SDK read compaction remains enabled. The renderer Streams suite covers these restart paths with real Loro objects and fake IndexedDB; production egress savings and power-loss durability are not established.
 - **0.21.0 writes through `saveMany`.** The SQLite and IndexedDB adapters now expose the optional atomic `saveMany`, and loro-repo prefers it over `save` for metadata and named Flock payloads. The crash test therefore injects the disk-full failure into both entry points and asserts that `saveMany` exists. A wrapper that lists adapter methods explicitly (such as #1060's write observer) must forward `saveMany`: omitting it stays correct but silently falls back to one commit per payload, undoing #141.
 - **Limit.** The first open after this upgrade writes the checkpoint table and triggers. If the disk is already full at that moment, the workspace fails to open (loro-dev/loro-repo#139).
 
@@ -306,7 +309,7 @@ The proposal above is kept as written. This section records what shipped, and it
 - **Open follow-ups.**
   - Opening the database for the first time after the upgrade still fails if the disk is full (loro-dev/loro-repo#139).
   - Storage-adapter wrappers must forward `saveMany`. #1060's write observer is being updated; omitting it stays correct but falls back to one commit per payload.
-  - A replica-bound LoroDoc checkpoint upstream would remove the per-command LoroDoc bootstrap. It is not needed for correctness.
+  - Upstream replica-bound LoroDoc checkpoints could bind data and progress atomically. Covered process replicas already avoid bootstrap through causal seeding; uncovered replicas replay safely.
 - **Limits.**
   - fake-indexeddb and real Chromium prove transaction ordering, not durability across power loss.
   - The strict-flush cost was measured on 0.20.3 (see the table above). #141's batching has not been re-measured inside Lody.

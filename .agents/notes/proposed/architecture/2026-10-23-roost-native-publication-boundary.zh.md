@@ -27,7 +27,7 @@ flowchart LR
   C --> D[已提交结果：scope + cursor + changes]
   D --> E[推进 owner 有界窗口]
   C --> F[提交后唤醒]
-  F --> G[已有 owner watchChanges 通道]
+  F --> G[Owner 检查点订阅]
   G --> H[前端只读缓存]
 ```
 
@@ -54,7 +54,7 @@ RPC 页、正文和 head 必须来自同一次稳定观察。跨 generation 使�
 
 本轮之前，Rust 核心已有提交后合并通知，但 Native 尚未暴露非阻塞订阅。其普通 Worker 请求通道是串行的；若把 Native 长等待塞进该通道，会堵住本来应唤醒它的写入。本方案明确排除这种实现。
 
-在普通请求执行之外暴露有 owner、容量有界的 Native 唤醒通道。先注册，再读初始 head，之后按 checkpoint 追持久日志。信号可合并，日志覆盖不能丢；共享 Native owner 的本地与远端同步提交均要唤醒。消费者复用 Machine RPC/Electron watchChanges，不新增每会话网络连接。取消订阅者只释放其 waiter，不终止共享 writer。
+在普通请求执行之外暴露有 owner、容量有界的 Native 唤醒通道。先注册，再读初始 head，之后按 checkpoint 追持久日志。信号可合并，日志覆盖不能丢；共享 Native owner 的本地与远端同步提交均要唤醒。消费者通过 Machine RPC 和本机 Electron 的订阅接收检查点。取消订阅者只释放其 waiter，不终止共享 writer。
 
 触发来自活跃历史观察者；归属为现有池化 Native client，每会话持有租约。取消要注销或等待释放订阅，不把已派发写入标成取消。重连接手从持久凭据续读。失败沿用有界诊断和可重试读取，保留可读缓存；通知失败不能把已提交写入报告成已回滚。关闭时停止接纳、释放订阅并沿用有界终结策略。不增加永久 Workspace gate、无主后台重试或 Effect 依赖升级。
 

@@ -61,11 +61,7 @@ const HISTORY_ROOT_KEY = 'history';
 export type LoroSessionDataOptions = {
   sessionId: SessionId;
   doc: LoroDoc;
-  /**
-   * The already-owned shared writer for this doc. The session entrypoint passes
-   * the Mirror's `historyWriter` so exactly one writer instance owns local
-   * history writes; omit it only in tests that build a standalone adapter.
-   */
+  /** Reuse the composition's single HistoryWriter; omit only for standalone adapters. */
   writer?: HistoryWriter;
   /**
    * Control-plane cursor access for the composed history import: the adapter
@@ -130,8 +126,7 @@ const readLength = (value: unknown): number => {
   return isContainer(value) && value.kind() === 'List' ? (value as LoroList).length : 0;
 };
 
-/** Convert a map except its explicitly projected children, without a recursive
- * toJSON crossing those children. Plain legacy JSON has already been decoded. */
+/** Project selected children without recursively decoding their bodies. */
 const projectMap = (
   value: unknown,
   projections: Record<string, (field: unknown) => unknown>
@@ -170,8 +165,7 @@ const displayTextTail = (value: unknown): string | undefined =>
         )
       : undefined;
 
-/** The inline task row only needs a latest-action line. Never read tool content,
- * raw output or an entire child text just to derive that line. */
+/** Read only the latest-action preview, never the child transcript or tool content. */
 const latestRunStep = (items: unknown): SubagentRunItem[] => {
   for (let index = readLength(items) - 1; index >= 0; index--) {
     const item = listValueAt(items, index);
@@ -199,7 +193,10 @@ const latestRunStep = (items: unknown): SubagentRunItem[] => {
   return [];
 };
 
-const displayTurn = (value: unknown): SessionTurn | undefined => {
+const displayTurn = (
+  value: unknown,
+  readItems: (items: unknown) => unknown[]
+): SessionTurn | undefined => {
   if (
     !value ||
     typeof value !== 'object' ||
@@ -207,17 +204,7 @@ const displayTurn = (value: unknown): SessionTurn | undefined => {
     (isContainer(value) && value.kind() !== 'Map')
   )
     return undefined;
-  const turn = projectMap(value, {
-    items: (items) =>
-      Array.from({ length: readLength(items) }, (_, index) => {
-        const item = listValueAt(items, index);
-        if (readString(readField(item, 'type')) !== 'subagent_task')
-          return isContainer(item) ? item.toJSON() : item;
-        return projectMap(item, {
-          run: (run) => (run == null ? run : projectMap(run, { items: latestRunStep })),
-        });
-      }),
-  });
+  const turn = projectMap(value, { items: readItems });
   return turn as unknown as SessionTurn;
 };
 
@@ -225,6 +212,55 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
   const { sessionId, doc } = options;
   const writer = options.writer ?? createHistoryWriter(doc);
   const list = doc.getList(HISTORY_ROOT_KEY);
+  // Weak, bounded projections reuse unchanged output without retaining evicted bodies.
+  const displayItems = new Map<string, WeakRef<object>>();
+  const displayLists = new Map<
+    string,
+    { value: WeakRef<unknown[]>; dirty: Set<number>; appended: number }
+  >();
+  const clearDisplayCache = () => {
+    displayItems.clear();
+    displayLists.clear();
+  };
+  let displayOpCount = doc.opCount();
+  const readDisplayItem = (item: unknown): unknown => {
+    if (readString(readField(item, 'type')) === 'subagent_task')
+      return projectMap(item, {
+        run: (run) => (run == null ? run : projectMap(run, { items: latestRunStep })),
+      });
+    if (!isContainer(item)) return item;
+    const cached = displayItems.get(item.id)?.deref();
+    if (cached) return cached;
+    const value: unknown = item.toJSON();
+    if (value !== null && typeof value === 'object') {
+      if (displayItems.has(item.id) || displayItems.size < 2048)
+        displayItems.set(item.id, new WeakRef(value));
+    }
+    return value;
+  };
+  const readDisplayItems = (items: unknown): unknown[] => {
+    const key = isContainer(items) && items.kind() === 'List' ? items.id : undefined;
+    const entry = key === undefined ? undefined : displayLists.get(key);
+    const previous = entry?.value.deref();
+    if (previous && entry && previous.length + entry.appended === readLength(items)) {
+      if (entry.dirty.size === 0 && entry.appended === 0) return previous;
+      const next = previous.slice();
+      for (const index of entry.dirty) next[index] = readDisplayItem(listValueAt(items, index));
+      entry.dirty.clear();
+      entry.appended = 0;
+      entry.value = new WeakRef(next);
+      return next;
+    }
+    const next = Array.from({ length: readLength(items) }, (_, index) =>
+      readDisplayItem(listValueAt(items, index))
+    );
+    if (key !== undefined) {
+      if (!displayLists.has(key) && displayLists.size >= 64)
+        displayLists.delete(displayLists.keys().next().value!);
+      displayLists.set(key, { value: new WeakRef(next), dirty: new Set(), appended: 0 });
+    }
+    return next;
+  };
 
   const issuesOf = (error: HistoryWriteError) => error.issues;
   /**
@@ -449,6 +485,69 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
   let indexedLength = -1;
   let indexedOpCount = -1;
   const unsubscribeIdentity = doc.subscribe((batch) => {
+    for (const event of batch.events) {
+      if (event.path[0] !== HISTORY_ROOT_KEY) continue;
+      // Container identity survives moves; positional child paths may not.
+      let changed = doc.getContainerById(event.target);
+      while (changed) {
+        displayItems.delete(changed.id);
+        changed = changed.parent();
+      }
+      if (event.path.length === 3 && event.path[2] === 'items' && event.diff.type === 'list') {
+        const cached = displayLists.get(event.target);
+        const previous = cached?.value.deref();
+        if (!cached || !previous) {
+          displayLists.delete(event.target);
+          continue;
+        }
+        const oldLength = previous.length + cached.appended;
+        let cursor = 0;
+        let appended = 0;
+        let appendOnly = true;
+        for (const delta of event.diff.diff) {
+          if (delta.retain !== undefined) cursor += delta.retain;
+          else if (delta.delete !== undefined) appendOnly = false;
+          else if (delta.insert !== undefined) {
+            if (cursor !== oldLength + appended) appendOnly = false;
+            appended += delta.insert.length;
+            cursor += delta.insert.length;
+          }
+        }
+        if (!appendOnly || cached.dirty.size + appended > 256) displayLists.delete(event.target);
+        else {
+          cached.appended += appended;
+          for (let i = oldLength; i < oldLength + appended; i++) cached.dirty.add(i);
+        }
+        continue;
+      }
+      if (event.path.length < 4) {
+        if (
+          event.path.length < 2 ||
+          event.path[2] === 'items' ||
+          (event.path.length === 2 &&
+            event.diff.type === 'map' &&
+            Object.hasOwn(event.diff.updated, 'items'))
+        )
+          displayLists.clear();
+        continue;
+      }
+      if (event.path[2] !== 'items') continue;
+      const turnPosition = event.path[1];
+      const itemPosition = event.path[3];
+      if (typeof turnPosition !== 'number' || typeof itemPosition !== 'number') {
+        displayLists.clear();
+        continue;
+      }
+      const items = readField(list.get(turnPosition), 'items');
+      if (isContainer(items)) {
+        const cached = displayLists.get(items.id);
+        if (cached) {
+          if (cached.dirty.size >= 256) displayLists.delete(items.id);
+          else cached.dirty.add(itemPosition);
+        }
+      }
+    }
+    displayOpCount = doc.opCount();
     if (
       batch.events.some(
         (event) =>
@@ -458,9 +557,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       identityDirty = true;
   });
   const ensureIdentityIndex = () => {
-    // Pending writes are readable before subscription delivery. Reuse the scan
-    // until another op arrives; merely having a pending transaction is not a change.
-    // opCount includes pending ops and does not restart at commit, unlike pending length.
+    // opCount includes pending writes without restarting at commit; reuse until it changes.
     if (!identityDirty && indexedLength === list.length) {
       if (doc.getPendingTxnLength() === 0 || indexedOpCount === doc.opCount()) return;
     }
@@ -521,10 +618,16 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       return position === undefined ? { state: 'missing' } : readSlot(list, position);
     },
     readTurnForDisplay(turnId: string): SessionTurnRead {
+      // Pending writes must invalidate without committing the caller's transaction.
+      const opCount = doc.opCount();
+      if (opCount !== displayOpCount) {
+        clearDisplayCache();
+        displayOpCount = opCount;
+      }
       ensureIdentityIndex();
       const position = positions.get(turnId);
       if (position === undefined) return { state: 'missing' };
-      const turn = displayTurn(list.get(position));
+      const turn = displayTurn(list.get(position), readDisplayItems);
       return turn ? { state: 'ready', turn } : { state: 'invalid' };
     },
     readSubagentRun(
@@ -560,13 +663,11 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       return directory(from, to);
     },
     readAll() {
-      // One detached synchronous read of the stored list: a single consistent
-      // snapshot, never a stitched count + paginated read.
+      // One consistent detached read, never stitched pages.
       return writer.readStored();
     },
     observe(listener: import('./types').SessionDataChangeListener) {
-      // Subscribe first, then snapshot in the same synchronous block: a change
-      // can neither be missed between the two nor delivered before `initial`.
+      // Subscribe and snapshot synchronously, leaving no observation gap.
       const unsubscribeDoc = doc.subscribe((batch) => {
         const scope = changeScopeOf(batch);
         // A batch that does not touch `history` (e.g. a control root) is not a
@@ -750,6 +851,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
 
   const dispose = () => {
     unsubscribeIdentity();
+    clearDisplayCache();
     positions.clear();
     identityDirty = true;
   };

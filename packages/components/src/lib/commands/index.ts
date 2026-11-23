@@ -17,6 +17,7 @@ export {
   COMMAND_SHORTCUTS,
   GLOBAL_SHORTCUTS,
   UNINTERCEPTABLE_WEB_KEYS,
+  composerScopedKeybindings,
   getCommandKeybindings,
   keybindingAppliesToEnvironment,
 } from './shortcuts';

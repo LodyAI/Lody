@@ -1,15 +1,25 @@
 # Product surfaces (`src/components`)
 
-Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
+Parent/child scopes apply. `CLAUDE.md` symlinks here; edit `AGENTS.md` only.
+
+## Styling
+
+- StyleX, not Tailwind; tokens/rules: `../../style/` and its `MIGRATION.md`.
 
 ## Sidebar and session rows
+
+- Sidebar top-level groups (machines, GitHub Worktrees, Chats) all use
+  `SIDEBAR_GROUP_LABEL_CLASS`, with no leading icon or sticky positioning; labels scroll
+  with their rows. Project, repo and conversation rows
+  are 1em. A machine is identified by its Offline pill and hover card
+  (`sidebar-machine-card.tsx`); never show "offline" while its status is unknown.
 
 - Sidebar rows represent Sessions, never Tasks.
 - Desktop project grouping applies `selectVisibleLocalProjectSections`; its
   "Hide Empty Projects" switch is documented in the [README](README.md).
 - Desktop Workspace, Local Project, Updated and Pinned rows support mention drag
-  and Mark as unread (hide on unread). Use `lib/session-mention-drag.ts` for
-  conversation/landing drops; parent tabs and unpinned rows use HTML5 drag; child
+  and Mark as unread (hidden when unread). Use `lib/session-mention-drag.ts` for
+  conversation/landing drops; parent tabs and unpinned rows use HTML5 drag, child
   tabs and Pinned rows use dnd-kit via `dropSessionMentionAtPoint`.
   `startSessionMentionDrag` / `armSessionMentionDrag` must light
   `ConversationDropOverlay` before `dragenter`. Navigation overlays use
@@ -20,18 +30,18 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   on reselection. Browser `/chat` links retain native modified-click, middle-click and
   context-menu actions without switching the source page. Electron Cmd-click
   (Ctrl-click on Windows/Linux) and context menus open native workspace windows.
-- Full-width sidebar stays mounted/inert with scroll; Cmd+B animates content width
-  (zero for reduced motion); pause hidden eager-sync/keyboard-nav. Compact/settings
+- Full-width sidebar stays mounted/inert with scroll. Cmd+B animates content width
+  (zero under reduced motion); hidden eager-sync/keyboard-nav pauses. Compact/settings
   remounts restore scroll. Compact nav is modal: inert content, restore focus,
   nested Escape first. [Spec](../../../../specs/desktop-windows.md). It opens only once
   the synced compact state agrees; a close that never finishes is unmounted.
 - Every list uses `lib/session-opened-by-tree.ts`; keyboard navigation uses
   `sidebar-navigation-model.ts`.
-- `openedBySessionId` is the precise opener; `openedByRowSessionId` is its row.
-  `buildSidebarOpenerRowResolver` in `sessions/session-list-rows.ts` walks
-  `parentSessionId` to root using sidebar `allActiveSessions`, not visible rows.
-  Preserve the precise opener and independent child workspace. `parentSessionId`
-  children stay out of `sessionListAtom` rows.
+- `openedBySessionId` is the precise opener; `openedByRowSessionId` its row.
+  `buildSidebarOpenerRowResolver` walks `parentSessionId` to root using sidebar
+  `allActiveSessions`, not visible rows. Preserve opener and child workspace;
+  parent children stay out of `sessionListAtom`. Read
+  [session provenance rules](sessions/AGENTS.md#opener-provenance) before changing ownership.
 - Opener and unrelated top-level rows retain flat-list alignment. In the leading slot,
   an opener shows disclosure, a child ├/└, nothing else — the ⋯ menu reveals in the
   end slot before Archive, in reserved columns with no fill of its own.
@@ -41,7 +51,7 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 - Conversation titles stay `font-normal`; pin with the glyph, never weight.
 - Sidebar row radius, inset, ink, hover/selected fill and title clipping use
   `sidebar-surface.ts` / `sidebar.tokens.stylex.ts` on conversation, repo and nav rows.
-  Tailwind wins same-property conflicts; keep it only for groups, menu-open and focus states.
+  Compose overrides in the owner; native group/data hooks drive menu-open and focus states.
 - Desktop work/wait/unread/send status belongs only in `SessionRowStatusIndicator`
   inside `SidebarRowEndSlot`, never the leading slot; it replaces resting `Mergeable`,
   worktree, PR icon or mobile time with one 14px mark. +/- totals: hover card only.
@@ -52,7 +62,7 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   `placeWorkspaceSessionsWithOpeners` first moves a Session whose opener renders in
   another group into that group. Before splitting desktop sections, pinned openers bring
   their visible opened-by descendants into Pinned without changing descendant pin flags. `MAX_VISIBLE_SESSIONS` /
-  `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
+  `UPDATED_BUCKET_PREVIEW_MAX` count top-level rows. Every list passes `rootRank` for
   latest-activity sorting; rank an opener by its freshest opened Session.
 - Collapse state uses `sidebarCollapsedOpenedBySessionsAtom`, default expanded. Keep
   both navigation directions reachable through the tree, every sidebar row's "Go to
@@ -105,15 +115,13 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 ## Local projects
 
-- Project rows follow visibility, not machine ownership: a teammate's shared project
-  navigates and offers New chat; only removal is owner-only.
-- Adding a folder is a workspace action, not a this-machine action: the picker chooses
-  the machine, so every entry point says "Add folder", not "Add a local project".
-  Settings > Projects pills EVERY machine the user may add to, even ones with none
-  yet, and passes it as `initialMachineId`. The addable set comes from
-  `useAddLocalProjectMachines`; the ownership rule (`canAddProjects`) has one home and
-  must not be re-derived per surface. Onboarding is the deliberate exception: its
-  desktop native picker really is this-machine only.
+- Project rows follow visibility: shared projects navigate and offer New chat;
+  only removal is owner-only.
+- Adding folders is workspace-scoped: say "Add folder"; the picker chooses the
+  machine. Settings > Projects lists every addable machine, including empty ones,
+  and passes `initialMachineId`. `useAddLocalProjectMachines` owns the addable set
+  and `canAddProjects`; do not rederive them per surface. Onboarding alone uses
+  the this-machine desktop picker.
 - Local directory registration and standalone display are independent. Missing
   `standaloneVisible` means visible. Standalone lists filter hidden registrations;
   member resolution, repository-copy selection and session access retain them.
@@ -132,13 +140,5 @@ ErrorBoundary uploads one fixed-vocabulary exception per failure episode, includ
 
 ## Automation markers
 
-- Key workspace, machine, invitation, membership and composer controls expose
-  stable `data-testid` values independent of translated labels. Repeated rows keep
-  the existing full identity attribute (`data-settings-machine-id`,
-  `data-machine-id`, `data-membership-id`, `data-request-id`, `data-device-key`,
-  `data-agent-config-id`).
-  These are public identifiers, never invitation tokens, credentials or key bytes.
-- `workspace-ready` exists only while the sidebar's scoped workspace data is ready;
-  it is not execution permission. Tests must still bind the workspace and observe
-  the required content or control surface. Preserve existing semantic/identity
-  attributes so older harnesses continue to work.
+Before changing workspace readiness or control identity markers, read
+[sessions/automation/AGENTS.md](sessions/automation/AGENTS.md#control-and-readiness-markers).

@@ -164,15 +164,20 @@ export abstract class EphemeralRoomTransport<
     this.setSyncState('connecting');
     this.onRoomStarted(store);
 
-    void transport
-      .join({
-        onStatusChange: (status) => {
-          if (generation !== this.generation) return;
-          this.setSyncState(EPHEMERAL_STATUS_TO_SYNC_STATE[status] ?? 'connecting');
-          if (status === 'joined') this.onJoined(store);
-        },
+    void Promise.resolve()
+      .then(async () => {
+        await args.auth({ reason: 'request' });
+        if (generation !== this.generation) return undefined;
+        return transport.join({
+          onStatusChange: (status) => {
+            if (generation !== this.generation) return;
+            this.setSyncState(EPHEMERAL_STATUS_TO_SYNC_STATE[status] ?? 'connecting');
+            if (status === 'joined') this.onJoined(store);
+          },
+        });
       })
       .then((result) => {
+        if (!result) return;
         if (generation !== this.generation) {
           if (result.ok) result.value.unsubscribe();
           return;

@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { allActiveSessionsAtom } from '@/atoms/doc-meta';
 import { iosLiveActivitiesEnabledAtom, userAtom } from '@/atoms';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
@@ -184,6 +185,7 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
   const { t, i18n } = useTranslation();
   const now = useStableNow(LIVE_ACTIVITY_RECHECK_INTERVAL_MS);
   const userId = user?.id ?? null;
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const liveActivitiesEnabled = useAtomValue(iosLiveActivitiesEnabledAtom);
   const nativeIOSAppShell = isNativeIOSAppShell();
 
@@ -206,7 +208,13 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
   // away in the sync effect. Gate the computation itself instead. The two
   // conditions are not equivalent: the atom defaults to `true`, so without the
   // shell check every desktop build rebuilds the summary it can never show.
-  const enabled = activityTarget !== null && nativeIOSAppShell && liveActivitiesEnabled;
+  const enabled =
+    activityTarget !== null &&
+    nativeIOSAppShell &&
+    liveActivitiesEnabled &&
+    runtime !== null &&
+    runtime.workspaceId === activityTarget.workspaceId &&
+    runtime.contentMode === 'plaintext';
 
   /**
    * One pass over the presence snapshot instead of one `findFreshSessionPresenceState`
@@ -333,14 +341,14 @@ export function useLodyLiveActivity({ workspaceName }: { workspaceName: string }
   const activityId = activityTarget?.activityId;
 
   useEffect(() => {
-    if (!nativeIOSAppShell || liveActivitiesEnabled || !activityId) return undefined;
+    if (!nativeIOSAppShell || enabled || !activityId) return undefined;
     getLiveActivityBridge()
       ?.endConversationSummary({ activityId })
       .catch((error: unknown) => {
         console.error('Failed to end disabled Lody Live Activity', error);
       });
     return undefined;
-  }, [activityId, liveActivitiesEnabled, nativeIOSAppShell]);
+  }, [activityId, enabled, nativeIOSAppShell]);
 
   useEffect(() => {
     if (!nativeIOSAppShell || !activityId) return undefined;

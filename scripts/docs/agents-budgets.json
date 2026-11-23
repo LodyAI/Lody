@@ -8,7 +8,7 @@
     "packages/components/src/providers/AGENTS.md": 1250,
     "packages/ui/AGENTS.md": 1380,
     "apps/mobile/ios/packages/LodyKit/Sources/LodyKit/Sessions/AGENTS.md": 1400,
-    "apps/cli/src/session/AGENTS.md": 1340,
+    "apps/cli/src/session/AGENTS.md": 1380,
     "apps/cli/src/mcp/AGENTS.md": 1320,
     "apps/cli/src/commands/AGENTS.md": 1280,
     "packages/components/src/hooks/AGENTS.md": 1280,
@@ -18,6 +18,8 @@
     "packages/components/src/lib/AGENTS.md": 1240,
     "packages/components/src/components/AGENTS.md": 1220,
     "packages/components/AGENTS.md": 1260,
-    "apps/cli/AGENTS.md": 1300
+    "packages/shared/AGENTS.md": 1260,
+    "apps/cli/AGENTS.md": 1300,
+    "apps/cli/src/lib/loro/AGENTS.md": 1280
   }
 }

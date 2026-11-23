@@ -24,7 +24,7 @@ Translation: current
 ### 入口与交互
 
 - 侧栏右键菜单与对话页顶部「…」菜单（对有写权限且未归档的会话）均提供：
-  - **稍后（Later）** 子菜单：快捷预设（1 小时后、今天稍后 +3h、明天上午 9:00、下周一 9:00、自定义时间）；已延后时提供 **移回进行中（Move to Focus）**。
+  - **稍后（Later）** 子菜单：快捷预设（1 小时后、3 小时后、明天上午 9:00、下周一 9:00、自定义时间）；已延后时提供 **移回进行中（Move to Focus）**。
   - **标记为已完成（Settle）**（处于进行中或稍后时）或 **移回进行中（Move to Focus）**（处于已完成时）。
 - 桌面端「进行中」与「稍后」的行在 hover 槽位提供一键 **标记为已完成**（取代其它视图在该位置的归档按钮）；「已完成」的行在该位置保持归档。「稍后」行的唤醒倒计时位于行最右侧，使用中性配色。
 - 暂缓、标记为已完成或移回进行中时，若对话存在活跃 opened-by 子对话，会先询问是否对子对话执行相同操作——仅作用于当前对话，或整棵 opened-session 树。包含的 Tab 跟随其拥有者所在分区，不会被单独写入，与归档确认展示的子对话统计一致。将行拖入「进行中」时其 opened-by 子对话默认一并恢复、不再询问；仅被拖拽的行写入 `orderKey`。
@@ -80,6 +80,9 @@ Translation: current
 已执行的验证：测试样例（13 个布局用例、38 个命令用例）在 `packages/shared/tests/status-view.test.ts`
 里运行，也在 `packages/components` 的桌面和手机适配层、iOS 和 Android 的 runtime 测试里运行；Storybook
 端到端测试 `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`（5 个用例）；手机
-WebView 在 iOS 模拟器和 Android 模拟器上的 Storybook；原生列表在模拟器上用离线测试数据。没有验证：
-真机、原生客户端登录后的云端工作区、桌面应用写入真实副本、真实的加密 Guest 会话和托管网关接受加密写入、
-设备上的 VoiceOver、Capacitor 打包后的 App。详见[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md#验证)。
+WebView 在 iOS 模拟器和 Android 模拟器上的 Storybook，以及在 Chromium 里用真实触摸输入操作；原生列表
+用离线测试数据，在 iOS 26.5 和 27.0 模拟器以及 Pixel 8 / Android 16 模拟器上验证。没有验证：真机、
+iOS 16.4–17.3 运行环境、原生客户端登录后的云端工作区、Android 对 staging 的 `/api/time` 读取、桌面应用
+写入真实副本、真实的加密 Guest 会话和托管网关接受加密写入、设备上的 VoiceOver、Capacitor 打包后的 App。
+已知缺口：在 iOS 和 Android 上，队友本地项目里的对话不提供状态操作，因为原生 runtime 读不到项目是否
+共享；桌面在项目共享时提供。详见[手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md#验证)。

@@ -27,6 +27,7 @@ import {
   resolveSessionHistoryBackendKind,
   type SessionId,
   type SessionMeta,
+  type WorkspaceId,
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { childSessionsAtomFamily, sessionMetaAtomFamily } from '@/atoms/doc-meta';
@@ -129,6 +130,8 @@ const attachments = {
 /** Existing document/attachment readers only; no composer, machine catalogs or RPC hooks. */
 export function SessionHistoryView({
   sessionId,
+  workspaceId,
+  showSenderIdentity = false,
   title,
   history,
   ready,
@@ -147,6 +150,8 @@ export function SessionHistoryView({
   sharing,
 }: {
   sessionId: SessionId;
+  workspaceId?: WorkspaceId | null;
+  showSenderIdentity?: boolean;
   title: string;
   history: ComponentProps<typeof SessionChatStream>['view'];
   ready: boolean;
@@ -252,6 +257,8 @@ export function SessionHistoryView({
           <SessionChatStream
             key={sessionId}
             sessionId={sessionId}
+            workspaceId={workspaceId}
+            showSenderIdentity={showSenderIdentity}
             view={history}
             className={stylex.props(styles.stream).className}
             emptyState={
@@ -294,8 +301,19 @@ export function SessionHistoryReader({
   const { t } = useTranslation();
   const store = useStore();
   const sessionAccess = useSessionAccess();
-  const { members, isLoading: membersLoading, error: membersError, retry: retryMembers } = useWorkspaceMembers();
-  const sharingResolver = useSessionSharing({ members, membersLoading, membersError, retryMembers });
+  const {
+    members,
+    isMultiMember,
+    isLoading: membersLoading,
+    error: membersError,
+    retry: retryMembers,
+  } = useWorkspaceMembers();
+  const sharingResolver = useSessionSharing({
+    members,
+    membersLoading,
+    membersError,
+    retryMembers,
+  });
   const accountId = useWorkspaceLocalAccountId();
   const router = useRouter();
   const fullscreen = useElectronFullscreen();
@@ -453,6 +471,8 @@ export function SessionHistoryReader({
     <>
       <SessionHistoryView
         sessionId={sessionId}
+        workspaceId={runtime?.workspaceId}
+        showSenderIdentity={isMultiMember}
         sharing={sharing}
         pinned={rootMeta?.isPinned ?? false}
         machineName={sharing.machineName ?? undefined}

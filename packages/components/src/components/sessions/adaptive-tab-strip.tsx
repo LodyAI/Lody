@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {
   createContext,
   forwardRef,
@@ -12,9 +13,35 @@ import {
   type ReactNode,
 } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 
 export const ACTIVE_TAB_MIN_WIDTH = 180;
+
+const styles = stylex.create({
+  viewport: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    flex: 1,
+    overflow: 'hidden',
+  },
+  container: { containerType: 'inline-size' },
+  strip: { display: 'flex', width: '100%', alignItems: 'center' },
+  item: { minWidth: 'calc(var(--spacing) * 0)', overflow: 'hidden' },
+  // Pin only when the container can afford the active tab without starving its neighbours.
+  activeMinimum: {
+    minWidth: {
+      default: null,
+      '@container (min-width: 366px)': 'var(--tab-active-min-width)',
+    },
+  },
+  frozenTransition: {
+    transitionProperty: {
+      default: 'width,margin-inline-start',
+      '@media (prefers-reduced-motion: reduce)': 'none',
+    },
+    transitionDuration: '200ms',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+  },
+});
 
 export type AdaptiveTabStripItemLayout = {
   id: string;
@@ -137,18 +164,6 @@ export function allocateAdaptiveTabStripLayout({
    from zero width to its allocated width. */
 const CLOSE_MODE_EXIT_SLOP_BOTTOM = 40;
 const CLOSE_MODE_EXIT_SLOP_TRAILING = 60;
-
-/**
- * The active tab keeps `ACTIVE_TAB_MIN_WIDTH` only while the strip can afford
- * it; below this container width the pin is suppressed and the tabs divide
- * evenly, which is what keeps a single `min-width` from overflowing a narrow
- * strip. The value is a little over `2 × ACTIVE_TAB_MIN_WIDTH` — the width at
- * which pinning stops starving the inactive tabs — and is validated across the
- * width and tab-count range rather than derived, because Tailwind needs the
- * complete class literal in the source. The pinned length itself arrives
- * through the item's custom property.
- */
-const ACTIVE_MIN_WIDTH_CLASS = '@[366px]:min-w-(--tab-active-min-width)';
 
 const EMPTY_MARGIN_MAP: ReadonlyMap<string, number> = new Map();
 
@@ -281,6 +296,8 @@ export type AdaptiveTabStripProps = Omit<ComponentPropsWithoutRef<'div'>, 'child
   activeItemId: string | null;
   children: ReactNode;
   viewportClassName?: string;
+  xstyle?: stylex.StyleXStyles;
+  viewportXstyle?: stylex.StyleXStyles;
   gap?: number;
   paddingLeft?: number;
   paddingRight?: number;
@@ -292,6 +309,8 @@ export function AdaptiveTabStrip({
   activeItemId,
   children,
   viewportClassName,
+  xstyle,
+  viewportXstyle,
   gap = 6,
   paddingLeft = 8,
   paddingRight = 8,
@@ -585,14 +604,17 @@ export function AdaptiveTabStrip({
   // is plain flex: equal flexible children that the browser sizes in the same
   // style recalculation as the panel around them, so a sidebar toggle needs no
   // measurement loop and no per-frame width writes.
+  const viewportStyles = stylex.props(
+    styles.viewport,
+    itemIds.length > 1 && styles.container,
+    viewportXstyle
+  );
+  const stripStyles = stylex.props(styles.strip, xstyle);
   return (
     <div
       ref={viewportRef}
-      className={cn(
-        'min-w-0 flex-1 overflow-hidden',
-        itemIds.length > 1 && '@container',
-        viewportClassName
-      )}
+      className={clsx(viewportStyles.className, viewportClassName)}
+      style={viewportStyles.style}
       data-adaptive-tab-strip-viewport=""
       onPointerDown={() => {
         // Chromium only enters rapid-close mode for a pointer-triggered close:
@@ -613,9 +635,10 @@ export function AdaptiveTabStrip({
         <div
           {...props}
           ref={stripRef}
-          className={cn('flex w-full items-center', className)}
+          className={clsx(stripStyles.className, className)}
           style={
             {
+              ...stripStyles.style,
               ...style,
               boxSizing: 'border-box',
               paddingLeft: layout?.paddingLeft ?? paddingLeft,
@@ -633,10 +656,11 @@ export function AdaptiveTabStrip({
 
 export type AdaptiveTabStripItemProps = ComponentPropsWithoutRef<'div'> & {
   itemId: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 export const AdaptiveTabStripItem = forwardRef<HTMLDivElement, AdaptiveTabStripItemProps>(
-  function AdaptiveTabStripItem({ itemId, className, style, ...props }, ref) {
+  function AdaptiveTabStripItem({ itemId, className, xstyle, style, ...props }, ref) {
     const context = useContext(AdaptiveTabStripContext);
     if (!context) {
       throw new Error('AdaptiveTabStripItem must be rendered inside AdaptiveTabStrip');
@@ -658,9 +682,7 @@ export const AdaptiveTabStripItem = forwardRef<HTMLDivElement, AdaptiveTabStripI
           flex: '1 1 0',
           marginRight: context.fallbackMarginById.get(itemId) ?? 0,
           ...(isActive
-            ? // Tailwind cannot interpolate the container-query variant, so the
-              // pinned minimum is a static class and only the length travels
-              // through this custom property.
+            ? // The query is static; only the pinned length is dynamic.
               ({
                 ['--tab-active-min-width' as string]: `${context.activeMinWidth}px`,
               } as CSSProperties)
@@ -669,18 +691,18 @@ export const AdaptiveTabStripItem = forwardRef<HTMLDivElement, AdaptiveTabStripI
 
     // Only explicitly frozen geometry transitions. Initial mount, restored
     // tabs and container resizes use flex directly, without an opening tween.
+    const itemStyles = stylex.props(
+      styles.item,
+      itemLayout && styles.frozenTransition,
+      !itemLayout && isActive && styles.activeMinimum,
+      xstyle
+    );
     return (
       <div
         {...props}
         ref={ref}
-        className={cn(
-          'min-w-0 overflow-hidden',
-          itemLayout &&
-            'transition-[width,margin-inline-start] duration-200 motion-reduce:transition-none',
-          !itemLayout && isActive && ACTIVE_MIN_WIDTH_CLASS,
-          className
-        )}
-        style={{ ...style, ...layoutStyle }}
+        className={clsx(itemStyles.className, className)}
+        style={{ ...itemStyles.style, ...style, ...layoutStyle }}
         data-adaptive-tab-strip-item={itemId}
       />
     );

@@ -428,7 +428,7 @@ export function E2eeLostAccessEntry({
       <Dialog.Root open={open} onOpenChange={change}>
         <Dialog.Content
           width={520}
-          className="max-h-[90dvh] overflow-y-auto"
+          xstyle={themeStyles.glyph}
           data-e2ee-pairing-surface=""
         >
           <Dialog.Title>{t('e2ee.lostAccess.title')}</Dialog.Title>
@@ -454,3 +454,7 @@ export function E2eeLostAccessEntry({
     </>
   );
 }
+
+const themeStyles = stylex.create({
+  glyph: { maxHeight: '90dvh', overflowY: 'auto' },
+});

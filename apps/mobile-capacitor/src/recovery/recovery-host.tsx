@@ -15,15 +15,21 @@ import { useTranslation } from 'react-i18next';
 import { mobileRecoveryCopy } from './recovery-copy';
 
 /** Offers the console the shared recovery section over this login's port, only while
- * the native iOS config exists and the feature is on, exactly when account settings mounts
+ * the native recovery config exists and the feature is on, exactly when account settings mounts
  * its recovery controls. Otherwise no section is provided, so the console shows where
  * recovery can be set up instead of an empty tab. The vault engine loads on first use. */
 export function MobileRecoveryHostProvider({ children }: { children: ReactNode }) {
   const { t, i18n } = useTranslation();
   const [confirming, setConfirming] = useState(false);
-  const confirmation = useRef<((file: Uint8Array | null) => void) | undefined>(undefined);
+  const confirmation = useRef<
+    | {
+        resolve: (file: Uint8Array | null) => void;
+        reject: (error: unknown) => void;
+      }
+    | undefined
+  >(undefined);
   const cancelConfirmation = () => {
-    confirmation.current?.(null);
+    confirmation.current?.resolve(null);
     confirmation.current = undefined;
     setConfirming(false);
   };
@@ -55,15 +61,15 @@ export function MobileRecoveryHostProvider({ children }: { children: ReactNode }
       sessionId,
       currentSession: () => live.current,
       confirmSavedFile: () =>
-        new Promise((resolve) => {
-          confirmation.current = resolve;
+        new Promise((resolve, reject) => {
+          confirmation.current = { resolve, reject };
           setConfirming(true);
         }),
     });
     setHost({ key: `${accountId}:${sessionId}`, value: { port: owned.port } });
     return () => {
       owned.dispose();
-      confirmation.current?.(null);
+      confirmation.current?.resolve(null);
       confirmation.current = undefined;
       setConfirming(false);
     };
@@ -96,8 +102,8 @@ export function MobileRecoveryHostProvider({ children }: { children: ReactNode }
                 confirmation.current = undefined;
                 setConfirming(false);
                 void chooseRecoveryFile().then(
-                  (file) => answer?.(file),
-                  () => answer?.(null)
+                  (file) => answer?.resolve(file),
+                  (error: unknown) => answer?.reject(error)
                 );
               }}
             >

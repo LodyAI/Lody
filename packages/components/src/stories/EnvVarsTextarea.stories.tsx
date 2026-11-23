@@ -1,6 +1,77 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { EnvVarsTextarea } from '@/components/settings/env-vars-textarea';
+const sceneStyles = stylex.create({
+  stack: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 4)',
+    },
+  },
+  compactStack: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2)',
+    },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-md)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  caption: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  caption2: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+  caption3: {
+    'margin-top': 'calc(var(--spacing) * 4)',
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--destructive) / 1)',
+  },
+  caption4: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--destructive) / 1)',
+  },
+  caption5: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  caption6: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    width: '400px',
+  },
+  frame2: {
+    width: '400px',
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 /**
  * EnvVarsTextarea component stories.
@@ -15,7 +86,7 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="w-[400px]">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),
@@ -65,15 +136,17 @@ export const Interactive: Story = {
     const [errors, setErrors] = useState<Array<{ line: number; message: string }>>([]);
 
     return (
-      <div className="space-y-4">
+      <div {...stylex.props(sceneStyles.stack)}>
         <EnvVarsTextarea value={env} onChange={setEnv} onError={setErrors} />
-        <div className="rounded-md border p-4">
-          <p className="mb-2 text-sm font-medium">Parsed Values:</p>
-          <pre className="text-xs">{JSON.stringify(env, null, 2)}</pre>
+        <div {...stylex.props(storyLayoutStyles.canvas)}>
+          <p {...stylex.props(storyLayoutStyles.caption)}>Parsed Values:</p>
+          <pre {...stylex.props(storyLayoutStyles.caption2)}>{JSON.stringify(env, null, 2)}</pre>
           {errors.length > 0 && (
             <>
-              <p className="mb-2 mt-4 text-sm font-medium text-destructive">Errors:</p>
-              <pre className="text-xs text-destructive">{JSON.stringify(errors, null, 2)}</pre>
+              <p {...stylex.props(storyLayoutStyles.caption3)}>Errors:</p>
+              <pre {...stylex.props(storyLayoutStyles.caption4)}>
+                {JSON.stringify(errors, null, 2)}
+              </pre>
             </>
           )}
         </div>
@@ -103,8 +176,8 @@ export const WithErrors: Story = {
   },
   decorators: [
     (Story) => (
-      <div className="w-[400px]">
-        <p className="mb-2 text-sm text-muted-foreground">
+      <div {...stylex.props(storyLayout.frame)}>
+        <p {...stylex.props(storyLayoutStyles.caption5)}>
           Try entering invalid lines like &quot;INVALID&quot; (no =) or &quot;123ABC=value&quot;
           (invalid key)
         </p>
@@ -181,7 +254,7 @@ export const DarkMode: Story = {
   },
   decorators: [
     (Story) => (
-      <div className="dark w-[400px] rounded-lg bg-background p-4">
+      <div className={clsx(stylex.props(storyLayout.frame2).className, 'dark')}>
         <Story />
       </div>
     ),
@@ -206,8 +279,8 @@ export const WithComments: Story = {
 
     // We can't directly set the text, so we'll show what happens when comments are used
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">
+      <div {...stylex.props(sceneStyles.compactStack)}>
+        <p {...stylex.props(storyLayoutStyles.caption6)}>
           Lines starting with # are treated as comments and ignored:
         </p>
         <EnvVarsTextarea value={env} onChange={setEnv} />

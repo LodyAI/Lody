@@ -132,6 +132,93 @@ describe('avatar cache', () => {
     // Painted from the persistent cache, not blocked on the failed fetch.
     expect(resolved).toMatch(/^blob:/);
   });
+
+  it('persists and restores avatars via IndexedDB on file:// ("null" origin) without CacheStorage', async () => {
+    const idbRecords = new Map<string, unknown>();
+    const fakeDb = {
+      objectStoreNames: { contains: () => true },
+      onversionchange: null as (() => void) | null,
+      close: vi.fn(),
+      transaction: (_name: string, _mode: string) => {
+        const tx = {
+          oncomplete: null as (() => void) | null,
+          onerror: null as (() => void) | null,
+          onabort: null as (() => void) | null,
+          objectStore: () => ({
+            get: (key: string) => {
+              const req = {
+                result: idbRecords.get(key),
+                onsuccess: null as (() => void) | null,
+                onerror: null,
+              };
+              queueMicrotask(() => req.onsuccess?.());
+              return req;
+            },
+            getAll: () => {
+              const req = {
+                result: [...idbRecords.values()],
+                onsuccess: null as (() => void) | null,
+                onerror: null,
+              };
+              queueMicrotask(() => req.onsuccess?.());
+              return req;
+            },
+            put: (record: { key: string }) => {
+              idbRecords.set(record.key, record);
+              queueMicrotask(() => tx.oncomplete?.());
+            },
+            delete: (key: string) => {
+              idbRecords.delete(key);
+            },
+          }),
+        };
+        return tx;
+      },
+    };
+    Object.defineProperty(globalThis, 'window', {
+      value: { location: { origin: 'null' } },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, 'indexedDB', {
+      value: {
+        open: () => {
+          const req = {
+            result: fakeDb,
+            onupgradeneeded: null,
+            onsuccess: null as (() => void) | null,
+            onerror: null,
+            onblocked: null,
+          };
+          queueMicrotask(() => req.onsuccess?.());
+          return req;
+        },
+        deleteDatabase: () => {
+          idbRecords.clear();
+        },
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      const avatarUrl = 'https://lh3.googleusercontent.com/a/synthetic-member-avatar';
+      fetchMock.mockResolvedValueOnce(pngResponse('electron-avatar'));
+      const first = await getAvatarBlobUrl(avatarUrl);
+      expect(first).toMatch(/^blob:/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      clearAvatarImageCache({ memory: true, persistent: false });
+      fetchMock.mockRejectedValue(new Error('offline'));
+
+      const restored = await getAvatarBlobUrl(avatarUrl);
+      expect(restored).toMatch(/^blob:/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      clearAvatarImageCache();
+      Reflect.deleteProperty(globalThis, 'indexedDB');
+    }
+  });
 });
 
 // Revalidation exercises undici Blob/Response async work (fetch + `.blob()` +

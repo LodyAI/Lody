@@ -82,6 +82,12 @@ Package through `pnpm --dir apps/electron package -- --production` (or
 update config and release identity before invoking electron-builder. Native macOS
 signing and notarization use electron-builder directly on the release runner.
 
+Set `LODY_LORO_STREAMS_WS_ENABLED=1` (or `true`) when building Cloud Electron
+to opt the renderer and bundled daemon presence into Streams WebSocket. An unset
+flag defaults to off. For compatibility, the Cloud build still accepts
+`VITE_LORO_STREAMS_WS_ENABLED` when the primary flag is absent. For a standalone
+daemon, set `LODY_LORO_STREAMS_WS_ENABLED=1` when starting it.
+
 Nightly candidates freeze the `LodyAI/Lody` main commit as `sourceSha`. Exported
 build values use `LODY_SOURCE_SHA`, `LODY_NIGHTLY_BUILD_NUMBER`,
 `LODY_BUILD_RUN_ID`, `LODY_BUILD_TIMESTAMP`, and the reserved

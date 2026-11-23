@@ -31,7 +31,7 @@ before touching gestures.
   `MOBILE_TURN_ACTION_LEADING_INSET_PX` (>= `EDGE_ZONE_PX`, pinned by
   `tests/assistant-turn-action-inset.test.ts`) with a duration label nothing may
   precede, whose width survives an unknown duration.
-- Full-screen right drawers need `border-l-0!`; plain `border-0` loses to Vaul.
+- Full-screen right drawers clear the left edge and remove its border in their direction styles.
 - Every back affordance that leaves a drill page (header chip, edge swipe) goes
   through `useMobileDrillExit`, so the page slides off over its destination;
   calling the route `onBack` directly unmounts it and the destination pops in.
@@ -50,7 +50,8 @@ before touching gestures.
   connection/pull pill may mount, and the two never overlap. The filter chip
   sits on the first group heading's trailing edge (`firstGroupTrailing`).
 - `capGroupPreviews` caps each bucket at `MOBILE_CHAT_PREVIEW_MAX_ROOTS` with a
-  showAll/showLess toggle; workspace home passes it, the in-project list does
+  Show more/Show less stepper; workspace home passes it, the in-project list
+  does
   not. It counts TOP-LEVEL rows (`countOpenedByTreeRoots`) AFTER `rootRank` and
   never splits an opener from its opened Sessions. Expanded state is per bucket
   id, NEVER `sidebarCollapsedOpenedBySessionsAtom`; SUSPEND the cap during

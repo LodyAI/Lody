@@ -348,7 +348,8 @@ const streamItems: ChatStreamItem[] = [
     {
       threadRoots: STORY_THREAD_ROOT_ID,
       inputConfig: {
-        prompt: '旧的分享链接保留 7 天有效期，然后再自动失效。PR #2631 顺便帮我看下能不能直接合并。',
+        prompt:
+          '旧的分享链接保留 7 天有效期，然后再自动失效。PR #2631 顺便帮我看下能不能直接合并。',
         replyTo: STORY_REPLY_TO_RESULTS,
       },
     }
@@ -460,7 +461,6 @@ function ConversationPage({
   const [prompt, setPrompt] = useState('');
   return (
     <SessionConversationPage
-      className="h-full"
       headerSlot={<SessionConversationPageHeader titleSlot={title} />}
       bodySlot={
         <SessionConversationPageBody
@@ -469,7 +469,6 @@ function ConversationPage({
               sessionId={sessionId}
               items={items}
               agentActivityLabel={agentActivityLabel}
-              className="h-full"
               renderMessageRow={({ message, sessionId: id }) => (
                 <MessageRowView message={message} sessionId={id} />
               )}
@@ -570,9 +569,7 @@ function CoordinatorPage({
     initialThreadOpen ? STORY_THREAD_ROOT_ID : null
   );
   const [replyDraft, setReplyDraft] = useState<CoordinatorReplyRef | null>(null);
-  const [activeTab, setActiveTab] = useState(
-    initialThreadOpen ? STORY_THREAD_TAB : BOARD_TAB
-  );
+  const [activeTab, setActiveTab] = useState(initialThreadOpen ? STORY_THREAD_TAB : BOARD_TAB);
   const currentStreamItems =
     mode === 'working'
       ? workingStreamItems
@@ -690,21 +687,24 @@ function CoordinatorPage({
       }
       terminalDock={null}
       secondaryPanel={
-        <div className="flex h-full min-h-0 flex-col">
+        <div style={{ display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column' }}>
           <SessionSidePanelTabBar
             tabs={tabs}
             activeTabId={activeTab}
             onTabSelect={setActiveTab}
             onTabClose={(tabId) => {
               if (tabId === CHILD_TAB) setOpenedChild(false);
-              if (openedThreadRootId && tabId === getCoordinatorThreadPanelTabId(openedThreadRootId)) {
+              if (
+                openedThreadRootId &&
+                tabId === getCoordinatorThreadPanelTabId(openedThreadRootId)
+              ) {
                 setOpenedThreadRootId(null);
               }
               setActiveTab(BOARD_TAB);
             }}
             closeTabLabel={(label) => `关闭 ${label}`}
           />
-          <div className="relative min-h-0 flex-1">
+          <div style={{ position: 'relative', minHeight: 0, flex: '1 1 0%' }}>
             {activeTab === BOARD_TAB ? (
               <ProjectBoardView
                 board={board}
@@ -716,7 +716,8 @@ function CoordinatorPage({
                 hideTitle
                 onAcceptTasks={() => {}}
               />
-            ) : openedThreadRootId && activeTab === getCoordinatorThreadPanelTabId(openedThreadRootId) ? (
+            ) : openedThreadRootId &&
+              activeTab === getCoordinatorThreadPanelTabId(openedThreadRootId) ? (
               <CoordinatorThreadPanel
                 coordinatorSessionId={coordinatorId}
                 threadRootId={openedThreadRootId}
@@ -763,7 +764,15 @@ function ProjectModePage({
       ) : (
         <ProjectWorkspace
           main={
-            <div className="flex h-full items-center justify-center text-lg">
+            <div
+              style={{
+                display: 'flex',
+                height: '100%',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 18,
+              }}
+            >
               开始一个协调者对话
             </div>
           }
@@ -844,27 +853,41 @@ function AvatarMoodShowcase() {
     { label: 'angry（生气）', body: '检测到密钥泄露高危风险，严禁提交到公开仓库！' },
   ];
   return (
-    <div className="flex flex-col gap-4 bg-background p-8 text-foreground">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 32 }}>
       <div>
         <button
           type="button"
-          className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          style={{
+            borderRadius: 8,
+            border: '1px solid var(--border, #e5e7eb)',
+            padding: '6px 12px',
+            fontSize: 14,
+            fontWeight: 500,
+            cursor: 'pointer',
+          }}
           onClick={() => setSeq((prev) => prev + 1)}
         >
           模拟新消息事件播放一次 Lottie 动画
         </button>
       </div>
-      <div className="flex flex-col gap-3">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {samples.map((sample, idx) => (
-          <div key={`${seq}:${idx}`} className="flex items-start gap-2.5">
+          <div key={`${seq}:${idx}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <CoordinatorBubbleAvatar
               scopeKey={`story-avatar-${seq}`}
               bubbleKey={`turn-${seq}:bubble-${idx}`}
               entry={{ body: sample.body }}
               createdAt={Date.now()}
             />
-            <div className="rounded-2xl bg-muted/60 px-3.5 py-2 text-sm">
-              <div className="text-xs font-medium text-muted-foreground">{sample.label}</div>
+            <div
+              style={{
+                borderRadius: 16,
+                backgroundColor: 'rgba(128, 128, 128, 0.1)',
+                padding: '8px 14px',
+                fontSize: 14,
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 500, opacity: 0.7 }}>{sample.label}</div>
               <div>{sample.body}</div>
             </div>
           </div>

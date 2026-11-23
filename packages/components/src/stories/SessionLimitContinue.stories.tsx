@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type ReactNode } from 'react';
 import { Clock, Copy } from 'lucide-react';
@@ -9,6 +10,37 @@ import { SessionLimitContinueRow } from '@/components/schedules/quota-continue-a
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { Button } from '@lody/ui/button';
 import { SettingsStoryProviders } from './settings-story-shell';
+
+const limitFrame = stylex.create({
+  page: {
+    minHeight: '100dvh',
+    width: '100%',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    paddingInline: {
+      default: 'calc(var(--spacing) * 3)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 6)',
+    },
+    paddingBlock: 'calc(var(--spacing) * 8)',
+  },
+  content: {
+    marginInline: 'auto',
+    display: 'flex',
+    width: '100%',
+    maxWidth: '760px',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  caption: { fontSize: '12px', color: 'hsl(var(--muted-foreground) / 1)' },
+  bottomContent: {
+    marginInline: 'auto',
+    display: 'flex',
+    minHeight: 'calc(100dvh - 4rem)',
+    width: '100%',
+    maxWidth: '760px',
+    flexDirection: 'column',
+    justifyContent: 'flex-end',
+  },
+});
 
 /**
  * Final placement for Claude session-limit recovery. The banner and the
@@ -85,10 +117,10 @@ function FailureBanner({
 
 function Preview({ children, caption }: { children: ReactNode; caption?: string }) {
   return (
-    <div className="min-h-dvh w-full bg-background px-3 py-8 sm:px-6">
-      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3">
+    <div {...stylex.props(limitFrame.page)}>
+      <div {...stylex.props(limitFrame.content)}>
         {children}
-        {caption ? <p className="text-[12px] text-muted-foreground">{caption}</p> : null}
+        {caption ? <p {...stylex.props(limitFrame.caption)}>{caption}</p> : null}
       </div>
     </div>
   );
@@ -103,8 +135,8 @@ function ComposerPreview({
 }) {
   const [text, setText] = useState('Keep this draft while waiting for the quota window.');
   return (
-    <div className="min-h-dvh w-full bg-background px-3 py-8 sm:px-6">
-      <div className="mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-[760px] flex-col justify-end">
+    <div {...stylex.props(limitFrame.page)}>
+      <div {...stylex.props(limitFrame.bottomContent)}>
         <ConversationColumn>
           <FailureBanner
             state={state}

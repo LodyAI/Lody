@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -12,6 +13,10 @@ import { ProjectBoard } from '@/components/project-mode/project-board';
 import type { CoordinatorProjectKey } from '@/components/project-mode/project-board-model';
 import { ProjectWorkspace } from '@/components/project-mode/project-workspace';
 import type { MachineId } from '@lody/shared';
+
+const styles = stylex.create({
+  root: { height: '100%' },
+});
 
 export type ChatSearch = ChatLandingSearch;
 
@@ -33,12 +38,22 @@ function ChatRoute() {
   const handleSelectionUrlSync = useCallback(
     (selectionSearch: ChatLandingSearch) => {
       void navigate({
-        search: search.coordinator ? { ...selectionSearch, coordinator: true } : selectionSearch,
+        search: (previous) => ({
+          ...selectionSearch,
+          ...(previous.coordinator ? { coordinator: true as const } : {}),
+          ...(previous.pinSection ? { pinSection: previous.pinSection } : {}),
+        }),
         replace: true,
       });
     },
-    [navigate, search.coordinator]
+    [navigate]
   );
+  const handleClearPinSection = useCallback(() => {
+    void navigate({
+      search: ({ pinSection: _cleared, ...rest }) => rest,
+      replace: true,
+    });
+  }, [navigate]);
 
   /* On mobile the home/project landing is owned by `MobileWorkspaceStack` (so
      it stays mounted beneath the session overlay). Publish this route's
@@ -69,13 +84,15 @@ function ChatRoute() {
       preSelectedRepo={search.repo}
       preSelectedGroup={search.group}
       coordinator={search.coordinator === true}
+      pinSectionId={search.pinSection}
+      onClearPinSection={handleClearPinSection}
       onSelectionUrlSync={handleSelectionUrlSync}
     />
   );
   const boardProject =
     developerMode && search.coordinator ? coordinatorProjectFromSearch(search) : null;
   return (
-    <div className="h-full" data-window-workspace-ready={workspaceName}>
+    <div {...stylex.props(styles.root)} data-window-workspace-ready={workspaceName}>
       {boardProject ? (
         <ProjectWorkspace
           main={landing}

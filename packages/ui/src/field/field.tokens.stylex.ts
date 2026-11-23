@@ -23,6 +23,7 @@ export const field = stylex.defineVars({
   text: text.subheadlineSize,
   labelSize: text.footnoteSize,
   labelLeading: text.footnoteLeading,
+  labelWeight: '500',
   gap: space[1.5],
   ringWidth: '2px',
   textareaMinHeight: '72px',
@@ -42,9 +43,8 @@ export const field = stylex.defineVars({
   // a chevron in the hint colour, and the gap keeps the value off it.
   iconSize: '16px',
   triggerGap: space[2],
-  // The rules put disabled at 45% opacity on the control. It is one value for
-  // the whole family, so the control and its label cannot drift apart.
-  disabledOpacity: '0.45',
+  // The family API shares the system state, including the label and help.
+  disabledOpacity: control.disabledOpacity,
   background: colors.wellBackground,
   well: shadow.inset,
   value: colors.label,

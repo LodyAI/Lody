@@ -9,6 +9,7 @@ import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { buildSnoozePresets, type SnoozePresetId } from '@lody/shared';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { toIntlLocale } from '@/lib/intl-locale';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useFoldAwareSheetHeight } from './use-vertical-division';
 
@@ -40,8 +41,9 @@ export function resolveCustomLaterTime(value: string, nowMs: number): number | n
  * with its date, so two presets on different Mondays never read the same.
  */
 export function presetTimeFormatter(locale: string | undefined, nowMs: number) {
-  const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' });
-  const dated = new Intl.DateTimeFormat(locale, {
+  const intlLocale = toIntlLocale(locale);
+  const time = new Intl.DateTimeFormat(intlLocale, { hour: 'numeric', minute: '2-digit' });
+  const dated = new Intl.DateTimeFormat(intlLocale, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -87,12 +89,10 @@ function MobileFieldSheet({
         style={{
           maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
-        className={`h-auto! rounded-t-2xl border-border/60 ${keyboard.contentClassName}`}
+        xstyle={[styles.sheet, keyboard.contentXstyle]}
       >
-        <DrawerTitle {...stylex.props(styles.heading)}>{heading}</DrawerTitle>
-        <DrawerDescription
-          {...stylex.props(styles.description, !description && styles.visuallyHidden)}
-        >
+        <DrawerTitle xstyle={styles.heading}>{heading}</DrawerTitle>
+        <DrawerDescription xstyle={styles.description} visuallyHidden={!description}>
           {description || heading}
         </DrawerDescription>
         <div ref={keyboard.scrollRef} style={keyboard.scrollStyle} {...stylex.props(styles.body)}>
@@ -118,15 +118,16 @@ export function MobileLaterSheet({
     if (open) setCustom(defaultCustomValue(nowMs));
   }
   const presets = useMemo(() => buildSnoozePresets(nowMs), [nowMs]);
+  const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
   const formatPresetTime = useMemo(
-    () => presetTimeFormatter(i18n.language || undefined, nowMs),
-    [i18n.language, nowMs]
+    () => presetTimeFormatter(intlLocale, nowMs),
+    [intlLocale, nowMs]
   );
   const presetLabel = (id: SnoozePresetId) =>
     id === 'oneHour'
       ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
       : id === 'laterToday'
-        ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+        ? t('sessions.contextMenu.snoozeLaterToday', 'In 3 hours')
         : id === 'tomorrowMorning'
           ? t('sessions.contextMenu.snoozeTomorrowMorning', 'Tomorrow morning')
           : t('sessions.contextMenu.snoozeNextWeek', 'Next week');
@@ -243,6 +244,12 @@ export function MobileSectionNameSheet({
 }
 
 const styles = stylex.create({
+  sheet: {
+    height: 'auto',
+    borderTopLeftRadius: 'var(--radius-2xl)',
+    borderTopRightRadius: 'var(--radius-2xl)',
+    borderColor: 'hsl(var(--border) / 0.6)',
+  },
   heading: {
     margin: 0,
     paddingInline: space[4],

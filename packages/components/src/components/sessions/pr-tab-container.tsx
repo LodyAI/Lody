@@ -171,10 +171,17 @@ export function PrTabContainer({
         // detail as a merge failure.
         if (isGitHubOperationTokenConnectionLostError(err)) return;
         const message = err instanceof Error ? err.message : String(err);
-        toast.error(t('sessions.prTab.mergeError', 'Failed to merge'), { description: message });
+        toast.error(
+          prNumber
+            ? t('sessions.prMergeStatus.failedNumber', 'Failed to merge PR #{{number}}', {
+                number: prNumber,
+              })
+            : t('sessions.prTab.mergeError', 'Failed to merge'),
+          { description: message }
+        );
       }
     },
-    [analyticsBase, data?.checkRuns, data?.pullRequest, mergePullRequest, postHog, t]
+    [analyticsBase, data?.checkRuns, data?.pullRequest, mergePullRequest, postHog, prNumber, t]
   );
 
   const handleSetState = useCallback(

@@ -958,6 +958,8 @@ describe('useSessionActions', () => {
     ['promotion-failed', 'canceled', false],
     ['promotion-failed', 'failed', false],
     ['promotion-failed', 'removed', false],
+    ['unsupported', 'pending_apply', true],
+    ['unsupported', 'pending_apply', false, true],
     ['delivery-unknown', 'pending_apply', false],
     ['applied', 'pending_apply', false],
     ['no-active-turn', 'pending_apply', false, true],
@@ -1667,11 +1669,7 @@ describe('useSessionActions', () => {
       await answerConfirmation(labels.all);
       await expect(result).resolves.toBe(true);
       // Opened Sessions follow; contained Tabs keep no status fields of their own.
-      for (const session of [
-        tree.rootSession,
-        tree.openedSession,
-        tree.openedFromTabSession,
-      ]) {
+      for (const session of [tree.rootSession, tree.openedSession, tree.openedFromTabSession]) {
         expect(applied(tree.metaRepo.getSession(session.id))).toBe(true);
       }
       for (const session of [tree.tabSession, tree.openedTab]) {

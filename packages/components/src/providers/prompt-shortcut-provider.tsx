@@ -18,10 +18,7 @@ import {
 } from 'react';
 import { useAtomValue } from 'jotai';
 import type { LoroRepo } from 'loro-repo';
-import type {
-  PromptShortcutRuntime,
-  ShortcutRuntimeSnapshot,
-} from '@lody/shared/prompt-shortcuts';
+import type { PromptShortcutRuntime, ShortcutRuntimeSnapshot } from '@lody/shared/prompt-shortcuts';
 import { getShortcutResourceStreamId } from '@lody/shared/prompt-shortcuts/access';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -49,6 +46,20 @@ const emptySnapshot = () => EMPTY;
 // StrictMode and a quick workspace return must finish the previous writer's
 // durable writes before reopening the same IndexedDB as a new replica.
 const closingDatabases = new Map<string, Promise<void>>();
+
+/**
+ * Hands settings an already-open runtime. Storybook renders the real Prompts page
+ * through this; the product always mounts `PromptShortcutProvider`.
+ */
+export function PromptShortcutRuntimeProvider({
+  runtime,
+  children,
+}: {
+  runtime: PromptShortcutRuntime;
+  children: ReactNode;
+}) {
+  return <Context.Provider value={{ runtime }}>{children}</Context.Provider>;
+}
 
 export function usePromptShortcuts() {
   const { runtime, error, retry, disabled } = useContext(Context);

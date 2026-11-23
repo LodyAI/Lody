@@ -1,7 +1,13 @@
 import { nativeScrollbar } from '../scroll-area/surface';
 import { Drawer as BaseDrawer } from '@base-ui/react/drawer';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, useSyncExternalStore, type ComponentProps, type ReactNode } from 'react';
+import {
+  forwardRef,
+  useSyncExternalStore,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { Button } from '../button/button';
 import {
   DialogFooter,
@@ -51,6 +57,7 @@ export interface DrawerContentProps extends Omit<PopupBaseProps, 'className' | '
   /** Classes for the backdrop, for a host that has to restack it. */
   backdropClassName?: string;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /**
    * Which edge the drawer comes in on. `start` and `end` are the writing
    * direction's edges rather than left and right, so a drawer that opens from
@@ -118,6 +125,8 @@ function subscribeToDirection(onChange: () => void): () => void {
 export const DrawerContent = forwardRef<HTMLDivElement, DrawerContentProps>(function DrawerContent(
   {
     className,
+    xstyle,
+    style,
     children,
     container,
     backdropContent,
@@ -170,6 +179,10 @@ export const DrawerContent = forwardRef<HTMLDivElement, DrawerContentProps>(func
           ref={panelRef}
           data-side={side}
           {...rest}
+          style={(state) => ({
+            ...stylex.props(xstyle).style,
+            ...(typeof style === 'function' ? style(state) : style),
+          })}
           className={(state) =>
             appendClassName(
               stylex.props(
@@ -177,6 +190,7 @@ export const DrawerContent = forwardRef<HTMLDivElement, DrawerContentProps>(func
                 modal.drawerPopup,
                 drawerSizeStyle(side),
                 !inset && drawerFlushStyle(side),
+                xstyle,
                 isHidden(state.transitionStatus) && drawerHiddenStyle(side, inset)
               ).className,
               className
@@ -213,9 +227,13 @@ type TitleBaseProps = ComponentProps<typeof BaseDrawer.Title>;
 type DescriptionBaseProps = ComponentProps<typeof BaseDrawer.Description>;
 
 export interface DrawerTitleProps extends Omit<TitleBaseProps, 'className'> {
+  xstyle?: stylex.StyleXStyles;
   className?: string;
+  /** Explicit heading weight; omission preserves the modal default. */
+  fontWeight?: CSSProperties['fontWeight'];
 }
 export interface DrawerDescriptionProps extends Omit<DescriptionBaseProps, 'className'> {
+  xstyle?: stylex.StyleXStyles;
   className?: string;
 }
 
@@ -225,30 +243,47 @@ export interface DrawerDescriptionProps extends Omit<DescriptionBaseProps, 'clas
  * would label nothing.
  */
 export const DrawerTitle = forwardRef<HTMLHeadingElement, DrawerTitleProps>(function DrawerTitle(
-  { className, ...rest },
+  { className, xstyle, fontWeight, ...rest },
   ref
 ) {
-  const sx = stylex.props(modal.title);
+  const sx = stylex.props(modal.title, xstyle);
   return (
     <BaseDrawer.Title
       ref={ref}
       {...rest}
       className={appendClassName(sx.className, className)}
-      style={sx.style}
+      style={
+        xstyle
+          ? (state) => ({
+              ...sx.style,
+              ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+              ...(fontWeight != null ? { fontWeight } : {}),
+            })
+          : fontWeight == null
+            ? sx.style
+            : { ...sx.style, fontWeight }
+      }
     />
   );
 });
 
 /** What the heading is about; Base UI wires it to the accessible description. */
 export const DrawerDescription = forwardRef<HTMLParagraphElement, DrawerDescriptionProps>(
-  function DrawerDescription({ className, ...rest }, ref) {
-    const sx = stylex.props(modal.description);
+  function DrawerDescription({ className, xstyle, ...rest }, ref) {
+    const sx = stylex.props(modal.description, xstyle);
     return (
       <BaseDrawer.Description
         ref={ref}
         {...rest}
         className={appendClassName(sx.className, className)}
-        style={sx.style}
+        style={
+          xstyle
+            ? (state) => ({
+                ...sx.style,
+                ...(typeof rest.style === 'function' ? rest.style(state) : rest.style),
+              })
+            : sx.style
+        }
       />
     );
   }

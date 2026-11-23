@@ -81,7 +81,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   before Repo subscribes; persist merged snapshots before adoption and storage-loaded
   versions before cursor advancement. Never replace live documents. Import before
   creating the history reader to avoid replaying bulk-import events.
-- Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
+- Storage, cursors, recovery metadata and eager-sync high-water marks share a per-renderer
   cache namespace. Independently persisted replicas must not share checkpoints.
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
 - Unknown workspace mode permits local Repo access, never ordinary body egress.
@@ -107,10 +107,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Cloud Electron dual runtimes await the first **Run local agent** snapshot; encrypted
   runtimes always sync through cloud and ignore the setting. Enabled uses dual sync;
   disabled uses cloud-only sync without the local data plane or reconnect state.
-- Meta attachment is single-flight; retries use `recovery`. External wakes preserve
-  outage history; sustained health resets loop backoff. Periodic cloud repair honors per-`kind:id`
-  error backoff (30s–5min), clears it on leaving error, and charges only attempted rooms.
-  Waiting rooms cannot delay new failures or be revived by periodic global reconnect.
+- Meta-room attachment is single-flight per runtime. Token/network/visibility retries preserve
+  outage history; sustained health alone resets backoff. Attempts after first use `recovery`,
+  including token rotation. Periodic repair honors per-`kind:id` error backoff (30s–5min), clears
+  it on leaving error, charges attempted rooms only, and cannot revive waiting rooms or delay failures.
   [Recovery](../../../../.agents/docs/components-package.md#cloud-room-recovery).
 - Workspace-level rooms without a machine owner use the platform fallback.
   Returning no transport silently disables synchronization for those rooms.

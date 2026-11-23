@@ -34,7 +34,7 @@ function TodayRoute() {
   }
   return (
     <RouteSuspense>
-      <LazyTodayPage memberId={search.member} anchorDate={search.date} />
+      <LazyTodayPage memberId={search.member} anchorDate={search.date} focus={search.focus} />
     </RouteSuspense>
   );
 }

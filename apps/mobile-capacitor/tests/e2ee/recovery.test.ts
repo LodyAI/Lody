@@ -651,8 +651,8 @@ it.each(['file', 'password', 'passkey'] as const)(
       expect(await owned.port.restore('file')).toEqual({
         outcome: 'restored',
         results: [
-          { name: 'Alpha', outcome: 'not-backed-up' },
-          { name: 'Beta', outcome: 'not-backed-up' },
+          { workspaceId: 'ws-a', name: 'Alpha', outcome: 'not-backed-up' },
+          { workspaceId: 'ws-b', name: 'Beta', outcome: 'not-backed-up' },
         ],
       });
       for (const bytes of f.prfOutputs) expect(bytes.every((byte) => byte === 0)).toBe(true);

@@ -4,10 +4,11 @@ import { CircleAlert, Clock, Pencil, Trash2, X } from 'lucide-react';
 import { Menu } from '@lody/ui/menu';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toIntlLocale } from '@/lib/intl-locale';
-import { cn } from '@/lib/utils';
 import { formatUpcoming } from '../../schedules/schedule-format';
 import { queuePreviewStyle, queueSurface } from './surface';
 import { IconAction, MoreTrigger } from './message-queue-row';
+
+const styles = stylex.create({ content: { minWidth: 0, flex: '1 1 0%', overflow: 'hidden' } });
 
 export type ScheduledQueueItem = {
   scheduleId: string;
@@ -68,11 +69,10 @@ export function ScheduledQueueRow({
         <span aria-hidden="true" {...stylex.props(queueSurface.gutter)} />
       </span>
       <div
-        className={cn(
-          'min-w-0 flex-1 overflow-hidden',
-          stylex.props(queueSurface.text, roomy && queueSurface.roomyBody).className
-        )}
-        style={queuePreviewStyle(!!(roomy || compact))}
+        {...stylex.props(styles.content, queueSurface.text, roomy && queueSurface.roomyBody)}
+        style={{
+          ...queuePreviewStyle(!!(roomy || compact)),
+        }}
       >
         <button
           type="button"

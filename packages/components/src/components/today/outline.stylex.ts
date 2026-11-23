@@ -1,4 +1,11 @@
 import * as stylex from '@stylexjs/stylex';
+import { createContext } from 'react';
+
+/**
+ * At the window's edge (pinned, sidebar hidden) a top row has no margin left
+ * of its fold toggle, so the row's "⋯" button sits at the row's end instead.
+ */
+export const TodayMoreAtEndContext = createContext(false);
 
 /** Today outline geometry shared by the rows and the surface around them. */
 export const todayOutline = stylex.defineConsts({
@@ -11,3 +18,6 @@ export const todayOutline = stylex.defineConsts({
    */
   foldOverhang: '17px',
 });
+
+/** The scroll surface: a zoomed node without children shows its "+" while it is hovered. */
+export const todaySurfaceMarker = stylex.defineMarker();

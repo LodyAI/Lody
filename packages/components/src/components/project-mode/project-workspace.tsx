@@ -4,6 +4,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/ui/resiz
 
 const styles = stylex.create({
   group: { height: '100%', minHeight: 0, minWidth: 0 },
+  main: { height: '100%', minWidth: 0 },
   panel: { minWidth: 0, minHeight: 0 },
 });
 
@@ -22,7 +23,7 @@ export function ProjectWorkspace({ main, board }: { main: ReactNode; board: Reac
       data-testid="project-workspace"
     >
       <ResizablePanel id="main" order={1} defaultSize={66} minSize={30}>
-        <div className="h-full min-w-0">{main}</div>
+        <div {...stylex.props(styles.main)}>{main}</div>
       </ResizablePanel>
       <ResizableHandle hitAreaMargins={{ coarse: 15, fine: 12 }} />
       <ResizablePanel

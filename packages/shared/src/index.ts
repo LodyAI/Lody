@@ -48,6 +48,7 @@ export * from './agent-authentication';
 export * from './subscription-quota';
 export * from './acp-authentication-limits';
 export * from './schema';
+export * from './agent-session-defaults';
 export * from './schedule-types';
 export * from './schedule-time';
 export * from './schedule-recurrence';

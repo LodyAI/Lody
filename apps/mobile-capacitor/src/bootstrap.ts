@@ -14,7 +14,9 @@ try {
         outcome: 'none' | 'success' | 'fallback';
         credentialCleanupFailed?: boolean;
       }>;
-      acknowledgeResetResult(options: { outcome: 'success' | 'fallback' }): Promise<void>;
+      acknowledgeResetResult(options: {
+        outcome: 'success' | 'fallback';
+      }): Promise<{ custodyCleanupFailed?: boolean } | undefined>;
     }>('LodyNativeReset');
     const { outcome, credentialCleanupFailed } = await reset.getResetResult();
     if (outcome !== 'none') {
@@ -36,7 +38,10 @@ try {
       await clearAllLodyLocalData();
     }
     if (outcome !== 'none') {
-      await reset.acknowledgeResetResult({ outcome });
+      const acknowledged = await reset.acknowledgeResetResult({ outcome });
+      window.__LODY_APP_INFO__ = Object.assign({}, window.__LODY_APP_INFO__, {
+        native_reset_custody_cleanup_failed: acknowledged?.custodyCleanupFailed === true,
+      });
     }
   }
   await import('./main');

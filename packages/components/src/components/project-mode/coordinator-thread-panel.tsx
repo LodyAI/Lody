@@ -16,16 +16,10 @@ import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { composerActionButtonTheme } from '@/components/chat/composer-action-button.stylex';
 import { useAtomValue } from 'jotai';
 import { ArrowUp } from 'lucide-react';
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
@@ -89,6 +83,21 @@ const STATE_LABELS: Record<ProjectBoardBucket, [key: string, fallback: string]> 
 };
 
 const styles = stylex.create({
+  fullHeight: {
+    height: '100%',
+  },
+  primaryAction: {
+    boxShadow: {
+      default: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':focus-visible': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':active': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    },
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+    translate: { default: null, ':active': '0 1px' },
+  },
   linkedHeader: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -193,8 +202,7 @@ function ThreadLinkedTaskItem({
     t('sessions.untitled', 'Untitled session');
   const number = formatTaskNumber(task?.taskNumber ?? null);
   const bucket = task?.bucket ?? (meta?.isArchived ? 'accepted' : undefined);
-  const pr =
-    task?.pullRequest ?? (meta ? resolveSessionPrimaryPullRequest(meta) : null);
+  const pr = task?.pullRequest ?? (meta ? resolveSessionPrimaryPullRequest(meta) : null);
 
   return (
     <div {...stylex.props(styles.linkedItemGroup)} data-coordinator-thread-linked-task="">
@@ -212,9 +220,7 @@ function ThreadLinkedTaskItem({
           </span>
         ) : null}
       </button>
-      {pr ? (
-        <ProjectBoardPrMenu sessionId={sessionId} pr={pr} onOpenPr={onOpenPr} />
-      ) : null}
+      {pr ? <ProjectBoardPrMenu sessionId={sessionId} pr={pr} onOpenPr={onOpenPr} /> : null}
     </div>
   );
 }
@@ -397,11 +403,17 @@ export function CoordinatorThreadPanel({
       turnIndex: idx,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canonicalRootId, coordinatorSessionId, conversationView, fallbackItems, targetTurnIds, viewVersion]);
+  }, [
+    canonicalRootId,
+    coordinatorSessionId,
+    conversationView,
+    fallbackItems,
+    targetTurnIds,
+    viewVersion,
+  ]);
 
   const threadMessages = useMemo(
-    () =>
-      filteredItems.flatMap((item) => (item.type === 'message' ? [item.message] : [])),
+    () => filteredItems.flatMap((item) => (item.type === 'message' ? [item.message] : [])),
     [filteredItems]
   );
 
@@ -439,7 +451,8 @@ export function CoordinatorThreadPanel({
   const threadMemoryScope = `${coordinatorSessionId}:${canonicalRootId}`;
   const threadStorageScope = workspaceId ? `${workspaceId}:${threadMemoryScope}` : null;
   const [subReplyTarget, setSubReplyTargetState] = useState<CoordinatorReplyRef | null>(
-    () => readCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId).subReplyTarget
+    () =>
+      readCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId).subReplyTarget
   );
   const [promptValue, setPromptValueState] = useState(
     () => readCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId).prompt
@@ -449,7 +462,11 @@ export function CoordinatorThreadPanel({
     threadStorageScope
   );
   if (activeThreadScope !== threadMemoryScope) {
-    const nextDraft = readCoordinatorThreadDraft(workspaceId, coordinatorSessionId, canonicalRootId);
+    const nextDraft = readCoordinatorThreadDraft(
+      workspaceId,
+      coordinatorSessionId,
+      canonicalRootId
+    );
     setActiveThreadScope(threadMemoryScope);
     setHydratedThreadStorageScope(threadStorageScope);
     setSubReplyTargetState(nextDraft.subReplyTarget);
@@ -529,7 +546,9 @@ export function CoordinatorThreadPanel({
   }, [canonicalRootId, coordinatorSessionId, prefillBridgeRef, workspaceId]);
 
   const effectiveReplyRef = subReplyTarget ?? defaultRootReplyRef;
-  const canSend = Boolean(onSendReply && effectiveReplyRef && promptValue.trim().length > 0 && !submitting);
+  const canSend = Boolean(
+    onSendReply && effectiveReplyRef && promptValue.trim().length > 0 && !submitting
+  );
 
   const handleSend = useCallback(async () => {
     const trimmed = promptValue.trim();
@@ -635,7 +654,7 @@ export function CoordinatorThreadPanel({
   return (
     <CoordinatorConversationPreviewProvider value={nestedConversationValue}>
       <SessionConversationPage
-        className="h-full"
+        className={stylex.props(styles.fullHeight).className}
         subHeaderSlot={
           linkedSessionIds.length > 0 ? (
             <div {...stylex.props(styles.linkedHeader)} data-coordinator-thread-linked-bar="">
@@ -666,7 +685,7 @@ export function CoordinatorThreadPanel({
                 agentActivityTone={agentActivityTone}
                 agentActivityShimmer={agentActivityTone !== 'warning'}
                 conversationFontSize={conversationFontSize}
-                className="h-full"
+                className={stylex.props(styles.fullHeight).className}
                 renderMessageRow={({ message }) => (
                   <MessageRowView
                     message={message}
@@ -679,7 +698,10 @@ export function CoordinatorThreadPanel({
             }
             composerSlot={
               onSendReply ? (
-                <div {...stylex.props(styles.composerContainer)} data-coordinator-thread-composer="">
+                <div
+                  {...stylex.props(styles.composerContainer)}
+                  data-coordinator-thread-composer=""
+                >
                   <ConversationColumn>
                     <ChatComposer
                       tone={composerTone}
@@ -709,14 +731,15 @@ export function CoordinatorThreadPanel({
                         <Button
                           type="button"
                           icon
-                          variant="ghost"
+                          variant="solid"
                           size="small"
                           shape="pill"
                           disabled={!canSend}
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => void handleSend()}
                           aria-label={t('sessions.send', 'Send')}
-                          className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+                          className={stylex.props(composerActionButtonTheme).className}
+                          xstyle={styles.primaryAction}
                         >
                           {submitting ? (
                             <Spinner size="small" />
@@ -766,9 +789,9 @@ export function ConnectedCoordinatorThreadPanel({
 }) {
   const tasks = useCoordinatorTasksData(coordinatorSessionId, project);
   const atomFontSize = useAtomValue(conversationFontSizeAtom);
-  const prefillBridgeRef = useRef<
-    ((prompt: string, replyTo: CoordinatorReplyRef) => void) | null
-  >(null);
+  const prefillBridgeRef = useRef<((prompt: string, replyTo: CoordinatorReplyRef) => void) | null>(
+    null
+  );
   const sendCoordinatorPrompt = useCallback(
     async (prompt: string, replyTo: CoordinatorReplyRef) => {
       if (!onSendReply) return false;
@@ -776,12 +799,9 @@ export function ConnectedCoordinatorThreadPanel({
     },
     [onSendReply]
   );
-  const prefillCoordinatorPrompt = useCallback(
-    (prompt: string, replyTo: CoordinatorReplyRef) => {
-      prefillBridgeRef.current?.(prompt, replyTo);
-    },
-    []
-  );
+  const prefillCoordinatorPrompt = useCallback((prompt: string, replyTo: CoordinatorReplyRef) => {
+    prefillBridgeRef.current?.(prompt, replyTo);
+  }, []);
   const { executeBubbleAction, dismissCard, supportedCommands, preferredMergeMethod } =
     useCoordinatorActionExecutor({
       coordinatorSessionId,
@@ -812,4 +832,3 @@ export function ConnectedCoordinatorThreadPanel({
     />
   );
 }
-

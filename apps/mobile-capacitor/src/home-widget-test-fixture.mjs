@@ -377,6 +377,7 @@ export async function createWidgetFixture({
       workspaceId,
       workspaceSlug,
       accountId,
+      contentMode: 'plaintext',
       requestProviderRateLimitsRefresh: (machineId, configId) => quotaRefresh(machineId, configId),
     };
     store.set(userAtom, { id });

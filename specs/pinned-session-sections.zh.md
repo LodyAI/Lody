@@ -25,9 +25,15 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 - 用户可以拖动 pin 对话，在分组内调整顺序或移到另一个分组；拖到分组标题上会放到该分组最上方。
   把未 pin 的对话拖进 pin 区会在该位置 pin 它。右键菜单也提供“移动到分组”（放到该分组最上方）
   和“新建分组…”。
+- 桌面端用户分组的标题菜单提供“在此分组新建对话”。它打开新建对话页，页面在项目选择旁显示该分组，
+  并保留页面上已选的项目。从这里开始的对话会 pin 到该分组最上方；取消勾选该分组则不 pin。
+  若分组在此期间被删除，对话落在默认区。
 - 删除分组不会取消 pin：其中的对话回到默认区。
 - 取消 pin 会清除该对话的分组（`pinSectionId`），但保留其 `orderKey` 以维持状态视图中的手动顺序；再次 pin 时会生成新的 `orderKey` 并回到默认区最上方。
 - 每个分组可以单独折叠，折叠状态只保存在本机。
+- 「置顶」标题的「可见分组」菜单列出所有分组，包括默认分组。勾选的分组会显示，
+  切换时菜单保持打开。隐藏默认分组时，其会话列表收起，「置顶」标题保留菜单入口。
+  可见性只保存在本机。用「移动到分组」把会话移入隐藏的分组时，该分组会重新显示。
 - 视图范围隐藏某个分组的全部对话时，该分组仍留在原地；展开时会在列表下方注明隐藏的对话数。
 - opener 子对话仍挂在根对话下面，跟随根对话移动，不单独排序。
 - 手机上，手机 WebView 和原生 iOS、Android 客户端的行为一致
@@ -93,7 +99,8 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 - 指针拖拽与引用投递：`packages/components/src/components/pinned-rows-dnd.ts`、
   `packages/components/src/lib/pinned-drop-settle.ts`、`packages/components/src/lib/session-mention-drag.ts`
 - 侧栏：`packages/components/src/components/sidebar-pinned-sections.tsx`、
-  `sidebar-updated-session-list.tsx`、`loro-app-sidebar.tsx`；移动端：
+  `sidebar-updated-session-list.tsx`、`loro-app-sidebar.tsx`；在分组中新建对话：chat 路由的
+  `pinSection` 参数、`components/chat/pin-section-target-pill.tsx`、`lib/session-submission.ts`；移动端：
   `packages/components/src/components/mobile/mobile-chat-list.tsx`
 - 加密内容选择：`packages/shared/src/workspace-streams-content.ts`
 - 定时任务投递方式：`packages/shared/src/schedule-types.ts`
@@ -107,5 +114,5 @@ pin 对话的顺序，并把它们放进自己命名的分组（pin section）�
 `packages/shared/tests/status-view.test.ts`。Storybook 端到端测试
 （`packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`）：把对话移到另一个分组、拖动
 分组标题调整分组顺序。非拥有者成员加密写入 `pinSection` 行已在加密房间层测试
-（`apps/electron/src/main/services/e2ee-runtime.test.mjs`）；托管网关的准入未覆盖。已知缺口：手机 WebView 不显示被可见范围隐藏的 pin 行数。手机端见
+（`apps/electron/src/main/services/e2ee-runtime.test.mjs`）；托管网关的准入未覆盖。手机端见
 [手机端笔记](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.zh.md#验证)。

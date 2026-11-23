@@ -150,9 +150,11 @@ describe('mobile-chat-list-opened-by', () => {
       expect(isNested(list[1]!)).toBe(false);
       expect(isNested(list[2]!)).toBe(true);
       // It still indents — losing the lines must not also lose the hierarchy.
-      expect(list[1]?.querySelector('[data-conversation-row-leading-slot]')?.className).toContain(
-        'w-8'
-      );
+      expect(
+        list[1]
+          ?.querySelector('[data-conversation-row-leading-slot]')
+          ?.getAttribute('data-conversation-row-slot')
+      ).toBe('nested');
     });
 
     it('gives an ACTIVE opener its status instead of the fold control', async () => {
@@ -413,7 +415,7 @@ describe('mobile-conversation-row-pr', () => {
       for (const prStatus of ['merged', 'closed'] as const) {
         const row = renderRow({ ...readyPr, id: `${prStatus}-session`, prStatus });
         expect(row.querySelector('[data-session-mergeable-pill]')).toBeNull();
-        expect(row.querySelector('.text-github-addition')?.textContent).toBe('+12');
+        expect(row.textContent).toContain('+12');
         flushSync(() => root?.unmount());
         root = undefined;
         container?.remove();

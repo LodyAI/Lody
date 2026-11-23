@@ -289,18 +289,18 @@ export function ProjectBoardPrMenu({
   const canResolveConflicts = Boolean(
     resolveConflictsAction?.available && !resolveConflictsAction.pending
   );
-  const canClose = Boolean(details.canWrite && livePr && !livePr.merged && livePr.state !== 'closed');
+  const canClose = Boolean(
+    details.canWrite && livePr && !livePr.merged && livePr.state !== 'closed'
+  );
   const canReopen = Boolean(details.canWrite && livePr && mergeKind === 'closed');
   const canDeleteBranch = Boolean(
     details.canWrite &&
-      livePr &&
-      mergeKind === 'merged' &&
-      details.branchExists === true &&
-      livePr.headRef !== livePr.baseRef
+    livePr &&
+    mergeKind === 'merged' &&
+    details.branchExists === true &&
+    livePr.headRef !== livePr.baseRef
   );
-  const canMerge = Boolean(
-    details.canWrite && livePr && mergeKind === 'ready' && !livePr.stack
-  );
+  const canMerge = Boolean(details.canWrite && livePr && mergeKind === 'ready' && !livePr.stack);
   const canMarkReady = Boolean(details.canWrite && livePr && mergeKind === 'draft');
   const blockedNotice =
     livePr && details.canWrite
@@ -319,7 +319,10 @@ export function ProjectBoardPrMenu({
     (details.state === 'idle' || details.state === 'loading') &&
     !livePr;
   const isErrorInitial =
-    hasHostedGitHub && Boolean(repoFullName && prNumber !== null) && details.state === 'error' && !livePr;
+    hasHostedGitHub &&
+    Boolean(repoFullName && prNumber !== null) &&
+    details.state === 'error' &&
+    !livePr;
 
   const hasPrimarySection =
     isLoadingInitial ||
@@ -362,17 +365,13 @@ export function ProjectBoardPrMenu({
       </Menu.Trigger>
       <Menu.Content align="end">
         {isLoadingInitial ? (
-          <Menu.Item disabled icon={<Spinner className="h-3.5 w-3.5" />}>
+          <Menu.Item disabled icon={<Spinner {...stylex.props(styles.spinner)} />}>
             {t('sessions.prTab.checking', 'Checking…')}
           </Menu.Item>
         ) : null}
 
         {isErrorInitial ? (
-          <Menu.Item
-            icon={RotateCw}
-            closeOnClick={false}
-            onClick={() => void details.refresh()}
-          >
+          <Menu.Item icon={RotateCw} closeOnClick={false} onClick={() => void details.refresh()}>
             {t('sessions.prTab.retry', 'Retry')}
           </Menu.Item>
         ) : null}
@@ -403,11 +402,7 @@ export function ProjectBoardPrMenu({
         {blockedNotice ? <Menu.GroupLabel>{blockedNotice}</Menu.GroupLabel> : null}
 
         {mergeKind === 'conflict' && canResolveConflicts ? (
-          <Menu.Item
-            icon={Wrench}
-            disabled={busy}
-            onClick={() => resolveConflictsAction?.run()}
-          >
+          <Menu.Item icon={Wrench} disabled={busy} onClick={() => resolveConflictsAction?.run()}>
             {t('sessions.prTab.resolveConflicts', 'Resolve conflicts')}
           </Menu.Item>
         ) : null}
@@ -423,11 +418,7 @@ export function ProjectBoardPrMenu({
         ) : null}
 
         {canDeleteBranch ? (
-          <Menu.Item
-            icon={Trash2}
-            disabled={busy}
-            onClick={() => void handleDeleteBranch()}
-          >
+          <Menu.Item icon={Trash2} disabled={busy} onClick={() => void handleDeleteBranch()}>
             {t('sessions.prTab.deleteBranch', 'Delete branch')}
           </Menu.Item>
         ) : null}
@@ -460,10 +451,7 @@ export function ProjectBoardPrMenu({
         ) : null}
 
         {livePr?.headRef ? (
-          <Menu.Item
-            icon={Copy}
-            onClick={() => void writeTextToClipboard(livePr.headRef)}
-          >
+          <Menu.Item icon={Copy} onClick={() => void writeTextToClipboard(livePr.headRef)}>
             {t('sessions.prTab.copyBranch', 'Copy branch name')}
           </Menu.Item>
         ) : null}

@@ -1,3 +1,8 @@
+import { corner as uiCorner, duration as uiMotion, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
+import { sidebarSectionHeaderMarker } from './sidebar-section-markers.stylex';
+import { themeSpace as appSpace } from '../style/theme-scale.stylex';
+import * as stylex from '@stylexjs/stylex';
 import {
   Fragment,
   memo,
@@ -33,7 +38,7 @@ import { dndPointerPoint } from '@/lib/dnd-pointer';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { CSS as DndCss } from '@dnd-kit/utilities';
 import { useTranslation } from 'react-i18next';
-import { FolderPlus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, FolderPlus, MoreHorizontal, Pencil, SquarePen, Trash2 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { PIN_SECTION_NAME_MAX_LENGTH } from '@lody/shared';
@@ -92,6 +97,7 @@ export type SidebarPinSectionActions = {
   onCreateSection: (name: string, moveItemId?: string) => void | Promise<void>;
   onRenameSection: (sectionId: string, name: string) => void | Promise<void>;
   onDeleteSection: (sectionId: string) => void;
+  onNewChat?: (sectionId: string) => void;
 };
 
 type SharedListProps = Omit<
@@ -103,6 +109,7 @@ type SharedListProps = Omit<
   | 'onToggleBucket'
   | 'toggleBucketLabel'
   | 'headerAction'
+  | 'headerMenu'
   | 'pinSectionMenu'
   | 'pinSectionId'
   | 'onDropPinnedSession'
@@ -124,7 +131,14 @@ export type SidebarPinnedSectionsProps = {
   onToggleDefault?: () => void;
   collapsedSectionIds?: Readonly<Record<string, boolean>>;
   onToggleSection?: (sectionId: string) => void;
-  /** Rendered on the first visible section header (the sidebar filter). */
+  /**
+   * Sections hidden on this device, keyed by `pinSectionKey(section.id)`. A
+   * hidden section can be restored from the visibility menu on the Pinned header.
+   */
+  hiddenSectionKeys?: Readonly<Record<string, boolean>>;
+  /** Absent when hiding is unavailable; the header menu then offers no "Hide". */
+  onSetSectionHidden?: (sectionKey: string, hidden: boolean) => void;
+  /** The sidebar filter, rendered on the first header. */
   headerAction?: ReactNode;
   /** Absent when this viewer cannot manage pin sections. */
   actions?: SidebarPinSectionActions;
@@ -152,6 +166,8 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
   onToggleDefault,
   collapsedSectionIds,
   onToggleSection,
+  hiddenSectionKeys,
+  onSetSectionHidden,
   headerAction,
   actions,
   onDropIntoFocus,
@@ -188,10 +204,16 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     [t]
   );
   const onDropItem = actions?.onDropItem;
-  // "Move to Section" puts the conversation at the top of that section.
+  const hiddenSectionKeysRef = useLatestRef(hiddenSectionKeys);
+  // "Move to Section" puts the conversation at the top of that section, and
+  // shows that section again if it was hidden so the conversation stays in view.
   const moveToSectionTop = useCallback(
-    (itemId: string, sectionId: string | null) => onDropItem?.(itemId, sectionId, 0),
-    [onDropItem]
+    (itemId: string, sectionId: string | null) => {
+      const key = pinSectionKey(sectionId);
+      if (hiddenSectionKeysRef.current?.[key]) onSetSectionHidden?.(key, false);
+      onDropItem?.(itemId, sectionId, 0);
+    },
+    [hiddenSectionKeysRef, onDropItem, onSetSectionHidden]
   );
   const openCreate = useCallback((itemId: string) => {
     setNameDialog({ kind: 'create', moveItemId: itemId });
@@ -389,7 +411,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         from: { left: lifted.left, top: lifted.top, width: lifted.width, height: lifted.height },
         ghost: activeGhost,
         fromBackground: liftedBackground(),
-        fromShadow: PINNED_ROW_LIFT_SHADOW,
+        fromShadow: uiShadow.popover,
       };
       if (target.sectionId === FOCUS_SECTION_DND_KEY) {
         beginPinnedDropSettle(settle);
@@ -440,10 +462,51 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
       return section ? [section] : [];
     }),
   ];
-  const visibleSections = orderedSections.filter(
-    // An empty default section only matters as a heading when nothing else is pinned.
-    (section) => section.id !== null || itemsOf(section.id).length > 0 || !hasUserSections
+  const presentSections = orderedSections.filter(
+    (section) =>
+      section.id !== null ||
+      onSetSectionHidden ||
+      itemsOf(section.id).length > 0 ||
+      !hasUserSections
   );
+  const isHidden = (section: SidebarPinnedSection) =>
+    hiddenSectionKeys?.[pinSectionKey(section.id)] === true;
+  const visibleSections = presentSections.filter(
+    (section) => section.id === null || !isHidden(section)
+  );
+  const visibilityEntries = onSetSectionHidden
+    ? presentSections.map((section) => ({
+        key: pinSectionKey(section.id),
+        name: section.id === null ? defaultLabel : section.name,
+        visible: !isHidden(section),
+      }))
+    : [];
+  const onNewChat = listProps.isMobile ? undefined : actions?.onNewChat;
+  const sectionMenuFor = (section: SidebarPinnedSection) => {
+    if (!actions && !onSetSectionHidden) return null;
+    const sectionId = section.id;
+    return (
+      <PinSectionHeaderMenu
+        label={t('sidebar.pinSections.sectionActions', 'Section actions')}
+        revealOnHover={!listProps.isMobile}
+        onNewChat={onNewChat && sectionId !== null ? () => onNewChat(sectionId) : undefined}
+        onNewSection={actions ? () => setNameDialog({ kind: 'create' }) : undefined}
+        onHide={
+          sectionId !== null && onSetSectionHidden
+            ? () => onSetSectionHidden(pinSectionKey(sectionId), true)
+            : undefined
+        }
+        onRename={
+          actions && sectionId
+            ? () => setNameDialog({ kind: 'rename', sectionId, initialName: section.name })
+            : undefined
+        }
+        onDelete={actions && sectionId ? () => actions.onDeleteSection(sectionId) : undefined}
+        visibility={sectionId === null ? visibilityEntries : undefined}
+        onSetVisible={(key, visible) => onSetSectionHidden?.(key, !visible)}
+      />
+    );
+  };
 
   return (
     <div className={className}>
@@ -459,72 +522,56 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         onDragCancel={handleDragCancel}
       >
         <SortableContext
-          items={userSectionIds.map(pinSectionDndId)}
+          items={visibleSections.flatMap((section) =>
+            section.id === null ? [] : [pinSectionDndId(section.id)]
+          )}
           strategy={verticalListSortingStrategy}
         >
           {visibleSections.map((section, index) => {
-            const isDefault = section.id === null;
             const sectionId = section.id;
+            const isDefault = sectionId === null;
             const sectionKey = pinSectionKey(sectionId);
-            const items = itemsOf(sectionId);
-            const collapsed = isDefault
-              ? defaultCollapsed
-              : Boolean(sectionId && collapsedSectionIds?.[sectionId]);
+            const sectionItems = itemsOf(sectionId);
+            // Keep the Pinned menu mounted when its own checkbox hides the default list.
+            const headerOnly =
+              isDefault && (isHidden(section) || (hasUserSections && sectionItems.length === 0));
+            const items = headerOnly ? EMPTY_ITEMS : sectionItems;
+            const collapsed =
+              headerOnly ||
+              (isDefault ? defaultCollapsed : Boolean(collapsedSectionIds?.[sectionId]));
             const label = isDefault ? defaultLabel : section.name;
-            // Every header menu can start a new (empty) section; the default
-            // one is hidden while empty, so it cannot be the only entry point.
-            const sectionMenu = actions ? (
-              <PinSectionHeaderMenu
-                label={t('sidebar.pinSections.sectionActions', 'Section actions')}
-                newSectionLabel={t('sidebar.pinSections.newSection', 'New Section…')}
-                renameLabel={t('sidebar.pinSections.rename', 'Rename Section')}
-                deleteLabel={t('sidebar.pinSections.delete', 'Delete Section')}
-                onNewSection={() => setNameDialog({ kind: 'create' })}
-                onRename={
-                  sectionId
-                    ? () => setNameDialog({ kind: 'rename', sectionId, initialName: section.name })
-                    : undefined
-                }
-                onDelete={sectionId ? () => actions.onDeleteSection(sectionId) : undefined}
-              />
-            ) : null;
-            const firstAction = index === 0 ? headerAction : null;
-            const action =
-              firstAction && sectionMenu ? (
-                <span className="flex items-center">
-                  {sectionMenu}
-                  {firstAction}
-                </span>
-              ) : (
-                (sectionMenu ?? firstAction ?? undefined)
-              );
+            const menu = sectionMenuFor(section);
+            const action = index === 0 ? headerAction : undefined;
             const hiddenCount = collapsed ? 0 : (hiddenCounts?.[sectionKey] ?? 0);
             const list = (renderHeader?: (header: ReactElement) => ReactNode) => (
               <SidebarUpdatedSessionList
                 {...listProps}
                 renderHeader={renderHeader}
-                onDropPinnedSession={dropBySection.get(sectionId)}
+                onDropPinnedSession={headerOnly ? undefined : dropBySection.get(sectionId)}
                 // Same gap between sections as between the sidebar's other groups.
                 className={
                   // Padding, not margin: the space between sections stays part of a
                   // drop target, so a drag crossing it never shows "no drop".
-                  index < visibleSections.length - 1 ? (collapsed ? 'pb-1' : 'pb-4') : undefined
+                  stylex.props(index < visibleSections.length - 1 && (collapsed ? pinStyles.foldedGap : pinStyles.sectionGap)).className
                 }
                 items={items}
                 grouping="manual"
-                pinSectionId={sectionId}
+                pinSectionId={headerOnly ? undefined : sectionId}
                 pinSectionMenu={menuBySection.get(sectionId)}
                 showPinnedIcon={false}
                 labels={{ heading: label, emptyTitle, emptyDescription }}
                 collapsedBuckets={collapsed ? COLLAPSED : undefined}
                 onToggleBucket={
-                  isDefault
-                    ? onToggleDefault
-                    : sectionId && onToggleSection
-                      ? () => onToggleSection(sectionId)
-                      : undefined
+                  headerOnly
+                    ? undefined
+                    : isDefault
+                      ? onToggleDefault
+                      : sectionId && onToggleSection
+                        ? () => onToggleSection(sectionId)
+                        : undefined
                 }
                 toggleBucketLabel={label}
+                headerMenu={menu}
                 headerAction={action}
                 footer={
                   hiddenCount > 0 ? (
@@ -539,10 +586,10 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                             )}
                             // The row grid: px-2 padding + the 14px leading
                             // slot + gap-2 puts this line on the title edge.
-                            className="flex cursor-default select-none items-center gap-2 px-2 pb-0.5 pt-1 text-xs text-sidebar-foreground-muted/70"
+                            {...stylex.props(sectionStyles.hiddenRowsHint)}
                           >
-                            <span className="w-3.5 shrink-0" aria-hidden="true" />
-                            <span className="truncate">
+                            <span {...stylex.props(sectionStyles.leadingSpacer)} aria-hidden="true" />
+                            <span {...stylex.props(sectionStyles.truncatedLabel)}>
                               {t('sidebar.pinSections.hiddenByScope', '{{count}} sessions hidden', {
                                 count: hiddenCount,
                               })}
@@ -623,7 +670,6 @@ function usePendingUntil<T>(
   }, [pending]);
   return [pending, setPending];
 }
-const PINNED_ROW_LIFT_SHADOW = '0 6px 16px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.12)';
 
 /** Sections meet sections; rows aim by pointer position (`pinnedPointerTargetAt`). */
 const pinnedCollisionDetection: CollisionDetection = (args) =>
@@ -683,8 +729,8 @@ function PinnedRowGhost({ source }: { source: HTMLElement | null }) {
     <div
       ref={bodyRef}
       data-pin-drag-overlay=""
-      className="overflow-hidden rounded-md border border-sidebar-border bg-sidebar"
-      style={{ boxShadow: PINNED_ROW_LIFT_SHADOW, cursor: 'grabbing' }}
+      {...stylex.props(sectionStyles.dragSurface)}
+      style={{ boxShadow: uiShadow.popover, cursor: 'grabbing' }}
     />
   );
 }
@@ -793,44 +839,110 @@ function SortablePinSection({
 
 function PinSectionHeaderMenu({
   label,
-  newSectionLabel,
-  renameLabel,
-  deleteLabel,
+  revealOnHover,
+  onNewChat,
   onNewSection,
+  onHide,
   onRename,
   onDelete,
+  visibility,
+  onSetVisible,
 }: {
   label: string;
-  newSectionLabel: string;
-  renameLabel: string;
-  deleteLabel: string;
-  onNewSection: () => void;
+  /** Pointer surfaces show the ⋯ only while its header row is hovered, focused or open. */
+  revealOnHover: boolean;
+  onNewChat?: () => void;
+  /** Absent for viewers who cannot manage sections. */
+  onNewSection?: () => void;
+  onHide?: () => void;
   /** Absent for the default section, which cannot be renamed or deleted. */
   onRename?: () => void;
   onDelete?: () => void;
+  /** Every section with whether it is shown on this device; each row toggles it. */
+  visibility?: readonly { key: string; name: string; visible: boolean }[];
+  onSetVisible: (sectionKey: string, visible: boolean) => void;
 }) {
+  const { t } = useTranslation();
+  const entries = visibility ?? [];
+  const hasHiddenSections = entries.some((entry) => !entry.visible);
   return (
     <Menu.Root>
-      <Menu.Trigger
-        render={
-          <Button type="button" variant="ghost" size="mini" icon aria-label={label}>
-            <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.5} />
-          </Button>
-        }
-      />
-      <Menu.Content align="end" className="min-w-[160px]">
-        <Menu.Item icon={FolderPlus} onClick={onNewSection}>
-          {newSectionLabel}
-        </Menu.Item>
+      <span
+        {...stylex.props(pinStyles.menuHost, revealOnHover && pinStyles.menuReveal)}
+      >
+        <Menu.Trigger
+          render={
+            <Button type="button" variant="ghost" size="mini" icon aria-label={label}>
+              <MoreHorizontal {...stylex.props(sectionStyles.menuGlyph)} strokeWidth={1.5} />
+            </Button>
+          }
+        />
+      </span>
+      <Menu.Content align="end" xstyle={sectionStyles.sectionMenu}>
+        {onNewChat ? (
+          <>
+            <Menu.Item icon={SquarePen} onClick={onNewChat}>
+              {t('sidebar.pinSections.newChat', 'New Chat in This Section')}
+            </Menu.Item>
+            <Menu.Separator />
+          </>
+        ) : null}
+        {onNewSection ? (
+          <Menu.Item icon={FolderPlus} onClick={onNewSection}>
+            {t('sidebar.pinSections.newSection', 'New Section…')}
+          </Menu.Item>
+        ) : null}
+        {onHide ? (
+          <Menu.Item icon={EyeOff} onClick={onHide}>
+            {t('sidebar.pinSections.hide', 'Hide Section')}
+          </Menu.Item>
+        ) : null}
         {onRename ? (
           <Menu.Item icon={Pencil} onClick={onRename}>
-            {renameLabel}
+            {t('sidebar.pinSections.rename', 'Rename Section')}
           </Menu.Item>
         ) : null}
         {onDelete ? (
           <Menu.Item icon={Trash2} onClick={onDelete}>
-            {deleteLabel}
+            {t('sidebar.pinSections.delete', 'Delete Section')}
           </Menu.Item>
+        ) : null}
+        {entries.length > 0 ? (
+          <>
+            {onNewSection || onHide || onRename || onDelete ? <Menu.Separator /> : null}
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger icon={Eye}>
+                {t('sidebar.pinSections.visibleSections', 'Visible Sections')}
+              </Menu.SubmenuTrigger>
+              <Menu.Content xstyle={sectionStyles.visibilityMenu}>
+                {entries.map((entry) => (
+                  <Menu.CheckboxItem
+                    key={entry.key}
+                    checked={entry.visible}
+                    closeOnClick={false}
+                    indicator="checkbox"
+                    onCheckedChange={(checked) => onSetVisible(entry.key, checked)}
+                  >
+                    {entry.name}
+                  </Menu.CheckboxItem>
+                ))}
+                {hasHiddenSections && entries.length > 1 ? (
+                  <>
+                    <Menu.Separator />
+                    <Menu.Item
+                      onClick={() => {
+                        for (const entry of entries) {
+                          if (!entry.visible) onSetVisible(entry.key, true);
+                        }
+                      }}
+                    >
+                      {t('sidebar.pinSections.showAll', 'Show All')}
+                    </Menu.Item>
+                  </>
+                ) : null}
+              </Menu.Content>
+            </Menu.Submenu>
+          </>
         ) : null}
       </Menu.Content>
     </Menu.Root>
@@ -877,15 +989,15 @@ function PinSectionNameDialog({
         if (!open && !saving) onClose();
       }}
     >
-      <Dialog.Content className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
-        <Dialog.Header className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
-          <Dialog.Title className="text-base">
+      <Dialog.Content xstyle={sectionStyles.nameDialog}>
+        <Dialog.Header xstyle={sectionStyles.nameDialogHeader}>
+          <Dialog.Title>
             {target?.kind === 'rename'
               ? t('sidebar.pinSections.renameTitle', 'Rename Section')
               : t('sidebar.pinSections.createTitle', 'New Section')}
           </Dialog.Title>
         </Dialog.Header>
-        <div className="px-4 py-4 sm:px-5">
+        <div {...stylex.props(sectionStyles.nameDialogBody)}>
           <Input
             autoFocus
             value={draft}
@@ -902,7 +1014,7 @@ function PinSectionNameDialog({
             }}
           />
         </div>
-        <Dialog.Footer className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
+        <Dialog.Footer xstyle={sectionStyles.nameDialogFooter}>
           <Button variant="secondary" size="small" onClick={onClose} disabled={saving}>
             {t('common.cancel', 'Cancel')}
           </Button>
@@ -914,3 +1026,29 @@ function PinSectionNameDialog({
     </Dialog.Root>
   );
 }
+
+const sectionStyles = stylex.create({
+  hiddenRowsHint: { display: 'flex', cursor: 'default', userSelect: 'none', alignItems: 'center', gap: appSpace[2], paddingInline: appSpace[2], paddingBottom: appSpace[0.5], paddingTop: appSpace[1], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  leadingSpacer: { width: appSpace[3.5], flexShrink: 0 },
+  truncatedLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  dragSurface: { overflow: 'hidden', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground },
+  menuGlyph: { height: appSpace[3.5], width: appSpace[3.5] },
+  sectionMenu: { minWidth: '160px' },
+  visibilityMenu: { minWidth: '200px' },
+  nameDialog: { maxWidth: '24rem', gap: 0, overflow: 'hidden', padding: { 'default': 0, '@media (min-width: 640px)': 0 } },
+  nameDialogHeader: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4], paddingRight: { 'default': appSpace[12], '@media (min-width: 640px)': appSpace[12] }, textAlign: 'start' },
+  nameDialogTitle: { fontSize: uiText.bodySize, lineHeight: uiText.bodyLeading },
+  nameDialogBody: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4] },
+  nameDialogFooter: { backgroundColor: uiColors.secondaryBackground, paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[3] },
+});
+
+const pinStyles = stylex.create({
+  menuHost: { display: 'inline-flex' },
+  menuReveal: {
+    opacity: { default: 0, [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 1, ':has(:focus-visible, [data-popup-open])': 1 },
+    pointerEvents: { default: 'none', [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 'auto', ':has(:focus-visible, [data-popup-open])': 'auto' },
+    transitionProperty: 'opacity', transitionDuration: uiMotion.fast,
+  },
+  foldedGap: { paddingBottom: appSpace[1] },
+  sectionGap: { paddingBottom: appSpace[4] },
+});

@@ -184,6 +184,18 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'Session',
   },
   {
+    id: 'session.openRunConfig',
+    titleKey: 'commands.session.openRunConfig',
+    title: 'Open Run Configuration',
+    category: 'Session',
+  },
+  {
+    id: 'session.openAddMenu',
+    titleKey: 'commands.session.openAddMenu',
+    title: 'Open Composer + Menu',
+    category: 'Session',
+  },
+  {
     id: 'mention.toggleSessionProjectScope',
     titleKey: 'commands.mention.toggleSessionProjectScope',
     title: 'Toggle Session Mention Project Scope',

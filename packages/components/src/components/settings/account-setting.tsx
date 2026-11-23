@@ -12,6 +12,10 @@ import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import {
+  deleteAccountWorkspace,
+  hasEncryptedContentMode,
+} from '@/lib/workspace-removal-transition';
 import { usePlatform } from '@lody/platform/react';
 import { E2eeTeamSettingsHost } from './e2ee-team-settings';
 import { useCloudQuery, useCloudAction } from '@lody/platform/react';
@@ -38,9 +42,10 @@ import {
 } from '@/lib/organization-member-role';
 import {
   AccountSettingsPure,
+  deriveWorkspaceDeleteBillingGuard,
   type AccountSettingsSurface,
-  type WorkspaceDeleteBillingGuard,
 } from './account-setting-pure';
+import { useE2eeRecoverySection } from './e2ee/recovery-host';
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { DeletedWorkspaceBilling } from './deleted-workspace-billing';
@@ -124,8 +129,9 @@ function CloudAccountSettings({
   const signOut = useAuthSignOut();
   const router = useRouter();
   const closeSettings = useSetAtom(settingsDialogOpenAtom);
+  const recoverySection = useE2eeRecoverySection();
   const recoveryEntry =
-    surface === 'account' && router?.options?.context?.recoveryPage ? (
+    surface === 'account' && recoverySection && router?.options?.context?.recoveryPage ? (
       <Button
         variant="secondary"
         onClick={() => {
@@ -151,11 +157,7 @@ function CloudAccountSettings({
   const currentUser = session?.user ?? null;
   const currentUserId = currentUser?.id ?? null;
   const activeOrganizationId = activeOrganization?.id;
-  const encrypted = Boolean(
-    activeOrganization &&
-    'contentMode' in activeOrganization &&
-    activeOrganization.contentMode === 'e2ee'
-  );
+  const encrypted = hasEncryptedContentMode(activeOrganization);
   const platform = usePlatform();
   const memberLimitState = useCloudQuery(
     cloudOperations.billing.getWorkspaceMemberLimitState,
@@ -169,37 +171,15 @@ function CloudAccountSettings({
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
     activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  // Deleting a paid workspace needs a billing-aware guard: a live subscription
-  // blocks deletion (cancel first); a cancel-scheduled one gets a warning that
-  // deletion preserves its scheduled end and any accrued charges.
+  // Not skipped for encrypted workspaces: the subscription guard on deletion still applies.
   const billingOverview = useCloudQuery(
     cloudOperations.billing.getBillingOverview,
-    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  const deleteBillingGuard: WorkspaceDeleteBillingGuard | null = useMemo(() => {
-    if (
-      !billingOverview ||
-      billingOverview.effectivePlanTier === 'free' ||
-      (billingOverview.entitlementSource === 'stripe_gift' && !billingOverview.autoRenewAfterGift)
-    ) {
-      return null;
-    }
-    if (billingOverview.cancelAtPeriodEnd) {
-      const entitlementEnd =
-        billingOverview.giftEndsAt && billingOverview.giftEndsAt > Date.now()
-          ? billingOverview.giftEndsAt
-          : billingOverview.currentPeriodEnd;
-      return {
-        kind: 'cancel-scheduled',
-        formattedPeriodEnd: entitlementEnd
-          ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(
-              new Date(entitlementEnd)
-            )
-          : null,
-      };
-    }
-    return { kind: 'active-subscription' };
-  }, [billingOverview]);
+  const deleteBillingGuard = useMemo(
+    () => deriveWorkspaceDeleteBillingGuard(billingOverview, Date.now()),
+    [billingOverview]
+  );
 
   const sortedMembers = useMemo(() => {
     const members = activeOrganization?.members ?? [];
@@ -714,17 +694,17 @@ function CloudAccountSettings({
 
   const handleDeleteAccount = useCallback(async () => {
     try {
-      // Per product decision, deleting your account deletes every workspace you
-      // own (including shared/team workspaces). Run the deletes in parallel.
-      // `organization.delete` is best-effort: it is only permitted for
-      // workspaces you own, so it fails harmlessly for workspaces where you are
-      // a non-owner member (those memberships are cleared when `deleteUser`
-      // removes your account below). A workspace that fails to delete must not
-      // block account deletion — removing the account is the critical step — so
-      // failures are logged, not thrown.
+      // Each service checks ownership. A refused workspace must not block account deletion.
       const ownedOrgs = organizations ?? [];
       const orgResults = await Promise.allSettled(
-        ownedOrgs.map((org) => authClient.organization.delete({ organizationId: org.id }))
+        ownedOrgs.map((org) =>
+          deleteAccountWorkspace(
+            org.id,
+            hasEncryptedContentMode(org),
+            authClient,
+            platform.e2eeWorkspaces
+          )
+        )
       );
       orgResults.forEach((result, index) => {
         if (result.status === 'rejected') {
@@ -750,7 +730,7 @@ function CloudAccountSettings({
       });
       throw error;
     }
-  }, [authClient, organizations, signOut, t]);
+  }, [authClient, organizations, platform.e2eeWorkspaces, signOut, t]);
 
   if (orgLoading) {
     return (

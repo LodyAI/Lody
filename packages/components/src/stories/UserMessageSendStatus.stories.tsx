@@ -1,8 +1,16 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { MessageSendStatusContext } from '@/components/ai-gui/message-send-status-context';
+
+const storyStyles = stylex.create({
+  messageFrame: { width: '100%', maxWidth: '42rem', marginInline: 'auto' },
+  singleMessage: { height: '300px' },
+  conversation: { height: '600px' },
+  contextCopy: { height: '400px' },
+});
 
 const meta = {
   title: 'AI/UserMessageSendStatus',
@@ -92,7 +100,7 @@ export const Sending: Story = {
   },
   render: (args) => (
     <MessageSendStatusContext.Provider value={new Set(['msg-sending'])}>
-      <div className="h-[300px] w-full max-w-2xl mx-auto">
+      <div {...stylex.props(storyStyles.messageFrame, storyStyles.singleMessage)}>
         <SessionChatStreamView {...args} />
       </div>
     </MessageSendStatusContext.Provider>
@@ -113,7 +121,7 @@ export const SentToServer: Story = {
     renderMessageRow,
   },
   render: (args) => (
-    <div className="h-[300px] w-full max-w-2xl mx-auto">
+    <div {...stylex.props(storyStyles.messageFrame, storyStyles.singleMessage)}>
       <SessionChatStreamView {...args} />
     </div>
   ),
@@ -131,7 +139,7 @@ export const PendingApplication: Story = {
     renderMessageRow,
   },
   render: (args) => (
-    <div className="h-[300px] w-full max-w-2xl mx-auto">
+    <div {...stylex.props(storyStyles.messageFrame, storyStyles.singleMessage)}>
       <SessionChatStreamView {...args} />
     </div>
   ),
@@ -153,7 +161,7 @@ export const Delivered: Story = {
     renderMessageRow,
   },
   render: (args) => (
-    <div className="h-[300px] w-full max-w-2xl mx-auto">
+    <div {...stylex.props(storyStyles.messageFrame, storyStyles.singleMessage)}>
       <SessionChatStreamView {...args} />
     </div>
   ),
@@ -192,7 +200,7 @@ export const AllStates: Story = {
   },
   render: (args) => (
     <MessageSendStatusContext.Provider value={new Set(['msg-4'])}>
-      <div className="h-[600px] w-full max-w-2xl mx-auto">
+      <div {...stylex.props(storyStyles.messageFrame, storyStyles.conversation)}>
         <SessionChatStreamView {...args} />
       </div>
     </MessageSendStatusContext.Provider>
@@ -216,7 +224,7 @@ export const ContextCopy: Story = {
     ),
   },
   render: (args) => (
-    <div className="mx-auto h-[400px] w-full max-w-2xl">
+    <div {...stylex.props(storyStyles.messageFrame, storyStyles.contextCopy)}>
       <SessionChatStreamView {...args} />
     </div>
   ),

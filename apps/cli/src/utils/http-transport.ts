@@ -1,15 +1,17 @@
+import { version } from '@/pkg';
 import { channel } from 'node:diagnostics_channel';
 import {
   Agent,
   Pool,
   ProxyAgent,
-  fetch as undiciFetch,
+  getGlobalDispatcher,
   setGlobalDispatcher,
   type Dispatcher,
 } from 'undici';
 import { sanitizeUrlForLogging } from './log-sanitize';
 import { getLogger, type Logger } from './logger';
 import { resolveProxyUrl } from './proxy';
+import { fetchWithUndiciDispatcher } from './undici-fetch-compat';
 
 export type CliFetch = typeof globalThis.fetch;
 
@@ -54,6 +56,26 @@ export interface CliHttpTransportOptions {
 let singletonTransport: CliHttpTransport | null = null;
 let singletonConfigKey: string | null = null;
 let undiciDiagnosticsInstalled = false;
+let activeGlobalTransport: CliHttpTransport | null = null;
+let installedGlobalFetch: CliFetch | null = null;
+let currentBaseFetch: CliFetch | null = null;
+let previousGlobalDispatcher: Dispatcher | null = null;
+
+const identifiedFetches = new WeakSet<CliFetch>();
+
+function withCliUserAgent(fetchImpl: CliFetch): CliFetch {
+  if (identifiedFetches.has(fetchImpl)) return fetchImpl;
+  const identified: CliFetch = (input, init) => {
+    const headers = new Headers(
+      init?.headers ?? (input instanceof Request ? input.headers : undefined)
+    );
+    const mode = process.argv[2] === 'start' ? 'daemon' : 'oneshot';
+    headers.set('user-agent', `lody-cli/${version} (${mode})`);
+    return fetchImpl(input, { ...init, headers });
+  };
+  identifiedFetches.add(identified);
+  return identified;
+}
 
 export function resolveCliHttpTransportConfig(
   env: NodeJS.ProcessEnv = process.env
@@ -131,18 +153,11 @@ export function createCliHttpTransport(
     },
   });
 
-  const fetchImpl: CliFetch = async (input, init) => {
-    const nextInit = {
-      ...(init ?? {}),
-      dispatcher,
-    } as NonNullable<Parameters<typeof undiciFetch>[1]>;
-    const response = await undiciFetch(input as Parameters<typeof undiciFetch>[0], nextInit);
-    return response as unknown as Response;
-  };
+  const fetchImpl: CliFetch = (input, init) => fetchWithUndiciDispatcher(input, init, dispatcher);
 
   return {
     dispatcher,
-    fetch: fetchImpl,
+    fetch: withCliUserAgent(fetchImpl),
     diagnostics: () => ({ ...config }),
     close: async () => {
       await dispatcher.close();
@@ -158,10 +173,21 @@ export function installCliHttpGlobalDispatcher(
   const config = resolveCliHttpTransportConfig(options.env);
 
   if (!transport) {
+    activeGlobalTransport = null;
+    globalThis.fetch = withCliUserAgent(globalThis.fetch);
     logger.debug('[http-transport] using Node default global dispatcher');
     return null;
   }
 
+  activeGlobalTransport = transport;
+  if (currentBaseFetch === null || globalThis.fetch === currentBaseFetch) {
+    const baseFetch = globalThis.fetch;
+    currentBaseFetch = baseFetch;
+    installedGlobalFetch = (input, init) =>
+      (activeGlobalTransport?.fetch ?? withCliUserAgent(baseFetch))(input, init);
+    globalThis.fetch = installedGlobalFetch;
+  }
+  previousGlobalDispatcher ??= getGlobalDispatcher();
   setGlobalDispatcher(transport.dispatcher);
 
   if (config.diagnosticsEnabled) {
@@ -176,13 +202,23 @@ export function installCliHttpGlobalDispatcher(
 
 export function getCliHttpFetch(options: CliHttpTransportOptions = {}): CliFetch {
   const transport = getOrCreateCliHttpTransport(options);
-  return transport?.fetch ?? globalThis.fetch.bind(globalThis);
+  return transport?.fetch ?? withCliUserAgent(globalThis.fetch.bind(globalThis));
 }
 
 export async function resetCliHttpTransportForTests(): Promise<void> {
   const previous = singletonTransport;
   singletonTransport = null;
   singletonConfigKey = null;
+  activeGlobalTransport = null;
+  if (installedGlobalFetch && globalThis.fetch === installedGlobalFetch && currentBaseFetch) {
+    globalThis.fetch = currentBaseFetch;
+  }
+  installedGlobalFetch = null;
+  currentBaseFetch = null;
+  if (previousGlobalDispatcher) {
+    setGlobalDispatcher(previousGlobalDispatcher);
+    previousGlobalDispatcher = null;
+  }
   await previous?.close();
 }
 

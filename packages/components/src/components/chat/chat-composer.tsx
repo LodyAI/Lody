@@ -13,8 +13,18 @@ import {
   type ReactNode,
   type Ref,
 } from 'react';
-import { ClipboardPaste, RefreshCw, X, Pencil } from 'lucide-react';
+import {
+  ClipboardPaste,
+  RefreshCw,
+  X,
+  Pencil,
+  TriangleAlert,
+  CircleAlert,
+  Info,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useAtomValue } from 'jotai';
+import { conversationFontSizeAtom } from '@/atoms/settings';
 
 import type { AcpCommandSummary } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
@@ -25,8 +35,7 @@ import {
   VisualAnnotationReferenceChip,
   type VisualAnnotationReferenceChipItem,
 } from './visual-annotation-reference-chip';
-import { cn } from '@/lib/utils';
-import { COMPOSER_ELEVATION_CLASS, COMPOSER_SESSION_SURFACE_CLASS } from './composer-surface';
+import { composerSurfaceStyles } from './composer-surface';
 import {
   CombinedMentionTextarea,
   type CombinedMentionTextareaHandle,
@@ -53,8 +62,9 @@ import { toIntlLocale } from '@/lib/intl-locale';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button, type ButtonProps } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
+import { dialog as dialogTokens } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { Drawer } from '@lody/ui/drawer';
-import type { TextareaProps } from '@lody/ui/textarea';
+import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
   COMPOSER_COMPACT_PLACEHOLDER_MAX_PX,
@@ -67,8 +77,18 @@ import { Kbd as KbdPrimitive } from '@lody/ui/kbd';
 import { commands, formatKeyBinding } from '@/lib/commands';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import * as stylex from '@stylexjs/stylex';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { text as textScale, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  text as textScale,
+  space,
+  control,
+  duration,
+  ease,
+  radius,
+} from '@lody/ui/tokens/scales.stylex';
+import { colors, shadow, media } from '@lody/ui/tokens/colors.stylex';
+import { card } from '@lody/ui/card/card.tokens.stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import {
   type ComposerInputElement,
   getComposerCaretRect,
@@ -80,9 +100,427 @@ import {
 const typography = stylex.create({
   imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
   prompt: { fontSize: textScale.bodySize, lineHeight: textScale.bodyLeading },
+  sheetPrompt: { fontSize: textScale.headlineSize },
   helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   code: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
+});
+
+const styles = stylex.create({
+  rootSheet: { minHeight: 0, flex: '1 1 0%', gap: 0 },
+  columnSheet: { height: '100%', minHeight: 0, gap: 0 },
+  boxSheet: { display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column', padding: 0 },
+  textareaSheet: {
+    minHeight: 0,
+    flex: '1 1 0%',
+    paddingInline: themeSpace[5],
+    paddingBlock: space[4],
+    lineHeight: '1.75rem',
+  },
+  preservedDisabled: { opacity: control.disabledOpacity },
+  sheetMentionSurface: {
+    '--mention-chip-surface': colors.background,
+    '--mention-chip-overlay': 'none',
+  },
+  sheetStripInset: { paddingInline: themeSpace[5], paddingTop: space[3] },
+  footerSheet: {
+    flexShrink: 0,
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    paddingInline: space[3],
+    paddingTop: space[2],
+    paddingBottom:
+      'calc(8px + max(0px, var(--safe-area-bottom, 0px) - var(--native-keyboard-height, 0px)))',
+  },
+  statusSheet: { paddingInline: themeSpace[5] },
+  textarea: {
+    color: { default: colors.label, '::placeholder': field.placeholder },
+    fontWeight: 400,
+    letterSpacing: 'normal',
+  },
+  textareaLanding: {
+    minHeight: { default: '120px', '@media (min-width: 640px)': '140px' },
+    paddingInline: 'calc(var(--spacing) * 0)',
+    paddingBlock: 'calc(var(--spacing) * 0)',
+  },
+  textareaSession: {
+    paddingInline: 'calc(var(--spacing) * 1)',
+    paddingBlock: 'calc(var(--spacing) * 0)',
+  },
+  textareaMobile: { minHeight: '24px' },
+  textareaDesktop: { minHeight: '48px' },
+  textareaDialog: {
+    width: '100%',
+    minHeight: '120px',
+    borderRadius: 'var(--radius-2xl)',
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
+  textareaModal: {
+    minHeight: '132px',
+    borderWidth: 0,
+    paddingInline: 0,
+    paddingBlock: 0,
+    resize: 'none',
+  },
+  textareaHint: { paddingRight: 'calc(var(--spacing) * 16)' },
+  secondaryAction: { width: 'auto', userSelect: 'none', flexShrink: 0 },
+  /* The composer's own frame. */
+  root: { display: 'flex', width: '100%', flexDirection: 'column' },
+  rootDialog: { gap: themeSpace[3] },
+  rootLanding: { gap: themeSpace[12] },
+  rootSession: { gap: themeSpace[2] },
+  title: { textAlign: 'center' },
+  titleText: {
+    userSelect: 'none',
+    fontSize: textScale.titleSize,
+    lineHeight: textScale.titleLeading,
+    fontWeight: 600,
+  },
+  column: { display: 'flex', flexDirection: 'column' },
+  columnLanding: { gap: themeSpace[2] },
+  columnSession: { gap: themeSpace[1] },
+  topSelector: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+
+  /* The landing composer box. */
+  landingBox: {
+    containerType: 'inline-size',
+    containerName: 'composer-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[4],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[4],
+    paddingBottom: themeSpace[3],
+    position: 'relative',
+  },
+  /* The dialog composer box, which has no container of its own. */
+  dialogBox: { display: 'flex', width: '100%', flexDirection: 'column' },
+  mentionSurface: { '--mention-chip-surface': card.background, '--mention-chip-overlay': 'none' },
+  fieldFocus: {
+    boxShadow: {
+      default: card.shadow,
+      ':has(textarea:focus)': `0 0 0 2px ${colors.accent}, ${card.shadow}`,
+    },
+  },
+  boxDropping: { boxShadow: `0 0 0 2px ${colors.accent}, ${card.shadow}` },
+  /* The attachment strips. */
+  referenceStrip: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: themeSpace[2],
+    paddingBottom: themeSpace[1],
+  },
+  attachmentStrip: {
+    display: 'flex',
+    gap: themeSpace[2],
+    overflowX: 'auto',
+    paddingBottom: themeSpace[1],
+  },
+  imageCard: {
+    position: 'relative',
+    flexShrink: 0,
+    overflow: 'hidden',
+    borderRadius: radius.medium,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
+  },
+  imageCardMobile: { width: '104px', height: '104px' },
+  imageCardDesktop: { width: themeSpace[20], height: themeSpace[20] },
+  imageCardFailed: { boxShadow: `0 0 0 2px ${colors.destructive}, ${shadow.inset}` },
+  imageButton: { width: '100%', height: '100%' },
+  imagePreview: { width: '100%', height: '100%', objectFit: 'cover' },
+  imageBadge: { color: colors.secondaryLabel },
+  imageProgress: {
+    position: 'absolute',
+    inset: 0,
+    backgroundColor: media.scrim,
+    transitionProperty: 'clip-path',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  imageScrim: { position: 'absolute', inset: 0, backgroundColor: media.scrim },
+  imageCorner: { position: 'absolute', top: themeSpace[1], right: themeSpace[1] },
+  imageProgressBar: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    backgroundColor: media.scrim,
+    paddingInline: themeSpace[1],
+    paddingBlock: themeSpace[0.5],
+    textAlign: 'center',
+    color: media.label,
+  },
+  imageFailure: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    width: '100%',
+    borderRadius: 0,
+  },
+  fileCard: {
+    position: 'relative',
+    display: 'flex',
+    flexShrink: 0,
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderRadius: radius.medium,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
+    padding: themeSpace[2],
+  },
+  fileCardMobile: { width: '104px', height: '104px' },
+  fileCardDesktop: { width: themeSpace[20], minHeight: themeSpace[20] },
+  fileCardFailed: { boxShadow: `0 0 0 2px ${colors.destructive}, ${shadow.inset}` },
+  fileType: {
+    maxWidth: '64%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: themeFontWeight.medium,
+    textTransform: 'uppercase',
+    letterSpacing: '0.025em',
+  },
+  fileTypeFailed: { color: colors.destructive },
+  fileTypeResting: { color: colors.secondaryLabel },
+  fileName: {
+    marginTop: themeSpace[1],
+    overflowWrap: 'break-word',
+    textAlign: 'left',
+    fontWeight: themeFontWeight.normal,
+    color: colors.label,
+  },
+  fileNameMobile: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 3,
+  },
+  fileNameDesktop: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+  },
+  fileRetry: { marginTop: 'auto', width: 'fit-content', maxWidth: '100%' },
+  fileStatus: {
+    marginTop: 'auto',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    paddingTop: themeSpace[1],
+    color: colors.secondaryLabel,
+  },
+  fileProgressTrack: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    height: themeSpace[1],
+    backgroundColor: colors.gray4,
+  },
+  fileProgressFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+    transitionProperty: 'width',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+
+  /* The footers. */
+  footer: {
+    display: 'flex',
+    userSelect: 'none',
+    alignItems: 'center',
+    columnGap: themeSpace[1.5],
+  },
+  footerLanding: { paddingTop: themeSpace[2] },
+  footerSession: { paddingTop: themeSpace[0.5] },
+  footerFace: {
+    containerType: 'inline-size',
+    containerName: 'composer-face',
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    columnGap: themeSpace[1.5],
+    overflow: 'hidden',
+  },
+  footerActions: {
+    marginLeft: 'auto',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  bottomBar: { userSelect: 'none', paddingInline: themeSpace[4], paddingTop: themeSpace[1] },
+
+  /* The focus hint, hidden once the box takes focus. */
+  focusHint: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    top: themeSpace[3],
+    right: themeSpace[3],
+    zIndex: 10,
+    display: 'flex',
+    alignItems: 'center',
+    color: colors.tertiaryLabel,
+    opacity: { default: 1, ':where(.group:focus-within *)': 0 },
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+
+  /* The composer's status line. */
+  status: { display: 'flex', alignItems: 'start', gap: space[1.5], paddingInline: themeSpace[1] },
+  statusMark: { width: space[4], height: space[4], flexShrink: 0 },
+  statusWarning: { color: colors.warning },
+  statusError: { color: colors.destructive },
+  statusMuted: { color: colors.secondaryLabel },
+
+  /* The dialog composer's own rows. */
+  dialogRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[3],
+    '@media (min-width: 640px)': {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
+    },
+  },
+  dialogSelectors: {
+    display: 'flex',
+    width: '100%',
+    flexWrap: 'wrap',
+    userSelect: 'none',
+    alignItems: 'flex-end',
+    gap: themeSpace[2],
+  },
+  dialogActions: {
+    display: 'flex',
+    width: '100%',
+    flexDirection: 'column',
+    userSelect: 'none',
+    gap: themeSpace[2],
+    '@media (min-width: 640px)': {
+      marginLeft: 'auto',
+      width: 'auto',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+    },
+  },
+
+  /* The pasted-text editor and its frame. */
+  pastedEditor: {
+    display: 'block',
+    minHeight: 0,
+    width: '100%',
+    flex: '1 1 0%',
+    resize: 'none',
+    overflow: 'auto',
+  },
+  pastedEditorMobile: { paddingInline: themeSpace[4], paddingBlock: themeSpace[3] },
+  pastedEditorDesktop: { height: '100%' },
+  pastedDrawer: {
+    display: 'flex',
+    height: '85dvh',
+    minHeight: 0,
+    flexDirection: 'column',
+  },
+  pastedDrawerGrabber: {
+    display: 'flex',
+    flexShrink: 0,
+    justifyContent: 'center',
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[1],
+  },
+  pastedDrawerHandle: {
+    height: themeSpace[1],
+    width: themeSpace[9],
+    borderRadius: themeRadius.full,
+    backgroundColor: colors.gray2,
+  },
+  pastedDrawerHeader: {
+    display: 'flex',
+    flexShrink: 0,
+    flexDirection: 'column',
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    paddingRight: themeSpace[2],
+    paddingLeft: themeSpace[4],
+  },
+  pastedDrawerTitleRow: { display: 'flex', alignItems: 'center', gap: themeSpace[3] },
+  pastedTitle: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  pastedDrawerTitle: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  pastedSummary: {
+    fontVariantNumeric: 'tabular-nums',
+  },
+  pastedDrawerSummary: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    paddingRight: themeSpace[2],
+  },
+  pastedDrawerContent: {
+    paddingTop: 0,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    paddingRight: 0,
+    paddingBlockStart: 0,
+    paddingBlockEnd: 0,
+    paddingInlineStart: 0,
+    paddingInlineEnd: 0,
+    [dialogTokens.gap]: 'calc(var(--spacing) * 0)',
+  },
+  pastedDialogContent: {
+    maxHeight: '85vh',
+    display: 'flex',
+    height: '85vh',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  pastedDialogHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[5],
+    paddingBlock: themeSpace[3],
+  },
+  pastedDialogTitleRow: { display: 'flex', alignItems: 'center', gap: themeSpace[3] },
+  pastedDialogBody: {
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    paddingInline: themeSpace[5],
+    paddingBlock: themeSpace[4],
+  },
+  glyph14: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0 },
+  glyph16: { width: themeSpace[4], height: themeSpace[4] },
+  glyph12: { width: themeSpace[3], height: themeSpace[3] },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  glyphMuted: { color: colors.secondaryLabel },
 });
 
 /* The `modal` variant: the composer as the body of a create dialog (Today's
@@ -95,11 +533,14 @@ const modalStyles = stylex.create({
     flexDirection: 'column',
     gap: space[3],
   },
-  // One row, like a create dialog's property bar (Linear): it never wraps.
-  // Running short, the project label truncates to its minimum first; past
-  // that (desktop windows go down to 400px) the row scrolls sideways, its
-  // scrollbar hidden. The block padding keeps the pills' lift and focus rings
-  // inside the scroll box.
+  textarea: {
+    minHeight: '132px',
+    borderWidth: 0,
+    paddingInline: 0,
+    paddingBlock: 0,
+    resize: 'none',
+  },
+  // Truncate the project first, then scroll the single row; block padding contains focus rings.
   pills: {
     display: 'flex',
     flexWrap: 'nowrap',
@@ -116,10 +557,7 @@ const modalStyles = stylex.create({
     paddingInline: '3px',
     marginInline: '-3px',
   },
-  // The run-config group follows the scope pills on their line at its own
-  // size; only a model name long enough to take over half the row truncates.
-  // It is not the footer's `composer-face` container, whose narrow form hides
-  // labels.
+  // This row truncates long model names; only the footer's composer-face hides labels.
   face: {
     display: 'flex',
     flexWrap: 'nowrap',
@@ -156,19 +594,14 @@ const modalStyles = stylex.create({
 });
 
 const promptSuggestionStyles = stylex.create({
-  // The hint is ghost text over the empty textarea, set in the textarea's own
-  // size and line height so it sits exactly where typing will appear. The
-  // empty textarea grows to the hint's height (see the auto-resize effect), so
-  // a wrapped hint never covers the footer. Only the mobile "Apply" control
-  // takes pointer events; everything else lets the press reach the input.
+  // Match the textarea's type and grow it to the hint; only Apply intercepts pointer events.
   anchor: { position: 'relative' },
   anchorSheet: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
   overlay: {
     position: 'absolute',
     insetInlineStart: space[1],
     insetInlineEnd: space[1],
-    // The empty textarea's caret blinks at the line start; leave room so it
-    // shows just before the hint instead of under the key cap.
+    // Leave the empty caret visible before the hint's key cap.
     paddingInlineStart: space[1.5],
     top: 0,
     zIndex: 20,
@@ -180,7 +613,6 @@ const promptSuggestionStyles = stylex.create({
     userSelect: 'none',
     color: colors.secondaryLabel,
     fontSize: textScale.bodySize,
-    // The session textarea's `leading-6`.
     lineHeight: '1.5rem',
   },
   overlayLanding: {
@@ -188,12 +620,11 @@ const promptSuggestionStyles = stylex.create({
     insetInlineEnd: 0,
     lineHeight: textScale.bodyLeading,
   },
-  // The sheet textarea's `px-5 py-4 text-base leading-7`.
   overlaySheet: {
     insetInlineStart: '1.25rem',
     insetInlineEnd: '1.25rem',
     top: space[4],
-    fontSize: '1rem',
+    fontSize: textScale.headlineSize,
     lineHeight: '1.75rem',
   },
   text: {
@@ -205,8 +636,7 @@ const promptSuggestionStyles = stylex.create({
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
-  // Leads the hint, away from the send button. One line tall, so the key cap or
-  // Apply control centres on the hint's first line.
+  // Keep the leading key cap or Apply control centred on the hint's first line.
   accept: {
     display: 'inline-flex',
     flexShrink: 0,
@@ -226,6 +656,7 @@ export interface ChatComposerAction {
   onClick: () => void | Promise<void>;
   disabled?: boolean;
   variant?: ButtonProps['variant'];
+  xstyle?: stylex.StyleXStyles;
   className?: string;
 }
 
@@ -349,6 +780,7 @@ export interface ChatComposerProps {
   primaryAction: ReactNode;
   secondaryAction?: ChatComposerAction;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Enable auto-resize based on content. When enabled, the textarea grows up to maxRows. */
   autoResize?: boolean;
   /** Maximum number of rows when autoResize is enabled (default: 12) */
@@ -357,35 +789,27 @@ export interface ChatComposerProps {
   focusOnContainerClick?: boolean;
 }
 
-export function getChatComposerTextareaClassName({
+export function getChatComposerTextareaStyles({
   variant,
   isMobile = false,
 }: {
   tone: ChatComposerTone;
   variant: ChatComposerVariant;
   isMobile?: boolean;
-}) {
-  const isLanding = variant === 'landing';
-  const isSheet = variant === 'sheet';
-
-  return cn(
-    'input-scrollbar resize-none transition-shadow',
-    stylex.props(typography.prompt).className,
-    isSheet
-      ? 'min-h-0 flex-1 border-transparent bg-transparent px-5 py-4 text-base leading-7'
-      : variant === 'modal'
-        ? 'min-h-[132px] border-transparent bg-transparent px-0 py-0'
-        : isLanding
-          ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
-          : cn(
-              'text-sm leading-6',
-              'border-transparent bg-transparent px-1 py-0',
-              // Mobile session composer floors at a single line; desktop keeps two.
-              isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
-            ),
-    'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/85'
-  );
+}): stylex.StyleXStyles {
+  const isModal = variant === 'modal';
+  return [
+    typography.prompt,
+    variant === 'sheet' && typography.sheetPrompt,
+    styles.textarea,
+    variant === 'sheet'
+      ? styles.textareaSheet
+      : variant === 'landing'
+        ? styles.textareaLanding
+        : isModal
+          ? styles.textareaModal
+          : [styles.textareaSession, isMobile ? styles.textareaMobile : styles.textareaDesktop],
+  ];
 }
 
 /**
@@ -461,6 +885,7 @@ export function ChatComposer({
   primaryAction,
   secondaryAction,
   className,
+  xstyle,
   autoResize = false,
   maxRows = 12,
   focusOnContainerClick = false,
@@ -473,17 +898,15 @@ export function ChatComposer({
     [i18n.language, i18n.resolvedLanguage]
   );
   const isMobile = useIsMobile();
+  const conversationFontSize = useAtomValue(conversationFontSizeAtom);
   const isDialog = variant === 'dialog';
   const isLanding = variant === 'landing';
   const isSheet = variant === 'sheet';
   const isModal = variant === 'modal';
-  // Mobile session composer starts at a single line to save vertical space
-  // (desktop keeps its 2-line default); it still auto-grows as the user types.
+  // Start mobile at one line and desktop at two; both grow with input.
   const singleLineMobile = isMobile && variant === 'session';
   const effectivePromptRows = singleLineMobile || isSheet ? 1 : promptRows;
-  // Desktop-only ⌘L discovery hint in the empty composer. Requires a fine pointer
-  // AND non-mobile layout so phone frames / narrow viewports never show a
-  // keyboard shortcut that doesn't exist on touch. Hidden once focused or typing.
+  // Show the empty, unfocused ⌘L hint only on non-mobile layouts with a fine pointer.
   const focusHintSupported = useMemo(
     () =>
       !isMobile &&
@@ -963,61 +1386,66 @@ export function ChatComposer({
       else if (caret.top < top) textarea.scrollTop -= top - caret.top;
     });
     return () => cancelAnimationFrame(frame);
-  }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows, promptSuggestionHeight]);
+  }, [
+    autoResize,
+    promptValue,
+    promptRef,
+    effectivePromptRows,
+    maxRows,
+    promptSuggestionHeight,
+    conversationFontSize,
+  ]);
 
-  const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
-
-  // Light surface: near-white composer on the gray canvas + 1px border.
-  // Avoid heavy bg-input fills that read as muddy gray on cool-white themes.
+  const boxTextareaStyles = getChatComposerTextareaStyles({ tone, variant, isMobile });
   const mentionContainerClassName = !isLanding
-    ? cn(
-        'w-full focus-within:outline-hidden',
-        'rounded-2xl border border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/70 dark:bg-input/90'
-      )
+    ? stylex.props(
+        styles.dialogBox,
+        composerSurfaceStyles.composerElevation,
+        styles.mentionSurface,
+        styles.fieldFocus
+      ).className
     : undefined;
+  const dialogTextareaStyles: stylex.StyleXStyles = [
+    typography.prompt,
+    variant === 'sheet' && typography.sheetPrompt,
+    styles.textarea,
+    styles.textareaDialog,
+    promptDisabled && preservePromptFocus && styles.preservedDisabled,
+  ];
+  const secondaryButtonStyles: stylex.StyleXStyles = [styles.secondaryAction];
+  const secondaryButtonSize = isDialog ? 'large' : isLanding ? 'mini' : 'small';
 
-  const dialogTextareaClassName = cn(
-    'input-scrollbar min-h-[120px] resize-none px-4 py-3 transition-shadow sm:min-h-[120px]',
-    stylex.props(typography.prompt).className,
-    'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/85'
-  );
+  const boxStyle = isSheet
+    ? stylex.props(
+        styles.boxSheet,
+        styles.sheetMentionSurface,
+        isImageDropActive && styles.boxDropping
+      )
+    : isLanding
+      ? stylex.props(
+          styles.landingBox,
+          styles.mentionSurface,
+          composerSurfaceStyles.composerElevation,
+          styles.fieldFocus,
+          isImageDropActive && styles.boxDropping
+        )
+      : stylex.props(
+          composerSurfaceStyles.sessionSurface,
+          styles.mentionSurface,
+          composerSurfaceStyles.composerElevation,
+          styles.fieldFocus,
+          isImageDropActive && styles.boxDropping
+        );
+  const modalBoxStyle = isModal ? stylex.props(modalStyles.box, styles.mentionSurface) : undefined;
+  const resolvedBoxStyle = modalBoxStyle ?? boxStyle;
+  const boxClassName = [
+    // `group` is the focus hint's anchor: it fades when the box takes focus.
+    'group',
+    resolvedBoxStyle.className,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
-  const actionBaseClassName = cn(
-    stylex.props(isLanding ? typography.caption : typography.code).className,
-    'select-none border font-medium transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
-    isDialog
-      ? 'h-10 rounded-lg px-5'
-      : isLanding
-        ? 'h-6 rounded-[4px] px-2 text-[11px] leading-tight'
-        : isSheet
-          ? 'h-9 rounded-full px-3 text-sm'
-          : 'h-7 rounded-md px-2.5 text-xs'
-  );
-
-  const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
-
-  // Focus stays quiet: the caret and placeholder already show where typing
-  // goes, so the composer keeps its resting border instead of an accent ring.
-  const landingContainerClassName = cn(
-    '@container/composer-box flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3',
-    'border-foreground/[0.10] bg-[hsl(var(--composer))]',
-    COMPOSER_ELEVATION_CLASS,
-    'dark:border-input-border/60 dark:bg-input/90'
-  );
-
-  const sessionContainerClassName = COMPOSER_SESSION_SURFACE_CLASS;
-
-  /* Sheet: the composer is the page, not a card floating on it. The writing
-     surface runs edge to edge; only the footer draws a separator. */
-  const sheetContainerClassName = 'flex h-full min-h-0 flex-col px-0 py-0';
-  const boxContainerClassName = isSheet
-    ? sheetContainerClassName
-    : isModal
-      ? stylex.props(modalStyles.box).className
-      : isLanding
-        ? landingContainerClassName
-        : sessionContainerClassName;
   const composerHasAttachments =
     Boolean(replyBanner) ||
     imageItems.length > 0 ||
@@ -1035,66 +1463,67 @@ export function ChatComposer({
     !promptValue &&
     !composerHasAttachments &&
     visiblePromptSuggestion === null;
-  const imageDropClassName = isImageDropActive
-    ? 'border-primary/50 bg-primary/[0.04] ring-2 ring-primary/25'
-    : undefined;
-  const boxFooterClassName = cn(
-    'flex shrink-0 select-none items-center gap-x-1.5',
-    isSheet
-      ? 'border-t border-border/60 px-3 pb-[calc(8px+max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px)))] pt-2'
-      : isLanding
-        ? 'pt-2'
-        : 'pt-0.5'
+  const statusStyle = stylex.props(
+    typography.helper,
+    styles.status,
+    styles.statusMuted,
+    isSheet && styles.statusSheet
   );
-  const statusClassName = cn(
-    'text-xs leading-snug',
-    isSheet ? 'px-5' : 'px-1',
-    stylex.props(typography.helper).className,
-    statusTone === 'error'
-      ? 'text-destructive'
-      : statusTone === 'warning'
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-muted-foreground'
+  const StatusGlyph =
+    statusTone === 'warning' ? TriangleAlert : statusTone === 'error' ? CircleAlert : Info;
+  const statusMarkStyle = stylex.props(
+    styles.statusMark,
+    statusTone === 'warning'
+      ? styles.statusWarning
+      : statusTone === 'error'
+        ? styles.statusError
+        : styles.statusMuted
   );
 
-  const secondaryButtonClassName = cn(
-    actionBaseClassName,
-    'border-foreground/[0.10] bg-background text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground focus-visible:ring-ring',
-    'dark:border-input-border/60 dark:bg-input/60 dark:text-input-foreground dark:hover:bg-muted/60'
+  const rootStyle = stylex.props(
+    styles.root,
+    isSheet
+      ? styles.rootSheet
+      : isDialog
+        ? styles.rootDialog
+        : isLanding
+          ? styles.rootLanding
+          : styles.rootSession,
+    xstyle
   );
 
   return (
     <>
       <div
-        className={cn(
-          'flex w-full flex-col',
-          isSheet ? 'min-h-0 flex-1 gap-0' : isDialog ? 'gap-3' : isLanding ? 'gap-12' : 'gap-2',
-          className
-        )}
+        className={[rootStyle.className, className].filter(Boolean).join(' ')}
+        style={rootStyle.style}
       >
         {title ? (
-          <div className="text-center">
-            <h1 className="select-none text-2xl leading-tight sm:text-3xl">{title}</h1>
+          <div {...stylex.props(styles.title)}>
+            <h1 {...stylex.props(styles.titleText)}>{title}</h1>
           </div>
         ) : null}
 
         {!isDialog ? (
           <div
-            className={cn(
-              'flex flex-col',
-              isSheet ? 'h-full min-h-0 gap-0' : isLanding ? 'gap-2' : 'gap-1'
+            {...stylex.props(
+              styles.column,
+              isSheet ? styles.columnSheet : isLanding ? styles.columnLanding : styles.columnSession
             )}
           >
             {/* Top selector (repo, branch) - shown outside and above the input box */}
             {topSelector && !isModal ? (
-              <div className="flex w-full min-w-0 select-none items-center gap-1">
-                {topSelector}
-              </div>
+              <div {...stylex.props(styles.topSelector)}>{topSelector}</div>
             ) : null}
             <div
               ref={composerBoxRef}
               data-mention-frame=""
-              className={cn(boxContainerClassName, imageDropClassName, 'group relative')}
+              /* The box's own landmark: the composer's classes are StyleX, so a
+                 test (and a reader) cannot find it by a utility class any
+                 more. */
+              data-lody-composer-box=""
+              className={boxClassName}
+              style={resolvedBoxStyle.style}
               onDragEnter={canHandleImageDrop ? handleImageDragEnter : undefined}
               onDragOver={canHandleImageDrop ? handleImageDragOver : undefined}
               onDragLeave={canHandleImageDrop ? handleImageDragLeave : undefined}
@@ -1123,10 +1552,10 @@ export function ChatComposer({
               }
             >
               {replyBanner ? (
-                <div className={cn(isSheet && 'px-5 pt-3')}>{replyBanner}</div>
+                <div {...stylex.props(isSheet && styles.sheetStripInset)}>{replyBanner}</div>
               ) : null}
               {commentReferenceItems.length > 0 ? (
-                <div className={cn('flex flex-wrap gap-2 pb-1', isSheet && 'px-5 pt-3')}>
+                <div {...stylex.props(styles.referenceStrip, isSheet && styles.sheetStripInset)}>
                   {commentReferenceItems.map((item) => (
                     <CommentReferenceChip
                       key={item.localId}
@@ -1139,7 +1568,7 @@ export function ChatComposer({
                 </div>
               ) : null}
               {visualAnnotationReferenceItems.length > 0 ? (
-                <div className={cn('flex flex-wrap gap-2 pb-1', isSheet && 'px-5 pt-3')}>
+                <div {...stylex.props(styles.referenceStrip, isSheet && styles.sheetStripInset)}>
                   {visualAnnotationReferenceItems.map((item) => (
                     <VisualAnnotationReferenceChip
                       key={item.localId}
@@ -1155,10 +1584,13 @@ export function ChatComposer({
                 // and file cards share the same square-card shape and scroll
                 // sideways together (cards step up in size on mobile for touch).
                 <div
-                  className={cn(
-                    'input-scrollbar flex gap-2 overflow-x-auto pb-1',
-                    isSheet && 'px-5 pt-3'
-                  )}
+                  className={[
+                    'input-scrollbar',
+                    stylex.props(styles.attachmentStrip, isSheet && styles.sheetStripInset)
+                      .className,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                 >
                   {imageItems.map((image) => (
                     <div
@@ -1166,10 +1598,10 @@ export function ChatComposer({
                       title={
                         image.status === 'failed' ? image.error || uploadFailedLabel : undefined
                       }
-                      className={cn(
-                        'relative shrink-0 overflow-hidden rounded-xl border',
-                        isMobile ? 'h-[104px] w-[104px]' : 'h-20 w-20',
-                        image.status === 'failed' && 'border-destructive/50'
+                      {...stylex.props(
+                        styles.imageCard,
+                        isMobile ? styles.imageCardMobile : styles.imageCardDesktop,
+                        image.status === 'failed' && styles.imageCardFailed
                       )}
                     >
                       <ComposerImagePeek
@@ -1177,63 +1609,73 @@ export function ChatComposer({
                         name={image.name}
                         alt={imagePreviewLabel}
                         trigger={
-                          <button type="button" className="h-full w-full" aria-label={image.name}>
+                          <button
+                            type="button"
+                            {...stylex.props(styles.imageButton)}
+                            aria-label={image.name}
+                          >
                             <img
                               src={image.previewUrl}
                               alt={image.name}
-                              className="h-full w-full object-cover"
+                              {...stylex.props(styles.imagePreview)}
                             />
                             {image.status === 'draft' ? (
                               <span
-                                className={cn(
-                                  ' text-muted-foreground',
-                                  stylex.props(typography.caption).className
-                                )}
+                                className={[
+                                  stylex.props(styles.imageBadge).className,
+                                  stylex.props(typography.caption).className,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' ')}
                               >
                                 {t('sessions.attachmentDraft')}
                               </span>
                             ) : image.status === 'uploading' ? (
                               <div
-                                className="absolute inset-0 bg-black/45 transition-[clip-path]"
+                                {...stylex.props(styles.imageProgress)}
                                 style={{
                                   clipPath: `inset(${Math.max(0, Math.min(100, image.progress))}% 0 0 0)`,
                                 }}
                               />
                             ) : null}
                             {image.status === 'failed' ? (
-                              <div className="absolute inset-0 bg-black/45" />
+                              <div {...stylex.props(styles.imageScrim)} />
                             ) : null}
                           </button>
                         }
                       />
-                      <div className="absolute right-1 top-1">
+                      <div {...stylex.props(styles.imageCorner)}>
                         <Button
                           type="button"
                           variant="secondary"
                           size="mini"
                           icon
-                          className={cn(isMobile ? '' : '')}
+
                           onClick={() => onImageRemove?.(image.id)}
                           aria-label={removeImageLabel}
                         >
-                          <X className="h-3 w-3" />
+                          <X className={stylex.props(styles.glyph12).className} />
                         </Button>
                       </div>
                       {image.status === 'draft' ? (
                         <span
-                          className={cn(
-                            ' text-muted-foreground',
-                            stylex.props(typography.caption).className
-                          )}
+                          className={[
+                            stylex.props(styles.imageBadge).className,
+                            stylex.props(typography.caption).className,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         >
                           {t('sessions.attachmentDraft')}
                         </span>
                       ) : image.status === 'uploading' ? (
                         <div
-                          className={cn(
-                            'absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center  text-white',
-                            stylex.props(typography.caption).className
-                          )}
+                          className={[
+                            stylex.props(styles.imageProgressBar).className,
+                            stylex.props(typography.caption).className,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         >
                           {image.progress}%
                         </div>
@@ -1256,18 +1698,17 @@ export function ChatComposer({
                         </div>
                       ) : null}
                       {image.status === 'failed' ? (
-                        <button
+                        <Button
                           type="button"
+                          variant="secondary"
+                          size="mini"
                           onClick={() => onImageRetry?.(image.id)}
                           aria-label={retryUploadLabel}
-                          className={cn(
-                            'absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/65 px-1 py-1  font-medium text-white transition hover:bg-black/75',
-                            stylex.props(typography.caption).className
-                          )}
+                          xstyle={[styles.imageFailure, typography.caption]}
                         >
-                          <RefreshCw className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{uploadFailedShortLabel}</span>
-                        </button>
+                          <RefreshCw className={stylex.props(styles.glyph12).className} />
+                          <span {...stylex.props(styles.truncate)}>{uploadFailedShortLabel}</span>
+                        </Button>
                       ) : null}
                     </div>
                   ))}
@@ -1275,53 +1716,59 @@ export function ChatComposer({
                     <div
                       key={file.id}
                       title={file.status === 'failed' ? file.error || uploadFailedLabel : undefined}
-                      className={cn(
-                        'relative flex shrink-0 flex-col overflow-hidden rounded-xl border p-2',
-                        isMobile ? 'h-[104px] w-[104px]' : 'h-20 w-20',
-                        file.status === 'failed'
-                          ? 'border-destructive/45 bg-muted/60'
-                          : 'border-border/60 bg-muted/60'
+                      {...stylex.props(
+                        styles.fileCard,
+                        isMobile ? styles.fileCardMobile : styles.fileCardDesktop,
+                        file.status === 'failed' && styles.fileCardFailed
                       )}
                     >
                       <span
-                        className={cn(
-                          'max-w-[64%] truncate font-medium uppercase tracking-wide',
-                          file.status === 'failed'
-                            ? 'text-destructive/80'
-                            : 'text-muted-foreground',
-                          stylex.props(isMobile ? typography.helper : typography.caption).className
-                        )}
+                        className={[
+                          stylex.props(styles.fileType).className,
+                          stylex.props(
+                            file.status === 'failed'
+                              ? styles.fileTypeFailed
+                              : styles.fileTypeResting
+                          ).className,
+                          stylex.props(isMobile ? typography.helper : typography.caption).className,
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
                       >
                         {getFileTypeLabel(file.name)}
                       </span>
                       <span
-                        className={cn(
-                          'mt-1 break-words text-left font-normal text-input-foreground',
-                          isMobile ? 'line-clamp-3' : 'line-clamp-2',
-                          stylex.props(typography.helper).className
-                        )}
+                        className={[
+                          stylex.props(styles.fileName).className,
+                          stylex.props(isMobile ? styles.fileNameMobile : styles.fileNameDesktop)
+                            .className,
+                          stylex.props(typography.helper).className,
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
                       >
                         {file.name}
                       </span>
                       {file.status === 'failed' ? (
-                        <button
+                        <Button
                           type="button"
+                          variant="secondary"
+                          size="mini"
                           onClick={() => onFileRetry?.(file.id)}
                           aria-label={retryUploadLabel}
-                          className={cn(
-                            'mt-auto flex w-fit items-center gap-1 pt-1  font-medium text-destructive transition hover:text-destructive/80',
-                            stylex.props(typography.caption).className
-                          )}
+                          xstyle={[styles.fileRetry, typography.caption]}
                         >
-                          <RefreshCw className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{uploadFailedShortLabel}</span>
-                        </button>
+                          <RefreshCw className={stylex.props(styles.glyph12).className} />
+                          <span {...stylex.props(styles.truncate)}>{uploadFailedShortLabel}</span>
+                        </Button>
                       ) : (
                         <span
-                          className={cn(
-                            'mt-auto truncate pt-1  text-muted-foreground',
-                            stylex.props(typography.caption).className
-                          )}
+                          className={[
+                            stylex.props(styles.fileStatus).className,
+                            stylex.props(typography.caption).className,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         >
                           {file.status === 'draft'
                             ? t('sessions.attachmentDraft')
@@ -1341,26 +1788,26 @@ export function ChatComposer({
                       ) : file.status === 'preparing' ||
                         file.status === 'uploading' ||
                         file.status === 'verifying' ? (
-                        <div className="absolute inset-x-0 bottom-0 h-1 bg-muted">
+                        <div {...stylex.props(styles.fileProgressTrack)}>
                           <div
-                            className="h-full bg-primary transition-[width]"
+                            {...stylex.props(styles.fileProgressFill)}
                             style={{
                               width: `${Math.max(0, Math.min(100, file.progress))}%`,
                             }}
                           />
                         </div>
                       ) : null}
-                      <div className="absolute right-1 top-1">
+                      <div {...stylex.props(styles.imageCorner)}>
                         <Button
                           type="button"
                           variant="secondary"
                           size="mini"
                           icon
-                          className={cn(isMobile ? '' : '')}
+
                           onClick={() => onFileRemove?.(file.id)}
                           aria-label={removeAttachmentLabel}
                         >
-                          <X className="h-3 w-3" />
+                          <X className={stylex.props(styles.glyph12).className} />
                         </Button>
                       </div>
                     </div>
@@ -1406,7 +1853,14 @@ export function ChatComposer({
                   // placeholder would otherwise run under the top-right ⌘L chip. Reserve
                   // room for it so the placeholder wraps before the chip; the padding is
                   // dropped once the user types (showFocusHint → false → full width).
-                  className={cn(boxTextareaClassName, showFocusHint && 'pr-16')}
+                  className="input-scrollbar"
+                  appearance="bare"
+                  focusRing={false}
+                  xstyle={[
+                    boxTextareaStyles,
+                    showFocusHint && styles.textareaHint,
+                    promptDisabled && preservePromptFocus && styles.preservedDisabled,
+                  ]}
                   fillHeight={isSheet}
                   mentionPanelPlacement={isSheet ? 'bottom' : undefined}
                   autoFocus={promptAutoFocus}
@@ -1461,7 +1915,7 @@ export function ChatComposer({
 
               {showFocusHint ? (
                 <div
-                  className="pointer-events-none absolute right-3 top-3 z-10 flex items-center opacity-50 transition-opacity duration-150 group-focus-within:opacity-0"
+                  {...stylex.props(styles.focusHint)}
                   title={t('chat.composer.focusHint', {
                     defaultValue: 'Press {{shortcut}} to focus',
                     shortcut: formatKeyBinding(focusHintBinding!),
@@ -1476,9 +1930,10 @@ export function ChatComposer({
                 <div
                   role={statusTone === 'error' ? 'alert' : 'status'}
                   aria-live={statusTone === 'error' ? 'assertive' : 'polite'}
-                  className={statusClassName}
+                  className={statusStyle.className}
                 >
-                  {statusMessage}
+                  <StatusGlyph {...statusMarkStyle} aria-hidden="true" />
+                  <span>{statusMessage}</span>
                 </div>
               ) : null}
 
@@ -1501,15 +1956,25 @@ export function ChatComposer({
                       mcp={mcp}
                       onScheduleSend={onScheduleSend}
                       scheduleDisabledReason={scheduleDisabledReason}
+                      commandsEnabled={commandsEnabled}
                     />
                     <div {...stylex.props(modalStyles.actions)}>{primaryAction}</div>
                   </div>
                 </>
               ) : (
-                <div className={boxFooterClassName}>
+                <div
+                  {...stylex.props(
+                    styles.footer,
+                    isSheet
+                      ? styles.footerSheet
+                      : isLanding
+                        ? styles.footerLanding
+                        : styles.footerSession
+                  )}
+                >
                   {/* Single bottom-left "+" attachment entry (replaces the old
-                      image + paperclip icons). Hidden when neither add callback
-                      is provided. */}
+                    image + paperclip icons). Hidden when neither add callback
+                    is provided. */}
                   <AttachmentAddMenu
                     isMobile={isMobile}
                     isLanding={isLanding}
@@ -1520,29 +1985,26 @@ export function ChatComposer({
                     mcp={mcp}
                     onScheduleSend={onScheduleSend}
                     scheduleDisabledReason={scheduleDisabledReason}
+                    commandsEnabled={commandsEnabled}
                   />
 
                   {/* Single row only: long model names must shrink/truncate inside
-                      the run-config face rather than wrapping config chips onto a
-                      second line (especially on mobile). */}
-                  <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
-                    {footerSelector}
-                  </div>
+                    the run-config face rather than wrapping config chips onto a
+                    second line (especially on mobile). */}
+                  <div {...stylex.props(styles.footerFace)}>{footerSelector}</div>
 
-                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                  <div {...stylex.props(styles.footerActions)}>
                     {secondaryAction ? (
                       <Button
                         type="button"
-                        variant={secondaryAction.variant ?? 'ghost'}
+                        variant={secondaryAction.variant ?? 'secondary'}
+                        size={secondaryButtonSize}
                         onClick={() => {
                           void secondaryAction.onClick();
                         }}
                         disabled={secondaryAction.disabled}
-                        className={cn(
-                          actionWidthClassName,
-                          secondaryButtonClassName,
-                          secondaryAction.className
-                        )}
+                        className={secondaryAction.className}
+                        xstyle={[secondaryButtonStyles, secondaryAction.xstyle]}
                       >
                         {secondaryAction.label}
                       </Button>
@@ -1552,7 +2014,7 @@ export function ChatComposer({
                 </div>
               )}
             </div>
-            {bottomBar ? <div className="select-none px-4 pt-1">{bottomBar}</div> : null}
+            {bottomBar ? <div {...stylex.props(styles.bottomBar)}>{bottomBar}</div> : null}
           </div>
         ) : (
           <>
@@ -1582,7 +2044,10 @@ export function ChatComposer({
               enterKeyHint={promptEnterKeyHint}
               placeholder={resolvedPromptPlaceholder}
               containerClassName={mentionContainerClassName}
-              className={dialogTextareaClassName}
+              className="input-scrollbar"
+              appearance="bare"
+              focusRing={false}
+              xstyle={dialogTextareaStyles}
               data-testid="composer-input"
               data-keyboard-nav="composer"
             />
@@ -1591,29 +2056,28 @@ export function ChatComposer({
               <div
                 role={statusTone === 'error' ? 'alert' : 'status'}
                 aria-live={statusTone === 'error' ? 'assertive' : 'polite'}
-                className={statusClassName}
+                className={statusStyle.className}
               >
-                {statusMessage}
+                <StatusGlyph {...statusMarkStyle} aria-hidden="true" />
+                <span>{statusMessage}</span>
               </div>
             ) : null}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex w-full flex-wrap select-none items-end gap-2" />
+            <div {...stylex.props(styles.dialogRow)}>
+              <div {...stylex.props(styles.dialogSelectors)}>{footerSelector}</div>
 
-              <div className="flex w-full flex-col select-none gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+              <div {...stylex.props(styles.dialogActions)}>
                 {secondaryAction ? (
                   <Button
                     type="button"
-                    variant={secondaryAction.variant ?? 'ghost'}
+                    variant={secondaryAction.variant ?? 'secondary'}
+                    size={secondaryButtonSize}
                     onClick={() => {
                       void secondaryAction.onClick();
                     }}
                     disabled={secondaryAction.disabled}
-                    className={cn(
-                      actionWidthClassName,
-                      secondaryButtonClassName,
-                      secondaryAction.className
-                    )}
+                    className={secondaryAction.className}
+                    xstyle={[secondaryButtonStyles, secondaryAction.xstyle]}
                   >
                     {secondaryAction.label}
                   </Button>
@@ -1673,8 +2137,8 @@ export function ChatComposer({
               {t('composer.removeMessageQuote', 'Remove quote')}
             </Button>
           ) : null;
-        const pastedTextEditor = (layoutClassName: string) => (
-          <textarea
+        const pastedTextEditor = (layout: stylex.StyleXStyles) => (
+          <Textarea
             rows={
               previewIsQuote
                 ? Math.min(18, Math.max(3, previewPastedTextEditorValue.split('\n').length))
@@ -1685,12 +2149,12 @@ export function ChatComposer({
             onChange={handlePastedTextDraftTextChange}
             readOnly={previewIsQuote || !onPastedTextDraftsChange}
             spellCheck={false}
-            className={cn(
-              'input-scrollbar block min-h-0 w-full flex-1 resize-none overflow-auto border-0 bg-transparent',
-              stylex.props(typography.prompt).className,
-              'text-input-foreground outline-hidden',
-              layoutClassName
-            )}
+            className={[
+              'input-scrollbar',
+              stylex.props(styles.pastedEditor, typography.prompt, layout).className,
+            ]
+              .filter(Boolean)
+              .join(' ')}
           />
         );
 
@@ -1701,21 +2165,25 @@ export function ChatComposer({
               open={previewPastedTextDraft !== null}
               onOpenChange={handlePastedTextOpenChange}
             >
-              <Drawer.Content side="bottom" closeButton={false} className="gap-0 rounded-t-2xl p-0">
+              <Drawer.Content side="bottom" closeButton={false} xstyle={styles.pastedDrawerContent}>
                 {previewPastedTextDraft ? (
                   // Base UI wraps the children in a block box, so the column
                   // that lets the editor fill the sheet has to be ours, with a
                   // definite height for `flex-1` to divide.
-                  <div className="flex h-[85dvh] min-h-0 flex-col">
-                    <div className="flex shrink-0 justify-center pt-2 pb-1">
-                      <div className="h-1 w-9 rounded-full bg-muted-foreground/30" />
+                  <div {...stylex.props(styles.pastedDrawer)}>
+                    <div {...stylex.props(styles.pastedDrawerGrabber)}>
+                      <div {...stylex.props(styles.pastedDrawerHandle)} />
                     </div>
                     {/* The close shares the title's row so it centres on that
                         first line; the summary sits on its own line beneath. */}
-                    <div className="flex shrink-0 flex-col border-b border-border/60 py-2 pr-2 pl-4">
-                      <div className="flex items-center gap-3">
-                        <Drawer.Title className="flex min-w-0 flex-1 items-center gap-2 font-medium">
-                          <ClipboardPaste className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <div {...stylex.props(styles.pastedDrawerHeader)}>
+                      <div {...stylex.props(styles.pastedDrawerTitleRow)}>
+                        <Drawer.Title
+                          className={
+                            stylex.props(styles.pastedTitle, styles.pastedDrawerTitle).className
+                          }
+                        >
+                          <ClipboardPaste {...stylex.props(styles.glyph14, styles.glyphMuted)} />
                           {pastedTextDialogTitle}
                         </Drawer.Title>
                         {removeQuoteButton}
@@ -1730,14 +2198,18 @@ export function ChatComposer({
                             />
                           }
                         >
-                          <X className="size-4" />
+                          <X className={stylex.props(styles.glyph16).className} />
                         </Drawer.Close>
                       </div>
-                      <Drawer.Description className="truncate pr-2 text-muted-foreground tabular-nums">
+                      <Drawer.Description
+                        className={
+                          stylex.props(styles.pastedSummary, styles.pastedDrawerSummary).className
+                        }
+                      >
                         {summaryText}
                       </Drawer.Description>
                     </div>
-                    {pastedTextEditor('px-4 py-3')}
+                    {pastedTextEditor(styles.pastedEditorMobile)}
                   </div>
                 ) : null}
               </Drawer.Content>
@@ -1753,36 +2225,29 @@ export function ChatComposer({
             <Dialog.Content
               closeButton={false}
               width="48rem"
-              className={
-                previewIsQuote
-                  ? undefined
-                  : 'flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0'
-              }
+              padding={previewIsQuote ? undefined : 'none'}
+              gap={previewIsQuote ? undefined : 'none'}
+              xstyle={!previewIsQuote && styles.pastedDialogContent}
             >
               {previewPastedTextDraft ? (
                 <>
-                  <div className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3">
-                    <Dialog.Title className="flex items-center gap-2 font-medium">
-                      <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
+                  <div {...stylex.props(styles.pastedDialogHeader)}>
+                    <Dialog.Title className={stylex.props(styles.pastedTitle).className}>
+                      <ClipboardPaste {...stylex.props(styles.glyph14, styles.glyphMuted)} />
                       {pastedTextDialogTitle}
                     </Dialog.Title>
-                    <div className="flex items-center gap-3">
+                    <div {...stylex.props(styles.pastedDialogTitleRow)}>
                       {removeQuoteButton}
-                      <Dialog.Description className="text-muted-foreground tabular-nums">
+                      <Dialog.Description className={stylex.props(styles.pastedSummary).className}>
                         {summaryText}
                       </Dialog.Description>
-                      <Dialog.Close
-                        className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                        aria-label={t('common.close', 'Close')}
-                      >
-                        <X className="h-4 w-4" />
+                      <Dialog.Close aria-label={t('common.close', 'Close')}>
+                        <X className={stylex.props(styles.glyph16).className} />
                       </Dialog.Close>
                     </div>
                   </div>
-                  <div className="flex min-h-0 flex-1 px-5 py-4">
-                    {pastedTextEditor(
-                      'h-full rounded-md bg-muted/30 px-4 py-3 focus-visible:ring-1 focus-visible:ring-ring/50'
-                    )}
+                  <div {...stylex.props(styles.pastedDialogBody)}>
+                    {pastedTextEditor(styles.pastedEditorDesktop)}
                   </div>
                 </>
               ) : null}

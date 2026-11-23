@@ -107,7 +107,8 @@ function isProjectSkillsResult(value: unknown): boolean {
         (typeof group.error === 'undefined' || typeof group.error === 'string')
     ) &&
     (typeof value.contentFingerprint === 'undefined' ||
-      typeof value.contentFingerprint === 'string')
+      typeof value.contentFingerprint === 'string') &&
+    (typeof value.unchanged === 'undefined' || typeof value.unchanged === 'boolean')
   );
 }
 
@@ -167,12 +168,36 @@ function isLocalProjectGitState(value: unknown): boolean {
     (value.currentBranch === null || typeof value.currentBranch === 'string') &&
     (value.defaultBranch === null || typeof value.defaultBranch === 'string') &&
     (value.githubRepoFullName === null || typeof value.githubRepoFullName === 'string') &&
-    isObjectRecord(value.workingTree) &&
-    typeof value.workingTree.clean === 'boolean' &&
-    typeof value.workingTree.staged === 'boolean' &&
-    typeof value.workingTree.unstaged === 'boolean' &&
-    typeof value.workingTree.untracked === 'boolean' &&
-    typeof value.workingTree.conflicted === 'boolean'
+    (value.workingTree === undefined ||
+      (isObjectRecord(value.workingTree) &&
+        typeof value.workingTree.clean === 'boolean' &&
+        typeof value.workingTree.staged === 'boolean' &&
+        typeof value.workingTree.unstaged === 'boolean' &&
+        typeof value.workingTree.untracked === 'boolean' &&
+        typeof value.workingTree.conflicted === 'boolean'))
+  );
+}
+
+function isLocalProjectBranchListResult(value: unknown): boolean {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  if (value.git === false) {
+    return true;
+  }
+
+  return (
+    value.git === true &&
+    (value.currentBranch === null || typeof value.currentBranch === 'string') &&
+    (value.defaultBranch === null || typeof value.defaultBranch === 'string') &&
+    isStringArray(value.pinnedBranches) &&
+    isStringArray(value.branches) &&
+    typeof value.truncated === 'boolean' &&
+    (value.nextCursor === undefined || typeof value.nextCursor === 'string') &&
+    typeof value.totalCount === 'number' &&
+    Number.isInteger(value.totalCount) &&
+    value.totalCount >= 0
   );
 }
 
@@ -359,11 +384,32 @@ export function isLocalProjectControlRequest(value: unknown): value is LocalProj
     return typeof value.workspaceId === 'string' && typeof value.localProjectId === 'string';
   }
 
+  if (value.type === 'local-project/list-branches') {
+    return (
+      typeof value.workspaceId === 'string' &&
+      typeof value.localProjectId === 'string' &&
+      isOptionalString(value.query) &&
+      isOptionalInteger(value.limit) &&
+      isOptionalString(value.cursor) &&
+      isOptionalString(value.requestedByUserId)
+    );
+  }
+
   if (value.type === 'local-project/list-files') {
     return (
       typeof value.workspaceId === 'string' &&
       typeof value.localProjectId === 'string' &&
       isOptionalInteger(value.maxFiles) &&
+      isOptionalString(value.requestedByUserId)
+    );
+  }
+
+  if (value.type === 'local-project/search-files') {
+    return (
+      typeof value.workspaceId === 'string' &&
+      typeof value.localProjectId === 'string' &&
+      typeof value.query === 'string' &&
+      isOptionalInteger(value.limit) &&
       isOptionalString(value.requestedByUserId)
     );
   }
@@ -383,12 +429,17 @@ export function isLocalProjectControlRequest(value: unknown): value is LocalProj
       typeof value.workspaceId === 'string' &&
       typeof value.localProjectId === 'string' &&
       isStringArray(value.skillDirs) &&
+      isOptionalString(value.knownFingerprint) &&
       isOptionalString(value.requestedByUserId)
     );
   }
 
   if (value.type === 'local-project/list-global-skills') {
-    return typeof value.workspaceId === 'string' && isOptionalString(value.requestedByUserId);
+    return (
+      typeof value.workspaceId === 'string' &&
+      isOptionalString(value.knownFingerprint) &&
+      isOptionalString(value.requestedByUserId)
+    );
   }
 
   if (value.type === 'local-project/read-file') {
@@ -573,7 +624,11 @@ export function isLocalProjectControlResponse(
     );
   }
 
-  if (value.type === 'local-project/list-files' || value.type === 'worktree/list-files') {
+  if (
+    value.type === 'local-project/list-files' ||
+    value.type === 'local-project/search-files' ||
+    value.type === 'worktree/list-files'
+  ) {
     return isLocalProjectFileListResult(value.result);
   }
 
@@ -595,6 +650,10 @@ export function isLocalProjectControlResponse(
 
   if (value.type === 'local-project/git-state') {
     return isLocalProjectGitState(value.result);
+  }
+
+  if (value.type === 'local-project/list-branches') {
+    return isLocalProjectBranchListResult(value.result);
   }
 
   if (value.type === 'local-project/checkout-branch') {

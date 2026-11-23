@@ -1,8 +1,7 @@
+import { clsx } from 'clsx';
 import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
-import { downloadBytesAsFile } from '@/lib/download-file';
-import { shareFileBytesNatively } from '@/lib/session-file-native-save';
-import { isNativeAppShell } from '@/lib/native-platform';
+import { saveBytesAsFile } from '@/lib/download-file';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import {
@@ -16,8 +15,24 @@ import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
 import { useSessionLinkNavigator } from './session-link-context';
+import { resolveSenderDisplayName } from '@/lib/workspace-sender-identity';
 import * as stylex from '@stylexjs/stylex';
-import { radius, space, text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, radius, space, text as textScale } from '@lody/ui/tokens/scales.stylex';
+import {
+  messageActionButtonTheme,
+  messageActionInkTheme,
+} from '../../style/message-action-button.stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   type ComponentPropsWithoutRef,
@@ -215,13 +230,7 @@ import {
   hasUnansweredPlanApproval,
   resolvePlanExitMarkdown,
 } from './plan-surface';
-import {
-  CONVERSATION_PANEL_BODY_CLASS,
-  CONVERSATION_PANEL_FRAME_CLASS,
-  CONVERSATION_PANEL_HEADER_CLASS,
-  CONVERSATION_PANEL_HEADER_RULE_CLASS,
-  CONVERSATION_PANEL_TITLE_CLASS,
-} from './conversation-panel';
+import { conversationPanelStyles } from './conversation-panel';
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
 import {
@@ -243,10 +252,9 @@ import {
   resolveLiveSessionHistoryDurationMs,
   resolveSessionHistoryDurationMs,
 } from '@/lib/session-history-duration';
-import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
+import { useTheme } from '@/theme-provider';
 import { conversationSurface } from './surface';
-import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
   isMessageActionsToggleTap,
   toggleMobileMessageActions,
@@ -280,10 +288,9 @@ import {
 } from '@/lib/session-image-cache';
 import { SessionFileCard, SessionFileCardList, SessionFileCardLayout } from './session-file-card';
 import {
-  SessionFilePreviewDialog,
-  type SessionFilePreviewStatus,
-} from './session-file-preview-dialog';
-import { downloadSessionFile, fetchSessionFilePreview } from '@/lib/session-file-download';
+  SessionFileAttachmentPreviewDialog,
+  useSessionFileDownload,
+} from './session-file-attachment';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { isHtmlSessionFile } from '@/lib/session-file-presentation';
 import type {
@@ -377,6 +384,1168 @@ import {
 } from '@/lib/session-chat-search';
 
 const EMPTY_GALLERY_ENTRIES: readonly SessionImageGalleryEntry[] = [];
+
+/**
+ * The conversation surface's own styles.
+ *
+ * Colours read the app theme's variables; sizes keep the existing scale.
+ * Opacity declarations must match the locked compiler's exact HSL or color-mix
+ * expression. Legacy conversions still need per-state visual verification;
+ * `style/MIGRATION.md` owns that contract.
+ *
+ * Retained dark variants and child-spacing utilities preserve their current
+ * theme selectors, DOM ownership and cascade until those contracts are migrated.
+ *
+ * A focus-scoped ring paints nothing at all in this app — the global focus
+ * rule zeroes Tailwind's `--tw-ring-shadow` — so no ring was migrated. It also
+ * erased the global inset focus ring on every element that carried one, so
+ * those elements had NO focus indicator at all; the styles that own them now
+ * restate that with `boxShadow: { default: null, ':focus-visible': 'none' }`.
+ */
+const pulseKeyframes = stylex.keyframes({
+  '0%, 100%': { opacity: 1 },
+  '50%': { opacity: 0.5 },
+});
+
+/** Tailwind's `transition-colors`, as the migration guide spells it. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const viewStyles = stylex.create({
+  userActionTransition: {
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  userActionDesktop: {
+    opacity: {
+      default: 0,
+      ':focus-visible': 1,
+      '@media (hover: hover)': {
+        default: null,
+        [stylex.when.ancestor(':is([class~="group/usermsg"]):hover')]: 1,
+      },
+    },
+  },
+  scrollLatest: {
+    pointerEvents: 'auto',
+    borderRadius: '9999px',
+    borderWidth: 0.5,
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: {
+      default: 'var(--color-white)',
+      '@media (hover: hover)': { default: null, ':hover': 'var(--color-white)' },
+    },
+    color: 'hsl(var(--foreground) / 1)',
+    boxShadow: '0 0.5px 1px 1px rgba(0, 0, 0, 0.04)',
+  },
+  scrollLatestDark: {
+    backgroundColor: {
+      default: 'hsl(var(--secondary) / 1)',
+      '@media (hover: hover)': { default: null, ':hover': 'var(--color-white)' },
+    },
+    color: 'hsl(var(--secondary-foreground) / 1)',
+    boxShadow: 'none',
+  },
+  profilePopup: { overflow: 'hidden' },
+  terminalFailed: {
+    borderColor: 'color-mix(in oklab, hsl(var(--destructive) / 1) 30%, transparent)',
+  },
+  footerAction: {
+    lineHeight: textScale.footnoteLeading,
+    gap: 'calc(var(--spacing) * 1.5)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    ...TRANSITION_COLORS,
+  },
+  footerActionAccent: {
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--primary) / 1) 40%, transparent)',
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--primary) / 1) 12%, transparent)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--primary) / 1) 18%, transparent)',
+      },
+    },
+    color: 'hsl(var(--primary) / 1)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  footerActionNeutral: {
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--background) / 1) 60%, transparent)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--muted) / 1) 55%, transparent)',
+      },
+    },
+    color: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 85%, transparent)',
+      '@media (hover: hover)': { default: null, ':hover': 'hsl(var(--foreground) / 1)' },
+    },
+    boxShadow: 'none',
+  },
+  togglePadding: {
+    lineHeight: textScale.footnoteLeading,
+    paddingInline: 'calc(var(--spacing) * 2)',
+  },
+  editedFilesMobile: {
+    borderRadius: 'var(--radius-lg)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 40%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 10%, transparent)',
+  },
+  stackTwo: {
+    ':is(*) > :where(:not(:last-child))': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2)',
+    },
+  },
+  stackOneHalf: {
+    ':is(*) > :where(:not(:last-child))': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 1.5)',
+    },
+  },
+  stackTwoHalf: {
+    ':is(*) > :where(:not(:last-child))': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 2.5)',
+    },
+  },
+  noticeAlert: { marginBlockEnd: { default: 'calc(var(--spacing) * 2)', ':last-child': 0 } },
+
+  // This private action contains plain text; no descendant reads the semantic label.
+  userTextToggleInk: {
+    [buttonTokens.ghostLabel]: 'hsl(var(--muted-foreground) / 1)',
+    [colors.label]: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@media (hover: hover)': 'hsl(var(--foreground) / 1)',
+    },
+  },
+  turnConfigTooltip: { [tooltip.maxWidth]: '20rem' },
+  forkFooterSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
+  planCopySpacing: { marginRight: 'calc(var(--spacing) * -1)' },
+  /* ── The live status row ──────────────────────────────────────────────── */
+  agentActivityRow: {
+    paddingBottom: {
+      default: themeSpace[2],
+      '@media (min-width: 640px)': themeSpace[3],
+    },
+  },
+  agentActivityProse: { maxWidth: '800px' },
+  agentActivityStatus: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    paddingInline: '4px',
+    paddingBlock: themeSpace[0.5],
+    color: themeColors.mutedForeground,
+    userSelect: 'none',
+  },
+  agentActivityStatusMobile: { gap: themeSpace[1.5] },
+  /** The collapsed group's label: it takes the rest of the row on mobile.
+   *  `flex-initial` is the flex the label ends with on both layouts — the
+   *  chevron follows the label rather than the column's far edge. */
+  activityGroupLabelMobile: {
+    minWidth: 0,
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: 'auto',
+  },
+  activityGroupLabelDesktop: {
+    minWidth: 0,
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: 'auto',
+    fontWeight: themeFontWeight.normal,
+  },
+
+  /* ── The empty conversation ───────────────────────────────────────────── */
+  emptyState: {
+    display: 'flex',
+    justifyContent: 'center',
+    paddingBlock: themeSpace[6],
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+    textAlign: 'center',
+  },
+  emptyStateCentered: {
+    display: 'flex',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: themeColors.mutedForeground,
+  },
+
+  /* ── The stream's shell ───────────────────────────────────────────────── */
+  streamRoot: {
+    position: 'relative',
+    backgroundColor: themeColors.background,
+  },
+  emptyStreamScroll: {
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    overflowY: 'auto',
+  },
+  conversationViewport: {
+    position: 'relative',
+    height: '100%',
+    overflowX: 'hidden',
+    paddingBottom: {
+      default: themeSpace[5],
+      '@media (min-width: 640px)': themeSpace[6],
+    },
+  },
+  relative: { position: 'relative' },
+  shrink0: { flexShrink: 0 },
+  shrink0Pt2: { flexShrink: 0, paddingTop: themeSpace[2] },
+  shrink0Pt1: { flexShrink: 0, paddingTop: themeSpace[1] },
+  fill: {
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  fillInline: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  topFade: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: themeSpace[12],
+    backgroundImage:
+      'linear-gradient(to bottom in oklab, hsl(var(--background)) 0%, transparent 100%)',
+  },
+  bottomFade: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: themeSpace[10],
+    backgroundImage:
+      'linear-gradient(to top in oklab, hsl(var(--background)) 0%, transparent 100%)',
+  },
+  scrollToLatestOverlay: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: themeSpace[4],
+  },
+  justifyEnd: { display: 'flex', justifyContent: 'flex-end' },
+
+  /* ── Operation status ─────────────────────────────────────────────────── */
+  columnGap2: { display: 'flex', flexDirection: 'column', gap: themeSpace[2] },
+  columnGap1_5: { display: 'flex', flexDirection: 'column', gap: themeSpace[1.5] },
+  columnGap1: { display: 'flex', flexDirection: 'column', gap: themeSpace[1] },
+  pt2: { paddingTop: themeSpace[2] },
+  invisible: { visibility: 'hidden' },
+  operationStatusCard: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2.5],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--muted) / 0.25)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2.5],
+  },
+  iconMd: {
+    marginTop: themeSpace[0.5],
+    height: themeSpace[4],
+    width: themeSpace[4],
+    flexShrink: 0,
+  },
+  iconMdPlain: {
+    height: themeSpace[4],
+    width: themeSpace[4],
+  },
+  fontSemibold: { fontWeight: themeFontWeight.semibold },
+  fontMono: {
+    fontFamily:
+      'JetBrains Mono, SF Mono, Monaco, Inconsolata, Fira Code, Droid Sans Mono, Source Code Pro, monospace',
+  },
+  destructive: { color: themeColors.destructive },
+  mutedForeground: { color: themeColors.mutedForeground },
+  mutedForeground75: { color: 'hsl(var(--muted-foreground) / 0.75)' },
+  foreground: { color: themeColors.foreground },
+  primary: { color: themeColors.primary },
+  fontMedium: { fontWeight: themeFontWeight.medium },
+  mtHalf: { marginTop: themeSpace[0.5] },
+  breakWords: { overflowWrap: 'break-word' },
+  roundedMd: { borderRadius: themeRadius.md },
+  resendSpinner: { width: 14, height: 14 },
+  spinnerSm: {
+    height: themeSpace[3],
+    width: themeSpace[3],
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  dashedNoticeRule: {
+    height: '1px',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    opacity: 0.6,
+  },
+
+  /* ── The agent notice banner ──────────────────────────────────────────── */
+  noticeFrame: {
+    width: '100%',
+    overflow: 'hidden',
+    borderRadius: themeRadius.lg,
+  },
+  iconSm: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+  },
+  /** The same glyph without a flex shrink rule, as the plain icons had. */
+  iconSmPlain: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+  },
+  noticeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingBlock: themeSpace[4],
+  },
+  noticeInlineRow: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingBlock: themeSpace[4],
+  },
+  noticeDivider: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    height: '1px',
+    backgroundColor: themeColors.border,
+  },
+  noticeSourceRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'baseline',
+    gap: themeSpace[1],
+  },
+  noticeSourcePrefix: { flexShrink: 0 },
+  noticeSourceButton: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+    textUnderlineOffset: '4px',
+    ':hover': {
+      color: themeColors.foreground,
+      textDecorationLine: 'underline',
+    },
+  },
+
+  /* ── The capacity retry control ───────────────────────────────────────── */
+  retryButton: {
+    position: 'relative',
+    isolation: 'isolate',
+    display: 'inline-grid',
+    height: themeSpace[7],
+    flexShrink: 0,
+    placeItems: 'center',
+    overflow: 'hidden',
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.04)',
+    paddingInline: themeSpace[2.5],
+    fontWeight: themeFontWeight.normal,
+    fontVariantNumeric: 'tabular-nums',
+    color: 'hsl(var(--foreground) / 0.8)',
+    ...TRANSITION_COLORS,
+    ':hover': { backgroundColor: 'hsl(var(--muted-foreground) / 0.07)' },
+    ':disabled': { pointerEvents: 'none', opacity: control.disabledOpacity },
+    /* The Tailwind `focus-visible:ring-1` this button used to carry declared a
+       full box-shadow in the utilities layer, which erased the global inset
+       focus ring. The button owned no ring of its own — it showed NO focus
+       indicator — so keep that: no resting shadow, and no focus shadow. */
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  retryProgress: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: -10,
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.08)',
+    transitionProperty: 'width',
+    transitionDuration: themeDuration[300],
+    transitionTimingFunction: themeEasing.linear,
+  },
+  retryLabel: {
+    position: 'relative',
+    zIndex: 10,
+    gridColumnStart: 1,
+    gridRowStart: 1,
+    visibility: {
+      default: 'visible',
+      [stylex.when.ancestor(':where(.group):hover')]: 'hidden',
+      [stylex.when.ancestor(':where(.group):focus-visible')]: 'hidden',
+      '@media (hover: none)': 'hidden',
+    },
+  },
+  retryLabelAlternate: {
+    position: 'relative',
+    zIndex: 10,
+    gridColumnStart: 1,
+    gridRowStart: 1,
+    visibility: {
+      default: 'hidden',
+      [stylex.when.ancestor(':where(.group):hover')]: 'visible',
+      [stylex.when.ancestor(':where(.group):focus-visible')]: 'visible',
+      '@media (hover: none)': 'visible',
+    },
+  },
+  relativeZ10: { position: 'relative', zIndex: 10 },
+
+  /* ── The system notice rows ───────────────────────────────────────────── */
+  noticeStack: { paddingBlock: themeSpace[1] },
+  /** A notice that sits on its own row is indented to sit apart from the
+   *  conversation; inside a turn that same indent is a broken left edge. */
+  noticeStackIndented: {
+    default: null,
+    '@container (min-width: 640px)': { paddingLeft: themeSpace[3] },
+  },
+
+  /* ── The worktree script notice ───────────────────────────────────────── */
+  iconSmFlexNone: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  truncateMedium: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: themeFontWeight.medium,
+  },
+
+  /* ── The user's message row ───────────────────────────────────────────── */
+  userName: {
+    maxWidth: 'calc(var(--spacing) * 40)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: themeFontWeight.medium,
+  },
+  tabular: { fontVariantNumeric: 'tabular-nums' },
+  recoveryButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.sm,
+    color: themeColors.destructive,
+    textUnderlineOffset: '2px',
+    ...TRANSITION_COLORS,
+    ':hover': {
+      color: 'hsl(var(--destructive) / 0.8)',
+      textDecorationLine: 'underline',
+    },
+  },
+  recoveryLabel: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    color: themeColors.destructive,
+  },
+  pendingLabel: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    color: themeColors.mutedForeground,
+  },
+  userRowEnd: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-end',
+  },
+  userContentRow: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    justifyContent: 'flex-end',
+    maxWidth: '100%',
+  },
+  userContentRowWide: { overflowX: 'auto' },
+  userBubbleFrame: {
+    position: 'relative',
+    minWidth: 0,
+    maxWidth: 'min(100%, 800px)',
+  },
+  userBubbleFrameEditing: { width: '100%' },
+  userBubbleFrameFitted: { width: 'fit-content' },
+  sendingSpinner: {
+    display: { default: 'none', '@container (min-width: 520px)': 'block' },
+    position: 'absolute',
+    bottom: '13px',
+    right: '100%',
+    marginRight: themeSpace[1.5],
+    height: themeSpace[4],
+    width: themeSpace[4],
+    color: themeColors.mutedForeground,
+  },
+  userTextFrame: {
+    minWidth: 0,
+    color: themeColors.foreground,
+  },
+  userTextFrameEditing: { width: '100%' },
+  userTextFrameFitted: { width: 'fit-content' },
+  userTextFrameWide: { minWidth: '480px' },
+  userTextFrameCapped: {
+    maxWidth: {
+      default: '100%',
+      '@media (min-width: 640px)': '800px',
+    },
+  },
+  editingStack: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: '100%',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: themeSpace[2],
+  },
+
+  /* ── The sender profile popover ───────────────────────────────────────── */
+  avatarButton: {
+    display: 'block',
+    borderRadius: themeRadius.full,
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    ':hover': { opacity: 0.85 },
+    /* The Tailwind `focus-visible:ring-2 focus-visible:ring-offset-2` this
+       button used to carry declared a full box-shadow in the utilities layer,
+       which erased the global inset focus ring. It painted no ring of its own
+       — the app forces Tailwind rings transparent — so the button showed NO
+       focus indicator. Keep that: no resting shadow, and no focus shadow. */
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  profileBody: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[3.5],
+    padding: themeSpace[4],
+  },
+  profileColumn: { minWidth: 0 },
+  profileName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.foreground,
+  },
+  profileEmail: {
+    marginTop: themeSpace[1],
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: themeColors.mutedForeground,
+  },
+
+  /* ── The turn's usage and timing panels ───────────────────────────────── */
+  turnMetaPanel: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.6)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2.5],
+  },
+  turnMetaHeading: {
+    marginBottom: themeSpace[1.5],
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  turnMetaRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    marginBlockStart: { default: null, ':not(:last-child)': 0 },
+    marginBlockEnd: { default: null, ':not(:last-child)': themeSpace[1.5] },
+  },
+  turnConfigRows: { paddingInline: themeSpace[3], paddingBlock: themeSpace[2.5] },
+  activityWarning: { color: themeColors.statusWarning },
+  turnMetaLabel: {
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  turnMetaValue: {
+    minWidth: 0,
+    textAlign: 'right',
+    fontWeight: themeFontWeight.medium,
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.foreground,
+  },
+  turnMetaValueWarning: {
+    minWidth: 0,
+    textAlign: 'right',
+    fontWeight: themeFontWeight.medium,
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.statusWarning,
+  },
+  /** The usage rows' value: the same shape, without the timing row's `min-w-0`. */
+  usageValue: {
+    textAlign: 'right',
+    fontWeight: themeFontWeight.medium,
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.foreground,
+  },
+  turnMetaHeadingBorder: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border) / 0.6)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+  },
+  turnConfigValue: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[1.5],
+    textAlign: 'right',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  turnConfigValueText: { minWidth: 0, overflowWrap: 'break-word' },
+  /** The turn-config trigger's own box: the size the footer gives it. */
+  turnConfigButtonSize: {
+    height: themeSpace[7],
+    width: themeSpace[7],
+  },
+
+  /* ── The turn configuration button ────────────────────────────────────── */
+  turnConfigButton: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    color: themeColors.mutedForeground,
+    ...TRANSITION_COLORS,
+    ':hover': {
+      backgroundColor: 'hsl(var(--hover) / 0.5)',
+      color: themeColors.foreground,
+    },
+    /* The Tailwind `focus-visible:ring-1` this button used to carry declared a
+       full box-shadow in the utilities layer, which erased the global inset
+       focus ring. The button owned no ring of its own — it showed NO focus
+       indicator — so keep that: no resting shadow, and no focus shadow. */
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+
+  /* ── The disclosure chevron ───────────────────────────────────────────── */
+  chevron: {
+    display: 'inline-flex',
+    flexGrow: 0,
+    flexShrink: 0,
+    transformOrigin: 'center',
+    color: themeColors.mutedForeground,
+  },
+  chevronHoverOnly: {
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    [stylex.when.ancestor(':where(.group):hover')]: { opacity: 1 },
+    [stylex.when.ancestor(':where(.group):focus-visible')]: { opacity: 1 },
+  },
+  chevronInner: { display: 'inline-flex', transformOrigin: 'center' },
+  chevronIconEm: { height: '1em', width: '1em' },
+  processIcon: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 0.7)',
+  },
+  processIconEm: { height: '1em', width: '1em', flexShrink: 0 },
+
+  /* ── The activity step ────────────────────────────────────────────────── */
+  activityStepIcon: { display: 'inline-flex', flexShrink: 0 },
+  activityStepBody: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  activityStepTitle: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    ...TRANSITION_COLORS,
+    [stylex.when.ancestor(':where(.group):hover')]: { color: themeColors.foreground },
+  },
+  activityStepBodyText: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The one-line process status: the group header's box and type. */
+  processLineMobile: {
+    columnGap: themeSpace[1.5],
+    paddingRight: themeSpace[1],
+  },
+
+  /* ── The assistant turn's action bar ──────────────────────────────────── */
+  actionBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    color: themeColors.mutedForeground,
+  },
+  actionBarMobile: { minHeight: themeSpace[6], gap: themeSpace[1] },
+  actionBarDesktop: { minHeight: themeSpace[7], gap: themeSpace[2] },
+  actionBarHidden: {
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    ':focus-within': { opacity: 1 },
+  },
+  actionBarVisible: { opacity: 1 },
+  actionBarLead: {
+    flexShrink: 0,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  actionBarButtons: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[0.5],
+    marginRight: '-7px',
+  },
+  actionButtons: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[2],
+  },
+
+  /* ── The assistant turn's shell ───────────────────────────────────────── */
+  turnShell: { width: '100%' },
+  turnShellWide: { overflowX: 'auto' },
+  turnProse: {
+    maxWidth: '800px',
+    overflowWrap: 'break-word',
+  },
+  turnProseForeground: { color: themeColors.foreground },
+  turnProseMuted: { color: themeColors.mutedForeground },
+  turnProseWide: { minWidth: '480px' },
+  turnStatusPad: { paddingBottom: themeSpace[2] },
+  turnStatusPadTop: { paddingTop: themeSpace[1] },
+  turnStatusPadTopWide: { paddingTop: themeSpace[3] },
+  turnStatusPadBottom: { paddingBottom: themeSpace[1.5] },
+
+  /* ── The image attachments ────────────────────────────────────────────── */
+  imageRow: {
+    display: 'flex',
+    width: '100%',
+    flexWrap: 'wrap',
+    gap: themeSpace[2],
+  },
+  imageRowFull: { display: 'flex', width: '100%' },
+  imageRowEnd: {
+    justifyContent: 'flex-end',
+    paddingInline: themeSpace[2],
+    paddingTop: themeSpace[1],
+  },
+  imageRowStart: { justifyContent: 'flex-start' },
+  imageBlock: {
+    /* 12px: the shared radius of every top-level conversation card (file
+       card, proposed plan, permission record). An 8px frame beside them
+       read as a different family of object. */
+    overflow: 'hidden',
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--muted) / 0.2)',
+  },
+  imageBlockFull: {
+    display: 'inline-flex',
+    maxWidth: '100%',
+    flexDirection: 'column',
+  },
+  imageFrameThumbnailLarge: {
+    height: { default: '9rem', '@media (min-width: 640px)': '10rem' },
+    width: { default: '9rem', '@media (min-width: 640px)': '10rem' },
+    flexShrink: 0,
+  },
+  imageFrameThumbnailSmall: { height: '6rem', width: '6rem', flexShrink: 0 },
+  imageFrameWidth: {
+    width: {
+      default: '14rem',
+      '@media (min-width: 640px)': '18rem',
+      '@media (min-width: 768px)': '20rem',
+    },
+    maxWidth: '100%',
+  },
+  imageFrameFullHeight: { height: '9rem' },
+  imageErrorBox: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[4],
+    color: themeColors.mutedForeground,
+  },
+  imageErrorBoxThumbnail: { padding: themeSpace[2] },
+  imageErrorBoxFull: { minHeight: themeSpace[24] },
+  imageButtonThumbnail: { display: 'block' },
+  imageButtonFull: { display: 'inline-flex', maxWidth: '100%' },
+  imageThumbnail: { objectFit: 'cover' },
+  imageFull: {
+    display: 'block',
+    maxHeight: '10.5rem',
+    maxWidth: '100%',
+    objectFit: 'contain',
+  },
+
+  /* ── The file group ───────────────────────────────────────────────────── */
+  fileOverflow: {
+    paddingInline: themeSpace[1],
+    color: themeColors.mutedForeground,
+  },
+
+  /* ── The tool verb ────────────────────────────────────────────────────── */
+  toolVerb: { color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)' },
+
+  /* ── The plan ─────────────────────────────────────────────────────────── */
+  planCard: {
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--background) / 0.8)',
+    padding: themeSpace[2.5],
+  },
+  planHeading: {
+    marginBlockEnd: 'calc(var(--spacing) * 2)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    fontWeight: themeFontWeight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: '0.025em',
+    color: themeColors.mutedForeground,
+  },
+  planEntryCard: {
+    marginBlockEnd: { default: 'calc(var(--spacing) * 1.5)', ':last-child': 0 },
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--background) / 0.6)',
+    padding: themeSpace[2.5],
+  },
+  planEntryHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[1.5],
+  },
+  planEntryTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontWeight: themeFontWeight.medium,
+  },
+  planEntryText: { overflowWrap: 'break-word' },
+  planStatusPending: { color: themeColors.mutedForeground },
+  planStatusInProgress: { color: themeColors.statusInfo },
+  planStatusCompleted: { color: themeColors.statusSuccess },
+
+  /* ── The proposed plan panel ──────────────────────────────────────────── */
+  planPanelHeader: {
+    marginBlock: 'calc(var(--spacing) * -1)',
+    marginLeft: 'calc(var(--spacing) * -1)',
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.sm,
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[1],
+    paddingLeft: themeSpace[1],
+    textAlign: 'left',
+  },
+  planPanelChevron: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  planPanelChevronOpen: { transform: 'rotate(90deg)' },
+  planPanelBody: { maxHeight: 'calc(var(--spacing) * 56)', overflow: 'hidden' },
+  planPanelFade: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: themeSpace[10],
+    backgroundImage:
+      'linear-gradient(to top in oklab, hsl(var(--background) / 0.95) 0%, transparent 100%)',
+  },
+
+  /* ── The goal marker ──────────────────────────────────────────────────── */
+  goalRow: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+    color: themeColors.mutedForeground,
+  },
+  goalIcon: {
+    height: themeSpace[3],
+    width: themeSpace[3],
+    flexShrink: 0,
+  },
+  goalStatusIcon: {
+    height: themeSpace[2.5],
+    width: themeSpace[2.5],
+    flexShrink: 0,
+  },
+  goalStatusPulse: {
+    animationName: pulseKeyframes,
+    animationDuration: '2s',
+    animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)',
+    animationIterationCount: 'infinite',
+  },
+  goalObjective: {
+    display: 'block',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  goalObjectiveCleared: { textDecorationLine: 'line-through' },
+
+  /* ── The tool call card ───────────────────────────────────────────────── */
+  toolCallHeader: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'flex-start',
+    gap: themeSpace[1.5],
+  },
+  toolCallStatusDanger: { color: themeColors.statusDanger },
+  toolCallTitleRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: '0.3em',
+  },
+  toolCallFileLink: {
+    display: 'inline-flex',
+    minWidth: 0,
+    maxWidth: 'min(100%, 20rem)',
+    flexShrink: 1,
+    alignItems: 'center',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  toolCallFileChip: {
+    display: 'inline-flex',
+    minWidth: 0,
+    maxWidth: '240px',
+    flexShrink: 1,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[0.5],
+  },
+  toolCallFileChipHover: { ':hover': { backgroundColor: 'hsl(var(--hover) / 0.6)' } },
+  toolCallCursor: { cursor: 'pointer' },
+  toolCallFileName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  toolCallFileNameHover: {
+    textUnderlineOffset: '2px',
+    ...TRANSITION_COLORS,
+    [stylex.when.ancestor(':where(.group):hover')]: { color: themeColors.foreground },
+    ':hover': { textDecorationLine: 'underline' },
+  },
+  toolCallFileIcon: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    filter: 'grayscale(100%)',
+  },
+  toolTitle: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+
+  /* ── The tool content ─────────────────────────────────────────────────── */
+  toolContentLabel: {
+    marginBlockStart: 0,
+    marginBlockEnd: 'calc(var(--spacing) * 2)',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+  },
+  toolImage: {
+    maxHeight: 'calc(var(--spacing) * 80)',
+    width: '100%',
+    borderRadius: themeRadius.lg,
+    objectFit: 'contain',
+  },
+  toolAudio: { width: '100%' },
+  toolResourceCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--muted) / 0.2)',
+    padding: themeSpace[3],
+    color: themeColors.mutedForeground,
+  },
+  toolResourceLink: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--muted) / 0.2)',
+    padding: themeSpace[3],
+    color: themeColors.primary,
+  },
+  toolResourceDownload: { color: themeColors.primary },
+  toolPermissionRow: {
+    display: 'flex',
+    minHeight: themeSpace[7],
+    width: '100%',
+    alignItems: 'flex-start',
+    gap: themeSpace[1.5],
+    paddingBlock: themeSpace[1],
+  },
+  toolPermissionLabel: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+
+  /* ── The collapsible card ─────────────────────────────────────────────── */
+  collapsibleContainer: { borderRadius: themeRadius.xl },
+  collapsibleButton: TRANSITION_COLORS,
+  collapsibleCursorPointer: { cursor: 'pointer' },
+  collapsibleCursorDefault: { cursor: 'default' },
+  collapsibleHeaderRow: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  collapsibleChevron: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexGrow: 0,
+    flexShrink: 0,
+    color: 'currentcolor',
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: themeEasing.out,
+  },
+  collapsibleChevronOpen: { transform: 'rotate(90deg)' },
+  collapsibleAside: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  collapsibleBody: {
+    paddingInline: themeSpace[2],
+    paddingBottom: themeSpace[1],
+  },
+  worktreeScriptContainer: { width: '100%', maxWidth: '760px' },
+  collapsibleBodyFlushInline: { paddingInline: 0 },
+  activityToolContainer: { borderRadius: 'var(--radius-md)' },
+  activityToolBody: {
+    paddingInline: 0,
+    paddingBottom: 'calc(var(--spacing) * 1.5)',
+    paddingTop: 'calc(var(--spacing) * 1)',
+  },
+  toolBody: {
+    paddingInline: 0,
+    paddingBottom: 'calc(var(--spacing) * 1)',
+    paddingTop: 'calc(var(--spacing) * 1.5)',
+  },
+
+  /* ── The thought card ─────────────────────────────────────────────────── */
+  thoughtLabel: {
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.mutedForeground,
+  },
+  thoughtBody: { color: 'hsl(var(--muted-foreground) / 0.7)' },
+
+  /** The visually hidden block Tailwind's `sr-only` compiles to. */
+  visuallyHidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+});
 
 function useSessionCopyWorkspaceId(): string | undefined {
   const readonlyPresentation = useContext(SessionReadonlyContext);
@@ -688,6 +1857,7 @@ export interface SessionChatStreamViewProps {
   /** The outline hovered a round with no preview yet; hydrate it so one appears. */
   onOutlinePreviewRound?: (turnIndex: number) => void;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
   /** UI-only accepted inputs; never added to history, outline, export or dispatch facts. */
@@ -703,6 +1873,8 @@ export interface SessionChatStreamViewProps {
   onFilePathClick?: (filePath: string, options?: { pathKind: 'canonical' }) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
   onOpenHtmlFile?: (file: SessionFilePayload) => boolean;
+  /** Returns true when the host opened the attachment preview in its side panel. */
+  onOpenFileAttachment?: (file: SessionFilePayload, sessionId: SessionId) => boolean;
   onAnnotateImage?: (selection: DocumentSelection) => boolean;
   lastAssistantMessageId?: string | null;
   lastCompletedAssistantMessageId?: string | null;
@@ -742,6 +1914,8 @@ export interface SessionChatStreamViewProps {
 export const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
+  /** Opens an attachment preview in the host's side panel; false when it has none. */
+  openFileAttachment?: (file: SessionFilePayload, sessionId: SessionId) => boolean;
   openLocalFile?: (path: string, options?: { pathKind: 'canonical' }) => void;
   copyContext?: (messageId: string) => void;
 }>({});
@@ -798,8 +1972,14 @@ export const AgentActivityRow = ({
   conversationFontSize?: ConversationFontSize;
 }) => {
   return (
-    <ConversationColumn className="pb-2 sm:pb-3" data-agent-activity-row="">
-      <div className="max-w-[800px]" style={conversationTextFontSizeStyle(conversationFontSize)}>
+    <ConversationColumn
+      className={stylex.props(viewStyles.agentActivityRow).className}
+      data-agent-activity-row=""
+    >
+      <div
+        {...stylex.props(viewStyles.agentActivityProse)}
+        style={conversationTextFontSizeStyle(conversationFontSize)}
+      >
         <AgentActivityStatus label={label} tone={tone} shimmer={shimmer} message={message} />
       </div>
     </ConversationColumn>
@@ -827,19 +2007,19 @@ const AgentActivityStatus = ({
       role="status"
       aria-live="polite"
       data-agent-activity-status=""
-      className={cn(
-        /* `px-[4px]` is `conversation.railInset`: the status sits on the prose rail.
-           It is live chrome rather than authored prose, so native selection must
-           not copy it when it shares the streaming row's measurement boundary. */
-        'flex w-full select-none items-center px-[4px] py-0.5 text-muted-foreground',
-        isMobile && 'gap-1.5'
+      {...stylex.props(
+        viewStyles.agentActivityStatus,
+        isMobile && viewStyles.agentActivityStatusMobile
       )}
     >
       <span
-        className={cn(
-          ACTIVITY_GROUP_LABEL_CLASS(isMobile),
-          tone === 'warning' && 'text-status-warning',
-          shimmer && 'agent-shimmer'
+        {...withClassName(
+          stylex.props(
+            isMobile ? viewStyles.activityGroupLabelMobile : viewStyles.activityGroupLabelDesktop,
+            isMobile ? conversationSurface.processText : activityTypography.control,
+            tone === 'warning' && viewStyles.activityWarning
+          ),
+          shimmer ? 'agent-shimmer' : undefined
         )}
       >
         {message && tone !== 'warning' ? (
@@ -1096,14 +2276,7 @@ const ChatItem = memo(function ChatItem({
     return <>{emptyState}</>;
   }
   return (
-    <div
-      className={cn(
-        stylex.props(activityTypography.body).className,
-        'flex justify-center py-6 font-medium text-muted-foreground text-center'
-      )}
-    >
-      {noMessagesLabel}
-    </div>
+    <div {...stylex.props(activityTypography.body, viewStyles.emptyState)}>{noMessagesLabel}</div>
   );
 }, areChatItemsEqual);
 
@@ -1340,8 +2513,7 @@ export const buildChatVirtualRows = ({
             entry.body.trim().length > 0 ||
             (entry.images?.length ?? 0) > 0 ||
             (entry.files?.length ?? 0) > 0;
-          const hasCardPayload =
-            Boolean(entry.card) || (entry.actions?.length ?? 0) > 0;
+          const hasCardPayload = Boolean(entry.card) || (entry.actions?.length ?? 0) > 0;
           if (hasBubbleBody) {
             coordinatorEntries.push({
               key: `assistant:${message.id}:bubble:${entry.id}`,
@@ -1464,8 +2636,8 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
-      const visibleEntries = block.entries.filter((entry) =>
-        entry.content.type === 'thought' || entry.content.kind !== 'think'
+      const visibleEntries = block.entries.filter(
+        (entry) => entry.content.type === 'thought' || entry.content.kind !== 'think'
       );
       if (visibleEntries.length === 0) return;
 
@@ -1886,6 +3058,7 @@ export const SessionChatStreamView = forwardRef<
       initialWindowReady = true,
       isVisible = true,
       className,
+      xstyle,
       leadingContent,
       localUserMessages,
       trailingContent,
@@ -1897,6 +3070,7 @@ export const SessionChatStreamView = forwardRef<
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onOpenFileAttachment,
       onAnnotateImage,
       lastAssistantMessageId = null,
       lastCompletedAssistantMessageId = null,
@@ -1938,6 +3112,7 @@ export const SessionChatStreamView = forwardRef<
     const [, setSelectionVersion] = useState(0);
     const scrollRootRef = useRef<HTMLDivElement>(null);
     const { t } = useTranslation();
+    const { resolvedTheme } = useTheme();
     const search = useSessionSearch();
     const activeSearchBlockId = search?.activeBlockId ?? null;
     const shouldShowAgentActivity = Boolean(agentActivityLabel);
@@ -2666,8 +3841,9 @@ export const SessionChatStreamView = forwardRef<
         openLocalFile: onFilePathClick,
         ...(sendMessage ? { sendMessage } : {}),
         ...(onOpenHtmlFile ? { openHtmlFile: onOpenHtmlFile } : {}),
+        ...(onOpenFileAttachment ? { openFileAttachment: onOpenFileAttachment } : {}),
       }),
-      [onCopyContext, onOpenHtmlFile, onFilePathClick, sendMessage]
+      [onCopyContext, onOpenFileAttachment, onOpenHtmlFile, onFilePathClick, sendMessage]
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
@@ -2679,21 +3855,21 @@ export const SessionChatStreamView = forwardRef<
           <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
             <ContainerQueryProvider
               ref={scrollRootRef}
-              className={cn('relative bg-background', className)}
+              {...withClassName(stylex.props(viewStyles.streamRoot, xstyle), className)}
             >
               <div
-                className="flex h-full flex-col overflow-y-auto"
+                {...stylex.props(viewStyles.emptyStreamScroll)}
                 data-window-session-stream-ready={initialWindowReady ? sessionId : undefined}
                 style={{ paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)' }}
               >
                 {leadingContent == null ? null : (
-                  <div className="shrink-0" data-conversation-leading-content="">
+                  <div {...stylex.props(viewStyles.shrink0)} data-conversation-leading-content="">
                     {leadingContent}
                   </div>
                 )}
                 {coordinatorBubbles ? (
                   activeCoordinatorStatus ? (
-                    <div className="shrink-0 pt-2">
+                    <div {...stylex.props(viewStyles.shrink0Pt2)}>
                       <CoordinatorWorkingRow
                         label={activeCoordinatorStatus.label}
                         tone={activeCoordinatorStatus.tone}
@@ -2703,7 +3879,7 @@ export const SessionChatStreamView = forwardRef<
                   ) : null
                 ) : (
                   agentActivityLabel && (
-                    <div className="shrink-0 pt-2">
+                    <div {...stylex.props(viewStyles.shrink0Pt2)}>
                       <AgentActivityRow
                         label={agentActivityLabel}
                         tone={agentActivityTone}
@@ -2713,20 +3889,15 @@ export const SessionChatStreamView = forwardRef<
                     </div>
                   )
                 )}
-                <div className="min-h-0 flex-1">
+                <div {...stylex.props(viewStyles.fill)}>
                   {emptyState ?? (
-                    <div
-                      className={cn(
-                        stylex.props(activityTypography.body).className,
-                        'flex h-full items-center justify-center text-muted-foreground'
-                      )}
-                    >
+                    <div {...stylex.props(activityTypography.body, viewStyles.emptyStateCentered)}>
                       {noMessagesLabel}
                     </div>
                   )}
                 </div>
                 {effectiveTrailingContent == null ? null : (
-                  <div className="shrink-0" data-conversation-trailing-content="">
+                  <div {...stylex.props(viewStyles.shrink0)} data-conversation-trailing-content="">
                     {effectiveTrailingContent}
                   </div>
                 )}
@@ -2824,7 +3995,7 @@ export const SessionChatStreamView = forwardRef<
       hasActivityRow ? (
         <div
           key={AGENT_ACTIVITY_ROW_KEY}
-          className="shrink-0 pt-1"
+          {...stylex.props(viewStyles.shrink0Pt1)}
           data-agent-activity-row-spacer=""
         >
           {coordinatorBubbles && activeCoordinatorStatus ? (
@@ -2855,130 +4026,134 @@ export const SessionChatStreamView = forwardRef<
       <CoordinatorStreamLatestBubbleContext.Provider value={latestCoordinatorBubbleByTaskId}>
         <CoordinatorSupersededCardsContext.Provider value={supersededCoordinatorCardKeys}>
           <SessionChatActionContext.Provider value={chatActionContextValue}>
-          <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
-            <LiveTurnContext.Provider value={liveTurnContextValue}>
-              <ContainerQueryProvider
-                ref={scrollRootRef}
-                className={cn('relative bg-background', className)}
-              >
-                <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
-                  <EngineConversationScroller
-                    sessionId={sessionId}
-                    rows={listRows}
-                    rowMeta={engineRowMeta}
-                    item={ConversationVirtualRow}
-                    keepMounted={nativeTextSelection.keepMounted}
-                    initialWindowReady={initialWindowReady}
-                    hidden={!isVisible}
-                    suppressAutoScrollRef={autoScrollSuppressedRef}
-                    onAtBottomChange={onAtBottomChange}
-                    onScroll={handleStreamScroll}
-                    onStateChange={handleListStateChange}
-                    layoutKey={String(conversationFontSize)}
-                    // Keep x overflow explicit: overflow-y:auto otherwise computes
-                    // the untouched x axis to auto too, letting any wide row pan the
-                    // entire conversation instead of its own nested scroller.
-                    // Mobile session page floats a frosted header over the list;
-                    // `--conversation-top-inset` (set by session-detail's mobile
-                    // branch) pads the scroll content so the first message clears the
-                    // header at rest while later content scrolls under it and blurs.
-                    // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
-                    viewportClassName="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
-                    viewportStyle={CONVERSATION_VIEWPORT_STYLE}
-                    trailing={<MessageSelectionOverlay />}
-                    // Pre-render extra items outside the viewport to reduce blank areas
-                    // during fast scrolling (especially on mobile). This is 4x Virtua's
-                    // default (200px) — generous, but deliberately not the previous 2000px:
-                    // an oversized buffer keeps a huge set of still-resizing rows mounted,
-                    // which widens the window where Virtua's offsets are mid-recompute and
-                    // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
-                    bufferSize={CONVERSATION_OVERSCAN}
-                    handleRef={listRef}
-                  />
-                </NativeSelectionRowsContext.Provider>
-                {/* Top fade into the bg-background canvas above (desktop only),
-                  hinting that the conversation continues past the top edge. */}
-                {!isMobile && isScrolledFromTop ? (
-                  <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
-                ) : null}
-                {/* Bottom fade into the same canvas over the last 40px above the
-                  info bar (desktop only): more conversation below. */}
-                {!isMobile && hasContentBelow ? (
-                  <div
-                    data-conversation-bottom-fade=""
-                    className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
-                  />
-                ) : null}
-                {/* Round outline. Its visual layer portals to the full-page overlay
-                  when supplied, so composer growth cannot move its centre. It is
-                  never a Virtua row or a child of the viewport: sticky scroll
-                  takes the content element from that div's `firstElementChild`.
-                  Touch has no hover, so mobile is excluded rather than shipped
-                  without its preview card. */}
-                {isMobile || !showOutlineRail ? null : (
-                  <ConversationOutlineRail
-                    entries={outlineEntries}
-                    activeIndex={activeOutlineIndex}
-                    onJumpToRound={handleOutlineJump}
-                    onPreviewRound={handleOutlinePreview}
-                    overlayRoot={outlineOverlayRoot}
-                    enableArrivalIntent
-                  />
-                )}
-                {showScrollToLatest && !isSticky && (
-                  /* Full-bleed overlay; ConversationColumn carries the shared
-                   horizontal gutter so the button lines up with the composer. */
-                  <div className="pointer-events-none absolute inset-x-0 bottom-4">
-                    <ConversationColumn className="flex justify-end">
-                      <Button
-                        variant="secondary"
-                        icon
-                        data-scroll-to-latest=""
-                        className={cn(
-                          stylex.props(stylex.defaultMarker()).className,
-                          'pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none'
-                        )}
-                        onClick={scrollToBottom}
-                        aria-label={t('sessions.scrollToLatest')}
-                      >
-                        {isScrollToLatestWorking ? (
-                          <Spinner
+            <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
+              <LiveTurnContext.Provider value={liveTurnContextValue}>
+                <ContainerQueryProvider
+                  ref={scrollRootRef}
+                  {...withClassName(stylex.props(viewStyles.streamRoot, xstyle), className)}
+                >
+                  <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
+                    <EngineConversationScroller
+                      sessionId={sessionId}
+                      rows={listRows}
+                      rowMeta={engineRowMeta}
+                      item={ConversationVirtualRow}
+                      keepMounted={nativeTextSelection.keepMounted}
+                      initialWindowReady={initialWindowReady}
+                      hidden={!isVisible}
+                      suppressAutoScrollRef={autoScrollSuppressedRef}
+                      onAtBottomChange={onAtBottomChange}
+                      onScroll={handleStreamScroll}
+                      onStateChange={handleListStateChange}
+                      layoutKey={String(conversationFontSize)}
+                      // Keep x overflow explicit: overflow-y:auto otherwise computes
+                      // the untouched x axis to auto too, letting any wide row pan the
+                      // entire conversation instead of its own nested scroller.
+                      // Mobile session page floats a frosted header over the list;
+                      // `--conversation-top-inset` (set by session-detail's mobile
+                      // branch) pads the scroll content so the first message clears the
+                      // header at rest while later content scrolls under it and blurs.
+                      // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
+                      viewportClassName={clsx(
+                        'chat-scrollbar',
+                        stylex.props(viewStyles.conversationViewport).className
+                      )}
+                      viewportStyle={CONVERSATION_VIEWPORT_STYLE}
+                      trailing={<MessageSelectionOverlay />}
+                      // Pre-render extra items outside the viewport to reduce blank areas
+                      // during fast scrolling (especially on mobile). This is 4x Virtua's
+                      // default (200px) — generous, but deliberately not the previous 2000px:
+                      // an oversized buffer keeps a huge set of still-resizing rows mounted,
+                      // which widens the window where Virtua's offsets are mid-recompute and
+                      // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
+                      bufferSize={CONVERSATION_OVERSCAN}
+                      handleRef={listRef}
+                    />
+                  </NativeSelectionRowsContext.Provider>
+                  {/* Top fade into the bg-background canvas above (desktop only),
+                    hinting that the conversation continues past the top edge. */}
+                  {!isMobile && isScrolledFromTop ? (
+                    <div {...stylex.props(viewStyles.topFade)} />
+                  ) : null}
+                  {/* Bottom fade into the same canvas over the last 40px above the
+                    info bar (desktop only): more conversation below. */}
+                  {!isMobile && hasContentBelow ? (
+                    <div
+                      data-conversation-bottom-fade=""
+                      {...stylex.props(viewStyles.bottomFade)}
+                    />
+                  ) : null}
+                  {/* Round outline. Its visual layer portals to the full-page overlay
+                    when supplied, so composer growth cannot move its centre. It is
+                    never a Virtua row or a child of the viewport: sticky scroll
+                    takes the content element from that div's `firstElementChild`.
+                    Touch has no hover, so mobile is excluded rather than shipped
+                    without its preview card. */}
+                  {isMobile || !showOutlineRail ? null : (
+                    <ConversationOutlineRail
+                      entries={outlineEntries}
+                      activeIndex={activeOutlineIndex}
+                      onJumpToRound={handleOutlineJump}
+                      onPreviewRound={handleOutlinePreview}
+                      overlayRoot={outlineOverlayRoot}
+                      enableArrivalIntent
+                    />
+                  )}
+                  {showScrollToLatest && !isSticky && (
+                    /* Full-bleed overlay; ConversationColumn carries the shared
+                     horizontal gutter so the button lines up with the composer. */
+                    <div {...stylex.props(viewStyles.scrollToLatestOverlay)}>
+                      <ConversationColumn className={stylex.props(viewStyles.justifyEnd).className}>
+                        <Button
+                          variant="secondary"
+                          icon
+                          data-scroll-to-latest=""
+                          xstyle={[
+                            stylex.defaultMarker(),
+                            viewStyles.scrollLatest,
+                            resolvedTheme === 'dark' && viewStyles.scrollLatestDark,
+                          ]}
+                          onClick={scrollToBottom}
+                          aria-label={t('sessions.scrollToLatest')}
+                        >
+                          {isScrollToLatestWorking ? (
+                            <Spinner
+                              {...stylex.props(
+                                scrollToLatestStyles.icon,
+                                scrollToLatestStyles.workingSpinner
+                              )}
+                              aria-hidden="true"
+                            />
+                          ) : null}
+                          <ArrowDown
                             {...stylex.props(
                               scrollToLatestStyles.icon,
-                              scrollToLatestStyles.workingSpinner
+                              isScrollToLatestWorking && scrollToLatestStyles.workingArrow
                             )}
                             aria-hidden="true"
                           />
-                        ) : null}
-                        <ArrowDown
-                          {...stylex.props(
-                            scrollToLatestStyles.icon,
-                            isScrollToLatestWorking && scrollToLatestStyles.workingArrow
-                          )}
-                          aria-hidden="true"
-                        />
-                      </Button>
-                    </ConversationColumn>
-                  </div>
-                )}
-                <ImagePreviewDialog
-                  open={
-                    findSessionImageGalleryEntryIndex(activeGalleryEntries, activeImageKey) !== -1
-                  }
-                  onOpenChange={(open) => {
-                    if (!open) {
-                      setActiveImageKey(null);
+                        </Button>
+                      </ConversationColumn>
+                    </div>
+                  )}
+                  <ImagePreviewDialog
+                    open={
+                      findSessionImageGalleryEntryIndex(activeGalleryEntries, activeImageKey) !== -1
                     }
-                  }}
-                  activeImageKey={activeImageKey}
-                  onActiveImageKeyChange={setActiveImageKey}
-                  entries={activeGalleryEntries}
-                  onAnnotateImage={onAnnotateImage}
-                  portalAnchorRef={scrollRootRef}
-                />
-              </ContainerQueryProvider>
-            </LiveTurnContext.Provider>
-          </SessionImagePreviewContext.Provider>
+                    onOpenChange={(open) => {
+                      if (!open) {
+                        setActiveImageKey(null);
+                      }
+                    }}
+                    activeImageKey={activeImageKey}
+                    onActiveImageKeyChange={setActiveImageKey}
+                    entries={activeGalleryEntries}
+                    onAnnotateImage={onAnnotateImage}
+                    portalAnchorRef={scrollRootRef}
+                  />
+                </ContainerQueryProvider>
+              </LiveTurnContext.Provider>
+            </SessionImagePreviewContext.Provider>
           </SessionChatActionContext.Provider>
         </CoordinatorSupersededCardsContext.Provider>
       </CoordinatorStreamLatestBubbleContext.Provider>
@@ -3143,7 +4318,7 @@ const SystemMessageRowContent = ({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div {...stylex.props(viewStyles.columnGap2)}>
       {systemItems.map(({ item, itemIndex }) =>
         item.type === 'system_notice' && item.name === 'agent_role_proposal' && item.meta ? (
           <AgentRoleProposalNotice
@@ -3213,7 +4388,7 @@ const OperationCompletionBatchView = ({
   const { t } = useTranslation();
   if (!hasVisibleOperationContent(batch)) return null;
   return (
-    <div className="flex flex-col gap-1.5">
+    <div {...stylex.props(viewStyles.columnGap1_5)}>
       <div>
         {t(
           batch.deliveryStatus === 'unknown'
@@ -3311,7 +4486,10 @@ const OperationCompletionView = ({
     failedCompletion || cancelledCompletion || partialCompletion || untargetedProblems.length > 0;
 
   return (
-    <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>
+    <div
+      {...stylex.props(viewStyles.columnGap2)}
+      data-operation-completion={completion.operationKind}
+    >
       {createsSessions ? (
         <CreatedSessionList cards={cards} onNavigateSession={onNavigateSession} />
       ) : (
@@ -3334,21 +4512,18 @@ const OperationCompletionView = ({
       )}
       {showStatusCard ? (
         <div
-          className={cn(
-            stylex.props(activityTypography.body).className,
-            'flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 '
-          )}
+          {...stylex.props(activityTypography.body, viewStyles.operationStatusCard)}
           title={completion.operationId}
         >
           <StatusIcon
-            className={cn(
-              'mt-0.5 h-4 w-4 shrink-0',
-              failedCompletion || failed > 0 ? 'text-destructive' : 'text-muted-foreground'
+            {...stylex.props(
+              viewStyles.iconMd,
+              failedCompletion || failed > 0 ? viewStyles.destructive : viewStyles.mutedForeground
             )}
             aria-hidden="true"
           />
-          <div className="min-w-0 flex-1">
-            <div className="font-medium text-foreground">
+          <div {...stylex.props(viewStyles.fillInline)}>
+            <div {...stylex.props(viewStyles.fontMedium, viewStyles.foreground)}>
               {t(
                 failedCompletion
                   ? 'orchestration.operationFailed'
@@ -3362,9 +4537,11 @@ const OperationCompletionView = ({
             </div>
             {completion.completion.type === 'error' ? (
               <div
-                className={cn(
-                  stylex.props(activityTypography.footnote).className,
-                  'mt-0.5 break-words text-muted-foreground'
+                {...stylex.props(
+                  activityTypography.footnote,
+                  viewStyles.mtHalf,
+                  viewStyles.breakWords,
+                  viewStyles.mutedForeground
                 )}
               >
                 {completion.completion.error.message}
@@ -3373,9 +4550,11 @@ const OperationCompletionView = ({
             {untargetedProblems.map((problem, index) => (
               <div
                 key={`${problem.label ?? 'item'}-${index}`}
-                className={cn(
-                  stylex.props(activityTypography.footnote).className,
-                  'mt-0.5 break-words text-muted-foreground'
+                {...stylex.props(
+                  activityTypography.footnote,
+                  viewStyles.mtHalf,
+                  viewStyles.breakWords,
+                  viewStyles.mutedForeground
                 )}
               >
                 {problem.label ? `${problem.label}: ${problem.message}` : problem.message}
@@ -3390,7 +4569,7 @@ const OperationCompletionView = ({
 
 const DashedNoticeRule = () => (
   <div
-    className="h-px flex-1 opacity-60"
+    {...stylex.props(viewStyles.dashedNoticeRule)}
     style={{
       backgroundImage:
         'repeating-linear-gradient(to right, hsl(var(--border)) 0 4px, transparent 4px 7px)',
@@ -3398,7 +4577,16 @@ const DashedNoticeRule = () => (
   />
 );
 
+const NOTICE_DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const noticeStyles = stylex.create({
+  warningAccent: {
+    color: {
+      default: 'var(--color-amber-600)',
+      [NOTICE_DARK_SCOPE]: 'var(--color-amber-400)',
+    },
+  },
   // One header row: glyph, label, and at most one trailing owner (retry or
   // copy). `alignItems: center` keeps the 14px glyph on the label's optical
   // line instead of relying on a hand-tuned top margin.
@@ -3499,12 +4687,12 @@ export const AgentNoticeBanner = ({
   // `--status-warning` resolves to a brown (24.9 58.9% 41%) in this theme and
   // reads as neither warning nor anything else at 14px, so warning uses amber —
   // the convention; failure keeps the semantic `--destructive`.
-  const accentClass =
+  const accentStyle =
     tone === 'error'
-      ? 'text-destructive'
+      ? viewStyles.destructive
       : tone === 'warning'
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-muted-foreground';
+        ? noticeStyles.warningAccent
+        : viewStyles.mutedForeground;
 
   // The tone only tints the well. There is no ring: a notice sits in the
   // conversation as a block of the same material as a user bubble or code
@@ -3525,10 +4713,10 @@ export const AgentNoticeBanner = ({
   const hasBody = Boolean(detail || afterDetail || bodyFooter);
 
   return (
-    <div style={{ background: fillColor }} className="w-full overflow-hidden rounded-lg">
+    <div style={{ background: fillColor }} {...stylex.props(viewStyles.noticeFrame)}>
       <div {...stylex.props(noticeStyles.header, !hasBody && noticeStyles.headerOnly)}>
-        <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
-        <span {...withClassName(stylex.props(noticeStyles.label), accentClass)}>{label}</span>
+        <Icon {...stylex.props(viewStyles.iconSm, accentStyle)} aria-hidden="true" />
+        <span {...stylex.props(noticeStyles.label, accentStyle)}>{label}</span>
         {headerTrailing ? (
           <div {...stylex.props(noticeStyles.trailing)}>{headerTrailing}</div>
         ) : null}
@@ -3595,9 +4783,10 @@ const SystemNoticeView = ({
       if (!meta) return null;
       return (
         <div
-          className={cn(
-            stylex.props(activityTypography.footnote).className,
-            'flex items-center gap-3 py-4 text-muted-foreground/75'
+          {...stylex.props(
+            activityTypography.footnote,
+            viewStyles.noticeRow,
+            viewStyles.mutedForeground75
           )}
         >
           <DashedNoticeRule />
@@ -3606,14 +4795,14 @@ const SystemNoticeView = ({
               clipping at the pane edge. Truncation must live on the button —
               on the wrapper the whole button is one atomic inline box, so the
               ellipsis would replace the entire title. */}
-          <span className="flex min-w-0 items-baseline gap-1">
-            <span className="shrink-0">
+          <span {...stylex.props(viewStyles.noticeSourceRow)}>
+            <span {...stylex.props(viewStyles.noticeSourcePrefix)}>
               {t('sessions.systemNotices.forkOrigin.prefix', 'This conversation was forked from')}
             </span>
             <button
               type="button"
               title={meta.sourceTitle}
-              className="min-w-0 truncate font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              {...stylex.props(viewStyles.noticeSourceButton)}
               onClick={() => onNavigateSession?.({ sessionId: meta.sourceSessionId })}
             >
               {meta.sourceTitle}
@@ -3644,18 +4833,16 @@ const SystemNoticeView = ({
   }
 
   return (
-    <div className="relative flex items-center gap-3 py-4">
+    <div {...stylex.props(viewStyles.noticeInlineRow)}>
       {/* Left divider line */}
-      <div className="flex-1 h-px bg-border" />
+      <div {...stylex.props(viewStyles.noticeDivider)} />
 
-      <span
-        className={cn(stylex.props(activityTypography.footnote).className, 'text-muted-foreground')}
-      >
+      <span {...stylex.props(activityTypography.footnote, viewStyles.mutedForeground)}>
         {mainMessage}
       </span>
 
       {/* Right divider line */}
-      <div className="flex-1 h-px bg-border" />
+      <div {...stylex.props(viewStyles.noticeDivider)} />
     </div>
   );
 };
@@ -3835,9 +5022,9 @@ const ChatFailedNoticeView = ({
       <button
         type="button"
         aria-label={isRetryCountdown ? stopAutoRetryLabel : undefined}
-        className={cn(
-          stylex.props(activityTypography.footnote).className,
-          'group relative isolate inline-grid h-7 shrink-0 place-items-center overflow-hidden rounded-full bg-muted-foreground/[0.04] px-2.5 font-normal tabular-nums text-foreground/80 transition-colors hover:bg-muted-foreground/[0.07] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50'
+        {...withClassName(
+          stylex.props(activityTypography.footnote, stylex.defaultMarker(), viewStyles.retryButton),
+          'group'
         )}
         disabled={capacityRetry.pending || !capacityRetry.canRetry}
         onClick={isRetryCountdown ? capacityRetry.stopAutoRetry : capacityRetry.retry}
@@ -3845,23 +5032,21 @@ const ChatFailedNoticeView = ({
         {capacityRetry.retryRemainingRatio !== null ? (
           <span
             aria-hidden="true"
-            className="absolute inset-y-0 left-0 -z-10 bg-muted-foreground/[0.08] transition-[width] duration-300 ease-linear"
+            {...stylex.props(viewStyles.retryProgress)}
             style={{ width: `${capacityRetry.retryRemainingRatio * 100}%` }}
           />
         ) : null}
         {isRetryCountdown ? (
           <>
-            <span className="relative z-10 col-start-1 row-start-1 group-hover:invisible group-focus-visible:invisible [@media(hover:none)]:invisible">
+            <span {...stylex.props(viewStyles.retryLabel)}>
               {t('sessions.systemNotices.chatFailed.retryIn', 'Retry in {{seconds}}s', {
                 seconds: retryInSeconds,
               })}
             </span>
-            <span className="invisible relative z-10 col-start-1 row-start-1 group-hover:visible group-focus-visible:visible [@media(hover:none)]:visible">
-              {stopAutoRetryLabel}
-            </span>
+            <span {...stylex.props(viewStyles.retryLabelAlternate)}>{stopAutoRetryLabel}</span>
           </>
         ) : (
-          <span className="relative z-10">
+          <span {...stylex.props(viewStyles.relativeZ10)}>
             {capacityRetry.pending
               ? t('sessions.systemNotices.chatFailed.retrying', 'Retrying…')
               : capacityRetry.autoRetryExhausted
@@ -3924,11 +5109,13 @@ const ChatFailedNoticeView = ({
   );
 
   return (
-    <div className={cn('space-y-2 py-1', !inTurn && '@[640px]:pl-3')}>
+    <div {...stylex.props(viewStyles.noticeStack, !inTurn && viewStyles.noticeStackIndented)}>
       {/* The full provider payload unfolds inside the banner itself, so there
           is no dialog to open and nothing to reach only by hover — which is
           what made the old tooltip unusable on touch in the first place. */}
-      <div role="alert">{noticeRow}</div>
+      <div role="alert" {...stylex.props(viewStyles.noticeAlert)}>
+        {noticeRow}
+      </div>
       {meta?.reason === 'acp_auth_required' && sessionMeta && canAuthenticateSessionAgent ? (
         <AcpAuthenticationPanel
           machineId={sessionMeta.machineId}
@@ -4020,7 +5207,10 @@ const AgentWarningNoticeBody = ({
               )
             : undefined;
   return (
-    <div className={cn('py-1', !inTurn && '@[640px]:pl-3')} role="alert">
+    <div
+      {...stylex.props(viewStyles.noticeStack, !inTurn && viewStyles.noticeStackIndented)}
+      role="alert"
+    >
       <AgentNoticeBanner
         tone="warning"
         label={label}
@@ -4077,32 +5267,33 @@ const WorktreeScriptNoticeView = ({
       showDisclosureIcon
       expanded={canToggle ? isOutputOpen : undefined}
       onExpandedChange={setIsOutputOpen}
-      containerClassName="w-full max-w-[760px]"
-      bodyClassName="px-0"
+      containerStyles={viewStyles.worktreeScriptContainer}
+      bodyStyles={viewStyles.collapsibleBodyFlushInline}
       left={
         <Fragment>
           <PhaseIcon
-            className={cn(
-              'h-3.5 w-3.5 flex-none shrink-0',
-              isFailed ? 'text-destructive' : 'text-muted-foreground'
+            {...stylex.props(
+              viewStyles.iconSmFlexNone,
+              isFailed ? viewStyles.destructive : viewStyles.mutedForeground
             )}
           />
           <span
-            className={cn(
-              cn(stylex.props(activityTypography.control).className, 'truncate font-medium '),
-              isFailed ? 'text-destructive' : 'text-muted-foreground'
+            {...stylex.props(
+              activityTypography.control,
+              viewStyles.truncateMedium,
+              isFailed ? viewStyles.destructive : viewStyles.mutedForeground
             )}
           >
             {title}
           </span>
           {isRunning ? (
-            <Spinner className="h-3 w-3 flex-none shrink-0 text-muted-foreground" />
+            <Spinner {...stylex.props(viewStyles.spinnerSm, viewStyles.mutedForeground)} />
           ) : null}
         </Fragment>
       }
     >
       {canToggle ? (
-        <div className="flex flex-col gap-2">
+        <div {...stylex.props(viewStyles.columnGap2)}>
           {script.steps.map((step, stepIndex) => {
             const isStepOpen = openTerminalSteps.has(stepIndex);
             const output =
@@ -4113,7 +5304,7 @@ const WorktreeScriptNoticeView = ({
                 title={step.command}
                 command=""
                 output={output}
-                className={cn('rounded-md', step.status === 'failed' && 'border-destructive/30')}
+                xstyle={step.status === 'failed' ? viewStyles.terminalFailed : undefined}
                 showHeader
                 showBorder
                 bodyVisible={isStepOpen}
@@ -4214,6 +5405,82 @@ const MessageAuthorSourceLink = memo(function MessageAuthorSourceLink({
   );
 });
 
+export function UserMessageAuthorSlot({
+  author,
+  user,
+  isMobile,
+  showSenderIdentity,
+  onNavigateSession,
+}: {
+  author?: SessionHistoryParsed['author'];
+  user?: SessionChatUser;
+  isMobile: boolean;
+  showSenderIdentity: boolean;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
+}) {
+  const sessionLinkNavigate = useSessionLinkNavigator();
+  const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
+  return (
+    <div {...stylex.props(conversationSurface.author)}>
+      {author?.kind === 'agent' ? (
+        <MessageAuthorIdentity author={author} onNavigateSession={navigateSourceSession} />
+      ) : (
+        <UserMessageAuthorAvatar user={user} isMobile={isMobile} showProfile={showSenderIdentity} />
+      )}
+    </div>
+  );
+}
+
+export function UserMessageMetadataAuthor({
+  author,
+  sessionId,
+  user,
+  showSenderIdentity,
+  isMobile,
+  onNavigateSession,
+}: {
+  author?: SessionHistoryParsed['author'];
+  sessionId: SessionId;
+  user?: SessionChatUser;
+  showSenderIdentity: boolean;
+  isMobile: boolean;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
+}) {
+  const sessionLinkNavigate = useSessionLinkNavigator();
+  const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
+  const sourceSessionId =
+    author?.kind === 'agent' && author.sessionId && author.sessionId !== sessionId
+      ? (author.sessionId as SessionId)
+      : null;
+  const senderDisplayName = resolveSenderDisplayName(user);
+
+  if (author?.kind === 'agent') {
+    const agentLabel = author.role?.name ?? author.name;
+    return (
+      <>
+        <span title={agentLabel}>{agentLabel}</span>
+        {sourceSessionId && navigateSourceSession ? (
+          <MessageAuthorSourceLink
+            sourceSessionId={sourceSessionId}
+            isMobile={isMobile}
+            onNavigate={navigateSourceSession}
+          />
+        ) : null}
+      </>
+    );
+  }
+
+  if (showSenderIdentity && senderDisplayName) {
+    return (
+      <span {...stylex.props(conversationSurface.metadataSenderName)} title={senderDisplayName}>
+        {senderDisplayName}
+      </span>
+    );
+  }
+
+  return null;
+}
+
 const UserMessageRowView = ({
   message,
   sessionId,
@@ -4245,14 +5512,6 @@ const UserMessageRowView = ({
   const { copyContext } = useContext(SessionChatActionContext);
   const copyWorkspaceId = useSessionCopyWorkspaceId();
   const isMobile = useIsMobile();
-  const sessionLinkNavigate = useSessionLinkNavigator();
-  const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
-  const sourceSessionId =
-    message.author?.kind === 'agent' &&
-    message.author.sessionId &&
-    message.author.sessionId !== sessionId
-      ? (message.author.sessionId as SessionId)
-      : null;
   const mobileActionsRevealed = useMobileMessageActionsRevealed(message.id);
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -4384,23 +5643,17 @@ const UserMessageRowView = ({
     <div
       {...stylex.props(conversationSurface.userRow, isMobile && conversationSurface.mobileUserRow)}
     >
-      <div {...stylex.props(conversationSurface.author)}>
-        {message.author?.kind === 'agent' ? (
-          <MessageAuthorIdentity
-            author={message.author}
-            onNavigateSession={navigateSourceSession}
-          />
-        ) : (
-          <UserMessageAuthorAvatar
-            user={user}
-            isMobile={isMobile}
-            showProfile={showSenderIdentity}
-          />
-        )}
-      </div>
+      <UserMessageAuthorSlot
+        author={message.author}
+        user={user}
+        isMobile={isMobile}
+        showSenderIdentity={showSenderIdentity}
+        onNavigateSession={onNavigateSession}
+      />
       <div
         {...withClassName(
           stylex.props(
+            stylex.defaultMarker(),
             conversationSurface.userStack,
             isMobile && conversationSurface.mobileUserStack
           ),
@@ -4415,66 +5668,63 @@ const UserMessageRowView = ({
         }
       >
         <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
-          {message.author?.kind === 'agent' ? (
-            <>
-              <span title={message.author.role?.name ?? message.author.name}>
-                {message.author.role?.name ?? message.author.name}
-              </span>
-              {sourceSessionId && navigateSourceSession ? (
-                <MessageAuthorSourceLink
-                  sourceSessionId={sourceSessionId}
-                  isMobile={isMobile}
-                  onNavigate={navigateSourceSession}
-                />
-              ) : null}
-            </>
-          ) : showSenderIdentity && user?.name ? (
-            <span className="max-w-40 truncate font-medium" title={user.name}>
-              {user.name}
-            </span>
+          <UserMessageMetadataAuthor
+            author={message.author}
+            sessionId={sessionId}
+            user={user}
+            showSenderIdentity={showSenderIdentity}
+            isMobile={isMobile}
+            onNavigateSession={onNavigateSession}
+          />
+          {timestampLabel ? (
+            <span {...stylex.props(conversationSurface.metadataTimestamp)}>{timestampLabel}</span>
           ) : null}
-          {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
           {isUndelivered || isDeliveryUnknown || isUpdateInterrupted ? (
             onResendUndelivered ? (
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-sm text-destructive underline-offset-2 transition-colors hover:text-destructive/80 hover:underline"
+                {...stylex.props(viewStyles.recoveryButton)}
                 onClick={() => setResendDialogOpen(true)}
                 aria-label={recoveryLabel}
               >
-                <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
+                <AlertCircle {...stylex.props(viewStyles.iconSmPlain)} strokeWidth={2} />
                 {!isMobile ? recoveryLabel : null}
               </button>
             ) : (
-              <span
-                className="inline-flex items-center gap-1 text-destructive"
-                title={recoveryLabel}
-              >
-                <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
+              <span {...stylex.props(viewStyles.recoveryLabel)} title={recoveryLabel}>
+                <AlertCircle {...stylex.props(viewStyles.iconSmPlain)} strokeWidth={2} />
                 {!isMobile ? recoveryLabel : null}
               </span>
             )
           ) : isPendingApply ? (
-            <span className="inline-flex items-center gap-1 text-muted-foreground">
-              <Clock3 className="h-3.5 w-3.5" strokeWidth={2} />
+            <span {...stylex.props(viewStyles.pendingLabel)}>
+              <Clock3 {...stylex.props(viewStyles.iconSmPlain)} strokeWidth={2} />
               {!isMobile ? t('sessions.messageStatus.pendingApply', 'Steering') : null}
             </span>
           ) : (
             <span title={isDelivered ? 'Delivered' : 'Sending'}>
               {isDelivered ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-primary" strokeWidth={2} />
+                <CheckCircle2
+                  {...stylex.props(viewStyles.iconSmPlain, viewStyles.primary)}
+                  strokeWidth={2}
+                />
               ) : (
-                <Circle className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={2} />
+                <Circle
+                  {...stylex.props(viewStyles.iconSmPlain, viewStyles.mutedForeground)}
+                  strokeWidth={2}
+                />
               )}
             </span>
           )}
         </div>
-        <div className="flex w-full min-w-0 items-start justify-end">
+        <div {...stylex.props(viewStyles.userRowEnd)}>
           <div
-            className={cn(
-              'flex w-full min-w-0 justify-end',
-              'max-w-full',
-              hasWideContent ? 'scrollbar-pro overflow-x-auto' : ''
+            {...withClassName(
+              stylex.props(
+                viewStyles.userContentRow,
+                hasWideContent && viewStyles.userContentRowWide
+              ),
+              hasWideContent ? 'scrollbar-pro' : ''
             )}
           >
             {/* min-w-0: this is the flex item wrapping the content stack. Without it the flex
@@ -4484,33 +5734,27 @@ const UserMessageRowView = ({
                 unbreakable line, the content grows to its 800px cap, and being
                 right-aligned (`justify-end`) it overflows the column on the left. Chromium
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
-            {/* The 800px cap lives on this shrink-to-fit box, bounded by the column. On the
-                content below, a percentage cap is ignored when this box computes its
-                fit-content width, so a long message stretched it across the column and left
-                the capped bubble at its start, far from the avatar. A window breakpoint
-                (`sm:`) cannot bound it either: split panes narrow the column, not the window. */}
             <div
-              className={cn(
-                'relative min-w-0 max-w-[min(100%,800px)]',
-                isEditing ? 'w-full' : 'w-fit'
+              {...stylex.props(
+                viewStyles.userBubbleFrame,
+                isEditing ? viewStyles.userBubbleFrameEditing : viewStyles.userBubbleFrameFitted
               )}
             >
               {showSendingSpinner && (
-                <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
+                <Spinner className={stylex.props(viewStyles.sendingSpinner).className} />
               )}
               <div
-                {...withClassName(
-                  stylex.props(isEditing ? conversationSurface.userEditContent : undefined),
-                  cn(
-                    'min-w-0 max-w-full text-foreground',
-                    isEditing ? 'w-full' : 'w-fit',
-                    hasWideContent ? 'min-w-[480px]' : ''
-                  )
+                {...stylex.props(
+                  viewStyles.userTextFrame,
+                  isEditing && conversationSurface.userEditContent,
+                  isEditing ? viewStyles.userTextFrameEditing : viewStyles.userTextFrameFitted,
+                  hasWideContent && viewStyles.userTextFrameWide,
+                  viewStyles.userTextFrameCapped
                 )}
                 data-text-selectable
               >
                 {isEditing ? (
-                  <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
+                  <div {...stylex.props(viewStyles.editingStack)}>
                     <UserChatBubble
                       sessionId={sessionId}
                       message={message}
@@ -4534,7 +5778,7 @@ const UserMessageRowView = ({
                     />
                   </div>
                 ) : (
-                  <div className="flex min-w-0 max-w-full flex-col items-end gap-1">
+                  <div {...stylex.props(coordinatorBubbleStyles.userBubbleStack)}>
                     {showUserInlineQuote && userReplyTo ? (
                       <CoordinatorInlineQuoteChip
                         replyTo={userReplyTo}
@@ -4576,10 +5820,10 @@ const UserMessageRowView = ({
             userReplyCount > 0) &&
           !isEditing ? (
           <div
-            {...withClassName(
-              stylex.props(conversationSurface.userActions),
+            {...stylex.props(
+              conversationSurface.userActions,
               /* Touch has no hover: a tap on the message reveals its actions. */
-              isMobile && !mobileActionsRevealed && userReplyCount === 0 ? 'invisible' : undefined
+              isMobile && !mobileActionsRevealed && userReplyCount === 0 && viewStyles.invisible
             )}
             data-user-message-actions=""
             data-mobile-actions-hidden={
@@ -4601,11 +5845,10 @@ const UserMessageRowView = ({
               <AssistantForkButton
                 turnId={message.id}
                 worktreeAvailability="hidden"
-                className={cn(
-                  'transition-opacity',
-                  !isMobile &&
-                    'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100'
-                )}
+                xstyle={[
+                  viewStyles.userActionTransition,
+                  !isMobile && viewStyles.userActionDesktop,
+                ]}
               />
             )}
             {onEdit ? (
@@ -4618,11 +5861,15 @@ const UserMessageRowView = ({
                         type="button"
                         variant="ghost"
                         icon
-                        className={cn(
-                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
-                          !isMobile &&
-                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
-                        )}
+                        height="calc(var(--spacing) * 7)"
+                        width="calc(var(--spacing) * 7)"
+                        className={
+                          stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                        }
+                        xstyle={[
+                          viewStyles.userActionTransition,
+                          !isMobile && viewStyles.userActionDesktop,
+                        ]}
                         onClick={() => {
                           const draft = getMessageQuoteEditDraft(message.items);
                           setEditText(draft.text);
@@ -4631,7 +5878,7 @@ const UserMessageRowView = ({
                         }}
                         aria-label={t('sessions.editMessage', 'Edit message')}
                       >
-                        <PencilLine className="h-3.5 w-3.5" />
+                        <PencilLine {...stylex.props(viewStyles.iconSmPlain)} />
                       </Button>
                     }
                   />
@@ -4649,11 +5896,15 @@ const UserMessageRowView = ({
                         type="button"
                         variant="ghost"
                         icon
-                        className={cn(
-                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
-                          !isMobile &&
-                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
-                        )}
+                        height="calc(var(--spacing) * 7)"
+                        width="calc(var(--spacing) * 7)"
+                        className={
+                          stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                        }
+                        xstyle={[
+                          viewStyles.userActionTransition,
+                          !isMobile && viewStyles.userActionDesktop,
+                        ]}
                         onClick={handlePin}
                         aria-label={
                           isPinned
@@ -4662,9 +5913,9 @@ const UserMessageRowView = ({
                         }
                       >
                         {isPinned ? (
-                          <PinOff className="h-3.5 w-3.5" />
+                          <PinOff {...stylex.props(viewStyles.iconSmPlain)} />
                         ) : (
-                          <Pin className="h-3.5 w-3.5" />
+                          <Pin {...stylex.props(viewStyles.iconSmPlain)} />
                         )}
                       </Button>
                     }
@@ -4686,25 +5937,29 @@ const UserMessageRowView = ({
                       type="button"
                       variant="ghost"
                       icon
-                      className={cn(
-                        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
-                        !isMobile &&
-                          'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
-                      )}
+                      height="calc(var(--spacing) * 7)"
+                      width="calc(var(--spacing) * 7)"
+                      className={
+                        stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                      }
+                      xstyle={[
+                        viewStyles.userActionTransition,
+                        !isMobile && viewStyles.userActionDesktop,
+                      ]}
                       onClick={() => {
                         void handleCopy();
                       }}
                       aria-label="Copy message"
                     >
                       {didCopy ? (
-                        <Check className="h-3.5 w-3.5" />
+                        <Check {...stylex.props(viewStyles.iconSmPlain)} />
                       ) : (
-                        <Copy className="h-3.5 w-3.5" />
+                        <Copy {...stylex.props(viewStyles.iconSmPlain)} />
                       )}
                     </Button>
                   }
                 />
-                 <Tooltip.Content>{didCopy ? 'Copied' : 'Copy message'}</Tooltip.Content>
+                <Tooltip.Content>{didCopy ? 'Copied' : 'Copy message'}</Tooltip.Content>
               </Tooltip.Root>
             </Tooltip.Provider>
             {coordinator?.onReplyToBubble ? (
@@ -4717,11 +5972,15 @@ const UserMessageRowView = ({
                         type="button"
                         variant="ghost"
                         icon
-                        className={cn(
-                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
-                          !isMobile &&
-                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
-                        )}
+                        height="calc(var(--spacing) * 7)"
+                        width="calc(var(--spacing) * 7)"
+                        className={
+                          stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                        }
+                        xstyle={[
+                          viewStyles.userActionTransition,
+                          !isMobile && viewStyles.userActionDesktop,
+                        ]}
                         onClick={() => {
                           coordinator.onReplyToBubble!(
                             createCoordinatorReplyRef({
@@ -4736,7 +5995,7 @@ const UserMessageRowView = ({
                         aria-label={t('projectMode.reply.action', 'Reply')}
                         data-user-message-reply=""
                       >
-                        <Reply className="h-3.5 w-3.5" />
+                        <Reply {...stylex.props(viewStyles.iconSmPlain)} />
                       </Button>
                     }
                   />
@@ -4773,7 +6032,7 @@ function UserMessageAuthorAvatar({
   showProfile: boolean;
 }) {
   const { t } = useTranslation();
-  const displayName = user?.name?.trim() || user?.email?.trim();
+  const displayName = resolveSenderDisplayName(user);
   // One rung on both shells: the 28/32 split was a size that had drifted rather
   // than a decision, and `@lody/ui`'s ladder has nothing between them.
   const avatar = <UserAvatar user={user} size="large" showIcon />;
@@ -4788,7 +6047,7 @@ function UserMessageAuthorAvatar({
         render={
           <button
             type="button"
-            className="block rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            {...stylex.props(viewStyles.avatarButton)}
             aria-label={t('sessions.openSenderProfile', 'View profile for {{name}}', {
               name: displayName,
             })}
@@ -4801,26 +6060,20 @@ function UserMessageAuthorAvatar({
         side="left"
         align="start"
         sideOffset={10}
-        className="w-72 overflow-hidden p-0"
+        padding="none"
+        width="calc(var(--spacing) * 72)"
+        xstyle={viewStyles.profilePopup}
         aria-label={t('sessions.senderProfile', 'Sender profile')}
       >
-        <div className="flex items-center gap-3.5 p-4">
-          <UserAvatar user={user} size="xlarge" className="shrink-0" />
-          <div className="min-w-0">
-            <div
-              className={cn(
-                stylex.props(activityTypography.body).className,
-                'truncate font-semibold text-foreground'
-              )}
-            >
+        <div {...stylex.props(viewStyles.profileBody)}>
+          <UserAvatar user={user} size="xlarge" />
+          <div {...stylex.props(viewStyles.profileColumn)}>
+            <div {...stylex.props(activityTypography.body, viewStyles.profileName)}>
               {user?.name?.trim() || displayName}
             </div>
             {user?.email ? (
               <div
-                className={cn(
-                  stylex.props(activityTypography.footnote).className,
-                  'mt-1 truncate text-muted-foreground'
-                )}
+                {...stylex.props(activityTypography.footnote, viewStyles.profileEmail)}
                 title={user.email}
               >
                 {user.email}
@@ -4874,7 +6127,9 @@ const ResendUndeliveredDialog = ({
               {t('common.cancel', 'Cancel')}
             </AlertDialog.Cancel>
             <AlertDialog.Action disabled={isResending} onClick={onConfirm}>
-              {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
+              {isResending ? (
+                <Spinner {...stylex.props(viewStyles.resendSpinner)} strokeWidth={2} />
+              ) : null}
               {t('sessions.resendUndelivered.continue', 'Continue')}
             </AlertDialog.Action>
           </AlertDialog.Footer>
@@ -4907,7 +6162,9 @@ const ResendUndeliveredDialog = ({
             {t('common.cancel', 'Cancel')}
           </AlertDialog.Cancel>
           <AlertDialog.Action disabled={isResending} onClick={onConfirm}>
-            {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
+            {isResending ? (
+              <Spinner {...stylex.props(viewStyles.iconSmPlain)} strokeWidth={2} />
+            ) : null}
             {t('sessions.resendUndelivered.action', 'Resend message')}
           </AlertDialog.Action>
         </AlertDialog.Footer>
@@ -4985,28 +6242,20 @@ const AssistantTurnUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => 
       : []),
   ];
   return (
-    <div className="border-t border-border/60 px-3 py-2.5">
-      <div
-        className={cn(
-          stylex.props(activityTypography.caption).className,
-          'mb-1.5 font-medium text-foreground'
-        )}
-      >
+    <div {...stylex.props(viewStyles.turnMetaPanel)}>
+      <div {...stylex.props(activityTypography.caption, viewStyles.turnMetaHeading)}>
         {t('sessions.turnConfig.tokens', 'Tokens')}
       </div>
-      <dl className="space-y-1.5">
+      <dl>
         {rows.map((row) => (
           <div
             key={row.key}
             data-turn-cost={row.key === 'cost' ? '' : undefined}
-            className={cn(
-              stylex.props(activityTypography.caption).className,
-              'flex items-start justify-between gap-3 '
-            )}
+            {...stylex.props(activityTypography.caption, viewStyles.turnMetaRow)}
           >
-            <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
+            <dt {...stylex.props(viewStyles.turnMetaLabel)}>{row.label}</dt>
             <dd
-              className="text-right font-medium tabular-nums text-foreground"
+              {...stylex.props(viewStyles.usageValue)}
               title={row.title ?? [exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
             >
               {row.display ?? formatCompactNumber(row.value, locale)}
@@ -5139,31 +6388,22 @@ const AssistantTurnTimingRows = ({
     };
   };
   return (
-    <div className="border-t border-border/60 px-3 py-2.5" data-turn-timing="">
-      <div
-        className={cn(
-          stylex.props(activityTypography.caption).className,
-          'mb-1.5 font-medium text-foreground'
-        )}
-      >
+    <div {...stylex.props(viewStyles.turnMetaPanel)} data-turn-timing="">
+      <div {...stylex.props(activityTypography.caption, viewStyles.turnMetaHeading)}>
         {t('sessions.turnTiming.title', 'Timing')}
       </div>
-      <dl className="space-y-1.5">
+      <dl>
         {rows.map((row) => {
           const { label, value, title, warning } = display(row);
           return (
             <div
               key={row.kind}
-              className={cn(
-                stylex.props(activityTypography.caption).className,
-                'flex items-start justify-between gap-3'
-              )}
+              {...stylex.props(activityTypography.caption, viewStyles.turnMetaRow)}
             >
-              <dt className="shrink-0 text-muted-foreground">{label}</dt>
+              <dt {...stylex.props(viewStyles.turnMetaLabel)}>{label}</dt>
               <dd
-                className={cn(
-                  'min-w-0 text-right font-medium tabular-nums',
-                  warning ? 'text-status-warning' : 'text-foreground'
+                {...stylex.props(
+                  warning ? viewStyles.turnMetaValueWarning : viewStyles.turnMetaValue
                 )}
                 title={title}
                 data-stale={warning ? '' : undefined}
@@ -5244,73 +6484,71 @@ const AssistantTurnConfigInfoButton = ({
                 render={
                   <button
                     type="button"
-                    className={cn(
-                      'inline-flex shrink-0 items-center justify-center rounded-sm',
-                      /* Rest tone matches every other icon in the turn; hover is
-                     what brightens. */
-                      'text-muted-foreground transition-colors',
-                      'hover:bg-hover/50 hover:text-foreground',
-                      'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                      className
-                    )}
+                    {...withClassName(stylex.props(viewStyles.turnConfigButton), className)}
                     aria-label={t('sessions.turnConfig.open', 'Turn configuration')}
                     aria-expanded={configOpen}
                   >
-                    <Info className={cn('h-3.5 w-3.5', iconClassName)} strokeWidth={2} />
+                    <Info
+                      {...withClassName(stylex.props(viewStyles.iconSmPlain), iconClassName)}
+                      strokeWidth={2}
+                    />
                   </button>
                 }
               />
             }
           />
           {!configOpen ? (
-            <Tooltip.Content side="top" className="max-w-xs">
+            <Tooltip.Content
+              side="top"
+              className={stylex.props(viewStyles.turnConfigTooltip).className}
+            >
               {tooltipPreview}
             </Tooltip.Content>
           ) : null}
         </Tooltip.Root>
       </Tooltip.Provider>
-      <Popover.Content align="start" side="bottom" sideOffset={6} className="w-64 gap-0 p-0">
-        <div className="border-b border-border/60 px-3 py-2">
+      <Popover.Content
+        align="start"
+        side="bottom"
+        sideOffset={6}
+        padding="none"
+        gap="none"
+        width="calc(var(--spacing) * 64)"
+      >
+        <div {...stylex.props(viewStyles.turnMetaHeadingBorder)}>
           <div
-            className={cn(
-              stylex.props(activityTypography.caption).className,
-              'font-medium text-foreground'
+            {...stylex.props(
+              activityTypography.caption,
+              viewStyles.fontMedium,
+              viewStyles.foreground
             )}
           >
             {t('sessions.turnConfig.title', 'Turn configuration')}
           </div>
         </div>
-        <dl className="space-y-1.5 px-3 py-2.5">
+        <dl {...stylex.props(viewStyles.turnConfigRows)}>
           {configRows.map((row) => (
             <div
               key={row.label}
-              className={cn(
-                stylex.props(activityTypography.caption).className,
-                'flex items-start justify-between gap-3 '
-              )}
+              {...stylex.props(activityTypography.caption, viewStyles.turnMetaRow)}
             >
-              <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
-              <dd className="flex min-w-0 items-center justify-end gap-1.5 text-right font-medium text-foreground">
+              <dt {...stylex.props(viewStyles.turnMetaLabel)}>{row.label}</dt>
+              <dd {...stylex.props(viewStyles.turnConfigValue)}>
                 {row.label === 'Model' ? (
                   <AgentAvatar
-                    className="h-3.5 w-3.5 shrink-0"
+                    {...stylex.props(viewStyles.iconSm)}
                     modelInfo={message.modelInfo}
                     cliType={sessionAvatarMeta.cliType}
                     agentType={sessionAvatarMeta.agentType}
                     env={avatarAgentConfig?.env ?? sessionAvatarMeta.env}
                   />
                 ) : null}
-                <span className="min-w-0 break-words">{row.value}</span>
+                <span {...stylex.props(viewStyles.turnConfigValueText)}>{row.value}</span>
               </dd>
             </div>
           ))}
           {configRows.length === 0 && !tokenUsage ? (
-            <p
-              className={cn(
-                stylex.props(activityTypography.caption).className,
-                'text-muted-foreground'
-              )}
-            >
+            <p {...stylex.props(activityTypography.caption, viewStyles.mutedForeground)}>
               {t('sessions.turnConfig.empty', 'No configuration recorded for this turn.')}
             </p>
           ) : null}
@@ -5331,33 +6569,18 @@ const activityTypography = stylex.create({
   footnote: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
 });
-const ACTIVITY_PROCESS_TEXT_CLASS = cn(stylex.props(conversationSurface.processText).className);
-const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground/70';
-const ACTIVITY_STEP_TITLE_CLASS = cn(
-  'min-w-0 flex-1 transition-colors group-hover:text-foreground',
-  ACTIVITY_PROCESS_TEXT_CLASS
-);
-const ACTIVITY_STEP_BODY_CLASS = cn(stylex.props(conversationSurface.processText).className);
+const ACTIVITY_PROCESS_TEXT_CLASS = clsx(stylex.props(conversationSurface.processText).className);
+const ACTIVITY_STEP_BODY_CLASS = clsx(stylex.props(conversationSurface.processText).className);
 
 /* The collapsed activity group's label type; the live status row reuses it so
    "Working" reads as the next group label, not a separate widget. */
 /** A one-line process status ("Context compacted"): the group header's box and type. */
 const PROCESS_STATUS_LINE_CLASS = (isMobile: boolean) =>
-  cn(
+  clsx(
     stylex.props(conversationSurface.processLine).className,
     isMobile
-      ? cn('gap-1.5 pr-1', ACTIVITY_PROCESS_TEXT_CLASS)
+      ? clsx(stylex.props(viewStyles.processLineMobile).className, ACTIVITY_PROCESS_TEXT_CLASS)
       : stylex.props(activityTypography.body).className
-  );
-
-const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
-  cn(
-    'min-w-0',
-    isMobile
-      ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
-      : /* A notch under the reply, and set close: summaries and their steps
-           are one compact list between paragraphs, not paragraphs themselves. */
-        cn(stylex.props(activityTypography.control).className, 'font-normal')
   );
 
 /** Last intended rotate after a click. Survives Virtua remounting the row. */
@@ -5405,25 +6628,22 @@ function ProcessDisclosureButton({
   }, [id, expanded]);
 
   const chevron = (
-    <span
-      className={cn(
-        'inline-flex flex-none shrink-0 origin-center text-muted-foreground',
-        !isMobile &&
-          'opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100'
-      )}
-    >
-      <span ref={chevronRef} className="inline-flex origin-center">
-        <ChevronRight className={isMobile ? ACTIVITY_PROCESS_ICON_CLASS : 'h-[1em] w-[1em]'} />
+    <span {...stylex.props(viewStyles.chevron, !isMobile && viewStyles.chevronHoverOnly)}>
+      <span ref={chevronRef} {...stylex.props(viewStyles.chevronInner)}>
+        <ChevronRight
+          {...stylex.props(isMobile ? viewStyles.processIcon : viewStyles.chevronIconEm)}
+        />
       </span>
     </span>
   );
   const title = (
     <span
-      className={cn(
-        ACTIVITY_GROUP_LABEL_CLASS(isMobile),
-        /* The chevron follows the label rather than the column's far edge. */
-        'flex-initial',
-        shimmer && 'agent-shimmer'
+      {...withClassName(
+        stylex.props(
+          isMobile ? viewStyles.activityGroupLabelMobile : viewStyles.activityGroupLabelDesktop,
+          isMobile ? conversationSurface.processText : activityTypography.control
+        ),
+        shimmer ? 'agent-shimmer' : undefined
       )}
     >
       {liveMessage ? <LiveActivityLabel label={label} message={liveMessage} /> : label}
@@ -5432,13 +6652,13 @@ function ProcessDisclosureButton({
   return (
     <button
       type="button"
-      className={cn(
-        'group',
+      {...withClassName(
         stylex.props(
+          stylex.defaultMarker(),
           conversationSurface.disclosure,
           isMobile && conversationSurface.mobileDisclosure
-        ).className,
-        isMobile ? ACTIVITY_PROCESS_TEXT_CLASS : undefined
+        ),
+        clsx('group', isMobile ? ACTIVITY_PROCESS_TEXT_CLASS : undefined)
       )}
       onClick={() => {
         const next = !expanded;
@@ -5566,16 +6786,13 @@ function ActivityProcessStep({
 }) {
   return (
     <div
-      className={cn(
-        /* Keep the leading icon on the same inset as tool steps and prose. */
-        stylex.props(conversationSurface.processStep, flush && conversationSurface.thoughtStep)
-          .className,
-        ACTIVITY_PROCESS_TEXT_CLASS,
-        className
+      {...withClassName(
+        stylex.props(conversationSurface.processStep, flush && conversationSurface.thoughtStep),
+        clsx(ACTIVITY_PROCESS_TEXT_CLASS, className)
       )}
     >
-      {icon ? <span className="inline-flex shrink-0">{icon}</span> : null}
-      <div className="min-w-0 flex-1">{children}</div>
+      {icon ? <span {...stylex.props(viewStyles.activityStepIcon)}>{icon}</span> : null}
+      <div {...stylex.props(viewStyles.activityStepBody)}>{children}</div>
     </div>
   );
 }
@@ -5819,7 +7036,7 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   // the shared activity group; its summary describes the adjacent tool calls.
   return (
     <ActivityProcessStep flush>
-      <span className="sr-only">
+      <span {...stylex.props(viewStyles.visuallyHidden)}>
         {isThinking
           ? t('sessions.toolActivity.thinking', 'Thinking…')
           : t('sessions.toolActivity.thought', 'Thought')}
@@ -5939,14 +7156,14 @@ const LiveActivityLabel = ({ label, message }: { label: string; message: LiveAct
 
 const AssistantForkButton = ({
   turnId,
-  className,
+  xstyle,
   isForking,
   worktreeAvailability,
   onFork,
   onWorktreeMenuOpen,
 }: {
   turnId: string;
-  className?: string;
+  xstyle?: stylex.StyleXStyles;
   isForking?: boolean;
   worktreeAvailability: SessionForkWorktreeAvailability;
   onFork?: (turnId: string, destination?: SessionForkDestination) => void;
@@ -5960,13 +7177,17 @@ const AssistantForkButton = ({
       type="button"
       variant="ghost"
       icon
-      className={cn(
-        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground',
-        className
-      )}
+      height="calc(var(--spacing) * 7)"
+      width="calc(var(--spacing) * 7)"
+      className={stylex.props(messageActionButtonTheme, messageActionInkTheme).className}
+      xstyle={xstyle}
       aria-label={t('sessions.forkSession', 'Fork session')}
     >
-      {isForking ? <Spinner className="h-3.5 w-3.5" /> : <GitFork className="h-3.5 w-3.5" />}
+      {isForking ? (
+        <Spinner {...stylex.props(viewStyles.iconSmPlain)} />
+      ) : (
+        <GitFork {...stylex.props(viewStyles.iconSmPlain)} />
+      )}
     </Button>
   );
 
@@ -6080,22 +7301,13 @@ export const AssistantTurnFooter = ({
   }, [hasCopyableText, textContent, copyWorkspaceId]);
 
   return (
-    <div className="flex flex-col gap-1">
+    <div {...stylex.props(viewStyles.columnGap1)}>
       {showFinishedMetadata && fileDiffs.length > 0 ? (
         <AssistantEditedFiles
           files={fileDiffs}
           /* Mobile: quieter surface so the file card does not outrank the answer. */
-          className={cn(
-            /* The footer ROW is `pt-0` (see `verticalClass`) because a text-only
-               action bar can ride on the answer's line leading. This is a
-               bordered card, not text, so it needs its own separation: without
-               it the card border lands flush against the answer's last line box
-               (measured 0px, and since the card shares the text's left edge it
-               read as part of the paragraph). 8px puts the visible gap at ~10px,
-               matching the block rhythm of the rest of the turn. */
-            'pt-2',
-            isMobile && '[&>div]:rounded-lg [&>div]:border-border/40 [&>div]:bg-muted/10'
-          )}
+          className={stylex.props(viewStyles.pt2).className}
+          cardXstyle={isMobile ? viewStyles.editedFilesMobile : undefined}
           onFileClick={
             onFileDiffClick ? (filePath) => onFileDiffClick(message.id, filePath) : undefined
           }
@@ -6103,17 +7315,26 @@ export const AssistantTurnFooter = ({
       ) : null}
       {(showFinishedMetadata || !!copyContext || hasTurnConfigInfo) && showActionBar ? (
         <div
-          className={cn(
-            cn(
-              stylex.props(activityTypography.caption).className,
-              'flex flex-wrap items-center justify-start text-muted-foreground'
+          {...withClassName(
+            stylex.props(
+              activityTypography.caption,
+              viewStyles.actionBar,
+              isMobile ? viewStyles.actionBarMobile : viewStyles.actionBarDesktop,
+              !isMobile && viewStyles.actionBarHidden,
+              !isMobile &&
+                (isTurnHovered || (showFinishedMetadata && isForking)) &&
+                viewStyles.actionBarVisible,
+              isMobile && conversationSurface.mobileTurnActions
             ),
-            isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
-            !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
-            !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100',
-            isMobile && stylex.props(conversationSurface.mobileTurnActions).className
+            undefined
           )}
           data-assistant-turn-actions
+          /* Whether the bar is showing: its opacity is the component's own
+             StyleX style, and a stylesheet is not in the jsdom document a test
+             renders in. */
+          data-assistant-turn-actions-visible={
+            isTurnHovered || (showFinishedMetadata && isForking) ? '' : undefined
+          }
         >
           {/* Mobile leads with the turn duration, and that is load-bearing: the
              native session drawer owns a left-edge back-swipe strip, and no row
@@ -6126,7 +7347,7 @@ export const AssistantTurnFooter = ({
              Desktop keeps the duration AFTER the buttons (see below). */}
           {isMobile ? (
             <span
-              className="shrink-0 tabular-nums"
+              {...stylex.props(viewStyles.actionBarLead)}
               style={{ minWidth: MOBILE_TURN_ACTION_LEADING_INSET_PX }}
             >
               {showFinishedMetadata ? (
@@ -6142,10 +7363,9 @@ export const AssistantTurnFooter = ({
              area bleeds into the metadata gap. Mobile retains its leading slot. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
             <div
-              className={cn(
-                'flex items-center gap-0.5 -mr-[7px]',
-                /* `invisible` keeps the row's height: revealing never shifts the list. */
-                mobileButtonsHidden && 'invisible'
+              {...stylex.props(
+                viewStyles.actionBarButtons,
+                mobileButtonsHidden && viewStyles.invisible
               )}
               data-mobile-actions-hidden={mobileButtonsHidden ? '' : undefined}
             >
@@ -6159,11 +7379,15 @@ export const AssistantTurnFooter = ({
                           type="button"
                           variant="ghost"
                           icon
-                          className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                          height="calc(var(--spacing) * 7)"
+                          width="calc(var(--spacing) * 7)"
+                          className={
+                            stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                          }
                           onClick={() => copyContext?.(message.id)}
                           aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
                         >
-                          <Copy className="h-3.5 w-3.5" />
+                          <Copy {...stylex.props(viewStyles.iconSmPlain)} />
                         </Button>
                       }
                     />
@@ -6182,16 +7406,20 @@ export const AssistantTurnFooter = ({
                           type="button"
                           variant="ghost"
                           icon
-                          className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                          height="calc(var(--spacing) * 7)"
+                          width="calc(var(--spacing) * 7)"
+                          className={
+                            stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                          }
                           onClick={() => {
                             void handleCopy();
                           }}
                           aria-label={t('sessions.copyResponse', 'Copy response')}
                         >
                           {didCopy ? (
-                            <Check className="h-3.5 w-3.5" />
+                            <Check {...stylex.props(viewStyles.iconSmPlain)} />
                           ) : (
-                            <Copy className="h-3.5 w-3.5" />
+                            <Copy {...stylex.props(viewStyles.iconSmPlain)} />
                           )}
                         </Button>
                       }
@@ -6211,13 +7439,13 @@ export const AssistantTurnFooter = ({
                   message={message}
                   sessionId={sessionId}
                   isLive={isLive}
-                  className="h-7 w-7"
+                  className={stylex.props(viewStyles.turnConfigButtonSize).className}
                 />
               ) : null}
               {showFinishedMetadata && (onFork || copyContext) ? (
                 <AssistantForkButton
                   turnId={message.id}
-                  className="mr-2"
+                  xstyle={viewStyles.forkFooterSpacing}
                   isForking={isForking}
                   worktreeAvailability={forkWorktreeAvailability}
                   onFork={showFinishedMetadata ? onFork : undefined}
@@ -6227,18 +7455,18 @@ export const AssistantTurnFooter = ({
             </div>
           ) : null}
           {showFinishedMetadata && completionTimestampLabel ? (
-            <span className="tabular-nums">{completionTimestampLabel}</span>
+            <span {...stylex.props(viewStyles.tabular)}>{completionTimestampLabel}</span>
           ) : null}
           {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>
               {completionTimestampLabel ? <span aria-hidden="true">·</span> : null}
-              <span className="tabular-nums">{durationLabel}</span>
+              <span {...stylex.props(viewStyles.tabular)}>{durationLabel}</span>
             </>
           ) : null}
         </div>
       ) : null}
       {(assistantActions?.length ?? 0) > 0 ? (
-        <div className="flex flex-wrap gap-2 px-2">
+        <div {...stylex.props(viewStyles.actionButtons)}>
           {assistantActions?.map((action) => {
             const Icon = action.icon;
             const isAccent = action.tone === 'accent';
@@ -6248,19 +7476,16 @@ export const AssistantTurnFooter = ({
                 type="button"
                 variant={isAccent ? 'primary' : 'secondary'}
                 size="small"
-                className={cn(
-                  cn(
-                    stylex.props(activityTypography.footnote).className,
-                    'h-8 gap-1.5 rounded-md px-3 font-medium transition-colors'
-                  ),
-                  isAccent
-                    ? 'border border-primary/40 bg-primary/[0.12] text-primary shadow-xs hover:bg-primary/[0.18] hover:text-primary disabled:opacity-60'
-                    : 'border-border/60 bg-background/60 text-foreground/85 shadow-none hover:bg-muted/55 hover:text-foreground'
-                )}
+                height="calc(var(--spacing) * 8)"
+                fontWeight="var(--font-weight-medium)"
+                xstyle={[
+                  viewStyles.footerAction,
+                  isAccent ? viewStyles.footerActionAccent : viewStyles.footerActionNeutral,
+                ]}
                 onClick={action.onClick}
                 disabled={action.disabled}
               >
-                {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+                {Icon ? <Icon {...stylex.props(viewStyles.iconSmPlain)} /> : null}
                 {action.label}
               </Button>
             );
@@ -6484,12 +7709,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
           />
         );
       case 'coordinator_card':
-        return (
-          <CoordinatorProactiveCardRow
-            messageId={message.id}
-            entry={content.entry}
-          />
-        );
+        return <CoordinatorProactiveCardRow messageId={message.id} entry={content.entry} />;
       case 'coordinator_notice':
         return (
           <SystemNoticeView
@@ -6568,7 +7788,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return (
           <>
             {liveStatus ? (
-              <div className="pb-2" data-agent-activity-row="">
+              <div {...stylex.props(viewStyles.turnStatusPad)} data-agent-activity-row="">
                 <AgentActivityStatus {...liveStatus} message={message} />
               </div>
             ) : null}
@@ -6589,8 +7809,13 @@ const AssistantChatItem = memo(function AssistantChatItem({
                 gap or the wider surface gap used after a bordered card. */}
             {liveStatus ? (
               <div
-                className={cn('pb-1.5', liveStatusFollowsSurface ? 'pt-3' : 'pt-1')}
                 data-agent-activity-row=""
+                {...stylex.props(
+                  viewStyles.turnStatusPadBottom,
+                  liveStatusFollowsSurface
+                    ? viewStyles.turnStatusPadTopWide
+                    : viewStyles.turnStatusPadTop
+                )}
               >
                 <AgentActivityStatus {...liveStatus} message={message} />
               </div>
@@ -6622,8 +7847,11 @@ const AssistantChatItem = memo(function AssistantChatItem({
       {rowBody}
       {liveStatus && content.kind !== 'subagent_tasks' && content.kind !== 'footer' ? (
         <div
-          className={cn('pb-1.5', liveStatusFollowsSurface ? 'pt-3' : 'pt-1')}
           data-agent-activity-row=""
+          {...stylex.props(
+            viewStyles.turnStatusPadBottom,
+            liveStatusFollowsSurface ? viewStyles.turnStatusPadTopWide : viewStyles.turnStatusPadTop
+          )}
         >
           <AgentActivityStatus {...liveStatus} message={message} />
         </div>
@@ -6693,13 +7921,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
       {...stylex.props(
         verticalClass,
         row.isFirstRowForMessage &&
-          (isCoordinatorRow
-            ? coordinatorBubbleStyles.firstRow
-            : conversationSurface.firstRow),
+          (isCoordinatorRow ? coordinatorBubbleStyles.firstRow : conversationSurface.firstRow),
         row.isLastRowForMessage &&
-          (isCoordinatorRow
-            ? coordinatorBubbleStyles.lastRow
-            : conversationSurface.lastRow),
+          (isCoordinatorRow ? coordinatorBubbleStyles.lastRow : conversationSurface.lastRow),
         row.endsRound &&
           (isCoordinatorRow
             ? coordinatorBubbleStyles.roundLastRow
@@ -6718,20 +7942,25 @@ const AssistantChatItem = memo(function AssistantChatItem({
           : undefined
       }
     >
-      <div className={cn('w-full', hasWideContent && 'scrollbar-pro overflow-x-auto')}>
+      <div
+        {...withClassName(
+          stylex.props(viewStyles.turnShell, hasWideContent && viewStyles.turnShellWide),
+          hasWideContent ? 'scrollbar-pro' : ''
+        )}
+      >
         <div
-          className={cn(
-            'max-w-[800px] break-words',
+          {...stylex.props(
+            viewStyles.turnProse,
             /* A folded region's contents stay on the rail: expanding "Worked
                for 12s" must reveal rows, not shift them right. Tone below is
                what separates process from answer. */
             /* L4 result: full contrast. Process: muted so answer pops. */
             isFinalAnswer || content.kind === 'footer'
-              ? 'text-foreground'
+              ? viewStyles.turnProseForeground
               : isProcessCluster
-                ? 'text-muted-foreground'
-                : 'text-foreground',
-            hasWideContent && 'min-w-[480px]'
+                ? viewStyles.turnProseMuted
+                : viewStyles.turnProseForeground,
+            hasWideContent && viewStyles.turnProseWide
           )}
           style={conversationTextFontSizeStyle(conversationFontSize)}
           data-text-selectable
@@ -6774,9 +8003,7 @@ export const UserChatBubble = ({
   message = { ...message, items: useSelectionStableValue(message.items) };
   if (!message.items.length) {
     return variant === 'attachments' ? null : (
-      <span
-        className={cn(stylex.props(activityTypography.footnote).className, 'text-muted-foreground')}
-      >
+      <span {...stylex.props(activityTypography.footnote, viewStyles.mutedForeground)}>
         No Message
       </span>
     );
@@ -6853,7 +8080,7 @@ export const UserChatBubble = ({
     if (group.kind === 'images') {
       const hasSingleImage = group.images.length === 1;
       return (
-        <div key={group.key} className={cn(IMAGE_ATTACHMENT_ROW_CLASS, 'justify-end px-2 pt-1')}>
+        <div key={group.key} {...stylex.props(viewStyles.imageRow, viewStyles.imageRowEnd)}>
           {hasSingleImage ? (
             <UserImageBlock entry={group.images[0]!.entry} variant="full" />
           ) : (
@@ -7018,7 +8245,7 @@ function CoordinatorReplyBubble({
               onPointerLeave={handleInteractiveLeave}
               {...stylex.props(conversationSurface.bubble, coordinatorBubbleStyles.bubble)}
             >
-              <div className="flex flex-col gap-2">
+              <div {...stylex.props(coordinatorBubbleStyles.bubbleInnerStack)}>
                 {showInlineQuote && entry.replyTo ? (
                   <CoordinatorInlineQuoteChip
                     replyTo={entry.replyTo}
@@ -7220,8 +8447,7 @@ export function resolveActiveCoordinatorStatus({
     }
     if (msg.role === 'system') {
       const isWakeReceipt = msg.items.some(
-        (item) =>
-          item.type === 'operation_completion' || item.type === 'operation_completion_batch'
+        (item) => item.type === 'operation_completion' || item.type === 'operation_completion_batch'
       );
       if (isWakeReceipt) {
         sawWakeAfterFinishedAssistant = true;
@@ -7284,7 +8510,10 @@ function CoordinatorWorkingRow({
 }) {
   const isWarning = tone === 'warning';
   return (
-    <ConversationColumn className="pb-2 sm:pb-3" data-coordinator-working-row="">
+    <ConversationColumn
+      className={stylex.props(viewStyles.agentActivityRow).className}
+      data-coordinator-working-row=""
+    >
       <div style={conversationTextFontSizeStyle(conversationFontSize)}>
         <div
           role="status"
@@ -7315,8 +8544,13 @@ function CoordinatorWorkingRow({
             />
           </span>
           <span
-            {...stylex.props(coordinatorBubbleStyles.statusLabel)}
-            className={cn(isWarning ? 'text-status-warning' : 'agent-shimmer')}
+            {...withClassName(
+              stylex.props(
+                coordinatorBubbleStyles.statusLabel,
+                isWarning && viewStyles.activityWarning
+              ),
+              isWarning ? undefined : 'agent-shimmer'
+            )}
           >
             {label}
           </span>
@@ -7327,6 +8561,19 @@ function CoordinatorWorkingRow({
 }
 
 const coordinatorBubbleStyles = stylex.create({
+  userBubbleStack: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: '100%',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: space[1],
+  },
+  bubbleInnerStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+  },
   siblingGap: {
     paddingTop: 6,
     paddingBottom: 0,
@@ -7493,7 +8740,7 @@ const renderAssistantContent = (
       );
     case 'image':
       return (
-        <div className="flex w-full">
+        <div {...stylex.props(viewStyles.imageRowFull)}>
           <UserImageBlock
             entry={createSessionImageGalleryEntry({
               sessionId,
@@ -7621,8 +8868,9 @@ type ImageThumbnailSize = 'compact' | 'large';
  * for screens; wrapping lays them along the width the column actually has and
  * keeps the turn readable. The row fills its parent and the tiles hug the side
  * the speaker is on, so a short group still reads as that speaker's attachment.
+ *
+ * The row itself is `viewStyles.imageRow`.
  */
-const IMAGE_ATTACHMENT_ROW_CLASS = 'flex w-full flex-wrap gap-2';
 
 /**
  * Hook to manage blob URLs for image gallery entries.
@@ -7856,8 +9104,11 @@ export const WorkspaceUserImageBlock = ({
   const thumbnailHeight = isThumbnail ? thumbnailEdge : undefined;
   // iOS WKWebView shares `blob:` image URLs as text from the native long-press menu.
   const useNativeIOSShareSafeImageUrl = isNativeIOSAppShell();
-  const fullFrameWidthClass = 'w-56 max-w-full sm:w-72 md:w-80';
-  const thumbnailFrameClass = isLargeThumbnail ? 'h-36 w-36 sm:h-40 sm:w-40' : 'h-24 w-24';
+  /* The frames' sizes: the full frame is a responsive width, the thumbnail a
+     fixed square that grows one step on a wide screen. */
+  const thumbnailFrameStyle = isLargeThumbnail
+    ? viewStyles.imageFrameThumbnailLarge
+    : viewStyles.imageFrameThumbnailSmall;
   const previewImageAlt =
     entry.fileName || entry.alt || t('sessions.uploadedImage', 'Uploaded image');
   const imageLoadUnavailableLabel = t('sessions.imageLoadUnavailable', 'Unable to load image');
@@ -7965,31 +9216,29 @@ export const WorkspaceUserImageBlock = ({
   return (
     <div
       ref={previewPortalAnchorRef}
-      className={cn(
-        /* 12px: the shared radius of every top-level conversation card (file
-           card, proposed plan, permission record). An 8px frame beside them
-           read as a different family of object. */
-        'overflow-hidden rounded-xl border border-border/70 bg-muted/20',
-        /* `shrink-0`: a thumbnail is a fixed square inside the wrapping
-           attachment row (`IMAGE_ATTACHMENT_ROW_CLASS`). Without it the last
-           tile of an over-long line squeezes instead of wrapping. */
-        isThumbnail ? `${thumbnailFrameClass} shrink-0` : 'inline-flex max-w-full flex-col'
+      {...stylex.props(
+        viewStyles.imageBlock,
+        isThumbnail ? thumbnailFrameStyle : viewStyles.imageBlockFull
       )}
     >
       {!cachedThumbnailUrl && isThumbnailLoading && (
         <Skeleton
           shape="block"
-          className={cn(isThumbnail ? thumbnailFrameClass : `h-36 ${fullFrameWidthClass}`)}
+          className={
+            stylex.props(
+              isThumbnail ? thumbnailFrameStyle : viewStyles.imageFrameFullHeight,
+              isThumbnail ? false : viewStyles.imageFrameWidth
+            ).className
+          }
         />
       )}
       {!cachedThumbnailUrl && !isThumbnailLoading && thumbnailLoadingError && (
         <div
-          className={cn(
-            cn(
-              stylex.props(activityTypography.footnote).className,
-              'flex items-center justify-center px-3 py-4 text-muted-foreground'
-            ),
-            isThumbnail ? `${thumbnailFrameClass} p-2` : `min-h-24 ${fullFrameWidthClass}`
+          {...stylex.props(
+            activityTypography.footnote,
+            viewStyles.imageErrorBox,
+            isThumbnail ? viewStyles.imageErrorBoxThumbnail : viewStyles.imageErrorBoxFull,
+            isThumbnail ? thumbnailFrameStyle : viewStyles.imageFrameWidth
           )}
         >
           {thumbnailLoadingError}
@@ -8000,8 +9249,9 @@ export const WorkspaceUserImageBlock = ({
           <>
             <button
               type="button"
-              className={cn(
-                isThumbnail ? `block ${thumbnailFrameClass}` : 'inline-flex max-w-full'
+              {...stylex.props(
+                isThumbnail ? viewStyles.imageButtonThumbnail : viewStyles.imageButtonFull,
+                isThumbnail && thumbnailFrameStyle
               )}
               onClick={() => {
                 if (onPreviewRequest) {
@@ -8018,10 +9268,9 @@ export const WorkspaceUserImageBlock = ({
               <img
                 src={displayedThumbnailUrl}
                 alt={previewImageAlt}
-                className={cn(
-                  isThumbnail
-                    ? `${thumbnailFrameClass} object-cover`
-                    : 'block max-h-[10.5rem] max-w-full object-contain'
+                {...stylex.props(
+                  isThumbnail ? viewStyles.imageThumbnail : viewStyles.imageFull,
+                  isThumbnail && thumbnailFrameStyle
                 )}
               />
             </button>
@@ -8067,7 +9316,7 @@ export const ImageGroupBubble = ({
      left rail: no horizontal pad (the gutter belongs to `ConversationColumn`)
      and no top pad (the row gap belongs to `cardSiblingGap`). The user's own
      attachments keep hugging the right edge exactly as they did. */
-  const rowClass = align === 'end' ? 'justify-end px-2 pt-1' : 'justify-start';
+  const rowStyle = align === 'end' ? viewStyles.imageRowEnd : viewStyles.imageRowStart;
   const entries = useMemo(
     () =>
       content.images.map((image, imageIndex) =>
@@ -8097,7 +9346,7 @@ export const ImageGroupBubble = ({
 
     return (
       <>
-        <div ref={previewPortalAnchorRef} className={cn('flex w-full', rowClass)}>
+        <div ref={previewPortalAnchorRef} {...stylex.props(viewStyles.imageRowFull, rowStyle)}>
           <UserImageBlock entry={entry} onPreviewRequest={handlePreviewRequest} variant="full" />
         </div>
         {!sessionImagePreview ? (
@@ -8120,7 +9369,7 @@ export const ImageGroupBubble = ({
 
   return (
     <>
-      <div ref={previewPortalAnchorRef} className={cn(IMAGE_ATTACHMENT_ROW_CLASS, rowClass)}>
+      <div ref={previewPortalAnchorRef} {...stylex.props(viewStyles.imageRow, rowStyle)}>
         {entries.map((entry, index) => (
           <UserImageBlock
             key={`${entry.imageId}-${index}`}
@@ -8148,6 +9397,17 @@ export const ImageGroupBubble = ({
     </>
   );
 };
+
+/**
+ * Container for a run of adjacent `file` blocks. Owns the workspace/token
+ * atoms, machine-name resolution, download, and the in-app preview dialog, then
+ * renders the pure `SessionFileCard`s. Adjacent file blocks are aggregated into
+ * one list (decision #3) at the call site; this component handles however many
+ * it is handed.
+ */
+const localAttachmentStyles = stylex.create({
+  actionGlyph: { width: space[4], height: space[4] },
+});
 
 const localAttachmentImageStyles = stylex.create({
   frame: { width: 320, maxWidth: '100%', height: 320 },
@@ -8215,7 +9475,11 @@ function LocalAttachmentImage({
           ? t('sessions.localAttachmentUnavailable', 'Local attachment unavailable')
           : t('sessions.markdownImage.loading', 'Loading image…')
       }
-      actionIcon={failed ? null : <Spinner className="h-4 w-4" />}
+      actionIcon={
+        failed ? null : (
+          <Spinner className={stylex.props(localAttachmentStyles.actionGlyph).className} />
+        )
+      }
       failed={failed}
       isInteractive={failed}
       onClick={() => setAttempt((value) => value + 1)}
@@ -8281,9 +9545,9 @@ export const LocalAttachmentCard = ({
       actionIcon={
         remote ? (
           opening ? (
-            <Spinner className="h-4 w-4" />
+            <Spinner className={stylex.props(localAttachmentStyles.actionGlyph).className} />
           ) : (
-            <ArrowDown className="h-4 w-4" />
+            <ArrowDown {...stylex.props(localAttachmentStyles.actionGlyph)} />
           )
         ) : null
       }
@@ -8309,8 +9573,7 @@ export const LocalAttachmentCard = ({
             .then(async (bytes) => {
               if (currentBinding.current !== binding) return;
               if (!bytes) throw new Error('Attachment download unavailable');
-              if (isNativeAppShell()) await shareFileBytesNatively(attachment.fileName, bytes);
-              else downloadBytesAsFile(attachment.fileName, bytes);
+              await saveBytesAsFile(attachment.fileName, bytes);
             })
             .catch(() => {
               if (currentBinding.current === binding)
@@ -8360,44 +9623,10 @@ export const WorkspaceSessionFileGroup = ({
 }) => {
   const { t } = useTranslation();
   const readonlyPresentation = useContext(SessionReadonlyContext);
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
-  const authToken = useAtomValue(authTokenAtom);
-  const attachmentRuntime = useAtomValue(runtimeAtom);
-  const { openHtmlFile } = useContext(SessionChatActionContext);
+  const { openHtmlFile, openFileAttachment } = useContext(SessionChatActionContext);
   const postHog = usePostHog();
   const [previewFile, setPreviewFile] = useState<SessionFilePayload | null>(null);
-  const [previewStatus, setPreviewStatus] = useState<SessionFilePreviewStatus>({ kind: 'loading' });
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const previewRequestRef = useRef<string | null>(null);
-
-  const handleDownload = useCallback(
-    (file: SessionFilePayload) => {
-      if (!workspaceId || !authToken) return;
-      capturePostHogEvent(postHog, 'file_preview/downloaded', {
-        file_kind: getAnalyticsFileKind(file.fileName),
-        source: 'attachment',
-      });
-      setDownloadingId(file.fileId);
-      void downloadSessionFile({
-        workspaceId,
-        sessionId: file.storageSessionId ?? sessionId,
-        fileId: file.fileId,
-        encryption: file.encryption,
-        attachmentToken:
-          attachmentRuntime?.workspaceId === workspaceId
-            ? attachmentRuntime.attachmentToken
-            : undefined,
-        token: authToken,
-        fileName: file.fileName,
-        mimeType: file.mimeType,
-      })
-        .catch(() => {
-          toast.error(t('sessions.fileDownloadFailed', { name: file.fileName }));
-        })
-        .finally(() => setDownloadingId((current) => (current === file.fileId ? null : current)));
-    },
-    [authToken, postHog, sessionId, t, workspaceId, attachmentRuntime]
-  );
+  const { download: handleDownload, downloadingId } = useSessionFileDownload(sessionId);
 
   const handlePreview = useCallback(
     (file: SessionFilePayload) => {
@@ -8408,48 +9637,14 @@ export const WorkspaceSessionFileGroup = ({
       if (isHtmlSessionFile(file) && openHtmlFile?.(file)) {
         return;
       }
-      setPreviewFile(file);
-      setPreviewStatus({ kind: 'loading' });
-      if (!workspaceId || !authToken) {
-        setPreviewStatus({
-          kind: 'error',
-          message: t('sessions.filePreviewUnavailable', 'Preview unavailable'),
-        });
+      // A desktop Session opens the attachment as a side-panel tab; hosts with
+      // no side panel (mobile, history readers) keep the Drawer / Dialog.
+      if (openFileAttachment?.(file, sessionId)) {
         return;
       }
-      // Stale-response guard: rapid open/close or switching files must not let
-      // an earlier fetch overwrite the state of the latest request.
-      previewRequestRef.current = file.fileId;
-      void fetchSessionFilePreview({
-        workspaceId,
-        sessionId: file.storageSessionId ?? sessionId,
-        fileId: file.fileId,
-        encryption: file.encryption,
-        attachmentToken:
-          attachmentRuntime?.workspaceId === workspaceId
-            ? attachmentRuntime.attachmentToken
-            : undefined,
-        token: authToken,
-        sizeBytes: file.sizeBytes,
-      })
-        .then((result) => {
-          if (previewRequestRef.current !== file.fileId) return;
-          setPreviewStatus({
-            kind: 'loaded',
-            text: result.text,
-            truncated: result.truncated,
-          });
-        })
-        .catch(() => {
-          if (previewRequestRef.current !== file.fileId) return;
-          // 4xx / network → degrade to a downloadable error state.
-          setPreviewStatus({
-            kind: 'error',
-            message: t('sessions.filePreviewFailed', 'Could not load preview'),
-          });
-        });
+      setPreviewFile(file);
     },
-    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId, attachmentRuntime]
+    [openFileAttachment, openHtmlFile, postHog, sessionId]
   );
 
   // The send path caps at 8 files/message, but a block list synced from another
@@ -8474,24 +9669,17 @@ export const WorkspaceSessionFileGroup = ({
           />
         ))}
         {overflowCount > 0 ? (
-          <span
-            className={cn(
-              stylex.props(activityTypography.footnote).className,
-              'px-1 text-muted-foreground'
-            )}
-          >
+          <span {...stylex.props(activityTypography.footnote, viewStyles.fileOverflow)}>
             {t('sessions.fileGroupOverflow', '+{{count}} more files', { count: overflowCount })}
           </span>
         ) : null}
       </SessionFileCardList>
       {previewFile ? (
-        <SessionFilePreviewDialog
-          open={previewFile !== null}
-          onOpenChange={(open) => {
-            if (!open) setPreviewFile(null);
-          }}
+        <SessionFileAttachmentPreviewDialog
+          key={previewFile.fileId}
           file={previewFile}
-          status={previewStatus}
+          sessionId={sessionId}
+          onClose={() => setPreviewFile(null)}
           onDownload={readonlyPresentation ? undefined : handleDownload}
           isDownloading={downloadingId === previewFile.fileId}
         />
@@ -8550,7 +9738,7 @@ const renderUserContent = (
       );
     case 'image':
       return (
-        <div className="flex w-full justify-end px-2 pt-1">
+        <div {...stylex.props(viewStyles.imageRowFull, viewStyles.imageRowEnd)}>
           <UserImageBlock
             entry={createSessionImageGalleryEntry({
               sessionId,
@@ -8604,13 +9792,13 @@ const renderUserContent = (
       return <ToolCallCard toolCall={content} fontSize={options.conversationFontSize} />;
     case 'comment_reference':
       return (
-        <div className="flex w-full justify-end px-2 pt-1">
+        <div {...stylex.props(viewStyles.imageRowFull, viewStyles.imageRowEnd)}>
           <CommentReferenceCard reference={content as CommentReferencePayload} />
         </div>
       );
     case 'visual_annotation_reference':
       return (
-        <div className="flex w-full justify-end px-2 pt-1">
+        <div {...stylex.props(viewStyles.imageRowFull, viewStyles.imageRowEnd)}>
           <VisualAnnotationReferenceCard reference={content as VisualAnnotationReferencePayload} />
         </div>
       );
@@ -8624,7 +9812,10 @@ const renderUserContent = (
             <MarkdownBlock
               text={content.body}
               size={options.conversationFontSize}
-              searchBlockId={getCoordinatorMessageSearchBlockId(options.messageId, options.itemIndex)}
+              searchBlockId={getCoordinatorMessageSearchBlockId(
+                options.messageId,
+                options.itemIndex
+              )}
             />
           ) : null}
           {content.images?.length ? (
@@ -8690,7 +9881,12 @@ const toolVerbStatus = (status: ToolCallMessage['status']): ToolVerbStatus =>
 
 /** The verb, brightened, shimmering while the step runs. */
 const ToolVerb = ({ word, status }: { word: string; status: ToolVerbStatus }) => (
-  <span className={cn('text-foreground/90', status === 'running' && 'agent-shimmer')}>
+  <span
+    {...withClassName(
+      stylex.props(viewStyles.toolVerb),
+      status === 'running' ? 'agent-shimmer' : undefined
+    )}
+  >
     {TOOL_VERB_FORMS[word]?.[status] ?? word}
   </span>
 );
@@ -8837,10 +10033,8 @@ const UserPlainTextBlock = ({
               type="button"
               variant="ghost"
               size="small"
-              className={cn(
-                stylex.props(activityTypography.footnote).className,
-                'h-7 px-2 text-muted-foreground hover:text-foreground'
-              )}
+              height="calc(var(--spacing) * 7)"
+              xstyle={[viewStyles.userTextToggleInk, viewStyles.togglePadding]}
               onClick={() => setIsExpanded((prev) => !prev)}
             >
               {isExpanded ? 'Show less' : 'Show more'}
@@ -8862,10 +10056,12 @@ const CollapsibleCard = ({
   onExpandedChange,
   showDisclosureIcon = false,
   containerClassName,
+  containerStyles,
   containerProps,
   buttonClassName,
   buttonStyles,
-  bodyClassName,
+  bodyStyles,
+  bodySpacing = 2,
   onActivate,
 }: {
   left: ReactNode;
@@ -8877,10 +10073,12 @@ const CollapsibleCard = ({
   onExpandedChange?: (expanded: boolean) => void;
   showDisclosureIcon?: boolean;
   containerClassName?: string;
+  containerStyles?: stylex.StyleXStyles;
   containerProps?: SearchContainerProps;
   buttonClassName?: string;
   buttonStyles?: stylex.StyleXStyles;
-  bodyClassName?: string;
+  bodyStyles?: stylex.StyleXStyles;
+  bodySpacing?: 1.5 | 2 | 2.5;
   /** What pressing the header does when there is no body to open. */
   onActivate?: () => void;
 }) => {
@@ -8901,38 +10099,57 @@ const CollapsibleCard = ({
   return (
     <div
       {...containerProps}
-      className={cn('rounded-xl', containerClassName, containerProps?.className)}
+      {...withClassName(
+        stylex.props(viewStyles.collapsibleContainer, containerStyles),
+        clsx(containerClassName, containerProps?.className)
+      )}
     >
       <button
         type="button"
         {...withClassName(
-          stylex.props(conversationSurface.collapsible, buttonStyles),
-          cn(
-            'group transition-colors',
-            canToggle || onActivate ? 'cursor-pointer' : 'cursor-default',
-            buttonClassName
-          )
+          stylex.props(
+            stylex.defaultMarker(),
+            conversationSurface.collapsible,
+            buttonStyles,
+            viewStyles.collapsibleButton,
+            canToggle || onActivate
+              ? viewStyles.collapsibleCursorPointer
+              : viewStyles.collapsibleCursorDefault
+          ),
+          clsx('group', buttonClassName)
         )}
         onClick={canToggle ? () => setExpanded(!isExpanded) : onActivate}
         aria-expanded={canToggle ? isExpanded : undefined}
         data-conversation-disclosure={canToggle ? 'inline' : undefined}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <div {...stylex.props(viewStyles.collapsibleHeaderRow)}>
           {canToggle && showDisclosureIcon ? (
             <ChevronRight
-              className={cn(
-                'h-3.5 w-3.5 flex-none shrink-0 text-current transition-transform duration-200 ease-out',
-                isExpanded ? 'rotate-90' : ''
+              {...stylex.props(
+                viewStyles.collapsibleChevron,
+                isExpanded && viewStyles.collapsibleChevronOpen
               )}
             />
           ) : null}
           {left}
         </div>
-        {right ? <div className="flex items-center gap-2">{right}</div> : null}
+        {right ? <div {...stylex.props(viewStyles.collapsibleAside)}>{right}</div> : null}
       </button>
 
       {shouldRenderBody ? (
-        <div className={cn('space-y-2 px-2 pb-1', bodyClassName)}>{children}</div>
+        <div
+          {...stylex.props(
+            viewStyles.collapsibleBody,
+            bodySpacing === 1.5
+              ? viewStyles.stackOneHalf
+              : bodySpacing === 2.5
+                ? viewStyles.stackTwoHalf
+                : viewStyles.stackTwo,
+            bodyStyles
+          )}
+        >
+          {children}
+        </div>
       ) : null}
     </div>
   );
@@ -8959,26 +10176,21 @@ const ThoughtCard = ({
       isCollapsible
       expanded={searchState.hasActive ? true : expanded}
       onExpandedChange={onExpandedChange}
-      containerClassName={cn(
+      containerClassName={clsx(
         searchState.hasMatched && SEARCH_HIGHLIGHT_CONTAINER_MATCHED_CLASS_NAME,
         searchState.hasActive && SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME
       )}
       containerProps={{ 'data-search-block-id': searchBlockId }}
       left={
         <Fragment>
-          <Sparkles className="h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground" />
-          <span
-            className={cn(
-              stylex.props(activityTypography.control).className,
-              'font-semibold text-muted-foreground'
-            )}
-          >
+          <Sparkles {...stylex.props(viewStyles.iconSmFlexNone, viewStyles.mutedForeground)} />
+          <span {...stylex.props(activityTypography.control, viewStyles.thoughtLabel)}>
             Agent thinking
           </span>
         </Fragment>
       }
     >
-      <div className="text-muted-foreground/70">
+      <div {...stylex.props(viewStyles.thoughtBody)}>
         <MarkdownRenderer
           text={text}
           size={fontSize}
@@ -8998,17 +10210,12 @@ const PlanBlock = ({
   entries: PlanEntryItem[];
   fontSize: ConversationFontSize;
 }) => (
-  <div className="space-y-2 rounded-lg border border-border/70 bg-background/80 p-2.5">
-    <div
-      className={cn(
-        stylex.props(activityTypography.footnote).className,
-        'flex items-center gap-2 font-semibold uppercase tracking-wide text-muted-foreground'
-      )}
-    >
-      <ListChecks className="h-4 w-4" />
+  <div {...stylex.props(viewStyles.planCard)}>
+    <div {...stylex.props(activityTypography.footnote, viewStyles.planHeading)}>
+      <ListChecks {...stylex.props(viewStyles.iconMdPlain)} />
       Plan
     </div>
-    <div className="space-y-1.5">
+    <div>
       {entries.map((entry, index) => (
         <PlanEntryRow key={`${entry.content}-${index}`} entry={entry} fontSize={fontSize} />
       ))}
@@ -9132,28 +10339,28 @@ const PlanPanel = ({
      like the turn's alert, and the status pill restated what the surrounding
      turn already shows (a drafting plan is visibly still growing). */
   return (
-    <div className={CONVERSATION_PANEL_FRAME_CLASS}>
-      <div className={cn(CONVERSATION_PANEL_HEADER_CLASS, CONVERSATION_PANEL_HEADER_RULE_CLASS)}>
+    <div {...stylex.props(conversationPanelStyles.frame)}>
+      <div {...stylex.props(conversationPanelStyles.header, conversationPanelStyles.headerRule)}>
         {/* The whole header toggles, matching `TerminalComponent`. The chevron is
             the affordance; it only exists when the body is actually clipped. */}
         <button
           type="button"
-          className="-my-1 -ml-1 flex min-w-0 flex-1 items-center gap-2 rounded py-1 pl-1 text-left"
+          {...stylex.props(viewStyles.planPanelHeader)}
           onClick={overflows || isOpen ? () => toggleExpanded(!isOpen) : undefined}
           aria-expanded={overflows || isOpen ? isOpen : undefined}
           disabled={!overflows && !isOpen}
         >
           {overflows || isOpen ? (
             <ChevronRight
-              className={cn(
-                'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200',
-                isOpen && 'rotate-90'
+              {...stylex.props(
+                viewStyles.planPanelChevron,
+                isOpen && viewStyles.planPanelChevronOpen
               )}
             />
           ) : (
-            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <FileText {...stylex.props(viewStyles.iconSm, viewStyles.mutedForeground)} />
           )}
-          <span className={CONVERSATION_PANEL_TITLE_CLASS}>Proposed Plan</span>
+          <span {...stylex.props(conversationPanelStyles.title)}>Proposed Plan</span>
         </button>
         <Tooltip.Provider>
           <Tooltip.Root>
@@ -9164,13 +10371,22 @@ const PlanPanel = ({
                   type="button"
                   variant="ghost"
                   icon
-                  className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:bg-hover hover:text-foreground"
+                  height="calc(var(--spacing) * 6)"
+                  width="calc(var(--spacing) * 6)"
+                  className={
+                    stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                  }
+                  xstyle={viewStyles.planCopySpacing}
                   onClick={() => {
                     void handleCopy();
                   }}
                   aria-label="Copy plan"
                 >
-                  {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  {didCopy ? (
+                    <Check {...stylex.props(viewStyles.iconSmPlain)} />
+                  ) : (
+                    <Copy {...stylex.props(viewStyles.iconSmPlain)} />
+                  )}
                 </Button>
               }
             />
@@ -9178,10 +10394,10 @@ const PlanPanel = ({
           </Tooltip.Root>
         </Tooltip.Provider>
       </div>
-      <div className="relative">
+      <div {...stylex.props(viewStyles.relative)}>
         <div
           ref={bodyRef}
-          className={cn(CONVERSATION_PANEL_BODY_CLASS, !isOpen && 'max-h-56 overflow-hidden')}
+          {...stylex.props(conversationPanelStyles.body, !isOpen && viewStyles.planPanelBody)}
         >
           <MarkdownRenderer
             text={plan.markdown}
@@ -9191,10 +10407,7 @@ const PlanPanel = ({
           />
         </div>
         {!isOpen && overflows ? (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background/95 to-transparent"
-          />
+          <div aria-hidden {...stylex.props(viewStyles.planPanelFade)} />
         ) : null}
       </div>
     </div>
@@ -9239,18 +10452,22 @@ const GoalBlock = ({ goal }: { goal: GoalMessage }) => {
   const StatusIcon = meta.Icon;
 
   return (
-    <div
-      className={cn(
-        stylex.props(activityTypography.caption).className,
-        'flex w-full min-w-0 items-center gap-2 text-muted-foreground'
-      )}
-    >
-      <Target className="h-3 w-3 flex-none" aria-hidden="true" />
+    <div {...stylex.props(activityTypography.caption, viewStyles.goalRow)}>
+      <Target {...stylex.props(viewStyles.goalIcon)} aria-hidden="true" />
       <StatusIcon
-        className={cn('h-2.5 w-2.5 flex-none', meta.textClassName, meta.pulse && 'animate-pulse')}
+        {...stylex.props(
+          viewStyles.goalStatusIcon,
+          meta.textStyle,
+          meta.pulse && viewStyles.goalStatusPulse
+        )}
         aria-hidden="true"
       />
-      <span className={cn('block min-w-0 truncate', goal.status === 'cleared' && 'line-through')}>
+      <span
+        {...stylex.props(
+          viewStyles.goalObjective,
+          goal.status === 'cleared' && viewStyles.goalObjectiveCleared
+        )}
+      >
         {objective}
       </span>
     </div>
@@ -9262,23 +10479,23 @@ const PLAN_STATUS_META: Record<
   {
     label: string;
     icon: ComponentType<{ className?: string }>;
-    className: string;
+    style: stylex.StyleXStyles;
   }
 > = {
   pending: {
     label: 'Pending',
     icon: Circle,
-    className: 'text-muted-foreground',
+    style: viewStyles.planStatusPending,
   },
   in_progress: {
     label: 'In progress',
     icon: CarbonInProgress,
-    className: 'text-status-info',
+    style: viewStyles.planStatusInProgress,
   },
   completed: {
     label: 'Completed',
     icon: CheckCircle2,
-    className: 'text-status-success',
+    style: viewStyles.planStatusCompleted,
   },
 };
 
@@ -9307,14 +10524,14 @@ const PlanEntryRow = ({
     PRIORITY_META[String(entry.priority) as keyof typeof PRIORITY_META] ?? PRIORITY_META.medium;
 
   return (
-    <div className="flex flex-col gap-1 rounded-md border border-border/60 bg-background/60 p-2.5">
-      <div className="flex items-center justify-between gap-1.5">
+    <div {...stylex.props(viewStyles.planEntryCard)}>
+      <div {...stylex.props(viewStyles.planEntryHeader)}>
         <div
-          className="flex items-center gap-1.5 font-medium"
+          {...stylex.props(viewStyles.planEntryTitle)}
           style={conversationTextFontSizeStyle(fontSize)}
         >
-          <StatusIcon className={cn('h-4 w-4 flex-none shrink-0', statusMeta.className)} />
-          <span className="break-words">{entry.content}</span>
+          <StatusIcon {...stylex.props(viewStyles.iconMdPlain, statusMeta.style)} />
+          <span {...stylex.props(viewStyles.planEntryText)}>{entry.content}</span>
         </div>
         <Badge tone={priorityMeta.tone}>{priorityMeta.label}</Badge>
       </div>
@@ -9347,7 +10564,7 @@ const ToolCallCard = memo(function ToolCallCard({
     if (toolCall.status !== 'pending' && toolCall.status !== 'in_progress') return null;
     return (
       <div className={PROCESS_STATUS_LINE_CLASS(isMobile)}>
-        <Spinner className="h-[1em] w-[1em] shrink-0" aria-hidden="true" />
+        <Spinner {...stylex.props(viewStyles.processIconEm)} aria-hidden="true" />
         <span>{t('sessions.activity.retrying', 'Retrying…')}</span>
       </div>
     );
@@ -9356,7 +10573,9 @@ const ToolCallCard = memo(function ToolCallCard({
     const isCompacting = toolCall.status === 'pending' || toolCall.status === 'in_progress';
     return (
       <div className={PROCESS_STATUS_LINE_CLASS(isMobile)}>
-        {isCompacting ? <Spinner className="h-[1em] w-[1em] shrink-0" aria-hidden="true" /> : null}
+        {isCompacting ? (
+          <Spinner {...stylex.props(viewStyles.processIconEm)} aria-hidden="true" />
+        ) : null}
         <span>
           {isCompacting
             ? t('sessions.activity.compactingContext', 'Compacting context')
@@ -9398,7 +10617,7 @@ const ToolCallCard = memo(function ToolCallCard({
 
   const isFailed = toolCall.status === 'failed';
   const isRunning = toolCall.status === 'in_progress';
-  const titleColorClass = isFailed ? 'text-status-danger' : '';
+  const titleColorStyle = isFailed ? viewStyles.toolCallStatusDanger : false;
 
   const isFileAction = toolCall.kind === 'read' || toolCall.kind === 'edit';
   const isReadOnly = toolCall.kind === 'read';
@@ -9464,7 +10683,7 @@ const ToolCallCard = memo(function ToolCallCard({
       : (TOOL_TITLE_LEADING_WORD.exec(displayTitle)?.[1] ?? commandVerb);
   const runningIndicator =
     isRunning && !(stepVerb && TOOL_VERB_FORMS[stepVerb]) ? (
-      <Spinner className="h-4 w-4 text-muted-foreground" />
+      <Spinner {...stylex.props(viewStyles.iconMdPlain, viewStyles.mutedForeground)} />
     ) : null;
 
   /* Everything the step did and got back, in order, as sections of one sheet
@@ -9611,16 +10830,15 @@ const ToolCallCard = memo(function ToolCallCard({
       defaultExpanded={isRunning || hasTerminalContent || isFailed || hasPermission}
       expanded={expanded}
       onExpandedChange={onExpandedChange}
-      containerClassName={cn(isActivityRow && 'rounded-md')}
+      containerStyles={isActivityRow ? viewStyles.activityToolContainer : undefined}
       buttonClassName={isActivityRow ? ACTIVITY_PROCESS_TEXT_CLASS : undefined}
       // Top-level tool cards share the turn rail, without the step's inset.
       buttonStyles={isActivityRow ? conversationSurface.step : conversationSurface.flushCollapsible}
-      bodyClassName={cn(
-        /* An expanded body starts on the rail, like every other collapsible
-           region in a turn. It still needs air under the title — they were 0px
-           apart — but not an indent. */
-        isActivityRow ? 'space-y-1.5 px-0 pb-1.5 pt-1' : 'space-y-2.5 px-0 pb-1 pt-1.5'
-      )}
+      /* An expanded body starts on the rail, like every other collapsible
+         region in a turn. It still needs air under the title — they were 0px
+         apart — but not an indent. */
+      bodySpacing={isActivityRow ? 1.5 : 2.5}
+      bodyStyles={isActivityRow ? viewStyles.activityToolBody : viewStyles.toolBody}
       right={runningIndicator}
       /* A file step with nothing to open (a read) is the file: pressing the
          row opens it. A step that unfolds keeps the row for that, and its
@@ -9628,20 +10846,19 @@ const ToolCallCard = memo(function ToolCallCard({
       onActivate={isFilePathClickable ? triggerFilePathClick : undefined}
       left={
         <div
-          className={cn(
-            'flex min-w-0 flex-1 items-start gap-1.5',
+          {...stylex.props(
+            viewStyles.toolCallHeader,
             /* The header and expanded body share the same rail. */
-            titleColorClass
+            titleColorStyle
           )}
         >
           {isFileAction && fileName ? (
             /* One word space between the verb and its file, not a 6px gap. */
-            <div className="flex min-w-0 items-center gap-[0.3em]">
+            <div {...stylex.props(viewStyles.toolCallTitleRow)}>
               <span
-                className={cn(
-                  isActivityRow
-                    ? ACTIVITY_STEP_TITLE_CLASS
-                    : cn(stylex.props(activityTypography.control).className, 'font-semibold ')
+                {...stylex.props(
+                  isActivityRow ? viewStyles.activityStepTitle : activityTypography.control,
+                  isActivityRow ? conversationSurface.processText : viewStyles.fontSemibold
                 )}
               >
                 {kindMeta?.label && TOOL_VERB_FORMS[kindMeta.label] ? (
@@ -9659,47 +10876,28 @@ const ToolCallCard = memo(function ToolCallCard({
                         tabIndex={isFilePathClickable ? 0 : undefined}
                         onClick={isFilePathClickable ? handleFilePathClick : undefined}
                         onKeyDown={isFilePathClickable ? handleFilePathKeyDown : undefined}
-                        className={cn(
+                        {...stylex.props(
+                          isActivityRow ? viewStyles.toolCallFileLink : viewStyles.toolCallFileChip,
                           isActivityRow
-                            ? cn(
-                                'inline-flex min-w-0 max-w-[min(100%,20rem)] shrink items-center truncate',
-                                ACTIVITY_PROCESS_TEXT_CLASS
-                              )
-                            : cn(
-                                stylex.props(activityTypography.caption).className,
-                                'inline-flex min-w-0 max-w-[240px] shrink items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 '
-                              ),
-                          isFilePathClickable
-                            ? isActivityRow
-                              ? /* The file name is a link inside the step: the pointer
-                                   says so, and only it brightens under the pointer. */
-                                'cursor-pointer'
-                              : 'cursor-pointer hover:bg-hover/60'
-                            : ''
+                            ? conversationSurface.processText
+                            : activityTypography.caption,
+                          isFilePathClickable && viewStyles.toolCallCursor,
+                          isFilePathClickable && !isActivityRow && viewStyles.toolCallFileChipHover
                         )}
                       >
                         {normalizedFilePath && !isActivityRow ? (
                           <FileIcon
                             filePath={normalizedFilePath}
-                            className="h-3.5 w-3.5 shrink-0 grayscale"
+                            {...stylex.props(viewStyles.toolCallFileIcon)}
                           />
                         ) : null}
                         <span
-                          className={cn(
-                            'min-w-0 truncate whitespace-nowrap',
-                            /* A step is a sentence ("Read session-list.tsx"),
-                               so its file name stays in the sentence's type. */
+                          {...stylex.props(
+                            viewStyles.toolCallFileName,
                             isActivityRow
-                              ? cn(
-                                  ACTIVITY_PROCESS_TEXT_CLASS,
-                                  'transition-colors',
-                                  isFilePathClickable &&
-                                    'underline-offset-2 group-hover:text-foreground hover:underline'
-                                )
-                              : cn(
-                                  stylex.props(activityTypography.footnote).className,
-                                  'font-mono '
-                                )
+                              ? conversationSurface.processText
+                              : activityTypography.footnote,
+                            isActivityRow ? viewStyles.toolCallFileNameHover : viewStyles.fontMono
                           )}
                         >
                           {fileName}
@@ -9718,12 +10916,13 @@ const ToolCallCard = memo(function ToolCallCard({
               title={displayTitle}
               status={toolVerbStatus(toolCall.status)}
               verb={commandVerb}
-              className={cn(
-                'truncate',
-                isActivityRow
-                  ? ACTIVITY_STEP_TITLE_CLASS
-                  : cn(stylex.props(activityTypography.control).className, 'font-semibold ')
-              )}
+              className={
+                stylex.props(
+                  viewStyles.toolTitle,
+                  isActivityRow ? viewStyles.activityStepTitle : activityTypography.control,
+                  isActivityRow ? conversationSurface.processText : viewStyles.fontSemibold
+                ).className
+              }
             />
           )}
         </div>
@@ -9836,19 +11035,14 @@ const StandardToolContentBlock = ({
           : buildSafeBase64DataUrl(content.mimeType, content.data);
       if (!src) return null;
       return (
-        <div className="space-y-2">
-          <div
-            className={cn(
-              stylex.props(activityTypography.footnote).className,
-              'font-medium text-muted-foreground'
-            )}
-          >
+        <div>
+          <div {...stylex.props(activityTypography.footnote, viewStyles.toolContentLabel)}>
             Image
           </div>
           <img
             src={src}
             alt={content.annotations?.audience ? 'Shared image' : 'Generated image'}
-            className="max-h-80 w-full rounded-lg object-contain"
+            {...stylex.props(viewStyles.toolImage)}
           />
         </div>
       );
@@ -9857,16 +11051,11 @@ const StandardToolContentBlock = ({
       const src = buildSafeBase64DataUrl(content.mimeType, content.data);
       if (!src) return null;
       return (
-        <div className="space-y-2">
-          <div
-            className={cn(
-              stylex.props(activityTypography.footnote).className,
-              'font-medium text-muted-foreground'
-            )}
-          >
+        <div>
+          <div {...stylex.props(activityTypography.footnote, viewStyles.toolContentLabel)}>
             Audio
           </div>
-          <audio controls className="w-full">
+          <audio controls {...stylex.props(viewStyles.toolAudio)}>
             <source src={src} />
           </audio>
         </div>
@@ -9877,10 +11066,10 @@ const StandardToolContentBlock = ({
       if (!href) {
         return (
           <div
-            className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 p-3 text-muted-foreground"
+            {...stylex.props(viewStyles.toolResourceCard)}
             style={conversationTextFontSizeStyle(fontSize)}
           >
-            <FileText className="h-4 w-4" />
+            <FileText {...stylex.props(viewStyles.iconMdPlain)} />
             {content.title || content.name}
           </div>
         );
@@ -9890,10 +11079,10 @@ const StandardToolContentBlock = ({
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 p-3 text-primary"
+          {...stylex.props(viewStyles.toolResourceLink)}
           style={conversationTextFontSizeStyle(fontSize)}
         >
-          <FileText className="h-4 w-4" />
+          <FileText {...stylex.props(viewStyles.iconMdPlain)} />
           {content.title || content.name}
         </a>
       );
@@ -9911,20 +11100,15 @@ const StandardToolContentBlock = ({
       const href = readonly ? undefined : sanitizeToolContentHref(content.resource.uri);
       if (!href) return null;
       return (
-        <div className="space-y-2">
-          <div
-            className={cn(
-              stylex.props(activityTypography.footnote).className,
-              'font-medium text-muted-foreground'
-            )}
-          >
+        <div>
+          <div {...stylex.props(activityTypography.footnote, viewStyles.toolContentLabel)}>
             Resource
           </div>
           <a
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary"
+            {...stylex.props(viewStyles.toolResourceDownload)}
             style={conversationTextFontSizeStyle(fontSize)}
           >
             Download blob
@@ -9972,7 +11156,7 @@ const PlanExitBlock = ({
      the plan prints twice. */
   const carriedMarkdown = planRenderedSeparately ? null : resolvePlanExitMarkdown(toolCall);
   return (
-    <div className="space-y-2">
+    <div {...stylex.props(viewStyles.stackTwo)}>
       {carriedMarkdown ? (
         <PlanPanel
           markdown={carriedMarkdown}
@@ -10037,9 +11221,9 @@ const PermissionRequestBlock = ({ toolCall }: { toolCall: ToolCallMessage }) => 
   if (record.kind === 'pending') {
     return (
       <div
-        className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
+        {...withClassName(stylex.props(viewStyles.toolPermissionRow), ACTIVITY_PROCESS_TEXT_CLASS)}
       >
-        <span className="min-w-0 flex-1 truncate">
+        <span {...stylex.props(viewStyles.toolPermissionLabel)}>
           {readonly
             ? t('sharing.permissionPending', 'Waiting for the author')
             : t('sessions.permission.waitingInline', 'Waiting for your answer')}
@@ -10055,11 +11239,11 @@ const PermissionRequestBlock = ({ toolCall }: { toolCall: ToolCallMessage }) => 
       : t('sessions.permissionDenied', 'Permission Denied'));
   return (
     <div
-      className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
+      {...withClassName(stylex.props(viewStyles.toolPermissionRow), ACTIVITY_PROCESS_TEXT_CLASS)}
     >
       {/* Truncated like every other process row: an `allow_always` name runs
           to a full sentence, and the record must stay one line. */}
-      <span className="min-w-0 flex-1 truncate" title={label}>
+      <span {...stylex.props(viewStyles.toolPermissionLabel)} title={label}>
         {label}
       </span>
     </div>

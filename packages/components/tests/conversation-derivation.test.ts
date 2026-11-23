@@ -59,6 +59,39 @@ const deriveDiffCount = (turn: { fileDiff?: unknown }) => ({
 });
 
 describe('createConversationDerivation', () => {
+  it('lets a returning conversation paint before its scan and holds hydration while hidden', async () => {
+    const { view } = await openView(20, { tailKeep: 0 });
+    const pending: Array<() => void> = [];
+    const derivation = createConversationDerivation(view, deriveDiffCount, {
+      yieldToEventLoop: () => new Promise<void>((resolve) => pending.push(resolve)),
+    });
+    try {
+      expect(derivation.facts.size).toBe(0);
+      expect(countHydrated(view)).toBe(0);
+      derivation.setActive(false);
+      pending.shift()!();
+      await drain(() => pending.length > 0, 100);
+      expect(derivation.facts.size).toBe(0);
+      expect(countHydrated(view)).toBe(0);
+      derivation.setActive(true);
+      for (let i = 0; i < 100 && !derivation.complete; i++) {
+        pending.shift()?.();
+        await drain(() => pending.length > 0 || derivation.complete, 100);
+      }
+      expect(derivation.complete).toBe(true);
+      expect(derivation.facts.size).toBe(view.turnCount);
+      const fact = derivation.facts.get('a-0');
+      derivation.setActive(false);
+      derivation.setActive(true);
+      expect(derivation.facts.get('a-0')).toBe(fact);
+      expect(derivation.complete).toBe(true);
+      expect(pending).toHaveLength(0);
+    } finally {
+      derivation.dispose();
+      for (const resolve of pending) resolve();
+      view.dispose();
+    }
+  });
   it.each(['loro'] as const)(
     'refreshes evicted goal and diff facts through the shipped reader (%s)',
     async (backend) => {

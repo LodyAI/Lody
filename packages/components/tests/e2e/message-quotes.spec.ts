@@ -22,6 +22,32 @@ async function selectPassage(page: Page, index: number) {
   return page.evaluate(() => getSelection()!.toString());
 }
 
+test('a modal covers the quote action when the background selection is restored', async ({ page }) => {
+  await openQuoteStory(page, 'modal-over-selection');
+  await selectPassage(page, 11);
+  const range = await page.evaluateHandle(() => getSelection()!.getRangeAt(0).cloneRange());
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog).toBeVisible();
+  const quote = page.getByText('Quote', { exact: true });
+  await page.evaluate(() => getSelection()!.removeAllRanges());
+  await expect(quote).toHaveCount(0);
+  await page.evaluate((retained) => getSelection()!.addRange(retained), range);
+  await expect(quote).toBeVisible();
+
+  const bounds = (await quote.boundingBox())!;
+  const panel = (await dialog.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(panel.x);
+  expect(bounds.y).toBeGreaterThanOrEqual(panel.y);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(panel.x + panel.width);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(panel.y + panel.height);
+  const shot = () => page.screenshot({ clip: bounds, animations: 'disabled' });
+  const retained = await shot();
+  await page.evaluate(() => getSelection()!.removeAllRanges());
+  await expect(quote).toHaveCount(0);
+  expect((await shot()).equals(retained)).toBe(true);
+});
+
 test('native selection action does not resize or scroll the conversation, and quotes keep question order', async ({
   page,
 }, testInfo) => {
