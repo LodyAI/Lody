@@ -39,8 +39,12 @@ File attachments use `file` blocks; the product contract is in
   downloads from inside, so it must not grow a duplicate control. That button carries the
   in-flight spinner, and the primary affordance keeps reading as preview.
 - `session-file-preview-dialog.tsx` — `SessionFilePreviewPanel` (status-driven;
-  markdown reuses `MarkdownRenderer`, raw toggle, copy=raw, truncation) and dialog wrapper.
-  `session-file-attachment.tsx` owns the preview fetch and download for every host.
+  markdown reuses `MarkdownRenderer`, raw toggle, copy=raw, truncation; video
+  attachments render the shared custom `VideoPlayer` with play/pause, scrubbing,
+  time, volume, playback speed, and download fallback on codec/load errors) and dialog wrapper.
+  `session-file-attachment.tsx` owns the preview fetch and download for every host
+  (fetching video bytes through the existing authenticated download / E2EE
+  decryption path into a tab-scoped `blob:` URL revoked on unmount).
   A desktop Session opens the preview as a closeable side-panel viewer tab
   (`openFileAttachment` on `SessionChatActionContext`, tab id
   `attachment:<storage session>:<fileId>`), deduped and focused like file tabs and

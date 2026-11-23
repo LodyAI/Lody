@@ -13,7 +13,12 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
 import { ReadOnlyHtmlPreview } from '../sessions/read-only-html-preview';
-import { formatFileSize, isHtmlSessionFile } from '@/lib/session-file-presentation';
+import { VideoPlayer } from '../shared/video-player';
+import {
+  formatFileSize,
+  isHtmlSessionFile,
+  isVideoSessionFile,
+} from '@/lib/session-file-presentation';
 import { MarkdownRenderer } from './markdown-renderer';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
@@ -23,9 +28,10 @@ const isMarkdownFile = (fileName: string): boolean => {
 };
 
 export type SessionFilePreviewStatus =
-  | { kind: 'loading' }
+  | { kind: 'loading'; loadedBytes?: number; totalBytes?: number }
   | { kind: 'error'; message: string }
-  | { kind: 'loaded'; text: string; truncated: boolean };
+  | { kind: 'loaded'; text: string; truncated: boolean }
+  | { kind: 'video'; src: string };
 
 /**
  * Where the preview is mounted:
@@ -40,6 +46,7 @@ export type SessionFilePreviewPanelProps = {
   variant?: SessionFilePreviewVariant;
   file: SessionFilePayload;
   status: SessionFilePreviewStatus;
+  active?: boolean;
   onDownload?: (file: SessionFilePayload) => void;
   isDownloading?: boolean;
   className?: string;
@@ -54,14 +61,16 @@ export type SessionFilePreviewPanelProps = {
 export function SessionFilePreviewPanel({
   file,
   status,
+  active = true,
   onDownload,
   isDownloading = false,
   variant = 'dialog',
   className,
 }: SessionFilePreviewPanelProps) {
   const { t } = useTranslation();
-  const html = isHtmlSessionFile(file);
-  const markdown = !html && isMarkdownFile(file.fileName);
+  const video = isVideoSessionFile(file);
+  const html = !video && isHtmlSessionFile(file);
+  const markdown = !video && !html && isMarkdownFile(file.fileName);
   // Renderable attachments open in preview; original bytes remain one toggle away.
   const [showRaw, setShowRaw] = useState(!markdown && !html);
   const canPreviewHtml = html && status.kind === 'loaded' && !status.truncated;
@@ -122,17 +131,19 @@ export function SessionFilePreviewPanel({
           </Tabs.List>
         </Tabs.Root>
       ) : null}
-      <Button
-        type="button"
-        variant="ghost"
-        size="small"
-        icon
-        onClick={handleCopy}
-        disabled={status.kind !== 'loaded'}
-        aria-label={t('common.copy', 'Copy')}
-      >
-        {copied ? <Check className="size-4 text-emerald-500" /> : <Copy className="size-4" />}
-      </Button>
+      {!video ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          icon
+          onClick={handleCopy}
+          disabled={status.kind !== 'loaded'}
+          aria-label={t('common.copy', 'Copy')}
+        >
+          {copied ? <Check className="size-4 text-emerald-500" /> : <Copy className="size-4" />}
+        </Button>
+      ) : null}
       {onDownload && (
         <Button
           type="button"
@@ -180,13 +191,29 @@ export function SessionFilePreviewPanel({
       </div>
     ) : null;
 
-  const content =
-    status.kind === 'loading' ? (
+  const renderVideo = status.kind === 'video';
+  const loadingMessage = (() => {
+    if (status.kind !== 'loading') return '';
+    if (video && status.totalBytes && status.totalBytes > 0 && status.loadedBytes !== undefined) {
+      const percent = Math.min(100, Math.round((status.loadedBytes / status.totalBytes) * 100));
+      return t('sessions.videoPreview.loadingProgress', 'Loading video… {{percent}}%', { percent });
+    }
+    if (video) {
+      return t('sessions.videoPreview.loading', 'Loading video…');
+    }
+    return t('sessions.filePreviewLoading', 'Loading preview…');
+  })();
+
+  let content: React.ReactNode;
+  if (status.kind === 'loading') {
+    content = (
       <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
         <Spinner className="size-4" />
-        {t('sessions.filePreviewLoading', 'Loading preview…')}
+        {loadingMessage}
       </div>
-    ) : status.kind === 'error' ? (
+    );
+  } else if (status.kind === 'error') {
+    content = (
       <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted-foreground">
         <FileWarning className="size-6 text-muted-foreground/60" aria-hidden="true" />
         <span>{status.message}</span>
@@ -196,7 +223,28 @@ export function SessionFilePreviewPanel({
           </Button>
         )}
       </div>
-    ) : renderHtml ? (
+    );
+  } else if (status.kind === 'video') {
+    content = (
+      <div
+        {...stylex.props(
+          styles.videoPreview,
+          mobileSheet && styles.fillHtmlPreview,
+          pane && styles.fillHtmlPreview
+        )}
+      >
+        <VideoPlayer
+          key={status.src}
+          src={status.src}
+          active={active}
+          title={file.fileName}
+          onDownload={onDownload ? () => onDownload(file) : undefined}
+          isDownloading={isDownloading}
+        />
+      </div>
+    );
+  } else if (renderHtml) {
+    content = (
       <div
         {...stylex.props(
           styles.htmlPreview,
@@ -206,17 +254,22 @@ export function SessionFilePreviewPanel({
       >
         <ReadOnlyHtmlPreview text={status.text} />
       </div>
-    ) : renderMarkdown ? (
+    );
+  } else if (renderMarkdown) {
+    content = (
       <div {...stylex.props(pane ? styles.paneMarkdown : styles.markdown)}>
         <MarkdownRenderer text={status.text} size="default" />
       </div>
-    ) : pane ? (
-      <pre {...stylex.props(styles.paneRaw)}>{status.text}</pre>
-    ) : (
+    );
+  } else if (pane) {
+    content = <pre {...stylex.props(styles.paneRaw)}>{status.text}</pre>;
+  } else {
+    content = (
       <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-3 font-mono text-[13px] leading-relaxed text-foreground">
         {status.text}
       </pre>
     );
+  }
 
   if (pane) {
     return (
@@ -229,7 +282,9 @@ export function SessionFilePreviewPanel({
           <div {...stylex.props(styles.paneActions)}>{actions}</div>
         </div>
         {truncatedNotice}
-        <div {...stylex.props(styles.paneBody, renderHtml && styles.paneBodyFill)}>{content}</div>
+        <div {...stylex.props(styles.paneBody, (renderHtml || renderVideo) && styles.paneBodyFill)}>
+          {content}
+        </div>
       </div>
     );
   }
@@ -331,6 +386,7 @@ const styles = stylex.create({
   sheetBody: { flex: 1, minHeight: 0, maxHeight: 'none', overscrollBehavior: 'contain' },
   fillHtmlPreview: { flexGrow: 1, width: '100%', height: '100%' },
   htmlPreview: { display: 'flex', height: '55vh', minWidth: 0, overflow: 'hidden' },
+  videoPreview: { display: 'flex', height: '55vh', minWidth: 0, overflow: 'hidden' },
   markdown: { paddingInline: '2px', paddingBottom: space[1] },
   pane: {
     display: 'flex',

@@ -6,6 +6,23 @@ import { getImageMimeTypeForPath, isBinaryImagePath } from '@lody/shared/image-f
 import type { LocalFileResolution, LocalFilePreviewResource } from '@lody/shared/local-file-preview'
 import { LOCAL_TEXT_EDIT_BYTES, LOCAL_TEXT_PAGE_BYTES } from '@lody/shared/local-file-preview'
 
+const VIDEO_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  webm: 'video/webm',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  mov: 'video/quicktime',
+  ogv: 'video/ogg',
+  mkv: 'video/x-matroska',
+  avi: 'video/x-msvideo'
+}
+
+function getVideoMimeTypeForPath(filePath: string): string | undefined {
+  const extension = /\.([^./\\]+)$/u.exec(filePath)?.[1]?.toLowerCase()
+  return extension && Object.hasOwn(VIDEO_MIME_BY_EXTENSION, extension)
+    ? VIDEO_MIME_BY_EXTENSION[extension]
+    : undefined
+}
+
 const revision = (s: Stats) => `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`
 type Resource = {
   owner: number
@@ -45,7 +62,8 @@ export class LocalFileResources {
       const imageMime = isBinaryImagePath(file.path)
         ? getImageMimeTypeForPath(file.path)
         : undefined
-      const mime = imageMime ?? (isPdf ? 'application/pdf' : undefined)
+      const videoMime = imageMime ? undefined : getVideoMimeTypeForPath(file.path)
+      const mime = imageMime ?? videoMime ?? (isPdf ? 'application/pdf' : undefined)
       const bytes =
         mime && !imageMime
           ? Buffer.alloc(0)

@@ -166,6 +166,26 @@ void test('large PDFs are binary resources with bounded range responses', async 
   assert.equal((await response.arrayBuffer()).byteLength, 64 * 1024)
 })
 
+void test('local video files serve video Content-Type and support HTTP Range seeking', async (t) => {
+  const bytes = Buffer.alloc(128 * 1024)
+  Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]).copy(bytes)
+  const file = await fixture(t, 'recording.mp4', bytes)
+  const resources = new LocalFileResources()
+  const result = await resources.preview(4, file)
+  assert.equal(result.status, 'resource')
+  assert.equal(result.kind, 'binary')
+  assert.equal(result.sizeBytes, bytes.length)
+
+  const response = await resources.respond(
+    new Request(result.url, { headers: { Range: 'bytes=1024-2047' } })
+  )
+  assert.equal(response.status, 206)
+  assert.equal(response.headers.get('Content-Type'), 'video/mp4')
+  assert.equal(response.headers.get('Accept-Ranges'), 'bytes')
+  assert.equal(response.headers.get('Content-Range'), `bytes 1024-2047/${bytes.length}`)
+  assert.equal((await response.arrayBuffer()).byteLength, 1024)
+})
+
 void test('replacing a file invalidates every existing resource URL', async (t) => {
   const file = await fixture(t, 'large.txt', 'a'.repeat(600_000))
   const resources = new LocalFileResources()

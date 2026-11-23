@@ -4,7 +4,13 @@ import { useTranslation } from 'react-i18next';
 import type { SessionFilePayload, SessionId, WorkspaceId } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
-import { downloadSessionFile, fetchSessionFilePreview } from '@/lib/session-file-download';
+import {
+  downloadSessionFile,
+  fetchSessionFileBlob,
+  fetchSessionFilePreview,
+} from '@/lib/session-file-download';
+import { isVideoSessionFile } from '@/lib/session-file-presentation';
+import { resolveVideoMimeType } from '@/lib/video-file-preview';
 import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { toast } from '@/lib/toast';
@@ -80,7 +86,8 @@ export function useSessionFilePreviewStatus(
   const hasAccess = access !== null;
   const [status, setStatus] = useState<SessionFilePreviewStatus>({ kind: 'loading' });
   const storageSessionId = file.storageSessionId ?? sessionId;
-  const { fileId, encryption, sizeBytes } = file;
+  const { fileId, fileName, mimeType, encryption, sizeBytes } = file;
+  const isVideo = isVideoSessionFile({ fileName, mimeType });
   useEffect(() => {
     const current = accessRef.current;
     if (!hasAccess || !current) {
@@ -91,7 +98,41 @@ export function useSessionFilePreviewStatus(
       return undefined;
     }
     const controller = new AbortController();
+    let objectUrl: string | undefined;
     setStatus({ kind: 'loading' });
+
+    if (isVideo) {
+      void fetchSessionFileBlob({
+        ...current,
+        sessionId: storageSessionId,
+        fileId,
+        encryption,
+        mimeType: resolveVideoMimeType(fileName, mimeType) ?? mimeType,
+        sizeBytes,
+        signal: controller.signal,
+        onProgress: ({ loadedBytes, totalBytes }) => {
+          if (controller.signal.aborted) return;
+          setStatus({ kind: 'loading', loadedBytes, totalBytes });
+        },
+      })
+        .then((blob) => {
+          if (controller.signal.aborted) return;
+          objectUrl = URL.createObjectURL(blob);
+          setStatus({ kind: 'video', src: objectUrl });
+        })
+        .catch(() => {
+          if (controller.signal.aborted) return;
+          setStatus({
+            kind: 'error',
+            message: t('sessions.videoPreview.loadFailed', 'Could not load video'),
+          });
+        });
+      return () => {
+        controller.abort();
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      };
+    }
+
     void fetchSessionFilePreview({
       ...current,
       sessionId: storageSessionId,
@@ -113,7 +154,18 @@ export function useSessionFilePreviewStatus(
         });
       });
     return () => controller.abort();
-  }, [accessRef, encryption, fileId, hasAccess, sizeBytes, storageSessionId, t]);
+  }, [
+    accessRef,
+    encryption,
+    fileId,
+    fileName,
+    hasAccess,
+    isVideo,
+    mimeType,
+    sizeBytes,
+    storageSessionId,
+    t,
+  ]);
   return status;
 }
 
@@ -121,11 +173,13 @@ export function useSessionFilePreviewStatus(
 export function SessionFileAttachmentPane({
   file,
   sessionId,
+  active = true,
   className,
 }: {
   file: SessionFilePayload;
   /** The Session whose message carried the attachment. */
   sessionId: SessionId;
+  active?: boolean;
   className?: string;
 }) {
   const status = useSessionFilePreviewStatus(file, sessionId);
@@ -135,6 +189,7 @@ export function SessionFileAttachmentPane({
       variant="pane"
       file={file}
       status={status}
+      active={active}
       onDownload={download}
       isDownloading={downloadingId === file.fileId}
       className={className}
