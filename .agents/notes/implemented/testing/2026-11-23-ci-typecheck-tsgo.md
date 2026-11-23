@@ -81,4 +81,6 @@ root `typecheck` script, `.github/scripts/run-ci-typecheck.mjs` and
 - With tsgo, the mobile app and e2ee programs and the e2e program report no
   errors. An injected type error in each program is reported. The e2e program
   lists the same 81 files under tsgo and `tsc`.
-- The CI wall-time effect is unmeasured until the change runs on a PR.
+- CI run `45172325099` (forced full, concurrency 2): `Typecheck (forced full)` took
+  88 s against 160–220 s before, and `Static checks` 191 s. One run; runner
+  variance is not characterized.
