@@ -1,6 +1,8 @@
 import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
+  applyScheduleRecurrence,
+  getDeviceTimeZone,
   getMachineRoomId,
   getMachineFlockDocId,
   getMachineFlockLocalProjects,
@@ -15,6 +17,7 @@ import {
   readMachineFlockRowsFromFlock,
   ScheduleCommandSchema,
   scheduleContentRevision,
+  scheduleProposalRuleToRecurrence,
   scheduleProposalRuleToTrigger,
   validateSchedulePrompt,
   type AgentConfigId,
@@ -191,7 +194,8 @@ export async function executeScheduleCommand(
   if (command.action === 'propose_edit') {
     if (!requesterSessionId) throw new Error('A proposal requires an invoking Session');
     const { patch } = command;
-    if (patch.rule) scheduleProposalRuleToTrigger(patch.rule, getServerNow());
+    const now = getServerNow();
+    if (patch.rule) scheduleProposalRuleToTrigger(patch.rule, now);
     if (patch.prompt !== undefined) validateSchedulePrompt(patch.prompt);
     const channel = await proposalChannel(requesterSessionId);
     const outcome = await publishScheduleEditProposal(
@@ -200,8 +204,22 @@ export async function executeScheduleCommand(
       async () => {
         const document = await repository.owned(id, auth.userId);
         if (document.message) throw new Error('A scheduled message has its own editor');
+        const targetMachineRecord = await manager.repo.getDocMeta(
+          getMachineRoomId(document.definition.machineId as MachineId)
+        );
+        const machineTimeZone =
+          (targetMachineRecord?.meta as MachineMeta | undefined)?.timeZone ?? getDeviceTimeZone();
+        const ruleUnchanged = !patch.rule
+          ? true
+          : patch.rule.kind === 'manual'
+            ? document.definition.trigger.kind === 'manual'
+            : applyScheduleRecurrence(
+                scheduleProposalRuleToRecurrence(patch.rule, machineTimeZone)!,
+                now,
+                document.definition.trigger
+              ) === document.definition.trigger;
         if (
-          !patch.rule &&
+          ruleUnchanged &&
           (patch.title ?? document.definition.title) === document.definition.title &&
           (patch.prompt ?? document.prompt) === document.prompt
         )

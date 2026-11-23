@@ -214,6 +214,16 @@ function useProposalCard<Meta>({
   const scope = useResolvedWorkspaceScope();
   const runtime =
     scope.enabled && scope.workspaceId === activeRuntime?.workspaceId ? activeRuntime : null;
+  const readOutcome = useCallback(async () => {
+    if (!runtime) return undefined;
+    const read = await runtime.withSessionStore(sessionId, (store) =>
+      store.sessionData.history.readTurn(entryId)
+    );
+    if (read.state !== 'ready') throw new Error('The proposal could not be read.');
+    const item = Array.isArray(read.turn.items) ? read.turn.items[itemIndex] : undefined;
+    if (!item || typeof item !== 'object') throw new Error('The proposal could not be read.');
+    return (item as { meta?: { outcome?: string } }).meta?.outcome;
+  }, [entryId, itemIndex, runtime, sessionId]);
   const writeOutcome = useCallback(
     async (next: Meta) => {
       if (!runtime) return;
@@ -245,7 +255,7 @@ function useProposalCard<Meta>({
     },
     [navigate, slug]
   );
-  return { runtime, writeOutcome, openSchedule };
+  return { runtime, readOutcome, writeOutcome, openSchedule };
 }
 
 export type ScheduleProposalNoticeProps = {
@@ -707,7 +717,7 @@ export function ScheduleEditProposalNotice({
 }: Omit<ScheduleProposalNoticeProps, 'meta'> & { meta: ScheduleEditProposalMeta }) {
   const { t, i18n } = useTranslation();
   const user = useAtomValue(userAtom);
-  const { runtime, writeOutcome, openSchedule } =
+  const { runtime, readOutcome, writeOutcome, openSchedule } =
     useProposalCard<ScheduleEditProposalMeta>(notice);
   const agents = useAtomValue(getAllAgentConfigAtom) as AgentConfigMeta[];
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
@@ -719,20 +729,27 @@ export function ScheduleEditProposalNotice({
   const activityId = scheduleEditProposalActivityId(notice.sessionId, meta.proposalId);
   const diff = useMemo(
     () =>
-      document && patch.prompt !== undefined ? diffPromptLines(document.prompt, patch.prompt) : null,
+      document && patch.prompt !== undefined
+        ? diffPromptLines(document.prompt, patch.prompt)
+        : null,
     [document?.prompt, patch.prompt]
   );
   const stale = t(
     'schedules.editProposal.stale',
     'This scheduled task was edited after the proposal. Ask the Agent for a new one.'
   );
+  const ownerId =
+    document?.definition.ownerId ??
+    registry.rows.find((row) => row.scheduleId === meta.scheduleId)?.ownerId;
+  const notOwner = !!ownerId && ownerId !== user?.id;
 
   const decide = (outcome: 'applied' | 'dismissed') => {
     void (async () => {
+      if (!runtime || !user) return;
       setBusy(true);
       try {
+        if (await readOutcome()) return;
         if (outcome === 'applied') {
-          if (!runtime || !user) return;
           const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
           await runtime.withScheduleStore(meta.scheduleId, async () => {
             const repository = new ScheduleRepository(runtime.repo, runtime.workspaceId, {
@@ -747,7 +764,8 @@ export function ScheduleEditProposalNotice({
               meta,
               latest,
               now,
-              machines.get(latest.definition.machineId as MachineId)?.timeZone ?? getDeviceTimeZone(),
+              machines.get(latest.definition.machineId as MachineId)?.timeZone ??
+                getDeviceTimeZone(),
               activityId
             );
             if (!draft) throw new Error(stale);
@@ -760,6 +778,8 @@ export function ScheduleEditProposalNotice({
               activityId,
             });
           });
+        } else if (notOwner) {
+          throw new Error(t('schedules.ownerOnly', 'Only the schedule owner can save changes.'));
         }
         await writeOutcome({ ...meta, outcome });
       } catch (error) {
@@ -880,7 +900,10 @@ export function ScheduleEditProposalNotice({
             diff.map((line, index) => {
               const Line = line.kind === 'add' ? 'ins' : line.kind === 'del' ? 'del' : 'div';
               return (
-                <Line key={index} {...stylex.props(styles.diffLine, line.kind !== 'same' && styles[line.kind])}>
+                <Line
+                  key={index}
+                  {...stylex.props(styles.diffLine, line.kind !== 'same' && styles[line.kind])}
+                >
                   {line.kind === 'gap' ? '⋯' : line.text || ' '}
                 </Line>
               );
@@ -900,7 +923,12 @@ export function ScheduleEditProposalNotice({
         </ul>
       ) : null}
       <div {...stylex.props(styles.actions)}>
-        <Button size="small" variant="ghost" disabled={busy} onClick={() => decide('dismissed')}>
+        <Button
+          size="small"
+          variant="ghost"
+          disabled={busy || !runtime || notOwner}
+          onClick={() => decide('dismissed')}
+        >
           {t('schedules.proposal.dismiss', 'Ignore')}
         </Button>
         <Button size="small" variant="secondary" onClick={() => openSchedule(meta.scheduleId)}>
@@ -918,4 +946,3 @@ export function ScheduleEditProposalNotice({
     </div>
   );
 }
-

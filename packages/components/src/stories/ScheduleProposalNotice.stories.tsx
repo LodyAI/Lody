@@ -180,4 +180,3 @@ export const EditApplied: Story = {
   args: Pending.args,
   render: () => <ScheduleEditProposalNotice {...base} meta={{ ...edit, outcome: 'applied' }} />,
 };
-

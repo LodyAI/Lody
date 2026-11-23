@@ -20,6 +20,7 @@ import {
   sendDaemonScheduleCommand,
 } from './schedule-command-client';
 import { executeScheduleCommand, type ScheduleCommandContext } from './schedule-command-service';
+import { publishScheduleEditProposal } from './schedule-proposal';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -706,6 +707,9 @@ describe('proposing a change to an existing schedule', () => {
       'changes nothing'
     );
     await expect(
+      proposeEdit(h, { rule: { kind: 'once', at: '2026-09-10T00:00:00Z' } })
+    ).rejects.toThrow('changes nothing');
+    await expect(
       proposeEdit(h, { rule: { kind: 'weekly', weekdays: [], hour: 9, minute: 0 } })
     ).rejects.toThrow();
     await expect(proposeEdit(h, undefined, 'missing')).rejects.toThrow('Schedule not found');
@@ -739,5 +743,23 @@ describe('proposing a change to an existing schedule', () => {
     await h.repository.delete('schedule', 'owner', 2);
     await expect(proposeEdit(h)).rejects.toThrow('Schedule not found');
     expect(h.history()).toEqual([]);
+  });
+
+  it('fails closed when proposal history cannot be read as missing or ready', async () => {
+    const appendHistoryTurn = vi.fn();
+    const describe = vi.fn();
+    await expect(
+      publishScheduleEditProposal(
+        {
+          readTurn: async () => ({ state: 'unavailable', reason: 'incomplete' }),
+          appendHistoryTurn,
+        },
+        { proposalId: 'revise', scheduleId: 'schedule', patch: { title: 'New' } },
+        describe,
+        {}
+      )
+    ).rejects.toThrow('unavailable');
+    expect(describe).not.toHaveBeenCalled();
+    expect(appendHistoryTurn).not.toHaveBeenCalled();
   });
 });

@@ -95,7 +95,7 @@ export async function publishScheduleEditProposal(
 ): Promise<{ pending: boolean; outcome?: 'applied' | 'dismissed' }> {
   const entryId = `schedule-edit-proposal-${request.proposalId}`;
   const read = await backend.readTurn(entryId);
-  if (read.state !== 'ready') {
+  if (read.state === 'missing') {
     const meta: ScheduleEditProposalMeta = {
       ...request,
       ...(await describe()),
@@ -115,6 +115,8 @@ export async function publishScheduleEditProposal(
     });
     return { pending: true };
   }
+  if (read.state !== 'ready')
+    throw new Error('Proposal history is unavailable; retry with the same requestId');
   const prior = (read.turn.items as MessageContent[] | undefined)?.find(
     (candidate) => candidate.type === 'system_notice' && candidate.name === 'schedule_edit_proposal'
   );

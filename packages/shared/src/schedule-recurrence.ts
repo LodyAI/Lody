@@ -294,8 +294,11 @@ export function recurrenceToTrigger(recurrence: ScheduleRecurrence, now: number)
 export function sameScheduleRecurrence(a: ScheduleRecurrence, b: ScheduleRecurrence): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
-    case 'once':
-      return a.at === (b as typeof a).at;
+    case 'once': {
+      const aMs = Date.parse(a.at);
+      const bMs = Date.parse((b as typeof a).at);
+      return Number.isFinite(aMs) && aMs === bMs ? true : a.at === (b as typeof a).at;
+    }
     case 'minutes':
     case 'hours':
       return a.every === (b as typeof a).every && a.timeZone === (b as typeof a).timeZone;
@@ -505,12 +508,17 @@ export function applyScheduleEditProposal(
   if (!landed && scheduleContentRevision(document) !== proposal.baseActivityId) return null;
   const patch: ScheduleEditProposalMeta['patch'] = landed ? {} : proposal.patch;
   const current = document.definition;
+  const nextRecurrence = patch.rule
+    ? scheduleProposalRuleToRecurrence(patch.rule, machineTimeZone)
+    : undefined;
   return {
     title: patch.title ?? current.title,
     prompt: patch.prompt ?? document.prompt,
-    trigger: patch.rule
-      ? scheduleProposalRuleToTrigger(patch.rule, now, machineTimeZone)
-      : current.trigger,
+    trigger: !patch.rule
+      ? current.trigger
+      : nextRecurrence
+        ? applyScheduleRecurrence(nextRecurrence, now, current.trigger)
+        : { kind: 'manual' },
     machineId: current.machineId,
     misfirePolicy: current.misfirePolicy,
     overlapPolicy: current.overlapPolicy,
