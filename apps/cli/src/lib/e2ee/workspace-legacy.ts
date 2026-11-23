@@ -29,8 +29,21 @@ import { getLogger } from '../../utils/logger';
 import { encryptedMemberRequester, lazyExecutionJournal } from './agent-execution';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
-import { makeEncryptedRpcListener, type E2eeRpcTiming } from '@lody/loro-streams-rpc/e2ee-streams';
-import type { E2eeDispatchInput, E2eeDispatchAck } from '@lody/shared/e2ee-rpc';
+import {
+  makeEncryptedRpcListener,
+  makeEncryptedStreamsChannel,
+  type E2eeRpcTiming,
+} from '@lody/loro-streams-rpc/e2ee-streams';
+import type {
+  E2eeDispatchInput,
+  E2eeDispatchAck,
+  E2eeFeatureInput,
+  E2eePreparedDispatch,
+} from '@lody/shared/e2ee-rpc';
+import type {
+  LocalMachineRpcRequest,
+  LocalMachineRpcResponse,
+} from '@lody/shared/local-machine-rpc';
 import { makeVerifiedExecutionIntent } from './execution-intent-verification';
 import { Bytes as IntentBytes } from '@lody/e2ee-core/protocol';
 import {
@@ -1014,6 +1027,43 @@ async function openWorkspaceOwned(
   });
   let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
   let irohFiber: Fiber.Fiber<never, unknown> | undefined;
+  type FeatureCall = { input: E2eeFeatureInput };
+  let featureChannel:
+    | Promise<{
+        send: (
+          prepared: E2eePreparedDispatch,
+          call: FeatureCall,
+          timeoutMs: number
+        ) => Effect.Effect<LocalMachineRpcResponse | null, unknown>;
+      }>
+    | undefined;
+  const openFeatureChannel = () => {
+    const started = (featureChannel ??= run(
+      Effect.gen(function* () {
+        const provider = yield* createTokenProvider(true);
+        yield* provider.getToken();
+        const bucketId = provider.getBucketId();
+        if (!bucketId || bucketId === 'lody' || !provider.getGatewayBaseUrl())
+          return yield* Effect.fail(new Error('e2ee_content_configuration'));
+        const client = createLoroStreamsJsonStreamClient({
+          bucketId,
+          getBaseUrl: provider.getGatewayBaseUrl,
+          getToken: () => Effect.runPromise(provider.getToken()),
+        });
+        return yield* makeEncryptedStreamsChannel<FeatureCall, LocalMachineRpcResponse>({
+          workspaceId: options.workspaceId,
+          requesterDevice: opened.signingPublicKey,
+          client,
+          acceptResponse: async (_prepared, call, frame) =>
+            (await run(dispatchNative.acceptFeatureResponse(call.input, frame))) ?? undefined,
+        });
+      })
+    ));
+    started.catch(() => {
+      if (featureChannel === started) featureChannel = undefined;
+    });
+    return started;
+  };
   const stopRpc = () =>
     run(
       Effect.all(
@@ -1963,6 +2013,16 @@ async function openWorkspaceOwned(
         })
       ),
     stopRpc,
+    /** `null`: no verified reply within `timeoutMs`; the signed original stays retained. */
+    requestFeature: async (
+      request: LocalMachineRpcRequest
+    ): Promise<LocalMachineRpcResponse | null> => {
+      if (closed) throw new Error('e2ee_closed');
+      const input: E2eeFeatureInput = { requestId: randomBytes(16).toString('hex'), request };
+      const prepared = await run(dispatchNative.prepareFeature(input));
+      const channel = await openFeatureChannel();
+      return await run(channel.send(prepared, { input }, request.timeoutMs ?? 30_000));
+    },
     isExecutionOpen: () => !closed,
     /** New execution evidence: a document's frame (room ID) or a confirmed ledger read. */
     subscribeExecutionEvidence: (listener: (roomId?: string) => void) => {

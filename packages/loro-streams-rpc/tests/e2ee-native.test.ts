@@ -457,6 +457,95 @@ describe('trusted-host encrypted dispatch originals', () => {
     );
   });
 
+  it("completes another member's Session and project work, while machine work stays the owner's", async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    const teammate = f.native('teammate', 'teammate', () => Effect.fail(new Error('offline')));
+    const sessionId = f.input.sessionId;
+    const request = (id: string, method: string, params: unknown) =>
+      E2eeFeatureInputSchema.parse({
+        requestId: id.repeat(16),
+        request: { workspaceId: f.workspaceId, machineId: f.machineId, method, params },
+      });
+    const shared = [
+      request('b1', 'session/fork', {
+        sourceSessionId: sessionId,
+        sourceTurnId: 'assistant-1',
+        targetSessionId: '00000000-0000-4000-8000-0000000000f5',
+        requestedByUserId: 'member-account',
+      }),
+      request('b2', 'session/cancel', { sessionId, turnId: 'assistant-1', subagentTaskId: 't1' }),
+      request('b3', 'session/steer', {
+        sessionId,
+        expectedTurnId: 'assistant-1',
+        userTurnId: 'user-2',
+        userId: 'member-account',
+        timestamp: '2026-11-13T00:00:00.000Z',
+        inputConfig: { prompt: 'SYNTHETIC_STEER' },
+      }),
+      request('b4', 'session/terminate', { sessionId }),
+      request('b5', 'local-project/git-state', {
+        localProjectId: 'project-1',
+        requestedByUserId: 'member-account',
+      }),
+      request('b6', 'session/live-status', { sessionId }),
+    ];
+    for (const input of shared) {
+      const original = await Effect.runPromise(teammate.prepareFeature(input));
+      const opened = await Effect.runPromise(
+        f.receiver.openFeature(f.machineId, original.frameHex)
+      );
+      if (!opened) throw new Error(`missing ${input.request.method}`);
+      expect(opened.input).toEqual(input);
+      const result = { ok: false as const, error: 'SYNTHETIC_REFUSAL' };
+      const frames = await Effect.runPromise(
+        f.receiver.sealFeatureResult(f.machineId, opened, result)
+      );
+      expect(
+        await Effect.runPromise(
+          teammate.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+        )
+      ).toEqual(result);
+    }
+    for (const input of [
+      request('c1', 'machine/pi-extensions', {}),
+      request('c2', 'machine/acp-binary-install', { agentType: 'codex' }),
+      request('c3', 'local-project/control', {
+        request: { type: 'local-project/list', machineId: f.machineId },
+      }),
+      request('c4', 'file/list-dir', { v: 3, sessionId, path: '' }),
+    ])
+      await expect(Effect.runPromise(teammate.prepareFeature(input))).rejects.toThrow(
+        /^e2ee_machine_not_owned$/
+      );
+  });
+
+  it("refuses a Guest's Session and project work before signing, but signs its history reads", async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    f.ledger.append([3, new Uint8Array(16).fill(13), 3]);
+    const guest = f.native('teammate');
+    const request = (id: string, method: string, params: unknown) =>
+      E2eeFeatureInputSchema.parse({
+        requestId: id.repeat(16),
+        request: { workspaceId: f.workspaceId, machineId: f.machineId, method, params },
+      });
+    const sessionId = f.input.sessionId;
+    for (const input of [
+      request('d1', 'session/cancel', { sessionId, turnId: 'assistant-1' }),
+      request('d2', 'session/goal', { sessionId, action: 'pause', userId: 'member-account' }),
+      request('d3', 'project/probe-local-member', { localProjectId: 'project-1' }),
+    ])
+      await expect(Effect.runPromise(guest.prepareFeature(input))).rejects.toThrow(
+        /^e2ee_rpc_denied$/
+      );
+    const live = request('d4', 'session/live-status', { sessionId });
+    const original = await Effect.runPromise(guest.prepareFeature(live));
+    expect(
+      (await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex)))?.input
+    ).toEqual(live);
+  });
+
   it("signs another member's dispatch on a host with no sharing policy reader", async () => {
     const f = encryptedRpcFixture({ teammate: true });
     fixtures.push(f);

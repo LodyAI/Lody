@@ -1556,6 +1556,57 @@ describe('encrypted file and preview routing', () => {
     expect(unsigned).toEqual([]);
   });
 
+  it('refuses an encrypted steer before sending when the target cannot read it', async () => {
+    const steer = {
+      sessionId,
+      expectedTurnId: 'assistant-1',
+      userTurnId: 'user-2',
+      userId: 'owner',
+      timestamp: '2026-11-13T00:00:00.000Z',
+      inputConfig: { prompt: 'SYNTHETIC_STEER' } as never,
+    };
+    const sent: unknown[] = [];
+    const facade = (capabilities: Record<string, number>, feature: boolean) =>
+      createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        getMachineProtocolCapabilities: async () => capabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () =>
+          ({
+            requestSessionSteer: async (args: unknown) => {
+              sent.push(args);
+              return {
+                type: 'session/steer_response',
+                sessionId,
+                userTurnId: 'user-2',
+                applied: true,
+                disposition: 'applied',
+              };
+            },
+          }) as never,
+        ...(feature ? { requestEncryptedFeature: async () => ({ ok: false, error: 'x' }) } : {}),
+      });
+    for (const [capabilities, feature] of [
+      [CURRENT_MACHINE_PROTOCOL_CAPABILITIES, true],
+      [{ ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES, e2eeRemoteControl: 1 }, false],
+    ] as const)
+      expect(
+        await facade(capabilities, feature).requestSessionSteer(remoteMachineId, steer)
+      ).toMatchObject({ applied: false, disposition: 'unsupported' });
+    expect(sent).toEqual([]);
+    expect(
+      await facade(
+        { ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES, e2eeRemoteControl: 1 },
+        true
+      ).requestSessionSteer(remoteMachineId, steer)
+    ).toMatchObject({ applied: true });
+    expect(sent).toHaveLength(1);
+  });
+
   it('offers remote encrypted edit and resend only to an updated machine owner', () => {
     const machine = {
       ownerUserId: 'owner-account',

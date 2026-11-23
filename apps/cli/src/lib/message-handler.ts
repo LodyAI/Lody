@@ -1,3 +1,4 @@
+import { isE2eeProjectScopedMethod } from '@lody/shared/e2ee-rpc';
 import type { MachineStatusResponse } from '@lody/shared';
 import { readManagedOperation } from './managed-daemon-release';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
@@ -179,6 +180,7 @@ import {
   type LocalProjectControlResponse,
   E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
   E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+  E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
   E2EE_SESSION_FORK_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
@@ -720,6 +722,9 @@ export interface MessageHandlerConfig {
   };
   encryptedWorkspace?: boolean;
   encryptedExecution?: EncryptedAgentExecution;
+  encryptedMachineRpc?: (
+    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+  ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
   token: string;
   workspaceId: WorkspaceId;
   workspaceSlug?: string;
@@ -855,6 +860,7 @@ export class MessageHandler {
   private onFatalAuthFailure?: (error: Error) => void;
   private onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
+  private readonly encryptedMachineRpc?: MessageHandlerConfig['encryptedMachineRpc'];
   private readonly baseMachineLifecycleCapability: MachineLifecycleCapability;
   private readonly hostsEncryptedWorkspace?: () => boolean;
   private get machineLifecycleCapability(): MachineLifecycleCapability {
@@ -992,8 +998,8 @@ export class MessageHandler {
     expiresAt: number,
     signal: AbortSignal
   ) {
-    // Scoped history and branch queries require the feature receiver's authorization.
-    if (input.method === 'session/history-read' || input.method === 'local-project/list-branches')
+    // Scoped history and project queries require the feature receiver's authorization.
+    if (input.method === 'session/history-read' || isE2eeProjectScopedMethod(input.method))
       throw new Error('e2ee_query_method');
     if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
     return this.encryptedQueryServer.readQuery(input, expiresAt, signal);
@@ -2939,12 +2945,14 @@ export class MessageHandler {
 
   private async probeProjectLocalMember(localProjectId: LocalProjectId) {
     try {
-      const rootPath = await resolveWorkspaceLocalProjectRootPath(
-        this.workspaceDocument.repo,
-        this.workspaceId,
-        this.machineId,
-        localProjectId
-      );
+      const rootPath = this.encryptedQueryServer
+        ? await this.resolveLocalProjectRootForRpc(localProjectId, 'project-member-probe')
+        : await resolveWorkspaceLocalProjectRootPath(
+            this.workspaceDocument.repo,
+            this.workspaceId,
+            this.machineId,
+            localProjectId
+          );
       if (!rootPath) throw new Error('Project group member is unavailable');
       return {
         type: 'project/probe-local-member' as const,
@@ -2952,6 +2960,34 @@ export class MessageHandler {
       };
     } catch {
       throw new Error('Unable to probe project group member');
+    }
+  }
+
+  /** Encrypted roots must hash to the requested ID, so a tampered row cannot redirect Git. */
+  private async resolveLocalProjectRootForRpc(
+    localProjectId: LocalProjectId,
+    reason: string
+  ): Promise<string | null> {
+    if (!this.encryptedQueryServer)
+      return await resolveWorkspaceLocalProjectRootPathWithRetry(
+        this.workspaceDocument.repo,
+        this.workspaceId,
+        this.machineId,
+        localProjectId,
+        {
+          requestSync: () =>
+            this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
+              reason,
+              timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
+            }),
+        }
+      );
+    const peeked = this.workspaceDocument.peekLocalProjectRootPath(this.machineId, localProjectId);
+    if (peeked === null) return null;
+    try {
+      return localProjectsLegacy.createLocalProjectId(peeked) === localProjectId ? peeked : null;
+    } catch {
+      return null;
     }
   }
 
@@ -2985,18 +3021,9 @@ export class MessageHandler {
       return failure('access_denied', access.reason);
     }
 
-    const rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId,
+    const rootPath = await this.resolveLocalProjectRootForRpc(
       args.localProjectId,
-      {
-        requestSync: () =>
-          this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
-            reason: 'local-project-git-state-resolve',
-            timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
-          }),
-      }
+      'local-project-git-state-resolve'
     );
     if (!rootPath) {
       return failure('local_project_not_found', `Local project not found: ${args.localProjectId}`);
@@ -3004,21 +3031,22 @@ export class MessageHandler {
 
     try {
       const state = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
-      void updateMachineLocalProjectGitSummaryFields(
-        this.workspaceDocument.repo,
-        this.workspaceId,
-        this.machineId,
-        args.localProjectId,
-        state.git
-          ? {
-              git: true,
-              defaultBranch: state.defaultBranch,
-              currentBranch: state.currentBranch,
-              githubRepoFullName: state.githubRepoFullName,
-            }
-          : { git: false },
-        this.workspaceDocument
-      ).catch(() => undefined);
+      if (!this.encryptedQueryServer)
+        void updateMachineLocalProjectGitSummaryFields(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          args.localProjectId,
+          state.git
+            ? {
+                git: true,
+                defaultBranch: state.defaultBranch,
+                currentBranch: state.currentBranch,
+                githubRepoFullName: state.githubRepoFullName,
+              }
+            : { git: false },
+          this.workspaceDocument
+        ).catch(() => undefined);
       return {
         type: 'local-project/git-state_response',
         machineId: this.machineId,
@@ -3067,37 +3095,10 @@ export class MessageHandler {
     }
 
     const isEncrypted = Boolean(this.encryptedQueryServer);
-    let rootPath: string | null = null;
-    if (isEncrypted) {
-      const peeked = this.workspaceDocument.peekLocalProjectRootPath(
-        this.machineId,
-        args.localProjectId
-      );
-      if (peeked !== null) {
-        try {
-          rootPath =
-            localProjectsLegacy.createLocalProjectId(peeked) === args.localProjectId
-              ? peeked
-              : null;
-        } catch {
-          rootPath = null;
-        }
-      }
-    } else {
-      rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
-        this.workspaceDocument.repo,
-        this.workspaceId,
-        this.machineId,
-        args.localProjectId,
-        {
-          requestSync: () =>
-            this.workspaceDocument.syncMachineFlockDoc(this.machineId, {
-              reason: 'local-project-list-branches-resolve',
-              timeoutMs: readLocalProjectRootResolveSyncTimeoutMs(),
-            }),
-        }
-      );
-    }
+    const rootPath = await this.resolveLocalProjectRootForRpc(
+      args.localProjectId,
+      'local-project-list-branches-resolve'
+    );
     if (!rootPath) {
       return failure('local_project_not_found', `Local project not found: ${args.localProjectId}`);
     }
@@ -3526,6 +3527,7 @@ export class MessageHandler {
     this.isMachineIdentityRestoreIdle = config.isMachineIdentityRestoreIdle;
     this.sealMachineIdentityRestore = config.sealMachineIdentityRestore;
     this.readWorkspaceAccess = config.readWorkspaceAccess;
+    this.encryptedMachineRpc = config.encryptedWorkspace ? config.encryptedMachineRpc : undefined;
     this.prepareManagedUpgrade = config.prepareManagedUpgrade;
     this.hostsEncryptedWorkspace = config.hostsEncryptedWorkspace;
     this.baseMachineLifecycleCapability = config.encryptedWorkspace
@@ -4284,25 +4286,20 @@ export class MessageHandler {
           ? this.resolveEncryptedCodeCollabOwnerSessionId
           : this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await fileReader.previewFile(request),
-        // Ordinary workspaces only; an encrypted reader has no folder listing yet, so the
-        // server answers `unsupported_protocol` there.
-        ...(this.encryptedFileReader
-          ? {}
-          : {
-              listSessionDirectory: async (request: SessionDirectoryListRequest) =>
-                await listSessionDirectory(
-                  {
-                    resolveWorkspace: this.resolveFilePreviewWorkspace,
-                    listDirectory: async (rootPath, relativePath, limit) =>
-                      await this.localProjectControlService.listProjectDirectory(
-                        rootPath,
-                        relativePath,
-                        { limit }
-                      ),
-                  },
-                  request
-                ),
-            }),
+        listSessionDirectory: async (request: SessionDirectoryListRequest) =>
+          await listSessionDirectory(
+            {
+              resolveWorkspace: config.encryptedWorkspace
+                ? (sessionId, rootId) =>
+                    this.resolveEncryptedCodeCollabV2Workspace(sessionId, { rootId })
+                : this.resolveFilePreviewWorkspace,
+              listDirectory: async (rootPath, relativePath, limit) =>
+                await this.localProjectControlService.listProjectDirectory(rootPath, relativePath, {
+                  limit,
+                }),
+            },
+            request
+          ),
         downloadFileChunk: async (request) => {
           if (
             request.attachment?.machineId !== undefined &&
@@ -4615,6 +4612,7 @@ export class MessageHandler {
                 e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
                 e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
                 e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+                e2eeRemoteControl: E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
               }
             : {}),
           ...(this.sorbetCredentials
@@ -7110,6 +7108,7 @@ export class MessageHandler {
                 e2eeAcpInteraction: E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
                 e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
                 e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
+                e2eeRemoteControl: E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
               }
             : {}),
           ...(this.sorbetCredentials
@@ -7870,6 +7869,9 @@ export class MessageHandler {
                 classifyEncryptedDerivation: (origin, target) =>
                   this.classifyEncryptedDerivation(origin, target),
                 checkEncryptedMachineAccess: (target) => this.checkEncryptedMachineAccess(target),
+                ...(this.encryptedMachineRpc
+                  ? { encryptedMachineRpc: this.encryptedMachineRpc }
+                  : {}),
               }
             : {}),
         },
@@ -8564,6 +8566,18 @@ export class MessageHandler {
         return await this.executionService.listMachinePiExtensions(
           request.params.configId as AgentConfigId | undefined
         );
+      case 'local-project/git-state':
+        if (request.ownerSessionId) throw new Error('Local project Git state scope mismatch');
+        return await this.getLocalProjectGitStateForRpc({
+          localProjectId: request.params.localProjectId as LocalProjectId,
+          requestedByUserId: request.params.requestedByUserId,
+        });
+      // Encrypted ingress serves these through `readEncryptedMachineRequest`.
+      case 'file/list-dir':
+      case 'local-project/control':
+      case 'machine/acp-binary-install':
+      case 'machine/provider-rate-limits-refresh':
+        throw new Error('e2ee_feature_unavailable');
       case 'session/fork':
         return await this.forkSessionWithAccessCheck(request.params);
       case 'session/edit-and-resend': {

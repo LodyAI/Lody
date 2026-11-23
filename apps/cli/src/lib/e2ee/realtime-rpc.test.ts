@@ -714,6 +714,101 @@ effectIt.effect(
 );
 
 effectIt.effect(
+  'authorizes remote Session control and project reads against what they name, as the verified signer',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver } = yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const streams = memoryStreams();
+      const asked = new Set<string>();
+      const handled: unknown[] = [];
+      const receiveOptions = {
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        authorize: () => Effect.die('Session control used owner-only authority'),
+        authorizeRead: () => Effect.die('a project read used machine read authority'),
+        authorizeSessionExecution: (_workspace: string, _device: string, sessionId: string) =>
+          Effect.sync(() => {
+            asked.add(`session:${sessionId}`);
+            return { _tag: 'Authorized' as const };
+          }),
+        authorizeProjectExecution: (_workspace: string, _device: string, project?: string) =>
+          Effect.sync(() => {
+            asked.add(`project:${project}`);
+            return project === 'project-1'
+              ? { _tag: 'Authorized' as const }
+              : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' as const };
+          }),
+        requesterIdentity: () =>
+          Effect.succeed({ accountId: 'member-account', executionUserId: 'e2ee-member:aa' }),
+        isOpen: () => true,
+        client: streams.client,
+        handle: async (
+          request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+          context: import('./feature-rpc').EncryptedFeatureContext
+        ) => {
+          handled.push({ method: request.method, requester: context.requester });
+          return { ok: false as const, error: 'SYNTHETIC_HANDLED' };
+        },
+      };
+      const call = (id: string, method: string, params: unknown) =>
+        Effect.gen(function* () {
+          const input = {
+            requestId: id.repeat(16),
+            request: { workspaceId: f.workspaceId, machineId: f.machineId, method, params },
+          } as import('@lody/shared/e2ee-rpc').E2eeFeatureInput;
+          const original = yield* f.sender.prepareFeature(input);
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+              yield* receive({ id: original.requestId, frame: original.frameHex });
+              yield* streams.waitResponse(original.requestId, 1);
+            })
+          );
+          const reply = streams.writes.filter((write) => write.stream.includes(':res:')).at(-1)
+            ?.value as { frame: string };
+          return yield* f.sender.acceptFeatureResponse(input, reply.frame);
+        });
+      const sessionId = f.input.sessionId;
+      for (const [id, method, params] of [
+        ['71', 'session/cancel', { sessionId, turnId: 'assistant-1', subagentTaskId: 'task-1' }],
+        [
+          '72',
+          'session/steer',
+          {
+            sessionId,
+            expectedTurnId: 'assistant-1',
+            userTurnId: 'user-2',
+            userId: 'member-account',
+            timestamp: '2026-11-13T00:00:00.000Z',
+            inputConfig: { prompt: 'SYNTHETIC_STEER' },
+          },
+        ],
+        [
+          '73',
+          'local-project/git-state',
+          { localProjectId: 'project-1', requestedByUserId: 'member-account' },
+        ],
+      ] as const)
+        expect(yield* call(id, method, params)).toMatchObject({ error: 'SYNTHETIC_HANDLED' });
+      expect([...asked]).toEqual([`session:${sessionId}`, 'project:project-1']);
+      const requester = { accountId: 'member-account', executionUserId: 'e2ee-member:aa' };
+      expect(handled).toEqual([
+        { method: 'session/cancel', requester },
+        { method: 'session/steer', requester },
+        { method: 'local-project/git-state', requester },
+      ]);
+      expect(
+        yield* call('74', 'project/probe-local-member', { localProjectId: 'project-2' })
+      ).toMatchObject({ ok: false, code: 'e2ee_machine_not_shared' });
+      expect(handled).toHaveLength(3);
+    })
+);
+
+effectIt.effect(
   'joins a live encrypted write across Iroh and Streams receivers without sealing uncertainty',
   () =>
     Effect.gen(function* () {

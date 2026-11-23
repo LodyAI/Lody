@@ -25,6 +25,19 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   explicit authorization action opens the browser. Cancel owned attempts on editor
   disposal, fence late replies, and omit the scope helper line.
 
+## Encrypted feature RPC
+
+- `e2ee-rpc.ts` `e2eeFeatureTarget` is the one classification of who may sign an encrypted
+  feature request and which authority the receiving machine applies; signer preparation,
+  reply verification and the receiver all read it. Machine work (files, Providers, credentials,
+  installs, project control) stays the machine owner's own membership. Session and project
+  work may come from a shared member, is authorized against what it names and runs as the
+  verified signer, never a requested user. Guests never sign writes or project reads.
+- `E2EE_REMOTE_CONTROL_METHODS` need the target's `e2eeRemoteControl` capability: senders
+  refuse before signing, because an older machine drops the frame unread. A steer refused
+  that way is a proven non-delivery and becomes a follow-up. CLI senders of an encrypted
+  workspace use only its signed channel and never the plaintext Machine RPC token.
+
 ## Code Collab
 
 - `codeCollabDiffBlobs` v1 gates the additive manifest/blob methods and opaque

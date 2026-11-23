@@ -48,7 +48,58 @@ export const isE2eeFeatureMethod = (method: string): boolean =>
   method === 'session/edit-and-resend' ||
   method === 'session/preview-create' ||
   method === 'session/preview-revoke' ||
-  method === 'session/preview-status';
+  method === 'session/preview-status' ||
+  isE2eeRemoteControlMethod(method);
+
+/** Gated by `e2eeRemoteControl`; see `src/AGENTS.md#encrypted-feature-rpc`. */
+export const E2EE_REMOTE_CONTROL_METHODS = [
+  'session/cancel',
+  'session/terminate',
+  'session/steer',
+  'session/goal',
+  'file/list-dir',
+  'local-project/git-state',
+  'project/probe-local-member',
+  'local-project/control',
+  'machine/memory',
+  'machine/pi-extensions',
+  'machine/acp-binary-install',
+  'machine/provider-rate-limits-refresh',
+] as const;
+export const isE2eeRemoteControlMethod = (method: string): boolean =>
+  (E2EE_REMOTE_CONTROL_METHODS as readonly string[]).includes(method);
+
+/** Whose device may sign a request and which authority the receiver applies
+ * ([contract](AGENTS.md#encrypted-feature-rpc)). */
+export type E2eeFeatureTarget =
+  | { kind: 'machine' }
+  | { kind: 'history'; sessionId: string }
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'project'; localProjectId: string };
+export const isE2eeProjectScopedMethod = (method: string): boolean =>
+  method === 'local-project/list-branches' ||
+  method === 'local-project/git-state' ||
+  method === 'project/probe-local-member';
+export function e2eeFeatureTarget(request: LocalMachineRpcRequest): E2eeFeatureTarget {
+  switch (request.method) {
+    case 'session/history-read':
+    case 'session/live-status':
+      return { kind: 'history', sessionId: request.params.sessionId };
+    case 'session/fork':
+      return { kind: 'session', sessionId: request.params.sourceSessionId };
+    case 'session/cancel':
+    case 'session/terminate':
+    case 'session/steer':
+    case 'session/goal':
+      return { kind: 'session', sessionId: request.params.sessionId };
+    case 'local-project/list-branches':
+    case 'local-project/git-state':
+    case 'project/probe-local-member':
+      return { kind: 'project', localProjectId: request.params.localProjectId };
+    default:
+      return { kind: 'machine' };
+  }
+}
 export const E2eeFeatureInputSchema = z
   .object({
     requestId: z.string().regex(/^[0-9a-f]{32}$/),
@@ -68,7 +119,10 @@ export const E2EE_READ_QUERY_METHODS = [
   'machine/acp-binary-status',
   'session/live-status',
   'local-project/list-branches',
+  'local-project/git-state',
+  'project/probe-local-member',
   'file/preview',
+  'file/list-dir',
   'file/download-chunk',
   'code-collab/open-text',
   'code-collab/refresh-text',

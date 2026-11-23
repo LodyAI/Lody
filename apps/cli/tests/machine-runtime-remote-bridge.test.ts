@@ -309,6 +309,88 @@ it('forks for the verified signer, owner or shared member, never a claimed reque
   ]);
 });
 
+it('runs encrypted remote Session control and project reads as the verified signer only', async () => {
+  const { runtime, handler } = createHarness(true);
+  const dispatched: unknown[] = [];
+  const served: unknown[] = [];
+  Object.assign(handler, {
+    handleLocalMachineRpc: async (request: unknown) => {
+      dispatched.push(request);
+      return { ok: true };
+    },
+    readEncryptedMachineRequest: async (request: unknown) => {
+      served.push(request);
+      return { ok: true };
+    },
+  });
+  const context = (requester?: { accountId: string; executionUserId: string }) => ({
+    requestId: 'b'.repeat(32),
+    requesterDevice: 'c'.repeat(64),
+    expiresAt: Date.now() + 60_000,
+    signal: new AbortController().signal,
+    ...(requester ? { requester } : {}),
+  });
+  const member = { accountId: 'member-account', executionUserId: 'e2ee-member:aa' };
+  const base = { workspaceId: 'workspace', machineId: 'machine' };
+  const steer = {
+    ...base,
+    method: 'session/steer' as const,
+    params: {
+      sessionId: 'session',
+      expectedTurnId: 'assistant-1',
+      userTurnId: 'user-2',
+      userId: 'member-account',
+      timestamp: '2026-11-13T00:00:00.000Z',
+      inputConfig: { prompt: 'SYNTHETIC_STEER' },
+    },
+  };
+  const cancel = {
+    ...base,
+    method: 'session/cancel' as const,
+    params: { sessionId: 'session', turnId: 'assistant-1' },
+  };
+  const probe = {
+    ...base,
+    method: 'project/probe-local-member' as const,
+    params: { localProjectId: 'local-project-1' },
+  };
+  await runtime.handleEncryptedFeatureRpc(steer, context(member));
+  await runtime.handleEncryptedFeatureRpc(cancel, context(member));
+  await runtime.handleEncryptedFeatureRpc(probe, context(member));
+  expect(dispatched).toEqual([
+    { ...steer, params: { ...steer.params, userId: 'e2ee-member:aa' } },
+    cancel,
+  ]);
+  expect(served).toEqual([
+    { ...probe, params: { ...probe.params, requestedByUserId: 'e2ee-member:aa' } },
+  ]);
+  await expect(
+    runtime.handleEncryptedFeatureRpc(
+      { ...steer, params: { ...steer.params, userId: 'owner' } },
+      context(member)
+    )
+  ).rejects.toThrow('e2ee_feature_requester');
+  await expect(runtime.handleEncryptedFeatureRpc(cancel, context())).rejects.toThrow(
+    'e2ee_feature_requester'
+  );
+  await expect(runtime.handleEncryptedFeatureRpc(cancel)).rejects.toThrow(
+    'e2ee_feature_requester'
+  );
+  expect(dispatched).toHaveLength(2);
+
+  const install = {
+    ...base,
+    method: 'machine/acp-binary-install' as const,
+    params: { agentType: 'codex' },
+  };
+  await expect(runtime.handleEncryptedFeatureRpc(install)).rejects.toThrow(
+    'e2ee_rpc_unavailable'
+  );
+  await runtime.handleEncryptedFeatureRpc(install, context());
+  expect(served.at(-1)).toEqual(install);
+  expect(dispatched).toHaveLength(2);
+});
+
 it('requires live verified authority for encrypted ACP interaction routing', async () => {
   const { runtime, handler } = createHarness(true);
   const request = {

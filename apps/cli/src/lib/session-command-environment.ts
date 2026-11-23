@@ -114,6 +114,10 @@ export interface DaemonWorkspace {
   ): Promise<
     'owner' | { principal: 'owner' | 'member'; origin: { sessionId: string; userTurnId: string } }
   >;
+  /** Encrypted only: a feature request signed as this machine. Absent: never plaintext. */
+  encryptedMachineRpc?(
+    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+  ): Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
   /** Encrypted only: machine access decided locally, without the workspace service. */
   checkEncryptedMachineAccess?(target: {
     machineId: string;
@@ -239,6 +243,32 @@ export type EncryptedCommandAccess = NonNullable<DaemonWorkspace['checkEncrypted
 const encryptedCommandAccess = new AsyncLocalStorage<EncryptedCommandAccess>();
 export const runWithEncryptedCommandAccess = <T>(access: EncryptedCommandAccess, run: () => T): T =>
   encryptedCommandAccess.run(access, run);
+
+export type EncryptedMachineRpcSender = NonNullable<DaemonWorkspace['encryptedMachineRpc']>;
+const encryptedCommandRpc = new AsyncLocalStorage<{
+  workspaceId: string;
+  manager: LoroDocumentManager;
+  request: EncryptedMachineRpcSender;
+}>();
+export const runWithEncryptedCommandRpc = <T>(
+  owner: { workspaceId: string; manager: LoroDocumentManager; request: EncryptedMachineRpcSender },
+  run: () => T
+): T => encryptedCommandRpc.run(owner, run);
+/** Absent `request`: the encrypted channel is unavailable and callers fail closed. */
+export const resolveEncryptedMachineRpc = (
+  workspaceId: string
+): { manager: LoroDocumentManager; request?: EncryptedMachineRpcSender } | undefined => {
+  const daemon = getDaemonWorkspace();
+  if (daemon?.workspaceId === workspaceId && daemon.manager.isEncryptedWorkspace()) {
+    const send = daemon.encryptedMachineRpc;
+    return {
+      manager: daemon.manager,
+      ...(send ? { request: (request) => send.call(daemon, request) } : {}),
+    };
+  }
+  const command = encryptedCommandRpc.getStore();
+  return command?.workspaceId === workspaceId ? command : undefined;
+};
 
 const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();
 export const runWithDaemonWorkspace = <T>(workspace: DaemonWorkspace, run: () => T): T =>

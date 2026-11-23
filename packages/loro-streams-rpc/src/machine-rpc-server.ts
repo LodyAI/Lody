@@ -679,6 +679,16 @@ type RpcServerDeps = {
   onFatalAuthFailure?: (error: LoroStreamsTokenAuthError) => void;
 };
 
+/** Served by their ordinary handler after the receiver's authorization and claim. */
+export const ENCRYPTED_ORDINARY_HANDLER_WRITES = [
+  'local-project/control',
+  'machine/acp-binary-install',
+  'machine/provider-rate-limits-refresh',
+] as const;
+const isEncryptedOrdinaryHandlerMethod = (method: string, params: unknown): boolean =>
+  isE2eeReadQuery(method, params) ||
+  (ENCRYPTED_ORDINARY_HANDLER_WRITES as readonly string[]).includes(method);
+
 export class LoroStreamsMachineRpcServer {
   private readonly requestStreamId: string;
   private readonly requestState: LoroJsonStreamState = { nextOffset: '-1' };
@@ -1102,7 +1112,7 @@ export class LoroStreamsMachineRpcServer {
     if (
       input.workspaceId !== this.deps.workspaceId ||
       input.machineId !== this.deps.machineId ||
-      !isE2eeReadQuery(input.method, input.params)
+      !isEncryptedOrdinaryHandlerMethod(input.method, input.params)
     )
       throw new Error('e2ee_query_method');
     let owner: string | undefined;
@@ -1121,7 +1131,7 @@ export class LoroStreamsMachineRpcServer {
       if (!owner) throw new Error('e2ee_query_owner');
       params = await encryptCodeCollabV2RpcPayload(owner, params);
     }
-    const outcome = await this.readQuery(
+    const outcome = await this.serveNative(
       { queryId: context.requestId, method: input.method, params },
       context.expiresAt,
       input.method === 'session/history-read' && context.authority
@@ -1164,6 +1174,15 @@ export class LoroStreamsMachineRpcServer {
     historyAuthority?: { isCurrent: () => boolean; signal: AbortSignal }
   ): Promise<E2eeQueryResult> {
     if (!isE2eeReadQuery(input.method, input.params)) throw new Error('e2ee_query_method');
+    return this.serveNative(input, expiresAt, signal, historyAuthority);
+  }
+
+  private async serveNative(
+    input: { queryId: string; method: string; params: unknown },
+    expiresAt: number,
+    signal: AbortSignal,
+    historyAuthority?: { isCurrent: () => boolean; signal: AbortSignal }
+  ): Promise<E2eeQueryResult> {
     const request = LoroStreamsRpcRequestSchema.parse({
       jsonrpc: '2.0',
       id: input.queryId,

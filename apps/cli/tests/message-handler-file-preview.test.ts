@@ -340,6 +340,11 @@ describe('MessageHandler file preview workspace lifecycle', () => {
       { status: 'ok', content: { text: content } },
     ],
     [
+      'file/list-dir',
+      { v: 3, sessionId, path: '' },
+      { status: 'ok', path: '', entries: [{ name: 'artifact.txt', type: 'file' }] },
+    ],
+    [
       'file/download-chunk',
       { sessionId, path: 'artifact.txt', offset: 0 },
       { status: 'ok', data: Buffer.from(content).toString('base64') },
@@ -630,7 +635,7 @@ describe('MessageHandler file preview workspace lifecycle', () => {
     }
   });
 
-  it('serves encrypted local-project/list-branches for verified project roots and refuses tampered paths', async () => {
+  it('serves encrypted project branch and Git state reads for verified roots and refuses tampered paths', async () => {
     await encryptedHandler();
     const { localProjectsLegacy } = await import('@lody/shared/node/local-project');
     const plainDir = path.join(dataDir, 'plain-dir');
@@ -706,6 +711,24 @@ describe('MessageHandler file preview workspace lifecycle', () => {
           error: 'local_project_not_found',
         },
       });
+      for (const [localProjectId, expected] of [
+        [validId, { success: true, state: { git: false } }],
+        ['local-project-tampered', { success: false, error: 'local_project_not_found' }],
+      ] as const)
+        expect(
+          await handler.readEncryptedMachineRequest(
+            {
+              workspaceId,
+              machineId,
+              method: 'local-project/git-state',
+              params: { localProjectId, requestedByUserId: 'user-1' },
+            },
+            context
+          )
+        ).toMatchObject({
+          ok: true,
+          result: { type: 'local-project/git-state_response', ...expected },
+        });
     } finally {
       f.close();
     }
