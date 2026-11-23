@@ -1047,6 +1047,25 @@ it.each([
   }
 );
 
+it.each(['workspace_transfer_active_subscription', 'workspace_transfer_payment_required'])(
+  'retains only the safe transfer refusal code through ledger submission: %s',
+  async (code) => {
+    const f = await appendOriginal();
+    const { network } = fixture(async () => {
+      throw Object.assign(new Error('synthetic-private-cause'), {
+        data: { code, secret: 'private' },
+      });
+    }, f.scope);
+    const exit = await Effect.runPromiseExit(
+      network.ledger('cc'.repeat(32)).log.appendCas(f.scope.genesis, f.expected, f.record)
+    );
+    const failure = failureOf(exit) as { cause?: BackendRefusal };
+    expect(failure.cause).toBeInstanceOf(BackendRefusal);
+    expect(failure.cause?.code).toBe(code);
+    expect(JSON.stringify(failure)).not.toContain('private');
+  }
+);
+
 it.each(['committed', 'conflict'] as const)(
   '%s append skips the genesis prefetch and supplies one signed inline page to the next matching feed read',
   async (status) => {

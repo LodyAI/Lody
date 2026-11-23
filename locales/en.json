@@ -4411,6 +4411,8 @@
   "workspace.transfer.errors.support": "Contact support to transfer ownership for this billing account.",
   "workspace.transfer.errors.billingBusy": "Finish the current billing operation, then try again.",
   "workspace.transfer.errors.freeLimit": "This member has reached the free workspace ownership limit.",
+  "workspace.transfer.errors.activeSubscription": "Cancel auto-renewal for the active paid subscription in Billing settings before transferring workspace ownership.",
+  "workspace.transfer.errors.paymentRequired": "Settle the outstanding balance in Billing settings before transferring workspace ownership.",
   "workspace.transfer.errors.failed": "Could not transfer ownership. Refresh to check the current owner before trying again.",
   "workspace.transfer.encryptedHelper": "Choose the new owner on the encryption console's members page. You become an admin, and the change is added to the change history.",
   "workspace.transfer.encryptedButton": "Transfer…",
