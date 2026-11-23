@@ -1100,14 +1100,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (response?.ok) return response.result as SessionSteerResponse;
       }
-      if (
-        deps.protectedContent &&
-        (!deps.requestEncryptedFeature ||
-          !machineSupportsProtocolCapability(
-            { protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId) },
-            MACHINE_PROTOCOL_CAPABILITIES.e2eeRemoteControl
-          ))
-      )
+      if (deps.protectedContent && !deps.requestEncryptedFeature)
         return {
           type: 'session/steer_response',
           sessionId: args.sessionId,

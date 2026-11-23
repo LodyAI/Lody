@@ -201,7 +201,7 @@
   "e2ee.unavailable.notification-body": "Encrypted workspaces do not yet support notification content.",
   "e2ee.unavailable.attachments": "Encrypted workspaces do not yet support attachments.",
   "e2ee.unavailable.rpc": "Encrypted workspaces do not yet support remote machine operations.",
-  "e2ee.unavailable.guest-file-write": "Guests have read-only file access: saving, comparing changes, loading folders and change history are unavailable.",
+  "e2ee.unavailable.guest-file-write": "Guests can view a shared session's changes read-only, but cannot save, load folders or open change history.",
   "e2ee.unavailable.preview-control-write": "Your workspace role cannot create, renew or revoke remote previews.",
   "e2ee.unavailable.presence": "Encrypted workspaces do not yet provide online status.",
   "e2ee.pair.conflict": "Another ledger operation won. The original request is kept; start a new pairing with the same desktop identity.",

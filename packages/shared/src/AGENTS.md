@@ -27,24 +27,30 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
 
 ## Encrypted feature RPC
 
-- `e2ee-rpc.ts` `e2eeFeatureTarget` is the one classification of who may sign an encrypted
-  feature request and which authority the receiving machine applies; signer preparation,
-  reply verification and the receiver all read it. Machine work (files, Providers, credentials,
-  installs, project control) stays the machine owner's own membership. Session and project
-  work may come from a shared member, is authorized against what it names and runs as the
-  verified signer, never a requested user. Guests never sign writes or project reads.
-- `E2EE_REMOTE_CONTROL_METHODS` need the target's `e2eeRemoteControl` capability: senders
-  refuse before signing, because an older machine drops the frame unread. A steer refused
-  that way is a proven non-delivery and becomes a follow-up. CLI senders of an encrypted
-  workspace use only its signed channel and never the plaintext Machine RPC token.
+- `e2ee-rpc.ts` `E2EE_RPC_POLICIES` is the one exhaustive table of admitted methods: its
+  lane (read, or write with an execution claim) and its scope decide who may sign and
+  which authority the receiving machine applies. Signer preparation, reply verification
+  and the receiver all derive from it; a new Machine RPC method must be classified there
+  or named local-only. `machine` work stays the machine owner's own membership.
+  `session` and `project` work may come from a shared member, is authorized against what
+  it names and runs as the verified signer, passed beside the signed request, never a
+  requested user. `session-read` methods also accept a current, revocable Session read
+  grant ([session access](../../../specs/session-access.md)), rechecked per reply frame;
+  an unknown Session is a denial. Guests never sign writes or project reads.
+- `remoteControl` methods need the target's `e2eeRemoteControl` capability: the shared
+  adapter refuses before signing, because an older machine drops the frame unread. A
+  steer refused that way returns `unsupported`, a proven non-delivery that becomes a
+  follow-up. CLI senders of an encrypted workspace use only its signed channel and never
+  the plaintext Machine RPC token.
 
 ## Code Collab
 
 - `codeCollabDiffBlobs` v1 gates the additive manifest/blob methods and opaque
   `[path, 'v']` generation siblings. Legacy file rows stay strict and unchanged;
   content hashes travel only through owner-scoped RPC, never the shared index.
-- Encrypted manifest/blob calls use same-member read authority without execution
-  claims or write-operation logs; cross-member Guest access remains unavailable. Manifest file-read failures, including path
+- Encrypted manifest/blob calls are `session-read` methods without execution claims or
+  write-operation logs, so a Guest with a current read grant may view them; every
+  write-lane Code Collab method stays refused for Guests. Manifest file-read failures, including path
   containment refusals, are per-file; request authorization and validation still reject
   the request.
 - File-index generation siblings count toward whole-state row/byte limits and

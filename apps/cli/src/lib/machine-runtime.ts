@@ -76,36 +76,8 @@ export class MachineRuntime {
     }
     const target = e2eeFeatureTarget(request).kind;
     if (target === 'session' || target === 'project') {
-      // Runs as the verified signer, never a requested user.
-      const requester = context?.requester;
-      if (!context || !requester) throw new Error('e2ee_feature_requester');
-      const named =
-        'userId' in request.params
-          ? request.params.userId
-          : 'requestedByUserId' in request.params
-            ? request.params.requestedByUserId
-            : requester.accountId;
-      if (named !== requester.accountId) throw new Error('e2ee_feature_requester');
-      const user = requester.executionUserId;
-      const verified = ((): typeof request => {
-        switch (request.method) {
-          case 'session/steer':
-            return { ...request, params: { ...request.params, userId: user } };
-          case 'session/goal':
-            return { ...request, params: { ...request.params, userId: user } };
-          case 'local-project/list-branches':
-            return { ...request, params: { ...request.params, requestedByUserId: user } };
-          case 'local-project/git-state':
-            return { ...request, params: { ...request.params, requestedByUserId: user } };
-          case 'project/probe-local-member':
-            return { ...request, params: { ...request.params, requestedByUserId: user } };
-          default:
-            return request;
-        }
-      })();
-      return isE2eeReadQuery(verified.method, verified.params)
-        ? this.requireHandler().readEncryptedMachineRequest(verified, context)
-        : this.dispatchLocalMachineRpc(verified, context.signal);
+      if (!context?.requester) throw new Error('e2ee_feature_requester');
+      return this.requireHandler().handleEncryptedSessionWork(request, context.requester);
     }
     if ('requestedByUserId' in request.params && request.params.requestedByUserId !== config.userId)
       throw new Error('e2ee_feature_requester');

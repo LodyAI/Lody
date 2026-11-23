@@ -462,6 +462,7 @@ describe('encrypted one-shot commands', () => {
       [getMachineRoomId('machine-new')]: { e2eeRemoteControl: 1 },
       [getMachineRoomId('machine-old')]: {},
     };
+    let reply = true;
     const manager = {
       isEncryptedWorkspace: () => true,
       repo: {
@@ -469,35 +470,29 @@ describe('encrypted one-shot commands', () => {
           meta: { protocolCapabilities: capabilities[roomId] },
         }),
       },
+      requestEncryptedFeature: async (request: unknown) => {
+        sent.push(request);
+        return reply
+          ? {
+              ok: true as const,
+              result: {
+                type: 'session/cancel_response' as const,
+                sessionId: 'session-1',
+                success: true,
+              },
+            }
+          : null;
+      },
     } as never;
-    const daemon = (encrypted: boolean) => ({
+    const daemon = {
       workspaceId: 'workspace-1' as WorkspaceId,
       userId: 'account',
       machineId: 'machine-self' as MachineId,
       manager,
       readInvocation: () => ({ found: false }) as never,
-      ...(encrypted
-        ? {
-            encryptedMachineRpc: async (request: unknown) => {
-              sent.push(request);
-              return {
-                ok: true as const,
-                result: {
-                  type: 'session/cancel_response' as const,
-                  sessionId: 'session-1',
-                  success: true,
-                },
-              };
-            },
-          }
-        : {}),
-    });
-    const call = <T>(
-      machineId: string,
-      fn: (client: LoroStreamsMachineRpcClient) => Promise<T>,
-      encrypted = true
-    ) =>
-      runWithDaemonWorkspace(daemon(encrypted), () =>
+    };
+    const call = <T>(machineId: string, fn: (client: LoroStreamsMachineRpcClient) => Promise<T>) =>
+      runWithDaemonWorkspace(daemon, () =>
         withMachineRpcClient(
           {
             auth: {} as never,
@@ -532,8 +527,10 @@ describe('encrypted one-shot commands', () => {
         })
       )
     ).rejects.toThrow('e2ee_rpc_unavailable');
-    await expect(call('machine-new', cancel, false)).rejects.toThrow('e2ee_rpc_unavailable');
     expect(sent).toHaveLength(1);
+    reply = false;
+    await expect(call('machine-new', cancel)).resolves.toMatchObject({ success: false });
+    expect(sent).toHaveLength(2);
   });
 
   it('explains a machine with no local ledger for the workspace', () => {

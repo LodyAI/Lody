@@ -201,7 +201,7 @@
   "e2ee.unavailable.notification-body": "加密工作区暂不支持通知内容",
   "e2ee.unavailable.attachments": "加密工作区暂不支持附件",
   "e2ee.unavailable.rpc": "加密工作区暂不支持远端机器操作",
-  "e2ee.unavailable.guest-file-write": "访客只有文件只读权限：无法保存、比较更改、加载文件夹或查看更改历史",
+  "e2ee.unavailable.guest-file-write": "访客可只读查看已共享会话的更改，但无法保存、加载文件夹或查看更改历史",
   "e2ee.unavailable.preview-control-write": "当前工作区角色不能创建、续期或撤销远端预览。",
   "e2ee.unavailable.presence": "加密工作区暂不提供在线状态",
   "e2ee.pair.conflict": "另一个账本操作已先提交。原请求已保留，请使用同一桌面身份重新配对。",

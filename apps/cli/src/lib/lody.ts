@@ -380,14 +380,6 @@ export class Lody {
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
         encryptedExecution: options.contentMode === 'e2ee' ? encryptedExecution : undefined,
-        ...(options.contentMode === 'e2ee'
-          ? {
-              encryptedMachineRpc: async (request) => {
-                if (!this.encryptedWorkspace) throw new Error('e2ee_rpc_unavailable');
-                return await this.encryptedWorkspace.requestFeature(request);
-              },
-            }
-          : {}),
         workspaceId: this.workspaceId,
         workspaceSlug: this.workspaceSlug,
         userId: this.userId,

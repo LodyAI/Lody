@@ -679,6 +679,17 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/withdraw-input'),
+    params: z
+      .object({
+        sessionId: z.string().trim().min(1),
+        userTurnId: z.string().trim().min(1),
+        requesterSessionId: z.string().trim().min(1),
+        userId: z.string().trim().min(1),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('file/list-dir'),
     params: SessionDirectoryListRequestSchema,
   }).strict(),
@@ -874,6 +885,7 @@ export const LocalMachineRpcResultSchema = z.union([
   LocalProjectControlResponseSchema,
   MachineAcpBinaryInstallResponseSchema,
   MachineProviderRateLimitsRefreshResponseSchema,
+  SessionWithdrawInputResponseSchema,
 ]);
 export type SorbetCredentialsListRequest = Extract<
   LocalMachineRpcRequest,

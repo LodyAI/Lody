@@ -27,7 +27,6 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { Data, Effect } from 'effect';
-import { isE2eeRemoteControlMethod } from '@lody/shared/e2ee-rpc';
 import {
   IpcConnectError,
   IpcProtocolError,
@@ -73,9 +72,8 @@ import {
   getSessionCommandEnvironment,
   resolveEncryptedMachineRpc,
   runWithEncryptedCommandAccess,
-  runWithEncryptedCommandRpc,
+  runWithEncryptedCommandManager,
   type EncryptedCommandAccess,
-  type EncryptedMachineRpcSender,
 } from './session-command-environment';
 import { assertRetainedE2eeModeAllowsOpen } from './e2ee/retained-binding';
 import { makeWorkspaceCommandManagers } from './workspace-command-manager';
@@ -396,44 +394,34 @@ export async function withMachineRpcClient<T>(
   }
 }
 
-const encryptedCommandSenders = new WeakMap<LoroDocumentManager, EncryptedMachineRpcSender>();
-
 async function withEncryptedMachineRpcClient<T>(
   args: { workspaceId: WorkspaceId; machineId: MachineId },
-  sender: NonNullable<ReturnType<typeof resolveEncryptedMachineRpc>>,
+  manager: LoroDocumentManager,
   fn: (client: LoroStreamsMachineRpcClient) => Promise<T>
 ): Promise<T> {
-  const { request, manager } = sender;
-  if (!request) throw new Error('e2ee_rpc_unavailable');
   const client = new LoroStreamsMachineRpcClient({
     workspaceId: args.workspaceId,
     machineId: args.machineId,
-    encryptedQuery: async (method, params, timeoutMs) => {
-      if (isE2eeRemoteControlMethod(method)) {
-        const machine = (await manager.repo.getDocMeta(getMachineRoomId(args.machineId)))?.meta;
-        if (
-          !machineSupportsProtocolCapability(
-            machine as MachineMeta | undefined,
-            MACHINE_PROTOCOL_CAPABILITIES.e2eeRemoteControl
-          )
-        )
-          return {
-            error: {
-              code: 'e2ee_machine_update_required',
-              message: 'Update Lody on the target machine to control it in an encrypted workspace.',
-            },
-          };
-      }
-      return await callEncryptedReadFeature({
+    encryptedQuery: async (method, params, timeoutMs) =>
+      await callEncryptedReadFeature({
         workspaceId: args.workspaceId,
         machineId: args.machineId,
         method,
         params,
         timeoutMs,
         request: async (input) =>
-          (await request(input)) ?? { ok: false, error: 'Encrypted machine request timed out.' },
-      });
-    },
+          (await manager.requestEncryptedFeature(input)) ?? {
+            ok: false,
+            error: 'Encrypted machine request timed out.',
+          },
+        supportsRemoteControl: async () =>
+          machineSupportsProtocolCapability(
+            (await manager.repo.getDocMeta(getMachineRoomId(args.machineId)))?.meta as
+              | MachineMeta
+              | undefined,
+            MACHINE_PROTOCOL_CAPABILITIES.e2eeRemoteControl
+          ),
+      }),
   });
   try {
     return await fn(client);
@@ -689,7 +677,6 @@ export async function withWorkspaceManager<T>(
         throw error;
       });
       resolveRemovalOwner(manager);
-      if (e2ee) encryptedCommandSenders.set(manager, (request) => e2ee.requestFeature(request));
       // E2EE local acceptance never waits for a token or network connection.
       if (e2ee)
         void manager
@@ -701,14 +688,10 @@ export async function withWorkspaceManager<T>(
       manager.isEncryptedWorkspace()
         ? runWithEncryptedCommandAccess(
             (target) => checkEncryptedCommandAccess(manager, commandAuth.userId, target),
-            () => {
-              const request = encryptedCommandSenders.get(manager);
-              return request
-                ? runWithEncryptedCommandRpc({ workspaceId: workspace.id, manager, request }, () =>
-                    fn(manager)
-                  )
-                : fn(manager);
-            }
+            () =>
+              runWithEncryptedCommandManager({ workspaceId: workspace.id, manager }, () =>
+                fn(manager)
+              )
           )
         : fn(manager),
     (error) => {

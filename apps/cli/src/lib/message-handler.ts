@@ -1,4 +1,3 @@
-import { isE2eeProjectScopedMethod } from '@lody/shared/e2ee-rpc';
 import type { MachineStatusResponse } from '@lody/shared';
 import { readManagedOperation } from './managed-daemon-release';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
@@ -722,9 +721,6 @@ export interface MessageHandlerConfig {
   };
   encryptedWorkspace?: boolean;
   encryptedExecution?: EncryptedAgentExecution;
-  encryptedMachineRpc?: (
-    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
-  ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
   token: string;
   workspaceId: WorkspaceId;
   workspaceSlug?: string;
@@ -860,7 +856,6 @@ export class MessageHandler {
   private onFatalAuthFailure?: (error: Error) => void;
   private onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
-  private readonly encryptedMachineRpc?: MessageHandlerConfig['encryptedMachineRpc'];
   private readonly baseMachineLifecycleCapability: MachineLifecycleCapability;
   private readonly hostsEncryptedWorkspace?: () => boolean;
   private get machineLifecycleCapability(): MachineLifecycleCapability {
@@ -993,17 +988,6 @@ export class MessageHandler {
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
   private encryptedQueryServer: LoroStreamsMachineRpcServer | null = null;
 
-  async readEncryptedQuery(
-    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
-    expiresAt: number,
-    signal: AbortSignal
-  ) {
-    // Scoped history and project queries require the feature receiver's authorization.
-    if (input.method === 'session/history-read' || isE2eeProjectScopedMethod(input.method))
-      throw new Error('e2ee_query_method');
-    if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
-    return this.encryptedQueryServer.readQuery(input, expiresAt, signal);
-  }
   async readEncryptedMachineRequest(
     request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
     context: {
@@ -2991,10 +2975,11 @@ export class MessageHandler {
     }
   }
 
-  private async getLocalProjectGitStateForRpc(args: {
-    localProjectId: LocalProjectId;
-    requestedByUserId: string;
-  }): Promise<LocalProjectGitStateRpcResponse> {
+  private async getLocalProjectGitStateForRpc(
+    signed: { localProjectId: LocalProjectId; requestedByUserId: string },
+    executionRequesterUserId = signed.requestedByUserId
+  ): Promise<LocalProjectGitStateRpcResponse> {
+    const args = { ...signed, requestedByUserId: executionRequesterUserId };
     const failure = (error: string, message: string): LocalProjectGitStateRpcResponse => ({
       type: 'local-project/git-state_response',
       machineId: this.machineId,
@@ -3061,13 +3046,17 @@ export class MessageHandler {
     }
   }
 
-  private async listLocalProjectBranchesForRpc(args: {
-    localProjectId: LocalProjectId;
-    requestedByUserId: string;
-    query?: string;
-    limit?: number;
-    cursor?: string;
-  }): Promise<LocalProjectListBranchesRpcResponse> {
+  private async listLocalProjectBranchesForRpc(
+    signed: {
+      localProjectId: LocalProjectId;
+      requestedByUserId: string;
+      query?: string;
+      limit?: number;
+      cursor?: string;
+    },
+    executionRequesterUserId = signed.requestedByUserId
+  ): Promise<LocalProjectListBranchesRpcResponse> {
+    const args = { ...signed, requestedByUserId: executionRequesterUserId };
     const failure = (error: string, message: string): LocalProjectListBranchesRpcResponse => ({
       type: 'local-project/list-branches_response',
       machineId: this.machineId,
@@ -3283,8 +3272,10 @@ export class MessageHandler {
   }
 
   private async steerSessionWithAccessCheck(
-    args: Parameters<SessionExecutionService['steerSession']>[0]
+    signed: Parameters<SessionExecutionService['steerSession']>[0],
+    executionRequesterUserId = signed.userId
   ): ReturnType<SessionExecutionService['steerSession']> {
+    const args = { ...signed, userId: executionRequesterUserId };
     const access = await this.verifySessionMachineAccess(args.sessionId, args.userId);
     if (access.outcome !== 'allowed') {
       return {
@@ -3299,12 +3290,16 @@ export class MessageHandler {
     return await this.executionService.steerSession(args);
   }
 
-  private async controlSessionGoalWithAccessCheck(args: {
-    sessionId: SessionId;
-    action: SessionGoalAction;
-    objective?: string;
-    userId: string;
-  }): Promise<SessionGoalResponse> {
+  private async controlSessionGoalWithAccessCheck(
+    signed: {
+      sessionId: SessionId;
+      action: SessionGoalAction;
+      objective?: string;
+      userId: string;
+    },
+    executionRequesterUserId = signed.userId
+  ): Promise<SessionGoalResponse> {
+    const args = { ...signed, userId: executionRequesterUserId };
     const access = await this.verifySessionMachineAccess(args.sessionId, args.userId);
     if (access.outcome !== 'allowed') {
       return {
@@ -3527,7 +3522,6 @@ export class MessageHandler {
     this.isMachineIdentityRestoreIdle = config.isMachineIdentityRestoreIdle;
     this.sealMachineIdentityRestore = config.sealMachineIdentityRestore;
     this.readWorkspaceAccess = config.readWorkspaceAccess;
-    this.encryptedMachineRpc = config.encryptedWorkspace ? config.encryptedMachineRpc : undefined;
     this.prepareManagedUpgrade = config.prepareManagedUpgrade;
     this.hostsEncryptedWorkspace = config.hostsEncryptedWorkspace;
     this.baseMachineLifecycleCapability = config.encryptedWorkspace
@@ -4202,18 +4196,8 @@ export class MessageHandler {
         },
         getSessionLiveStatus: async ({ sessionId, includeActivity }) =>
           await this.readSessionLiveStatus(sessionId, includeActivity === true),
-        withdrawSessionInput: async ({ userId, ...args }) => {
-          const access = await this.verifySessionMachineAccess(args.sessionId, userId);
-          if (access.outcome !== 'allowed')
-            return {
-              type: 'session/withdraw-input_response' as const,
-              sessionId: args.sessionId,
-              userTurnId: args.userTurnId,
-              outcome: 'error' as const,
-              error: `Withdraw access verification ${access.outcome}`,
-            };
-          return await this.withdrawQueuedInput(args);
-        },
+        withdrawSessionInput: async ({ userId, ...args }) =>
+          await this.withdrawSessionInputWithAccessCheck(args, userId),
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -7869,9 +7853,6 @@ export class MessageHandler {
                 classifyEncryptedDerivation: (origin, target) =>
                   this.classifyEncryptedDerivation(origin, target),
                 checkEncryptedMachineAccess: (target) => this.checkEncryptedMachineAccess(target),
-                ...(this.encryptedMachineRpc
-                  ? { encryptedMachineRpc: this.encryptedMachineRpc }
-                  : {}),
               }
             : {}),
         },
@@ -8574,6 +8555,7 @@ export class MessageHandler {
         });
       // Encrypted ingress serves these through `readEncryptedMachineRequest`.
       case 'file/list-dir':
+      case 'session/withdraw-input':
       case 'local-project/control':
       case 'machine/acp-binary-install':
       case 'machine/provider-rate-limits-refresh':
@@ -8811,6 +8793,90 @@ export class MessageHandler {
    * Verified encrypted fork. `executionRequesterUserId` is the signer's execution identity
    * (owner account or `e2ee-member:`); `spec.requestedByUserId` stays the display account.
    */
+  private async withdrawSessionInputWithAccessCheck(
+    args: { sessionId: SessionId; userTurnId: string; requesterSessionId: SessionId },
+    requesterUserId: string
+  ): Promise<SessionWithdrawInputResponse> {
+    const access = await this.verifySessionMachineAccess(args.sessionId, requesterUserId);
+    if (access.outcome !== 'allowed')
+      return {
+        type: 'session/withdraw-input_response',
+        sessionId: args.sessionId,
+        userTurnId: args.userTurnId,
+        outcome: 'error',
+        error: `Withdraw access verification ${access.outcome}`,
+      };
+    return await this.withdrawQueuedInput(args);
+  }
+
+  /** Session and project work the encrypted receiver admitted for a verified signer. It
+   * runs as the signer's execution identity, passed beside the signed request. */
+  async handleEncryptedSessionWork(
+    request: LocalMachineRpcRequestValidated,
+    requester: { accountId: string; executionUserId: string }
+  ): Promise<LocalMachineRpcResponse> {
+    const params: object = request.params;
+    const named =
+      'userId' in params
+        ? params.userId
+        : 'requestedByUserId' in params
+          ? params.requestedByUserId
+          : requester.accountId;
+    if (named !== requester.accountId) throw new Error('e2ee_feature_requester');
+    const as = requester.executionUserId;
+    const run = async (): Promise<LocalMachineRpcResult> => {
+      switch (request.method) {
+        case 'session/cancel':
+        case 'session/terminate':
+          return await this.dispatchLocalMachineRpc(request);
+        case 'session/steer':
+          return await this.steerSessionWithAccessCheck(
+            { ...request.params, sessionId: request.params.sessionId as SessionId },
+            as
+          );
+        case 'session/goal':
+          return await this.controlSessionGoalWithAccessCheck(request.params, as);
+        case 'session/withdraw-input':
+          return await this.withdrawSessionInputWithAccessCheck(
+            {
+              sessionId: request.params.sessionId as SessionId,
+              userTurnId: request.params.userTurnId,
+              requesterSessionId: request.params.requesterSessionId as SessionId,
+            },
+            as
+          );
+        case 'local-project/list-branches':
+          return await this.listLocalProjectBranchesForRpc(
+            { ...request.params, localProjectId: request.params.localProjectId as LocalProjectId },
+            as
+          );
+        case 'local-project/git-state':
+          return await this.getLocalProjectGitStateForRpc(
+            { ...request.params, localProjectId: request.params.localProjectId as LocalProjectId },
+            as
+          );
+        case 'project/probe-local-member': {
+          const localProjectId = request.params.localProjectId as LocalProjectId;
+          const access = await this.verifyRequesterMachineAccess({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            requesterUserId: as,
+            localProjectId,
+          });
+          if (!access.allowed) throw new Error('Project group member access denied');
+          return await this.probeProjectLocalMember(localProjectId);
+        }
+        default:
+          throw new Error('e2ee_feature_method');
+      }
+    };
+    try {
+      return { ok: true, result: await run() };
+    } catch (error) {
+      return { ok: false, error: formatErrorMessage(error) };
+    }
+  }
+
   async handleEncryptedSessionFork(
     spec: SessionForkSpec,
     executionRequesterUserId: string
@@ -8841,7 +8907,7 @@ export class MessageHandler {
   async resolveSessionHistoryAccessTarget(sessionId: SessionId) {
     await this.resolveSessionHistoryOwnerSessionId(sessionId);
     const entry = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
-    if (!entry || entry.meta.machineId !== this.machineId)
+    if (!entry || entry.deleted || entry.meta.machineId !== this.machineId)
       throw new Error('session_history_read_denied');
     const child = { ...(entry.meta as SessionMeta), id: sessionId };
     const parentId = typeof child.parentSessionId === 'string' ? child.parentSessionId : undefined;
@@ -11983,12 +12049,15 @@ export class MessageHandler {
       };
     }
 
-    const rootPath = await resolveWorkspaceLocalProjectRootPath(
-      this.workspaceDocument.repo,
-      this.workspaceId,
-      this.machineId,
-      args.localProjectId
-    );
+    // Encrypted control acts only on a root that hashes to the requested project ID.
+    const rootPath = this.encryptedQueryServer
+      ? await this.resolveLocalProjectRootForRpc(args.localProjectId, 'local-project-control')
+      : await resolveWorkspaceLocalProjectRootPath(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          args.localProjectId
+        );
     if (!rootPath) {
       return {
         ok: false,

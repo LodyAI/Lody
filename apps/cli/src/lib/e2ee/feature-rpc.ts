@@ -77,10 +77,12 @@ export function makeEncryptedFeatureAuthorization(options: {
     ) {
       if (!resolveHistoryTarget)
         return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
+      // An unknown, deleted or foreign Session is a denial, never an unanswered request.
       const target = yield* Effect.tryPromise({
         try: () => resolveHistoryTarget(sessionId),
         catch: (cause) => cause,
-      });
+      }).pipe(Effect.orElseSucceed(() => undefined));
+      if (!target) return { _tag: 'Denied' as const, reason: 'not-authorized' as const };
       const editing = yield* authorization.authorizeExecution(
         workspaceId,
         requester,
@@ -192,13 +194,11 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     const active = read ? reads : writes;
     if (active.has(envelope.id) || active.size >= 32) return true;
     active.add(envelope.id);
-    const historyRequest =
-      opened.input.request.method === 'session/history-read' ? opened.input.request : undefined;
     const target = e2eeFeatureTarget(opened.input.request);
     const sharedWork = target.kind === 'session' || target.kind === 'project';
     const refused = Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const });
     const authorize: AuthorizeEncryptedExecution =
-      target.kind === 'history'
+      target.kind === 'session-read'
         ? (workspaceId, requesterDevice) =>
             options.authorizeHistoryRead?.(workspaceId, requesterDevice, target.sessionId) ??
             refused
@@ -300,7 +300,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       if (
         authority._tag !== 'Authorized' ||
         ((opened.input.request.method === 'machine/acp-interaction' ||
-          opened.input.request.method === 'session/history-read') &&
+          target.kind === 'session-read') &&
           (!authority.isCurrent ||
             !authoritySignal ||
             authoritySignal.aborted ||
@@ -463,9 +463,10 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       for (const frame of frames) {
         // Metadata can change without a ledger/policy revision (for example an
         // assigned owner transfer). Re-resolve actual target access after stream I/O.
-        const latest = historyRequest
-          ? yield* authorize(options.workspaceId, opened.requesterDevice)
-          : current;
+        const latest =
+          target.kind === 'session-read'
+            ? yield* authorize(options.workspaceId, opened.requesterDevice)
+            : current;
         if (
           latest._tag !== 'Authorized' ||
           (latest.isCurrent && !latest.isCurrent()) ||

@@ -1040,23 +1040,20 @@ async function openWorkspaceOwned(
   const openFeatureChannel = () => {
     const started = (featureChannel ??= run(
       Effect.gen(function* () {
-        const provider = yield* createTokenProvider(true);
-        yield* provider.getToken();
-        const bucketId = provider.getBucketId();
-        if (!bucketId || bucketId === 'lody' || !provider.getGatewayBaseUrl())
-          return yield* Effect.fail(new Error('e2ee_content_configuration'));
-        const client = createLoroStreamsJsonStreamClient({
-          bucketId,
-          getBaseUrl: provider.getGatewayBaseUrl,
-          getToken: () => Effect.runPromise(provider.getToken()),
-        });
-        return yield* makeEncryptedStreamsChannel<FeatureCall, LocalMachineRpcResponse>({
-          workspaceId: options.workspaceId,
-          requesterDevice: opened.signingPublicKey,
-          client,
-          acceptResponse: async (_prepared, call, frame) =>
-            (await run(dispatchNative.acceptFeatureResponse(call.input, frame))) ?? undefined,
-        });
+        const channelScope = yield* Scope.fork(yield* Effect.scope);
+        return yield* Effect.gen(function* () {
+          const client = yield* openRpcStreamsClient();
+          return yield* makeEncryptedStreamsChannel<FeatureCall, LocalMachineRpcResponse>({
+            workspaceId: options.workspaceId,
+            requesterDevice: opened.signingPublicKey,
+            client,
+            acceptResponse: async (_prepared, call, frame) =>
+              (await run(dispatchNative.acceptFeatureResponse(call.input, frame))) ?? undefined,
+          });
+        }).pipe(
+          Scope.provide(channelScope),
+          Effect.onError((cause) => Scope.close(channelScope, Exit.failCause(cause)))
+        );
       })
     ));
     started.catch(() => {
@@ -1179,6 +1176,28 @@ async function openWorkspaceOwned(
         })
       );
       return observed;
+    });
+  const openRpcStreamsClient = (signal?: AbortSignal) =>
+    Effect.gen(function* () {
+      const provider = yield* createTokenProvider(true);
+      yield* provider.getToken();
+      const bucketId = provider.getBucketId();
+      if (!bucketId || bucketId === 'lody' || !provider.getGatewayBaseUrl())
+        return yield* Effect.fail(new Error('e2ee_content_configuration'));
+      return createLoroStreamsJsonStreamClient({
+        bucketId,
+        getBaseUrl: provider.getGatewayBaseUrl,
+        getToken: () => Effect.runPromise(provider.getToken()),
+        ...(signal
+          ? {
+              fetchImpl: (url: string, init?: RequestInit) =>
+                fetch(url, {
+                  ...init,
+                  signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
+                }),
+            }
+          : {}),
+      });
     });
   const tokens: CloudStreamsTokenPort = {
     createTokenProvider: () => createTokenProvider(),
@@ -1857,28 +1876,12 @@ async function openWorkspaceOwned(
           rpcFiber = yield* Effect.forkIn(
             Effect.scoped(
               Effect.gen(function* () {
-                const provider = yield* createTokenProvider(true);
-                yield* provider.getToken();
+                const controller = new AbortController();
+                yield* Effect.addFinalizer(() => Effect.sync(() => controller.abort()));
+                const client = yield* openRpcStreamsClient(controller.signal);
                 // The backend answered again after a failed attempt: refresh the ledger
                 // now, so waiting inputs recheck on its success rather than a timer.
                 if (attempts++ > 0) void refreshInBackground(false);
-                const bucketId = provider.getBucketId();
-                if (!bucketId || bucketId === 'lody' || !provider.getGatewayBaseUrl())
-                  return yield* Effect.fail(new Error('e2ee_content_configuration'));
-                const controller = new AbortController();
-                yield* Effect.addFinalizer(() => Effect.sync(() => controller.abort()));
-                const client = createLoroStreamsJsonStreamClient({
-                  bucketId,
-                  getBaseUrl: provider.getGatewayBaseUrl,
-                  getToken: () => Effect.runPromise(provider.getToken()),
-                  fetchImpl: (url, init) =>
-                    fetch(url, {
-                      ...init,
-                      signal: init?.signal
-                        ? AbortSignal.any([controller.signal, init.signal])
-                        : controller.signal,
-                    }),
-                });
                 const receive = makeEncryptedRpcReceiver({
                   workspaceId: options.workspaceId,
                   genesis: binding.genesisHash,

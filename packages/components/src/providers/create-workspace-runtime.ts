@@ -66,7 +66,6 @@ import {
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsProtocolCapability,
 } from '@lody/shared';
-import { isE2eeRemoteControlMethod } from '@lody/shared/e2ee-rpc';
 import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import type { PlatformSyncMode } from '@lody/platform';
@@ -2101,19 +2100,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         workspaceId,
         machineId,
         encryptedQuery: async (method, params, timeoutMs) =>
-          isE2eeRemoteControlMethod(method) &&
-          !machineSupportsProtocolCapability(
-            { protocolCapabilities: await getMachineProtocolCapabilities(machineId) },
-            MACHINE_PROTOCOL_CAPABILITIES.e2eeRemoteControl
-          )
-            ? {
-                error: {
-                  code: 'e2ee_machine_update_required',
-                  message:
-                    'Update Lody on this machine to control it in an encrypted workspace.',
-                },
-              }
-            : (await ensureEncryptedRpc()).query(machineId, method, params, timeoutMs),
+          (await ensureEncryptedRpc()).query(machineId, method, params, timeoutMs, async () =>
+            machineSupportsProtocolCapability(
+              { protocolCapabilities: await getMachineProtocolCapabilities(machineId) },
+              MACHINE_PROTOCOL_CAPABILITIES.e2eeRemoteControl
+            )
+          ),
       });
       machineRpcClients.set(machineId, next);
       return next;

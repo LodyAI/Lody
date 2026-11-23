@@ -1556,7 +1556,7 @@ describe('encrypted file and preview routing', () => {
     expect(unsigned).toEqual([]);
   });
 
-  it('refuses an encrypted steer before sending when the target cannot read it', async () => {
+  it('refuses an encrypted steer before sending when no encrypted channel exists', async () => {
     const steer = {
       sessionId,
       expectedTurnId: 'assistant-1',
@@ -1590,13 +1590,12 @@ describe('encrypted file and preview routing', () => {
           }) as never,
         ...(feature ? { requestEncryptedFeature: async () => ({ ok: false, error: 'x' }) } : {}),
       });
-    for (const [capabilities, feature] of [
-      [CURRENT_MACHINE_PROTOCOL_CAPABILITIES, true],
-      [{ ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES, e2eeRemoteControl: 1 }, false],
-    ] as const)
-      expect(
-        await facade(capabilities, feature).requestSessionSteer(remoteMachineId, steer)
-      ).toMatchObject({ applied: false, disposition: 'unsupported' });
+    expect(
+      await facade(
+        { ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES, e2eeRemoteControl: 1 },
+        false
+      ).requestSessionSteer(remoteMachineId, steer)
+    ).toMatchObject({ applied: false, disposition: 'unsupported' });
     expect(sent).toEqual([]);
     expect(
       await facade(
@@ -2050,7 +2049,7 @@ describe('encrypted remote files from a browser or mobile device', () => {
       code: 'permission_denied',
       retryable: false,
       message:
-        'Guests have read-only file access: saving, comparing changes, loading folders and change history are unavailable.',
+        "Guests can view a shared session's changes read-only, but cannot save, load folders or open change history.",
     };
     expect(save).toEqual(denied);
     expect(
