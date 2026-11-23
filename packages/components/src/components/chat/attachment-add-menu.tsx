@@ -5,17 +5,8 @@ import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
-import { Kbd } from '@lody/ui/kbd';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
-import {
-  commands,
-  composerScopedKeybindings,
-  formatKeyBinding,
-  getCommandKeybindings,
-  useCommand,
-  useCommands,
-} from '@/lib/commands';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 
@@ -55,9 +46,6 @@ export interface AttachmentAddMenuProps {
   scheduleDisabledReason?: string;
   /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
-  /** Register the `session.openAddMenu` command only while this surface owns
-   *  the composer's shortcuts (hidden retained panes pass `false`). */
-  commandsEnabled?: boolean;
 }
 
 /**
@@ -84,7 +72,6 @@ export function AttachmentAddMenu({
   onScheduleSend,
   scheduleDisabledReason,
   mcp,
-  commandsEnabled = true,
 }: AttachmentAddMenuProps) {
   const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
   const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
@@ -96,33 +83,11 @@ export function AttachmentAddMenu({
   // keyboard returns instead), so choosing the picker skips the composer
   // focus restore every other selection gets.
   const filePickerOpenedRef = useRef(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const triggerLabel = t('sessions.addAttachmentMenu', 'Add attachment');
 
   const mcpServers = mcp?.servers ?? [];
   const hasMcp = mcpServers.length > 0;
-  const hasMenuContent = Boolean(onAddAttachment || hasMcp || onScheduleSend);
-
-  useCommands();
-  const openAddMenuKey = commands.getKeybindingsFor('session.openAddMenu')[0];
-
-  useCommand(
-    {
-      id: 'session.openAddMenu',
-      titleKey: 'commands.session.openAddMenu',
-      title: t('commands.session.openAddMenu', 'Open Composer + Menu'),
-      category: 'Session',
-      keybindings: composerScopedKeybindings(
-        getCommandKeybindings('session.openAddMenu'),
-        () => triggerRef.current
-      ),
-      when: () => hasMenuContent && !disabled,
-      run: () => setOpen(true),
-    },
-    commandsEnabled
-  );
-
-  if (!hasMenuContent) {
+  if (!onAddAttachment && !hasMcp && !onScheduleSend) {
     return null;
   }
 
@@ -179,57 +144,45 @@ export function AttachmentAddMenu({
         if (!nextOpen) setView('root');
       }}
     >
-      <Tooltip.Root>
-        <Tooltip.Trigger
-          delay={500}
-          render={
-            <Menu.Trigger
-              ref={triggerRef}
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  icon
-                  disabled={disabled}
-                  aria-label={triggerLabel}
-                  className={cn(
-                    triggerSize,
-                    isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
-                    // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-                    // `bg-accent`/`bg-muted`) because those equal the background in the
-                    // dark theme and paint nothing.
-                    'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-                  )}
-                >
-                  <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
-                </Button>
-              }
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                icon
-                disabled={disabled}
-                aria-label={triggerLabel}
-                className={cn(
-                  triggerSize,
-                  isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
-                  // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-                  // `bg-accent`/`bg-muted`) because those equal the background in the
-                  // dark theme and paint nothing.
-                  'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-                )}
-              >
-                <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
-              </Button>
-            </Menu.Trigger>
-          }
-        />
-        <Tooltip.Content side="top" className="flex items-center gap-1.5">
-          <span>{triggerLabel}</span>
-          {openAddMenuKey ? <Kbd>{formatKeyBinding(openAddMenuKey)}</Kbd> : null}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Menu.Trigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            icon
+            disabled={disabled}
+            aria-label={triggerLabel}
+            className={cn(
+              triggerSize,
+              isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
+              // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+              // `bg-accent`/`bg-muted`) because those equal the background in the
+              // dark theme and paint nothing.
+              'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+            )}
+          >
+            <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+          </Button>
+        }
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          icon
+          disabled={disabled}
+          aria-label={triggerLabel}
+          className={cn(
+            triggerSize,
+            isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
+            // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+            // `bg-accent`/`bg-muted`) because those equal the background in the
+            // dark theme and paint nothing.
+            'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+          )}
+        >
+          <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+        </Button>
+      </Menu.Trigger>
       <Menu.Content
         align="start"
         side="top"

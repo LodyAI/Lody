@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { useMemo, useState, type ComponentProps, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { Bot, Check, ListChecks, LockKeyhole, Monitor, Plus, ShieldAlert, Zap } from 'lucide-react';
@@ -47,17 +47,8 @@ import {
 } from '@/lib/composer-agent-roles';
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
-import {
-  commands,
-  composerScopedKeybindings,
-  formatKeyBinding,
-  getCommandKeybindings,
-  useCommand,
-  useCommands,
-} from '@/lib/commands';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Kbd } from '@lody/ui/kbd';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { control, space } from '@lody/ui/tokens/scales.stylex';
@@ -176,19 +167,16 @@ function ValueSubTrigger({
   label,
   value,
   icon,
-  shortcut,
   disabled = false,
 }: {
   label: string;
   value: string | null;
   /** Rides beside the value, for a row whose value has a mark of its own. */
   icon?: ReactNode;
-  /** Trailing hint text (e.g. a formatted shortcut), in the row's shortcut slot. */
-  shortcut?: ReactNode;
   disabled?: boolean;
 }) {
   return (
-    <Menu.SubmenuTrigger disabled={disabled} shortcut={shortcut}>
+    <Menu.SubmenuTrigger disabled={disabled}>
       {label}
       <span {...stylex.props(styles.rowValue)}>
         {icon}
@@ -439,9 +427,6 @@ export type DesktopRunConfigMenuProps = {
    * Omitted, it opens below and flips when there is no room.
    */
   menuSide?: 'top';
-  /** Register the `session.openRunConfig` command only while this surface owns
-   *  the composer's shortcuts (hidden retained panes pass `false`). */
-  commandsEnabled?: boolean;
 };
 
 export function DesktopRunConfigMenu({
@@ -466,12 +451,9 @@ export function DesktopRunConfigMenu({
   onRecentRunConfigSelect,
   agentRoles,
   menuSide,
-  commandsEnabled = true,
 }: DesktopRunConfigMenuProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [modelSubmenuOpen, setModelSubmenuOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   if (disabledReason && open) setOpen(false);
   // Each submenu remains anchored to its own trigger, including during filtering.
   const submenuPlacement = {
@@ -710,30 +692,6 @@ export function DesktopRunConfigMenu({
     speedTierSelector != null ||
     planSelector != null ||
     fastSelector != null;
-
-  useCommands();
-  const openRunConfigKey = commands.getKeybindingsFor('session.openRunConfig')[0];
-  const cycleThinkEffortKey = commands.getKeybindingsFor('session.cycleThinkEffort')[0];
-
-  useCommand(
-    {
-      id: 'session.openRunConfig',
-      titleKey: 'commands.session.openRunConfig',
-      title: t('commands.session.openRunConfig', 'Open Run Configuration'),
-      category: 'Session',
-      keybindings: composerScopedKeybindings(
-        getCommandKeybindings('session.openRunConfig'),
-        () => triggerRef.current
-      ),
-      when: () => hasAnyRow && !disabledReason,
-      run: () => {
-        if (modelPickerOptions.length > 0) setModelSubmenuOpen(true);
-        setOpen(true);
-      },
-    },
-    commandsEnabled
-  );
-
   if (!hasAnyRow) return null;
 
   const runConfigButtonAriaLabel = t('chat.runConfig.buttonAriaLabel', 'Run configuration');
@@ -780,13 +738,7 @@ export function DesktopRunConfigMenu({
   );
 
   const menu = (
-    <Menu.Root
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setModelSubmenuOpen(false);
-      }}
-    >
+    <Menu.Root open={open} onOpenChange={setOpen}>
       {disabledReason ? (
         <Tooltip.Root>
           {/* A native disabled button cannot reliably trigger hover/focus events.
@@ -810,28 +762,16 @@ export function DesktopRunConfigMenu({
           <Tooltip.Content side="top">{disabledReason}</Tooltip.Content>
         </Tooltip.Root>
       ) : (
-        <Tooltip.Root>
-          <Tooltip.Trigger
-            delay={500}
-            render={
-              <Menu.Trigger
-                ref={triggerRef}
-                aria-label={runConfigButtonAriaLabel}
-                data-run-config-trigger=""
-                data-agent-config-id={selectedAgentConfig?.id}
-                data-machine-id={selectedAgentConfig?.machineId}
-                className={triggerClassName}
-                render={<button type="button" />}
-              >
-                {triggerFace}
-              </Menu.Trigger>
-            }
-          />
-          <Tooltip.Content side="top" className="flex items-center gap-1.5">
-            <span>{runConfigButtonAriaLabel}</span>
-            {openRunConfigKey ? <Kbd>{formatKeyBinding(openRunConfigKey)}</Kbd> : null}
-          </Tooltip.Content>
-        </Tooltip.Root>
+        <Menu.Trigger
+          aria-label={runConfigButtonAriaLabel}
+          data-run-config-trigger=""
+          data-agent-config-id={selectedAgentConfig?.id}
+          data-machine-id={selectedAgentConfig?.machineId}
+          className={triggerClassName}
+          render={<button type="button" />}
+        >
+          {triggerFace}
+        </Menu.Trigger>
       )}
       <Menu.Content align="start" className="min-w-60" {...menuSideProps(menuSide)}>
         <div {...stylex.props(surface.menuList)}>
@@ -991,7 +931,7 @@ export function DesktopRunConfigMenu({
           })}
 
           {modelPickerOptions.length > 0 ? (
-            <Menu.Submenu open={modelSubmenuOpen} onOpenChange={setModelSubmenuOpen}>
+            <Menu.Submenu>
               <ValueSubTrigger label={modelRowLabel} value={modelLabel} />
               <Menu.Content
                 {...submenuPlacement}
@@ -1050,15 +990,7 @@ export function DesktopRunConfigMenu({
 
           {thinkingSelector ? (
             <Menu.Submenu>
-              <ValueSubTrigger
-                label={reasoningLabel}
-                value={thinkingLabel}
-                shortcut={
-                  cycleThinkEffortKey && thinkingSelector.options.length > 1
-                    ? formatKeyBinding(cycleThinkEffortKey)
-                    : null
-                }
-              />
+              <ValueSubTrigger label={reasoningLabel} value={thinkingLabel} />
               <Menu.Content {...submenuPlacement} className={COMPACT_OPTION_SUBMENU_CLASS}>
                 {thinkingSelector.options.map((opt) => (
                   <OptionItem
@@ -1256,10 +1188,6 @@ export function DesktopPermissionModeButton({
   );
   const { options, value, label, source } = face;
   const controlLabel = permissionModeControlLabel(face, t);
-  const ariaLabel = label ? `${controlLabel}: ${label}` : controlLabel;
-
-  useCommands();
-  const cycleModeKey = commands.getKeybindingsFor('session.cycleMode')[0];
 
   if (options.length === 0) return null;
 
@@ -1276,25 +1204,15 @@ export function DesktopPermissionModeButton({
       {/* Icon only: every mode has an icon (warning modes the amber shield),
           and a label such as "Bypass permissions" took most of the control
           row. The mode's name is the tooltip and the accessible name. */}
-      <Tooltip.Root>
-        <Tooltip.Trigger
-          delay={500}
-          render={
-            <Menu.Trigger
-              disabled={disabled}
-              aria-label={ariaLabel}
-              className={iconOnlyTriggerClassName}
-              render={<button type="button" />}
-            >
-              <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
-            </Menu.Trigger>
-          }
-        />
-        <Tooltip.Content side="top" className="flex items-center gap-1.5">
-          <span>{ariaLabel}</span>
-          {cycleModeKey ? <Kbd>{formatKeyBinding(cycleModeKey)}</Kbd> : null}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <Menu.Trigger
+        disabled={disabled}
+        aria-label={label ? `${controlLabel}: ${label}` : controlLabel}
+        title={label ? `${controlLabel}: ${label}` : controlLabel}
+        className={iconOnlyTriggerClassName}
+        render={<button type="button" />}
+      >
+        <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
+      </Menu.Trigger>
       <Menu.Content align="start" className="w-max min-w-44 max-w-64" {...menuSideProps(menuSide)}>
         <div {...stylex.props(surface.menuList)}>
           {options.map((opt) => (
