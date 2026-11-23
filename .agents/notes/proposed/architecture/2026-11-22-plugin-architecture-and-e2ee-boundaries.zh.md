@@ -56,4 +56,4 @@ Translation: current
 ## 影响与验证状态
 
 - [`scripts/plugin-sdk-contracts.test.mjs`](../../../../scripts/plugin-sdk-contracts.test.mjs) 已在纯浏览器与纯 Node 双 `tsconfig` 下验证 [`sdk/shared.d.ts`](../../../../scripts/fixtures/plugin-sdk/sdk/shared.d.ts)、[`sdk/client.d.ts`](../../../../scripts/fixtures/plugin-sdk/sdk/client.d.ts)、[`sdk/machine.d.ts`](../../../../scripts/fixtures/plugin-sdk/sdk/machine.d.ts)、[`sdk/manifest.d.ts`](../../../../scripts/fixtures/plugin-sdk/sdk/manifest.d.ts)、正反向契约断言（[`contracts.ts`](../../../../scripts/fixtures/plugin-sdk/contracts.ts)、[`machine-contracts.ts`](../../../../scripts/fixtures/plugin-sdk/machine-contracts.ts)）以及六个参考插件（`test-report`、`issue-context`、`worktrees`、`focus-sidebar`、`sound-effects`、`sorbet-workflow`），并覆盖 `ctx.dataDir` 并发故障注入、`sound-effects` 事件清理与 `sorbet-workflow` 原始快照事件编排及 `machine.onStart` 守护进程重启恢复运行时测试。
-- 生产级运行时宿主（`PluginHost`、`ClientPluginHost`、`lody_plugin` 审批卡片、声明式配置表单与 E2EE 运行时门禁）尚待第一阶段按规范实施。
+- 生产级运行时宿主（`PluginHost`、`ClientPluginHost`、`lody_plugin` 审批卡片、声明式配置表单与 E2EE 运行时门禁）尚待按 [插件系统实施设计与分层 PR 落地计划](2026-11-23-plugin-system-implementation-design.zh.md) 的四阶段方案依次落地。
