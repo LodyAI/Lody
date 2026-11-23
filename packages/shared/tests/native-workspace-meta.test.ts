@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { META_ROOM, type RepoClient } from '@loro-dev/loro-repo-client';
+import { META_ROOM, RepoRpcError, type RepoClient } from '@loro-dev/loro-repo-client';
 import {
   connectEngine,
   engineIsOlder,
@@ -78,8 +78,16 @@ const alive = (pid: number) => {
 async function untilGone(pid: number) {
   while (alive(pid)) await new Promise((resolve) => setImmediate(resolve));
 }
+/** The running host: right after a kill, `engine.json` names the dead one until its successor starts. */
+async function liveHostPid(dataDir: string) {
+  for (;;) {
+    const pid = await hostPid(dataDir).catch(() => 0);
+    if (pid && alive(pid)) return pid;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
 async function killHost(dataDir: string, signal: NodeJS.Signals) {
-  const pid = await hostPid(dataDir);
+  const pid = await liveHostPid(dataDir);
   process.kill(pid, signal);
   await untilGone(pid);
 }
@@ -305,6 +313,71 @@ describe('native Workspace Meta', () => {
     expect((await daemon.repo.getDocMeta('session-1'))?.meta).toEqual({ title: 'before' });
     await daemon.repo.upsertDocMeta('session-1', { title: 'again' });
     expect((await daemon.repo.getDocMeta('session-1'))?.meta).toEqual({ title: 'again' });
+  });
+
+  it('keeps metadata writable after a refusal before writing, a handoff, or a reconnect after commit', async () => {
+    const { dataDir, connection } = await setup();
+    const real = connection.client;
+    let inject: 'read' | 'handoff' | 'after-commit' | undefined;
+    const client = new Proxy(real, {
+      get(target, key) {
+        const value: unknown = Reflect.get(target, key, target);
+        if (typeof value !== 'function') return value;
+        const call = (args: unknown[]) =>
+          (value as (...a: unknown[]) => unknown).apply(target, args);
+        if (key === 'flockReadMany')
+          return async (...args: unknown[]) => {
+            if (inject === 'read') {
+              inject = undefined;
+              throw new Error('disconnected');
+            }
+            return call(args);
+          };
+        if (key === 'flockBatchConditional')
+          return async (...args: unknown[]) => {
+            if (inject === 'handoff') {
+              inject = undefined;
+              await killHost(dataDir, 'SIGKILL');
+              throw new RepoRpcError('unsupported', 'ENGINE_HANDING_OFF: draining for a successor');
+            }
+            const result = await call(args);
+            if (inject === 'after-commit') {
+              inject = undefined;
+              await killHost(dataDir, 'SIGKILL');
+            }
+            return result;
+          };
+        return (...args: unknown[]) => call(args);
+      },
+    }) as RepoClient;
+    const daemon = await nativeRepo(client);
+    const title = async () => (await daemon.repo.getDocMeta('d'))?.meta.title;
+
+    inject = 'read';
+    await expect(daemon.repo.upsertDocMeta('d', { title: 'refused' })).rejects.toBeInstanceOf(
+      ExternalMetadataNotCommittedError
+    );
+    await daemon.repo.upsertDocMeta('d', { title: 'one' });
+    expect(await title()).toBe('one');
+
+    inject = 'handoff';
+    await daemon.repo.upsertDocMeta('d', { title: 'two' });
+    expect(await title()).toBe('two');
+
+    inject = 'after-commit';
+    await daemon.repo.upsertDocMeta('d', { title: 'three' });
+    expect(await title()).toBe('three');
+    /** A refusal while the connection is still settling is a retryable non-commit, never a latch. */
+    for (let attempt = 1; ; attempt++) {
+      if (real.connectionState !== 'connected') await real.whenConnected();
+      try {
+        await daemon.repo.upsertDocMeta('d', { title: 'four' });
+        break;
+      } catch (error) {
+        if (!(error instanceof ExternalMetadataNotCommittedError) || attempt === 5) throw error;
+      }
+    }
+    expect(await title()).toBe('four');
   });
 
   it('applies concurrent field writes from two writers without losing either', async () => {
@@ -890,6 +963,35 @@ describe('remote Session writes', () => {
         JSON.stringify(['two (edited)', 'three'])
     );
     expect(daemon.mirror.getState().humanInputReceipts).toEqual({ 'u-1': { userId: 'local:me' } });
+  });
+
+  it('commits back-to-back control writes, each against the head the previous one left', async () => {
+    const { daemon, a, b } = await openRemote('session-control-burst');
+    const item = (task: string) => ({
+      task,
+      userId: 'local:me',
+      timestamp: '2026-01-01T00:00:00Z',
+      acpSessionConfig: { prompt: task, cliType: 'codex', agentType: 'codex' },
+    });
+    const tasks = (state: Control) =>
+      ((state.mq ?? []) as { task: string }[]).map((row) => row.task);
+    await a.control.update((draft) => {
+      draft.mq = [item('zero')];
+    });
+    const first = a.control.update((draft) => {
+      draft.mq = [...((draft.mq ?? []) as unknown[]), item('one')];
+    });
+    const second = a.control.update((draft) => {
+      draft.mq = [...((draft.mq ?? []) as unknown[]), item('two')];
+      draft.humanInputReceipts = { 'u-2': { userId: 'local:me' } };
+    });
+    expect(tasks(a.control.getState())).toEqual(['zero', 'one', 'two']);
+    await Promise.all([first, second]);
+    expect(tasks(a.control.getState())).toEqual(['zero', 'one', 'two']);
+    await until(() => tasks(b.control.getState()).length === 3);
+    expect(tasks(b.control.getState())).toEqual(['zero', 'one', 'two']);
+    await until(() => (daemon.mirror.getState().mq ?? []).length === 3);
+    expect(daemon.mirror.getState().humanInputReceipts).toEqual({ 'u-2': { userId: 'local:me' } });
   });
 
   it('appends, edits and answers turns with the writer planners under concurrent writes', async () => {
