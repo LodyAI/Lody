@@ -244,6 +244,7 @@ describe('recovery vault password & passkey-first workflows', () => {
           // Unlock via recovery file
           const viaFile = yield* openRecoveryVault({
             recoveryFile,
+            locator: 'https://api.lody.test',
             store: harness.store,
             local: makeStores().journal,
           });

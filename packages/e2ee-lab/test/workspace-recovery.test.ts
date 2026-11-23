@@ -206,6 +206,7 @@ it('uses the public facade to set up/test a real R via HTTP, then restores into 
                   Effect.gen(function* () {
                     const vault = yield* openRecoveryVault({
                       recoveryFile: created.recoveryFile,
+                      locator: created.vault.locator,
                       ...storage,
                     });
                     const [reference, ...others] = yield* listVaultWorkspaces(vault);

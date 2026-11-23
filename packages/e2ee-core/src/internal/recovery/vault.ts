@@ -1187,17 +1187,27 @@ export const createRecoveryVaultWithPassword = Effect.fnUntraced(function* (inpu
     (secret) => Effect.sync(() => secret.fill(0))
   );
 });
-/** Unlock an existing recovery vault from its offline recovery file. */
+/**
+ * Unlock an existing recovery vault from its offline recovery file.
+ *
+ * `locator` is the signed-in client's own service locator. The file's
+ * `serviceLocator` must equal it exactly, otherwise this fails with
+ * `locator-mismatch` before any store read. The file's value is never used to
+ * choose a service.
+ */
 export const openRecoveryVault = Effect.fnUntraced(function* (input: {
   recoveryFile: Uint8Array;
+  locator: string;
   store: RecoveryVaultStore;
   local: RecoveryVaultLocalStore;
 }) {
+  if (!input.locator || input.locator.length > 2048) return yield* vaultError('invalid-input');
   const file = yield* attempt(() => parseRecoveryFile(input.recoveryFile));
   return yield* Effect.acquireUseRelease(
     Effect.succeed(file),
     (owned) =>
       Effect.gen(function* () {
+        if (owned.locator !== input.locator) return yield* vaultError('locator-mismatch');
         const entry = yield* input.store.readEntry(owned.vaultId, owned.vaultId);
         if (!entry || entry.revision !== 0) return yield* vaultError('authentication');
         const master = yield* attempt(() =>
