@@ -842,6 +842,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     return (
       <>
         <SessionInfoHoverCard
+          menuOpen={rowMenuOpen}
           kind="local"
           author={author ?? undefined}
           title={title}

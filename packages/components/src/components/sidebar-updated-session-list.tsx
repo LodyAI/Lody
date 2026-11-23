@@ -1821,6 +1821,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 
   return (
     <SessionInfoHoverCard
+      menuOpen={rowMenuOpen}
       kind={item.kind}
       author={item.owner ?? undefined}
       title={item.title}

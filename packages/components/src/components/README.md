@@ -33,6 +33,9 @@ The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
 
+Opening a desktop session row's menu immediately dismisses its hover card.
+The card stays hidden while the menu or a submenu is open.
+
 Header controls (`sidebar-history-controls.tsx`) use the local `CuidaSidebarExpandOutline`
 SVG for the sidebar toggle and Lucide `ChevronLeft` / `ChevronRight` for history
 navigation, in 16px boxes. Every page header that offers to show a hidden sidebar

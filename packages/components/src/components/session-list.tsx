@@ -902,6 +902,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
     (onOpenPullRequest && prUrl)
   );
   const hasMenuActions = !isMobile && (hasStandardMenuActions || canToggleOpenedSessions);
+  const [rowMenuOpen, setRowMenuOpen] = useState(false);
   const row = (
     <div
       key={session.sessionId}
@@ -1234,7 +1235,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
   // Desktop repo rows get a hover info card wrapping the whole row/menu.
   const showInfoCard = !isMobile;
   const menuRow = hasMenuActions ? (
-    <ContextMenu.Root key={session.sessionId}>
+    <ContextMenu.Root key={session.sessionId} onOpenChange={setRowMenuOpen}>
       <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
       <ContextMenu.Content className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
@@ -1397,6 +1398,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
   const desktopRow = showInfoCard ? (
     <SessionInfoHoverCard
       key={session.sessionId}
+      menuOpen={hasMenuActions && rowMenuOpen}
       kind={isChatSession ? 'chat' : 'github'}
       author={session.owner ?? undefined}
       title={session.title}
