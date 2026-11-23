@@ -53,13 +53,15 @@ export interface Surface {
   readonly diagnostics: GenuiDiagnostic[];
 }
 
+/**
+ * A host may pass a long-lived `state` store: re-declared slots keep committed
+ * values across program revisions, which is the Revision contract.
+ */
 export function createSurface(
   id: string,
   program: SurfaceProgram,
   options: { maxSteps?: number; state?: SurfaceState } = {}
 ): Surface {
-  // A host may pass a long-lived store: re-declared slots keep committed
-  // values across program revisions, which is the Revision contract.
   const state = options.state ?? new SurfaceState(id);
   const diagnostics = [...program.diagnostics];
   const scope: Record<string, unknown> = {};

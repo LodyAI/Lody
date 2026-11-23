@@ -566,7 +566,6 @@ function runArrayMethod(
   const args = (field<AstNode[]>(node, 'arguments') ?? []).map((arg) => evalNode(arg, env, budget));
   const callback = args[0];
   if (!isInterpretedFunction(callback) && name !== 'sort') {
-    // A native callback (rare but legal) still works through the built-in.
     const builtin = (arr as never as Record<string, (...a: unknown[]) => unknown>)[name];
     return builtin.apply(arr, args);
   }

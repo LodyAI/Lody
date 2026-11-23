@@ -76,7 +76,7 @@ function convertNode(node: AstNode): UiNode | undefined {
       return convertFragment(node);
     case 'JSXExpressionContainer': {
       const expr = node.expression as AstNode;
-      if (expr.type === 'JSXEmptyExpression') return undefined; // {/* comment */}
+      if (expr.type === 'JSXEmptyExpression') return undefined;
       return { kind: 'text', parts: [{ kind: 'expr', node: expr }] };
     }
     case 'JSXSpreadChild': {
@@ -135,7 +135,6 @@ function convertElement(node: AstNode): UiElement {
         props.push({ name, value: { kind: 'expr', node: expr } });
       }
     } else {
-      // JSXElement/JSXFragment attribute values are unsupported for now.
       throw new GenuiError('jsx', `unsupported attribute value on '${name}'`, value.start);
     }
   }

@@ -33,7 +33,6 @@ describe('evaluate', () => {
     });
     let captured = -1;
     void handler;
-    // Call the arrow through a member-less call expression instead.
     run('handler(21)', { handler, setValue: (v: number) => (captured = v) });
     expect(captured).toBe(42);
   });
