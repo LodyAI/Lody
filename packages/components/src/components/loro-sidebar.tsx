@@ -730,7 +730,7 @@ function NavButton({
           // Same size as the session titles below: a smaller label reads as
           // undersized next to its 16px icon.
           SIDEBAR_ROW_TEXT_CLASS,
-          'group flex w-full select-none items-center text-left outline-hidden transition',
+          'group flex w-full select-none items-center text-left outline-hidden transition-colors',
           isMobile ? 'gap-2' : 'gap-1.5',
           // Desktop rows share a +15px icon and +37px text column with the
           // project, repository, and session rows below them. Same brightness as
@@ -782,7 +782,7 @@ function NavButton({
 }
 
 /**
- * A navigation row's shortcut pill, at the row's end: it fades in on hover or
+ * A navigation row's shortcut pill, at the row's end: it appears on hover or
  * keyboard focus, and shows with the session rows' ⌘1–9 pills while the
  * modifier is held. A leaf, so holding the modifier re-renders only these.
  */
@@ -792,7 +792,7 @@ function NavShortcut({ binding, selected }: { binding: string; selected: boolean
     <span
       data-nav-shortcut=""
       className={cn(
-        'ml-auto flex shrink-0 items-center pl-2 transition-opacity duration-150 motion-reduce:transition-none',
+        'ml-auto flex shrink-0 items-center pl-2',
         held ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'
       )}
     >
