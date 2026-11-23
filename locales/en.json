@@ -1065,6 +1065,8 @@
   "bugReport.descriptionLabel": "What happened?",
   "bugReport.descriptionPlaceholder": "Describe what you did and what went wrong...",
   "bugReport.dialogDescription": "Your report includes this client's version, system, device/browser information and recent errors. Select a machine to also include its recent CLI logs.",
+  "bugReport.dialogDescriptionEncrypted": "This workspace is end-to-end encrypted, so your report includes only your description and the app build. No client diagnostics or machine logs are attached.",
+  "bugReport.dialogDescriptionPending": "This workspace's encryption mode is not confirmed yet, so your report includes only your description and the app build. No client diagnostics or machine logs are attached.",
   "bugReport.machineLabel": "Machine",
   "bugReport.machinePlaceholder": "Select a machine",
   "bugReport.noMachineHint": "Client diagnostics will be uploaded without machine logs.",

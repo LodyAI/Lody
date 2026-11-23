@@ -1065,6 +1065,8 @@
   "bugReport.descriptionLabel": "发生了什么？",
   "bugReport.descriptionPlaceholder": "描述你的操作以及出现的问题…",
   "bugReport.dialogDescription": "报告包含当前客户端的版本、系统、设备或浏览器信息及近期错误。选择机器还会附上该机器的近期 CLI 日志。",
+  "bugReport.dialogDescriptionEncrypted": "此工作区已端到端加密，报告只包含你的描述和应用构建信息，不会附带客户端诊断信息或机器日志。",
+  "bugReport.dialogDescriptionPending": "尚未确认此工作区是否加密，报告只包含你的描述和应用构建信息，不会附带客户端诊断信息或机器日志。",
   "bugReport.machineLabel": "机器",
   "bugReport.machinePlaceholder": "选择机器",
   "bugReport.noMachineHint": "将上传客户端诊断信息，不包含机器日志。",
