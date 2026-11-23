@@ -284,7 +284,6 @@ export async function openMigrationTarget(
       );
       if (!batch?.updates.length) return;
       if (!cursor) {
-        // The initial index and its receipts are one atomic stream creation.
         if (
           unwrap(await client(id, signal).create({ part: await writePart(id, batch.updates) }))
             .created
@@ -400,7 +399,6 @@ export async function openMigrationTarget(
                 'insert'
               )
                 flock.set(row.key, row.value);
-              // Same CAS as the row. Survives lost responses and later user edits/deletes.
               flock.set(receiptKey(manifest, row), hashBytes(canonical(row.value)));
             }
           },

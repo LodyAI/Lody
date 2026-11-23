@@ -73,7 +73,6 @@ const tokens: LoroStreamsTokenProviderLegacy = {
   retryCleanup: async () => {},
 };
 
-// This server stores opaque framed ciphertext only. SDK replicas do all decryption.
 function encryptedServer() {
   const rooms = new Map<string, Uint8Array[]>();
   const uploads = new Map<string, Uint8Array>();
@@ -118,7 +117,6 @@ function encryptedServer() {
     if (!id) return Response.json({ extensions: ['append-cas'] });
     const append = async () => {
       const body = new Uint8Array(await new Response(init?.body).arrayBuffer());
-      // Each update item is an authenticated streams-crdt v2 encrypted envelope.
       const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
       for (let at = 0; at < body.length;) {
         const length = view.getUint32(at, false);
@@ -562,7 +560,6 @@ it('encrypts frozen OSS history, attachments and CAS indexes, fences execution a
       importedBy: 'acct',
     });
     const disabled = new LoroDoc();
-    // Stream routing is shared with ordinary clients.
     const { getLoroStreamIdForDocId } = await import('@lody/shared');
     await readRoom(
       host,
