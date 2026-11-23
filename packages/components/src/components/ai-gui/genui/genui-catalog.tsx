@@ -56,6 +56,24 @@ const pascal = (name: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join('');
 
+// lucide-react 1.x dropped deprecated aliases like `x-circle` (now `circle-x`);
+// models still write the old kebab names, so retry with rotated segments.
+export function resolveIcon(name: string) {
+  const direct = icons[pascal(name) as IconName];
+  if (direct) return direct;
+  const parts = name.split('-');
+  if (parts.length < 2) return undefined;
+  const candidates = [
+    [...parts.slice(1), parts[0]],
+    [parts[parts.length - 1], ...parts.slice(0, -1)],
+  ];
+  for (const candidate of candidates) {
+    const icon = icons[pascal(candidate.join('-')) as IconName];
+    if (icon) return icon;
+  }
+  return undefined;
+}
+
 function GenuiSlider({ value, onChange, min, max, step, disabled }: GenuiProps) {
   return (
     <span {...stylex.props(styles.sliderRow)}>
@@ -139,7 +157,7 @@ export const GENU_CATALOG: Record<string, GenuiRenderer> = {
     </Badge>
   ),
   icon: ({ name, size, color }) => {
-    const Icon = icons[pascal(str(name)) as IconName];
+    const Icon = resolveIcon(str(name));
     const px = num(size, 14);
     const tone = str(color);
     return Icon ? (
