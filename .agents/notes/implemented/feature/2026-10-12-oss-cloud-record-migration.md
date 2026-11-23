@@ -105,6 +105,8 @@ branch can typecheck while the merged native token API does not.
 
 ## Encrypted target ownership
 
+Pull request: [#3222](https://github.com/LodyAI/Lody/pull/3222).
+
 The command also borrows the existing activated machine workspace owner for E2EE
 imports; ordinary targets keep their original token Scope and transport path. The
 owner validates the exact account/machine against its pinned verified ledger and
