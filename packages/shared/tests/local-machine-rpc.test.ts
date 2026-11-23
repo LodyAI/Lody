@@ -4,7 +4,7 @@ import {
   LocalMachineRpcRequestSchema,
   safeParseLocalMachineRpcRequest,
 } from '../src/local-machine-rpc';
-import { isE2eeFeatureMethod } from '../src/e2ee-rpc';
+import { isE2eeFeatureMethod, E2eeFeatureInputSchema, e2eeRpcPolicy } from '../src/e2ee-rpc';
 
 describe('local Machine RPC', () => {
   it('bounds Sorbet credential identifiers and excludes unexpected fields', () => {
@@ -190,3 +190,33 @@ it('accepts typed memory operations and rejects caller-provided commands', () =>
     }).success
   ).toBe(false);
 });
+
+it.each(['ios-simulator', 'android-emulator'] as const)(
+  'admits signed %s controls while keeping agent-control local',
+  (platform) => {
+    const request = {
+      workspaceId: 'workspace',
+      machineId: 'machine',
+      method: `${platform}/control`,
+      params: { sessionId: 'session', requestedByUserId: 'owner', command: { action: 'list' } },
+    };
+    expect(E2eeFeatureInputSchema.parse({ requestId: '1'.repeat(32), request }).request).toEqual(
+      request
+    );
+    expect(e2eeRpcPolicy(request.method)).toEqual({
+      lane: 'write',
+      scope: 'machine',
+      remoteControl: true,
+    });
+    expect(
+      E2eeFeatureInputSchema.safeParse({
+        requestId: '2'.repeat(32),
+        request: {
+          ...request,
+          method: `${platform}/agent-control`,
+          params: { sessionId: 'session', command: { action: 'list' } },
+        },
+      }).success
+    ).toBe(false);
+  }
+);

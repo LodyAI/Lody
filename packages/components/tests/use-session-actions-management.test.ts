@@ -642,6 +642,30 @@ describe('useSessionActions', () => {
     expect(result.sessionMeta.historyBackend).toBe('loro');
   });
 
+  it.each([undefined, 0, 1, 2])(
+    'negotiates encrypted Roost creation with owner capability %s',
+    async (version) => {
+      const store = createStore();
+      store.set(developerModeEnabledAtom, true);
+      store.set(roostHistoryExperimentEnabledAtom, true);
+      const metaRepo = createSessionMetaRepo([]);
+      const payload = createSessionPayload('encrypted-roost' as SessionId);
+      metaRepo.setMeta(getMachineRoomId(payload.machineId), {
+        protocolCapabilities: version === undefined ? {} : { e2eeRoostHistory: version },
+      });
+      const runtime = Object.assign(createRuntime({ repo: metaRepo.repo }), {
+        contentMode: 'e2ee' as const,
+      });
+      const actions = await renderActions(runtime, { store });
+      const creating = actions.createSession(payload);
+      if (version) expect((await creating).sessionMeta.historyBackend).toBe('roost');
+      else {
+        await expect(creating).rejects.toThrow(/Update Lody/);
+        expect(metaRepo.getSession('encrypted-roost' as SessionId)).toBeUndefined();
+      }
+    }
+  );
+
   it('keeps creating ordinary Loro sessions on targets without Roost capability', async () => {
     const store = createStore();
     store.set(developerModeEnabledAtom, true);

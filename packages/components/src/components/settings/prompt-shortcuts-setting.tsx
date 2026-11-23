@@ -1,4 +1,4 @@
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useGithubWorkspaceQuery } from '@/hooks/use-github-workspace';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
@@ -611,7 +611,7 @@ function useShortcutScopeOptions(workspaceIdInput?: string) {
     workspaceId ? { workspaceId } : undefined
   );
   const configs = useAtomValue(getAllAgentConfigAtom);
-  const repositories = useLegacyWorkspaceQuery(
+  const repositories = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   );

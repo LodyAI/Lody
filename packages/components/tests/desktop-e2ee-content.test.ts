@@ -112,6 +112,10 @@ describe('desktop E2EE content epoch safety', () => {
       epoch: 0,
       authToken: () => null,
     });
+    const roles: unknown[] = [];
+    const stopRoles = access.e2ee.memberRole.subscribe(() =>
+      roles.push(access.e2ee.memberRole.get())
+    );
     const seen: string[] = [];
     const unsubscribe = access.e2ee.codeCollabRole.subscribe(() =>
       seen.push(access.e2ee.codeCollabRole.get())
@@ -127,6 +131,8 @@ describe('desktop E2EE content epoch safety', () => {
     await access.close();
     expect(access.e2ee.codeCollabRole.get()).toBe('read');
     expect(seen).toEqual(['write', 'read', 'write', 'read']);
+    expect(roles).toEqual(['member', 'guest', 'admin', null]);
+    stopRoles();
     unsubscribe();
   });
   it('mints a fresh content token for a recreated runtime instead of hydrating storage', async () => {

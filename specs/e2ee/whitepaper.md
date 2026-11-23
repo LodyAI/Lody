@@ -5,6 +5,8 @@ Translation: current
 
 End-to-end encryption, device trust, and organization collaboration. This paper describes a proposed security architecture, not current product guarantees or an independent security audit. Approval is not implementation, deployment or real-device acceptance, and no production E2EE entrypoint is enabled. See the [document scope](#references-and-document-scope) at the end.
 
+The protocol specifications and client E2EE code are open source in [LodyAI/Lody](https://github.com/LodyAI/Lody). They have undergone internal security review and automated verification. They have not yet undergone a paid third-party external cryptographic audit; one is planned for a future milestone. Internal review and automated verification do not replace that audit.
+
 ## Abstract
 
 Lody brings people, devices, and remote machines into a shared workspace. Beyond keeping content private, this creates another security question: who sent an operation, and are they authorized to make a machine act on it?

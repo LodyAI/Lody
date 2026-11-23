@@ -20,6 +20,26 @@ CLI preparation and installation retain their existing custody owners. The comma
 
 Admission becomes visible as `admitted` before any key exists for the machine. The approving desktop appends the record, then its ledger refresh runs the key round that delivers the current epoch key through the mailbox. Any later refresh by an approved desktop that holds the current key resumes that delivery. The machine itself reports `ready` only after it has installed the key, so the command cannot wait for `ready` before it activates. Instead, a missing key (`e2ee_waiting_for_key`) after admission keeps the command polling with backoff up to 15 seconds for 10 minutes. Any other activation error remains terminal. Exiting on the first missing key let an ordinary delivery delay abort pairing. If that desktop then closed, a retry of the same command could not finish until an approved desktop refreshed that workspace again. The command now says so instead of reporting a generic failure.
 
+## Portable approval owner
+
+The portable implementation candidate uses the existing personal-device session,
+with a separate pairing-operation permit and an installation-scoped IndexedDB CAS
+journal. It retains offers and admission originals before network; local signing and
+storage use the session permit, while remote calls remain bounded and interruptible.
+Close/account retirement owns ongoing native work and leaves the journal for retry.
+A fresh holder reuses the command, verifies the original against current membership,
+and confirms its admission in local verified history before the existing key round.
+This keeps portable custody and core authorization in their existing owners instead
+of exporting a generic signer into Web/mobile composition. Guest/revoked/removed
+approvers fail closed. Server terminal/no-reservation receipts fence retirement;
+archives preserve evidence and a new command gets a fresh session.
+
+The shared cloud host injects relay calls, fixed deployment origins and public
+original storage only. Mobile enables it with its build configuration. Private Web
+must pass `remoteMachineEndpoints` to `personalEntry` and forward the ports input;
+this public change cannot deploy that composition. Cryptographic/IndexedDB tests
+and native-host fixture tests do not establish installed-device or service acceptance.
+
 ## Service access and running
 
 The machine generates and protects a random per-workspace credential before preparation; only its hash is relayed. The backend activates it as a machine service credential after verified admission (or explicit confirmation of the same active device). It is never a Better Auth API key. Each narrow request derives its account from that grant and checks workspace/genesis, the bound active device/machine/member, account and workspace deletion fences, and projection/checkpoint agreement. It cannot authenticate ordinary account APIs or manage the workspace.

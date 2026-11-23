@@ -36,6 +36,11 @@ vi.mock('../src/hooks/useOrganization', () => ({
 }));
 
 import { currentWorkspaceIdAtom, setWorkspaceContextAtom } from '../src/atoms/workspace-context';
+import { runtimeAtom } from '../src/atoms/runtime';
+import {
+  createTourStore,
+  DEFAULT_TOUR_IDENTITY,
+} from '../src/components/onboarding/tour/tour-fixtures';
 import { userAtom } from '../src/atoms';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import {
@@ -81,11 +86,19 @@ function usageDay(
 }
 
 function Probe({ dayStartMs }: { dayStartMs: number | null }) {
-  const { workspaceId, workspaceReposLoading } = useSettingsDataCache();
+  const { workspaceId, workspaceReposLoading, canManageGithub, repositories } =
+    useSettingsDataCache();
   const { day, loading } = useSettingsUsageDay(dayStartMs);
   return (
     <output>
-      {JSON.stringify({ workspaceId, day: day ?? null, loading, workspaceReposLoading })}
+      {JSON.stringify({
+        workspaceId,
+        day: day ?? null,
+        loading,
+        workspaceReposLoading,
+        canManageGithub,
+        repositories,
+      })}
     </output>
   );
 }
@@ -159,6 +172,55 @@ describe('settings usage day cache', () => {
     root = createRoot(container);
   });
 
+  it.each(['owner', 'admin', 'member', 'guest'] as const)(
+    'uses verified encrypted %s role for repo reads and management',
+    async (role) => {
+      const tour = createTourStore(DEFAULT_TOUR_IDENTITY);
+      const runtime = tour.get(runtimeAtom)!;
+      store.set(runtimeAtom, {
+        ...runtime,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceSlug: 'workspace-1',
+        accountId: 'test-account',
+        contentMode: 'e2ee',
+        protectedMemberRole: { get: () => role, subscribe: () => () => {} },
+      });
+      store.set(workspaceContentModeAtom, {
+        accountId: 'test-account',
+        workspaceId: 'workspace-1',
+        workspaceSlug: 'workspace-1',
+        descriptor: {
+          workspaceId: 'workspace-1',
+          contentMode: 'e2ee',
+          contentModeVersion: 1,
+          activation: 'active',
+          cryptoOrgId: 'ab'.repeat(32),
+          genesisHash: 'ab'.repeat(32),
+        },
+      });
+      const repository = [{ id: 7, fullName: 'owner/repo', name: 'repo', private: true }];
+      const empty: never[] = [];
+      const numericUsage = usageDay();
+      mocks.useQuery.mockImplementation((query, args) => {
+        if (args === 'skip') return undefined;
+        const name = getFunctionName(query);
+        if (name === 'usage:getWorkspaceUsageDay') return numericUsage;
+        if (name.startsWith('usage:')) return undefined;
+        if (name === 'github:getWorkspaceRepositories') return repository;
+        return empty;
+      });
+      await render(FIRST_DAY);
+      expect(snapshot().day).toEqual(numericUsage);
+      expect(snapshot().canManageGithub).toBe(role === 'owner' || role === 'admin');
+      expect(snapshot().workspaceId).toBe('workspace-1');
+      expect(snapshot().repositories).toEqual(
+        role === 'guest'
+          ? undefined
+          : [{ id: 7, fullName: 'owner/repo', name: 'repo', private: true }]
+      );
+    }
+  );
+
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
@@ -185,7 +247,7 @@ describe('settings usage day cache', () => {
     });
   });
 
-  it('loads encrypted numeric timelines, calendar and day details while keeping GitHub blocked', async () => {
+  it('loads encrypted numeric timelines, calendar and day details before GitHub runtime admission', async () => {
     store.set(workspaceContentModeAtom, {
       ...store.get(workspaceContentModeAtom)!,
       descriptor: {

@@ -1,8 +1,10 @@
 import { promptShortcutDatabaseName, closePromptShortcutDatabase } from './prompt-shortcut-storage';
+import { roostHistoryDatabase } from './roost-history-cache';
 import { createSessionInputStorage } from './session-input-storage';
 import { personalHostFailureCode } from './e2ee-control-failure';
 import { removeEagerSyncHighWaterNamespace } from './eager-sync-high-water-cache';
 import {
+  encryptedLocalInstance,
   encryptedLocalNamespace,
   parseEncryptedLocalScope,
   type E2eeLocalDataScope,
@@ -69,6 +71,7 @@ export async function removeEncryptedWorkspaceLocalData(input: E2eeLocalDataScop
   const results = await Promise.allSettled([
     removeShortcuts(),
     removeInputs(),
+    remove(roostHistoryDatabase(encryptedLocalInstance(input))),
     remove(`lody-loro-repo-db-${namespace}`),
     remove(`lody-loro-stream-cursors-${namespace}`),
     removeEagerSyncHighWaterNamespace(namespace),

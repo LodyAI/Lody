@@ -110,6 +110,8 @@ codec with read authority and no execution journal. See the
 room boundaries and acceptance limits are recorded in the
 [availability decision](../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md).
 
+`ios-simulator/control` and `android-emulator/control` use this channel as owner-membership writes requiring `e2eeRemoteControl`; agent-control remains local-only. The receiver selects the remote viewer transport under live authority, and replies retain the platform schema and Session binding. Media keeps the existing private viewer transport and its security limits.
+
 `session/history-read` also permits requests to another member's machine, including
 from Guests. Preparation, retained-request reuse and response verification keep the
 same target signer. Streams and Iroh receivers share the actual-session authorization

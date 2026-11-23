@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./remote-machine": "./src/remote-machine.ts",
     "./pairing": "./src/pairing.ts",
     "./account-pairing": "./src/account-pairing.ts",
     "./account-pairing/browser": "./src/account-pairing-browser.ts",

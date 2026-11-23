@@ -13,6 +13,8 @@ directories keep their permissions. Windows retains direct file writes.
 
 ## Composition and transports
 
+- Encrypted local RPC allows iOS simulators; `session/dispatch-turn` stays blocked.
+
 - `session-command-environment.ts` `resolveDaemonTarget` is the sole binding and local-authority gate for daemon-hosted commands (`sameReplica`, `localHost`, `authority`, `nativeOwnerAccess`): bound ordinary daemon owners act on same-machine Sessions locally, while other accounts, remote targets, and `revoked`/`unauthorized`/`unknown` daemon states require cloud checks or fail closed.
 
 - Daemon commands borrow its replica; command cleanup failures never fence.

@@ -27,9 +27,9 @@ export function getIosSimulatorPanelAvailability(
     | { os?: string | null; protocolCapabilities?: MachineProtocolCapabilities }
     | null
     | undefined,
-  contentMode?: 'plaintext' | 'e2ee'
+  _contentMode?: 'plaintext' | 'e2ee'
 ): IosSimulatorPanelAvailability {
-  if (contentMode === 'e2ee' || machine?.os !== 'darwin') return 'hidden';
+  if (machine?.os !== 'darwin') return 'hidden';
   return machineSupportsIosSimulatorProtocol(machine) ? 'available' : 'upgrade-required';
 }
 

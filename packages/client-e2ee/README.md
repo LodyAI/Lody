@@ -101,3 +101,33 @@ The facade in [`src/entry.ts`](src/entry.ts) exposes the iroh methods when the
 wrapper supplies the native port. Route selection uses those methods to detect
 iroh support. The [mobile host test](../../apps/mobile-capacitor/tests/e2ee/mobile-host.test.ts)
 exercises the path from the facade to the native plugin boundary.
+
+## Remote CLI machines
+
+Official cloud hosts pass `remoteMachineEndpoints: { deploymentUrl, ingressUrl }`
+to `personalEntry` and forward its `ports` input to `personalCloudHostPorts`.
+Only then does the facade expose the four platform remote-machine pairing methods.
+Mobile supplies its existing build-time deployment/server origins; the private Web
+composition must pass the same origins when adopting this revision. Missing or
+invalid origins never affect ordinary workspace opens; creating a command refuses them.
+
+The portable workflow in `@lody/e2ee-client/remote-machine` uses core possession,
+credential-binding, ledger-command and key-distribution primitives. The authenticated
+network adapter calls `e2eeMachinePairing.begin/inspect/authorizeExisting/cancel`
+and the existing ledger append action. Location is untrusted display metadata.
+A locally retained, verified ledger and active owner/admin/member personal device
+are required; guest or lost access cannot start or approve.
+
+The per-installation `:remote-machine:` IndexedDB journal preserves the exact signed
+command, claimed public material and admission request before dispatch. Atomic CAS
+rejects concurrent stale writers. Retry rechecks retained signatures and current
+membership, resubmits the same admission and reads it back from verified local
+history before delivering the current epoch key. A terminal server cancellation
+archives originals only after verified settlement or its explicit no-reservation
+receipt. Closing/logout preserves the journal; reopening Begin returns the same
+command and Resume finishes an interrupted delivery.
+
+[Pairing ownership and service boundaries](../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md)
+explain why admission and machine-confirmed readiness remain separate. Tests use
+real signatures, ledger replay, IndexedDB transactions and HPKE with synthetic
+network boundaries; iOS 16.4 device and deployed Web acceptance remain separate.
