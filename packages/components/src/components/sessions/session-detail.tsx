@@ -6126,6 +6126,7 @@ const SessionDetail = ({
         key={`${activeSession.id}:${tab.id}`}
         file={tab.file}
         sessionId={tab.sessionId}
+        active={active}
         className={className}
       />
     ) : tab.type === 'file' ? (

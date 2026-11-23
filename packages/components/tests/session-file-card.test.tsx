@@ -375,4 +375,166 @@ describe('attachment preview routing', () => {
     expect(container.textContent).toContain('Could not load preview');
     expect(container.querySelectorAll('button[aria-label="Download"]').length).toBe(1);
   });
+
+  it('opens a video attachment in the desktop right sidebar instead of triggering download', async () => {
+    const video = file({
+      fileId: 'video-1',
+      fileName: 'demo.mp4',
+      mimeType: 'video/mp4',
+      textPreview: false,
+      sizeBytes: 1024,
+    });
+    const opened: Array<[string, string]> = [];
+    await mount(
+      createElement(
+        SessionChatActionContext.Provider,
+        {
+          value: {
+            openFileAttachment: (target: SessionFilePayload, sessionId: string) => {
+              opened.push([target.fileName, sessionId]);
+              return true;
+            },
+          },
+        },
+        createElement(WorkspaceSessionFileGroup, {
+          files: [video],
+          sessionId: 'session' as never,
+        })
+      )
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="demo.mp4"]')?.click()
+    );
+    expect(opened).toEqual([['demo.mp4', 'session']]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('plays, pauses, seeks, and cleans up a video attachment in the side-panel tab', async () => {
+    const videoFile = file({
+      fileId: 'video-2',
+      fileName: 'walkthrough.webm',
+      mimeType: 'video/webm',
+      textPreview: false,
+      sizeBytes: 64,
+    });
+    const blobs = new Map<string, Blob>();
+    let seq = 0;
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      const url = `blob:attachment-video-${++seq}`;
+      blobs.set(url, blob as Blob);
+      return url;
+    });
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      blobs.delete(url);
+    });
+    const playSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'play')
+      .mockImplementation(function (this: HTMLMediaElement) {
+        Object.defineProperty(this, 'paused', { configurable: true, value: false });
+        this.dispatchEvent(new Event('play'));
+        return Promise.resolve();
+      });
+    const pauseSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'pause')
+      .mockImplementation(function (this: HTMLMediaElement) {
+        Object.defineProperty(this, 'paused', { configurable: true, value: true });
+        this.dispatchEvent(new Event('pause'));
+      });
+    vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
+
+    const fetchCalls: Array<{ url: string; auth: string | null }> = [];
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const headers = new Headers(init?.headers);
+      fetchCalls.push({ url: String(input), auth: headers.get('Authorization') });
+      return new Response(Uint8Array.of(0x1a, 0x45, 0xdf, 0xa3), {
+        status: 200,
+        headers: { 'Content-Type': 'video/webm', 'Content-Length': '4' },
+      });
+    });
+
+    await mount(
+      createElement(SessionFileAttachmentPane, {
+        file: videoFile,
+        sessionId: 'session' as never,
+        active: true,
+      })
+    );
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0]?.auth).toBe('Bearer token');
+    expect(fetchCalls[0]?.url).not.toContain('token');
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+
+    const videoEl = container.querySelector('video')!;
+    expect(videoEl).not.toBeNull();
+    expect(videoEl.controls).toBe(false);
+    expect(container.querySelector('button[aria-label="Download"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Copy"]')).toBeNull();
+
+    Object.defineProperty(videoEl, 'duration', { configurable: true, value: 20 });
+    await act(async () => {
+      videoEl.dispatchEvent(new Event('loadedmetadata'));
+    });
+
+    const playButton = container.querySelector<HTMLButtonElement>('button[aria-label="Play"]')!;
+    expect(playButton).not.toBeNull();
+    await act(async () => playButton.click());
+    expect(playSpy).toHaveBeenCalledTimes(1);
+
+    const pauseButton = container.querySelector<HTMLButtonElement>('button[aria-label="Pause"]')!;
+    expect(pauseButton).not.toBeNull();
+
+    const seekInput = container.querySelector<HTMLInputElement>('input[aria-label="Seek"]')!;
+    expect(seekInput.disabled).toBe(false);
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(seekInput, '7.5');
+      seekInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(videoEl.currentTime).toBe(7.5);
+    expect(container.querySelector('[data-testid="video-player-time"]')?.textContent).toBe(
+      '0:07 / 0:20'
+    );
+
+    await act(async () => pauseButton.click());
+    expect(pauseSpy).toHaveBeenCalled();
+
+    const speedTrigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Playback speed: 1×"]'
+    )!;
+    expect(speedTrigger).not.toBeNull();
+    expect(speedTrigger.textContent).toBe('1×');
+    expect(videoEl.playbackRate).toBe(1);
+    await act(async () => speedTrigger.click());
+    const speedItems = Array.from(document.querySelectorAll('[role="menuitemradio"]'));
+    expect(speedItems.map((el) => el.textContent?.trim())).toEqual([
+      '0.5×',
+      '0.75×',
+      '1×',
+      '1.25×',
+      '1.5×',
+      '2×',
+    ]);
+    const twoX = speedItems.find((el) => el.textContent?.trim() === '2×') as HTMLElement;
+    await act(async () => twoX.click());
+    expect(videoEl.playbackRate).toBe(2);
+    expect(
+      container.querySelector<HTMLButtonElement>('button[aria-label="Playback speed: 2×"]')
+        ?.textContent
+    ).toBe('2×');
+
+    Object.defineProperty(videoEl, 'error', { configurable: true, value: { code: 4 } });
+    await act(async () => {
+      videoEl.dispatchEvent(new Event('error'));
+    });
+    expect(container.textContent).toContain('Video unavailable');
+    expect(
+      container.querySelectorAll('button[aria-label="Download"]').length
+    ).toBeGreaterThanOrEqual(1);
+
+    await act(async () => root.unmount());
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(blobs.size).toBe(0);
+  });
 });
