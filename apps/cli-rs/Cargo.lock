@@ -538,6 +538,7 @@ name = "lody-worktree"
 version = "0.1.0"
 dependencies = [
  "lody-ports",
+ "tempfile",
 ]
 
 [[package]]

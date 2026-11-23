@@ -90,7 +90,7 @@ impl SqliteStore {
                  session_id TEXT NOT NULL,
                  turn_id TEXT NOT NULL,
                  record_json TEXT NOT NULL,
-                 UNIQUE(session_id, turn_id)
+                 UNIQUE(workspace_id, session_id, turn_id)
              );",
         )
         .map_err(map_sql_err)?;
@@ -404,11 +404,21 @@ impl HistoryPort for SqliteStore {
 
     fn is_user_turn_durable(
         &self,
-        _workspace_id: &WorkspaceId,
-        _session_id: &SessionId,
-        _turn_id: &TurnId,
+        workspace_id: &WorkspaceId,
+        session_id: &SessionId,
+        turn_id: &TurnId,
     ) -> PortResult<bool> {
-        Ok(true)
+        let conn = self.conn.lock().expect("sqlite lock");
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM lody_session_turns
+                 WHERE workspace_id = ?1 AND session_id = ?2 AND turn_id = ?3",
+                params![&workspace_id.0, &session_id.0, &turn_id.0],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        Ok(exists.is_some())
     }
 
     fn read_session_turns(
@@ -439,29 +449,34 @@ impl HistoryPort for SqliteStore {
         Ok(turns)
     }
 
-    fn read_turns_by_session_id(
+    fn resolve_unique_workspace_for_session(
         &self,
         session_id: &SessionId,
-    ) -> PortResult<Vec<HistoryTurnRecord>> {
+    ) -> PortResult<Option<WorkspaceId>> {
         let conn = self.conn.lock().expect("sqlite lock");
         let mut stmt = conn
             .prepare(
-                "SELECT record_json FROM lody_session_turns
-                 WHERE session_id = ?1
-                 ORDER BY seq ASC",
+                "SELECT DISTINCT workspace_id FROM lody_session_turns WHERE session_id = ?1 LIMIT 2",
             )
             .map_err(map_sql_err)?;
         let rows = stmt
             .query_map(params![&session_id.0], |r| r.get::<_, String>(0))
             .map_err(map_sql_err)?;
-        let mut turns = Vec::new();
-        for row in rows {
-            let raw = row.map_err(map_sql_err)?;
-            let parsed: HistoryTurnRecord = serde_json::from_str(&raw)
-                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
-            turns.push(parsed);
+        let mut workspaces = Vec::new();
+        for item in rows {
+            workspaces.push(item.map_err(map_sql_err)?);
         }
-        Ok(turns)
+        match workspaces.len() {
+            0 => Ok(None),
+            1 => Ok(workspaces.into_iter().next().map(WorkspaceId)),
+            _ => Err(PortError::new(
+                PortErrorKind::Conflict,
+                format!(
+                    "session '{}' exists in multiple workspaces; specify workspace_id",
+                    session_id.0
+                ),
+            )),
+        }
     }
 
     fn upsert_turn_record(
@@ -476,7 +491,7 @@ impl HistoryPort for SqliteStore {
         conn.execute(
             "INSERT INTO lody_session_turns (workspace_id, session_id, turn_id, record_json)
              VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(session_id, turn_id) DO UPDATE SET record_json = excluded.record_json",
+             ON CONFLICT(workspace_id, session_id, turn_id) DO UPDATE SET record_json = excluded.record_json",
             params![&workspace_id.0, &session_id.0, &record.turn_id.0, &json],
         )
         .map_err(map_sql_err)?;

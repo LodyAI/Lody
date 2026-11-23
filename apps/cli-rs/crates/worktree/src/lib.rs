@@ -26,6 +26,32 @@ impl Default for GitWorktreeManager {
     }
 }
 
+fn verify_existing_worktree_belongs_to_repo(worktree_path: &Path, project_root: &Path) -> bool {
+    let Ok(expected_git_dir) = fs::canonicalize(project_root.join(".git")) else {
+        return false;
+    };
+    let Ok(out) = Command::new("git")
+        .args(["rev-parse", "--git-common-dir"])
+        .current_dir(worktree_path)
+        .stdin(Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    let reported = String::from_utf8_lossy(&out.stdout);
+    let reported_trimmed = reported.trim();
+    let resolved = Path::new(reported_trimmed);
+    let candidate = if resolved.is_absolute() {
+        resolved.to_path_buf()
+    } else {
+        worktree_path.join(resolved)
+    };
+    fs::canonicalize(candidate).is_ok_and(|actual| actual == expected_git_dir)
+}
+
 impl WorktreePort for GitWorktreeManager {
     fn supports_git_worktree(&self) -> bool {
         true
@@ -46,12 +72,27 @@ impl WorktreePort for GitWorktreeManager {
         let branch_name = format!("lody/session-{sanitized_sid}");
         let worktree_path = self.worktrees_root.join(&project_id.0).join(&sanitized_sid);
 
+        if worktree_path.exists() {
+            if verify_existing_worktree_belongs_to_repo(&worktree_path, project_root) {
+                return Ok(WorktreeLease {
+                    session_id: session_id.clone(),
+                    project_id: project_id.clone(),
+                    branch_name,
+                    worktree_path,
+                });
+            }
+            return Err(PortError::new(
+                PortErrorKind::Conflict,
+                format!(
+                    "existing worktree directory {:?} does not belong to project {:?}",
+                    worktree_path, project_root
+                ),
+            ));
+        }
+
         if let Some(parent) = worktree_path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
-        }
-        if worktree_path.exists() {
-            let _ = fs::remove_dir_all(&worktree_path);
         }
 
         let wt_str = worktree_path.to_string_lossy();

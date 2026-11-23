@@ -4,7 +4,7 @@ use lody_acp::{ManagedArtifactInstaller, StdioAcpLauncher};
 use lody_app::ApplicationService;
 use lody_engine::RepoEngineClient;
 use lody_entry::{
-    DispatchPlan, execute_offline_oneshot, parse_cli_args, serve_local_daemon,
+    DispatchPlan, execute_offline_oneshot, parse_cli_args, probe_live_daemon, serve_local_daemon,
     start_daemon_detached, stop_running_daemon, try_execute_via_live_daemon,
 };
 use lody_env::HostEnv;
@@ -127,6 +127,10 @@ fn main() -> ExitCode {
             }
         },
         DispatchPlan::RunDaemonForeground => {
+            if probe_live_daemon(&effective_data_dir).is_some() {
+                eprintln!("a live lody daemon already owns {:?}", effective_data_dir);
+                return ExitCode::FAILURE;
+            }
             let tokio_rt = match tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()

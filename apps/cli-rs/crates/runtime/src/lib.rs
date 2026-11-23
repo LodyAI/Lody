@@ -7,19 +7,20 @@ pub mod workspace;
 pub use actor::{ControlCommand, SessionHandle, SessionSpawnOptions, spawn_session_actor};
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, AttachedWorkspaceView, CapabilitySet,
-    CustomCommandSpec, DaemonStatusView, LocalProjectId, PortError, PortErrorKind, PortResult,
-    ProfileId, SessionId, StorageLeaseMode, VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode,
-    enforce_command_policy,
+    CustomCommandSpec, DaemonStatusView, HistoryTurnRecord, LocalProjectId, PortError,
+    PortErrorKind, PortResult, ProfileId, SessionId, StorageLeaseMode, TurnId, UserId,
+    VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode, enforce_command_policy,
 };
-use lody_kernel::{FrozenTurnInvocation, KernelEvent, TurnSourceKind};
+use lody_kernel::{FrozenTurnInvocation, TurnSourceKind};
 use lody_ports::{
-    AcpLauncherPort, ArtifactRegistryPort, BackendPort, DiffStorePort, EnginePort, HistoryPort,
-    InboxStorePort, ProjectStorePort, WorktreePort,
+    AcpLauncherPort, AdmissionVerdict, AdmittedTurnInput, ArtifactRegistryPort, BackendPort,
+    DiffStorePort, EnginePort, HistoryPort, InboxCategory, InboxStorePort, ProjectStorePort,
+    WorktreePort,
 };
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::Semaphore;
-pub use workspace::{FleetWorkspaceTable, WorkspaceMount};
+pub use workspace::{DetachDisposition, FleetWorkspaceTable, WorkspaceMount};
 
 const DEFAULT_SETTLING_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -111,29 +112,49 @@ impl DaemonRuntime {
         workspace_id: &WorkspaceId,
         erase_local_state: bool,
     ) -> PortResult<usize> {
-        let handles = self
+        let disposition = self
             .workspaces
             .write()
             .expect("workspaces lock")
-            .begin_detach(workspace_id)
-            .unwrap_or_default();
+            .begin_detach(workspace_id);
 
-        let drained = handles.len();
-        for handle in handles {
-            handle.shutdown().await;
+        match disposition {
+            DetachDisposition::Absent => {
+                if erase_local_state {
+                    self.deps.inbox.erase_workspace_inbox(workspace_id)?;
+                    self.deps.history.erase_workspace_turns(workspace_id)?;
+                }
+                Ok(0)
+            }
+            DetachDisposition::JoinedInFlight(notify) => {
+                notify.notified().await;
+                Ok(0)
+            }
+            DetachDisposition::Started { sessions, notify } => {
+                let drained = sessions.len();
+                for handle in sessions {
+                    handle.shutdown().await;
+                }
+
+                let erase_res = if erase_local_state {
+                    self.deps
+                        .inbox
+                        .erase_workspace_inbox(workspace_id)
+                        .and_then(|()| self.deps.history.erase_workspace_turns(workspace_id))
+                } else {
+                    Ok(())
+                };
+
+                self.workspaces
+                    .write()
+                    .expect("workspaces lock")
+                    .finish_detach(workspace_id);
+                notify.notify_waiters();
+
+                erase_res?;
+                Ok(drained)
+            }
         }
-
-        self.workspaces
-            .write()
-            .expect("workspaces lock")
-            .finish_detach(workspace_id);
-
-        if erase_local_state {
-            self.deps.inbox.erase_workspace_inbox(workspace_id)?;
-            self.deps.history.erase_workspace_turns(workspace_id)?;
-        }
-
-        Ok(drained)
     }
 
     fn ensure_session_actor(
@@ -185,16 +206,20 @@ impl DaemonRuntime {
         Ok(handle)
     }
 
+    fn verified_requester(caller: &VerifiedPrincipal) -> UserId {
+        caller
+            .effective_user_id()
+            .cloned()
+            .unwrap_or_else(|| UserId("local-host".to_string()))
+    }
+
     fn caller_invocation(
         caller: &VerifiedPrincipal,
         turn_id: &str,
         adapter_id: &str,
         prompt: String,
     ) -> FrozenTurnInvocation {
-        let requester_user_id = caller
-            .effective_user_id()
-            .map(|u| u.0.clone())
-            .unwrap_or_else(|| "local-host".to_string());
+        let requester_user_id = Self::verified_requester(caller).0;
         let signed_intent_verified = matches!(
             caller,
             VerifiedPrincipal::LocalHost { .. } | VerifiedPrincipal::EncryptedMember { .. }
@@ -208,6 +233,68 @@ impl DaemonRuntime {
             mcp_selection_digest: "default".to_string(),
             signed_intent_verified,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn admit_turn_and_wake(
+        &self,
+        caller: &VerifiedPrincipal,
+        workspace_id: WorkspaceId,
+        session_id: SessionId,
+        turn_id: TurnId,
+        depth: u8,
+        local_project_id: Option<LocalProjectId>,
+        use_worktree: bool,
+        adapter_id: String,
+        custom_acp: Option<CustomCommandSpec>,
+        prompt: String,
+    ) -> PortResult<AppResponse> {
+        let requester = Self::verified_requester(caller);
+        let verdict = self.deps.inbox.admit_turn(&AdmittedTurnInput {
+            workspace_id: workspace_id.clone(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            category: InboxCategory::Human,
+            verified_requester: requester.clone(),
+            prompt_text: prompt.clone(),
+        })?;
+
+        if verdict == AdmissionVerdict::DuplicateIgnored {
+            return Ok(AppResponse::SessionAccepted {
+                session_id,
+                turn_id,
+            });
+        }
+
+        self.deps.history.upsert_turn_record(
+            &workspace_id,
+            &session_id,
+            &HistoryTurnRecord {
+                turn_id: turn_id.clone(),
+                author_user_id: Some(requester),
+                user_prompt: prompt,
+                assistant_blocks: Vec::new(),
+                outcome: None,
+            },
+        )?;
+
+        let handle = self.ensure_session_actor(
+            &workspace_id,
+            &session_id,
+            depth,
+            local_project_id,
+            use_worktree,
+            custom_acp.clone(),
+        )?;
+        if let Some(spec) = custom_acp {
+            handle.set_custom_acp(spec).await?;
+        }
+        handle.wake_inbox(adapter_id).await?;
+
+        Ok(AppResponse::SessionAccepted {
+            session_id,
+            turn_id,
+        })
     }
 
     pub async fn execute_async(
@@ -262,22 +349,19 @@ impl DaemonRuntime {
                 custom_acp,
                 prompt,
             } => {
-                let handle = self.ensure_session_actor(
-                    &workspace_id,
-                    &session_id,
+                self.admit_turn_and_wake(
+                    caller,
+                    workspace_id,
+                    session_id,
+                    turn_id,
                     0,
                     local_project_id,
                     use_worktree,
+                    adapter_id,
                     custom_acp,
-                )?;
-                let invocation = Self::caller_invocation(caller, &turn_id.0, &adapter_id, prompt);
-                handle
-                    .send_event(KernelEvent::SubmitInput { invocation })
-                    .await?;
-                Ok(AppResponse::SessionAccepted {
-                    session_id,
-                    turn_id,
-                })
+                    prompt,
+                )
+                .await
             }
             AppCommand::SendChat {
                 workspace_id,
@@ -287,29 +371,23 @@ impl DaemonRuntime {
                 prompt,
             } => {
                 let adapter_id = if custom_acp.is_some() {
-                    "custom"
+                    "custom".to_string()
                 } else {
-                    "default"
+                    "default".to_string()
                 };
-                let handle = self.ensure_session_actor(
-                    &workspace_id,
-                    &session_id,
+                self.admit_turn_and_wake(
+                    caller,
+                    workspace_id,
+                    session_id,
+                    turn_id,
                     0,
                     None,
                     false,
-                    custom_acp.clone(),
-                )?;
-                if let Some(spec) = custom_acp {
-                    handle.set_custom_acp(spec).await?;
-                }
-                let invocation = Self::caller_invocation(caller, &turn_id.0, adapter_id, prompt);
-                handle
-                    .send_event(KernelEvent::SubmitInput { invocation })
-                    .await?;
-                Ok(AppResponse::SessionAccepted {
-                    session_id,
-                    turn_id,
-                })
+                    adapter_id,
+                    custom_acp,
+                    prompt,
+                )
+                .await
             }
             AppCommand::SteerTurn {
                 workspace_id,
@@ -363,24 +441,19 @@ impl DaemonRuntime {
                 prompt,
                 ..
             } => {
-                let handle = self.ensure_session_actor(
-                    &workspace_id,
-                    &child_session_id,
+                self.admit_turn_and_wake(
+                    caller,
+                    workspace_id,
+                    child_session_id,
+                    turn_id,
                     1,
                     None,
                     false,
+                    adapter_id,
                     None,
-                )?;
-                let mut invocation =
-                    Self::caller_invocation(caller, &turn_id.0, &adapter_id, prompt);
-                invocation.source = TurnSourceKind::AgentDelegationChat;
-                handle
-                    .send_event(KernelEvent::SubmitInput { invocation })
-                    .await?;
-                Ok(AppResponse::SessionAccepted {
-                    session_id: child_session_id,
-                    turn_id,
-                })
+                    prompt,
+                )
+                .await
             }
             AppCommand::ArchiveSession {
                 workspace_id,
@@ -456,7 +529,17 @@ impl DaemonRuntime {
                 session_id,
             } => {
                 let turns = if workspace_id.0.is_empty() || workspace_id.0 == "*" {
-                    self.deps.history.read_turns_by_session_id(&session_id)?
+                    match self
+                        .deps
+                        .history
+                        .resolve_unique_workspace_for_session(&session_id)?
+                    {
+                        Some(resolved_ws) => self
+                            .deps
+                            .history
+                            .read_session_turns(&resolved_ws, &session_id)?,
+                        None => Vec::new(),
+                    }
                 } else {
                     self.deps
                         .history

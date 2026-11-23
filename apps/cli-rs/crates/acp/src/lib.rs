@@ -76,6 +76,7 @@ impl AcpLauncherPort for StdioAcpLauncher {
 }
 
 struct SharedProcessState {
+    pid: u32,
     stdin: Mutex<Option<ChildStdin>>,
     child: Mutex<Child>,
     pending_rpc: Mutex<HashMap<u64, mpsc::Sender<Result<Value, String>>>>,
@@ -142,6 +143,16 @@ impl SharedProcessState {
             return;
         }
         let _ = self.stdin.lock().expect("acp stdin lock").take();
+        #[cfg(unix)]
+        if self.pid > 0 {
+            let neg_pgid = format!("-{}", self.pid);
+            let _ = Command::new("kill")
+                .args(["-KILL", &neg_pgid])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
             let _ = child.wait();
@@ -181,16 +192,29 @@ impl StdioAcpSession {
             )
         })?;
 
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| PortError::new(PortErrorKind::Internal, "missing acp stdin"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| PortError::new(PortErrorKind::Internal, "missing acp stdout"))?;
+        let pid = child.id();
+        let stdin = match child.stdin.take() {
+            Some(s) => s,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(PortError::new(PortErrorKind::Internal, "missing acp stdin"));
+            }
+        };
+        let stdout = match child.stdout.take() {
+            Some(s) => s,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(PortError::new(
+                    PortErrorKind::Internal,
+                    "missing acp stdout",
+                ));
+            }
+        };
 
         let shared = Arc::new(SharedProcessState {
+            pid,
             stdin: Mutex::new(Some(stdin)),
             child: Mutex::new(child),
             pending_rpc: Mutex::new(HashMap::new()),
@@ -204,51 +228,59 @@ impl StdioAcpSession {
         let reader_shared = Arc::clone(&shared);
         thread::spawn(move || run_stdout_reader(stdout, reader_shared, sink));
 
-        let _ = shared.call_blocking(
-            "initialize",
-            json!({
-                "protocolVersion": 1,
-                "clientInfo": { "name": "lody", "version": "0.1.0" }
-            }),
-            handshake_timeout,
-        )?;
-
-        let mcp_servers: Vec<Value> = spec
-            .mcp_mounts
-            .iter()
-            .map(|m| {
+        let handshake = (|| -> PortResult<String> {
+            let _ = shared.call_blocking(
+                "initialize",
                 json!({
-                    "name": m.name,
-                    "type": "http",
-                    "url": m.transport_url,
+                    "protocolVersion": 1,
+                    "clientInfo": { "name": "lody", "version": "0.1.0" }
+                }),
+                handshake_timeout,
+            )?;
+
+            let mcp_servers: Vec<Value> = spec
+                .mcp_mounts
+                .iter()
+                .map(|m| {
+                    json!({
+                        "name": m.name,
+                        "type": "http",
+                        "url": m.transport_url,
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        let new_res = shared.call_blocking(
-            "session/new",
-            json!({
-                "cwd": spec.cwd,
-                "mcpServers": mcp_servers,
+            let new_res = shared.call_blocking(
+                "session/new",
+                json!({
+                    "cwd": spec.cwd,
+                    "mcpServers": mcp_servers,
+                }),
+                handshake_timeout,
+            )?;
+
+            new_res
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    PortError::new(
+                        PortErrorKind::Internal,
+                        format!("missing sessionId in session/new response: {new_res}"),
+                    )
+                })
+                .map(ToOwned::to_owned)
+        })();
+
+        match handshake {
+            Ok(acp_session_id) => Ok(Self {
+                acp_session_id,
+                shared,
             }),
-            handshake_timeout,
-        )?;
-
-        let acp_session_id = new_res
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                PortError::new(
-                    PortErrorKind::Internal,
-                    format!("missing sessionId in session/new response: {new_res}"),
-                )
-            })?
-            .to_string();
-
-        Ok(Self {
-            acp_session_id,
-            shared,
-        })
+            Err(err) => {
+                shared.terminate_child();
+                Err(err)
+            }
+        }
     }
 }
 

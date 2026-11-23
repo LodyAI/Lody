@@ -216,7 +216,7 @@ pub fn stop_running_daemon(data_dir: &Path) -> Result<(), String> {
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    Ok(())
+    Err("timed out waiting for running lody daemon to stop".to_string())
 }
 
 pub fn try_execute_via_live_daemon(

@@ -544,6 +544,14 @@ pub async fn serve_local_daemon(
     use std::os::unix::fs::PermissionsExt;
     use tokio::net::UnixListener;
 
+    if probe_live_daemon(data_dir).is_some() {
+        return Err(lody_app::PortError::new(
+            lody_app::PortErrorKind::Conflict,
+            "a live lody daemon already owns this data directory",
+        ));
+    }
+
+    let my_pid = std::process::id();
     let machine_id = ensure_bootstrap_files(data_dir).map_err(|e| {
         lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
     })?;
@@ -564,7 +572,7 @@ pub async fn serve_local_daemon(
 
     let token = generate_ipc_token();
     let meta = DaemonRunMetadata {
-        pid: std::process::id(),
+        pid: my_pid,
         socket_path: probe_path.to_string_lossy().into_owned(),
         control_socket_path: control_path.to_string_lossy().into_owned(),
         version: version.to_string(),
@@ -623,9 +631,11 @@ pub async fn serve_local_daemon(
 
     let _ = tokio::join!(probe_srv, control_srv);
 
-    let _ = fs::remove_file(&run_file);
-    let _ = fs::remove_file(&probe_path);
-    let _ = fs::remove_file(&control_path);
+    if DaemonRunMetadata::read(data_dir).is_some_and(|m| m.pid == my_pid) {
+        let _ = fs::remove_file(&run_file);
+        let _ = fs::remove_file(&probe_path);
+        let _ = fs::remove_file(&control_path);
+    }
     Ok(())
 }
 

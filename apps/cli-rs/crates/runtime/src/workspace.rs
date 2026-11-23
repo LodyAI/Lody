@@ -4,11 +4,22 @@ use lody_ports::{
     PortError, PortErrorKind, PortResult, SessionId, WorkspaceId, WorkspaceSecurityMode,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Notify;
+
+pub enum DetachDisposition {
+    Absent,
+    JoinedInFlight(Arc<Notify>),
+    Started {
+        sessions: Vec<SessionHandle>,
+        notify: Arc<Notify>,
+    },
+}
 
 pub struct WorkspaceMount {
     pub workspace_id: WorkspaceId,
     pub security_mode: WorkspaceSecurityMode,
-    pub draining: bool,
+    pub detach_notify: Option<Arc<Notify>>,
     pub sessions: HashMap<SessionId, SessionHandle>,
 }
 
@@ -17,9 +28,13 @@ impl WorkspaceMount {
         Self {
             workspace_id,
             security_mode,
-            draining: false,
+            detach_notify: None,
             sessions: HashMap::new(),
         }
+    }
+
+    pub fn is_draining(&self) -> bool {
+        self.detach_notify.is_some()
     }
 
     pub fn view(&self) -> AttachedWorkspaceView {
@@ -43,7 +58,7 @@ impl FleetWorkspaceTable {
         mode: WorkspaceSecurityMode,
     ) -> PortResult<AttachedWorkspaceView> {
         if let Some(existing) = self.mounts.get_mut(workspace_id) {
-            if existing.draining {
+            if existing.is_draining() {
                 return Err(PortError::new(
                     PortErrorKind::Unavailable,
                     "workspace is currently detaching",
@@ -63,10 +78,17 @@ impl FleetWorkspaceTable {
         Ok(view)
     }
 
-    pub fn begin_detach(&mut self, workspace_id: &WorkspaceId) -> Option<Vec<SessionHandle>> {
-        let mount = self.mounts.get_mut(workspace_id)?;
-        mount.draining = true;
-        Some(mount.sessions.drain().map(|(_, h)| h).collect())
+    pub fn begin_detach(&mut self, workspace_id: &WorkspaceId) -> DetachDisposition {
+        let Some(mount) = self.mounts.get_mut(workspace_id) else {
+            return DetachDisposition::Absent;
+        };
+        if let Some(existing_notify) = &mount.detach_notify {
+            return DetachDisposition::JoinedInFlight(Arc::clone(existing_notify));
+        }
+        let notify = Arc::new(Notify::new());
+        mount.detach_notify = Some(Arc::clone(&notify));
+        let sessions = mount.sessions.drain().map(|(_, h)| h).collect();
+        DetachDisposition::Started { sessions, notify }
     }
 
     pub fn finish_detach(&mut self, workspace_id: &WorkspaceId) {
@@ -87,7 +109,7 @@ impl FleetWorkspaceTable {
         session_id: &SessionId,
     ) -> Option<SessionHandle> {
         self.mounts.get(workspace_id).and_then(|m| {
-            (!m.draining)
+            (!m.is_draining())
                 .then(|| m.sessions.get(session_id).cloned())
                 .flatten()
         })
@@ -107,7 +129,7 @@ impl FleetWorkspaceTable {
         let mut out: Vec<AttachedWorkspaceView> = self
             .mounts
             .values()
-            .filter(|m| !m.draining)
+            .filter(|m| !m.is_draining())
             .map(WorkspaceMount::view)
             .collect();
         out.sort_by(|a, b| a.workspace_id.cmp(&b.workspace_id));
@@ -126,7 +148,7 @@ impl FleetWorkspaceTable {
             );
         }
         let mount = self.mounts.get_mut(workspace_id).expect("mount inserted");
-        if mount.draining {
+        if mount.is_draining() {
             return Err(PortError::new(
                 PortErrorKind::Unavailable,
                 "workspace is currently detaching",

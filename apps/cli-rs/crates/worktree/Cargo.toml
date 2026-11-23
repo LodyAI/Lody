@@ -8,3 +8,6 @@ license.workspace = true
 
 [dependencies]
 lody-ports.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

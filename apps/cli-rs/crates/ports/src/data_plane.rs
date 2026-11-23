@@ -121,11 +121,11 @@ pub trait HistoryPort: Send + Sync {
         workspace_id: &WorkspaceId,
         session_id: &SessionId,
     ) -> PortResult<Vec<HistoryTurnRecord>>;
-    fn read_turns_by_session_id(
+    fn resolve_unique_workspace_for_session(
         &self,
-        session_id: &SessionId,
-    ) -> PortResult<Vec<HistoryTurnRecord>> {
-        self.read_session_turns(&WorkspaceId("local".to_string()), session_id)
+        _session_id: &SessionId,
+    ) -> PortResult<Option<WorkspaceId>> {
+        Ok(Some(WorkspaceId("local".to_string())))
     }
     fn upsert_turn_record(
         &self,
