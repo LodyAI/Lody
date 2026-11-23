@@ -122,7 +122,10 @@ generated directories exist. Builds without bindings, or without a
   native dependencies.
 - Supply the existing staging client build variables before building. Mobile
   needs `VITE_CONVEX_SITE_URL`, `VITE_CONVEX_DEPLOY_URL`, and `VITE_SERVER_URL`; use
-  matching site and direct push settings from the same environment. An ignored
+  matching site and direct push settings from the same environment. Set `VITE_SITE_URL`
+  to that environment's site as well: recovery files carry its origin, and an unset value
+  means Lody Cloud (`https://lody.ai`), so staging files would not open on staging desktop
+  or Web. An ignored
   `apps/mobile-capacitor/.env.staging.local` file supplies these for staging builds. A new
   checkout has no local `.env` file. A successful unconfigured Vite build can still
   fail at startup because Better Auth falls back to `capacitor://localhost`, which

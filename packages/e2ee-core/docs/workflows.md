@@ -263,7 +263,11 @@ opens the new personal device's workspace with the recovered keys installed.
 
 `RecoveryVaults` (_requires `RecoveryVaultStore`, `RecoveryVaultLocalStore`_)
 creates and unlocks vault-v1 vaults: a recovery file kept offline, or a
-passkey PRF. A passkey needs a registration that reported `enabled: true` and an
+passkey PRF. Every create and open takes the signed-in client's service `locator`;
+a file is written with that value, and opening a file whose `serviceLocator` differs
+fails with `locator-mismatch` before any store read. Core compares the strings
+exactly and never connects to the file's value; hosts supply one canonical value.
+A passkey needs a registration that reported `enabled: true` and an
 authentication with user verification and a 32-byte `results.first`; WebAuthn never reports
 `enabled` at authentication. Every ceremony uses `vaultPrfInput()`, and `user.id` is
 `passkeyUserHandle(vaultId)`, so a new device without the file learns the vault from the
