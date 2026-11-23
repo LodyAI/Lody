@@ -191,7 +191,7 @@ flowchart TB
 合规宿主 **MUST** 在 `ClientPluginRegistry.events.on` 与 `MachinePluginRegistry.events.on` 两端同时提供一等公民的推送式事件总线，使插件无需借助 DOM 监听或轮询 Session 状态即可构建实时响应逻辑：
 
 1. **规范化会话与 Agent 生命周期事件（`MachineHostEventMap` —— 机器侧与客户端共享）：**
-   - `session.created`、`session.status.changed`、`session.turn.started`、`session.turn.completed`（含 `stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` 与 `durationMs`）、`session.tool.started`、`session.tool.completed`（携带归一化 `ObservedToolCall`）以及 `session.waiting_input`（携带轻量 `PendingInteractionSummary`：`{ requestId, kind: "permission" | "elicitation", title? }`）。
+   - `session.created`、`session.status.changed`、`session.turn.started`、`session.turn.completed`（含 `stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` 与 `durationMs`）、`session.tool.started`、`session.tool.completed`（携带归一化 `ObservedToolCall`）以及 `session.waiting_input`（携带 `PendingInteractionSummary`：`{ requestId, turnId?, kind: "permission" | "elicitation", title?, options }`）。
 2. **客户端本地交互事件（`ClientHostEventMap` —— 仅客户端）：**
    - `ui.message.submitted`、`ui.session.switched`、`ui.interaction.resolved` 与 `ui.command.invoked`。
 3. **投递、隔离与回收规则：**
@@ -267,15 +267,15 @@ flowchart TB
 3. **脱离底层句柄、深度只读冻结与 Selector 记忆化：** 物化后的 `RawDocumentSnapshot`（`{ schemaVersion, revision, doc }`）**MUST** 与底层可变 CRDT 句柄分离并执行深度只读冻结（`Object.freeze`），一切写操作仍严格经由内核命令与 `HistoryWriter` 完成（[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)）；`useLodySnapshot(target, selector, isEqual)` 仅在 `selector(snapshot)` 变化时触发组件重渲染。
 4. **安全脱敏与一致授权：** 快照严格复用与 `lodyQueries` 相同的工作区及 E2EE 可见性门禁，并在冻结前剥离钥匙串密钥、认证令牌、E2EE KEK/签名私钥以及外部插件私有 `businessKey`。
 
-### 7.3 会话编排、幂等回执与宿主独占交互结算
+### 7.3 会话编排、幂等回执与受物理手势门控的通用交互结算（`respondInteraction`）
 
 1. **原子化 `(requestId, businessKey)` `sessions.create` 幂等回执：**
    - 按 `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` 持久化。
    - 重放完全相同的归一化请求（即使目标 Session 后来已归档）始终返回原始 `SessionRef`；复用相同 `requestId` 但篡改参数时拒绝 `idempotency_conflict`。
    - 新 `requestId` 若命中尚未归档的同 `businessKey` 活跃会话则拒绝 `business_key_conflict`；Session 归档后释放 `businessKey` 预留，但永久保留原 `requestId` 回执。
-2. **宿主独占权限审批与表单追问结算（Permission & Elicitation Exclusivity）：**
-   - 待处理用户交互（`kind: "permission" | "elicitation"`）仅作为只读状态摘要（`SessionSummary.pendingInteraction`）与生命周期事件（`session.waiting_input`、`ui.interaction.resolved`）向插件广播。
-   - 经 `WorkspaceWriter.respondSessionPermission`（[`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)、[`ask-user-question.ts`](../packages/shared/src/acp/ask-user-question.ts)，含各 Provider 表单差异与 `isSecret` 敏感输入项）提交的交互结算 **MUST** 由 Lody 宿主原生组件独占完成；SDK **MUST NOT** 向插件暴露直接提交权限或追问答案的写接口。
+2. **1:1 映射内核的通用交互结算原语（`lody.sessions.respondInteraction`）：**
+   - 客户端插件（自定义侧边栏、Hover Card、多 Agent 指挥台）可通过 `lody.sessions.respondInteraction(session, { requestId, turnId?, outcome })` 直接结算挂起的 `permission` 或 `elicitation` 交互，**1:1 映射**至内核 `WorkspaceWriter.respondSessionPermission` 与 `PermissionOutcomeSchema`（[`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)、[`message-schemas.ts`](../packages/shared/src/message-schemas.ts)），无需再发明 `answerQuestion` 等特定工具包装。需要完整表单字段结构的插件可直接按需读取 `useLodySnapshot({ kind: "session-transcript", session, turnIds: [turnId] })`。
+   - **仅限客户端 + 瞬态物理手势门禁：** `MachineHostPort` **MUST NOT** 暴露 `respondInteraction`；且 `ClientPluginHost` 在 `navigator.userActivation.isActive === false` 时 **MUST** 以 `forbidden` 拒绝调用，防止后台循环或无人值守脚本静默自动放行权限。
 
 ---
 
@@ -463,7 +463,7 @@ flowchart TB
 
 遵循 [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts)：
 
-- 客户端 `useLody().sessions.create` / `send` 在个人设备上签发 `E2EE_INTENT_KIND.memberInput`（`kind = 1`）。
+- 客户端 `useLody().sessions.create` / `send` / `respondInteraction` 在个人设备上签发 `E2EE_INTENT_KIND.memberInput`（`kind = 1`，其中 `respondInteraction` 额外要求处于有效人类物理手势 `userActivation` 窗口内）。
 - 守护进程 `ToolExecutionContext` 以及由携带已验证 `rootUserTurnId` 的生命周期事件（或本机人类签名工作流激活声明）触发的 `MachineEventContext` 可签发 `derivedFrom` `E2EE_INTENT_KIND.machineInput`（`kind = 2`），严格遵守 **20 跳派生上限**与**单机规则**。
 - 无交互根签名的 `MachineContext`（`query`、`mutation`、`attachmentSource`）调用 `sessions.create` / `send` 一律拒绝 `forbidden`。
 

@@ -17,6 +17,8 @@ import {
   type CreateSessionRequest,
   type FilePreviewEntry,
   type InstalledPluginSummary,
+  type InteractionOption,
+  type InteractionOutcome,
   type LodyQueryDescriptor,
   type MachineHostEventMap,
   type MachineHostEventType,
@@ -40,6 +42,7 @@ import {
   type ReadonlyJsonPrimitive,
   type ReadonlyJsonValue,
   type RepositoryGitState,
+  type RespondInteractionRequest,
   type ScheduleSummary,
   type ScopeTarget,
   type SendSessionMessageReceipt,
@@ -73,6 +76,8 @@ export {
   type CreateSessionRequest,
   type FilePreviewEntry,
   type InstalledPluginSummary,
+  type InteractionOption,
+  type InteractionOutcome,
   type LodyQueryDescriptor,
   type MachineHostEventMap,
   type MachineHostEventType,
@@ -96,6 +101,7 @@ export {
   type ReadonlyJsonPrimitive,
   type ReadonlyJsonValue,
   type RepositoryGitState,
+  type RespondInteractionRequest,
   type ScheduleSummary,
   type SendSessionMessageReceipt,
   type SendSessionMessageRequest,
@@ -460,6 +466,14 @@ export interface LodyClient {
       session: SessionRef,
       request: SendSessionMessageRequest,
     ): Promise<SendSessionMessageReceipt>;
+    /**
+     * Resolves a pending ACP permission or elicitation interaction via `WorkspaceWriter.respondSessionPermission`.
+     * Client-only and gated on active physical user gesture (`userActivation.isActive`).
+     */
+    respondInteraction(
+      session: SessionRef,
+      request: RespondInteractionRequest,
+    ): Promise<void>;
     requestStop(session: SessionRef): Promise<void>;
     requestArchive(session: SessionRef): Promise<void>;
   };

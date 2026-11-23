@@ -191,7 +191,7 @@ Conforming hosts MUST expose `@lody/plugin-sdk`, `@lody/plugin-sdk/client`, `@lo
 Conforming hosts MUST provide a first-class, push-based event bus on both `ClientPluginRegistry.events.on` and `MachinePluginRegistry.events.on` so plugins never resort to DOM mutation observers or Session status polling:
 
 1. **Canonical Session & Agent Lifecycle Events (`MachineHostEventMap` — available on BOTH machine and client):**
-   - `session.created`, `session.status.changed`, `session.turn.started`, `session.turn.completed` (including `stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` and `durationMs`), `session.tool.started`, `session.tool.completed` (`ObservedToolCall`), and `session.waiting_input` (`PendingInteractionSummary`: `{ requestId, kind: "permission" | "elicitation", title? }`).
+   - `session.created`, `session.status.changed`, `session.turn.started`, `session.turn.completed` (including `stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` and `durationMs`), `session.tool.started`, `session.tool.completed` (`ObservedToolCall`), and `session.waiting_input` (`PendingInteractionSummary`: `{ requestId, turnId?, kind: "permission" | "elicitation", title?, options }`).
 2. **Client UI Interaction Events (`ClientHostEventMap` — client-only):**
    - `ui.message.submitted`, `ui.session.switched`, `ui.interaction.resolved`, and `ui.command.invoked`.
 3. **Delivery, Isolation & Teardown Rules:**
@@ -267,15 +267,15 @@ To guarantee custom Workspace / multi-Agent control planes are never bottlenecke
 3. **Detachment, Deep Immutability & Selector Memoization:** Every materialized `RawDocumentSnapshot` (`{ schemaVersion, revision, doc }`) MUST be detached from live CRDT handles and deeply frozen (`Object.freeze` in development/strict mode) while `HistoryWriter` and Kernel commands remain the sole write path ([`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)). `useLodySnapshot(target, selector, isEqual)` re-renders ONLY when `selector(snapshot)` changes under `isEqual` (default `Object.is`).
 4. **Redaction & Authorization:** Snapshots apply the exact same workspace/E2EE visibility gates as `lodyQueries` and strip keychain secrets, auth tokens, E2EE KEKs/signing keys, and other plugins' `businessKey` values prior to freezing.
 
-### 7.3 Session Orchestration, Idempotency & Host-Exclusive Interaction Resolution
+### 7.3 Session Orchestration, Idempotency & Gesture-Gated `respondInteraction`
 
 1. **Atomic `(requestId, businessKey)` `sessions.create` Receipt:**
    - Keyed by `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` in durable storage.
    - Replaying the identical normalized payload returns the original `SessionRef` even after Session archive; replaying `requestId` with a modified payload rejects with `idempotency_conflict`.
    - A new `requestId` targeting an already-active (non-archived) `businessKey` rejects with `business_key_conflict`; archiving the Session releases `businessKey` while retaining the `requestId` receipt.
-2. **Host-Exclusive Permission & Elicitation Settlement:**
-   - Pending user interactions (`kind: "permission" | "elicitation"`) are exposed to plugins purely as read-only state (`SessionSummary.pendingInteraction`) and lifecycle events (`session.waiting_input`, `ui.interaction.resolved`).
-   - Submitting outcomes through `WorkspaceWriter.respondSessionPermission` ([`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts), [`ask-user-question.ts`](../packages/shared/src/acp/ask-user-question.ts) — including provider-specific elicitation schemas and `isSecret` inputs) MUST remain exclusively owned by Lody's native host UI; plugins MUST NOT expose or invoke raw permission/elicitation response mutators.
+2. **1:1 ACP Interaction Settlement (`lody.sessions.respondInteraction`):**
+   - Client UI plugins (custom sidebars, hover cards, multi-Agent dashboards) settle pending `permission` or `elicitation` requests via `lody.sessions.respondInteraction(session, { requestId, turnId?, outcome })`, mapping 1:1 to `WorkspaceWriter.respondSessionPermission` / `PermissionOutcomeSchema` ([`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts), [`message-schemas.ts`](../packages/shared/src/message-schemas.ts)) without inventing tool-specific wrappers like `answerQuestion`. Plugins needing full elicitation form schemas read the turn via `useLodySnapshot({ kind: "session-transcript", session, turnIds: [turnId] })`.
+   - **Client-Only + Physical User Gesture Gate:** `respondInteraction` MUST NOT exist on `MachineHostPort`, and `ClientPluginHost` MUST reject any invocation when `navigator.userActivation.isActive` is `false` (`forbidden`), preventing background loops or unattended agents from auto-approving permissions.
 
 ---
 
@@ -463,7 +463,7 @@ Per [`specs/e2ee/machine-sharing.md`](e2ee/machine-sharing.md):
 
 Per [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts):
 
-- Client `useLody().sessions.create` / `send` signs `E2EE_INTENT_KIND.memberInput` (`kind = 1`) on the personal device.
+- Client `useLody().sessions.create` / `send` / `respondInteraction` signs `E2EE_INTENT_KIND.memberInput` (`kind = 1`) on the personal device (with `respondInteraction` additionally requiring active physical `userActivation`).
 - Daemon `ToolExecutionContext` AND `MachineEventContext` triggered by a lifecycle event carrying a verified `rootUserTurnId` (or a human-signed workflow activation declaration on that same machine) MAY sign `derivedFrom` `E2EE_INTENT_KIND.machineInput` (`kind = 2`), enforcing the **20-derivation cap** and **single-machine rule**.
 - Un-rooted `MachineContext` (`query`, `mutation`, `attachmentSource`) MUST reject `sessions.create` and `sessions.send` with `forbidden`.
 

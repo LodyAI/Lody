@@ -305,7 +305,12 @@ export async function verifyClientTypeSafety(
     delivery: "queue",
   });
   void sendReceipt.disposition;
-  // @ts-expect-error Interactive permission & elicitation responses stay exclusively host-owned.
+  await lody.sessions.respondInteraction(session, {
+    requestId: "req-1",
+    turnId: "turn-1",
+    outcome: { outcome: "selected", optionId: "allow_once" },
+  });
+  // @ts-expect-error Bespoke `answerQuestion` was replaced by 1:1 ACP `respondInteraction`.
   void lody.sessions.answerQuestion;
   await lody.sessions.requestStop(session);
   lody.panels.openSession(session, "issues", { identifier: "LODY-101" });

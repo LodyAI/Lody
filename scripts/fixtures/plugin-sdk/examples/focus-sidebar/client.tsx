@@ -11,13 +11,14 @@ import {
   type SidebarItemProps,
   type SidebarViewProps,
 } from "@lody/plugin-sdk/client";
-import { Alert, Badge, Button, Card } from "@lody/ui";
+import { Alert, Badge, Button, Card, Input } from "@lody/ui";
+import { useState } from "react";
 
 /**
  * Layer 1 (`sidebar.sessionRow.decorate`): Composable row-level enhancement.
- * Surfaces a `? Input` / `Approval` pill and a hover summary for sessions paused on user
- * interaction, jumping directly into Lody's native permission/elicitation sheet on click — and
- * works automatically across both Lody's built-in sidebar and custom `<SessionRow />` views!
+ * Surfaces a `? Input` / `Approval` pill and an interactive hover popover that can directly
+ * settle a pending ACP interaction (`sessions.respondInteraction`) OR send/steer a follow-up
+ * message (`sessions.send`) without switching out of the active Session!
  */
 function WaitingInteractionBadge({ session }: SessionRowSlotProps) {
   if (!session.pendingInteraction) return null;
@@ -36,28 +37,72 @@ function WaitingInteractionBadge({ session }: SessionRowSlotProps) {
   );
 }
 
-function HoverInteractionPreviewCard({ session }: SessionRowSlotProps) {
+function HoverSessionControlCard({ session }: SessionRowSlotProps) {
   const lody = useLody();
-  if (!session.pendingInteraction) return null;
+  const [quickReply, setQuickReply] = useState("");
+  const pending = session.pendingInteraction;
+
   return (
     <Card.Root>
       <Card.Header>
         <Card.Title>{session.title}</Card.Title>
       </Card.Header>
-      <Card.Description>
-        {session.pendingInteraction.title ??
-          (session.pendingInteraction.kind === "elicitation"
-            ? "Agent is waiting for your input."
-            : "Agent is waiting for tool approval.")}
-      </Card.Description>
+      {pending ? (
+        <div>
+          <Card.Description>
+            {pending.title ?? "Waiting for your decision"}
+          </Card.Description>
+          <div>
+            {pending.options.map((opt) => (
+              <Button
+                key={opt.optionId}
+                size="small"
+                variant={
+                  opt.kind?.startsWith("allow") ? "primary" : "secondary"
+                }
+                onClick={() =>
+                  void lody.sessions.respondInteraction(session.session, {
+                    requestId: pending.requestId,
+                    turnId: pending.turnId,
+                    outcome: { outcome: "selected", optionId: opt.optionId },
+                  })
+                }
+              >
+                {opt.name}
+              </Button>
+            ))}
+            <Button
+              size="small"
+              variant="ghost"
+              onClick={() =>
+                void lody.sessions.respondInteraction(session.session, {
+                  requestId: pending.requestId,
+                  turnId: pending.turnId,
+                  outcome: { outcome: "cancelled" },
+                })
+              }
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <Card.Footer>
-        <Button
+        <Input
           size="small"
-          variant="primary"
-          onClick={() => lody.sessions.open(session.session)}
-        >
-          Open Session to Respond
-        </Button>
+          value={quickReply}
+          placeholder="Quick message or steer…"
+          onChange={(e) => setQuickReply(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && quickReply.trim()) {
+              void lody.sessions.send(session.session, {
+                prompt: quickReply.trim(),
+                delivery: session.status === "busy" ? "steer" : "queue",
+              });
+              setQuickReply("");
+            }
+          }}
+        />
       </Card.Footer>
     </Card.Root>
   );
@@ -144,7 +189,7 @@ function SwarmHubScreen({ workspace }: ScreenProps) {
 
 /**
  * Layer 3 (`sidebar.views.add`): Paseo-style pure custom sidebar view over raw `lodyQueries.sessions`
- * (`openedByRootSessionId`, `agentRoleId`). Rendering `<SessionRow />` composes `HoverInteractionPreviewCard`!
+ * (`openedByRootSessionId`, `agentRoleId`). Rendering `<SessionRow />` composes `HoverSessionControlCard`!
  */
 function SwarmTreeSidebarView({ workspace, activeSession }: SidebarViewProps) {
   const lody = useLody();
@@ -215,7 +260,7 @@ export default defineClientPlugin((lody) => {
   lody.sidebar.sessionRow.decorate({
     id: "hover-pending-interaction",
     trailing: WaitingInteractionBadge,
-    hoverCard: HoverInteractionPreviewCard,
+    hoverCard: HoverSessionControlCard,
   });
 
   lody.sidebar.headerItems.add({

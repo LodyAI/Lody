@@ -45,8 +45,8 @@ export const machineContractChecks = defineMachinePlugin((machine) => {
   });
 
   machine.query(sessionMonitorQuery, async (ctx) => {
-    // @ts-expect-error Machine daemon port never exposes client-only `answerQuestion` or permission bypasses.
-    void ctx.lody.sessions.answerQuestion;
+    // @ts-expect-error Machine daemon port never exposes client-only `respondInteraction` (requires physical user gesture).
+    void ctx.lody.sessions.respondInteraction;
     const detail = await ctx.lody.read(ctx.target, lodyQueries.sessionDetail, {
       recentTurnLimit: 3,
     });

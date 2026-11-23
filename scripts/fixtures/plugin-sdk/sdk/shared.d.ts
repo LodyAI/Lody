@@ -268,10 +268,41 @@ export interface SendSessionMessageReceipt {
   readonly disposition: "started" | "queued" | "steered";
 }
 
+export interface InteractionOption {
+  readonly optionId: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly kind?:
+    | "allow_once"
+    | "allow_always"
+    | "deny"
+    | "reject_once"
+    | "reject_always";
+}
+
 export interface PendingInteractionSummary {
   readonly requestId: string;
+  readonly turnId?: string;
   readonly kind: "permission" | "elicitation";
   readonly title?: string;
+  readonly options: readonly InteractionOption[];
+}
+
+export type InteractionOutcome =
+  | {
+      readonly outcome: "cancelled";
+      readonly _meta?: ReadonlyJsonObject | null;
+    }
+  | {
+      readonly outcome: "selected";
+      readonly optionId: string;
+      readonly _meta?: ReadonlyJsonObject | null;
+    };
+
+export interface RespondInteractionRequest {
+  readonly requestId: string;
+  readonly turnId?: string;
+  readonly outcome: InteractionOutcome;
 }
 
 export interface LodyQueryDescriptor<S extends PluginScope, TInput, TOutput> {
