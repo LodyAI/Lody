@@ -108,10 +108,19 @@ it('turns a refused system prompt into a cancellation', { timeout: 20_000 }, asy
 });
 
 it('offers passkeys only where the browser itself reports PRF', async () => {
-  const available = (target: Page) =>
-    target.evaluate(() => (globalThis as Surface).PasskeyFixture.available());
-  expect(await available((await page({ hasPrf: true })).page)).toBe(true);
-  expect(await available((await page({ hasPrf: true, capabilities: 'no-prf' })).page)).toBe(false);
-  expect(await available((await page({ hasPrf: true, capabilities: 'absent' })).page)).toBe(false);
-  expect(await available((await page({ hasPrf: true, capabilities: 'throws' })).page)).toBe(false);
+  const available = async (capabilities?: 'absent' | 'no-prf' | 'throws') => {
+    const { page: target } = await page({
+      hasPrf: true,
+      ...(capabilities ? { capabilities } : {}),
+    });
+    try {
+      return await target.evaluate(() => (globalThis as Surface).PasskeyFixture.available());
+    } finally {
+      await target.context().close();
+    }
+  };
+  expect(await available()).toBe(true);
+  expect(await available('no-prf')).toBe(false);
+  expect(await available('absent')).toBe(false);
+  expect(await available('throws')).toBe(false);
 });

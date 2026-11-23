@@ -8,14 +8,9 @@ import { Input } from '@lody/ui/input';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
 
+import type { RecoveryRestoreResult as RestoreResult } from '@/components/settings/e2ee/recovery-port';
+
 type Method = 'passkey' | 'password' | 'file';
-type RestoreResult = {
-  workspaceId?: string;
-  name: string;
-  outcome: string;
-  /** Admitted, with newer epoch keys still to be installed by a later restore. */
-  partialEpochKey?: boolean;
-};
 type Restored =
   | { outcome: 'cancelled' }
   | {

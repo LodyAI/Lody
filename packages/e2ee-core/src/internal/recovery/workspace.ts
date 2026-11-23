@@ -13,6 +13,7 @@ import {
 } from '../ledger';
 import { prepareDeviceAdmission, prepareLedgerCommand } from '../ledger/admission';
 import { decodeRecord } from '../ledger/records';
+import { historicalContentIdentity } from '../ledger/replay';
 import { signLedgerRecord } from '../ledger/signing';
 import type { DeviceSigner } from '../foundation/signing';
 import { openEpochEnvelope, authenticateEpochEnvelopeSignature } from '../keys/envelope';
@@ -729,7 +730,15 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             Result.getOrThrow(Schema.decodeUnknownResult(RestoreSchema)(parseCanonical(before)))
           );
           if (intent.personal !== hex(personal.publicKey.toBytes())) {
-            if (view.classifyDevice?.(intent.personal) !== 'revoked')
+            const previous = yield* Effect.fromResult(
+              Bytes.signingPublicKey(fromHex(intent.personal))
+            );
+            const admitted = historicalContentIdentity(view, previous);
+            if (
+              view.classifyDevice?.(intent.personal) !== 'revoked' ||
+              Result.isFailure(admitted) ||
+              !admitted.success.memberInstance.equals(membership)
+            )
               return yield* vaultError('conflict');
             intent = yield* signAdmission(view);
             const next = canonical(intent);

@@ -59,5 +59,5 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
 - The lost-access restore page offers deleting or leaving only when the backup does not
   cover this workspace; a `Pending`, `Unconfirmed` or failed row is checked or retried
   instead. A partial key restore of this workspace still opens it, marked partial.
-- Desktop Settings > Account opens `recovery-account-page.tsx` through the router's
-  `recoveryPage`: desktop main's vault needs no encrypted workspace.
+- Desktop Settings > Account opens `RecoveryAccountPage` (`recovery-host.tsx`) through
+  the router's `recoveryPage`: desktop main's vault needs no encrypted workspace.

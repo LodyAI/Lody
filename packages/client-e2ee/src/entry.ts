@@ -1202,7 +1202,9 @@ export function personalEntry(options: PersonalEntryOptions) {
         const opened = await get(workspaceId, offer);
         const commands = personalRuntimeRecovery(opened.runtime);
         if (!commands) throw fail('unsupported');
-        const result = await execute(commands.restore(input));
+        const result = await execute(commands.restore(input)).catch((error: unknown) =>
+          project(opened.entry, opened.accountId, error)
+        );
         check(opened.accountId);
         if (opened.entry.retired) throw fail('closed');
         if (result.outcome === 'Committed' && result.partialEpochKey !== true) {

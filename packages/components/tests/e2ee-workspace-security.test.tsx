@@ -16,7 +16,7 @@ import { E2eeMachineSharingSettings } from '../src/components/settings/e2ee/mach
 import { WorkspaceSettings } from '../src/components/settings/e2ee/workspace-security';
 import { E2eeWorkspaceConsole } from '../src/components/pages/e2ee-workspace-console';
 import { RecoveryVaultSection } from '../src/components/settings/e2ee/recovery-vault-section';
-import { RecoveryAccountPage } from '../src/components/settings/e2ee/recovery-account-page';
+import { RecoveryAccountPage } from '../src/components/settings/e2ee/recovery-host';
 import { StableSessionContext, type StableSessionValue } from '../src/hooks/useStableSession';
 import { E2eeRecoveryHostContext } from '../src/components/settings/e2ee/recovery-host';
 import type { RecoveryPlan, RecoveryPort } from '../src/components/settings/e2ee/recovery-port';
@@ -142,11 +142,16 @@ describe('recovery vault settings', () => {
 
 describe('desktop account recovery page', () => {
   const signedIn = { data: { user: { id: 'account-1' } } } as unknown as StableSessionValue;
-  const renderPage = async (platform: PlatformProvider) => {
+  const renderPage = async (platform: PlatformProvider, readsPlan: boolean) => {
     const calls: string[] = [];
+    let planRead!: () => void;
+    const planAnswered = new Promise<void>((resolve) => {
+      planRead = resolve;
+    });
     vi.stubGlobal('ipc', {
       invoke: async (channel: string) => {
         calls.push(channel);
+        if (channel === 'e2ee.recoveryReplacementPlan') queueMicrotask(planRead);
         return channel === 'e2ee.recoveryReplacementPlan'
           ? { hasVault: false, replaceable: false, replacing: false, covered: [], uncovered: [] }
           : channel === 'e2ee.recoveryPasskeyAvailable'
@@ -169,7 +174,7 @@ describe('desktop account recovery page', () => {
         </PlatformContext.Provider>
       );
     });
-    for (let tick = 0; tick < 10; tick++) await act(async () => {});
+    if (readsPlan) await act(() => planAnswered);
     return {
       calls,
       text: container.textContent ?? '',
@@ -182,7 +187,7 @@ describe('desktop account recovery page', () => {
   };
 
   it('manages recovery from Settings > Account without opening an encrypted workspace', async () => {
-    const page = await renderPage(TEST_CLOUD_PLATFORM);
+    const page = await renderPage(TEST_CLOUD_PLATFORM, true);
     try {
       expect(page.text).toContain('e2ee.recovery.createWithPassword');
       expect(page.calls).toContain('e2ee.recoveryReplacementPlan');
@@ -192,11 +197,10 @@ describe('desktop account recovery page', () => {
   });
 
   it('says recovery is unavailable on a local-only desktop and never asks main', async () => {
-    const page = await renderPage({
-      ...TEST_CLOUD_PLATFORM,
-      kind: 'local',
-      capabilities: LOCAL_PLATFORM_CAPABILITIES,
-    });
+    const page = await renderPage(
+      { ...TEST_CLOUD_PLATFORM, kind: 'local', capabilities: LOCAL_PLATFORM_CAPABILITIES },
+      false
+    );
     try {
       expect(page.text).toContain('e2ee.recovery.unavailable');
       expect(page.calls).toEqual([]);

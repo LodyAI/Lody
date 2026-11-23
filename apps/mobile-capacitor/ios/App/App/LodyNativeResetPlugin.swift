@@ -86,19 +86,27 @@ public final class LodyNativeResetPlugin: CAPPlugin, CAPBridgedPlugin, WKNavigat
                 call.reject("Reset state changed before recovery completed")
                 return
             }
-            let acknowledge = {
+            let acknowledge = { [weak self] (custodyCleanupFailed: Bool) in
+                // The purge settles asynchronously: a reset started meanwhile owns the result.
+                guard let self = self, self.resetCall == nil,
+                    UserDefaults.standard.string(forKey: Self.resultKey) == outcome
+                else {
+                    call.reject("Reset state changed before recovery completed")
+                    return
+                }
                 UserDefaults.standard.removeObject(forKey: Self.resultKey)
                 self.credentials.resetFailureCount()
-                call.resolve()
+                call.resolve(["custodyCleanupFailed": custodyCleanupFailed])
             }
             guard outcome == "fallback" else {
-                acknowledge()
+                acknowledge(false)
                 return
             }
             // The shared web wipe has just run and the app is not imported yet: the
             // wrapped originals are gone, so their KEKs follow. Best effort, like that
-            // wipe; a failure never blocks boot, and the next full reset retries it.
-            self.clearCustody { _ in acknowledge() }
+            // wipe; a failure never blocks boot, is reported in the result, and the next
+            // full reset retries it.
+            self.clearCustody { cleared in acknowledge(!cleared) }
         }
     }
 
@@ -258,7 +266,7 @@ public final class LodyNativeResetPlugin: CAPPlugin, CAPBridgedPlugin, WKNavigat
     /// has returned. KEKs only protect originals stored in WebKit storage, which a full
     /// reset deletes; leaving them would orphan device-bound keys from a signed-out identity.
     private func clearCustody(_ done: @escaping (Bool) -> Void) {
-        LodyKekCallQueue.shared.afterAdmitted(on: .global(qos: .userInitiated)) {
+        LodyKekCallQueue.shared.fenced(on: .global(qos: .userInitiated)) {
             let cleared = LodyKeychainKekStorage.purgeAll()
             DispatchQueue.main.async { done(cleared) }
         }

@@ -3083,6 +3083,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       throw new Error('e2ee_recovery_invalid-input')
     if (method !== 'file' && method !== 'passkey' && method !== 'password')
       throw new Error('e2ee_recovery_invalid-input')
+    recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
     const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
     const dialogOptions = {
       defaultPath: 'lody-recovery.lodyrecovery',

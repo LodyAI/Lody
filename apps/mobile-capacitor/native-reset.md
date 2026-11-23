@@ -59,9 +59,12 @@ Auth scope is pinned to better-auth-capacitor 0.3.6 with `storagePrefix: 'better
   storage, so a full reset removes every item of that one service and then that directory,
   never another service, and never the entire Preferences domain. Live reset does this
   only after WebKit records are verified empty and every admitted `LodyKek` call has
-  returned (`LodyKekCallQueue.afterAdmitted`); a failure rejects the reset into root
-  recovery. Fallback acknowledgement repeats it best effort after the shared web wipe and
-  before the app import; a failure there never blocks boot, and the next reset retries.
+  returned (`LodyKekCallQueue.fenced`); calls arriving meanwhile wait until the purge
+  settles. A failure rejects the reset into root recovery. Fallback acknowledgement
+  repeats it best effort after the shared web wipe and before the app import; a failure
+  there never blocks boot, resolves with `custodyCleanupFailed: true` (bootstrap records
+  `native_reset_custody_cleanup_failed`), and the next reset retries. A purge that
+  settles after another reset began rejects the acknowledgement instead of clearing it.
 - Shared native cookies are cleared best-effort, and `OneSignal.logout()` is
   called after renderer quiescence. The Cordova SDK initializes natively
   at launch with its saved app ID, including when the renderer fails to boot.

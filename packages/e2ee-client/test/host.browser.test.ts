@@ -840,7 +840,10 @@ it.each([
     expected: { ok: true, sealed: true, recoveryVerified: true, refreshedDuringSetup: true },
   },
   { options: { repair: true }, expected: { ok: true, sealed: true, noDuplicateAdmission: true } },
-  { options: { repair: true, revokePersonal: true }, expected: { ok: false } },
+  {
+    options: { repair: true, revokePersonal: true },
+    expected: { ok: true, sealed: true, replaced: true, progress: 'done' },
+  },
   {
     options: { repair: true, revokePersonal: true, replaceRevoked: true },
     expected: { ok: true, sealed: true, replaced: true, progress: 'done' },

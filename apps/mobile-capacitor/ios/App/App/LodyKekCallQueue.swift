@@ -10,13 +10,26 @@ final class LodyKekCallQueue {
     }
     private let metadata = NSLock()
     private var entries: [String: Entry] = [:]
+    // While a purge runs, new calls wait here in arrival order instead of reaching
+    // half-purged custody. Depth lets overlapping purges hold one fence.
+    private var fenceDepth = 0
+    private var held: [(route: String, work: () -> Void)] = []
 
     func enqueue(route: String, _ work: @escaping () -> Void) {
         metadata.lock()
+        if fenceDepth > 0 {
+            held.append((route: route, work: work))
+        } else {
+            admit(route: route, work)
+        }
+        metadata.unlock()
+    }
+
+    /// Caller holds `metadata`. Enqueue under it to preserve same-route order.
+    private func admit(route: String, _ work: @escaping () -> Void) {
         let entry = entries[route] ?? Entry()
         entries[route] = entry
         entry.pending += 1
-        // Enqueue under the short metadata lock to preserve same-route order.
         entry.queue.async {
             defer {
                 self.metadata.lock()
@@ -26,19 +39,30 @@ final class LodyKekCallQueue {
             }
             work() // No native work or callback runs under the metadata lock.
         }
-        metadata.unlock()
     }
 
-    /// Runs `done` on `queue` once every call already admitted, on every route, has returned.
-    /// Calls admitted later are not awaited; the caller must have stopped their source.
-    func afterAdmitted(on queue: DispatchQueue, _ done: @escaping () -> Void) {
+    /// Fences new calls, runs `work` on `queue` once every call already admitted on every
+    /// route has returned, then admits the held calls in arrival order. The fence lifts after
+    /// `work` returns, whatever it did, so held calls see the settled state, never a partial one.
+    func fenced(on queue: DispatchQueue, _ work: @escaping () -> Void) {
         let group = DispatchGroup()
         metadata.lock()
+        fenceDepth += 1
         for entry in entries.values {
             group.enter()
             entry.queue.async { group.leave() }
         }
         metadata.unlock()
-        group.notify(queue: queue, execute: done)
+        group.notify(queue: queue) {
+            work()
+            self.metadata.lock()
+            self.fenceDepth -= 1
+            if self.fenceDepth == 0 {
+                let released = self.held
+                self.held = []
+                for call in released { self.admit(route: call.route, call.work) }
+            }
+            self.metadata.unlock()
+        }
     }
 }

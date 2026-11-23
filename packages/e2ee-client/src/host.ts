@@ -736,7 +736,12 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
         const user = yield* Effect.fromResult(accountUserId(platform.scope.accountId));
         const member = initial.inspectState().members.get(pin.membershipId);
         if (!member || !member.userId.equals(user)) return yield* fail('scope-mismatch');
-        const p = input.offer ? yield* prepare(offer) : yield* accountIdentity(pin, history);
+        const account = offer.endorser === ACCOUNT_PAIRING_ENDORSER;
+        const p = account ? yield* accountIdentity(pin, history) : yield* prepare(offer);
+        const lost = account
+          ? null
+          : verifiedAccessLoss(initial, toHex(p.binding.device.toBytes()));
+        if (lost) return yield* Effect.fail(lost);
         const progress = recoveryRestoreProgress(input.local, platform.scope.workspaceId);
         yield* progress.begin();
         const keys = memoryRecoveryEpochKeys();

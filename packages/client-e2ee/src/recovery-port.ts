@@ -63,20 +63,6 @@ export function chooseRecoveryFile(): Promise<Uint8Array | null> {
   });
 }
 
-/** A restore row as the console shows it, keyed by workspace ID because names repeat. */
-export type RecoveryRestoreRow = {
-  readonly workspaceId: string;
-  readonly name: string;
-  readonly outcome: string;
-  readonly partialEpochKey?: boolean;
-};
-const restoreRow = (row: RecoveryWorkspaceResult): RecoveryRestoreRow => ({
-  workspaceId: row.workspaceId,
-  name: row.name,
-  outcome: row.outcome,
-  ...(row.partialEpochKey === true ? { partialEpochKey: true } : {}),
-});
-
 /** Only a committed, verified setup is done; every other engine outcome stays unfinished. */
 const setupResult = (row: RecoveryWorkspaceResult | undefined) =>
   row?.outcome === 'recoverable'
@@ -261,7 +247,7 @@ export function recoveryWorkspacesPort(host: RecoveryWorkspacesPortHost) {
     restore: (
       method: Method,
       options?: UnlockOptions,
-      onResult?: (result: RecoveryRestoreRow) => void,
+      onResult?: (result: RecoveryWorkspaceResult) => void,
       observationSignal?: AbortSignal
     ) =>
       unlocked(method, options, async (engine, unlock) => {
@@ -272,12 +258,11 @@ export function recoveryWorkspacesPort(host: RecoveryWorkspacesPortHost) {
         const observe = (rows: readonly RecoveryWorkspaceResult[]) => {
           if (!observing || observationSignal?.aborted || !onResult) return;
           for (const row of rows) {
-            const shown = restoreRow(row);
-            const key = `${shown.outcome}:${shown.partialEpochKey === true}`;
+            const key = `${row.outcome}:${row.partialEpochKey === true}`;
             if (seen.get(row.workspaceId) === key) continue;
             seen.set(row.workspaceId, key);
             try {
-              onResult(shown);
+              onResult(row);
             } catch {
               /* A view cannot cancel a producer or replace its result. */
             }
@@ -289,7 +274,7 @@ export function recoveryWorkspacesPort(host: RecoveryWorkspacesPortHost) {
             : [];
           return {
             outcome: 'restored' as const,
-            results: rows.map(restoreRow),
+            results: rows,
           };
         } finally {
           observing = false;

@@ -185,10 +185,11 @@ export const recoveryRestoreIncomplete = (
   workspaceId: string
 ) => Effect.map(local.read(restoreProgressKey(workspaceId)), isIncomplete);
 
-/** Durable progress for a restore that is not driven by `restoreVaultWorkspaces` (the
- * personal host's single-workspace restore). The same markers and keys keep a partial
- * or interrupted restore retryable from the same plan. `begin` returns the marker to
- * replace on completion; a finished marker from an earlier vault is reopened. */
+/** Durable progress of one workspace's restore, shared by `restoreVaultWorkspaces` and
+ * the personal host's single-workspace restore. `begin` marks the restore open (a
+ * finished marker from an earlier vault is reopened, so it cannot hide this attempt's
+ * failure); `finish` records `partial` or `done` and fails as `conflict` when another
+ * writer moved the marker, so an unrecorded restore is never reported as finished. */
 export const recoveryRestoreProgress = (
   local: WorkspaceRecoveryInput['local'],
   workspaceId: string
@@ -204,13 +205,15 @@ export const recoveryRestoreProgress = (
           return yield* Effect.fail(new RecoveryVaultError({ code: 'conflict' }));
       }),
     finish: (partialEpochKey: boolean | undefined) =>
-      Effect.asVoid(
-        local.compareAndSwap(
+      Effect.gen(function* () {
+        const finished = yield* local.compareAndSwap(
           key,
           RESTORE_OPEN,
           partialEpochKey === true ? RESTORE_PARTIAL : RESTORE_DONE
-        )
-      ),
+        );
+        if (finished !== 'Committed')
+          return yield* Effect.fail(new RecoveryVaultError({ code: 'conflict' }));
+      }),
   };
 };
 
@@ -247,13 +250,33 @@ export interface RecoveryRestoreTarget {
   >;
 }
 
-/** A verified, adopted workspace result; partial keys remain separately marked. */
-export type VaultWorkspaceRestoreResult = {
+/** One workspace's restore outcome. Only a committed restore can be partial: admitted,
+ * with newer epoch keys still to be installed by a later restore. `Unconfirmed` is a
+ * wait that ran out while the restore continues; `not-backed-up` means the vault has no
+ * package for the workspace. */
+export type RestoreOutcome =
+  | { readonly outcome: 'Committed'; readonly partialEpochKey?: true }
+  | {
+      readonly outcome: 'Pending' | 'Conflict' | 'Unconfirmed' | 'Failed' | 'not-backed-up';
+      readonly partialEpochKey?: never;
+    };
+
+/** A workspace's restore result, keyed by ID because names repeat. */
+export type VaultWorkspaceRestoreResult = RestoreOutcome & {
   readonly workspaceId: string;
   readonly name: string;
-  readonly outcome: string;
-  readonly partialEpochKey?: boolean;
 };
+
+/** The outcome a restore workflow result reports, keeping its partial marker. */
+export const restoreOutcome = (result: {
+  readonly outcome: 'Committed' | 'Conflict' | 'Pending';
+  readonly partialEpochKey?: boolean;
+}): RestoreOutcome =>
+  result.outcome === 'Committed'
+    ? result.partialEpochKey === true
+      ? { outcome: 'Committed', partialEpochKey: true }
+      : { outcome: 'Committed' }
+    : { outcome: result.outcome };
 
 /**
  * Restore every workspace a vault covers and this account can name. The genesis comes
@@ -295,8 +318,7 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
     (lane) =>
       Effect.gen(function* () {
         for (const { reference, target, position } of lane) {
-          const key = restoreProgressKey(target.id);
-          const progress = yield* input.local.read(key);
+          const progress = yield* input.local.read(restoreProgressKey(target.id));
           const identity = target.hasIdentity();
           if (identity === 'unknown' && !isIncomplete(progress)) {
             yield* report(position, {
@@ -310,12 +332,8 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
           if (target.prepareHistory) yield* target.prepareHistory();
           const attempt = Effect.scoped(
             Effect.gen(function* () {
-              // A finished marker from an earlier vault must not hide this attempt's failure.
-              if (!isOpen(progress)) {
-                const opened = yield* input.local.compareAndSwap(key, progress, RESTORE_OPEN);
-                if (opened !== 'Committed')
-                  return yield* Effect.fail(new RecoveryVaultError({ code: 'conflict' }));
-              }
+              const marker = recoveryRestoreProgress(input.local, target.id);
+              yield* marker.begin();
               let connected:
                 | Effect.Success<ReturnType<RecoveryRestoreTarget['connect']>>
                 | undefined;
@@ -337,21 +355,16 @@ export const restoreVaultWorkspaces = Effect.fnUntraced(function* (input: {
               });
               if (result.outcome === 'Committed') {
                 yield* connected!.adopt(connected!.recovered());
-                yield* input.local.compareAndSwap(
-                  key,
-                  RESTORE_OPEN,
-                  result.partialEpochKey === true ? RESTORE_PARTIAL : RESTORE_DONE
-                );
+                yield* marker.finish(result.partialEpochKey);
               }
-              return { outcome: result.outcome as string, partialEpochKey: result.partialEpochKey };
+              return restoreOutcome(result);
             })
           );
           const exit = yield* Effect.exit(attempt);
           yield* report(position, {
             workspaceId: target.id,
             name: target.name,
-            outcome: Exit.isSuccess(exit) ? exit.value.outcome : 'Failed',
-            ...(Exit.isSuccess(exit) ? { partialEpochKey: exit.value.partialEpochKey } : {}),
+            ...(Exit.isSuccess(exit) ? exit.value : { outcome: 'Failed' as const }),
           });
         }
       }),

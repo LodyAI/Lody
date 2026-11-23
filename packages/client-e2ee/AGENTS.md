@@ -81,7 +81,8 @@
   ready only after a verified committed restore that installed the current epoch key;
   it never creates a second host. A partial restore leaves the pin unready and its
   journal partial, so the plan keeps offering the restore. A restore never routes to a
-  cancelled pin's offer: the account offer lets the host replace the revoked identity.
+  cancelled pin's offer. Exact loss of a retained identity during restore cancels its
+  pin, and the engine retries once with the account offer so the host replaces it.
 - `makeClientRecovery` and `makeRecoveryWorkspaces` bound remote Convex RPCs at 90 s
   (leaving file/passkey ceremonies uncapped) so a dead WebSocket releases `commands`
   and `active` instead of wedging recovery. `makeRecoveryWorkspaces` unlocks the vault

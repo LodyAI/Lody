@@ -14,5 +14,7 @@ Parent package and repository instructions apply. Edit `AGENTS.md` only.
 Restores report partial epoch-key recovery separately from admission and content
 readiness, and retain the retryable journal until the current epoch key is installed.
 The host's single-workspace `restoreRecovery` writes the same progress markers through
-`recoveryRestoreProgress`. Without a retained offer it restores the account identity,
-and an identity the verified history shows revoked restores as its replacement.
+`recoveryRestoreProgress`. An account-pairing offer always restores through the account
+identity, so a revoked identity, or an interrupted or partial replacement, restores
+or resumes on its replacement. A retained ordinary offer whose identity the verified
+history shows lost fails as access loss and is never restored onto.

@@ -1,4 +1,4 @@
-import { Effect, Exit, Layer, Semaphore, type Scope } from 'effect';
+import { Effect, Layer, Semaphore, type Scope } from 'effect';
 import { api } from '@lody/cloud-api';
 import { makeFunctionReference } from 'convex/server';
 import type { PersonalCloudConnection } from '@lody/client-e2ee';
@@ -11,6 +11,10 @@ import {
   unlockVaultWithPasskey,
 } from '@lody/e2ee-client/passkey-unlock';
 import { E2eePasskeyCancelled, type E2eePasskeyPort } from '@lody/platform/e2ee-passkey';
+import {
+  removeVaultPasswordGuarded,
+  setVaultPasswordVerified,
+} from '@lody/e2ee-client/recovery-password';
 import { clientRecoveryJournal } from './recovery-journal';
 import { MAX_VAULT_PASSWORD_GENERATIONS, passwordWrapEntryId } from '@lody/e2ee-core/protocol';
 
@@ -538,33 +542,16 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
     /** Set or rotate the current vault's password wrap, then prove it opens that vault. */
     setPassword: (unlock: ClientRecoveryUnlock, password: string) =>
       use(unlock, true, (vault) =>
-        Effect.gen(function* () {
-          yield* vault.setPassword({ password });
-          const reopened = yield* (yield* RecoveryVaults).openWithPassword({
-            vaultId: vault.vaultId,
-            locator: accountId,
-            password,
-          });
-          if (reopened.vaultId !== vault.vaultId)
-            return yield* Effect.fail({ code: 'authentication' });
-          yield* Effect.ignore(rememberMethods(reopened));
-        })
+        Effect.flatMap(setVaultPasswordVerified(vault, { password }), (reopened) =>
+          Effect.ignore(rememberMethods(reopened))
+        )
       ),
-    /** Remove the password wrap once a file or passkey still unlocks the vault. A removal
-     * that failed after its intent was journaled reports itself as still pending. */
+    /** Remove the password wrap once a file or passkey still unlocks the vault. */
     removePassword: (unlock: ClientRecoveryUnlock) =>
       use(unlock, true, (vault) =>
-        Effect.gen(function* () {
-          const hasFile = yield* vault.hasRecoveryFile();
-          const passkeys = yield* vault.listPasskeys();
-          if (!hasFile && passkeys.length === 0) return yield* Effect.fail({ code: 'conflict' });
-          const removed = yield* Effect.exit(vault.removePassword());
-          const pending = yield* vault.pendingPasswordRemovals();
-          yield* Effect.ignore(rememberMethods(vault));
-          if (Exit.isFailure(removed) && pending.length === 0)
-            return yield* Effect.failCause(removed.cause);
-          return { removed: Exit.isSuccess(removed), pending: pending.length > 0 };
-        })
+        removeVaultPasswordGuarded(vault).pipe(
+          Effect.tap(() => Effect.ignore(rememberMethods(vault)))
+        )
       ),
     dispose: () => {
       retired = true;

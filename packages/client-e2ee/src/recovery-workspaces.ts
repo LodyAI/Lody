@@ -2,8 +2,17 @@ import { Deferred, Effect, Exit, Option, Result } from 'effect';
 import { readWorkspaceRecoveryProgress, type RecoveryVault } from '@lody/e2ee-core';
 import type { RecoveryVaultLocalStore } from '@lody/e2ee-core/services';
 import { api, type E2eeWorkspaceHistoryPage } from '@lody/cloud-api';
-import { accountPairingOffer, verifyPersonalHistory } from '@lody/e2ee-client';
-import { readRecoveryHistory, recoveryRestoreIncomplete } from '@lody/e2ee-client/recovery-restore';
+import {
+  accountPairingOffer,
+  verifyPersonalHistory,
+  type PersonalPairingOffer,
+} from '@lody/e2ee-client';
+import {
+  readRecoveryHistory,
+  recoveryRestoreIncomplete,
+  restoreOutcome,
+  type VaultWorkspaceRestoreResult,
+} from '@lody/e2ee-client/recovery-restore';
 import { recoveryFetchEnvelope } from '@lody/e2ee-client/vault-replacement';
 import {
   Bytes,
@@ -21,13 +30,16 @@ import {
 } from './recovery';
 import { clientRecoveryJournal } from './recovery-journal';
 import { hex, raw, historyPage } from './network';
-export type RecoveryWorkspaceResult = {
-  workspaceId: string;
-  name: string;
-  outcome: string;
-  /** A committed restore whose newer epoch keys still await repair. */
-  partialEpochKey?: boolean;
-};
+/** One workspace's result: a restore outcome, or a setup's `recoverable` /
+ * `not-admitted` (a setup that did not finish is `Pending`, `Failed` or `Unconfirmed`). */
+export type RecoveryWorkspaceResult =
+  | VaultWorkspaceRestoreResult
+  | {
+      readonly workspaceId: string;
+      readonly name: string;
+      readonly outcome: 'recoverable' | 'not-admitted';
+      readonly partialEpochKey?: never;
+    };
 export type RecoveryWorkspaceProgress = {
   results: RecoveryWorkspaceResult[];
   waiting: boolean;
@@ -168,7 +180,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           const reference = (yield* vault.readIndex()).value.entries.find(
             (ref) => !ref.retired && ref.genesis === workspace.genesisHash
           );
-          if (!reference) return { outcome: 'not-backed-up' };
+          if (!reference) return { outcome: 'not-backed-up' } as const;
           const offer = yield* Effect.acquireUseRelease(
             vault.readEntry(reference),
             (bundle) =>
@@ -186,17 +198,29 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
               ),
             (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
           );
-          const pinned = yield* pins.read(options.accountId, workspace.id);
-          const previous = pinned?.phase === 'cancelled' ? null : pinned;
           const read = () => pages(workspace.id);
           const view = () => Effect.flatMap(read(), (rows) => verifyPersonalHistory(offer, rows));
           const fetchCurrentEnvelope = envelope(workspace.id, view);
-          const result = yield* request(() =>
-            options.commands.restore(workspace.id, previous?.offer ?? offer, {
+          const routed = () =>
+            Effect.map(pins.read(options.accountId, workspace.id), (pin) =>
+              pin && pin.phase !== 'cancelled' ? pin.offer : undefined
+            );
+          const restoreVia = (retained: PersonalPairingOffer | undefined) =>
+            Effect.tryPromise({
+              try: async () => {
+                check();
+                const value = await restoreWith(retained);
+                check();
+                return value;
+              },
+              catch: (error) => error,
+            });
+          const restoreWith = (retained: PersonalPairingOffer | undefined) =>
+            options.commands.restore(workspace.id, retained ?? offer, {
               vault,
               local,
               reference,
-              offer: previous?.offer,
+              offer: retained,
               pages: read,
               fetchCurrentEnvelope,
               submitOriginalAsRecovery: (record, _identity, credential, credentialHash) =>
@@ -227,14 +251,22 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                     }),
                   (borrowed) => Effect.sync(() => borrowed.fill(0))
                 ),
-            })
+            });
+          const retained = yield* routed();
+          const result = yield* restoreVia(retained).pipe(
+            Effect.catchIf(
+              (error) =>
+                retained !== undefined &&
+                error instanceof Error &&
+                error.message === 'e2ee_device_revoked',
+              () =>
+                Effect.flatMap(routed(), (next) =>
+                  next === undefined ? restoreVia(undefined) : Effect.fail(failure())
+                )
+            ),
+            Effect.mapError(() => failure())
           );
-          return {
-            outcome: result.outcome as string,
-            ...(result.outcome === 'Committed' && result.partialEpochKey === true
-              ? { partialEpochKey: true }
-              : {}),
-          };
+          return restoreOutcome(result);
         }
         // A reused session may have been opened for reading. Authorize every backup
         // against the current replacement state before borrowing workspace keys.
@@ -244,7 +276,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
         if (vault.vaultId !== state.current || state.replacing !== null)
           return yield* Effect.fail(failure());
         const pin = yield* pins.read(options.accountId, workspace.id);
-        if (pin?.phase !== 'ready') return { outcome: 'not-admitted' };
+        if (pin?.phase !== 'ready') return { outcome: 'not-admitted' } as const;
         const result = yield* request(() =>
           options.commands.setup(workspace.id, {
             vault,
@@ -272,7 +304,10 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           })
         );
         return {
-          outcome: result.outcome === 'Committed' && result.recoverable ? 'recoverable' : 'Pending',
+          outcome:
+            result.outcome === 'Committed' && result.recoverable
+              ? ('recoverable' as const)
+              : ('Pending' as const),
         };
       })
     );
@@ -368,11 +403,14 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                               );
                               // Remove settled attempts: failure/Pending must remain retryable.
                               if (jobs.get(workspace.id) === owned) jobs.delete(workspace.id);
-                              yield* Deferred.succeed(owned.done, {
+                              const settled: RecoveryWorkspaceResult = {
                                 workspaceId: workspace.id,
                                 name: workspace.name,
-                                ...(Exit.isSuccess(result) ? result.value : { outcome: 'Failed' }),
-                              });
+                                ...(Exit.isSuccess(result)
+                                  ? result.value
+                                  : { outcome: 'Failed' as const }),
+                              };
+                              yield* Deferred.succeed(owned.done, settled);
                             }).pipe(
                               Effect.ensuring(Effect.sync(release)),
                               Effect.uninterruptible,

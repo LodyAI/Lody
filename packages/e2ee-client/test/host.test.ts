@@ -410,7 +410,9 @@ it.each(['partial', 'adopt-failure', 'blocked-peer'] as const)(
           expect(yield* recoveryRestoreIncomplete(local, 'workspace')).toBe(true);
           const admittedLength = records.length;
           envelopes.set(1, latest);
-          expect((yield* run())[0]).toMatchObject({ outcome: 'Committed', partialEpochKey: false });
+          const finished = (yield* run())[0];
+          expect(finished).toMatchObject({ outcome: 'Committed' });
+          expect(finished?.partialEpochKey).toBeUndefined();
           expect(records.length).toBe(admittedLength);
           expect(progress()).toBe('done');
           expect(yield* recoveryRestoreIncomplete(local, 'workspace')).toBe(false);

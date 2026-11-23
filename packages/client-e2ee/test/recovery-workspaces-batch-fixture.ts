@@ -65,6 +65,7 @@ let runtime: NonNullable<ReturnType<ReturnType<typeof personalEntry>['createRunt
 let stage = 'new';
 let blocked = false;
 let historyMetadata = true;
+let loseAppendReply = false;
 let emptyMailbox = false;
 let historyReads = 0;
 let stagingReads = 0;
@@ -105,6 +106,10 @@ async function server(path: string, args: Record<string, unknown>) {
   };
   if (path === 'e2eeWorkspaces:appendRecord') {
     append(w!, raw(String(args.recordHex)), args.credentialHash as string | undefined);
+    if (loseAppendReply) {
+      loseAppendReply = false;
+      throw new Error('synthetic lost append reply');
+    }
     await wait(); // Commit happened; acknowledgement is deliberately unknown.
     return { status: 'committed', recordHash: args.requestId };
   }
@@ -153,7 +158,8 @@ async function server(path: string, args: Record<string, unknown>) {
     };
   }
   if (path === 'e2eeMailbox:fetch') {
-    if (emptyMailbox || Number(args.epoch) !== 0) return { items: [], next: null };
+    if (emptyMailbox || (epochZero.size > 0 && Number(args.epoch) !== 0))
+      return { items: [], next: null };
     const hash = hex(
       new Uint8Array(
         await crypto.subtle.digest('SHA-256', new Uint8Array(raw(String(args.credential))))
@@ -659,4 +665,9 @@ export async function portRestore() {
   const observed: unknown[] = [];
   const restored = await consolePort().restore('file', undefined, (row) => observed.push(row));
   return { restored, observed };
+}
+
+/** The next ledger append commits, but its reply never reaches the client. */
+export function loseNextAppendReply() {
+  loseAppendReply = true;
 }

@@ -40,6 +40,10 @@ import {
   replaceAccountVault,
   type VaultReplacementWorkspace
 } from '@lody/e2ee-client/vault-replacement'
+import {
+  removeVaultPasswordGuarded,
+  setVaultPasswordVerified
+} from '@lody/e2ee-client/recovery-password'
 import { sqliteRecoveryVaultLocalStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/services'
 import { createHash, randomUUID } from 'node:crypto'
@@ -699,16 +703,10 @@ export const setRecoveryPassword = (
       const vault = yield* openVault(io.unlock)
       const { current } = yield* io.replacement.state()
       if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
-      yield* vault.setPassword({
+      const reopened = yield* setVaultPasswordVerified(vault, {
         password: io.password,
         ...(io.kdf ? { kdf: io.kdf } : {})
       })
-      const reopened = yield* (yield* RecoveryVaults).openWithPassword({
-        vaultId: vault.vaultId,
-        locator: vault.locator,
-        password: io.password
-      })
-      if (reopened.vaultId !== vault.vaultId) return yield* Effect.fail({ code: 'authentication' })
       yield* syncVaultMethodsSummary(reopened)
       return { hasPassword: true as const }
     }).pipe(Effect.provide(vaults(io)))
@@ -726,15 +724,9 @@ export const removeRecoveryPassword = (
       const vault = yield* openVault(io.unlock)
       const { current } = yield* io.replacement.state()
       if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
-      const hasFile = yield* vault.hasRecoveryFile()
-      const passkeys = yield* vault.listPasskeys()
-      if (!hasFile && passkeys.length === 0) return yield* Effect.fail({ code: 'conflict' })
-      const removed = yield* Effect.exit(vault.removePassword())
-      const pending = yield* vault.pendingPasswordRemovals()
-      yield* syncVaultMethodsSummary(vault)
-      if (Exit.isFailure(removed) && pending.length === 0)
-        return yield* Effect.failCause(removed.cause)
-      return { removed: Exit.isSuccess(removed), pending: pending.length > 0 }
+      return yield* removeVaultPasswordGuarded(vault).pipe(
+        Effect.tap(() => syncVaultMethodsSummary(vault))
+      )
     }).pipe(Effect.provide(vaults(io)))
   )
 

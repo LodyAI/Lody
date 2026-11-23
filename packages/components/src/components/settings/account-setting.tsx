@@ -36,8 +36,12 @@ import {
   type OrganizationMemberRef,
   type OrganizationMemberRole,
 } from '@/lib/organization-member-role';
-import { AccountSettingsPure, type AccountSettingsSurface } from './account-setting-pure';
-import { useWorkspaceDeleteBillingGuard } from './workspace-delete-billing-guard';
+import {
+  AccountSettingsPure,
+  deriveWorkspaceDeleteBillingGuard,
+  type AccountSettingsSurface,
+} from './account-setting-pure';
+import { useE2eeRecoverySection } from './e2ee/recovery-host';
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { DeletedWorkspaceBilling } from './deleted-workspace-billing';
@@ -121,8 +125,9 @@ function CloudAccountSettings({
   const signOut = useAuthSignOut();
   const router = useRouter();
   const closeSettings = useSetAtom(settingsDialogOpenAtom);
+  const recoverySection = useE2eeRecoverySection();
   const recoveryEntry =
-    surface === 'account' && router?.options?.context?.recoveryPage ? (
+    surface === 'account' && recoverySection && router?.options?.context?.recoveryPage ? (
       <Button
         variant="secondary"
         onClick={() => {
@@ -166,7 +171,15 @@ function CloudAccountSettings({
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
     activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  const deleteBillingGuard = useWorkspaceDeleteBillingGuard(activeOrganizationId);
+  // Not skipped for encrypted workspaces: the subscription guard on deletion still applies.
+  const billingOverview = useCloudQuery(
+    cloudOperations.billing.getBillingOverview,
+    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
+  );
+  const deleteBillingGuard = useMemo(
+    () => deriveWorkspaceDeleteBillingGuard(billingOverview, Date.now()),
+    [billingOverview]
+  );
 
   const sortedMembers = useMemo(() => {
     const members = activeOrganization?.members ?? [];

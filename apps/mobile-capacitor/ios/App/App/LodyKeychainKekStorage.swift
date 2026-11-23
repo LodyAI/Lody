@@ -45,21 +45,21 @@ final class LodyKeychainKekStorage: LodyKekStorage {
         } catch { throw LodyKekError.unknown }
     }
 
-    private func query(_ id: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: Self.service, kSecAttrAccount as String: id,
-         kSecAttrSynchronizable as String: false,
-         kSecUseDataProtectionKeychain as String: true]
+    /// This service's non-synced data-protection items; one account when `id` is given.
+    private static func baseQuery(_ id: String? = nil) -> [String: Any] {
+        var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrService as String: service,
+                                    kSecAttrSynchronizable as String: false,
+                                    kSecUseDataProtectionKeychain as String: true]
+        if let id = id { query[kSecAttrAccount as String] = id }
+        return query
     }
 
     /// Full native reset only, once WebKit storage (which held every wrapped original) is
     /// gone and no LodyKek call is still admitted. Deletes every KEK of this service, then
     /// the receipts: a key never outlives its receipt, so a partial purge still refuses reuse.
     static func purgeAll() -> Bool {
-        let all: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                  kSecAttrService as String: service,
-                                  kSecAttrSynchronizable as String: false,
-                                  kSecUseDataProtectionKeychain as String: true]
+        let all = baseQuery()
         let deleted = SecItemDelete(all as CFDictionary)
         guard deleted == errSecSuccess || deleted == errSecItemNotFound else { return false }
         var remaining = all
@@ -82,7 +82,7 @@ final class LodyKeychainKekStorage: LodyKekStorage {
     }
 
     func readKey(_ id: String) throws -> Data? {
-        var request = query(id)
+        var request = Self.baseQuery(id)
         request[kSecReturnData as String] = true
         request[kSecReturnAttributes as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -99,7 +99,7 @@ final class LodyKeychainKekStorage: LodyKekStorage {
     }
 
     func createKey(_ id: String, bytes: Data) throws {
-        var request = query(id)
+        var request = Self.baseQuery(id)
         request[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         request[kSecValueData as String] = bytes
         // Add-only: never update/replace an existing or uncertain key.
@@ -107,7 +107,7 @@ final class LodyKeychainKekStorage: LodyKekStorage {
     }
 
     func deleteKey(_ id: String) throws {
-        let status = SecItemDelete(query(id) as CFDictionary)
+        let status = SecItemDelete(Self.baseQuery(id) as CFDictionary)
         if status != errSecItemNotFound { try check(status) }
     }
 }

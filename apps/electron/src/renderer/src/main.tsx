@@ -13,7 +13,7 @@ import { useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
 import { createRouter } from '@lody/components/router'
-import { RecoveryAccountPage } from '@lody/components/components/settings/e2ee/recovery-account-page'
+import { RecoveryAccountPage } from '@lody/components/components/settings/e2ee/recovery-host'
 import {
   detectBrowserLanguage,
   fallbackLanguage,
