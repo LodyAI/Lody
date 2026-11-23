@@ -55,7 +55,7 @@ it('reselects the latest row when metadata changes between the two owner request
     });
     let changed = false;
     const factory = createCommandSessionHistoryFactory(
-      () => ({ repo: fixture.repo }) as LoroDocumentManager,
+      () => ({ repo: fixture.repo, isEncryptedWorkspace: () => false }) as LoroDocumentManager,
       { userId: 'test-user', machineId: 'test-machine', token: 'synthetic-token' } as AuthContext,
       'test-workspace',
       async (_target, run) =>

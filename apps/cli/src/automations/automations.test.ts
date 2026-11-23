@@ -16,7 +16,8 @@ import { platformLayer } from '@/platform/process-options';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Clock, Deferred, Effect, Layer, Fiber } from 'effect';
+import { Arbitrary, Clock, Deferred, Effect, Layer, Fiber, Schema } from 'effect';
+import { it as effectIt } from '@effect/vitest';
 import type {
   AutomationEvent,
   AutomationRuleDraft,
@@ -31,7 +32,10 @@ import {
 import {
   advanceDelivery,
   deliveryStepCurrent,
+  readDeliveryProgress,
+  readPullRequestSnapshot,
   startDeliveryEpoch,
+  DELIVERY_CI_REPORT_GRACE_MS,
   DELIVERY_PR_CREATION_GRACE_MS,
 } from './policies/delivery';
 import { evaluateCapacity } from './runtime/capacity';
@@ -1817,6 +1821,22 @@ describe('Auto delivery', () => {
     ).toEqual({ state: 'stalled', reason: 'pr_not_created' });
   });
 
+  it('asks for a new pull request instead of adopting one merged by earlier work', () => {
+    const ledger = enabled();
+    const earlier = sessionMeta([{ url: prUrl, status: 'merged' }]);
+    observePullRequests(
+      ledger,
+      earlier,
+      'owner/project',
+      [{ ...pr('a'.repeat(40), 's', 'c'), status: 'merged' as const }],
+      5
+    );
+    const decision = advanceDelivery({ ledger, meta: earlier, options, now: 10 });
+    expect(decision).toMatchObject({ status: { state: 'pr' } });
+    expect(decision.finished).toBeUndefined();
+    expect(requested(deliver(ledger, 10))).toEqual(['delivery:create_pr']);
+  });
+
   it('requests a CI fix per failing head, stops on an unchanged head and after the limit', () => {
     const ledger = enabled();
     let now = 100;
@@ -1858,8 +1878,9 @@ describe('Auto delivery', () => {
         meta: { ...linked, workspaceUnpushed: true },
         options,
         now: 103,
-      }).status.state
-    ).toBe('ci');
+      }).status
+    ).toEqual({ state: 'stalled', reason: 'workspace_unpushed', prUrl });
+    expect(deliver(ledger, 103)).toEqual([]);
     expect(advanceDelivery({ ledger, meta: linked, options, now: 104 }).status.state).toBe('merge');
     const receipts = deliver(ledger, 104);
     expect(requested(receipts)).toEqual(['delivery:merge']);
@@ -1879,6 +1900,36 @@ describe('Auto delivery', () => {
     expect(done).toMatchObject({ finished: true, status: { state: 'merged' } });
   });
 
+  it('waits for checks on a head that reports none before treating it as green', () => {
+    const ledger = enabled();
+    const head = 'a'.repeat(40);
+    observePullRequests(ledger, linked, 'owner/project', [pr(head, null, 'c')], 100);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 101 }).status.state).toBe('ci');
+    observePullRequests(
+      ledger,
+      linked,
+      'owner/project',
+      [pr(head, null, 'c')],
+      99 + DELIVERY_CI_REPORT_GRACE_MS
+    );
+    expect(
+      advanceDelivery({ ledger, meta: linked, options, now: 100 + DELIVERY_CI_REPORT_GRACE_MS })
+        .status.state
+    ).toBe('ci');
+    expect(deliver(ledger, 100 + DELIVERY_CI_REPORT_GRACE_MS)).toEqual([]);
+    observePullRequests(
+      ledger,
+      linked,
+      'owner/project',
+      [pr(head, null, 'c')],
+      101 + DELIVERY_CI_REPORT_GRACE_MS
+    );
+    expect(
+      advanceDelivery({ ledger, meta: linked, options, now: 102 + DELIVERY_CI_REPORT_GRACE_MS })
+        .status.state
+    ).toBe('merge');
+  });
+
   it('leaves merging to the user unless chosen and stops when GitHub blocks the merge', () => {
     const ledger = enabled({ fixCi: true, resolveConflicts: true, merge: false });
     observePullRequests(ledger, linked, 'owner/project', [pr('a'.repeat(40), 's', 'c')], 100);
@@ -1894,6 +1945,261 @@ describe('Auto delivery', () => {
     });
     expect(deliver(ledger, 103)).toEqual([]);
   });
+
+  const prUrls = [prUrl, 'https://github.com/owner/project/pull/43'];
+  const pick = <A>(table: readonly A[], index: number) => required(table[index % table.length]);
+  const prStatuses = ['open', 'open', 'open', 'open', 'open', 'draft', 'merged', 'closed'] as const;
+  const ciStates = ['s', 's', 'f', 'f', 'p', 'e', 'x', null] as const;
+  const mergeStates = ['c', 'c', 'd', 'd', 'u', 'b', 'h', null] as const;
+  const afterTurn = {
+    ci: ['f', 'f', 'f', 'f', 's', 's', 'p', null] as const,
+    merge: ['c', 'c', 'c', 'c', 'd', 'd', 'd', null] as const,
+  };
+  const outcomes = [
+    'settled',
+    'settled',
+    'settled',
+    'settled',
+    'failed',
+    'cancelled',
+    'superseded',
+    'stop',
+    'restore',
+  ] as const;
+  const selector = Schema.Literals([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  const settingsSchema = Schema.Struct({
+    fixCi: Schema.Boolean,
+    resolveConflicts: Schema.Boolean,
+    merge: Schema.Boolean,
+  });
+  const kinds = [
+    'turn',
+    'turn',
+    'turn',
+    'observe',
+    'observe',
+    'agent',
+    'link',
+    'workspace',
+    'wait',
+  ] as const;
+  const step = Schema.Struct({
+    kind: selector,
+    a: selector,
+    b: selector,
+    c: selector,
+    d: selector,
+    toggle: Schema.Boolean,
+    settings: settingsSchema,
+  });
+  const terminal = ['settled', 'failed', 'cancelled', 'superseded'];
+
+  effectIt.prop(
+    'keeps its limits and request preconditions under any observation and outcome order',
+    [Arbitrary.schema(settingsSchema), Arbitrary.array(Arbitrary.schema(step), { maxLength: 80 })],
+    ([initial, steps]) => {
+      const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+      try {
+        const heads = ['a', 'b', 'c', 'd'].map((c) => c.repeat(40));
+        let head = required(heads[0]);
+        let pushes = 0;
+        const observe = (
+          url: string,
+          sha: string,
+          status: (typeof prStatuses)[number],
+          ciState: (typeof ciStates)[number],
+          mergeState: (typeof mergeStates)[number]
+        ) =>
+          observePullRequests(
+            ledger,
+            meta(),
+            'owner/project',
+            [
+              {
+                ...pr(sha, ciState, mergeState),
+                number: 42 + prUrls.indexOf(url),
+                url,
+                status,
+                updatedAt: new Date(providerClock).toISOString(),
+              },
+            ],
+            now
+          );
+        const links = new Map<string, string>();
+        const workspace = { workspaceDirty: false, workspaceUnpushed: false };
+        const meta = () =>
+          ({
+            ...sessionMeta(
+              [...links].map(([url, status]) => ({ url, status })) as SessionMeta['pullRequests']
+            ),
+            ...workspace,
+          }) as SessionMeta;
+        let now = 1_000;
+        let providerClock = 1_000;
+        let settings: typeof options | undefined = initial;
+        links.set(prUrl, 'open');
+        startDeliveryEpoch(ledger, 'session', now);
+        configureSessionPolicies(ledger, 'session', 'user', { autoDeliver: initial }, now);
+        let epoch: { fix: number; conflict: number; create: number; merges: Set<string> } = {
+          fix: 0,
+          conflict: 0,
+          create: 0,
+          merges: new Set(),
+        };
+        let boundIn: number | undefined;
+        let ended: string | undefined;
+        const receipts = () =>
+          ledger.activities(500).filter((receipt) => receipt.event.source === 'lody/auto-delivery');
+        const outstanding = () => receipts().filter((receipt) => !terminal.includes(receipt.state));
+        const pass = () => {
+          for (const receipt of outstanding())
+            if (settings && deliveryStepCurrent(ledger, 'session', receipt.event.id).value === 'no')
+              ledger.update(receipt.id, receipt.state, { state: 'superseded' }, now);
+          if (!settings) return;
+          const current = meta();
+          const before = readDeliveryProgress(ledger, 'session');
+          const decision = advanceDelivery({ ledger, meta: current, options: settings, now });
+          const progress = required(readDeliveryProgress(ledger, 'session'));
+          if (!before?.prUrl && progress.prUrl) {
+            expect(links.get(progress.prUrl)).toMatch(/^(open|draft)$/);
+            expect(
+              readPullRequestSnapshot(ledger, 'session', progress.prUrl)?.status ?? 'open'
+            ).toMatch(/^(open|draft)$/);
+            boundIn = progress.epoch;
+          }
+          const created = deliver(ledger, now);
+          expect(created.length).toBeLessThanOrEqual(1);
+          for (const receipt of created) {
+            expect(ended).toBeUndefined();
+            const data = receipt.event.data;
+            const pr = progress.prUrl
+              ? readPullRequestSnapshot(ledger, 'session', progress.prUrl)
+              : undefined;
+            if (data.step === 'create_pr') {
+              expect(++epoch.create).toBe(1);
+              continue;
+            }
+            expect(pr).toMatchObject({ status: 'open', headSha: data.headSha });
+            expect(current.workspaceDirty || current.workspaceUnpushed).toBe(false);
+            if (data.step === 'fix_ci') {
+              expect(settings.fixCi && ['f', 'e'].includes(String(pr?.ciState))).toBe(true);
+              expect(++epoch.fix).toBeLessThanOrEqual(3);
+            } else if (data.step === 'resolve_conflicts') {
+              expect(settings.resolveConflicts && pr?.mergeState === 'd').toBe(true);
+              expect(++epoch.conflict).toBeLessThanOrEqual(3);
+            } else {
+              expect(settings.merge && ['c', 'u'].includes(String(pr?.mergeState))).toBe(true);
+              const graced =
+                pr?.ciState === null &&
+                progress.unreportedCi?.head === pr.headSha &&
+                pr.observedAt - progress.unreportedCi.since >= DELIVERY_CI_REPORT_GRACE_MS;
+              expect(pr?.ciState === 's' || graced).toBe(true);
+              expect(epoch.merges.has(String(data.headSha))).toBe(false);
+              epoch.merges.add(String(data.headSha));
+            }
+          }
+          expect(
+            outstanding().filter(
+              (receipt) => deliveryStepCurrent(ledger, 'session', receipt.event.id).value !== 'no'
+            ).length
+          ).toBeLessThanOrEqual(1);
+          const last = progress.lastStep;
+          const lastReceipt = last && ledger.eventReceipts('lody/auto-delivery', last.eventId)[0];
+          if (lastReceipt?.state === 'failed' || lastReceipt?.state === 'cancelled') {
+            ended ??= lastReceipt.state === 'failed' ? 'request_failed' : 'stopped';
+            expect(decision.status).toMatchObject({ state: 'stalled', reason: ended });
+          }
+          if (decision.finished) {
+            expect(boundIn).toBe(progress.epoch);
+            expect(
+              readPullRequestSnapshot(ledger, 'session', required(progress.prUrl))?.status
+            ).toBe('merged');
+            configureSessionPolicies(ledger, 'session', 'user', { autoDeliver: false }, now);
+            settings = undefined;
+            return;
+          }
+          advanceDelivery({ ledger, meta: current, options: settings, now });
+          expect(deliver(ledger, now)).toEqual([]);
+        };
+        for (const item of steps) {
+          now += 1_000;
+          const { a, b, c, d } = item;
+          switch (item.toggle && a === 0 ? 'toggle' : pick(kinds, item.kind)) {
+            case 'observe': {
+              providerClock += d === 0 ? -500 : 1_000;
+              head = pick(heads, b);
+              observe(
+                pick(prUrls, a === 8 ? 1 : 0),
+                head,
+                pick(prStatuses, c),
+                pick(ciStates, d),
+                pick(mergeStates, a + b)
+              );
+              break;
+            }
+            case 'link': {
+              const url = pick(prUrls, a === 8 ? 1 : 0);
+              links.delete(url);
+              links.set(url, pick(prStatuses, b));
+              break;
+            }
+            case 'workspace':
+              workspace.workspaceDirty = a === 0;
+              workspace.workspaceUnpushed = b === 0;
+              break;
+            case 'agent': {
+              const receipt = outstanding().at(-1);
+              if (!receipt) break;
+              const outcome = pick(outcomes, a);
+              const patch =
+                outcome === 'stop'
+                  ? { state: 'blocked' as const, reason: 'target_stopped' }
+                  : outcome === 'restore'
+                    ? { state: 'queued' as const, reason: undefined }
+                    : { state: outcome };
+              ledger.update(receipt.id, receipt.state, patch, now);
+              break;
+            }
+            case 'turn': {
+              const receipt = outstanding().at(-1);
+              if (receipt) ledger.update(receipt.id, receipt.state, { state: 'settled' }, now);
+              now += 1_000;
+              providerClock += 1_000;
+              if (a !== 0) head = `push-${++pushes}`.padEnd(40, '0');
+              observe(prUrl, head, 'open', pick(afterTurn.ci, b), pick(afterTurn.merge, c));
+              break;
+            }
+            case 'wait':
+              now += pick([0, 1, 4, 6, 11], a) * 60_000;
+              break;
+            case 'toggle': {
+              const on = b !== 0;
+              const chosen = item.settings;
+              if (on && !settings) {
+                startDeliveryEpoch(ledger, 'session', now);
+                epoch = { fix: 0, conflict: 0, create: 0, merges: new Set() };
+                boundIn = undefined;
+                ended = undefined;
+              }
+              configureSessionPolicies(
+                ledger,
+                'session',
+                'user',
+                { autoDeliver: on ? chosen : false },
+                now
+              );
+              settings = on ? chosen : undefined;
+              break;
+            }
+          }
+          pass();
+        }
+      } finally {
+        ledger.close();
+      }
+    },
+    { arbitrary: { runs: 200, size: 80 } }
+  );
 
   it('sends the Info Bar request text after its origin line, plus the merged head', () => {
     const values = { repoFullName: 'owner/project', prNumber: 42, prUrl, headSha: 'a'.repeat(40) };

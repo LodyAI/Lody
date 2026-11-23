@@ -202,13 +202,12 @@ export function MobileDrillPageLayout({ children, onBack }: MobileDrillPageLayou
     <MobileDrillAnimatedBackContext.Provider value={contextValue}>
       <div
         ref={layoutRef}
-        /* `safe-areas` opts into Konsta's safe-area CSS variables
-           (`--k-safe-area-top`, `--k-safe-area-bottom`, etc.) for
-           every descendant. Without it the Tailwind utilities like
-           `pt-safe-*` resolve to 0 and the headers/content end up
-           tucked under the notch on iOS. The home screen does the
-           same opt-in on its root container — see
-           `mobile-home-screen.tsx`. */
+        /* `safe-areas` opts into the `--k-safe-area-*` CSS variables
+           (defined in `tailwind/theme-defaults.css`) for every
+           descendant. Without it the vars stay 0px and the
+           headers/content end up tucked under the notch on iOS. The
+           home screen does the same opt-in on its root container —
+           see `mobile-home-screen.tsx`. */
         {...withClassName(stylex.props(styles.root), 'safe-areas')}
       >
         <div

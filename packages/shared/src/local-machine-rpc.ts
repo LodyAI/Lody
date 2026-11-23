@@ -31,6 +31,7 @@ import {
   MachineProviderRateLimitsRefreshResponseSchema,
   SessionHistoryReadQuerySchema,
   SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
 } from './message-schemas';
 import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
@@ -299,6 +300,16 @@ export const E2eeAcpInteractionResultSchema = z
   .strict();
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/history-write'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+        operation: z.enum(['accept_input', 'accept_input_and_dispatch']),
+        payload: z.object({ entry: z.record(z.string(), z.unknown()) }).strict(),
+      })
+      .strict(),
+  }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/history-read'),
     params: z.object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema }).strict(),
@@ -836,6 +847,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
 
 export const LocalMachineRpcResultSchema = z.union([
   SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   E2eeAcpInteractionResultSchema,
   SorbetProvidersResultSchema,
   MachineStatusResponseSchema,

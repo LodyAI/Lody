@@ -119,6 +119,35 @@ describe('encrypted execution intent verification', () => {
       });
   });
 
+  it('checks a Roost user row and derivation origin against the current ledger', async () => {
+    const row = {
+      id: 'turn',
+      role: 'user',
+      e2eeIntent: await signRow(member),
+      inputConfig: config,
+    };
+    const source = { readUserTurn: async (id: string) => (id === row.id ? row : undefined) };
+    const check = (inputConfig: unknown, origin = false) =>
+      Effect.runPromise(verifier().resolve({ ...intent, inputConfig }, source, { origin }));
+    expect(await check(config)).toMatchObject({ requesterDevice: hex(member.publicKey.toBytes()) });
+    expect(await check(undefined, true)).toMatchObject({
+      requesterDevice: hex(member.publicKey.toBytes()),
+    });
+    expect(await check({ ...config, prompt: 'altered' })).toMatchObject({
+      reason: 'e2ee_signature_invalid',
+    });
+    expect(
+      await Effect.runPromise(verifier({ members: false }).resolve(intent, source))
+    ).toMatchObject({ reason: 'e2ee_sender_not_authorized' });
+    expect(
+      await Effect.runPromise(
+        verifier().resolve(intent, {
+          readUserTurn: async () => ({ ...row, e2eeIntent: undefined }),
+        })
+      )
+    ).toMatchObject({ reason: 'e2ee_signature_missing' });
+  });
+
   it('refuses a missing, altered or misdirected signature with its own reason', async () => {
     const { resolve } = verifier();
     expect(await Effect.runPromise(resolve(intent, documentWith({})))).toEqual({

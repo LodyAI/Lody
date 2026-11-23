@@ -266,17 +266,38 @@ export class Lody {
           }),
         resolveVerifiedOriginal: (intent, lookup) => {
           const owner = manager;
-          const loaded = owner?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
+          const loaded = owner?.sessions.get(intent.sessionId as SessionId);
           if (!e2ee || typeof e2ee.resolveVerifiedExecutionOriginal !== 'function')
             return Effect.succeed(undefined);
           const resolve = e2ee.resolveVerifiedExecutionOriginal;
-          if (loaded || !lookup?.origin || !owner) return resolve(intent, loaded, lookup);
+          const fromSession = (session: typeof loaded) => {
+            const backend = session?.getSessionBackend?.();
+            if (backend?.kind !== 'roost') return resolve(intent, session?.handle?.doc, lookup);
+            return resolve(
+              intent,
+              {
+                readUserTurn: async (id) => {
+                  const result = await backend.readTurn(id);
+                  if (
+                    result.state === 'ready' &&
+                    result.turn.role === 'user' &&
+                    result.turn.id === id
+                  )
+                    return result.turn;
+                  if (result.state !== 'missing') throw new Error('e2ee_history_turn_unavailable');
+                  return undefined;
+                },
+              },
+              lookup
+            );
+          };
+          if (loaded || !lookup?.origin || !owner) return fromSession(loaded);
           // A derivation origin may live in a session this daemon has not opened yet.
           return Effect.tryPromise({
             try: () => owner.getOrCreateSessionDoc(intent.sessionId as SessionId),
             catch: (cause) => cause,
           }).pipe(
-            Effect.flatMap((session) => resolve(intent, session.handle?.doc, lookup)),
+            Effect.flatMap(fromSession),
             Effect.catch(() => Effect.succeed(undefined))
           );
         },

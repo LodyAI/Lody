@@ -30,10 +30,11 @@ Behavior: [Today Spec](../../../../../specs/today-outline.md). Files: [README.md
   same `TodayMention`, and caret geometry counts `[data-today-mention]` as one character.
 - Folds go through `TodayOutline.setCollapsed` (a `sys:` commit, never an undo step); a peer's fold
   change never refolds an open page's view (`viewFolds` in the outline).
-- The full page's toolbar is window-top chrome (`TodayToolbar`): it carries the drag-region helper,
-  exempts every control, and shows `SidebarHistoryControls` while the navigation sidebar is hidden.
-  Pinned with the sidebar hidden, the column's toolbar shows them instead, and main pages read
-  `mainPageAtWindowEdgeAtom` (not raw sidebar visibility) for those controls and traffic-light clearance.
+- `TodayToolbar` takes `surface: 'page' | 'pinned' | 'standalone'`: `'page'` and `'standalone'`
+  headers carry window drag chrome and exempt every control; `'pinned'` is not window chrome; and
+  only main-window surfaces (`'page'` / `'pinned'`) show `SidebarHistoryControls` while the sidebar
+  is hidden. Main pages read `mainPageAtWindowEdgeAtom` (not raw sidebar visibility) for those
+  controls and traffic-light clearance.
 - Import `../../providers/*` relatively: the Electron web build maps `@/providers` elsewhere.
 - The desktop Today window route stays outside the `_auth` workspace layout and its runtime passes
   `backgroundWork: false`: it must not mount the sidebar, notifiers, badges or window-ownership election,
