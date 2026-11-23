@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.115.1](https://github.com/LodyAI/Lody/compare/lody-cli-v0.115.0...lody-cli-v0.115.1) (2026-11-23)
+
+
+### Documentation
+
+* **cli:** add Stable 0.115.1 changelog entry ([8bcf752](https://github.com/LodyAI/Lody/commit/8bcf752e48dc944fc6ddcdec5c51dc79a2f574ec))
+
 ## [0.115.0](https://github.com/LodyAI/Lody/compare/lody-cli-v0.114.1...lody-cli-v0.115.0) (2026-11-23)
 
 
