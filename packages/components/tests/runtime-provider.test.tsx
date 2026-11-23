@@ -1365,7 +1365,14 @@ describe('RuntimeProvider warm workspace preparation', () => {
         expect(router.state.location.pathname).toBe('/local/chat');
         expect(store.get(runtimeInitializingAtom)).toBe(true);
         expect(container.textContent).not.toContain('protected history');
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         await act(async () => received.resolve());
+        if (!installed) {
+          expect(store.get(runtimeInitializingAtom)).toBe(true);
+          expect(router.state.location.pathname).toBe('/local/chat');
+          await act(async () => vi.advanceTimersByTimeAsync(15_000));
+        }
+        vi.useRealTimers();
         expect(store.get(runtimeAtom)).toBe(installed ? prepared : null);
         expect(store.get(runtimeInitializingAtom)).toBe(false);
         expect(prepared.disposed).toBe(false);
@@ -1448,6 +1455,53 @@ describe('RuntimeProvider warm workspace preparation', () => {
     await act(async () => notifyE2eeLedgerChanged('local:user', 'local:workspace'));
     expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.disposed).toBe(false);
+  });
+
+  it.each([
+    ['opens once a late mailbox key arrives on a backoff re-poll', 3],
+    ['hands the workspace to the key-wait page after the bounded re-polls', Infinity],
+  ] as const)('%s', async (_name, arrivesOnRefresh) => {
+    ordinaryCloud();
+    listEncrypted();
+    let refreshes = 0;
+    const status = () => ({
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 1,
+      hasCurrentKey: refreshes >= arrivesOnRefresh,
+      writeEpoch: refreshes >= arrivesOnRefresh ? 1 : null,
+      rotationRequired: false,
+    });
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status(),
+      status: async () => status(),
+      refresh: async () => {
+        refreshes++;
+        return status();
+      },
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await render();
+      expect(refreshes).toBe(1);
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(store.get(runtimeInitializingAtom)).toBe(true);
+      for (const delay of [1_000, 2_000, 4_000, 8_000])
+        await act(async () => vi.advanceTimersByTimeAsync(delay));
+      if (arrivesOnRefresh === 3) {
+        expect(store.get(runtimeAtom)).toBe(prepared);
+      } else {
+        expect(refreshes).toBe(5);
+        expect(store.get(runtimeAtom)).toBeNull();
+        expect(store.get(runtimeInitializingAtom)).toBe(false);
+        await act(async () => vi.advanceTimersByTimeAsync(60_000));
+        expect(refreshes).toBe(5);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('opens with a retained key while current-key reception fails', async () => {

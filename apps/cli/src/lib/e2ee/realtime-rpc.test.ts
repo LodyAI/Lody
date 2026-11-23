@@ -7,7 +7,7 @@ import {
   makeEncryptedStreamsRpc,
   makeEncryptedRpcListener,
 } from '@lody/loro-streams-rpc/e2ee-streams';
-import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
+import { LoroStreamsGatewayError, type LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { encryptedRpcFixture } from '../../../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture';
 import { RealtimeJournal } from './realtime-journal';
 import { makeEncryptedAgentExecution } from './agent-execution';
@@ -334,6 +334,66 @@ function memoryStreams() {
     activeReads: () => [...listeners.values()].reduce((count, set) => count + set.size, 0),
   };
 }
+
+effectIt.effect.each([
+  { name: 'gateway 502/503', req: [503], res: [502, 503], acked: true, attempts: [2, 3] },
+  { name: 'origin 500', req: [500], res: [], acked: false, attempts: [1, 0] },
+])(
+  'retries an encrypted request and response append only after a $name, with bounded backoff',
+  ({ req, res, acked, attempts }) =>
+    Effect.gen(function* () {
+      const f = fixture();
+      const streams = memoryStreams();
+      const failing = { req: [...req], res: [...res] };
+      const tried = { req: 0, res: 0 };
+      const client: LoroStreamsJsonStreamClient = {
+        ...streams.client,
+        appendJson: async (stream, value) => {
+          const lane = stream.includes(':req:') ? 'req' : 'res';
+          tried[lane]++;
+          const status = failing[lane].shift();
+          if (status) throw new LoroStreamsGatewayError('synthetic gateway', status);
+          return streams.client.appendJson(stream, value);
+        },
+      };
+      const original = yield* f.sender.prepareDispatch(f.machineId, f.input);
+      const receive = makeEncryptedRpcReceiver({
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        authorize: () => Effect.succeed({ _tag: 'Authorized' }),
+        isOpen: () => true,
+        client,
+        offer: async () => f.ack,
+      });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* makeEncryptedRpcListener({
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            client,
+            receive,
+          });
+          const sender = yield* makeEncryptedStreamsRpc({
+            workspaceId: f.workspaceId,
+            requesterDevice: original.requesterDevice,
+            client,
+            acceptResponse: (prepared, input, frame) =>
+              Effect.runPromise(f.sender.acceptResponse(prepared.targetMachineId, input, frame)),
+          });
+          const pending = yield* Effect.forkChild(sender.send(original, f.input, 5_000));
+          for (let elapsed = 0; elapsed < 5_000; elapsed += 30) yield* TestClock.adjust(30);
+          expect(yield* Fiber.join(pending)).toEqual(acked ? f.ack : null);
+        })
+      );
+      expect([tried.req, tried.res]).toEqual(attempts);
+      expect(streams.writes.filter((write) => write.stream.includes(':req:'))).toHaveLength(
+        acked ? 1 : 0
+      );
+    })
+);
 
 effectIt.effect(
   'routes ciphertext-only Streams ACKs, falls back on timeout, then replays the exact original safely',

@@ -102,3 +102,21 @@ export const ClientDiagnosticsFailed: Story = {
     onRetryClientDiagnostics: fn(),
   },
 };
+
+export const EncryptedWorkspace: Story = {
+  args: {
+    descriptionOnly: true,
+  },
+};
+
+export const EncryptedWorkspaceSuccess: Story = {
+  args: {
+    descriptionOnly: true,
+    state: {
+      status: 'success',
+      bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
+      withLogs: false,
+      clientDiagnostics: 'omitted',
+    },
+  },
+};

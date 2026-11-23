@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createStore, Provider } from 'jotai';
 import { afterEach, expect, it, vi } from 'vitest';
 import { bugReportDialogOpenAtom, userAtom } from '@/atoms';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { BugReportDialogContainer } from '../src/components/bug-report/bug-report-dialog-container';
 import { click, mount, one, press, step, type Mounted } from '../../ui/test/dom';
 
@@ -18,10 +19,16 @@ vi.mock('@/atoms/runtime', async () => {
   const { atom } = await import('jotai');
   return { runtimeAtom: atom(null) };
 });
-vi.mock('@/hooks/use-visible-machine-metas', () => ({
-  useVisibleMachineMetas: () => ({ machines: new Map() }),
+const machineIndex = vi.hoisted(() => ({
+  machines: new Map<string, { name: string }>(),
+  online: new Set<string>(),
 }));
-vi.mock('@/hooks/use-machine-online-status', () => ({ useOnlineMachineIds: () => new Set() }));
+vi.mock('@/hooks/use-visible-machine-metas', () => ({
+  useVisibleMachineMetas: () => ({ machines: machineIndex.machines }),
+}));
+vi.mock('@/hooks/use-machine-online-status', () => ({
+  useOnlineMachineIds: () => machineIndex.online,
+}));
 vi.mock('@/lib/auth-bootstrap', () => ({ readStoredAuthToken: () => 'session' }));
 vi.mock('@/lib/chat-landing-defaults', () => ({ readChatLandingDefaults: () => null }));
 vi.mock('@/lib/cloud-http-port', () => ({ requireCloudAuthBaseUrl: () => 'https://auth.test' }));
@@ -47,6 +54,8 @@ afterEach(async () => {
   await mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
+  machineIndex.machines.clear();
+  machineIndex.online.clear();
 });
 
 function button(label: string) {
@@ -57,14 +66,16 @@ function button(label: string) {
   return result;
 }
 
-async function setup() {
+async function setup(options: { encrypted?: boolean } = {}) {
   const requests: Array<{
     body: unknown;
     signal: AbortSignal | null | undefined;
     respond: (response: Response) => void;
   }> = [];
   let created = 0;
+  const urls: string[] = [];
   vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
+    urls.push(url);
     if (url.endsWith('/create')) {
       created += 1;
       return Promise.resolve(Response.json({ bugReportId: `report-${created}` }));
@@ -76,6 +87,13 @@ async function setup() {
     });
   });
   const store = createStore();
+  if (options.encrypted)
+    store.set(workspaceContentModeAtom, {
+      accountId: 'reporter',
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace',
+      descriptor: { workspaceId: 'workspace', contentMode: 'e2ee', contentModeVersion: 1 } as never,
+    });
   mounted = await mount(
     <Provider store={store}>
       <button data-outside="">normal application action</button>
@@ -93,8 +111,21 @@ async function setup() {
     });
     await click(button('Submit report'));
   };
-  return { store, requests, submit, created: () => created };
+  return { store, requests, urls, submit, created: () => created };
 }
+
+it('files an encrypted workspace report as description only, with no machine logs or diagnostics', async () => {
+  machineIndex.machines.set('machine-1', { name: 'online laptop' });
+  machineIndex.online.add('machine-1');
+  const { urls, submit } = await setup({ encrypted: true });
+  expect(document.querySelector('#bug-report-machine')).toBeNull();
+  expect(document.body.textContent).toContain('end-to-end encrypted');
+  await submit();
+  expect(urls).toEqual(['https://auth.test/api/bug-reports/create']);
+  expect(document.body.textContent).toContain('report-1');
+  expect(document.body.textContent).not.toContain('client diagnostics');
+  expect(document.body.textContent).not.toContain('Client diagnostics');
+});
 
 it.each(['Close', 'cross', 'Escape', 'backdrop'])(
   'shows the saved ID and permits %s while diagnostics never respond',

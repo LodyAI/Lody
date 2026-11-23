@@ -98,6 +98,9 @@
   before passing pages to the portable host; keep its strict capture, signature,
   scope and checkpoint verification unchanged.
   Ledger append skips genesis prefetch; backend verification and parent-tail CAS remain authoritative.
+  Only the backend's `e2ee_self_service_rate_limited` refusal with a non-negative integer
+  `retryAt` becomes core's `self-service-rate-limited` ledger reason; every other append
+  failure, including that code without a valid `retryAt`, stays an unconfirmed outcome.
   Inline history is single-use, scoped to this ledger/account and the next feed position. Bootstrap requires a decoded genesis matching the scope hash.
   Otherwise read history; LedgerFeed verifies and persists originals before advancing.
 

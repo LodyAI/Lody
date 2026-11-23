@@ -1,7 +1,7 @@
 import { Clock, Deferred, Effect } from 'effect';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type { makeE2eeRpcNative } from '@lody/loro-streams-rpc/e2ee-native';
-import { e2eeRpcEnvelope } from '@lody/loro-streams-rpc/e2ee-streams';
+import { e2eeRpcEnvelope, retryTransientGateway } from '@lody/loro-streams-rpc/e2ee-streams';
 import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import type {
   LocalMachineRpcRequest,
@@ -297,16 +297,21 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
         for (const frame of refusal) {
           if (!options.isOpen() || (yield* Clock.currentTimeMillis) >= opened.expiresAt)
             return yield* Effect.void;
-          yield* Effect.tryPromise({
-            try: async () => {
-              if (sink) return await sink.deliver(opened.requestId, frame);
-              await client!.appendJson(
-                stream,
-                e2eeRpcEnvelope({ id: opened.requestId, frame: Buffer.from(frame).toString('hex') })
-              );
-            },
-            catch: (cause) => cause,
-          });
+          yield* retryTransientGateway(
+            Effect.tryPromise({
+              try: async () => {
+                if (sink) return await sink.deliver(opened.requestId, frame);
+                await client!.appendJson(
+                  stream,
+                  e2eeRpcEnvelope({
+                    id: opened.requestId,
+                    frame: Buffer.from(frame).toString('hex'),
+                  })
+                );
+              },
+              catch: (cause) => cause,
+            })
+          );
         }
         return yield* Effect.void;
       }
@@ -492,23 +497,28 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           (yield* Clock.currentTimeMillis) >= opened.expiresAt
         )
           return yield* Effect.void;
-        yield* Effect.tryPromise({
-          try: async () => {
-            if (
-              !options.isOpen() ||
-              !currentAdmission() ||
-              (latest.isCurrent && !latest.isCurrent()) ||
-              clock.currentTimeMillisUnsafe() >= opened.expiresAt
-            )
-              throw new Error('e2ee_history_authority_withdrawn');
-            if (sink) return await sink.deliver(opened.requestId, frame);
-            await client!.appendJson(
-              stream,
-              e2eeRpcEnvelope({ id: opened.requestId, frame: Buffer.from(frame).toString('hex') })
-            );
-          },
-          catch: (cause) => cause,
-        });
+        yield* retryTransientGateway(
+          Effect.tryPromise({
+            try: async () => {
+              if (
+                !options.isOpen() ||
+                !currentAdmission() ||
+                (latest.isCurrent && !latest.isCurrent()) ||
+                clock.currentTimeMillisUnsafe() >= opened.expiresAt
+              )
+                throw new Error('e2ee_history_authority_withdrawn');
+              if (sink) return await sink.deliver(opened.requestId, frame);
+              await client!.appendJson(
+                stream,
+                e2eeRpcEnvelope({
+                  id: opened.requestId,
+                  frame: Buffer.from(frame).toString('hex'),
+                })
+              );
+            },
+            catch: (cause) => cause,
+          })
+        );
       }
       return yield* Effect.void;
     }).pipe(

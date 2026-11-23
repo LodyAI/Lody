@@ -145,6 +145,18 @@ export class E2eeAccessRefusal extends BackendRefusal {
     this.name = 'E2eeAccessRefusal';
   }
 }
+export class SelfServiceRateLimitRefusal extends BackendRefusal {
+  constructor(readonly retryAt: number) {
+    super('e2ee_self_service_rate_limited');
+    this.name = 'SelfServiceRateLimitRefusal';
+  }
+}
+const selfServiceRateLimit = (cause: unknown) => {
+  const retryAt = (cause as { data?: { retryAt?: unknown } } | null)?.data?.retryAt;
+  return typeof retryAt === 'number' && Number.isSafeInteger(retryAt) && retryAt >= 0
+    ? new SelfServiceRateLimitRefusal(retryAt)
+    : null;
+};
 const accessLossCodes = new Set(['e2ee_device_revoked', 'e2ee_member_removed']);
 /** The backend's `ConvexError` refusal code, if it is a well-formed `e2ee_*` code. */
 export const refusalCode = (cause: unknown) => {
@@ -170,7 +182,8 @@ const callFailure = (cause: unknown, bound: boolean) => {
           cause:
             bound && accessLossCodes.has(code)
               ? new E2eeAccessRefusal(code as E2eeAccessRefusal['code'])
-              : new BackendRefusal(code),
+              : ((code === 'e2ee_self_service_rate_limited' ? selfServiceRateLimit(cause) : null) ??
+                new BackendRefusal(code)),
         }
       : {}),
   });
@@ -684,7 +697,16 @@ export function makePersonalCloudNetwork(
             if (result.recordHash !== id || result.status !== 'committed')
               return yield* failure('conflict');
             return undefined;
-          }).pipe(Effect.mapError(() => new LedgerLogError({})));
+          }).pipe(
+            Effect.mapError((error) =>
+              error instanceof BackendError && error.cause instanceof SelfServiceRateLimitRefusal
+                ? new LedgerLogError({
+                    reason: 'self-service-rate-limited',
+                    retryAt: error.cause.retryAt,
+                  })
+                : new LedgerLogError({})
+            )
+          );
         },
       },
     };
