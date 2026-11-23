@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { useParams, useRouter, useSearch } from '@tanstack/react-router';
@@ -10,6 +10,7 @@ import { AppThemeShell } from '@/components/app-theme-shell';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { mobileWorkspaceBaseContextAtom, type MobileWorkspaceBaseContext } from '@/atoms';
+import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useTranslation } from 'react-i18next';
 
@@ -111,6 +112,14 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
   const sessionSearch = useSearch({ from: SESSION_ROUTE_ID, shouldThrow: false });
   const sessionId = sessionParams?.sessionId as SessionId | undefined;
   const open = sessionId != null;
+  const [suppressBackOpen, setSuppressBackOpen] = useState(() =>
+    open ? consumeMobileBackNavigation() : false
+  );
+  useEffect(() => {
+    if (!open && suppressBackOpen) {
+      setSuppressBackOpen(false);
+    }
+  }, [open, suppressBackOpen]);
   const composerPresentation = useMobileComposerPresentation(sessionId);
   const [presentedSessionId, setPresentedSessionId] = useState<string>();
   const { onPresented } = composerPresentation;
@@ -180,7 +189,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
         // already open uses Vaul's own non-animated entry; later Back/swipe and
         // ordinary session opens keep their existing transitions.
         key={composerPresentation.key}
-        defaultOpen={composerPresentation.defaultOpen}
+        defaultOpen={composerPresentation.defaultOpen || suppressBackOpen}
         direction="right"
         repositionInputs={isNativeAppShell()}
         open={open}
@@ -195,7 +204,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
         <DrawerContent
           width="full"
           xstyle={styles.sessionDrawer}
-          skipOpenAnimation={open && composerPresentation.skipOpenAnimation}
+          skipOpenAnimation={open && (composerPresentation.skipOpenAnimation || suppressBackOpen)}
           data-sidebar-swipe-open-disabled
           data-lody-session-drawer
         >
