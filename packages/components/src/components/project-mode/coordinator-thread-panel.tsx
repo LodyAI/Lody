@@ -5,7 +5,6 @@ import {
   getSessionRoomId,
   parseCoordinatorAnchorId,
   parseThreadRootsScalar,
-  resolveSessionPrimaryPullRequest,
   type CoordinatorReplyRef,
   type GitHubMergeMethod,
   type SessionHistoryParsed,
@@ -63,10 +62,13 @@ import {
   type CoordinatorThreadDirectoryIndex,
 } from './coordinator-thread-model';
 import { formatTaskNumber, useCoordinatorTasksData } from './project-board';
-import type {
-  CoordinatorProjectKey,
-  ProjectBoardBucket,
-  ProjectBoardRow,
+import {
+  hasMultiplePullRequestRepos,
+  resolveOrderedSessionPullRequests,
+  resolveOwnerSessionForPullRequest,
+  type CoordinatorProjectKey,
+  type ProjectBoardBucket,
+  type ProjectBoardRow,
 } from './project-board-model';
 import { ProjectBoardPrMenu } from './project-board-pr-menu';
 import {
@@ -197,12 +199,19 @@ function ThreadLinkedTaskItem({
   const { t } = useTranslation();
   const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const title =
+    task?.workItemTitle?.trim() ||
     task?.session.title?.trim() ||
     meta?.title?.trim() ||
     t('sessions.untitled', 'Untitled session');
   const number = formatTaskNumber(task?.taskNumber ?? null);
   const bucket = task?.bucket ?? (meta?.isArchived ? 'accepted' : undefined);
-  const pr = task?.pullRequest ?? (meta ? resolveSessionPrimaryPullRequest(meta) : null);
+  const prs =
+    task?.pullRequests && task.pullRequests.length > 0
+      ? task.pullRequests
+      : meta
+        ? resolveOrderedSessionPullRequests(meta)
+        : [];
+  const showRepo = hasMultiplePullRequestRepos(prs);
 
   return (
     <div {...stylex.props(styles.linkedItemGroup)} data-coordinator-thread-linked-task="">
@@ -220,7 +229,15 @@ function ThreadLinkedTaskItem({
           </span>
         ) : null}
       </button>
-      {pr ? <ProjectBoardPrMenu sessionId={sessionId} pr={pr} onOpenPr={onOpenPr} /> : null}
+      {prs.map((pr) => (
+        <ProjectBoardPrMenu
+          key={pr.url}
+          sessionId={task ? resolveOwnerSessionForPullRequest(task, pr.url) : sessionId}
+          pr={pr}
+          showRepoPrefix={showRepo}
+          onOpenPr={onOpenPr}
+        />
+      ))}
     </div>
   );
 }

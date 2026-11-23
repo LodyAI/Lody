@@ -6982,6 +6982,7 @@
   "projectMode.board.needsYou": "需要你",
   "projectMode.board.working": "进行中",
   "projectMode.board.empty": "暂无",
+  "projectMode.board.memberCount": "{{count}} 个子对话",
   "projectMode.board.createdManually": "手动创建",
   "projectMode.sidebar.projects": "项目",
   "projectMode.sidebar.conversations": "对话",

@@ -222,7 +222,9 @@ describe('Thought visibility', () => {
       contents
     );
     const collapsed = expansion(id, { [key]: false });
-    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: collapsed }))).toEqual([]);
+    expect(visibleContents(buildChatVirtualRows({ ...args, selectionLayouts: collapsed }))).toEqual(
+      []
+    );
     // Search retains original item indexes, including thoughts after a tool call.
     const search = new Map([
       [id, { ...collapsed.get(id)!, activeSearchBlockId: getMessageItemPrefix(id, 2) }],
@@ -834,7 +836,9 @@ describe('coordinator conversation bubbles and search', () => {
       translate,
       maxActions: 6,
     });
-    expect(resolvedInitial.map((a) => ({ id: a.spec.id, label: a.displayLabel, state: a.liveState }))).toEqual([
+    expect(
+      resolvedInitial.map((a) => ({ id: a.spec.id, label: a.displayLabel, state: a.liveState }))
+    ).toEqual([
       { id: 'agent-rebase-merge', label: 'Rebase & merge #42', state: 'ready' },
       { id: 'agent-e2e', label: 'Run E2E suite', state: 'ready' },
       { id: 'rule:pr-open:task-pr', label: 'View #42', state: 'ready' },
@@ -1137,6 +1141,206 @@ describe('coordinator conversation bubbles and search', () => {
       translate: (_key, fallback) => fallback,
     });
     expect(dismissedCardResolved?.isDismissed).toBe(true);
+
+    const implSession = {
+      id: 'wi-impl' as SessionId,
+      title: 'Implement submodule PR',
+      isArchived: false,
+      latestUserMsgId: 'u-impl-1',
+    } as ProjectBoardRow['session'];
+    const reviewSession = {
+      id: 'wi-review' as SessionId,
+      title: 'Review main repo PR',
+      isArchived: false,
+      latestUserMsgId: 'u-rev-1',
+    } as ProjectBoardRow['session'];
+    const prSubmodule = {
+      pr: { url: 'https://github.com/LodyAI/acp-pi/pull/18', status: 'open' as const },
+      url: 'https://github.com/LodyAI/acp-pi/pull/18',
+      status: 'open' as const,
+      repoFullName: 'LodyAI/acp-pi',
+      number: 18,
+      readiness: 'y' as const,
+      state: { m: 'c' as const, s: 's' as const, t: 10 },
+    };
+    const prMainRepo = {
+      pr: { url: 'https://github.com/LodyAI/lody/pull/99', status: 'draft' as const },
+      url: 'https://github.com/LodyAI/lody/pull/99',
+      status: 'draft' as const,
+      repoFullName: 'LodyAI/lody',
+      number: 99,
+      readiness: null,
+      state: null,
+    };
+    const groupedRow: ProjectBoardRow = {
+      workItemId: 'wi-impl',
+      workItemTitle: 'Cross-repo ACP upgrade',
+      collaborationMode: 'delegated',
+      externalRefs: [],
+      session: implSession,
+      members: [
+        {
+          session: implSession,
+          role: 'implement',
+          bucket: 'review',
+          latestMessageAt: 2000,
+          hasUnreadActivity: false,
+          pullRequest: prSubmodule,
+          pullRequests: [prSubmodule],
+        },
+        {
+          session: reviewSession,
+          role: 'review',
+          bucket: 'review',
+          latestMessageAt: 2100,
+          hasUnreadActivity: false,
+          pullRequest: prMainRepo,
+          pullRequests: [prMainRepo],
+        },
+      ],
+      taskNumber: 4,
+      bucket: 'review',
+      latestMessageAt: 2100,
+      pullRequest: prSubmodule,
+      pullRequests: [prSubmodule, prMainRepo],
+    };
+    const groupedTasks = new Map<string, ProjectBoardRow>([
+      ['wi-impl', groupedRow],
+      ['wi-review', groupedRow],
+    ]);
+
+    const multiMemberCardEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-grouped-card',
+      body: '子模块与主仓 PR 都准备好了。',
+      linkedSessionIds: ['wi-impl' as SessionId, 'wi-review' as SessionId],
+      card: {
+        kind: 'next_step',
+        title: '推进跨仓 PR',
+        workItemId: 'wi-impl',
+        snapshotTurnBySession: {
+          'wi-impl': 'u-impl-1',
+          'wi-review': 'u-rev-1',
+        },
+        actions: [
+          {
+            id: 'merge-sub',
+            label: '先合并 acp-pi #18',
+            source: 'agent',
+            intent: {
+              kind: 'client_command',
+              command: 'github.pr_merge',
+              params: { sessionId: 'wi-impl', prUrl: prSubmodule.url },
+            },
+          },
+        ],
+      },
+      createdAt: 2200,
+    };
+
+    const groupedResolvedCard = resolveCoordinatorProactiveCard({
+      entry: multiMemberCardEntry,
+      tasksById: groupedTasks,
+      translate,
+    });
+    expect(groupedResolvedCard?.linkedTasks).toHaveLength(1);
+    expect(groupedResolvedCard?.linkedTasks[0]?.workItemId).toBe('wi-impl');
+
+    const multiPrBubble: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-multi-pr-rules',
+      body: '请查看跨仓进展 [T4](lody://session/wi-impl)',
+      linkedSessionIds: ['wi-impl' as SessionId],
+    };
+    const multiPrStream = [
+      wrap(makeMessage('assistant:multi-pr', 'assistant', [multiPrBubble], true)),
+    ];
+    const multiPrActions = resolveCoordinatorBubbleActions({
+      turnId: 'assistant:multi-pr',
+      entry: multiPrBubble,
+      tasksById: groupedTasks,
+      latestBubbleByTaskId: buildLatestCoordinatorBubbleByTaskId(multiPrStream),
+      translate,
+      maxActions: 6,
+    });
+    expect(multiPrActions.map((a) => ({ label: a.displayLabel, intent: a.spec.intent }))).toEqual([
+      {
+        label: 'Merge acp-pi #18',
+        intent: {
+          kind: 'client_command',
+          command: 'github.pr_merge',
+          params: { sessionId: 'wi-impl', prUrl: prSubmodule.url, method: 'squash' },
+        },
+      },
+      {
+        label: 'View acp-pi #18',
+        intent: {
+          kind: 'client_command',
+          command: 'panel.open',
+          params: { target: 'pr', sessionId: 'wi-impl', url: prSubmodule.url },
+        },
+      },
+      {
+        label: 'Mark lody #99 ready',
+        intent: {
+          kind: 'client_command',
+          command: 'github.pr_ready',
+          params: { sessionId: 'wi-review', prUrl: prMainRepo.url },
+        },
+      },
+      {
+        label: 'View lody #99',
+        intent: {
+          kind: 'client_command',
+          command: 'panel.open',
+          params: { target: 'pr', sessionId: 'wi-review', url: prMainRepo.url },
+        },
+      },
+      {
+        label: 'Accept T4',
+        intent: {
+          kind: 'client_command',
+          command: 'task.accept',
+          params: { sessionId: 'wi-impl', sessionIds: ['wi-impl', 'wi-review'] },
+        },
+      },
+    ]);
+
+    const groupedCardStream = [
+      wrap(makeMessage('assistant:grouped-card-turn', 'assistant', [multiMemberCardEntry], true)),
+    ];
+    const groupedCardKey = formatCoordinatorBubbleKey(
+      'assistant:grouped-card-turn',
+      'b-grouped-card'
+    );
+    expect(
+      buildSupersededCoordinatorCardKeys({
+        items: groupedCardStream,
+        tasksById: groupedTasks,
+      }).has(groupedCardKey)
+    ).toBe(false);
+
+    const advancedReviewSession = {
+      ...reviewSession,
+      latestUserMsgId: 'u-rev-direct-2',
+    };
+    const groupedRowAfterDirectChildChat: ProjectBoardRow = {
+      ...groupedRow,
+      members: [
+        groupedRow.members[0]!,
+        { ...groupedRow.members[1]!, session: advancedReviewSession },
+      ],
+    };
+    const groupedTasksAfterChildChat = new Map<string, ProjectBoardRow>([
+      ['wi-impl', groupedRowAfterDirectChildChat],
+      ['wi-review', groupedRowAfterDirectChildChat],
+    ]);
+    expect(
+      buildSupersededCoordinatorCardKeys({
+        items: groupedCardStream,
+        tasksById: groupedTasksAfterChildChat,
+      }).has(groupedCardKey)
+    ).toBe(true);
   });
 
   it('selects coordinator avatar moods from message content and restricts Lottie playback to one-shot live arrivals', () => {

@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import { extractLinkedSessionIdsFromText } from './coordinator-threads';
+import {
+  normalizeCardSnapshotTurnBySession,
+  normalizeWorkItemId,
+  WORK_ITEM_ID_MAX_CHARS,
+} from './coordinator-work-items';
 import type { SessionId } from './ids';
 
 export const COORDINATOR_ACTIONS_MAX_COUNT = 6;
@@ -94,6 +99,8 @@ export const CoordinatorProactiveCardSpecSchema = z
     kind: CoordinatorCardKindSchema.optional(),
     title: z.string().trim().min(1).max(COORDINATOR_CARD_TITLE_MAX_CHARS),
     summary: z.string().trim().max(COORDINATOR_CARD_SUMMARY_MAX_CHARS).optional(),
+    workItemId: z.string().trim().min(1).max(WORK_ITEM_ID_MAX_CHARS).optional(),
+    snapshotTurnBySession: z.record(z.string(), z.string()).optional(),
     actions: z.array(CoordinatorActionSpecSchema).min(1).max(COORDINATOR_ACTIONS_MAX_COUNT),
   })
   .strict();
@@ -153,10 +160,14 @@ export function normalizeCoordinatorProactiveCard(
     typeof record.summary === 'string' && record.summary.trim().length > 0
       ? record.summary.trim().slice(0, COORDINATOR_CARD_SUMMARY_MAX_CHARS)
       : undefined;
+  const workItemId = normalizeWorkItemId(record.workItemId);
+  const snapshotTurnBySession = normalizeCardSnapshotTurnBySession(record.snapshotTurnBySession);
   return {
     ...(kindParsed.success ? { kind: kindParsed.data } : {}),
     title,
     ...(summary ? { summary } : {}),
+    ...(workItemId ? { workItemId } : {}),
+    ...(snapshotTurnBySession ? { snapshotTurnBySession } : {}),
     actions,
   };
 }
@@ -383,8 +394,7 @@ export function matchUserMessageToOpenCoordinatorCards(
 
   if (input.replyToTargetTurnId && input.replyToTargetBubbleId) {
     const exact = openCards.filter(
-      (c) =>
-        c.turnId === input.replyToTargetTurnId && c.bubbleId === input.replyToTargetBubbleId
+      (c) => c.turnId === input.replyToTargetTurnId && c.bubbleId === input.replyToTargetBubbleId
     );
     if (exact.length > 0) return exact.map((c) => c.key);
   }

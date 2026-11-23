@@ -6995,6 +6995,7 @@
   "projectMode.board.needsYou": "Needs you",
   "projectMode.board.working": "In progress",
   "projectMode.board.empty": "Nothing here",
+  "projectMode.board.memberCount": "{{count}} sessions",
   "projectMode.board.createdManually": "Created manually",
   "projectMode.sidebar.projects": "Projects",
   "projectMode.sidebar.conversations": "Conversations",

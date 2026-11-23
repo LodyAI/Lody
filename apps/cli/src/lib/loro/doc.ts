@@ -3142,7 +3142,26 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
       acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
+      workItems: state.workItems as SessionDocMeta['workItems'],
     };
+  }
+
+  upsertCoordinatorWorkItem(
+    workItemId: string,
+    updater: (
+      existing: import('@lody/shared').CoordinatorWorkItemDoc | undefined
+    ) => import('@lody/shared').CoordinatorWorkItemDoc
+  ): import('@lody/shared').CoordinatorWorkItemDoc {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    const existing = this.mirror.getState().workItems?.[workItemId] as
+      | import('@lody/shared').CoordinatorWorkItemDoc
+      | undefined;
+    const next = updater(existing);
+    this.mirror.setState((draft) => {
+      draft.workItems ??= {};
+      draft.workItems[workItemId] = next;
+    });
+    return next;
   }
 
   /** Trusted human send only; generic history writes/imports never author this outbox. */

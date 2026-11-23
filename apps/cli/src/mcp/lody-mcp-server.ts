@@ -136,6 +136,17 @@ import {
   describeChatFailure,
   readChatFailureNotice,
   type LodyTurnFailure,
+  COORDINATOR_WORK_ITEMS_MAX_COUNT,
+  CoordinatorCollaborationModeSchema,
+  CoordinatorExternalRefSchema,
+  normalizeCoordinatorExternalRefs,
+  normalizeWorkItemId,
+  normalizeWorkItemRole,
+  WORK_ITEM_EXTERNAL_REFS_MAX_COUNT,
+  WORK_ITEM_ID_MAX_CHARS,
+  WORK_ITEM_MEMBERS_MAX_COUNT,
+  WORK_ITEM_ROLE_MAX_CHARS,
+  WORK_ITEM_TITLE_MAX_CHARS,
 } from '@lody/shared';
 import { makeLocalControlClientAuto } from '@lody/shared/node/local-ipc';
 import {
@@ -265,6 +276,7 @@ const SESSION_MANAGE_TOOL_NAME = 'lody_session_manage';
 const OPERATION_CANCEL_TOOL_NAME = 'lody_operation_cancel';
 const COORDINATOR_SEND_MESSAGE_TOOL_NAME = 'lody_coordinator_send_message';
 const COORDINATOR_SET_STATUS_TOOL_NAME = 'lody_coordinator_set_status';
+const COORDINATOR_WORK_ITEM_TOOL_NAME = 'lody_coordinator_work_item';
 const MAX_COORDINATOR_MESSAGE_CHARS = 64 * 1024;
 const MAX_COORDINATOR_STATUS_CHARS = 240;
 
@@ -326,6 +338,15 @@ const CoordinatorSendMessageCardInputSchema = z
       .optional()
       .describe(
         'Concise context summary (findings, affected files, verification status, or trade-offs) so the user can decide directly on the card without opening child conversations.'
+      ),
+    workItemId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(WORK_ITEM_ID_MAX_CHARS)
+      .optional()
+      .describe(
+        'Optional WorkItem identifier when this card applies to a multi-session task group.'
       ),
     actions: z
       .array(CoordinatorSendMessageActionInputSchema)
@@ -392,6 +413,75 @@ const CoordinatorSetStatusInputSchema = z
       ),
   })
   .strict();
+
+const CoordinatorWorkItemMemberInputSchema = z
+  .object({
+    sessionId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(240)
+      .describe(
+        'Child conversation sessionId or lody://session/<id> URI to include in this WorkItem.'
+      ),
+    role: z
+      .string()
+      .trim()
+      .max(WORK_ITEM_ROLE_MAX_CHARS)
+      .optional()
+      .describe(
+        'Optional short role label of this conversation inside the group (for example "implement", "review", or "submodule:pi").'
+      ),
+  })
+  .strict();
+
+const CoordinatorWorkItemInputSchema = z
+  .object({
+    workItemId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(WORK_ITEM_ID_MAX_CHARS)
+      .optional()
+      .describe(
+        'Existing WorkItem id (or an existing lead child sessionId so T<n> numbering stays unchanged) to update. Omit to create or derive from the first member.'
+      ),
+    title: z
+      .string()
+      .trim()
+      .max(WORK_ITEM_TITLE_MAX_CHARS)
+      .optional()
+      .describe('Shared task-group title in the user language.'),
+    mode: CoordinatorCollaborationModeSchema.optional().describe(
+      'Collaboration mode: "delegated" (coordinator relays outcomes) or "direct" (user works directly in child conversation while coordinator watches milestones).'
+    ),
+    externalRefs: z
+      .array(CoordinatorExternalRefSchema)
+      .max(WORK_ITEM_EXTERNAL_REFS_MAX_COUNT)
+      .optional()
+      .describe(
+        'Optional external resource links associated with this WorkItem (for example { kind: "github_issue", uri: "...", label: "#3300" } or Linear/preview links).'
+      ),
+    members: z
+      .array(CoordinatorWorkItemMemberInputSchema)
+      .max(WORK_ITEM_MEMBERS_MAX_COUNT)
+      .optional()
+      .describe(
+        'Child conversations that collaborate on this WorkItem (for example an implementer conversation and a reviewer conversation, or conversations across repositories).'
+      ),
+  })
+  .strict()
+  .refine(
+    (val) =>
+      Boolean(val.workItemId?.trim()) ||
+      Boolean(val.title?.trim()) ||
+      Boolean(val.mode) ||
+      Boolean(val.externalRefs) ||
+      Boolean(val.members?.length),
+    {
+      message: 'Provide at least one of workItemId, title, mode, externalRefs, or members',
+    }
+  );
 const SESSION_FILE_MAX_SIZE_MB = Math.floor(SESSION_FILE_MAX_SIZE_BYTES / (1024 * 1024));
 const SESSION_CONTROL_TIMEOUT_MS = 30_000;
 const MAX_MCP_SESSION_WAIT_TIMEOUT_SECONDS = 3_600;
@@ -5513,7 +5603,7 @@ export function buildSessionToolServer(
               explicitThreadId: output.threadId,
             })
           : undefined;
-      const normalizedCard: CoordinatorProactiveCardSpec | undefined =
+      let normalizedCard: CoordinatorProactiveCardSpec | undefined =
         output.kind === 'message' && output.card
           ? normalizeCoordinatorProactiveCard({
               ...output.card,
@@ -5555,6 +5645,42 @@ export function buildSessionToolServer(
               return merged.length > 0 ? merged : undefined;
             })()
           : undefined;
+
+      if (normalizedCard && (linkedSessionIds?.length || normalizedCard.workItemId)) {
+        const snapshotTurnBySession: Record<string, string> = {};
+        const candidateSessionIds = new Set<SessionId>(linkedSessionIds ?? []);
+        const targetWorkItemIds = new Set<string>();
+        if (normalizedCard.workItemId) {
+          targetWorkItemIds.add(normalizedCard.workItemId);
+        }
+        for (const sid of candidateSessionIds) {
+          const childRow = await daemon.manager.repo
+            .getDocMeta(getSessionRoomId(sid))
+            .catch(() => undefined);
+          if (!childRow?.meta || isLoroRepoDocDeleted(childRow)) continue;
+          const childMeta = childRow.meta as SessionMeta;
+          snapshotTurnBySession[sid] = childMeta.latestUserMsgId?.trim() ?? '';
+          if (childMeta.workItemId?.trim()) {
+            targetWorkItemIds.add(childMeta.workItemId.trim());
+          }
+        }
+        if (targetWorkItemIds.size > 0) {
+          const aliveSessions = await listAliveSessionMetas(daemon.manager);
+          for (const entry of aliveSessions) {
+            const entrySid = entry.meta.id;
+            if (!entrySid) continue;
+            const effectiveGroupId = entry.meta.workItemId?.trim() || entrySid;
+            if (!targetWorkItemIds.has(effectiveGroupId)) continue;
+            snapshotTurnBySession[entrySid] = entry.meta.latestUserMsgId?.trim() ?? '';
+          }
+        }
+        if (Object.keys(snapshotTurnBySession).length > 0) {
+          normalizedCard = {
+            ...normalizedCard,
+            snapshotTurnBySession,
+          };
+        }
+      }
 
       const result = await backend.applyHistoryAction({
         kind: 'coordinator-output',
@@ -5635,6 +5761,146 @@ export function buildSessionToolServer(
       async (args) => {
         try {
           return await applyCoordinatorTurnOutput({ kind: 'status', status: args.status });
+        } catch (error) {
+          return mcpErrorResult(error);
+        }
+      }
+    );
+
+    registerSessionTool(
+      COORDINATOR_WORK_ITEM_TOOL_NAME,
+      {
+        summary:
+          'Create or update a multi-session task group (WorkItem) and bind collaborating child conversations, collaboration mode, or external links.',
+        title: 'Manage coordinator work item',
+        description:
+          'Create or update a coordinator WorkItem (task group `T<n>`) in this project. Use this when multiple child conversations collaborate on one goal (such as an implementer conversation plus a reviewer conversation, or conversations across multiple repositories/submodules), when setting `mode: "direct"` vs `"delegated"`, or when attaching external issue/preview links. Pass an existing lead child `sessionId` as `workItemId` when promoting an existing single-conversation task into a group so its `T<n>` number stays unchanged. Ready to call directly without lody_help.',
+        inputSchema: CoordinatorWorkItemInputSchema,
+        exemptFromHelp: true,
+      },
+      async (args) => {
+        try {
+          const ctx = getSessionContext();
+          const daemon = getDaemonWorkspace();
+          if (!daemon) throw new Error('Coordinator tools require an active daemon session');
+          const row = await daemon.manager.repo.getDocMeta(getSessionRoomId(ctx.sessionId));
+          const meta =
+            row?.meta && !isLoroRepoDocDeleted(row) ? (row.meta as SessionMeta) : undefined;
+          if (!isCoordinatorSession(meta)) {
+            throw new Error(
+              'Coordinator tools are available only inside a coordinator conversation'
+            );
+          }
+
+          const resolvedMembers: Array<{
+            sessionId: SessionId;
+            role?: string;
+            createdAtMs: number;
+          }> = [];
+          const seenMemberIds = new Set<string>();
+          for (const member of args.members ?? []) {
+            const extracted =
+              extractLinkedSessionIdsFromText(member.sessionId)[0] ??
+              (resolveSessionLinkId(
+                member.sessionId,
+                getMcpWorkspaceId(ctx)
+              ) as SessionId | null) ??
+              (member.sessionId.trim() as SessionId);
+            if (!extracted || seenMemberIds.has(extracted)) continue;
+            if (extracted === ctx.sessionId) {
+              throw new Error(
+                'Cannot add the coordinator conversation itself as a WorkItem member'
+              );
+            }
+            const memberRow = await daemon.manager.repo.getDocMeta(getSessionRoomId(extracted));
+            const memberMeta =
+              memberRow?.meta && !isLoroRepoDocDeleted(memberRow)
+                ? (memberRow.meta as SessionMeta)
+                : undefined;
+            if (!memberMeta) {
+              throw new Error(`Target conversation not found: ${extracted}`);
+            }
+            if (meta?.userId && memberMeta.userId && memberMeta.userId !== meta.userId) {
+              throw new Error(`Cannot group a conversation owned by another user: ${extracted}`);
+            }
+            seenMemberIds.add(extracted);
+            resolvedMembers.push({
+              sessionId: extracted,
+              role: normalizeWorkItemRole(member.role),
+              createdAtMs: Date.parse(memberMeta.createdAt) || getServerNow(),
+            });
+          }
+
+          const workItemId =
+            normalizeWorkItemId(args.workItemId) ??
+            resolvedMembers[0]?.sessionId ??
+            `wi-${randomUUID().slice(0, 12)}`;
+
+          const sessionDoc = await daemon.manager.getOrCreateSessionDoc(ctx.sessionId);
+          const docState = await sessionDoc.getDocState();
+          const currentMap = docState?.workItems ?? {};
+          if (
+            !currentMap[workItemId] &&
+            Object.keys(currentMap).length >= COORDINATOR_WORK_ITEMS_MAX_COUNT
+          ) {
+            throw new Error(
+              `Coordinator WorkItem limit (${COORDINATOR_WORK_ITEMS_MAX_COUNT}) reached`
+            );
+          }
+
+          const now = getServerNow();
+          const earliestMemberCreatedAt =
+            resolvedMembers.length > 0
+              ? Math.min(...resolvedMembers.map((m) => m.createdAtMs))
+              : now;
+          const normalizedTitle =
+            typeof args.title === 'string' && args.title.trim().length > 0
+              ? args.title.replace(/\s+/g, ' ').trim().slice(0, WORK_ITEM_TITLE_MAX_CHARS)
+              : undefined;
+          const normalizedRefs =
+            args.externalRefs !== undefined
+              ? normalizeCoordinatorExternalRefs(args.externalRefs)
+              : undefined;
+
+          const updatedWorkItem = sessionDoc.upsertCoordinatorWorkItem(workItemId, (existing) => ({
+            id: workItemId,
+            ...(existing?.taskNumber !== undefined ? { taskNumber: existing.taskNumber } : {}),
+            ...(normalizedTitle !== undefined
+              ? { title: normalizedTitle }
+              : existing?.title
+                ? { title: existing.title }
+                : {}),
+            ...(args.mode !== undefined
+              ? { mode: args.mode }
+              : existing?.mode
+                ? { mode: existing.mode }
+                : {}),
+            ...(normalizedRefs !== undefined
+              ? normalizedRefs.length > 0
+                ? { externalRefs: normalizedRefs }
+                : {}
+              : existing?.externalRefs?.length
+                ? { externalRefs: existing.externalRefs }
+                : {}),
+            ...(existing?.acceptedAt !== undefined ? { acceptedAt: existing.acceptedAt } : {}),
+            createdAt: existing?.createdAt
+              ? Math.min(existing.createdAt, earliestMemberCreatedAt)
+              : earliestMemberCreatedAt,
+            updatedAt: now,
+          }));
+
+          for (const member of resolvedMembers) {
+            await daemon.manager.repo.upsertDocMeta(getSessionRoomId(member.sessionId), {
+              workItemId,
+              ...(member.role !== undefined ? { workItemRole: member.role } : {}),
+            });
+          }
+
+          return jsonTextResult({
+            ok: true,
+            workItem: updatedWorkItem,
+            memberSessionIds: resolvedMembers.map((m) => m.sessionId),
+          });
         } catch (error) {
           return mcpErrorResult(error);
         }

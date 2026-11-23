@@ -169,7 +169,12 @@ export function useCoordinatorActionExecutor(options: {
             | SessionMeta
             | undefined)
         : undefined;
-      const prView = task?.pullRequest ?? resolveSessionPrimaryPullRequest(meta);
+      const matchedTaskPr = explicitUrl
+        ? task?.pullRequests?.find(
+            (candidate) => candidate.url.trim().toLowerCase() === explicitUrl.toLowerCase()
+          )
+        : undefined;
+      const prView = matchedTaskPr ?? task?.pullRequest ?? resolveSessionPrimaryPullRequest(meta);
       const url = explicitUrl ?? prView?.url ?? '';
       const parsed = url ? parseGitHubReferenceUrl(url) : null;
       const repoFullName =
@@ -188,15 +193,28 @@ export function useCoordinatorActionExecutor(options: {
 
   const commandRegistry = useMemo<CoordinatorActionCommandRegistry>(() => {
     const registry = createCoordinatorActionCommandRegistry({
-      [COORDINATOR_CLIENT_COMMANDS.taskAccept]: (params) => {
+      [COORDINATOR_CLIENT_COMMANDS.taskAccept]: (params, ctx) => {
         const sid = readParamString(params, 'sessionId');
-        const list = Array.isArray(params?.sessionIds)
-          ? params.sessionIds.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+        const rawList = Array.isArray(params?.sessionIds)
+          ? params.sessionIds.filter(
+              (v): v is string => typeof v === 'string' && v.trim().length > 0
+            )
           : sid
             ? [sid]
             : [];
-        if (list.length > 0) {
-          acceptTasks(list);
+        const expanded: string[] = [];
+        for (const id of rawList) {
+          const task = ctx.tasks.get(id);
+          if (task?.members && task.members.length > 0) {
+            for (const member of task.members) {
+              expanded.push(member.session.id);
+            }
+          } else {
+            expanded.push(id);
+          }
+        }
+        if (expanded.length > 0) {
+          acceptTasks(expanded);
         }
         return { persistResolution: true, summary: t('projectMode.board.accepted', 'Accepted') };
       },
@@ -232,7 +250,12 @@ export function useCoordinatorActionExecutor(options: {
 
       [COORDINATOR_CLIENT_COMMANDS.githubPrMerge]: async (params, ctx) => {
         const resolved = resolvePrTarget(params, ctx);
-        if (!hasHostedGitHub || !currentWorkspaceId || !resolved.repoFullName || !resolved.prNumber) {
+        if (
+          !hasHostedGitHub ||
+          !currentWorkspaceId ||
+          !resolved.repoFullName ||
+          !resolved.prNumber
+        ) {
           if (resolved.sessionId && resolved.prView) {
             onOpenPr(resolved.sessionId, resolved.prView);
             return;
@@ -282,7 +305,12 @@ export function useCoordinatorActionExecutor(options: {
 
       [COORDINATOR_CLIENT_COMMANDS.githubPrReady]: async (params, ctx) => {
         const resolved = resolvePrTarget(params, ctx);
-        if (!hasHostedGitHub || !currentWorkspaceId || !resolved.repoFullName || !resolved.prNumber) {
+        if (
+          !hasHostedGitHub ||
+          !currentWorkspaceId ||
+          !resolved.repoFullName ||
+          !resolved.prNumber
+        ) {
           if (resolved.sessionId && resolved.prView) {
             onOpenPr(resolved.sessionId, resolved.prView);
             return;
@@ -325,7 +353,12 @@ export function useCoordinatorActionExecutor(options: {
 
       [COORDINATOR_CLIENT_COMMANDS.githubPrClose]: async (params, ctx) => {
         const resolved = resolvePrTarget(params, ctx);
-        if (!hasHostedGitHub || !currentWorkspaceId || !resolved.repoFullName || !resolved.prNumber) {
+        if (
+          !hasHostedGitHub ||
+          !currentWorkspaceId ||
+          !resolved.repoFullName ||
+          !resolved.prNumber
+        ) {
           if (resolved.url) void openExternalUrl(resolved.url);
           return;
         }
@@ -529,10 +562,15 @@ export function useCoordinatorActionExecutor(options: {
 
   const dismissCard = useCallback(
     async (req: CoordinatorCardDismissRequest): Promise<void> => {
-      await persistActionResolution(req.turnId, req.bubbleId, COORDINATOR_CARD_DISMISSED_ACTION_ID, {
-        status: 'dismissed',
-        resolvedAt: getServerNow(),
-      });
+      await persistActionResolution(
+        req.turnId,
+        req.bubbleId,
+        COORDINATOR_CARD_DISMISSED_ACTION_ID,
+        {
+          status: 'dismissed',
+          resolvedAt: getServerNow(),
+        }
+      );
     },
     [persistActionResolution]
   );

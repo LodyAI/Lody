@@ -29,6 +29,10 @@ import type {
   ResolvedCoordinatorProactiveCard,
 } from './coordinator-action-engine';
 import { formatTaskNumber } from './project-board';
+import {
+  hasMultiplePullRequestRepos,
+  resolveOwnerSessionForPullRequest,
+} from './project-board-model';
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
 const COLLAPSE_EASE = 'cubic-bezier(0.2, 0, 0, 1)';
@@ -719,10 +723,7 @@ export function CoordinatorProactiveCard({
           setMountedVisible(false);
         }
       }}
-      {...stylex.props(
-        styles.outerPresenceGrid,
-        shouldHideCard && styles.outerPresenceHidden
-      )}
+      {...stylex.props(styles.outerPresenceGrid, shouldHideCard && styles.outerPresenceHidden)}
     >
       <div {...stylex.props(styles.collapseInner)}>
         <div
@@ -780,12 +781,22 @@ export function CoordinatorProactiveCard({
                       const num = formatTaskNumber(task.taskNumber);
                       const diff = task.session.diffStats?.allChange;
                       const showDiff = hasWorkspaceChanges(diff);
-                      const pr = task.pullRequest;
+                      const prs =
+                        task.pullRequests && task.pullRequests.length > 0
+                          ? task.pullRequests
+                          : task.pullRequest
+                            ? [task.pullRequest]
+                            : [];
+                      const showRepo = hasMultiplePullRequestRepos(prs);
+                      const title = task.workItemTitle?.trim() || task.session.title;
                       return (
-                        <span key={task.session.id} {...stylex.props(styles.collapsedRight)}>
+                        <span
+                          key={task.workItemId || task.session.id}
+                          {...stylex.props(styles.collapsedRight)}
+                        >
                           <button
                             type="button"
-                            title={task.session.title}
+                            title={title}
                             onClick={(event) => {
                               event.stopPropagation();
                               onOpenTask?.(task.session.id);
@@ -795,7 +806,7 @@ export function CoordinatorProactiveCard({
                             <span {...stylex.props(styles.taskNumber)}>
                               {num ?? t('sessions.untitled', 'Task')}
                             </span>
-                            {showDiff && diff && !pr ? (
+                            {showDiff && diff && prs.length === 0 ? (
                               <>
                                 {diff.add > 0 ? (
                                   <span {...stylex.props(styles.diffAdd)}>+{diff.add}</span>
@@ -806,23 +817,31 @@ export function CoordinatorProactiveCard({
                               </>
                             ) : null}
                           </button>
-                          {pr ? (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                if (onOpenPr) {
-                                  onOpenPr(task.session.id, pr);
-                                } else {
-                                  onOpenTask?.(task.session.id);
-                                }
-                              }}
-                              {...stylex.props(styles.prChip)}
-                            >
-                              <GitPullRequest size={11} aria-hidden="true" />
-                              <span>{pr.number !== null ? `#${pr.number}` : 'PR'}</span>
-                            </button>
-                          ) : null}
+                          {prs.map((pr) => {
+                            const shortRepo = pr.repoFullName?.split('/')[1] || pr.repoFullName;
+                            const numLabel = pr.number !== null ? `#${pr.number}` : 'PR';
+                            return (
+                              <button
+                                key={pr.url}
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  const ownerSid = resolveOwnerSessionForPullRequest(task, pr.url);
+                                  if (onOpenPr) {
+                                    onOpenPr(ownerSid, pr);
+                                  } else {
+                                    onOpenTask?.(ownerSid);
+                                  }
+                                }}
+                                {...stylex.props(styles.prChip)}
+                              >
+                                <GitPullRequest size={11} aria-hidden="true" />
+                                <span>
+                                  {showRepo && shortRepo ? `${shortRepo} ${numLabel}` : numLabel}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </span>
                       );
                     })}
@@ -855,12 +874,23 @@ export function CoordinatorProactiveCard({
                     {card.linkedTasks.map((task) => {
                       const num = formatTaskNumber(task.taskNumber);
                       const title =
-                        task.session.title?.trim() || t('sessions.untitled', 'Untitled session');
+                        task.workItemTitle?.trim() ||
+                        task.session.title?.trim() ||
+                        t('sessions.untitled', 'Untitled session');
                       const diff = task.session.diffStats?.allChange;
                       const showDiff = hasWorkspaceChanges(diff);
-                      const pr = task.pullRequest;
+                      const prs =
+                        task.pullRequests && task.pullRequests.length > 0
+                          ? task.pullRequests
+                          : task.pullRequest
+                            ? [task.pullRequest]
+                            : [];
+                      const showRepo = hasMultiplePullRequestRepos(prs);
                       return (
-                        <span key={task.session.id} {...stylex.props(styles.taskChipGroup)}>
+                        <span
+                          key={task.workItemId || task.session.id}
+                          {...stylex.props(styles.taskChipGroup)}
+                        >
                           <button
                             type="button"
                             title={title}
@@ -883,23 +913,31 @@ export function CoordinatorProactiveCard({
                               </>
                             ) : null}
                           </button>
-                          {pr ? (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                if (onOpenPr) {
-                                  onOpenPr(task.session.id, pr);
-                                } else {
-                                  onOpenTask?.(task.session.id);
-                                }
-                              }}
-                              {...stylex.props(styles.prChip)}
-                            >
-                              <GitPullRequest size={11} aria-hidden="true" />
-                              <span>{pr.number !== null ? `#${pr.number}` : 'PR'}</span>
-                            </button>
-                          ) : null}
+                          {prs.map((pr) => {
+                            const shortRepo = pr.repoFullName?.split('/')[1] || pr.repoFullName;
+                            const numLabel = pr.number !== null ? `#${pr.number}` : 'PR';
+                            return (
+                              <button
+                                key={pr.url}
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  const ownerSid = resolveOwnerSessionForPullRequest(task, pr.url);
+                                  if (onOpenPr) {
+                                    onOpenPr(ownerSid, pr);
+                                  } else {
+                                    onOpenTask?.(ownerSid);
+                                  }
+                                }}
+                                {...stylex.props(styles.prChip)}
+                              >
+                                <GitPullRequest size={11} aria-hidden="true" />
+                                <span>
+                                  {showRepo && shortRepo ? `${shortRepo} ${numLabel}` : numLabel}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </span>
                       );
                     })}

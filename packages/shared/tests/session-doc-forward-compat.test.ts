@@ -252,4 +252,64 @@ describe('createSessionControlPlaneMirror', () => {
     expect(remaining[0]?.task).toBe('second');
     mirror.dispose();
   });
+
+  it('round-trips coordinator workItems across control-plane snapshots without hydrating history', () => {
+    const sourceDoc = new LoroDoc();
+    const fullMirror = createSessionMirror(sourceDoc);
+    fullMirror.setState((draft) => ({
+      ...draft,
+      history: [
+        {
+          id: 'heavy-turn-1',
+          role: 'user',
+          timestamp: '2026-11-24T00:00:00.000Z',
+          items: [{ type: 'text', text: 'large conversation body' }],
+        },
+      ],
+      workItems: {
+        'child-impl-1': {
+          id: 'child-impl-1',
+          title: 'ACP submodule auth sync',
+          mode: 'direct',
+          externalRefs: [
+            {
+              kind: 'linear_issue',
+              label: 'ENG-204',
+              uri: 'https://linear.app/lody/issue/ENG-204',
+            },
+          ],
+          createdAt: 1_700_000_000_000,
+          updatedAt: 1_700_000_005_000,
+        },
+      },
+    }));
+
+    const replicaDoc = new LoroDoc();
+    replicaDoc.import(sourceDoc.export({ mode: 'snapshot' }));
+    const controlMirror = createSessionControlPlaneMirror({
+      doc: replicaDoc,
+      initialState: { session: { id: sessionId } },
+    });
+
+    expect((controlMirror.getState() as Record<string, unknown>).history).toBeUndefined();
+    expect(controlMirror.getState().workItems).toMatchObject({
+      'child-impl-1': {
+        id: 'child-impl-1',
+        title: 'ACP submodule auth sync',
+        mode: 'direct',
+        externalRefs: [
+          {
+            kind: 'linear_issue',
+            label: 'ENG-204',
+            uri: 'https://linear.app/lody/issue/ENG-204',
+          },
+        ],
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_005_000,
+      },
+    });
+
+    controlMirror.dispose();
+    fullMirror.dispose();
+  });
 });

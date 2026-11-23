@@ -2659,6 +2659,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       const ordinaryTools = (await ordinaryClient.listTools()).tools.map((tool) => tool.name);
       expect(ordinaryTools).not.toContain('lody_coordinator_send_message');
       expect(ordinaryTools).not.toContain('lody_coordinator_set_status');
+      expect(ordinaryTools).not.toContain('lody_coordinator_work_item');
 
       const coordinatorTools = (await coordinatorClient.listTools()).tools;
       const sendTool = coordinatorTools.find(
@@ -2667,8 +2668,12 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       const statusTool = coordinatorTools.find(
         (tool) => tool.name === 'lody_coordinator_set_status'
       );
+      const workItemTool = coordinatorTools.find(
+        (tool) => tool.name === 'lody_coordinator_work_item'
+      );
       expect(sendTool?.description).not.toContain('Before execution, read lody_help');
       expect(statusTool?.description).not.toContain('Before execution, read lody_help');
+      expect(workItemTool?.description).not.toContain('Before execution, read lody_help');
     } finally {
       await ordinaryClient.close();
       await coordinatorClient.close();
@@ -3159,5 +3164,180 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       isCoordinator: true,
     });
     expect(headerAfterDismiss).toBeUndefined();
+
+    const implSessionId = 'child-impl-group' as SessionId;
+    const reviewSessionId = 'child-review-group' as SessionId;
+    const foreignSessionId = 'child-foreign-group' as SessionId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(implSessionId), {
+      id: implSessionId,
+      userId: ownerUserId,
+      machineId,
+      openedBySessionId: sessionId,
+      createdAt: '2026-11-20T00:05:00.000Z',
+      cliType: 'builtin',
+      agentType: 'claude',
+      latestUserMsgId: 'u-impl-init',
+    });
+    await manager.repo.upsertDocMeta(getSessionRoomId(reviewSessionId), {
+      id: reviewSessionId,
+      userId: ownerUserId,
+      machineId,
+      openedBySessionId: sessionId,
+      createdAt: '2026-11-20T00:05:10.000Z',
+      cliType: 'builtin',
+      agentType: 'claude',
+      latestUserMsgId: 'u-review-init',
+    });
+    await manager.repo.upsertDocMeta(getSessionRoomId(foreignSessionId), {
+      id: foreignSessionId,
+      userId: 'other-user' as UserId,
+      machineId,
+      createdAt: '2026-11-20T00:05:20.000Z',
+      cliType: 'builtin',
+      agentType: 'claude',
+    });
+
+    const rejectedForeign = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_work_item', {
+        workItemId: implSessionId,
+        members: [{ sessionId: foreignSessionId, role: 'review' }],
+      })
+    );
+    expect(rejectedForeign.isError).toBe(true);
+    expect(JSON.stringify(rejectedForeign.content)).toContain(
+      'Cannot group a conversation owned by another user: child-foreign-group'
+    );
+
+    const groupResult = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_work_item', {
+        workItemId: `lody://session/${implSessionId}?workspace=${workspaceId}`,
+        title: 'ACP submodule token refresh',
+        mode: 'direct',
+        members: [
+          {
+            sessionId: `lody://session/${implSessionId}?workspace=${workspaceId}`,
+            role: 'implement',
+          },
+          { sessionId: reviewSessionId, role: 'review' },
+        ],
+        externalRefs: [
+          {
+            kind: 'linear_issue',
+            label: 'ENG-204',
+            uri: 'https://linear.app/lody/issue/ENG-204',
+          },
+        ],
+      })
+    );
+    expect(groupResult.isError, JSON.stringify(groupResult.content)).not.toBe(true);
+
+    const docStateAfterGroup = await sessionDoc.getDocState();
+    expect(docStateAfterGroup.workItems?.[implSessionId]).toMatchObject({
+      id: implSessionId,
+      title: 'ACP submodule token refresh',
+      mode: 'direct',
+      externalRefs: [
+        {
+          kind: 'linear_issue',
+          label: 'ENG-204',
+          uri: 'https://linear.app/lody/issue/ENG-204',
+        },
+      ],
+    });
+    expect((await manager.repo.getDocMeta(getSessionRoomId(implSessionId)))?.meta).toMatchObject({
+      workItemId: implSessionId,
+      workItemRole: 'implement',
+    });
+    expect((await manager.repo.getDocMeta(getSessionRoomId(reviewSessionId)))?.meta).toMatchObject({
+      workItemId: implSessionId,
+      workItemRole: 'review',
+    });
+
+    await backend.openAssistantTurn({
+      turnId: 'assistant:user-after-card-dismiss',
+      userTurnId: 'user-after-card-dismiss',
+      timestamp: new Date(1_700_000_009_000).toISOString(),
+    });
+    const groupedDaemon: DaemonWorkspace = {
+      ...daemon,
+      readActiveAssistantTurnId: () => 'assistant:user-after-card-dismiss',
+    };
+
+    const groupedCardResult = await runWithDaemonWorkspace(groupedDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_send_message', {
+        card: {
+          kind: 'next_step',
+          title: '实现与独立审查均已完成',
+          workItemId: implSessionId,
+          actions: [
+            {
+              label: '让实现会话提交跨仓 PR',
+              tone: 'primary',
+              intent: {
+                kind: 'session_dispatch',
+                sessionId: implSessionId,
+                prompt: '请提交 PR',
+                mode: 'send',
+              },
+            },
+          ],
+        },
+      })
+    );
+    expect(groupedCardResult.isError, JSON.stringify(groupedCardResult.content)).not.toBe(true);
+
+    const turnWithGroupedCard = await backend.readTurn('assistant:user-after-card-dismiss');
+    expect(turnWithGroupedCard.state).toBe('ready');
+    if (turnWithGroupedCard.state !== 'ready') throw new Error('Expected ready reply turn');
+    expect(turnWithGroupedCard.turn.items.at(-1)).toMatchObject({
+      type: 'coordinator_message',
+      card: {
+        title: '实现与独立审查均已完成',
+        workItemId: implSessionId,
+        snapshotTurnBySession: {
+          [implSessionId]: 'u-impl-init',
+          [reviewSessionId]: 'u-review-init',
+        },
+      },
+    });
+
+    await backend.appendHistoryTurn({
+      id: 'user-followup-grouped-fresh',
+      role: 'user',
+      timestamp: new Date(1_700_000_010_000).toISOString(),
+      inputConfig: {
+        prompt: '先跑一遍兼容性检查再提 PR',
+        inputBlocks: [{ type: 'text', text: '先跑一遍兼容性检查再提 PR' }],
+        cliType: 'builtin',
+        agentType: 'claude',
+      },
+      items: [{ type: 'text', text: '先跑一遍兼容性检查再提 PR' }],
+    });
+
+    const readLatestUserMsgId = async (sid: SessionId) =>
+      ((await manager.repo.getDocMeta(getSessionRoomId(sid)))?.meta as SessionMeta | undefined)
+        ?.latestUserMsgId;
+
+    const freshSnapshotHeader = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-followup-grouped-fresh',
+      isCoordinator: true,
+      readSessionLatestUserMsgId: readLatestUserMsgId,
+    });
+    expect(freshSnapshotHeader).toContain('实现与独立审查均已完成');
+
+    await manager.repo.upsertDocMeta(getSessionRoomId(reviewSessionId), {
+      latestUserMsgId: 'u-review-direct-2',
+    });
+
+    const staleSnapshotHeader = await resolveCoordinatorPromptReplyHeader({
+      history: backend.history,
+      workspaceId,
+      userTurnId: 'user-followup-grouped-fresh',
+      isCoordinator: true,
+      readSessionLatestUserMsgId: readLatestUserMsgId,
+    });
+    expect(staleSnapshotHeader).toBeUndefined();
   });
 });

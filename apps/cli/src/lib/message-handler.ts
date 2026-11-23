@@ -2763,6 +2763,12 @@ export class MessageHandler {
             .catch(() => undefined);
           return (targetRow?.meta as SessionMeta | undefined)?.title;
         },
+        readSessionLatestUserMsgId: async (targetId) => {
+          const targetRow = await this.workspaceDocument.repo
+            .getDocMeta(getSessionRoomId(targetId))
+            .catch(() => undefined);
+          return (targetRow?.meta as SessionMeta | undefined)?.latestUserMsgId;
+        },
       });
     } catch (error) {
       this.logger.warn(

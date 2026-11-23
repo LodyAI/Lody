@@ -8,6 +8,7 @@ import {
   type SessionExternalHistoryCursorDocState,
   type SessionAcpRuntimeConfigSnapshot,
 } from './schema';
+import type { CoordinatorWorkItemDoc } from './coordinator-work-items';
 import { sessionDocSchema } from './session-doc-schemas';
 import { createHistoryWriter, historyValuesEqual, type HistoryWriter } from './history-writer';
 import { HistoryEntryWriteSchema, parseHistoryWrite } from './history-write-schema';
@@ -16,12 +17,13 @@ import type { SessionForkOperation } from './message-schemas';
 const immer = new Immer({ autoFreeze: false, useStrictShallowCopy: true });
 export type SessionWriteState = Omit<
   SessionDocMeta,
-  'forkOperation' | 'preview' | 'externalHistoryCursor' | 'acpRuntimeConfig'
+  'forkOperation' | 'preview' | 'externalHistoryCursor' | 'acpRuntimeConfig' | 'workItems'
 > & {
   forkOperation?: SessionForkOperation;
   preview?: SessionPreviewDocState;
   externalHistoryCursor?: SessionExternalHistoryCursorDocState;
   acpRuntimeConfig?: SessionAcpRuntimeConfigSnapshot;
+  workItems?: Record<string, CoordinatorWorkItemDoc>;
 };
 export type SessionWriteUpdater =
   | Partial<SessionWriteState>

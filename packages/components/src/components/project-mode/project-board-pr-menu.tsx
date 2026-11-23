@@ -122,10 +122,12 @@ function resolveMergeKind(pr: GitHubPullRequestDetails): MergeKind {
 export function ProjectBoardPrMenu({
   sessionId,
   pr,
+  showRepoPrefix = false,
   onOpenPr,
 }: {
   sessionId: string;
   pr: SessionPullRequestView;
+  showRepoPrefix?: boolean;
   onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
 }) {
   const { t } = useTranslation();
@@ -179,7 +181,10 @@ export function ProjectBoardPrMenu({
   const statusText = isMergeable
     ? t('sessions.pr.mergeable', 'Mergeable')
     : t(statusMeta.labelKey, statusMeta.labelFallback);
-  const numberLabel = prNumber !== null ? `#${prNumber}` : 'PR';
+  const repoShortName = repoFullName.split('/')[1]?.trim() || repoFullName;
+  const baseNumberLabel = prNumber !== null ? `#${prNumber}` : 'PR';
+  const numberLabel =
+    showRepoPrefix && repoShortName ? `${repoShortName} ${baseNumberLabel}` : baseNumberLabel;
 
   const orderedMergeMethods = useMemo(
     () => [

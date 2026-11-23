@@ -4,7 +4,9 @@ import {
   buildProjectBoard,
   coordinatorProjectKeyId,
   findProjectCoordinatorSession,
+  hasMultiplePullRequestRepos,
   isSessionInCoordinatorProject,
+  resolveOwnerSessionForPullRequest,
   type CoordinatorProjectKey,
 } from '../src/components/project-mode/project-board-model';
 import { buildChildSessionsByParent } from '../src/components/sessions/session-list-rows';
@@ -259,5 +261,115 @@ describe('project board', () => {
         'user-1'
       )?.id
     ).toBe('coord-upper');
+  });
+
+  it('groups collaborating child sessions under one WorkItem while preserving T<n> numbering and multi-repo PRs', () => {
+    const created = (minute: number) => `2026-11-12T00:${String(minute).padStart(2, '0')}:00.000Z`;
+    const soloFirst = session('solo-first', {
+      openedBySessionId: coordinator.id as never,
+      createdAt: created(1),
+      lastMessageAt: 10,
+      lastReadAt: 5,
+    });
+    const implLead = session('impl-lead', {
+      title: 'Implement ACP token refresh',
+      openedBySessionId: coordinator.id as never,
+      createdAt: created(2),
+      lastMessageAt: 20,
+      lastReadAt: 20,
+      workItemId: 'impl-lead',
+      workItemRole: 'implement',
+      pullRequests: [
+        { url: 'https://github.com/LodyAI/acp-extension-pi/pull/18', status: 'open' },
+        { url: 'https://github.com/LodyAI/lody/pull/2701', status: 'draft' },
+      ],
+      pullRequestState: {
+        'https://github.com/LodyAI/acp-extension-pi/pull/18': { s: 's', m: 'c', t: 1 },
+      },
+    });
+    const reviewPartner = session('review-partner', {
+      title: 'Independent security review',
+      openedBySessionId: coordinator.id as never,
+      createdAt: created(5),
+      lastMessageAt: 35,
+      lastReadAt: 10,
+      workItemId: 'impl-lead',
+      workItemRole: 'review',
+      pullRequests: [
+        { url: 'https://github.com/LodyAI/acp-extension-pi/pull/18', status: 'open' },
+        { url: 'https://github.com/LodyAI/lody/pull/2702', status: 'merged' },
+      ],
+    });
+    const soloThird = session('solo-third', {
+      openedBySessionId: coordinator.id as never,
+      createdAt: created(3),
+      lastMessageAt: 15,
+      lastReadAt: 5,
+    });
+
+    const allSessions = [coordinator, soloFirst, implLead, soloThird, reviewPartner];
+    const result = buildProjectBoard({
+      sessions: allSessions,
+      childSessionsByParent: buildChildSessionsByParent(allSessions),
+      project,
+      coordinatorSessionId: coordinator.id,
+      currentUserId: 'user-1',
+      liveSessionStatuses: new Map([['review-partner', { type: 'running' }]]),
+      sendStates: {},
+      workItems: {
+        'impl-lead': {
+          id: 'impl-lead',
+          title: 'ACP submodule token refresh',
+          mode: 'direct',
+          externalRefs: [
+            {
+              kind: 'linear_issue',
+              label: 'ENG-204',
+              uri: 'https://linear.app/lody/issue/ENG-204',
+            },
+          ],
+          createdAt: 100,
+          updatedAt: 200,
+        },
+      },
+    });
+
+    const rows = Object.values(result).flat();
+    expect(rows).toHaveLength(3);
+
+    const byWorkItem = new Map(rows.map((row) => [row.workItemId, row]));
+    expect(byWorkItem.get('solo-first')?.taskNumber).toBe(1);
+    expect(byWorkItem.get('impl-lead')?.taskNumber).toBe(2);
+    expect(byWorkItem.get('solo-third')?.taskNumber).toBe(3);
+
+    const grouped = byWorkItem.get('impl-lead')!;
+    expect(grouped.bucket).toBe('working');
+    expect(grouped.workItemTitle).toBe('ACP submodule token refresh');
+    expect(grouped.collaborationMode).toBe('direct');
+    expect(grouped.externalRefs).toEqual([
+      {
+        kind: 'linear_issue',
+        label: 'ENG-204',
+        uri: 'https://linear.app/lody/issue/ENG-204',
+      },
+    ]);
+    expect(
+      grouped.members.map((m) => ({ id: m.session.id, role: m.role, bucket: m.bucket }))
+    ).toEqual([
+      { id: 'impl-lead', role: 'implement', bucket: 'review' },
+      { id: 'review-partner', role: 'review', bucket: 'working' },
+    ]);
+    expect(grouped.pullRequests.map((pr) => `${pr.repoFullName}#${pr.number}`)).toEqual([
+      'LodyAI/lody#2701',
+      'LodyAI/acp-extension-pi#18',
+      'LodyAI/lody#2702',
+    ]);
+    expect(hasMultiplePullRequestRepos(grouped.pullRequests)).toBe(true);
+    expect(
+      resolveOwnerSessionForPullRequest(grouped, 'https://github.com/LodyAI/lody/pull/2701')
+    ).toBe('impl-lead');
+    expect(
+      resolveOwnerSessionForPullRequest(grouped, 'https://github.com/LodyAI/lody/pull/2702')
+    ).toBe('review-partner');
   });
 });

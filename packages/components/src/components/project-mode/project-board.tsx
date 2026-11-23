@@ -13,7 +13,7 @@ import {
 } from '@lody/shared';
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue } from 'jotai';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
@@ -25,15 +25,19 @@ import { useMySessionScope, useVisibleSessionMetas } from '@/hooks/use-visible-s
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { useSessionActions } from '@/hooks/use-session-actions';
+import { useSessionDoc } from '@/hooks/use-session-doc';
 import {
   buildProjectBoard,
   coordinatorProjectKeyId,
   findProjectCoordinatorSession,
+  hasMultiplePullRequestRepos,
   PROJECT_BOARD_BUCKETS,
+  resolveOwnerSessionForPullRequest,
   type CoordinatorProjectKey,
   type ProjectBoard as ProjectBoardData,
   type ProjectBoardBucket,
   type ProjectBoardRow,
+  type ProjectBoardSessionMember,
 } from './project-board-model';
 import { ProjectBoardPrMenu } from './project-board-pr-menu';
 
@@ -86,6 +90,12 @@ const styles = stylex.create({
     backgroundColor: colors.elevatedBackground,
     boxShadow: shadow.card,
   },
+  groupWrapper: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    boxShadow: { default: 'none', ':not(:first-child)': `inset 0 0.5px 0 ${colors.separator}` },
+  },
   row: {
     display: 'flex',
     alignItems: 'center',
@@ -94,6 +104,14 @@ const styles = stylex.create({
     paddingInlineEnd: space[3],
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
     boxShadow: { default: 'none', ':not(:first-child)': `inset 0 0.5px 0 ${colors.separator}` },
+  },
+  groupHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    paddingInlineEnd: space[3],
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
   },
   rowLink: {
     display: 'flex',
@@ -105,6 +123,20 @@ const styles = stylex.create({
     paddingInlineStart: space[3],
     color: colors.label,
     textDecoration: 'none',
+  },
+  groupHeaderButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    flexGrow: 1,
+    minWidth: 0,
+    paddingBlock: space[3],
+    paddingInlineStart: space[3],
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: colors.label,
+    textAlign: 'start',
+    cursor: 'pointer',
   },
   taskNumber: {
     marginInlineEnd: space[1.5],
@@ -127,12 +159,81 @@ const styles = stylex.create({
     lineHeight: text.bodyLeading,
   },
   rowMeta: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
+  },
+  prStack: {
+    display: 'inline-flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[1],
+    flexShrink: 0,
+  },
+  externalRefPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+    paddingBlock: 2,
+    paddingInline: space[1.5],
+    borderRadius: radius.full,
+    backgroundColor: { default: colors.wellBackground, ':hover': colors.hoverFill },
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    textDecoration: 'none',
+    flexShrink: 0,
+  },
+  memberList: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    paddingBottom: space[1.5],
+  },
+  memberRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    paddingInlineStart: space[6],
+    paddingInlineEnd: space[3],
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+  },
+  memberLink: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    flexGrow: 1,
+    minWidth: 0,
+    paddingBlock: space[1.5],
+    paddingInlineStart: space[2],
+    color: colors.label,
+    textDecoration: 'none',
+  },
+  memberTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    color: colors.label,
+  },
+  rolePill: {
+    flexShrink: 0,
+    paddingBlock: 1,
+    paddingInline: space[1.5],
+    borderRadius: radius.small,
+    backgroundColor: colors.wellBackground,
+    color: colors.secondaryLabel,
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
   },
   mark: { display: 'flex', width: '14px', flexShrink: 0, justifyContent: 'center' },
   empty: {
@@ -158,14 +259,16 @@ const DEFAULT_COLLAPSED_BUCKETS: Record<ProjectBoardBucket, boolean> = {
   accepted: true,
 };
 
+const EMPTY_SESSION_ID = '' as SessionId;
+
 /** `T3` for a coordinator task; manual conversations have no number. */
 export const formatTaskNumber = (taskNumber: number | null): string | null =>
   taskNumber === null ? null : `T${taskNumber}`;
 
 /**
- * Accepting records the time on the task's own metadata, then archives the
- * task (the owner's choice): an accepted task is finished, so its conversation
- * and worktree are released like any archived conversation.
+ * Accepting records the time on each member conversation's metadata, then
+ * archives the conversations: an accepted work item is finished, so its
+ * conversations and worktrees are released like any archived conversation.
  */
 export function useAcceptCoordinatorTasks(): (sessionIds: readonly string[]) => void {
   const { updateSessionMetadata, archiveSession } = useSessionActions();
@@ -173,8 +276,10 @@ export function useAcceptCoordinatorTasks(): (sessionIds: readonly string[]) => 
   return useCallback(
     (sessionIds) => {
       const acceptedAt = getServerNow();
+      const uniqueIds = [...new Set(sessionIds.filter(Boolean))];
+      if (uniqueIds.length === 0) return;
       void Promise.all(
-        sessionIds.map(async (id) => {
+        uniqueIds.map(async (id) => {
           await updateSessionMetadata(id as SessionId, { coordinatorTaskAcceptedAt: acceptedAt });
           await archiveSession(id as SessionId);
         })
@@ -197,6 +302,23 @@ function useProjectBoardDataInternal(
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
   const sendStates = useAtomValue(sessionSendStatesAtom);
   const allSessionsIncludingArchived = useAtomValue(allSessionsIncludingArchivedAtom);
+
+  const resolvedCoordinatorSessionId = useMemo(
+    () =>
+      coordinatorSessionId ??
+      (project
+        ? (findProjectCoordinatorSession(allActiveSessions, project, currentUserId)?.id ?? null)
+        : null),
+    [allActiveSessions, coordinatorSessionId, currentUserId, project]
+  );
+
+  const { doc: coordinatorDoc } = useSessionDoc(
+    (resolvedCoordinatorSessionId as SessionId | null) ?? EMPTY_SESSION_ID,
+    {
+      enabled: Boolean(resolvedCoordinatorSessionId),
+      syncEnabled: false,
+    }
+  );
 
   const liveRef = useRef<Map<string, SessionStatus> | null>(null);
   const liveSessionStatuses = useMemo(() => {
@@ -231,27 +353,24 @@ function useProjectBoardDataInternal(
         sessions: allSessionsIncludingArchived,
         childSessionsByParent,
         project,
-        coordinatorSessionId:
-          coordinatorSessionId ??
-          (project
-            ? (findProjectCoordinatorSession(allActiveSessions, project, currentUserId)?.id ?? null)
-            : null),
+        coordinatorSessionId: resolvedCoordinatorSessionId,
         currentUserId,
         liveSessionStatuses,
         sendStates,
+        workItems: resolvedCoordinatorSessionId ? coordinatorDoc.workItems : undefined,
         numberingSessions: allSessionsIncludingArchived,
         includeArchived,
       }),
     [
-      allActiveSessions,
+      allSessionsIncludingArchived,
       childSessionsByParent,
-      coordinatorSessionId,
+      coordinatorDoc.workItems,
       currentUserId,
       includeArchived,
       liveSessionStatuses,
       project,
+      resolvedCoordinatorSessionId,
       sendStates,
-      allSessionsIncludingArchived,
     ]
   );
 
@@ -270,8 +389,9 @@ export function useProjectBoardData(
 }
 
 /**
- * Every task of a coordinator, archived (accepted) ones included, so history
- * change strips in the coordinator conversation keep titles, numbers and state.
+ * Every work item of a coordinator, archived (accepted) ones included, indexed
+ * by both `workItemId` and every member `session.id` so history strips, threads,
+ * and cards resolve any member reference to its owning `T<n>` group.
  */
 export function useCoordinatorTasksData(
   coordinatorSessionId: string | null,
@@ -281,17 +401,17 @@ export function useCoordinatorTasksData(
   return useMemo(() => {
     const tasks = new Map<string, ProjectBoardRow>();
     for (const rows of Object.values(board)) {
-      for (const row of rows) tasks.set(row.session.id, row);
+      for (const row of rows) {
+        tasks.set(row.workItemId, row);
+        for (const member of row.members) {
+          tasks.set(member.session.id, row);
+        }
+      }
     }
     return tasks;
   }, [board]);
 }
 
-/**
- * The right-hand column of a project: every conversation its coordinator
- * opened, plus the project's other conversations, by what they need from the
- * user. A leaf of the page, so the presence clock re-renders only this column.
- */
 export function ProjectBoard({
   coordinatorSessionId,
   project,
@@ -301,11 +421,8 @@ export function ProjectBoard({
 }: {
   coordinatorSessionId: string | null;
   project: CoordinatorProjectKey | null;
-  /** Opens a row in place (the coordinator's right panel); defaults to the conversation's page. */
   onOpenSession?: (sessionId: string) => void;
-  /** Opens a row's associated PR as a right-panel tab; falls back to opening the PR URL. */
   onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
-  /** Inside the side panel the tab already names the board. */
   hideTitle?: boolean;
 }) {
   const board = useProjectBoardData(coordinatorSessionId, project);
@@ -405,7 +522,11 @@ export function ProjectBoardView({
                 <Button
                   size="small"
                   variant="ghost"
-                  onClick={() => onAcceptTasks(rows.map((row) => row.session.id))}
+                  onClick={() =>
+                    onAcceptTasks(
+                      rows.flatMap((row) => row.members.map((member) => member.session.id))
+                    )
+                  }
                 >
                   {t('projectMode.board.acceptAll', 'Accept all')}
                 </Button>
@@ -413,16 +534,27 @@ export function ProjectBoardView({
             </div>
             {collapsed ? null : rows.length > 0 ? (
               <div {...stylex.props(styles.card)}>
-                {rows.map((row) => (
-                  <ProjectBoardRowLink
-                    key={row.session.id}
-                    row={row}
-                    href={getSessionHref(row.session.id)}
-                    onOpen={onOpenSession}
-                    onOpenPr={onOpenPr}
-                    onAccept={onAcceptTasks}
-                  />
-                ))}
+                {rows.map((row) =>
+                  row.members.length > 1 ? (
+                    <ProjectBoardGroupRow
+                      key={row.workItemId}
+                      row={row}
+                      getSessionHref={getSessionHref}
+                      onOpen={onOpenSession}
+                      onOpenPr={onOpenPr}
+                      onAccept={onAcceptTasks}
+                    />
+                  ) : (
+                    <ProjectBoardRowLink
+                      key={row.workItemId}
+                      row={row}
+                      href={getSessionHref(row.session.id)}
+                      onOpen={onOpenSession}
+                      onOpenPr={onOpenPr}
+                      onAccept={onAcceptTasks}
+                    />
+                  )
+                )}
               </div>
             ) : (
               <p {...stylex.props(styles.empty)}>{t('projectMode.board.empty', 'Nothing here')}</p>
@@ -433,6 +565,166 @@ export function ProjectBoardView({
     </aside>
   );
 }
+
+function RowPullRequestList({
+  row,
+  onOpenPr,
+}: {
+  row: ProjectBoardRow;
+  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
+}) {
+  if (row.pullRequests.length === 0 && row.externalRefs.length === 0) return null;
+  const showRepo = hasMultiplePullRequestRepos(row.pullRequests);
+  return (
+    <div {...stylex.props(styles.prStack)}>
+      {row.externalRefs.map((ref) => (
+        <a
+          key={ref.uri}
+          href={ref.uri}
+          target="_blank"
+          rel="noreferrer"
+          title={`${ref.kind}: ${ref.label ?? ref.uri}`}
+          {...stylex.props(styles.externalRefPill)}
+        >
+          <span>{ref.label ?? ref.kind}</span>
+          <ExternalLink size={11} aria-hidden="true" />
+        </a>
+      ))}
+      {row.pullRequests.map((pr) => (
+        <ProjectBoardPrMenu
+          key={pr.url}
+          sessionId={resolveOwnerSessionForPullRequest(row, pr.url)}
+          pr={pr}
+          showRepoPrefix={showRepo}
+          onOpenPr={onOpenPr}
+        />
+      ))}
+    </div>
+  );
+}
+
+const ProjectBoardGroupRow = memo(function ProjectBoardGroupRow({
+  row,
+  getSessionHref,
+  onOpen,
+  onOpenPr,
+  onAccept,
+}: {
+  row: ProjectBoardRow;
+  getSessionHref: (sessionId: string) => string;
+  onOpen: (sessionId: string) => void;
+  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
+  onAccept?: (sessionIds: readonly string[]) => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const [expanded, setExpanded] = useState(row.bucket !== 'accepted');
+  const title =
+    row.workItemTitle?.trim() ||
+    row.session.title?.trim() ||
+    t('sessions.untitled', 'Untitled session');
+  const updated = new Date(row.latestMessageAt).toLocaleString(toIntlLocaleOrEn(i18n.language), {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const taskLabel = formatTaskNumber(row.taskNumber);
+  const Chevron = expanded ? ChevronDown : ChevronRight;
+
+  return (
+    <div {...stylex.props(styles.groupWrapper)} data-project-board-work-item-id={row.workItemId}>
+      <div {...stylex.props(styles.groupHeaderRow)}>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((prev) => !prev)}
+          {...stylex.props(styles.groupHeaderButton)}
+        >
+          <span {...stylex.props(styles.mark)}>
+            <SessionRowStatusIndicator
+              isWaitingPermission={row.bucket === 'needsYou' && row.sendState !== 'failed'}
+              isWorking={row.isWorking}
+              hasUnreadMessages={row.bucket !== 'accepted' && row.hasUnreadMessages}
+              sendState={row.sendState}
+            />
+          </span>
+          <span {...stylex.props(styles.rowText)}>
+            <span {...stylex.props(styles.rowTitle)}>
+              {taskLabel ? <span {...stylex.props(styles.taskNumber)}>{taskLabel}</span> : null}
+              {title}
+            </span>
+            <span {...stylex.props(styles.rowMeta)}>
+              <Chevron size={12} aria-hidden="true" />
+              <span>
+                {t('projectMode.board.memberCount', '{{count}} sessions', {
+                  count: row.members.length,
+                })}
+              </span>
+              <span>·</span>
+              <span>{updated}</span>
+            </span>
+          </span>
+        </button>
+        <RowPullRequestList row={row} onOpenPr={onOpenPr} />
+        {row.bucket === 'review' && onAccept ? (
+          <Button
+            size="small"
+            variant="secondary"
+            onClick={() => onAccept(row.members.map((member) => member.session.id))}
+          >
+            {t('projectMode.board.accept', 'Accept')}
+          </Button>
+        ) : null}
+      </div>
+      {expanded ? (
+        <div {...stylex.props(styles.memberList)}>
+          {row.members.map((member) => (
+            <ProjectBoardMemberRow
+              key={member.session.id}
+              member={member}
+              href={getSessionHref(member.session.id)}
+              onOpen={onOpen}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+const ProjectBoardMemberRow = memo(function ProjectBoardMemberRow({
+  member,
+  href,
+  onOpen,
+}: {
+  member: ProjectBoardSessionMember;
+  href: string;
+  onOpen: (sessionId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    onOpen(member.session.id);
+  };
+  const title = member.session.title?.trim() || t('sessions.untitled', 'Untitled session');
+  return (
+    <div {...stylex.props(styles.memberRow)} data-project-board-session-id={member.session.id}>
+      <a href={href} onClick={handleClick} {...stylex.props(styles.memberLink)}>
+        <span {...stylex.props(styles.mark)}>
+          <SessionRowStatusIndicator
+            isWaitingPermission={member.bucket === 'needsYou' && member.sendState !== 'failed'}
+            isWorking={member.isWorking}
+            hasUnreadMessages={member.bucket !== 'accepted' && member.hasUnreadMessages}
+            sendState={member.sendState}
+          />
+        </span>
+        {member.role ? <span {...stylex.props(styles.rolePill)}>{member.role}</span> : null}
+        <span {...stylex.props(styles.memberTitle)}>{title}</span>
+      </a>
+    </div>
+  );
+});
 
 const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
   row,
@@ -453,7 +745,10 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
     event.preventDefault();
     onOpen(row.session.id);
   };
-  const title = row.session.title?.trim() || t('sessions.untitled', 'Untitled session');
+  const title =
+    row.workItemTitle?.trim() ||
+    row.session.title?.trim() ||
+    t('sessions.untitled', 'Untitled session');
   const updated = new Date(row.latestMessageAt).toLocaleString(toIntlLocaleOrEn(i18n.language), {
     month: 'short',
     day: 'numeric',
@@ -483,13 +778,7 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
           <Badge tone="neutral">{t('projectMode.board.createdManually', 'Created manually')}</Badge>
         ) : null}
       </a>
-      {row.pullRequest ? (
-        <ProjectBoardPrMenu
-          sessionId={row.session.id}
-          pr={row.pullRequest}
-          onOpenPr={onOpenPr}
-        />
-      ) : null}
+      <RowPullRequestList row={row} onOpenPr={onOpenPr} />
       {row.bucket === 'review' && onAccept ? (
         <Button size="small" variant="secondary" onClick={() => onAccept([row.session.id])}>
           {t('projectMode.board.accept', 'Accept')}

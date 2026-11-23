@@ -6,6 +6,7 @@ import {
   extractLinkedSessionIdsFromText,
   formatCoordinatorAnchorId,
   formatCoordinatorReplyContextBlock,
+  isCoordinatorCardStaleFromChildActivity,
   matchUserMessageToOpenCoordinatorCards,
   normalizeCoordinatorActionResolutions,
   normalizeCoordinatorActionSpecs,
@@ -205,6 +206,9 @@ async function resolveImplicitRelatedCardHeader(args: {
   userTurnId: string;
   userText: string;
   readSessionTitle?: (sessionId: SessionId) => Promise<string | undefined> | string | undefined;
+  readSessionLatestUserMsgId?: (
+    sessionId: SessionId
+  ) => Promise<string | undefined> | string | undefined;
 }): Promise<string | undefined> {
   if (!args.userText.trim()) return undefined;
   const total = await args.history.count();
@@ -273,6 +277,23 @@ async function resolveImplicitRelatedCardHeader(args: {
 
         const bubbleId = String(item.id ?? '');
         const linkedIds = collectTurnLinkedSessionIds(turn, bubbleId);
+        if (card.snapshotTurnBySession && args.readSessionLatestUserMsgId) {
+          const snapshotSids = Object.keys(card.snapshotTurnBySession) as SessionId[];
+          const sessionCursors = await Promise.all(
+            snapshotSids.map(async (sid) => ({
+              id: sid,
+              latestUserMsgId: await args.readSessionLatestUserMsgId!(sid),
+            }))
+          );
+          if (
+            isCoordinatorCardStaleFromChildActivity({
+              snapshotTurnBySession: card.snapshotTurnBySession,
+              linkedSessions: sessionCursors,
+            })
+          ) {
+            continue;
+          }
+        }
         const taskTitles: string[] = [];
         for (const sid of linkedIds) {
           const title = await getTitle(sid);
@@ -366,6 +387,9 @@ export async function resolveCoordinatorPromptReplyHeader(args: {
   userTurnId: string;
   isCoordinator?: boolean;
   readSessionTitle?: (sessionId: SessionId) => Promise<string | undefined> | string | undefined;
+  readSessionLatestUserMsgId?: (
+    sessionId: SessionId
+  ) => Promise<string | undefined> | string | undefined;
 }): Promise<string | undefined> {
   const inputRead = await args.history.readTurn(args.userTurnId);
   if (inputRead.state !== 'ready' || inputRead.turn.role !== 'user') return undefined;
@@ -379,6 +403,7 @@ export async function resolveCoordinatorPromptReplyHeader(args: {
       userTurnId: args.userTurnId,
       userText: extractUserTurnPlainText(inputRead.turn),
       readSessionTitle: args.readSessionTitle,
+      readSessionLatestUserMsgId: args.readSessionLatestUserMsgId,
     });
   }
 

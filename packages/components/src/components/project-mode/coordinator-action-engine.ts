@@ -5,11 +5,13 @@ import {
   extractActionLinkedSessionIds,
   extractLinkedSessionIdsFromText,
   hasWorkspaceChanges,
+  isCoordinatorCardStaleFromChildActivity,
   matchUserMessageToOpenCoordinatorCards,
   normalizeCoordinatorActionResolutions,
   normalizeCoordinatorActionSpecs,
   normalizeCoordinatorProactiveCard,
   normalizeSessionTurnInputConfig,
+  type ChildSessionActivityCursorSnapshot,
   type CoordinatorActionResolution,
   type CoordinatorActionSpec,
   type CoordinatorCardKind,
@@ -18,9 +20,14 @@ import {
   type MessageContent,
   type OpenCoordinatorCardCandidate,
   type SessionId,
+  type SessionPullRequestView,
 } from '@lody/shared';
 import type { ChatStreamItem } from '@/components/ai-gui/view';
-import type { ProjectBoardRow } from './project-board-model';
+import {
+  hasMultiplePullRequestRepos,
+  resolveOwnerSessionForPullRequest,
+  type ProjectBoardRow,
+} from './project-board-model';
 
 export type CoordinatorTranslateFn = (
   key: string,
@@ -107,9 +114,7 @@ export type CoordinatorActionCommandRegistry = {
 export function createCoordinatorActionCommandRegistry(
   initial?: Record<string, CoordinatorActionCommandHandler>
 ): CoordinatorActionCommandRegistry {
-  const map = new Map<string, CoordinatorActionCommandHandler>(
-    Object.entries(initial ?? {})
-  );
+  const map = new Map<string, CoordinatorActionCommandHandler>(Object.entries(initial ?? {}));
   return {
     register(command, handler) {
       map.set(command.trim(), handler);
@@ -199,6 +204,13 @@ function readParamString(
   return trimmed;
 }
 
+function formatPrRuleLabel(pr: SessionPullRequestView, showRepoPrefix: boolean): string {
+  const numPart = pr.number !== null ? `#${pr.number}` : 'PR';
+  if (!showRepoPrefix || !pr.repoFullName) return numPart;
+  const shortRepo = pr.repoFullName.split('/')[1]?.trim() || pr.repoFullName.trim();
+  return shortRepo ? `${shortRepo} ${numPart}` : numPart;
+}
+
 export const prWorkflowRuleProvider: CoordinatorActionRuleProvider = {
   id: 'pr-workflow',
   produce(ctx) {
@@ -206,117 +218,124 @@ export const prWorkflowRuleProvider: CoordinatorActionRuleProvider = {
     for (const task of ctx.eligibleTasks) {
       const sid = task.session.id;
       const taskTag = formatTaskTag(task);
-      const pr = task.pullRequest;
-      if (pr) {
-        const prLabel = pr.number !== null ? `#${pr.number}` : 'PR';
-        if (pr.status === 'draft') {
-          actions.push({
-            id: `rule:pr-ready:${sid}`,
-            label: ctx.translate('projectMode.actions.markPrReady', 'Mark {{pr}} ready', {
-              pr: prLabel,
-            }),
-            tone: 'primary',
-            icon: 'git-pull-request',
-            dedupKey: `pr.ready:${sid}`,
-            source: 'rule',
-            intent: {
-              kind: 'client_command',
-              command: COORDINATOR_CLIENT_COMMANDS.githubPrReady,
-              params: { sessionId: sid, prUrl: pr.url },
-            },
-          });
-          actions.push({
-            id: `rule:pr-open:${sid}`,
-            label: ctx.translate('projectMode.actions.viewPr', 'View {{pr}}', { pr: prLabel }),
-            tone: 'default',
-            icon: 'external-link',
-            dedupKey: `panel.open:pr:${sid}`,
-            source: 'rule',
-            intent: {
-              kind: 'client_command',
-              command: COORDINATOR_CLIENT_COMMANDS.panelOpen,
-              params: { target: 'pr', sessionId: sid, url: pr.url },
-            },
-          });
-        } else if (pr.status === 'open') {
-          if (pr.state?.m === 'd') {
+      const prs =
+        task.pullRequests && task.pullRequests.length > 0
+          ? task.pullRequests
+          : task.pullRequest
+            ? [task.pullRequest]
+            : [];
+      if (prs.length > 0) {
+        const showRepo = hasMultiplePullRequestRepos(prs);
+        const multiPr = prs.length > 1;
+        for (const pr of prs) {
+          const ownerSid = resolveOwnerSessionForPullRequest(task, pr.url);
+          const keySuffix = multiPr ? `${ownerSid}:${pr.url}` : sid;
+          const prLabel = formatPrRuleLabel(pr, showRepo);
+          if (pr.status === 'draft') {
             actions.push({
-              id: `rule:pr-conflicts:${sid}`,
-              label: ctx.translate(
-                'projectMode.actions.resolveConflicts',
-                'Resolve {{pr}} conflicts',
-                { pr: prLabel }
-              ),
-              tone: 'primary',
-              icon: 'play',
-              dedupKey: `pr.resolve_conflicts:${sid}`,
-              source: 'rule',
-              intent: {
-                kind: 'session_dispatch',
-                sessionId: sid,
-                mode: 'send',
-                prompt: ctx.translate(
-                  'projectMode.actions.prompts.resolveConflicts',
-                  'Resolve the merge conflicts on this pull request, verify checks pass, and push the updated branch.'
-                ),
-              },
-            });
-          } else if (
-            pr.state?.s === 'f' ||
-            pr.state?.s === 'e' ||
-            pr.state?.m === 'u'
-          ) {
-            actions.push({
-              id: `rule:pr-fix-ci:${sid}`,
-              label: ctx.translate('projectMode.actions.fixCi', 'Fix {{pr}} CI', { pr: prLabel }),
-              tone: 'primary',
-              icon: 'play',
-              dedupKey: `pr.fix_ci:${sid}`,
-              source: 'rule',
-              intent: {
-                kind: 'session_dispatch',
-                sessionId: sid,
-                mode: 'send',
-                prompt: ctx.translate(
-                  'projectMode.actions.prompts.fixCi',
-                  'Investigate and fix the failing CI checks on this pull request, then push the fix.'
-                ),
-              },
-            });
-          } else if (pr.readiness === 'y') {
-            actions.push({
-              id: `rule:pr-merge:${sid}`,
-              label: ctx.translate('projectMode.actions.mergePr', 'Merge {{pr}}', {
+              id: `rule:pr-ready:${keySuffix}`,
+              label: ctx.translate('projectMode.actions.markPrReady', 'Mark {{pr}} ready', {
                 pr: prLabel,
               }),
               tone: 'primary',
-              icon: 'git-merge',
-              dedupKey: `pr.merge:${sid}`,
+              icon: 'git-pull-request',
+              dedupKey: `pr.ready:${keySuffix}`,
               source: 'rule',
               intent: {
                 kind: 'client_command',
-                command: COORDINATOR_CLIENT_COMMANDS.githubPrMerge,
-                params: {
-                  sessionId: sid,
-                  prUrl: pr.url,
-                  method: ctx.preferredMergeMethod,
+                command: COORDINATOR_CLIENT_COMMANDS.githubPrReady,
+                params: { sessionId: ownerSid, prUrl: pr.url },
+              },
+            });
+            actions.push({
+              id: `rule:pr-open:${keySuffix}`,
+              label: ctx.translate('projectMode.actions.viewPr', 'View {{pr}}', { pr: prLabel }),
+              tone: 'default',
+              icon: 'external-link',
+              dedupKey: `panel.open:pr:${keySuffix}`,
+              source: 'rule',
+              intent: {
+                kind: 'client_command',
+                command: COORDINATOR_CLIENT_COMMANDS.panelOpen,
+                params: { target: 'pr', sessionId: ownerSid, url: pr.url },
+              },
+            });
+          } else if (pr.status === 'open') {
+            if (pr.state?.m === 'd') {
+              actions.push({
+                id: `rule:pr-conflicts:${keySuffix}`,
+                label: ctx.translate(
+                  'projectMode.actions.resolveConflicts',
+                  'Resolve {{pr}} conflicts',
+                  { pr: prLabel }
+                ),
+                tone: 'primary',
+                icon: 'play',
+                dedupKey: `pr.resolve_conflicts:${keySuffix}`,
+                source: 'rule',
+                intent: {
+                  kind: 'session_dispatch',
+                  sessionId: ownerSid as SessionId,
+                  mode: 'send',
+                  prompt: ctx.translate(
+                    'projectMode.actions.prompts.resolveConflicts',
+                    'Resolve the merge conflicts on this pull request, verify checks pass, and push the updated branch.'
+                  ),
                 },
+              });
+            } else if (pr.state?.s === 'f' || pr.state?.s === 'e' || pr.state?.m === 'u') {
+              actions.push({
+                id: `rule:pr-fix-ci:${keySuffix}`,
+                label: ctx.translate('projectMode.actions.fixCi', 'Fix {{pr}} CI', { pr: prLabel }),
+                tone: 'primary',
+                icon: 'play',
+                dedupKey: `pr.fix_ci:${keySuffix}`,
+                source: 'rule',
+                intent: {
+                  kind: 'session_dispatch',
+                  sessionId: ownerSid as SessionId,
+                  mode: 'send',
+                  prompt: ctx.translate(
+                    'projectMode.actions.prompts.fixCi',
+                    'Investigate and fix the failing CI checks on this pull request, then push the fix.'
+                  ),
+                },
+              });
+            } else if (pr.readiness === 'y') {
+              actions.push({
+                id: `rule:pr-merge:${keySuffix}`,
+                label: ctx.translate('projectMode.actions.mergePr', 'Merge {{pr}}', {
+                  pr: prLabel,
+                }),
+                tone: 'primary',
+                icon: 'git-merge',
+                dedupKey: `pr.merge:${keySuffix}`,
+                source: 'rule',
+                intent: {
+                  kind: 'client_command',
+                  command: COORDINATOR_CLIENT_COMMANDS.githubPrMerge,
+                  params: {
+                    sessionId: ownerSid,
+                    prUrl: pr.url,
+                    method: ctx.preferredMergeMethod,
+                  },
+                },
+              });
+            }
+            actions.push({
+              id: `rule:pr-open:${keySuffix}`,
+              label: ctx.translate('projectMode.actions.viewPr', 'View {{pr}}', { pr: prLabel }),
+              tone: 'default',
+              icon: 'git-pull-request',
+              dedupKey: `panel.open:pr:${keySuffix}`,
+              source: 'rule',
+              intent: {
+                kind: 'client_command',
+                command: COORDINATOR_CLIENT_COMMANDS.panelOpen,
+                params: { target: 'pr', sessionId: ownerSid, url: pr.url },
               },
             });
           }
-          actions.push({
-            id: `rule:pr-open:${sid}`,
-            label: ctx.translate('projectMode.actions.viewPr', 'View {{pr}}', { pr: prLabel }),
-            tone: 'default',
-            icon: 'git-pull-request',
-            dedupKey: `panel.open:pr:${sid}`,
-            source: 'rule',
-            intent: {
-              kind: 'client_command',
-              command: COORDINATOR_CLIENT_COMMANDS.panelOpen,
-              params: { target: 'pr', sessionId: sid, url: pr.url },
-            },
-          });
         }
       } else if (
         task.bucket === 'review' &&
@@ -400,7 +419,10 @@ export const taskReviewAcceptRuleProvider: CoordinatorActionRuleProvider = {
         intent: {
           kind: 'client_command',
           command: COORDINATOR_CLIENT_COMMANDS.taskAccept,
-          params: { sessionId: sid },
+          params:
+            task.members && task.members.length > 1
+              ? { sessionId: sid, sessionIds: task.members.map((m) => m.session.id) }
+              : { sessionId: sid },
         },
       });
       if (!task.pullRequest) {
@@ -446,8 +468,15 @@ function resolveSingleActionLiveStatus(args: {
   const { intent } = spec;
   if (intent.kind === 'client_command') {
     const sid = readParamString(intent.params, 'sessionId');
+    const explicitUrl =
+      readParamString(intent.params, 'prUrl') ?? readParamString(intent.params, 'url');
     const task = sid ? tasksById.get(sid) : undefined;
-    const pr = task?.pullRequest ?? null;
+    const matchedPr = explicitUrl
+      ? task?.pullRequests?.find(
+          (candidate) => candidate.url.trim().toLowerCase() === explicitUrl.toLowerCase()
+        )
+      : undefined;
+    const pr = matchedPr ?? task?.pullRequest ?? null;
     const prLabel = pr && pr.number !== null ? `#${pr.number}` : 'PR';
 
     if (intent.command === COORDINATOR_CLIENT_COMMANDS.taskAccept) {
@@ -723,18 +752,25 @@ export function resolveCoordinatorProactiveCard(args: {
       ? resolvedActions[0]
       : undefined);
 
-  const linkedIds = extractBubbleLinkedSessionIds(entry);
+  const linkedIds = [
+    ...(normalizedCard?.workItemId ? [normalizedCard.workItemId as SessionId] : []),
+    ...extractBubbleLinkedSessionIds(entry),
+  ];
   const linkedTasks: ProjectBoardRow[] = [];
+  const seenWorkItemIds = new Set<string>();
   for (const sid of linkedIds) {
     const task = tasksById.get(sid);
-    if (task) linkedTasks.push(task);
+    if (!task) continue;
+    const groupKey = task.workItemId || task.session.id;
+    if (seenWorkItemIds.has(groupKey)) continue;
+    seenWorkItemIds.add(groupKey);
+    linkedTasks.push(task);
   }
 
   return {
     kind: normalizedCard?.kind ?? 'next_step',
     title:
-      normalizedCard?.title ??
-      translate('projectMode.card.defaultTitle', 'Suggested next steps'),
+      normalizedCard?.title ?? translate('projectMode.card.defaultTitle', 'Suggested next steps'),
     summary: normalizedCard?.summary,
     linkedTasks,
     actions: resolvedActions,
@@ -770,9 +806,7 @@ export function buildSupersededCoordinatorCardKeys(args: {
       for (const entry of msg.items) {
         if (entry.type !== 'coordinator_message') continue;
         const normalizedCard = normalizeCoordinatorProactiveCard(entry.card);
-        const legacyActions = normalizedCard
-          ? []
-          : normalizeCoordinatorActionSpecs(entry.actions);
+        const legacyActions = normalizedCard ? [] : normalizeCoordinatorActionSpecs(entry.actions);
         if (!normalizedCard && legacyActions.length === 0) continue;
 
         const actions = normalizedCard ? normalizedCard.actions : legacyActions;
@@ -786,24 +820,82 @@ export function buildSupersededCoordinatorCardKeys(args: {
           });
         if (alreadyChosen) continue;
 
-        const linkedIds = extractBubbleLinkedSessionIds(entry);
+        const bubbleKey = formatCoordinatorBubbleKey(msg.id, entry.id);
+        const linkedIds = [
+          ...(normalizedCard?.workItemId ? [normalizedCard.workItemId as SessionId] : []),
+          ...extractBubbleLinkedSessionIds(entry),
+        ];
         const taskNumbers: number[] = [];
         const taskTitles: string[] = [];
         const prNumbers: number[] = [];
+        const sessionCursors: ChildSessionActivityCursorSnapshot[] = [];
+        const seenCursorIds = new Set<string>();
         if (tasksById) {
           for (const sid of linkedIds) {
             const task = tasksById.get(sid);
             if (!task) continue;
-            if (task.taskNumber !== null) taskNumbers.push(task.taskNumber);
-            if (task.session.title?.trim()) taskTitles.push(task.session.title.trim());
-            if (task.pullRequest?.number !== null && task.pullRequest?.number !== undefined) {
-              prNumbers.push(task.pullRequest.number);
+            if (task.taskNumber !== null && !taskNumbers.includes(task.taskNumber)) {
+              taskNumbers.push(task.taskNumber);
             }
+            const groupTitle = task.workItemTitle?.trim() || task.session.title?.trim();
+            if (groupTitle && !taskTitles.includes(groupTitle)) {
+              taskTitles.push(groupTitle);
+            }
+            const prs =
+              task.pullRequests && task.pullRequests.length > 0
+                ? task.pullRequests
+                : task.pullRequest
+                  ? [task.pullRequest]
+                  : [];
+            for (const pr of prs) {
+              if (pr.number !== null && pr.number !== undefined && !prNumbers.includes(pr.number)) {
+                prNumbers.push(pr.number);
+              }
+            }
+            const members =
+              task.members && task.members.length > 0
+                ? task.members
+                : [{ session: task.session, latestMessageAt: task.latestMessageAt }];
+            for (const member of members) {
+              if (seenCursorIds.has(member.session.id)) continue;
+              seenCursorIds.add(member.session.id);
+              sessionCursors.push({
+                id: member.session.id,
+                latestUserMsgId: member.session.latestUserMsgId,
+                latestMessageAt: member.latestMessageAt,
+              });
+            }
+          }
+          if (normalizedCard?.snapshotTurnBySession) {
+            for (const snapSid of Object.keys(normalizedCard.snapshotTurnBySession)) {
+              if (seenCursorIds.has(snapSid)) continue;
+              const snapTask = tasksById.get(snapSid);
+              if (!snapTask) continue;
+              const matchedMember = snapTask.members?.find((m) => m.session.id === snapSid);
+              const targetSession = matchedMember?.session ?? snapTask.session;
+              seenCursorIds.add(snapSid);
+              sessionCursors.push({
+                id: snapSid,
+                latestUserMsgId: targetSession.latestUserMsgId,
+                latestMessageAt: matchedMember?.latestMessageAt ?? snapTask.latestMessageAt,
+              });
+            }
+          }
+          if (
+            isCoordinatorCardStaleFromChildActivity({
+              snapshotTurnBySession: normalizedCard?.snapshotTurnBySession,
+              cardCreatedAt: entry.createdAt,
+              linkedSessions: sessionCursors,
+              isAlreadyChosen: false,
+            })
+          ) {
+            superseded.add(bubbleKey);
+            continue;
           }
         }
 
         openCards.push({
-          key: formatCoordinatorBubbleKey(msg.id, entry.id),
+          key: bubbleKey,
           turnId: msg.id,
           bubbleId: entry.id,
           threadRootId: entry.replyTo?.threadRootId,

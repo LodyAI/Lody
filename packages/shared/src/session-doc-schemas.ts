@@ -23,6 +23,7 @@ import type {
   SessionId,
 } from '.';
 import type { SessionHistorySendStatus, SessionHistoryStatus, SessionPlanEntry } from './schema';
+import type { CoordinatorCollaborationMode } from './coordinator-work-items';
 
 const historyItemAnySchema = schema.Any({ defaultLoroText: false });
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -479,6 +480,29 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
   { required: false }
 );
 
+const coordinatorWorkItemExternalRefDocSchema = schema.LoroMap({
+  kind: schema.String(),
+  uri: schema.String(),
+  label: schema.String({ required: false }),
+});
+
+export const coordinatorWorkItemDocSchema = schema.LoroMap({
+  id: schema.String(),
+  taskNumber: schema.Number({ required: false }),
+  title: schema.String({ required: false }),
+  mode: schema.String<CoordinatorCollaborationMode>({ required: false }),
+  externalRefs: schema.LoroList(coordinatorWorkItemExternalRefDocSchema, undefined, {
+    required: false,
+  }),
+  acceptedAt: schema.Number({ required: false }),
+  createdAt: schema.Number(),
+  updatedAt: schema.Number(),
+});
+
+export const coordinatorWorkItemsDocSchema = schema
+  .LoroMap({}, { required: false })
+  .catchall(coordinatorWorkItemDocSchema);
+
 /**
  * Root schema for a session doc.
  *
@@ -531,4 +555,6 @@ export const sessionDocSchema = schema({
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
   acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
+  /** Coordinator control-plane task-group (`WorkItem`) map; absent on ordinary sessions. */
+  workItems: coordinatorWorkItemsDocSchema,
 });

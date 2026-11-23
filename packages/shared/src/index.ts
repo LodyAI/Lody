@@ -29,6 +29,7 @@ export * from './pi-provider-migration';
 export * from './message-quote';
 export * from './coordinator-threads';
 export * from './coordinator-actions';
+export * from './coordinator-work-items';
 export * from './message-text-spans';
 export * from './deepseek-harness';
 export * from './acp-run-config';

@@ -50,18 +50,18 @@ All of these are the owner's decisions.
 
 ## Current state: what already exists
 
-| Capability | State | Source |
-| --- | --- | --- |
-| Spawning child conversations | Exists. `lody_session_create(_many)` creates a conversation on any reachable machine and project, optionally in its own worktree, and records `openedBySessionId`. | `apps/cli/src/mcp/README.md` |
-| Returning completion results | Exists. A finished child's result enters the parent's Inbox; several results are merged into one batch; the Spec says an idle parent is woken for a new turn. | `specs/session-orchestration.md`, "Idempotent message consumption" |
-| Adding instructions to a running child | Exists. `lody_session_chat` steers into the running turn, or queues when the agent cannot accept a steer. | Same |
-| Seeing what a child is doing | Exists. `lody_session_status_many` returns the current action, last output time, queued inputs and the latest failure cause; `lody_session_list` filters by PR. | Same, "Coordinating many Sessions" |
-| PR / CI state | Exists. Polled on the machine and written to session metadata `pullRequests` and `pullRequestState` (CI, mergeable, readiness). | `specs/local-github-pr-observation.md` |
-| Waking on an external condition | Exists. `lody_automation` registers a polled condition (it can read PR lifecycle and CI) and queues a continuation in the registering conversation on a match. | `apps/cli/src/automations/README.md` |
-| Sidebar grouped by project | Exists. The `workspace` mode of `sidebarOrganizeModeAtom` groups by Chats / local projects (per machine) / GitHub repositories, with drag ordering. | `packages/components/src/atoms/sidebar-state.ts` |
-| Attention buckets | Partly. Conversations are bucketed as permission / question / running / unread with counts; there is no "done" and no per-project aggregate. | `packages/shared/src/live-activity-summary.ts` |
-| File changes and PR beside a conversation | Exists. The side panel has Files, All Changes and a PR tab (summary plus changes). | `.agents/docs/sessions-side-panel.md` |
-| A conversation inside the right panel | Partly. Side Chat is a child Tab (`parentSessionId`) placed in the side panel that shares the parent's workspace; an independent conversation cannot be placed there. | `.agents/docs/sessions-tabs-routing.md` |
+| Capability                                | State                                                                                                                                                                 | Source                                                             |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Spawning child conversations              | Exists. `lody_session_create(_many)` creates a conversation on any reachable machine and project, optionally in its own worktree, and records `openedBySessionId`.    | `apps/cli/src/mcp/README.md`                                       |
+| Returning completion results              | Exists. A finished child's result enters the parent's Inbox; several results are merged into one batch; the Spec says an idle parent is woken for a new turn.         | `specs/session-orchestration.md`, "Idempotent message consumption" |
+| Adding instructions to a running child    | Exists. `lody_session_chat` steers into the running turn, or queues when the agent cannot accept a steer.                                                             | Same                                                               |
+| Seeing what a child is doing              | Exists. `lody_session_status_many` returns the current action, last output time, queued inputs and the latest failure cause; `lody_session_list` filters by PR.       | Same, "Coordinating many Sessions"                                 |
+| PR / CI state                             | Exists. Polled on the machine and written to session metadata `pullRequests` and `pullRequestState` (CI, mergeable, readiness).                                       | `specs/local-github-pr-observation.md`                             |
+| Waking on an external condition           | Exists. `lody_automation` registers a polled condition (it can read PR lifecycle and CI) and queues a continuation in the registering conversation on a match.        | `apps/cli/src/automations/README.md`                               |
+| Sidebar grouped by project                | Exists. The `workspace` mode of `sidebarOrganizeModeAtom` groups by Chats / local projects (per machine) / GitHub repositories, with drag ordering.                   | `packages/components/src/atoms/sidebar-state.ts`                   |
+| Attention buckets                         | Partly. Conversations are bucketed as permission / question / running / unread with counts; there is no "done" and no per-project aggregate.                          | `packages/shared/src/live-activity-summary.ts`                     |
+| File changes and PR beside a conversation | Exists. The side panel has Files, All Changes and a PR tab (summary plus changes).                                                                                    | `.agents/docs/sessions-side-panel.md`                              |
+| A conversation inside the right panel     | Partly. Side Chat is a child Tab (`parentSessionId`) placed in the side panel that shares the parent's workspace; an independent conversation cannot be placed there. | `.agents/docs/sessions-tabs-routing.md`                            |
 
 A "project" has three forms today: a local project (one directory on one machine), a GitHub repository (a repository name only, with no record of its own), and a multi-repository `WorkspaceProject` (a workspace-level record whose Spec is still a draft). A conversation links to one of them through `SessionMeta.project`.
 
@@ -71,35 +71,35 @@ A "project" has three forms today: a local project (one directory on one machine
 
 ### A. The coordinator itself (harness)
 
-| # | Missing | State | Effect |
-| --- | --- | --- | --- |
-| A1 | System prompt channel | A Role's `promptPrefix` is only placed in front of the user message; `buildPrompt` still carries `TODO: use system prompt`. Coordinator conversations now get theirs over ACP (see "First version as built"); other conversations still have none. | It cannot be reliably constrained to "coordinate only, do no work, respond fast". |
-| A2 | Builtin tool allowlist | No provider path passes allowed or disallowed tools. A Role can only pin the model and permission mode. | The coordinator can still edit files and run commands. |
-| A3 | Per-conversation Lody MCP tool subset | Tools are registered statically; every conversation sees the same set, including archive, Role, MCP configuration and simulator previews. | Too many tools for the coordinator: slower and easier to drift. |
-| A4 | A "coordinator" conversation type | Now `SessionMeta.coordinator: { version: 1 }`; nothing reads it except prompt delivery, so there is no dedicated layout or limit yet. | The UI and runtime cannot tell which conversation is the coordinator, so it cannot get a dedicated layout or dedicated limits. |
-| A5 | Context control for a long-lived conversation | Each completion batch adds up to 64 KiB to history; there is no coordinator-specific compaction or project memory. | The longer the coordinator lives the slower it gets, which conflicts with fast responses. |
+| #   | Missing                                       | State                                                                                                                                                                                                                                              | Effect                                                                                                                         |
+| --- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| A1  | System prompt channel                         | A Role's `promptPrefix` is only placed in front of the user message; `buildPrompt` still carries `TODO: use system prompt`. Coordinator conversations now get theirs over ACP (see "First version as built"); other conversations still have none. | It cannot be reliably constrained to "coordinate only, do no work, respond fast".                                              |
+| A2  | Builtin tool allowlist                        | No provider path passes allowed or disallowed tools. A Role can only pin the model and permission mode.                                                                                                                                            | The coordinator can still edit files and run commands.                                                                         |
+| A3  | Per-conversation Lody MCP tool subset         | Tools are registered statically; every conversation sees the same set, including archive, Role, MCP configuration and simulator previews.                                                                                                          | Too many tools for the coordinator: slower and easier to drift.                                                                |
+| A4  | A "coordinator" conversation type             | Now `SessionMeta.coordinator: { version: 1 }`; nothing reads it except prompt delivery, so there is no dedicated layout or limit yet.                                                                                                              | The UI and runtime cannot tell which conversation is the coordinator, so it cannot get a dedicated layout or dedicated limits. |
+| A5  | Context control for a long-lived conversation | Each completion batch adds up to 64 KiB to history; there is no coordinator-specific compaction or project memory.                                                                                                                                 | The longer the coordinator lives the slower it gets, which conflicts with fast responses.                                      |
 
 ### B. Coordination
 
-| # | Missing | State | Effect |
-| --- | --- | --- | --- |
-| B1 | Child ownership | `openedBySessionId` records only who created a conversation and is unrelated to the project; no tool lists all children of a coordinator. | Neither the board nor the coordinator can get the complete set of children. |
-| B2 | Task status | Only run state exists (idle / running / waiting for permission / initializing). There is no "done", "failed" or "in review", and no status or label an agent can write. | Of "needs you / unread / done", only unread can be computed directly. |
-| B3 | Telling the coordinator a child is stuck | The coordinator gets a receipt only when a child **finishes**. It does not know when a child waits for permission or for the user's answer. | The coordinator cannot tell the user that a task is waiting for them. |
-| B4 | A tool for a child to ask the user or request attention | No such MCP tool exists; a question appears only on the child's own page. | The user never sees the question without opening the child. |
-| B5 | Notifications for the coordinator's proactive messages | Agent-initiated turns **suppress** the user-facing completion notification. | A summary the coordinator writes after a receipt wakes it does not notify a user who is away from the page. |
-| B6 | Delivering PR / CI events to the coordinator | The state is in metadata, but the coordinator is woken only if it registers an automation per child. | "PR merged, so the task is done" and "CI failed, so it needs handling" do not happen on their own. |
-| B7 | Chain depth and concurrency limits | The delegation chain allows 16 hops and a completion continuation counts as one; there is no cap on concurrent spawns. | A coordinator that handles many receipts in a row without human input reaches 16 hops; it can also spawn too many children at once. |
+| #   | Missing                                                 | State                                                                                                                                                                   | Effect                                                                                                                              |
+| --- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| B1  | Child ownership                                         | `openedBySessionId` records only who created a conversation and is unrelated to the project; no tool lists all children of a coordinator.                               | Neither the board nor the coordinator can get the complete set of children.                                                         |
+| B2  | Task status                                             | Only run state exists (idle / running / waiting for permission / initializing). There is no "done", "failed" or "in review", and no status or label an agent can write. | Of "needs you / unread / done", only unread can be computed directly.                                                               |
+| B3  | Telling the coordinator a child is stuck                | The coordinator gets a receipt only when a child **finishes**. It does not know when a child waits for permission or for the user's answer.                             | The coordinator cannot tell the user that a task is waiting for them.                                                               |
+| B4  | A tool for a child to ask the user or request attention | No such MCP tool exists; a question appears only on the child's own page.                                                                                               | The user never sees the question without opening the child.                                                                         |
+| B5  | Notifications for the coordinator's proactive messages  | Agent-initiated turns **suppress** the user-facing completion notification.                                                                                             | A summary the coordinator writes after a receipt wakes it does not notify a user who is away from the page.                         |
+| B6  | Delivering PR / CI events to the coordinator            | The state is in metadata, but the coordinator is woken only if it registers an automation per child.                                                                    | "PR merged, so the task is done" and "CI failed, so it needs handling" do not happen on their own.                                  |
+| B7  | Chain depth and concurrency limits                      | The delegation chain allows 16 hops and a completion continuation counts as one; there is no cap on concurrent spawns.                                                  | A coordinator that handles many receipts in a row without human input reaches 16 hops; it can also spawn too many children at once. |
 
 ### C. Interface
 
-| # | Missing | State |
-| --- | --- | --- |
-| C1 | Project page and route | None. The existing project route only redirects to the new-conversation page. |
-| C2 | Sidebar project rows | Groups exist, but they expand into conversations; there is no "one row per project with aggregated status" form and no Projects / Conversations switch. |
-| C3 | An independent conversation in a right-hand tab | The top tab strip holds only the root conversation and its child Tabs; an independent conversation opens only as a full page. Two independent conversations cannot sit side by side. |
-| C4 | Child conversation board | None. The bucketing logic in `live-activity-summary` can be reused. |
-| C5 | Mobile | Web mobile, native iOS and native Android are three separate list implementations and each needs its own work. |
+| #   | Missing                                         | State                                                                                                                                                                                |
+| --- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C1  | Project page and route                          | None. The existing project route only redirects to the new-conversation page.                                                                                                        |
+| C2  | Sidebar project rows                            | Groups exist, but they expand into conversations; there is no "one row per project with aggregated status" form and no Projects / Conversations switch.                              |
+| C3  | An independent conversation in a right-hand tab | The top tab strip holds only the root conversation and its child Tabs; an independent conversation opens only as a full page. Two independent conversations cannot sit side by side. |
+| C4  | Child conversation board                        | None. The bucketing logic in `live-activity-summary` can be reused.                                                                                                                  |
+| C5  | Mobile                                          | Web mobile, native iOS and native Android are three separate list implementations and each needs its own work.                                                                       |
 
 ## Basic plan
 
@@ -118,7 +118,7 @@ flowchart LR
 
 - Run one real flow to confirm whether an idle parent is woken by a completion receipt, and correct whichever document is wrong.
 - Use an Agent Role (Lody Agent, `promptPrefix`, a fast model) as the coordinator with only the existing MCP tools, for a day or two of real use. Its parts are listed under "Prototype scope".
-- Write a Spec (suggested `specs/project-coordinator-mode.md`) holding the step 2 contracts and the decisions here.
+- Write a Spec ([`specs/project-coordinator-mode.md`](../../../../specs/project-coordinator-mode.md)) holding the step 2 contracts and the decisions here.
 
 ### 2. Data contracts (the foundation for the other steps)
 
@@ -176,15 +176,15 @@ All of these are the owner's decisions.
 
 Under these decisions the prototype consists entirely of existing capabilities:
 
-| Part | Uses |
-| --- | --- |
-| Coordinator | One Agent Role: Lody Agent and a fast model, with `promptPrefix` standing in for the system prompt. It is an ordinary conversation with no dedicated interface. |
-| Dispatching tasks | `lody_session_create(_many)`; the coordinator picks a Role from the Role descriptions. |
-| Collecting results | The existing completion receipt. When a child's turn ends, its final reply is the result. |
-| "Needs you" | The child ends its turn with a question in its reply. To the coordinator this is also a completion receipt, which it relays to the user; after the user answers, the coordinator forwards it with `lody_session_chat`. |
-| "Failed" | The failure cause in the existing receipt (`usage_limit`, `agent_crash` and so on). |
-| Progress in between | When the user asks, the coordinator calls `lody_session_status_many` (current action, last output time). |
-| Viewing children | The existing sidebar: conversations the coordinator opened are indented beneath it. |
+| Part                | Uses                                                                                                                                                                                                                   |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Coordinator         | One Agent Role: Lody Agent and a fast model, with `promptPrefix` standing in for the system prompt. It is an ordinary conversation with no dedicated interface.                                                        |
+| Dispatching tasks   | `lody_session_create(_many)`; the coordinator picks a Role from the Role descriptions.                                                                                                                                 |
+| Collecting results  | The existing completion receipt. When a child's turn ends, its final reply is the result.                                                                                                                              |
+| "Needs you"         | The child ends its turn with a question in its reply. To the coordinator this is also a completion receipt, which it relays to the user; after the user answers, the coordinator forwards it with `lody_session_chat`. |
+| "Failed"            | The failure cause in the existing receipt (`usage_limit`, `agent_crash` and so on).                                                                                                                                    |
+| Progress in between | When the user asks, the coordinator calls `lody_session_status_many` (current action, last output time).                                                                                                               |
+| Viewing children    | The existing sidebar: conversations the coordinator opened are indented beneath it.                                                                                                                                    |
 
 The prototype excludes the project page and board, the sidebar Projects / Conversations switch, the coordinator conversation marker, the task card, and any new MCP tool. These wait for the prototype's findings (plan step 2 onward).
 

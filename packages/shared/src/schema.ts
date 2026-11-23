@@ -726,6 +726,17 @@ export type SessionMeta = SessionPullRequestRecordFields & {
    * coordinator task. Activity after this time sends the task back to review.
    */
   coordinatorTaskAcceptedAt?: number;
+  /**
+   * Project mode: optional task-group (`WorkItem`) identifier joining one or more
+   * collaborating child conversations under a single `T<n>` work item. When absent,
+   * the conversation forms an implicit solo work item keyed by its own `id`.
+   */
+  workItemId?: string;
+  /**
+   * Project mode: optional short role label of this conversation inside its
+   * multi-session `WorkItem` (for example `implement`, `review`, `submodule:pi`).
+   */
+  workItemRole?: string;
   projectRun?: SessionProjectRun;
   repoFullName?: string;
   /** Base branch selected when the session starts (starting point). */

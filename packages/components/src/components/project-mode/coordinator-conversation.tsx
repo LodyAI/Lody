@@ -255,6 +255,7 @@ function CoordinatorTaskChip({
   const { t } = useTranslation();
   const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId as SessionId)));
   const title =
+    task?.workItemTitle?.trim() ||
     task?.session.title?.trim() ||
     meta?.title?.trim() ||
     fallbackTitle?.trim() ||
@@ -293,6 +294,18 @@ export function CoordinatorTaskChangeStrip({
   const coordinator = useCoordinatorConversation();
   const [expanded, setExpanded] = useState(false);
   if (!coordinator) return <>{details}</>;
+  const dedupedSessionIds = useMemo(() => {
+    const out: string[] = [];
+    const seenWorkItems = new Set<string>();
+    for (const id of sessionIds) {
+      const task = coordinator.tasks.get(id);
+      const groupKey = task?.workItemId ?? id;
+      if (seenWorkItems.has(groupKey)) continue;
+      seenWorkItems.add(groupKey);
+      out.push(id);
+    }
+    return out;
+  }, [coordinator.tasks, sessionIds]);
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
     <div {...stylex.props(styles.strip)} data-coordinator-change-strip="">
@@ -300,7 +313,7 @@ export function CoordinatorTaskChangeStrip({
         <span {...stylex.props(styles.stripLabel)}>
           {t('projectMode.changes.label', 'Changes')}
         </span>
-        {sessionIds.map((id) => (
+        {dedupedSessionIds.map((id) => (
           <CoordinatorTaskChip
             key={id}
             sessionId={id}

@@ -140,6 +140,7 @@ export function useSessionDoc(
       preview: undefined,
       externalHistoryCursor: undefined,
       acpRuntimeConfig: undefined,
+      workItems: {},
     }),
     [sessionId]
   );
