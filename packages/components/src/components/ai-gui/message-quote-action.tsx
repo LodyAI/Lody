@@ -9,7 +9,7 @@ import { useSafeAreaCollisionPadding } from '@/hooks/use-safe-area-insets';
 import { selectedMessageMarkdown } from './message-quote-markdown';
 
 const styles = stylex.create({
-  floating: { position: 'fixed', zIndex: 80 },
+  floating: { position: 'fixed', zIndex: 60 },
 });
 
 type Capture = {

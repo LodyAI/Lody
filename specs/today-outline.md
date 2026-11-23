@@ -137,6 +137,9 @@ any time; when off it changes none of the app's existing behavior.
   outdented, moved, merged or deleted from its own view, and its direct children do not outdent out of it: Enter on
   its empty last child adds another child instead (as in Logseq), so repeated Enter and Shift+Tab keep every line
   inside the subtree. A node deleted meanwhile shows "This node was deleted." with a way back.
+- A zoomed node without children shows a "+" where its first child's bullet would be while the pointer is over the
+  surface (always on touch screens); clicking it, or anywhere on the surface's empty area, starts that child with
+  the caret in it, as one undo step (user decision, after Logseq's add button).
 - Keys: `⌥→` zooms into the edited or selected node and `⌥←` goes up one level (node, parent, day, stream). On
   Windows and Linux they always apply; on the Mac, where `⌥←/→` move by word, they apply in block selection and
   while editing only from the node's end (`⌥→`) or start (`⌥←`). `⌘.`, `⌘,` and `⌘[` keep their app bindings;

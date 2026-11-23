@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { Button } from '@lody/ui/button';
@@ -6,7 +7,7 @@ import { PinSectionTargetPill } from '@/components/chat/pin-section-target-pill'
 function PinSectionTargetDemo({ name }: { name: string }) {
   const [pinned, setPinned] = useState(true);
   return (
-    <div className="flex w-[420px] items-center gap-2 p-6">
+    <div {...stylex.props(themeStyles.row)}>
       {pinned ? (
         <PinSectionTargetPill
           sectionId="maintenance"
@@ -36,3 +37,7 @@ export const Default: Story = {};
 export const LongName: Story = {
   args: { name: 'Weekly dependency and mirror maintenance' },
 };
+
+const themeStyles = stylex.create({
+  row: { display: 'flex', width: '420px', alignItems: 'center', gap: 'calc(var(--spacing) * 2)', padding: 'calc(var(--spacing) * 6)' },
+});

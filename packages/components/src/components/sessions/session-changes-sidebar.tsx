@@ -59,6 +59,7 @@ export type SessionChangesSidebarProps = {
 };
 
 const styles = stylex.create({
+  tree: { padding: 0 },
   scope: { display: 'flex', height: '100%', flexDirection: 'column' },
   header: {
     display: 'flex',
@@ -162,19 +163,19 @@ const styles = stylex.create({
       '[data-state="closed"]': accordionUp,
     },
     animationDuration: {
-      default: 'var(--tw-animation-duration, var(--tw-duration, .2s))',
-      '[data-state="open"]': 'var(--tw-animation-duration, var(--tw-duration, .2s))',
-      '[data-state="closed"]': 'var(--tw-animation-duration, var(--tw-duration, .2s))',
+      default: '.2s',
+      '[data-state="open"]': '.2s',
+      '[data-state="closed"]': '.2s',
     },
     animationTimingFunction: {
-      default: 'var(--tw-ease, ease-out)',
-      '[data-state="open"]': 'var(--tw-ease, ease-out)',
-      '[data-state="closed"]': 'var(--tw-ease, ease-out)',
+      default: 'ease-out',
+      '[data-state="open"]': 'ease-out',
+      '[data-state="closed"]': 'ease-out',
     },
-    animationDelay: 'var(--tw-animation-delay, 0s)',
-    animationIterationCount: 'var(--tw-animation-iteration-count, 1)',
-    animationDirection: 'var(--tw-animation-direction, normal)',
-    animationFillMode: 'var(--tw-animation-fill-mode, none)',
+    animationDelay: '0s',
+    animationIterationCount: '1',
+    animationDirection: 'normal',
+    animationFillMode: 'none',
   },
   categoryRows: {
     display: 'flex',
@@ -448,7 +449,7 @@ export function SessionChangesSidebar({
             defaultNodeIcon={DefaultFolderIcon}
             defaultLeafIcon={DefaultFileIcon}
             renderItem={renderTreeItem}
-            className="p-0"
+            xstyle={styles.tree}
           />
         </div>
       );

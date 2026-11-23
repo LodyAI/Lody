@@ -68,6 +68,11 @@ file creates an empty vault only: the user must save and reimport the exact file
 before ciphertext upload. It does not enroll any workspace or authorize a device.
 Reads may open a retired vault whose recovery identity is still valid; mutations
 require the current vault. Mobile and Web entry points remain thin fixed-namespace wrappers.
+Recovery files carry the signed-in site's canonical origin
+([`recoveryServiceLocator`](../e2ee-client/README.md#recovery-service-locator)) through the
+optional `serviceLocator` option. Omitted, it is the page's HTTP(S) origin, which suits the
+hosted and self-hosted Web client; the mobile wrapper passes `VITE_SITE_URL`. Without a usable
+origin every command refuses as `disabled`.
 
 `makeRecoveryWorkspaces` is the shared per-workspace setup and restore engine.
 The caller passes `platform: 'web' | 'mobile'`, the passkey port, and the closed

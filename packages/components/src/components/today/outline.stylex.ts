@@ -18,3 +18,6 @@ export const todayOutline = stylex.defineConsts({
    */
   foldOverhang: '17px',
 });
+
+/** The scroll surface: a zoomed node without children shows its "+" while it is hovered. */
+export const todaySurfaceMarker = stylex.defineMarker();

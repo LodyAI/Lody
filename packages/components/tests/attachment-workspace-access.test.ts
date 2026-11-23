@@ -1,5 +1,6 @@
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createStore, type PlatformProvider, type PlatformSessionState } from '@lody/platform';
+import { createStore, type PlatformSessionState } from '@lody/platform';
 import { installAttachmentWorkspaceAccess } from '../src/lib/attachment-workspace-access';
 import { uploadSessionImage } from '../src/lib/session-image-upload';
 import { uploadSessionFile } from '../src/lib/session-file-upload';
@@ -34,7 +35,12 @@ function fixture(describe: () => Promise<WorkspaceAdmissionDescriptor> = async (
   const session = createStore(authenticated('account'));
   remove = installAttachmentWorkspaceAccess({
     identity: { session, signOut: async () => {} },
-    e2eeWorkspaces: { describe } as PlatformProvider['e2eeWorkspaces'],
+    e2eeWorkspaces: {
+      describe,
+      create: unexpectedE2eeWorkspaceOperation,
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
+      history: unexpectedE2eeWorkspaceOperation,
+    },
     workspaces: {
       state: createStore({ status: 'ready', workspaces: [], activeWorkspaceId: null }),
       setActive: async () => {},

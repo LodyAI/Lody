@@ -1,15 +1,27 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useCallback, useState } from 'react';
 import { fn } from 'storybook/test';
 import { InviteScreenView, OnboardingBackdrop, type InviteEntry } from '@/components/onboarding';
 
+const storyStyles = stylex.create({
+  stage: { position: 'relative', minHeight: 760, width: '100%' },
+  content: {
+    position: 'relative',
+    zIndex: 10,
+    display: 'flex',
+    minHeight: 760,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
+
 function InvitePreviewWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-[760px] w-full">
+    <div {...stylex.props(storyStyles.stage)}>
       <OnboardingBackdrop />
-      <div className="relative z-10 flex min-h-[760px] items-center justify-center p-8">
-        {children}
-      </div>
+      <div {...stylex.props(storyStyles.content)}>{children}</div>
     </div>
   );
 }

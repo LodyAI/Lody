@@ -1,9 +1,13 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { LoroDoc } from 'loro-crdt';
 import { useEffect, useMemo, useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { CalendarDays, MoreHorizontal, PinOff } from 'lucide-react';
+import { CalendarDays, MoreHorizontal, Pin } from 'lucide-react';
 import { Button } from '@lody/ui/button';
+import { Toggle } from '@lody/ui/toggle';
 import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
 import { TodayPinnedCard } from '@/components/today/today-pinned-column';
 import { TodayToolbar } from '@/components/today/today-view';
@@ -109,6 +113,7 @@ function DayStream(props: {
 const meta: Meta<typeof DayStream> = {
   title: 'Today/Day stream',
   component: DayStream,
+  excludeStories: ['PinnedTodayToolbar'],
 };
 export default meta;
 
@@ -129,6 +134,22 @@ export const WideWindow: StoryObj<typeof DayStream> = {
 export const WideWindowFullWidth: StoryObj<typeof DayStream> = {
   args: { dates: [TODAY, '2026-11-18' as TodayDate], wide: true, fullWidth: true },
 };
+
+export function PinnedTodayToolbar() {
+  return (
+    <TodayToolbar surface="pinned" title={null}>
+      <Button variant="ghost" size="small" icon aria-label="Pick a date">
+        <CalendarDays size={16} strokeWidth={1.5} />
+      </Button>
+      <Toggle size="small" icon pressed aria-label="Pin to sidebar">
+        <Pin size={16} strokeWidth={1.5} fill="none" />
+      </Toggle>
+      <Button variant="ghost" size="small" icon aria-label="More">
+        <MoreHorizontal size={16} strokeWidth={1.5} />
+      </Button>
+    </TodayToolbar>
+  );
+}
 
 /** Draws where macOS puts the traffic lights (close button centred at 23, 23). */
 function TrafficLights() {
@@ -160,24 +181,14 @@ function PinnedAtWindowEdge() {
   }, [setCollapsed]);
   if (!ready) return null;
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-sidebar text-foreground">
+    <div {...stylex.props(themeStyles.row)}>
       <TrafficLights />
       <TodayPinnedCard width={360} anchored={false} label="Today">
-        <TodayToolbar pinned title={null}>
-          <Button variant="ghost" size="small" icon aria-label="Pick a date">
-            <CalendarDays size={16} strokeWidth={1.5} />
-          </Button>
-          <Button variant="ghost" size="small" icon aria-label="Unpin Today">
-            <PinOff size={16} strokeWidth={1.5} />
-          </Button>
-          <Button variant="ghost" size="small" icon aria-label="More">
-            <MoreHorizontal size={16} strokeWidth={1.5} />
-          </Button>
-        </TodayToolbar>
+        <PinnedTodayToolbar />
         <DayStream dates={[TODAY, '2026-11-18' as TodayDate]} placement="pinnedAtWindowEdge" />
       </TodayPinnedCard>
       <WorkspaceCard anchored>
-        <div className="p-6 text-sm text-muted-foreground">Conversation</div>
+        <div {...stylex.props(themeStyles.hint)}>Conversation</div>
       </WorkspaceCard>
     </div>
   );
@@ -193,3 +204,8 @@ export const PinnedSidebarHidden: StoryObj<typeof DayStream> = {
   parameters: { layout: 'fullscreen' },
   render: () => <PinnedAtWindowEdge />,
 };
+
+const themeStyles = stylex.create({
+  row: { display: 'flex', height: '100dvh', width: '100%', overflow: 'hidden', backgroundColor: uiColors.secondaryBackground, color: uiColors.label },
+  hint: { padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+});

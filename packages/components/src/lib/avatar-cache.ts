@@ -154,7 +154,10 @@ const getSyntheticCacheStorageUrl = (key: string): string =>
 const getLegacyOriginCacheStorageUrl = (key: string): string | null => {
   if (typeof window === 'undefined') return null;
   const origin = window.location?.origin;
-  if (typeof origin !== 'string' || (!origin.startsWith('https://') && !origin.startsWith('http://'))) {
+  if (
+    typeof origin !== 'string' ||
+    (!origin.startsWith('https://') && !origin.startsWith('http://'))
+  ) {
     return null;
   }
   try {

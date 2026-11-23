@@ -1069,7 +1069,7 @@ describe('LoroSidebar pinned section', () => {
     expect(onCreateSection).toHaveBeenCalledWith('Routine', undefined);
   });
 
-  it('overlays the section menu on the folded pin section activity mark and hides the mark on hover', () => {
+  it('keeps the section menu and folded activity mark in the same end slot', () => {
     const onTogglePinSection = vi.fn();
     const unreadItem = {
       ...pinnedItem,
@@ -1095,16 +1095,14 @@ describe('LoroSidebar pinned section', () => {
     });
 
     const opsHeader = container?.querySelector<HTMLElement>(
-      '[data-pin-section="ops"] .group\\/section-header'
+      '[data-pin-section="ops"] [data-sidebar-section-header]'
     );
-    const opsMenuSlot = opsHeader?.querySelector('.group\\/section-menu');
+    const opsMenuSlot = opsHeader?.querySelector('[data-sidebar-section-menu]');
     const opsMenu = opsMenuSlot?.querySelector('button[aria-label="Section actions"]');
     const opsMark = opsMenuSlot?.querySelector('[data-sidebar-group-activity]');
     expect(opsMenu).not.toBeNull();
     expect(opsMark).not.toBeNull();
     expect(opsMark?.querySelector('[data-session-row-indicator]')).not.toBeNull();
-    expect(opsMark?.parentElement?.className).toContain('group-hover/section-header:opacity-0');
-    expect(opsMenu?.parentElement?.className).toContain('group-hover/section-header:opacity-100');
 
     flushSync(() => {
       opsMark?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1112,9 +1110,9 @@ describe('LoroSidebar pinned section', () => {
     expect(onTogglePinSection).toHaveBeenCalledWith('ops');
 
     const defaultHeader = container?.querySelector<HTMLElement>(
-      '[data-pin-section="default"] .group\\/section-header'
+      '[data-pin-section="default"] [data-sidebar-section-header]'
     );
-    const defaultMenuSlot = defaultHeader?.querySelector('.group\\/section-menu');
+    const defaultMenuSlot = defaultHeader?.querySelector('[data-sidebar-section-menu]');
     const defaultMark = defaultMenuSlot?.querySelector('[data-sidebar-group-activity]');
     const filterButton = defaultHeader?.querySelector('button[aria-label="Filter sidebar"]');
     expect(defaultMark).not.toBeNull();

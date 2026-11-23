@@ -146,6 +146,7 @@ async function workspaceFixture(
   owners.push(handle);
   return Object.assign(handle, {
     testRoot: root,
+    testRepo: repo,
     testDocument: doc,
     testEditors: editors,
     testAuthors: authors,
@@ -270,6 +271,78 @@ describe('Automation control authority', () => {
       settings: { autoDeliver: false },
     });
     expect(meta.autoDelivery).toBeNull();
+  });
+  it('does not republish an Auto delivery status after it is turned off during a pass', async () => {
+    vi.useFakeTimers();
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      pullRequests: [{ url: 'https://github.com/owner/project/pull/42', status: 'open' }],
+      autoDelivery: undefined as Record<string, unknown> | null | undefined,
+    };
+    const host = await workspaceFixture(meta);
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: { fixCi: true, resolveConflicts: true, merge: false } },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(meta.autoDelivery).toMatchObject({ state: 'ci' });
+    const read = host.testRepo.getDocMeta;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    host.testRepo.getDocMeta = async (room: string) => {
+      host.testRepo.getDocMeta = read;
+      entered.resolve();
+      await release.promise;
+      return read(room);
+    };
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(1);
+    await entered.promise;
+    const turnedOff = host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: false },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    release.resolve();
+    await vi.advanceTimersByTimeAsync(1);
+    await turnedOff;
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(meta.autoDelivery).toBeNull();
+  });
+  it('withdraws an unsent Auto delivery request when delivery is turned off', async () => {
+    vi.useFakeTimers();
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    };
+    const host = await workspaceFixture(meta);
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: { fixCi: true, resolveConflicts: true, merge: false } },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    const request = required(
+      host.ledger.activities().find((receipt) => receipt.event.source === 'lody/auto-delivery')
+    );
+    expect(['accepted', 'blocked']).toContain(host.ledger.receipt(request.id)?.state);
+    expect(host.ledger.hasSessionWork('session-a')).toBe(true);
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: false },
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(host.ledger.receipt(request.id)?.state).toBe('cancelled');
+    expect(host.ledger.hasSessionWork('session-a')).toBe(false);
   });
   it('enables recovery for the current confirmed failure without replaying a later input', async () => {
     const meta = {

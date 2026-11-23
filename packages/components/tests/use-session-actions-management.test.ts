@@ -48,7 +48,8 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionToCreate,
-  type WorkspaceId} from '@lody/shared';
+  type WorkspaceId,
+} from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
@@ -1646,11 +1647,7 @@ describe('useSessionActions', () => {
       await answerConfirmation(labels.all);
       await expect(result).resolves.toBe(true);
       // Opened Sessions follow; contained Tabs keep no status fields of their own.
-      for (const session of [
-        tree.rootSession,
-        tree.openedSession,
-        tree.openedFromTabSession,
-      ]) {
+      for (const session of [tree.rootSession, tree.openedSession, tree.openedFromTabSession]) {
         expect(applied(tree.metaRepo.getSession(session.id))).toBe(true);
       }
       for (const session of [tree.tabSession, tree.openedTab]) {

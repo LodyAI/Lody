@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { fn } from 'storybook/test';
@@ -8,6 +9,16 @@ import {
   type RemoteDirectoryPickerMachine,
 } from '@/components/local-projects/add-local-project-dialog';
 import { Button } from '@lody/ui/button';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    height: '680px',
+    'align-items': 'flex-start',
+    'justify-content': 'center',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 10%, transparent)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 type FakeEntry = {
   name: string;
@@ -154,7 +165,7 @@ function StoryShell({
 }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="flex h-[680px] items-start justify-center bg-muted/10 p-6">
+    <div {...stylex.props(storyLayout.row)}>
       <Button type="button" onClick={() => setOpen(true)}>
         Add local project
       </Button>

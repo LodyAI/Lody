@@ -267,12 +267,13 @@ const MenuRadioItem = React.forwardRef<HTMLDivElement, MenuRadioItemProps>(funct
  * Base UI's GroupLabel throws outside a `Menu.Group`, and these menus use a
  * label as a loose section header. A presentation div states the same thing.
  */
-const MenuGroupLabel = React.forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<'div'>>(
-  function MenuGroupLabel({ className, style, ...props }, ref) {
-    const sx = withClassName(stylex.props(menuStyles.groupLabel), className);
-    return <div ref={ref} {...props} className={sx.className} style={{ ...sx.style, ...style }} />;
-  }
-);
+const MenuGroupLabel = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentPropsWithoutRef<'div'> & { xstyle?: stylex.StyleXStyles }
+>(function MenuGroupLabel({ className, xstyle, style, ...props }, ref) {
+  const sx = withClassName(stylex.props(menuStyles.groupLabel, xstyle), className);
+  return <div ref={ref} {...props} className={sx.className} style={{ ...sx.style, ...style }} />;
+});
 
 /** Same-frame hover open for submenus; Base UI's trigger `delay` defaults to 100ms. */
 function MenuSubmenu(props: MenuSubmenuProps) {
@@ -353,6 +354,7 @@ type MenuSearchInputProps = {
   onSubmit?: () => void;
   /** Layout only (a width floor); the field is the recessed well. */
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 /**
@@ -375,7 +377,7 @@ type MenuSearchInputProps = {
  * menu the user just opened.
  */
 const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>(
-  ({ value, onValueChange, placeholder, ariaLabel, onSubmit, className }, forwardedRef) => {
+  ({ value, onValueChange, placeholder, ariaLabel, onSubmit, className, xstyle }, forwardedRef) => {
     const inputRef = React.useRef<HTMLInputElement | null>(null);
     /* Read by the menu-level listener below, which binds once: rebinding it per
        keystroke would drop the key that caused the re-render. */
@@ -459,7 +461,7 @@ const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>
 
     return (
       <div
-        {...withClassName(stylex.props(menuStyles.searchShell), className)}
+        {...withClassName(stylex.props(menuStyles.searchShell, xstyle), className)}
         onClick={(event) => {
           event.stopPropagation();
           inputRef.current?.focus();

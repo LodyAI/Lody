@@ -199,6 +199,9 @@ export const cloudOperations = {
       'e2eeWorkspaces:memberProfiles'
     ),
     create: action<ConvexApi['e2eeWorkspaces']['create']>('e2eeWorkspaces:create'),
+    deleteWorkspace: action<ConvexApi['e2eeWorkspaces']['deleteWorkspace']>(
+      'e2eeWorkspaces:deleteWorkspace'
+    ),
     describe: query<ConvexApi['e2eeWorkspaces']['describe']>('e2eeWorkspaces:describe'),
     history: action<ConvexApi['e2eeWorkspaces']['history']>('e2eeWorkspaces:history'),
   },

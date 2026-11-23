@@ -402,6 +402,8 @@ export function CloudPlatformProvider({
         memberProfiles: (request) =>
           cloudClient.query(cloudOperations.e2eeWorkspaces.memberProfiles, request),
         create: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.create, request),
+        deleteWorkspace: (request) =>
+          cloudClient.action(cloudOperations.e2eeWorkspaces.deleteWorkspace, request),
         describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),
         history: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.history, request),
       },

@@ -308,7 +308,8 @@ submissions never retry. Exact-instance retirement detaches lifecycle listeners 
 termination, preserving the assistant entry and output owner through resume. Until retirement
 succeeds, the disconnected-execution release path retains the old Session for cleanup,
 including missing-session errors and Stop. Success clears the old prompt's cancellation drain,
-so Stop reaches the reusable replacement.
+republishes running presence and status before the retry, and lets Stop reach the reusable
+replacement.
 
 History promotion and activation can fail independently. `promotion-failed` preserves proof
 of non-delivery. `recoveryOwned` tells the renderer not to publish a conflicting activation;

@@ -1,6 +1,11 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ChatShareCard, type ChatShareCardMessage } from '@/components/share-card/chat-share-card';
 import { AgentIcon } from '@/components/icons/agent-icon';
+
+const sceneStyles = stylex.create({
+  agentIcon: { width: 'calc(var(--spacing) * 5)', height: 'calc(var(--spacing) * 5)' },
+});
 
 const meta = {
   title: 'Sessions/ChatShareCard',
@@ -41,7 +46,7 @@ const demoMeta = {
   name: 'Claude Code',
   params: ['Sonnet 4.5', '~12.4K tokens'],
   date: '2026-09-07 21:38',
-  icon: <AgentIcon cliType="builtin" agentType="claude" className="size-5" />,
+  icon: <AgentIcon cliType="builtin" agentType="claude" {...stylex.props(sceneStyles.agentIcon)} />,
 };
 
 // Synthetic fixtures only — never real transcripts.

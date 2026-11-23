@@ -1,13 +1,15 @@
 import { useMemo } from 'react';
 import { useOrganization } from '@/hooks/useOrganization';
 import { isLocalAppPlatform } from '@/lib/app-platform';
+import { cloudOperations } from '@/lib/cloud-api-operations';
+import { useCloudPlatformClient } from '../../providers/cloud-platform-api';
 import { useAuthClient } from '../../providers/convex-provider';
 
-/** The ordinary account workspace removals the lost-access page may start. Neither
+/** The account workspace removals the lost-access page may start. Neither
  * needs this device's encryption keys; the server checks ownership and billing on
  * every call, so the page's role reading is only a hint for which one to offer. */
 export interface E2eeWorkspaceRemoval {
-  /** Owner deletion or member leave through the ordinary account path. Rejects with
+  /** Owner deletion or member leave through the signed-in account. Rejects with
    * the server's error, or with a transport error whose outcome is unknown. */
   submit(kind: 'delete' | 'leave', workspaceId: string): Promise<void>;
   /** Whether the account still lists the workspace: true listed, false gone, null
@@ -28,10 +30,11 @@ export function useE2eeWorkspaceRemoval(): E2eeWorkspaceRemoval | undefined {
 function useCloudWorkspaceRemoval(): E2eeWorkspaceRemoval {
   const { deleteOrganization, leaveOrganization, refetchOrganizations } = useOrganization();
   const authClient = useAuthClient();
+  const cloudClient = useCloudPlatformClient();
   return useMemo(
     () => ({
       submit: async (kind, workspaceId) => {
-        if (kind === 'delete') await deleteOrganization(workspaceId);
+        if (kind === 'delete') await deleteOrganization(workspaceId, { isEncrypted: true });
         else await leaveOrganization(workspaceId);
       },
       listed: async (workspaceId) => {
@@ -40,7 +43,9 @@ function useCloudWorkspaceRemoval(): E2eeWorkspaceRemoval {
             fetchOptions: { disableSignal: true },
           });
           if (error || !Array.isArray(data)) return null;
-          return data.some((organization) => organization.id === workspaceId);
+          if (data.some((organization) => organization.id === workspaceId)) return true;
+          const encrypted = await cloudClient.query(cloudOperations.e2eeMembers.workspaces, {});
+          return encrypted.some((workspace) => workspace.id === workspaceId);
         } catch {
           return null;
         }
@@ -51,6 +56,6 @@ function useCloudWorkspaceRemoval(): E2eeWorkspaceRemoval {
           .catch((error: unknown) => console.warn('Workspace list refresh failed', error));
       },
     }),
-    [authClient, deleteOrganization, leaveOrganization, refetchOrganizations]
+    [authClient, cloudClient, deleteOrganization, leaveOrganization, refetchOrganizations]
   );
 }

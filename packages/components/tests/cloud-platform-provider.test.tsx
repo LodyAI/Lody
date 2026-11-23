@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { createCloudSessionAccess } from '@/providers/cloud-session-access';
 
@@ -221,6 +222,24 @@ describe('CloudPlatformProvider', () => {
     );
     expect(seen.at(-1)!.identity.session.get()).toEqual({ status: 'unauthenticated' });
     expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBeUndefined();
+  });
+
+  it('accepts deletion only after the dedicated action confirms the requested workspace', async () => {
+    refetch('A');
+    await render();
+    const request = { workspaceId: 'workspace-a' };
+    let receipt = { ...request, deleted: true };
+    fixture.cloudClient.action = async (reference, args) => {
+      expect(getFunctionName(reference)).toBe('e2eeWorkspaces:deleteWorkspace');
+      expect(args).toEqual(request);
+      return receipt;
+    };
+    const port = seen.at(-1)!.e2eeWorkspaces!;
+    await expect(port.deleteWorkspace(request)).resolves.toEqual(receipt);
+    receipt = { ...request, deleted: false };
+    await expect(port.deleteWorkspace(request)).rejects.toThrow('e2ee_deletion_receipt_mismatch');
+    receipt = { workspaceId: 'workspace-b', deleted: true };
+    await expect(port.deleteWorkspace(request)).rejects.toThrow('e2ee_deletion_receipt_mismatch');
   });
 
   it('subscribes to only the scoped ledger head, delivers cached state and fences late values', async () => {
@@ -876,7 +895,11 @@ describe('cloud E2EE creation ownership', () => {
     status: 'authenticated',
     user: { id: 'user-a' },
   });
-  const remote: Pick<PlatformE2eeWorkspaces, 'create' | 'describe' | 'history'> = {
+  const remote: Pick<
+    PlatformE2eeWorkspaces,
+    'create' | 'deleteWorkspace' | 'describe' | 'history'
+  > = {
+    deleteWorkspace: unexpectedE2eeWorkspaceOperation,
     create: async () => ({ ...receipt }),
     describe: async () => ({ ...receipt }),
     history: async () => ({
@@ -1087,6 +1110,7 @@ describe('cloud E2EE display directory ownership', () => {
       }[];
     }>();
     const remote = {
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },

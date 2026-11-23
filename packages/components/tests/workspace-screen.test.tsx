@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import {
   createRouter,
   createRootRoute,
@@ -255,6 +256,7 @@ describe('WorkspaceScreen write recovery', () => {
       ...TEST_CLOUD_PLATFORM,
       e2eeWorkspaces: {
         describe: describeMode,
+        deleteWorkspace: unexpectedE2eeWorkspaceOperation,
         create: async () => {
           throw new Error('unused');
         },

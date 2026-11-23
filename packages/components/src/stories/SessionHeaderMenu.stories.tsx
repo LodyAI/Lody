@@ -1,15 +1,28 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import { Provider, createStore } from 'jotai';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
-import type { MachineId, SessionMeta } from '@lody/shared';
+import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 
-import { SessionHeaderMenu } from '@/components/sessions/session-chat-interface';
 import {
-  SessionInfoDialog,
+  SessionHeaderMenu,
   type SessionOwnerMenuState,
-} from '@/components/sessions/session-info-dialog';
+} from '@/components/sessions/session-chat-interface';
+import { SessionInfoDialog } from '@/components/sessions/session-info-dialog';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'min-width': '32rem',
+    'align-items': 'flex-start',
+    'justify-content': 'center',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-top': 'calc(var(--spacing) * 24)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const ownerMenuState: SessionOwnerMenuState = {
   ownerUserId: 'user-story',
@@ -47,7 +60,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="flex min-h-dvh min-w-[32rem] items-start justify-center bg-background pt-24 text-foreground">
+      <div {...stylex.props(storyLayout.row)}>
         <Story />
       </div>
     ),
@@ -92,6 +105,8 @@ export const GitHubWorktree: Story = {
   globals: { theme: 'dark' },
 };
 
+export const GitHubWorktreeAmbient: Story = {};
+
 /**
  * Multi-member workspace: "Session info…" lists the owner with a Change
  * picker. Single-member workspaces pass no `owner` at all, so the owner row is
@@ -106,6 +121,39 @@ export const MultiMemberOwnerTransfer: Story = {
 export const OwnerTransferPending: Story = {
   globals: { theme: 'dark' },
   args: { owner: { ...ownerMenuState, pendingUserId: 'user-teammate' } },
+};
+
+export const SharingUnknown: Story = {
+  args: {
+    sharing: {
+      visibility: 'unknown',
+      canManage: false,
+      machineId: 'machine-header-menu-story' as MachineId,
+      localProjectId: null,
+      machineName: 'Synthetic machine',
+      projectName: null,
+    },
+  },
+};
+
+export const OpenedSessions: Story = {
+  args: {
+    openedByRelations: {
+      opened: [
+        {
+          sessionId: 'synthetic-opened-review' as SessionId,
+          title: 'Review the proposed changes',
+          target: { sessionId: 'synthetic-opened-review' as SessionId },
+        },
+        {
+          sessionId: 'synthetic-opened-followup' as SessionId,
+          title: 'Follow up on the browser checks',
+          target: { sessionId: 'synthetic-opened-followup' as SessionId },
+        },
+      ],
+      onOpenSession: fn(),
+    },
+  },
 };
 
 export const OpenInIde: Story = {

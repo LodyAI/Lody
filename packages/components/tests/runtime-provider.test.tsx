@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import {
   authorizePlaintextAttachmentUpload,
   installAttachmentWorkspaceAccess,
@@ -315,6 +316,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
           contentMode: 'plaintext',
           contentModeVersion: 1,
         }),
+        deleteWorkspace: unexpectedE2eeWorkspaceOperation,
         create: async () => {
           throw new Error('unused');
         },

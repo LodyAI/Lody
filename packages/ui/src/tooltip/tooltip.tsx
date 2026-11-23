@@ -20,6 +20,7 @@ export interface TooltipContentProps extends Omit<
   /** Where the tooltip mounts. Defaults to the nearest `PopupContainerProvider`. */
   container?: PopupContainer;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 /**
@@ -37,7 +38,7 @@ export type TooltipTriggerProps = TriggerBaseProps;
  */
 export const TooltipContent = forwardRef<HTMLDivElement, TooltipContentProps>(
   function TooltipContent(
-    { className, children, container, sideOffset = POPUP_GAP, ...rest },
+    { className, xstyle, children, container, sideOffset = POPUP_GAP, ...rest },
     ref
   ) {
     const inheritedContainer = usePopupContainer();
@@ -69,7 +70,7 @@ export const TooltipContent = forwardRef<HTMLDivElement, TooltipContentProps>(
               const hidden =
                 state.transitionStatus === 'starting' || state.transitionStatus === 'ending';
               return appendClassName(
-                stylex.props(chip.popup, hidden && hiddenChipForSide(state.side)).className,
+                stylex.props(chip.popup, hidden && hiddenChipForSide(state.side), xstyle).className,
                 className
               );
             }}
