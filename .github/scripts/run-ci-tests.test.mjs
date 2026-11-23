@@ -24,7 +24,12 @@ function packagesCoveredInFullRun() {
   for (const group of TEST_GROUPS) {
     for (const args of planCiTests({ scope: null, group })) {
       if (args[0] === 'test:rest') {
-        for (const name of Object.keys(REST_PACKAGE_DIRS)) owners.get(name).push(group);
+        const projects = args.filter((arg) => arg.startsWith('--project='));
+        for (const [name, dir] of Object.entries(REST_PACKAGE_DIRS)) {
+          if (projects.length === 0 || projects.includes(`--project=${dir}:*`)) {
+            owners.get(name).push(group);
+          }
+        }
         continue;
       }
       // Root scripts such as `test:scripts` run no workspace package.
@@ -55,10 +60,16 @@ void test('full run assigns each package to exactly one group', () => {
 
 void test('full rest group runs repository scripts, site-docs and single-boot rest vitest', () => {
   const plan = planCiTests({ scope: null, group: 'rest' });
+  const restProjects = Object.values(REST_PACKAGE_DIRS)
+    .filter((dir) => dir !== 'e2ee-lab')
+    .map((dir) => `--project=${dir}:*`);
   assert.deepEqual(plan, [
     ['test:scripts'],
     ['--filter', '@lody/site-docs', 'run', 'test'],
-    ['test:rest', '--maxWorkers=4'],
+    ['test:rest', '--maxWorkers=4', ...restProjects],
+  ]);
+  assert.deepEqual(planCiTests({ scope: null, group: 'e2ee-lab' }), [
+    ['test:rest', '--maxWorkers=4', '--project=e2ee-lab:*'],
   ]);
   assert.deepEqual(planCiTests({ scope: null, group: 'electron' }), [
     ['--filter', '@lody/electron', 'run', 'test'],
@@ -90,6 +101,21 @@ void test('affected scope runs only the groups that own a listed package', () =>
   assert.deepEqual(planCiTests({ scope, group: 'electron' }), [
     ['--filter', '@lody/electron', 'run', 'test'],
   ]);
+});
+
+void test('affected e2ee-lab runs on its own group and narrows to related files', () => {
+  const scope = affected(['@lody/e2ee-lab', '@lody/e2ee-core']);
+  assert.deepEqual(planCiTests({ scope, group: 'rest' }), [
+    ['test:rest', '--maxWorkers=4', '--project=e2ee-core:*'],
+  ]);
+  assert.deepEqual(planCiTests({ scope, group: 'e2ee-lab' }), [
+    ['test:rest', '--maxWorkers=4', '--project=e2ee-lab:*'],
+  ]);
+  const changed = 'packages/e2ee-core/src/value.ts';
+  assert.deepEqual(planCiTests({ scope, group: 'e2ee-lab', related: [changed] }), [
+    ['test:rest:related', '--passWithNoTests', '--maxWorkers=4', '--project=e2ee-lab:*', changed],
+  ]);
+  assert.deepEqual(planCiTests({ scope: affected(['@lody/shared']), group: 'e2ee-lab' }), []);
 });
 
 void test('affected rest group filters to its own listed packages via single-boot projects and recursive fallback', () => {

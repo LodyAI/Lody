@@ -26,7 +26,8 @@ const DEDICATED_WORKERS = 4;
 export const REST_PACKAGE_DIRS = Object.fromEntries(
   REST_PACKAGES.map((dir) => [dir === 'ignore' ? '@loro-dev/ignore' : `@lody/${dir}`, dir])
 );
-export const TEST_GROUPS = [...Object.keys(DEDICATED_PACKAGES), 'rest', 'electron'];
+const SPLIT_REST_DIR = 'e2ee-lab';
+export const TEST_GROUPS = [...Object.keys(DEDICATED_PACKAGES), 'rest', SPLIT_REST_DIR, 'electron'];
 
 function loadScope(scopePath) {
   try {
@@ -95,6 +96,16 @@ export function planCiTests({ scope, group, shard = null, full = false, related 
   if (group === 'electron') {
     return selected('@lody/electron') ? [['--filter', '@lody/electron', 'run', 'test']] : [];
   }
+  const restVitest = (dirs) => [
+    relatedFiles ? 'test:rest:related' : 'test:rest',
+    ...(relatedFiles ? ['--passWithNoTests'] : []),
+    `--maxWorkers=${DEDICATED_WORKERS}`,
+    ...dirs.map((dir) => `--project=${dir}:*`),
+    ...(relatedFiles ?? []),
+  ];
+  if (group === SPLIT_REST_DIR) {
+    return selected(`@lody/${SPLIT_REST_DIR}`) ? [restVitest([SPLIT_REST_DIR])] : [];
+  }
 
   const dedicated = Object.values(DEDICATED_PACKAGES);
   const recursive = ['-r', '--workspace-concurrency=2', '--no-sort'];
@@ -102,22 +113,15 @@ export function planCiTests({ scope, group, shard = null, full = false, related 
   if (runAll) {
     commands.push(['test:scripts']);
     commands.push(['--filter', '@lody/site-docs', 'run', 'test']);
-    commands.push(['test:rest', `--maxWorkers=${DEDICATED_WORKERS}`]);
+    commands.push(restVitest(REST_PACKAGES.filter((dir) => dir !== SPLIT_REST_DIR)));
   } else {
     const others = listed.filter((name) => name !== '@lody/electron' && !dedicated.includes(name));
     const restDirs = others
       .filter((name) => name in REST_PACKAGE_DIRS)
-      .map((name) => REST_PACKAGE_DIRS[name]);
+      .map((name) => REST_PACKAGE_DIRS[name])
+      .filter((dir) => dir !== SPLIT_REST_DIR);
     const nonRestPackages = others.filter((name) => !(name in REST_PACKAGE_DIRS));
-    if (restDirs.length > 0) {
-      commands.push([
-        relatedFiles ? 'test:rest:related' : 'test:rest',
-        ...(relatedFiles ? ['--passWithNoTests'] : []),
-        `--maxWorkers=${DEDICATED_WORKERS}`,
-        ...restDirs.map((dir) => `--project=${dir}:*`),
-        ...(relatedFiles ?? []),
-      ]);
-    }
+    if (restDirs.length > 0) commands.push(restVitest(restDirs));
     if (nonRestPackages.length > 0) {
       commands.push([
         ...recursive,

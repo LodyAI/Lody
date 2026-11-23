@@ -134,6 +134,7 @@ jobs:
           - { group: cli, shard: 1/2, label: cli 1/2 }
           - { group: cli, shard: 2/2, label: cli 2/2 }
           - { group: rest, shard: '', label: rest }
+          - { group: e2ee-lab, shard: '', label: e2ee-lab }
           - { group: electron, shard: '', label: electron }
     steps:
       - name: Checkout
