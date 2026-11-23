@@ -2022,8 +2022,6 @@ export class AgentClient implements acp.Client {
     const canForkSession = this.supportsFork && hasForkMethod;
 
     // Pi advertises loadSession only for history import; a live resume must not replay it.
-    // Antigravity (`agy acp`) returns `session/load` before its replay stream finishes draining,
-    // leaking trailing history updates into the next turn; `session/resume` restores without replay.
     const preferResumeOverLoad =
       (this.options.agentConfig?.cliType === 'builtin' &&
         (this.options.agentConfig.agentType === 'kimi' ||
