@@ -80,6 +80,7 @@
     "@ipld/dag-cbor": "10.0.2",
     "@lody/configs": "workspace:*",
     "@playwright/test": "^1.54.1",
+    "@stylexjs/stylex": "0.19.0",
     "@stylexjs/unplugin": "0.19.0",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
