@@ -7,6 +7,7 @@ export * from './history-write-schema';
 export type * from './session-mirror';
 export type * from './session-control-plane';
 export * from './session-cancel-request';
+export * from './roost-cloud-history';
 
 export type {
   AbsolutePath,

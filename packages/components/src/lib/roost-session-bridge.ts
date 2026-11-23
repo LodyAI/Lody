@@ -52,6 +52,7 @@ import {
 import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
 import { SessionHistoryChangesSchema } from '@lody/shared';
+import type { createRoostHistoryReplica } from './roost-history-replica';
 
 type HistoryReadResponse = Extract<
   LocalSessionControlResponse,
@@ -83,6 +84,7 @@ type RoostHistoryTransport = {
 };
 
 type RoostHistoryObservationOptions = {
+  readonly cloudHistory?: (sessionId: SessionId) => ReturnType<typeof createRoostHistoryReplica>;
   readonly coherentInspection?: boolean | (() => boolean);
   readonly incremental?: boolean | (() => boolean);
   readonly live?: boolean | (() => boolean);
@@ -265,6 +267,7 @@ const createRoostSessionDataFactoryFromTransport =
   ): ConversationSessionDataFactory =>
   ({ sessionId }) => {
     const transport = createTransport(sessionId);
+    const cloudHistory = options.cloudHistory?.(sessionId);
     const incrementalEnabled = () =>
       typeof options.incremental === 'function'
         ? options.incremental()
@@ -1214,6 +1217,10 @@ const createRoostSessionDataFactoryFromTransport =
     };
 
     const unsubscribeWake = options.subscribeWake?.(() => {
+      if (cloudHistory) {
+        cloudHistory.refresh();
+        return;
+      }
       if (!active() || !subscriptionEnabled()) stopSubscription();
       startSubscription();
       if (!transport.subscribeHistory || !subscriptionEnabled()) scheduleRefresh();
@@ -1311,6 +1318,10 @@ const createRoostSessionDataFactoryFromTransport =
       if (disposed) throw new Error('Roost session bridge is disposed');
       assertSerializableHistoryPayload(operation, payload);
       const receipt = await transport.writeHistory(operation, payload);
+      if (cloudHistory) {
+        cloudHistory.refresh();
+        return receipt.result;
+      }
       await notifyChanged(
         receipt.historyChange,
         receipt.historyRevision,
@@ -1357,7 +1368,9 @@ const createRoostSessionDataFactoryFromTransport =
     const snapshots: SessionSnapshotService = {
       capture: async (): Promise<SessionSnapshot> => {
         const snapshot = Object.freeze({
-          history: [...(await readEntries({ kind: 'readAll' }))],
+          history: [
+            ...(await (cloudHistory?.history.readAll() ?? readEntries({ kind: 'readAll' }))),
+          ],
         }) as unknown as SessionSnapshot;
         snapshotProvenance.add(snapshot);
         return snapshot;
@@ -1376,7 +1389,7 @@ const createRoostSessionDataFactoryFromTransport =
 
     const sessionData = createRoostSessionData({
       sessionId,
-      history,
+      history: cloudHistory?.history ?? history,
       commands,
       snapshots,
       inputAcceptance: {
@@ -1390,6 +1403,7 @@ const createRoostSessionDataFactoryFromTransport =
       },
       dispose: () => {
         disposed = true;
+        cloudHistory?.dispose();
         stopSubscription();
         unsubscribeWake?.();
         if (refreshTimer) clearTimeout(refreshTimer);

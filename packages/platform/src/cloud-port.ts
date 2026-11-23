@@ -22,6 +22,10 @@ import type {
   MachineId,
   SessionId,
   WorkspaceId,
+  RoostCloudHistoryAuthority,
+  RoostCloudHistoryBinding,
+  RoostCloudHistoryGrant,
+  RoostCloudHistoryTarget,
   createLoroStreamsTokenProviderLegacy,
   LoroStreamsTokenProvider,
 } from '@lody/shared';
@@ -201,6 +205,21 @@ export type CloudAccessSnapshot =
  * local catalog, the owner is always allowed, and no network I/O happens.
  */
 export interface CloudAccessPort {
+  /** Owner-only, exact-stream upload authority. */
+  roostHistory?: {
+    uploadGrant(
+      request: RoostCloudHistoryTarget & { binding: RoostCloudHistoryBinding },
+      signal: AbortSignal
+    ): Promise<RoostCloudHistoryGrant>;
+    publish(
+      request: RoostCloudHistoryTarget & {
+        binding: RoostCloudHistoryBinding;
+        authority: RoostCloudHistoryAuthority;
+      },
+      signal: AbortSignal
+    ): Promise<void>;
+    unpublish(request: RoostCloudHistoryTarget, signal: AbortSignal): Promise<void>;
+  };
   /** Online verification of a short-lived, purpose-bound ordinary history proof. */
   verifySessionHistoryRead?: (request: {
     workspaceId: string;
@@ -384,7 +403,10 @@ export interface CloudGithubWriteTokenContext {
 }
 
 export interface CloudGithubTokenManager {
-  getCredentialPolicy(context: CloudGithubWriteTokenContext, signal?: AbortSignal): Promise<{ personalEnabled: boolean }>;
+  getCredentialPolicy(
+    context: CloudGithubWriteTokenContext,
+    signal?: AbortSignal
+  ): Promise<{ personalEnabled: boolean }>;
   getCredentialCandidate(
     repoFullName: string,
     context: CloudGithubWriteTokenContext,

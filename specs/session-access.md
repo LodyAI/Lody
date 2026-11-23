@@ -74,8 +74,14 @@ and v3 policy. Contained children resolve the same root. Long polls recheck befo
 after body reads and response encryption. Encrypted reads retain a ledger-generation
 and verified-policy fence through the entire response; observed withdrawal drops the reply. Read admission grants no writes, execution, file or
 terminal methods, or other sessions. Ordinary history writes require a separate
-editing proof. An offline/unavailable machine produces an explicit reading-unavailable
-state. Loro history retains its document reader.
+editing proof. Owner-served history requires the machine to be available. Loro retains its
+document reader.
+
+Ordinary cloud viewers can also read published Roost history while the owning
+machine is offline. The service resolves the published generation from that
+machine's authenticated registration and uses the same session sharing rules.
+The grant covers a single published stream and expires within 60 seconds. The
+next grant reevaluates access after withdrawal. Editing still requires the owner.
 
 ## Interface
 

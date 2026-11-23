@@ -328,6 +328,8 @@ export class Lody {
       throw error;
     });
     const lody = new Lody(options, manager, encryptedExecution);
+    const history = options.cloudPort.access.roostHistory;
+    if (history) manager.enableRoostCloudHistory(options.machineId, history);
     lody.encryptedWorkspace = e2ee;
     if (e2ee)
       lody.clientLossReceipt = daemonLossObserver.register(

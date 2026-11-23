@@ -3,8 +3,27 @@ import {
   PreviewControlIntentSchema,
   type PreviewControlIntent,
   type PreviewControlProof,
+  roostCloudHistoryGrantSchema,
+  type RoostCloudHistoryTarget,
 } from '@lody/shared';
 import { requireCloudAuthBaseUrl } from './cloud-http-port';
+
+export async function getRoostCloudHistoryReadGrant(
+  target: RoostCloudHistoryTarget,
+  sessionToken: string | null,
+  signal: AbortSignal
+) {
+  const baseUrl = requireCloudAuthBaseUrl('teamSharing');
+  if (!sessionToken) throw new Error('Session history authorization is unavailable.');
+  const response = await fetch(new URL('/api/session-history/roost-read-grant', baseUrl), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+    body: JSON.stringify(target),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+  });
+  if (!response.ok) throw new Error('Roost history read authorization was refused.');
+  return roostCloudHistoryGrantSchema.parse(await response.json());
+}
 
 const TokenResponse = z
   .object({ requestToken: z.string().min(1), requesterUserId: z.string().min(1) })

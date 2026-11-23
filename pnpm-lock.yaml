@@ -1460,6 +1460,12 @@ importers:
       '@loro-dev/flock-wasm':
         specifier: 'catalog:'
         version: 0.5.0
+      '@loro-dev/roost':
+        specifier: 'catalog:'
+        version: 0.3.1
+      '@loro-dev/streams-client':
+        specifier: 'catalog:'
+        version: 0.14.0(effect@4.0.2)
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.23.0(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)

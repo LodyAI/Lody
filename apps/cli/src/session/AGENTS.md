@@ -104,6 +104,7 @@ and the isolation of Roost reads alongside authorization and execution boundarie
   Verify retained bodies against one checkpoint. Capture limits preserve verified coverage.
   Repairs from the same applied checkpoint and retained window share bounded preparation through
   caller timeouts. Generation retirement and owner shutdown cancel pending preparation.
+  Upload replicas outside the writer queue before publishing.
 - `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals: argv (shell for
   unsplit lines only), direct exit and bounded drain. Managed Codex reused-refresh retries once after process cleanup, delay and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:

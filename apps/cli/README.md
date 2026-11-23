@@ -149,6 +149,14 @@ retain the production-only check. `tsconfig.tests.json` remains the explicit
 test-inclusive check; existing test typing errors are not part of the production
 check.
 
+## Roost history replication
+
+In ordinary cloud workspaces the daemon uploads signed active Roost histories
+to Streams. It backfills from the local store and schedules later batches from
+committed turn changes. After initial upload confirmation, it publishes the
+generation for exact-session read grants. Streams work runs independently of
+Agent writes and resumes from Roost's durable upload state after restart.
+
 ## Roost cache recovery tests
 
 Regular `pnpm test` runs the Native recovery contract with 1 and 120 retained turns

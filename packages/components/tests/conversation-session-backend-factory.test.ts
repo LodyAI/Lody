@@ -4,6 +4,15 @@ import { createRoostDirectoryRow, readSessionHistoryMetadata } from '@lody/share
 import type { SessionHistoryInput, SessionHistoryReadResponse } from '@lody/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
+import { Identity, IndexedDbStorage, Store } from '@loro-dev/roost';
+import { fromApplicationJson, LodyHistory } from '@loro-dev/roost/lody-history';
+import {
+  ROOST_HISTORY_BUCKET_ID,
+  roostCloudHistoryStreamId,
+  roostHistoryAuthorKey,
+  roostHistorySourceId,
+} from '@lody/shared';
+import { createRoostHistoryReplica } from '../src/lib/roost-history-replica';
 
 import type { SessionId, MachineId, WorkspaceId } from '@lody/shared';
 import { createConversationSession } from '../src/lib/conversation-view/create-conversation-session';
@@ -27,6 +36,208 @@ import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/
 import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
+  it(
+    'opens and resumes published Roost history from Streams with its owner offline',
+    { timeout: 30_000 },
+    async () => {
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const workspaceId = 'roost-cloud-workspace' as WorkspaceId;
+      const sessionId = 'roost-cloud-session' as SessionId;
+      const machineId = 'roost-cloud-machine' as MachineId;
+      const author = Identity.fromSeed(new Uint8Array(32).fill(23));
+      const storage = await IndexedDbStorage.open('roost-cloud-source');
+      let entropy = 0;
+      const store = new Store(storage, () => true, {
+        clock: () => 1_700_000_000_000n,
+        randomBytes: () => new Uint8Array(16).fill(++entropy),
+      });
+      const stream = store.stream(roostHistorySourceId(sessionId, 'root'));
+      const writer = new LodyHistory(stream, author);
+      const turn = {
+        id: 'cloud-message',
+        role: 'user',
+        timestamp: '2026-11-01T00:00:00Z',
+        items: [{ type: 'text', text: 'Synthetic Roost history' }],
+      };
+      const reply = {
+        id: 'cloud-reply',
+        role: 'assistant',
+        userTurnId: turn.id,
+        timestamp: '2026-11-01T00:00:01Z',
+        items: [{ type: 'text', text: 'A later Roost update' }],
+      };
+      const append = async (
+        entry: typeof turn,
+        preceding?: Awaited<ReturnType<typeof writer.acceptToView>>
+      ) => {
+        const parent = preceding ? await stream.readTurnHeader(preceding.turnId) : undefined;
+        const parents =
+          parent?.kind === 'found' && parent.turn.sealed
+            ? [{ id: parent.turn.turnId, hash: parent.turn.sealed }]
+            : [];
+        const accepted = await writer.acceptToView({
+          viewId: sessionId,
+          expectedRevision: preceding?.revision ?? 0n,
+          expectedHead: preceding?.newHead ?? null,
+          operationId: entry.id,
+          input: {
+            kind: 'message',
+            businessId: entry.id,
+            segmentId: 'primary',
+            parents,
+            content: fromApplicationJson(entry),
+          },
+        });
+        await writer.finish(accepted.turnId, 1n);
+        return accepted;
+      };
+      const exportHistory = async () =>
+        stream.exportTurns(
+          (await stream.readStream()).flatMap((record) =>
+            record.kind === 'found' ? [record.turn.turnId] : []
+          )
+        );
+      const accepted = await append(turn);
+      const bytes = await exportHistory();
+      await append(reply, accepted);
+      const incremental = await exportHistory();
+      await store.close();
+      await storage.close();
+
+      const binding = {
+        generation: 'root' as const,
+        ownerPublicKey: roostHistoryAuthorKey(author.owner()),
+      };
+      const physical = roostCloudHistoryStreamId(workspaceId, machineId, sessionId, binding);
+      const url = `https://streams.invalid/ds/${ROOST_HISTORY_BUCKET_ID}/${encodeURIComponent(physical)}`;
+      const startOffset = String(bytes.length);
+      const tail = String(bytes.length + incremental.length);
+      const applied = Promise.withResolvers<void>();
+      let requestsToTail = 0;
+      vi.stubGlobal('fetch', (input: string | Request, init?: RequestInit) => {
+        const read = new URL(input instanceof Request ? input.url : input);
+        const { pathname, origin } = new URL(url);
+        if (read.origin !== origin || read.pathname !== pathname)
+          throw new Error('Unexpected cloud history transport');
+        if (read.searchParams.get('direction') === 'backward') {
+          return Promise.resolve(
+            new Response(new Uint8Array(bytes), {
+              headers: {
+                'content-type': 'application/octet-stream',
+                'stream-prev-offset': '0',
+                'stream-end-offset': startOffset,
+                'stream-tail-offset': startOffset,
+                'stream-at-start': 'true',
+                'stream-message-spans': JSON.stringify([
+                  {
+                    rel_start: 0,
+                    rel_end: bytes.length,
+                    message_start: '0',
+                    message_end: startOffset,
+                    message_len: startOffset,
+                    msg_offset: '0',
+                  },
+                ]),
+              },
+            })
+          );
+        }
+        const next = (body: Uint8Array<ArrayBuffer> | null, offset: string) =>
+          new Response(body, {
+            status: body ? 200 : 204,
+            headers: {
+              'content-type': 'application/octet-stream',
+              'stream-next-offset': offset,
+              'stream-up-to-date': 'true',
+            },
+          });
+        const offset = read.searchParams.get('offset');
+        if (offset === startOffset) {
+          if (!read.searchParams.has('live')) return Promise.resolve(next(null, startOffset));
+          requestsToTail++;
+          return Promise.resolve(next(new Uint8Array(incremental), tail));
+        }
+        if (offset === tail) {
+          const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+          return new Promise<Response>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+          });
+        }
+        throw new Error(`Unexpected resumed position ${offset}`);
+      });
+      const offline = async (): Promise<never> => {
+        throw new Error('Synthetic owner is offline');
+      };
+      let cachedBinding: typeof binding | undefined;
+      const open = (
+        requestGrant: () => Promise<{
+          binding: typeof binding;
+          streamUrl: string;
+          token: string;
+          expiresIn: number;
+        }>
+      ) =>
+        createRemoteRoostSessionDataFactory({
+          workspaceId,
+          machineId,
+          cloudHistory: () =>
+            createRoostHistoryReplica({
+              workspaceId,
+              machineId,
+              sessionId,
+              replicaNamespace: 'test',
+              getBinding: () => cachedBinding,
+              observeBinding: () => () => {},
+              requestGrant,
+              onSyncState: (state) => {
+                if ('checkpoint' in state && JSON.parse(state.checkpoint)[2] === tail)
+                  applied.resolve();
+              },
+            }),
+          requestHistoryRead: offline,
+          requestHistoryWrite: offline,
+        })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
+      const first = open(async () => ({
+        binding,
+        streamUrl: url,
+        token: 'synthetic-read-grant',
+        expiresIn: 60,
+      }));
+      try {
+        const observation = first.history.observe(() => {});
+        const page = await observation.initialPage;
+        expect(page.rows).toMatchObject([{ turnId: turn.id }]);
+        expect(await first.history.readTurn(turn.id)).toMatchObject({ state: 'ready', turn });
+        await applied.promise;
+        expect(requestsToTail).toBe(1);
+        expect(await first.history.readTurn(reply.id)).toMatchObject({
+          state: 'ready',
+          turn: reply,
+        });
+        const latest = await first.history.readLatestDirectoryPage!(1);
+        expect(latest.rows).toMatchObject([{ turnId: reply.id }]);
+        expect(latest.cursor).toBeTruthy();
+        const older = await first.history.readOlderDirectoryPage!(latest.cursor!, 1);
+        expect(older.checkpoint).toBe(latest.checkpoint);
+        expect(older.rows).toMatchObject([{ turnId: turn.id }]);
+        observation.unsubscribe();
+      } finally {
+        first.dispose();
+      }
+      cachedBinding = binding;
+      const reopened = open(offline);
+      try {
+        const page = await reopened.history.readLatestDirectoryPage?.(40);
+        expect(page?.rows).toMatchObject([{ turnId: turn.id }, { turnId: reply.id }]);
+        expect(await reopened.history.readTurn(turn.id)).toMatchObject({ state: 'ready', turn });
+      } finally {
+        reopened.dispose();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
   it.each(
     (['local', 'remote'] as const).flatMap((transport) =>
       (['current', 'legacy', 'empty'] as const).map((format) => ({ transport, format }))

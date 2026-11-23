@@ -157,8 +157,11 @@ type OwnerLease = {
   readonly client: RoostNativeClient;
   readonly owner: Uint8Array;
   readonly projectionLanes: Semaphore.Semaphore;
+  readonly remoteAuth: Map<string, RoostRemoteAuth>;
   release(): Promise<void>;
 };
+
+type RoostRemoteAuth = NonNullable<ConstructorParameters<typeof RoostNativeClient>[0]['auth']>;
 
 const bytesHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
 
@@ -172,6 +175,7 @@ let ownerPool:
       client: RoostNativeClient;
       owner: Uint8Array;
       projectionLanes: Semaphore.Semaphore;
+      remoteAuth: Map<string, RoostRemoteAuth>;
       refs: number;
       closePromise?: Promise<void>;
     }
@@ -188,17 +192,24 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
       client: ownerPool.client,
       owner: ownerPool.owner.slice(),
       projectionLanes: ownerPool.projectionLanes,
+      remoteAuth: ownerPool.remoteAuth,
       release: async () => releaseOwner(key),
     };
   }
   if (ownerPool) await releaseOwnerUnlocked(ownerPool.key, true);
   await mkdir(dirname(dbPath), { recursive: true });
+  const remoteAuth = new Map<string, RoostRemoteAuth>();
   const client = new RoostNativeClient({
     dbPath,
     seed,
     allowedOwners: [owner],
     maxQueuedRequests: options.maxQueuedRequests ?? 32,
     maxQueuedBytes: options.maxQueuedBytes ?? 8 * 1024 * 1024,
+    auth: async (input) => {
+      const auth = remoteAuth.get(bytesHex(input.remoteId));
+      if (!auth) throw new Error('Roost Streams authorization is unavailable');
+      return await auth(input);
+    },
   });
   void client.exited.then(({ code }) => {
     if (client.failure) {
@@ -224,11 +235,12 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
   const projectionLanes = Effect.runSync(
     Semaphore.make(Math.max(1, Math.min(8, Math.floor((options.maxQueuedRequests ?? 32) / 2))))
   );
-  ownerPool = { key, client, owner, projectionLanes, refs: 1 };
+  ownerPool = { key, client, owner, projectionLanes, remoteAuth, refs: 1 };
   return {
     client,
     owner: owner.slice(),
     projectionLanes,
+    remoteAuth,
     release: async () => releaseOwner(key),
   };
 };
@@ -246,6 +258,25 @@ const serializeOwnerTransition = <T>(operation: () => Promise<T>): Promise<T> =>
 const acquireOwner = (options: RoostNativeOptions): Promise<OwnerLease> => {
   return serializeOwnerTransition(() => acquireOwnerUnlocked(options));
 };
+
+let installedNativeOptions: RoostNativeOptions = {};
+
+export async function acquireRoostCloudUploadOwner() {
+  const lease = await acquireOwner(installedNativeOptions);
+  return {
+    client: lease.client,
+    owner: lease.owner,
+    bindAuth(remoteId: Uint8Array, auth: RoostRemoteAuth) {
+      const key = bytesHex(remoteId);
+      if (lease.remoteAuth.has(key)) throw new Error('Roost remote already has an upload owner');
+      lease.remoteAuth.set(key, auth);
+      return () => {
+        if (lease.remoteAuth.get(key) === auth) lease.remoteAuth.delete(key);
+      };
+    },
+    release: lease.release,
+  };
+}
 
 const releaseOwnerUnlocked = async (key: string, force = false): Promise<void> => {
   if (!ownerPool || ownerPool.key !== key) return;
@@ -1054,6 +1085,7 @@ const createNodeServicesForLease = async (
       stream,
       (cursor, indexChange) => {
         if (disposed || closing || watchedStream !== stream) return;
+        sessionDoc.onRoostHistoryCommit?.();
         if (!pendingCommitHint) pendingCommitHint = { stream, cursor, indexChange };
         else {
           pendingCommitHint.indexChange ||= indexChange;
@@ -3996,6 +4028,7 @@ let installed = false;
 /** Install the local Node owner adapter once for the daemon process. */
 export function installRoostNodeSessionBackend(options: RoostNativeOptions = {}): void {
   if (installed) return;
+  installedNativeOptions = options;
   registerSessionBackendFactory(
     'roost',
     createRoostSessionBackendFactory((sessionDoc) => createNodeServices(sessionDoc, options))
