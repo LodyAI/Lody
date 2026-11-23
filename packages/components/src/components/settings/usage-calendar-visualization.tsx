@@ -160,7 +160,8 @@ const styles = stylex.create({
     '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
   },
   selectedMark: { boxShadow: '0 0 0 1px hsl(var(--foreground))' },
-  dayBarInteractive: { default: null,
+  dayBarInteractive: {
+    default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',
@@ -172,7 +173,8 @@ const styles = stylex.create({
       [stylex.when.ancestor(':focus-visible')]: '0 0 0 2px hsl(var(--ring))',
     },
   },
-  weekDotInteractive: { default: null,
+  weekDotInteractive: {
+    default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',
@@ -1320,8 +1322,22 @@ function UsageWeekMatrix({
 }
 
 const COMPOSITION_SEGMENT_LIMIT = 5;
-const MODEL_SERIES_COLORS = ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'] as const;
-const MEMBER_SERIES_COLORS = ['#7c3aed', '#9333ea', '#a855f7', '#c084fc', '#e9d5ff'] as const;
+// Per-subject alpha ramps over the chart palette: models take the blue anchor,
+// members the violet one, so the hues follow the theme like RING_COLORS does.
+const MODEL_SERIES_COLORS = [
+  'hsl(var(--chart-1))',
+  'hsl(var(--chart-1) / 0.82)',
+  'hsl(var(--chart-1) / 0.64)',
+  'hsl(var(--chart-1) / 0.46)',
+  'hsl(var(--chart-1) / 0.28)',
+] as const;
+const MEMBER_SERIES_COLORS = [
+  'hsl(var(--chart-3))',
+  'hsl(var(--chart-3) / 0.82)',
+  'hsl(var(--chart-3) / 0.64)',
+  'hsl(var(--chart-3) / 0.46)',
+  'hsl(var(--chart-3) / 0.28)',
+] as const;
 
 type UsageCompositionSegment = {
   id: string;
