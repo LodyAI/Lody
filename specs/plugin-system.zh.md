@@ -288,7 +288,7 @@ flowchart TB
 
 - `Disabled`：未启用；`0` 子进程，`0` 工具/事件/Role/MCP/ACP 注册。
 - `Starting`：清单校验通过；存在 `manifest.machine` 时派生 `child_process.fork` 并等待 `10_000 ms` `ready` 握手；不含 `manifest.machine` 的插件直接以 `0` 子进程跃迁至 `Running`。
-- `Running`：活跃 `instance_id` 正常响应 RPC、事件、工具与工作流贡献；每次进入 `Running`（含守护进程重启恢复）后立即派发 `machine.onStart(ctx)`，使工作流插件可对账持久化的 `ctx.dataDir` 任务日志并幂等恢复未完成步骤。
+- `Running`：活跃 `instance_id` 正常响应 RPC、事件、工具与工作流贡献。为在不引入 Durable Event Broker 的前提下彻底消除历史对账与实时事件之间的切换窗口，`PluginHost` 在收到 `ready` 的同一时刻即挂载 `subscribedEvents` 内存暂存队列，待 `machine.onStart(ctx)`（`start`）完成后按序排空暂存事件再切入实时直通（重叠事件经插件日志键与永久 `SessionCreationReceipt` 自动幂等去重）。
 - `Stopping`：按 `shutdown -> 2s SIGTERM -> 2s SIGKILL` 排空终止中。
 - `Stopped`：`reload` 或守护进程退出过程中的已排空中间态（`active_instance = null`）。
 - `Faulted`：意外退出、握手超时、缺失必填密钥/配置或 IPC 协议违规后的隔离态。**严禁后台自动无限重启**；仅在显式 `reload`、`disable` 或 `remove`（或补齐配置保存）时离开 `Faulted`。
@@ -337,7 +337,7 @@ flowchart TB
 
 ### 9.3 超时、取消信号与会话 `Stop` 传播
 
-- **超时上限：** `init -> ready` 为 `10_000 ms`；`query` / `mutation` / `attachment-*` / `event` 为 `30_000 ms`；`defineTool` 为 `600_000 ms`（`10 min`）。
+- **超时上限：** `init -> ready` 为 `10_000 ms`；`start`（`machine.onStart`）/ `query` / `mutation` / `attachment-*` / `event` 为 `30_000 ms`；`defineTool` 为 `600_000 ms`（`10 min`）。
 - **取消与即时 Session `Stop`：** 客户端卸载、入参变更或用户点击 Session `Stop` 均发送 `cancel(callId)` 中止 `ctx.signal`；用户 Session `Stop` 立即完成宿主回合结算，绝不被挂死的插件阻塞。
 
 ### 9.4 错误码分类体系与零自动重试铁律

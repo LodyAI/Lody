@@ -288,7 +288,7 @@ To guarantee custom Workspace / multi-Agent control planes are never bottlenecke
 
 - `Disabled`: Not running; zero subprocesses, zero active tools/events/roles/MCP/ACP registrations.
 - `Starting`: Manifest validated; spawning `child_process.fork` (if `manifest.machine` is present) and awaiting `ready` within `10_000 ms`. Plugins without `manifest.machine` transition `Disabled -> Running` directly with `0` subprocesses.
-- `Running`: Active `instance_id` serving RPCs, `events`, tools, and workflow contributions; immediately upon entering `Running` (including after daemon restart), `PluginHost` dispatches `machine.onStart(ctx)` so workflow plugins can reconcile durable `ctx.dataDir` progress journals and resume incomplete steps idempotently.
+- `Running`: Active `instance_id` serving RPCs, `events`, tools, and workflow contributions. To eliminate any gap between historical reconciliation and live events without a Durable Event Broker, `PluginHost` attaches `subscribedEvents` in an in-memory buffer immediately upon `ready`, awaits `machine.onStart(ctx)` (`start`), and then drains buffered events in order before switching to live pass-through (relying on plugin journal keys + permanent `SessionCreationReceipt` rows to deduplicate overlap idempotently).
 - `Stopping`: Draining via `shutdown -> 2s SIGTERM -> 2s SIGKILL`.
 - `Stopped`: Transient drained state (`active_instance = null`) during `reload` or daemon shutdown.
 - `Faulted`: Quarantined after unexpected exit, `ready` timeout, missing required secret/config, or IPC protocol violation. **Zero automatic background restarts**; exits `Faulted` ONLY on explicit `reload`, `disable`, or `remove`.
@@ -337,7 +337,7 @@ To deliver exact Desktop and Web parity in `Core Conformance`, `WorkspaceMachine
 
 ### 9.3 Timeouts, Cancellation, and Session `Stop`
 
-- **Deadlines:** `init -> ready`: `10_000 ms`; `query` / `mutation` / `attachment-*` / `event`: `30_000 ms`; `defineTool`: `600_000 ms` (`10 min`).
+- **Deadlines:** `init -> ready`: `10_000 ms`; `start` (`machine.onStart`) / `query` / `mutation` / `attachment-*` / `event`: `30_000 ms`; `defineTool`: `600_000 ms` (`10 min`).
 - **Cancellation & Immediate Session `Stop`:** Client unmount, input change, or user Session `Stop` sends `cancel(callId)` to abort `ctx.signal`. User Session `Stop` settles the Session turn immediately without waiting for a hung plugin handler.
 
 ### 9.4 Error Code Taxonomy & Zero-Auto-Retry Rule
