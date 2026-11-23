@@ -93,14 +93,13 @@
   Activated workspaces reopen offline. Join identical per-workspace intents; Fleet shutdown
   drains activation before cloud-port close.
 
-- Never register Fleet PR pollers for encrypted workspaces.
+- Encrypted pollers publish protected Loro metadata, with null hosted PR association.
 - `runtime-cloud-port.ts` closes plaintext cloud channels for encrypted runtimes but keeps
   the attachment relay URL and the preview tunnel, whose ordinary proof verifier rejects.
   MessageHandler fences plaintext attachment reads.
 - Edit-and-resend replacements carry this machine's `signMachineInput` intent in the same
   commit; an unsigned one is never written.
-- Encrypted cloud ports omit hosted GitHub tokens. SessionManager uses host git/gh
-  credentials; never send decrypted repository names through its credential broker.
+- Account E2EE ports retain repo-scoped GitHub credentials. Personal requests stay account-bound; other accounts use App tokens. Device-only ports omit GitHub.
 
 - Fleet/Lody/one-shot commands load `workspace-legacy` only in the encrypted branch.
   Keep custody/core off the ordinary entry graph; CLI plus maps must fit the 2 GiB heap.
@@ -155,9 +154,7 @@
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
   fresh approval/KEK. OS/unknown stays OS.
 
-Member removal: verify identity/persist receipt before custody release. Drain execution/sync;
-erase only account/genesis/device content under identity lease/pairing mutex. Retry busy
-cleanup before open; preserve projects. Rejoin with new member/keys.
+Verify member removal and persist its receipt before custody release. Drain execution/sync; erase scoped content under identity lease/pairing mutex. Retry before open, preserve projects, and rejoin with fresh keys. [Roost cleanup](../../session/README.md#encrypted-roost-history).
 
 - `client-loss-observer.ts` is read-only E2E diagnostics, requiring nonrelease build
   opt-in and runtime `LODY_E2E=1`. Bind baseline requester identity to verified ledger

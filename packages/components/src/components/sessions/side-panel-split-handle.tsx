@@ -1,3 +1,4 @@
+import { radius as sharedRadius } from '@lody/ui/tokens/scales.stylex';
 import { useState, type KeyboardEvent, type PointerEvent } from 'react';
 import * as stylex from '@stylexjs/stylex';
 
@@ -38,7 +39,7 @@ const styles = stylex.create({
     width: '3px',
     height: '28px',
     flexShrink: 0,
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     pointerEvents: 'none',
     backgroundColor: 'hsl(var(--foreground) / 0.3)',
     opacity: {

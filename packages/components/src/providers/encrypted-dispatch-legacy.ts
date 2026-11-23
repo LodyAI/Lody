@@ -438,7 +438,13 @@ export function createEncryptedDispatchLegacy(options: {
       ]).finally(() => clearTimeout(timer));
     },
     requestFeature,
-    query: (machineId: string, method: string, params: unknown, timeoutMs: number) =>
+    query: (
+      machineId: string,
+      method: string,
+      params: unknown,
+      timeoutMs: number,
+      supportsRemoteControl: () => Promise<boolean>
+    ) =>
       callEncryptedReadFeature({
         workspaceId: options.workspaceId,
         machineId,
@@ -446,6 +452,7 @@ export function createEncryptedDispatchLegacy(options: {
         params,
         timeoutMs,
         request: requestFeature,
+        supportsRemoteControl,
       }),
     close: async () => {
       closed = true;

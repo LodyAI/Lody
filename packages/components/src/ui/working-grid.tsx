@@ -7,7 +7,8 @@ import {
   type CSSProperties,
 } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import { useResolvedTheme } from '@/theme-provider';
 
 import {
@@ -22,10 +23,17 @@ import {
 
 export type { WorkingGridDirection } from './working-grid-sea';
 
+const styles = stylex.create({
+  root: { position: 'relative', display: 'inline-block', flexShrink: 0 },
+  tile: { position: 'absolute', display: 'block' },
+  face: { display: 'block', width: '100%', height: '100%', backgroundColor: 'currentColor' },
+});
+
 /** Where a tile scales from, or `none` to keep every tile full size. */
 export type WorkingGridScale = 'center' | 'bottom' | 'none';
 
 export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'> & {
+  xstyle?: stylex.StyleXStyles;
   /** Edge length of the whole 3×3 grid, px. */
   size?: number;
   /** Tile corner radius as a fraction of the tile edge (0.5 = circle). */
@@ -218,6 +226,7 @@ export function WorkingGrid({
   rowPitch = 28,
   lightCompensation = true,
   className,
+  xstyle,
   style,
   ...props
 }: WorkingGridProps) {
@@ -396,15 +405,16 @@ export function WorkingGrid({
       : { borderRadius: `${cornerRadius * 100}%` };
   const origin = scale === 'bottom' ? '50% 100%' : '50% 50%';
 
+  const sx = stylex.props(styles.root, xstyle);
   return (
     <span
       ref={rootRef}
       data-working-grid=""
       aria-hidden="true"
-      className={cn('relative inline-block shrink-0', className)}
+      className={clsx(sx.className, className)}
       // Tiles animate opacity between 1 and their trough; the mark's own opacity
       // sets the ceiling, so the brightest tile reaches maxOpacity.
-      style={{ width: size, height: size, opacity: maxOpacity, ...style }}
+      style={{ ...sx.style, width: size, height: size, opacity: maxOpacity, ...style }}
       {...props}
     >
       {[0, 1, 2].map((row) =>
@@ -414,7 +424,7 @@ export function WorkingGrid({
             data-working-grid-tile=""
             data-row={row}
             data-col={col}
-            className="absolute block"
+            className={stylex.props(styles.tile).className}
             style={{
               left: col * pitch + inset,
               top: row * pitch + insetTop,
@@ -424,7 +434,7 @@ export function WorkingGrid({
             }}
           >
             <span
-              className="block size-full bg-current"
+              className={stylex.props(styles.face).className}
               style={{ ...shape, transformOrigin: origin }}
             />
           </span>

@@ -1,9 +1,9 @@
+import { duration as sharedMotion, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { navigationSidebarVisibleAtom } from '@/atoms/layout-state';
 import { WORKSPACE_FRAME_CSS } from '@/lib/workspace-frame';
 import { DocumentStyle } from '../document-style';
@@ -60,7 +60,7 @@ const styles = stylex.create({
       backgroundColor: colors.accent,
       opacity: { default: 0, ':hover': 1, ':active': 1, ':focus-visible': 1 },
       transitionProperty: 'opacity',
-      transitionDuration: '120ms',
+      transitionDuration: sharedMotion.fast,
       transitionDelay: { default: '0ms', ':hover': '150ms' },
     },
   },

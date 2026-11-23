@@ -679,6 +679,16 @@ type RpcServerDeps = {
   onFatalAuthFailure?: (error: LoroStreamsTokenAuthError) => void;
 };
 
+/** Served by their ordinary handler after the receiver's authorization and claim. */
+export const ENCRYPTED_ORDINARY_HANDLER_WRITES = [
+  'local-project/control',
+  'machine/acp-binary-install',
+  'machine/provider-rate-limits-refresh',
+] as const;
+const isEncryptedOrdinaryHandlerMethod = (method: string, params: unknown): boolean =>
+  isE2eeReadQuery(method, params) ||
+  (ENCRYPTED_ORDINARY_HANDLER_WRITES as readonly string[]).includes(method);
+
 export class LoroStreamsMachineRpcServer {
   private readonly requestStreamId: string;
   private readonly requestState: LoroJsonStreamState = { nextOffset: '-1' };
@@ -1102,9 +1112,29 @@ export class LoroStreamsMachineRpcServer {
     if (
       input.workspaceId !== this.deps.workspaceId ||
       input.machineId !== this.deps.machineId ||
-      !isE2eeReadQuery(input.method, input.params)
+      !isEncryptedOrdinaryHandlerMethod(input.method, input.params)
     )
       throw new Error('e2ee_query_method');
+    if (input.method === 'session/history-read') {
+      const denied = {
+        ok: false as const,
+        code: 'session_history_read_denied',
+        error: 'Session history read access was refused.',
+      };
+      const authority = context.authority;
+      if (!authority || !this.deps.readSessionHistory) return denied;
+      const signal = AbortSignal.any([context.signal, authority.signal]);
+      const current = () =>
+        !this.stopped && !signal.aborted && context.expiresAt > this.now() && authority.isCurrent();
+      if (!current()) return denied;
+      const owner = await this.deps.resolveSessionHistoryOwnerSessionId?.(input.params.sessionId, {
+        signal,
+      });
+      if (!owner || (input.ownerSessionId && owner !== input.ownerSessionId) || !current())
+        return denied;
+      const result = await this.deps.readSessionHistory({ ...input.params, signal });
+      return current() ? LocalMachineRpcResponseSchema.parse({ ok: true, result }) : denied;
+    }
     let owner: string | undefined;
     let params: unknown = input.params;
     if (isOwnerScopedEncryptedRpcMethod(input.method)) {
@@ -1112,21 +1142,14 @@ export class LoroStreamsMachineRpcServer {
         throw new Error('e2ee_query_owner');
       owner =
         input.ownerSessionId ??
-        (input.method === 'session/history-read'
-          ? await this.deps.resolveSessionHistoryOwnerSessionId?.(
-              input.params.sessionId as SessionId,
-              { signal: context.signal }
-            )
-          : await this.deps.resolveCodeCollabOwnerSessionId?.(input.params.sessionId as SessionId));
+        (await this.deps.resolveCodeCollabOwnerSessionId?.(input.params.sessionId as SessionId));
       if (!owner) throw new Error('e2ee_query_owner');
       params = await encryptCodeCollabV2RpcPayload(owner, params);
     }
-    const outcome = await this.readQuery(
+    const outcome = await this.serveNative(
       { queryId: context.requestId, method: input.method, params },
       context.expiresAt,
-      input.method === 'session/history-read' && context.authority
-        ? AbortSignal.any([context.signal, context.authority.signal])
-        : context.signal,
+      context.signal,
       context.authority
     );
     if (outcome.error)
@@ -1164,6 +1187,15 @@ export class LoroStreamsMachineRpcServer {
     historyAuthority?: { isCurrent: () => boolean; signal: AbortSignal }
   ): Promise<E2eeQueryResult> {
     if (!isE2eeReadQuery(input.method, input.params)) throw new Error('e2ee_query_method');
+    return this.serveNative(input, expiresAt, signal, historyAuthority);
+  }
+
+  private async serveNative(
+    input: { queryId: string; method: string; params: unknown },
+    expiresAt: number,
+    signal: AbortSignal,
+    historyAuthority?: { isCurrent: () => boolean; signal: AbortSignal }
+  ): Promise<E2eeQueryResult> {
     const request = LoroStreamsRpcRequestSchema.parse({
       jsonrpc: '2.0',
       id: input.queryId,

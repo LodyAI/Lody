@@ -8,6 +8,7 @@ import {
   ACP_COLLABORATION_MODE_PLAN_VALUE,
   getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   isAcpFastModeConfigId,
+  isAcpNormalSpeedAlias,
   isAcpThoughtLevelConfigOption,
   getAcpCapabilityCacheKey,
   getAcpCapabilityCacheEntryAuthority,
@@ -101,12 +102,12 @@ export const coerceFastModeConfigOptionValue = (
   if (selector.type === 'boolean') {
     if (typeof value === 'boolean') return value;
     if (value === CONFIG_OPTION_ON_VALUE || value === ACP_FAST_MODE_VALUE_FAST) return true;
-    if (value === CONFIG_OPTION_OFF_VALUE) return false;
+    if (value === CONFIG_OPTION_OFF_VALUE || isAcpNormalSpeedAlias(value)) return false;
     return undefined;
   }
   if (isOnOffSelectSelector(selector)) {
     if (value === true || value === ACP_FAST_MODE_VALUE_FAST) return CONFIG_OPTION_ON_VALUE;
-    if (value === false) return CONFIG_OPTION_OFF_VALUE;
+    if (value === false || isAcpNormalSpeedAlias(value)) return CONFIG_OPTION_OFF_VALUE;
     return typeof value === 'string' && selector.options.some((option) => option.value === value)
       ? value
       : undefined;
@@ -116,7 +117,10 @@ export const coerceFastModeConfigOptionValue = (
       ? ACP_FAST_MODE_VALUE_FAST
       : undefined;
   }
-  if (value === false) {
+  if (value === false || isAcpNormalSpeedAlias(value)) {
+    if (typeof value === 'string' && selector.options.some((option) => option.value === value)) {
+      return value;
+    }
     return selector.options.some((option) => option.value === CONFIG_OPTION_OFF_VALUE)
       ? CONFIG_OPTION_OFF_VALUE
       : undefined;
@@ -347,6 +351,7 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
         configOptions: synthesized.length > 0 ? synthesized : undefined,
         modelReasoningEfforts,
         declaredModelControls,
+        observedModelConfigOptions,
       };
     }
   }
@@ -511,12 +516,14 @@ export const normalizeReasoningEffortSelectors = (
   }
   const map = options.modelReasoningEfforts;
   const selectedModelId = options.selectedModelId;
-  if (!map || !selectedModelId) {
+  if (!map || !selectedModelId || !Object.hasOwn(map, selectedModelId)) {
     return selectors;
   }
   const targetEfforts = map[selectedModelId];
   if (!targetEfforts || targetEfforts.length === 0) {
-    return selectors;
+    return selectors.filter(
+      (selector) => selector.type !== 'select' || !isThoughtLevelSelector(selector)
+    );
   }
   return applyEffortLadder(selectors, targetEfforts);
 };
@@ -623,7 +630,9 @@ const normalizeFastModeSelectors = (
   const existingIndex = selectors.findIndex(isAnySpeedControlSelector);
   const existing = existingIndex >= 0 ? selectors[existingIndex] : undefined;
   if (declaredTiers.length === 0) {
-    return existing ? selectors.filter((selector) => !isAnySpeedControlSelector(selector)) : selectors;
+    return existing
+      ? selectors.filter((selector) => !isAnySpeedControlSelector(selector))
+      : selectors;
   }
 
   const configId = existing?.configId ?? getBuiltinModelControlBinding(options)?.fastConfigId;
@@ -632,7 +641,9 @@ const normalizeFastModeSelectors = (
     if (!configId) return selectors;
     const nextSelector = buildSpeedTierSelectSelector(configId, declaredTiers, existing);
     if (existingIndex >= 0) {
-      return selectors.map((selector, index) => (index === existingIndex ? nextSelector : selector));
+      return selectors.map((selector, index) =>
+        index === existingIndex ? nextSelector : selector
+      );
     }
     return [...selectors, nextSelector];
   }
@@ -648,7 +659,9 @@ const normalizeFastModeSelectors = (
     options: [],
   };
   if (existingIndex >= 0) {
-    return selectors.map((selector, index) => (index === existingIndex ? toggleSelector : selector));
+    return selectors.map((selector, index) =>
+      index === existingIndex ? toggleSelector : selector
+    );
   }
   return [...selectors, toggleSelector];
 };

@@ -1,6 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { ProposedPlanBlock } from '@/components/ai-gui/view';
+const storyLayout = stylex.create({
+  frame: {
+    width: '520px',
+    'max-width': 'calc(100vw - 2rem)',
+  },
+});
 
 const meta = {
   title: 'AI GUI/ProposedPlanBlock',
@@ -42,7 +49,7 @@ export const Ready: Story = {
     itemIndex: 0,
   },
   render: (args) => (
-    <div className="w-[520px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyLayout.frame)}>
       <ProposedPlanBlock {...args} />
     </div>
   ),
@@ -115,7 +122,7 @@ export const LongPlanOverflow: Story = {
     awaitingDecision: true,
   },
   render: (args) => (
-    <div className="w-[520px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyLayout.frame)}>
       <ProposedPlanBlock {...args} />
     </div>
   ),
@@ -134,7 +141,7 @@ export const Drafting: Story = {
     itemIndex: 0,
   },
   render: (args) => (
-    <div className="w-[520px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyLayout.frame)}>
       <ProposedPlanBlock {...args} />
     </div>
   ),

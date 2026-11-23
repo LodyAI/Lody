@@ -308,7 +308,12 @@ export function SessionHistoryReader({
     error: membersError,
     retry: retryMembers,
   } = useWorkspaceMembers();
-  const sharingResolver = useSessionSharing({ members, membersLoading, membersError, retryMembers });
+  const sharingResolver = useSessionSharing({
+    members,
+    membersLoading,
+    membersError,
+    retryMembers,
+  });
   const accountId = useWorkspaceLocalAccountId();
   const router = useRouter();
   const fullscreen = useElectronFullscreen();

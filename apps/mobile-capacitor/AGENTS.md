@@ -5,8 +5,8 @@ Root `AGENTS.md` also applies.
 
 ## Minimum iOS compatibility
 
-- Minimum: **iOS / iPadOS 16.4 (WKWebView)**, matching Tailwind 4, including
-  shared code and Workers. Guard or polyfill newer APIs, syntax and CSS.
+- Minimum: **iOS / iPadOS 16.4 (WKWebView)**, including shared code and
+  Workers. Guard or polyfill newer APIs, syntax and CSS.
 - Keep Podfile, Xcode targets and Vite Safari target at 16.4.
   [Audit and device checks](BUILDING.md#build-compatibility).
 - Newer APIs need an early, tested polyfill or capability-gated fallback.
@@ -66,6 +66,8 @@ See [composition and adoption](../../packages/platform/AGENTS.md#telemetry-priva
 - Ordinary Lody HTTP(S) links stay in the browser. Do not add `applinks` Associated Domains,
   Android HTTP(S) VIEW filters, or native startup routing for website URLs.
 - Safari's app-id-only Smart App Banner is the explicit website-to-iOS-app entry.
+- Register `lody` in iOS `CFBundleURLTypes` for OAuth and encrypted-device pairing;
+  forward cold-launch and warm-open URLs through `ApplicationDelegateProxy`.
 - Keep OAuth's `lody://` custom scheme and native push `data.route` navigation
   separate from browser links. See
   [context/mobile-app-launch.md](AGENTS.md#app-launch-policy) for ownership

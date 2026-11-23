@@ -1,3 +1,4 @@
+import type { CloudPort, CloudGithubTokenManager } from '@lody/platform';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
 import * as httpTransport from '../src/utils/http-transport';
@@ -1439,4 +1440,67 @@ describe('CLI E2EE Round 2 optimizations', () => {
       vi.useRealTimers();
     }
   });
+});
+
+it('keeps E2EE GitHub tokens account-bound while removing hosted PR/session sinks', async () => {
+  const requests: unknown[] = [];
+  const app = {
+    token: 'fixture-app-token',
+    tokenSource: 'app' as const,
+    rateLimitScope: 'github:installation:7',
+  };
+  const manager = {
+    getAppTokenInfoForRepo: async (repo: string) => {
+      requests.push({ kind: 'app', repo });
+      return app;
+    },
+    getAppTokenForRepo: async (repo: string) => {
+      requests.push({ kind: 'app', repo });
+      return app.token;
+    },
+    getWriteTokenInfoForRepo: async (repo: string, context: { requesterUserId: string }) => {
+      if (context.requesterUserId !== 'account') throw new Error('cross-account delegation');
+      requests.push({ kind: 'operation', repo, context });
+      return app;
+    },
+    shutdown: async () => {},
+  } as unknown as CloudGithubTokenManager;
+  const port = encryptedRuntimeCloudPort(
+    {
+      githubTokens: { createTokenManager: () => manager },
+      prAssociation: {
+        associatePullRequest: async () => {
+          throw new Error('decrypted PR egress');
+        },
+      },
+      sessionSharing: {},
+      notifications: {},
+    } as unknown as CloudPort,
+    'account'
+  );
+  expect(port.prAssociation).toBeNull();
+  expect(port.sessionSharing).toBeNull();
+  expect(port.notifications).toBeNull();
+  const tokens = port.githubTokens!.createTokenManager('workspace');
+  await expect(
+    tokens.getWriteTokenInfoForRepo('owner/repo', {
+      requesterUserId: 'account',
+      machineId: 'machine',
+    })
+  ).resolves.toEqual(app);
+  const foreign = { requesterUserId: 'other-account', machineId: 'machine' };
+  await expect(tokens.getCredentialPolicy(foreign)).resolves.toEqual({ personalEnabled: false });
+  await expect(
+    tokens.getCredentialCandidate('owner/repo', foreign, 'personal')
+  ).resolves.toMatchObject({ available: false });
+  await expect(tokens.getWriteTokenInfoForRepo('owner/repo', foreign)).resolves.toEqual(app);
+  expect(requests).toEqual([
+    {
+      kind: 'operation',
+      repo: 'owner/repo',
+      context: { requesterUserId: 'account', machineId: 'machine' },
+    },
+    { kind: 'app', repo: 'owner/repo' },
+  ]);
+  await tokens.shutdown();
 });

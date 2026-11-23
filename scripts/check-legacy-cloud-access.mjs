@@ -29,6 +29,16 @@ const legacyNames = new Set([
   'workspaceJoinRequests:reviewRequest',
 ]);
 const safeNames = new Map([
+  ...[
+    'usage:getWorkspaceUsageCalendar',
+    'usage:getWorkspaceUsageDay',
+    'usage:getWorkspaceUsageSummary',
+    'usage:getWorkspaceUsageTimeline',
+    'activity:recordMyWorkspaceDailyActiveUser',
+  ].map((name) => [
+    name,
+    'Numeric accounting and own daily activity support active encrypted ledger members; no workspace content.',
+  ]),
   [
     'auth:getUserById',
     'Display-only profile lookup returns null on denied membership/mode; never throws the mode refusal into render.',
@@ -59,7 +69,7 @@ const exceptions = new Map([
         'github:getAccessTokenByRepoNameForCli',
       ].map((name) => [
         name,
-        'CLI GitHub token port: explicit workspace/token binding; protected machine composition exposes no ordinary GitHub capability; denied results are operation failures.',
+        'CLI GitHub token port: explicit workspace/token binding; account CLI keys use verified encrypted membership; device-only machine composition has no GitHub capability; denied results are operation failures.',
       ]),
     ]),
   ],
@@ -80,7 +90,7 @@ const exceptions = new Map([
     new Map([
       [
         'usage:upsertSessionUsageFromCli',
-        'Ordinary CLI usage service only; encrypted machine composition has no usage capability. Rejections remain failed queued records.',
+        'Account-token numeric usage only; encrypted turns for other users are skipped before queueing. Device-only machine composition has no usage capability. Rejections remain queued.',
       ],
     ]),
   ],
@@ -96,7 +106,9 @@ const exceptions = new Map([
         'deviceAuth:getWorkspaceBillingEntitlementForCliToken',
       ].map((name) => [
         name,
-        'Ordinary CLI workspace/account catalog and token validators; encrypted machine composition uses its separate device-authenticated port. Mode denial returns invalid or fails the requested command.',
+        name === 'github:listWorkspaceRepositoriesForCliToken'
+          ? 'Workspace-scoped repository metadata for ordinary and verified encrypted member accounts; device-only composition has no account catalog. Denied results fail the requested command.'
+          : 'Ordinary CLI workspace/account catalog and token validators; encrypted machine composition uses its separate device-authenticated port. Mode denial returns invalid or fails the requested command.',
       ]),
     ]),
   ],
@@ -145,10 +157,26 @@ const exceptions = new Map([
         'github:getOperationAccessTokenByRepoNameForClient',
       ].map((name) => [
         name,
-        'Imperative token owner rechecks the same live admission atoms before the first request and again after auth refresh, before retry.',
+        'Imperative token owner rechecks live account/workspace admission and the verified encrypted member role before requests, after responses and before auth retry.',
       ]),
     ]),
   ],
+]);
+const githubMetadataNames = new Set([
+  'github:getWorkspaceRepositories',
+  'github:listWorkspaceReposWithStatus',
+  'github:getPersonalOperationSettings',
+  'github:refreshPersonalGitHubProfile',
+  'github:setPersonalOperationPreference',
+  'githubPersonalAuthorization:begin',
+  'github:beginPersonalAuthorization',
+  'githubPersonalAuthorization:complete',
+  'github:completePersonalAuthorization',
+  'github:createGitHubInstallState',
+  'github:removeRepoFromWorkspace',
+  'github:setRepoEnabled',
+  'github:setRepoWorktreeSetup',
+  'github:setRepoWorktreeCleanup',
 ]);
 const wrappers = new Set([
   'useLegacyWorkspaceQuery',
@@ -175,6 +203,7 @@ export function auditLegacyCloudSource(file, source) {
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const apiRoots = new Set();
   const guardedCalls = new Set();
+  const githubGuardedCalls = new Set();
   const apiNamespaces = new Map();
   const referenceFactories = new Set(['makeFunctionReference']);
   const factoryNamespaces = new Set();
@@ -198,6 +227,15 @@ export function auditLegacyCloudSource(file, source) {
         (module.endsWith('cloud-api-operations') && original === 'cloudOperations')
       )
         apiRoots.add(binding.name.text);
+      if (
+        module.endsWith('use-github-workspace') &&
+        [
+          'useGithubWorkspaceQuery',
+          'useGithubWorkspaceMutation',
+          'useGithubWorkspaceAction',
+        ].includes(original)
+      )
+        githubGuardedCalls.add(binding.name.text);
       if (module.endsWith('use-legacy-workspace-query') && wrappers.has(original))
         guardedCalls.add(binding.name.text);
     }
@@ -241,7 +279,8 @@ export function auditLegacyCloudSource(file, source) {
       ts.isCallExpression(parent) &&
       parent.arguments[0] === node &&
       ts.isIdentifier(parent.expression) &&
-      guardedCalls.has(parent.expression.text);
+      (guardedCalls.has(parent.expression.text) ||
+        (githubGuardedCalls.has(parent.expression.text) && githubMetadataNames.has(name)));
     const reason = safeNames.get(name) ?? exceptions.get(file)?.get(name);
     const line = ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1;
     rows.push({

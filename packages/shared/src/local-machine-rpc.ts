@@ -24,8 +24,14 @@ import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
 import {
   LocalProjectBranchListResultSchema,
+  LocalProjectControlRequestSchema,
+  LocalProjectControlResponseSchema,
+  LocalProjectGitStateSchema,
+  MachineAcpBinaryInstallResponseSchema,
+  MachineProviderRateLimitsRefreshResponseSchema,
   SessionHistoryReadQuerySchema,
   SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
 } from './message-schemas';
 import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
@@ -50,7 +56,12 @@ import {
   CodeCollabV2SaveTextRequestSchema,
   CodeCollabV2SaveTextResponseSchema,
 } from './code-collab';
-import { FilePreviewV3RequestSchema, FilePreviewV3ResponseSchema } from './file-preview';
+import {
+  FilePreviewV3RequestSchema,
+  FilePreviewV3ResponseSchema,
+  SessionDirectoryListRequestSchema,
+  SessionDirectoryListResponseSchema,
+} from './file-preview';
 import {
   MachineStatusResponseSchema,
   MachinePingResponseSchema,
@@ -290,6 +301,16 @@ export const E2eeAcpInteractionResultSchema = z
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/history-write'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+        operation: z.enum(['accept_input', 'accept_input_and_dispatch']),
+        payload: z.object({ entry: z.record(z.string(), z.unknown()) }).strict(),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/history-read'),
     params: z.object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema }).strict(),
   }).strict(),
@@ -378,7 +399,21 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
 
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('project/probe-local-member'),
-    params: z.object({ localProjectId: z.string().trim().min(1) }).strict(),
+    params: z
+      .object({
+        localProjectId: z.string().trim().min(1),
+        requestedByUserId: z.string().trim().min(1).optional(),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('local-project/git-state'),
+    params: z
+      .object({
+        localProjectId: z.string().trim().min(1),
+        requestedByUserId: z.string().trim().min(1),
+      })
+      .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('local-project/list-branches'),
@@ -654,6 +689,33 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       })
       .strict(),
   }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/withdraw-input'),
+    params: z
+      .object({
+        sessionId: z.string().trim().min(1),
+        userTurnId: z.string().trim().min(1),
+        requesterSessionId: z.string().trim().min(1),
+        userId: z.string().trim().min(1),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('file/list-dir'),
+    params: SessionDirectoryListRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('local-project/control'),
+    params: z.object({ request: LocalProjectControlRequestSchema }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/acp-binary-install'),
+    params: z.object({ agentType: z.string().trim().min(1) }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/provider-rate-limits-refresh'),
+    params: z.object({ configId: AgentConfigIdSchema }).strict(),
+  }).strict(),
 ]);
 
 export type LocalMachineRpcRequest = z.infer<typeof LocalMachineRpcRequestSchema>;
@@ -693,6 +755,31 @@ export const LocalProjectListBranchesRpcResponseSchema = z.discriminatedUnion('s
 export type LocalProjectListBranchesRpcResponse = z.infer<
   typeof LocalProjectListBranchesRpcResponseSchema
 >;
+
+export const LocalProjectGitStateRpcResponseSchema = z.discriminatedUnion('success', [
+  z
+    .object({
+      type: z.literal('local-project/git-state_response'),
+      machineId: z.string().trim().min(1),
+      workspaceId: z.string().trim().min(1),
+      localProjectId: z.string().trim().min(1),
+      success: z.literal(true),
+      state: LocalProjectGitStateSchema,
+      observedAtMs: z.number().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('local-project/git-state_response'),
+      machineId: z.string().trim().min(1),
+      workspaceId: z.string().trim().min(1),
+      localProjectId: z.string().trim().min(1),
+      success: z.literal(false),
+      error: z.string().trim().min(1),
+      message: z.string().trim().min(1).optional(),
+    })
+    .strict(),
+]);
 
 const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
 
@@ -760,6 +847,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
 
 export const LocalMachineRpcResultSchema = z.union([
   SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   E2eeAcpInteractionResultSchema,
   SorbetProvidersResultSchema,
   MachineStatusResponseSchema,
@@ -804,6 +892,12 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
   MachinePiExtensionsResponseSchema,
+  SessionDirectoryListResponseSchema,
+  LocalProjectGitStateRpcResponseSchema,
+  LocalProjectControlResponseSchema,
+  MachineAcpBinaryInstallResponseSchema,
+  MachineProviderRateLimitsRefreshResponseSchema,
+  SessionWithdrawInputResponseSchema,
 ]);
 export type SorbetCredentialsListRequest = Extract<
   LocalMachineRpcRequest,

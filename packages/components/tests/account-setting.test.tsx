@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +11,7 @@ const mocks = vi.hoisted(() => {
   const noop = async () => undefined;
   const organization = (contentMode: 'e2ee' | 'plaintext') => ({
     activeOrganization: { id: 'workspace-1', name: 'Paid', contentMode, members: [] },
-    organizations: [],
+    organizations: [{ id: 'encrypted', contentMode: 'e2ee' }, { id: 'ordinary' }],
     loading: false,
     role: 'owner',
     hasAdminPermission: true,
@@ -25,7 +26,10 @@ const mocks = vi.hoisted(() => {
     organizations: { e2ee: organization('e2ee'), plaintext: organization('plaintext') },
     contentMode: 'e2ee' as 'e2ee' | 'plaintext',
     router: { options: { context: {} }, navigate: noop },
-    authClient: { organization: { listInvitations: async () => ({ data: [] }) } },
+    authClient: {
+      organization: { listInvitations: async () => ({ data: [] }), delete: vi.fn() },
+      deleteUser: vi.fn(),
+    },
     session: { data: { user: { id: 'owner-user' } }, rawData: null, refetch: noop },
     i18n: { t: (key: string) => key },
     guards: [] as unknown[],
@@ -48,9 +52,12 @@ vi.mock('../src/hooks/useOrganization', () => ({
 }));
 vi.mock('../src/components/settings/account-setting-pure', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/components/settings/account-setting-pure')>()),
-  AccountSettingsPure: (props: { deleteBillingGuard?: unknown }) => {
+  AccountSettingsPure: (props: {
+    deleteBillingGuard?: unknown;
+    onDeleteAccount: () => Promise<void>;
+  }) => {
     mocks.guards.push(props.deleteBillingGuard ?? null);
-    return null;
+    return <button onClick={props.onDeleteAccount}>Delete account</button>;
   },
 }));
 
@@ -95,6 +102,55 @@ describe('account settings', () => {
     act(() => root?.unmount());
     root = undefined;
     mocks.guards.length = 0;
+  });
+
+  it('waits for both deletion services and continues account deletion after a refusal', async () => {
+    const encrypted = Promise.withResolvers<{ workspaceId: string; deleted: true }>();
+    const remaining = new Set(['account', 'encrypted', 'ordinary']);
+    const deleteWorkspace = vi.fn(async ({ workspaceId }: { workspaceId: string }) => {
+      const result = await encrypted.promise;
+      remaining.delete(workspaceId);
+      return result;
+    });
+    mocks.authClient.organization.delete.mockRejectedValueOnce(new Error('not owner'));
+    mocks.authClient.deleteUser.mockImplementationOnce(async () => {
+      expect([...remaining]).toEqual(['account', 'ordinary']);
+      remaining.delete('account');
+      return { error: null };
+    });
+    const platform: PlatformProvider = {
+      ...TEST_CLOUD_PLATFORM,
+      e2eeWorkspaces: {
+        create: unexpectedE2eeWorkspaceOperation,
+        describe: unexpectedE2eeWorkspaceOperation,
+        history: unexpectedE2eeWorkspaceOperation,
+        deleteWorkspace,
+      },
+      cloudApi: {
+        ...TEST_CLOUD_PLATFORM.cloudApi!,
+        useQuery: () => undefined,
+        useMutation: () => unexpectedE2eeWorkspaceOperation,
+        useAction: () => unexpectedE2eeWorkspaceOperation,
+      },
+    };
+    const container = document.createElement('div');
+    root = createRoot(container);
+    await act(async () =>
+      root!.render(
+        <PlatformContext.Provider value={platform}>
+          <AccountSettingsComponent surface="account" />
+        </PlatformContext.Provider>
+      )
+    );
+    await act(async () => container.querySelector('button')!.click());
+    expect(deleteWorkspace).toHaveBeenCalledWith({ workspaceId: 'encrypted' });
+    expect(mocks.authClient.organization.delete.mock.calls).toEqual([
+      [{ organizationId: 'ordinary' }],
+    ]);
+    expect(remaining.has('account')).toBe(true);
+    await act(async () => encrypted.resolve({ workspaceId: 'encrypted', deleted: true }));
+    expect(remaining).toEqual(new Set(['ordinary']));
+    expect(mocks.authClient.deleteUser).toHaveBeenCalledWith({});
   });
 
   it.each(['e2ee', 'plaintext'] as const)(

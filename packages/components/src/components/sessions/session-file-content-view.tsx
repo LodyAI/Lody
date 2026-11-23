@@ -1,3 +1,5 @@
+import { control, radius as sharedRadius } from '@lody/ui/tokens/scales.stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { ReadOnlyHtmlPreview } from './read-only-html-preview';
 import { PagedFileViewer } from './paged-file-viewer';
 import * as stylex from '@stylexjs/stylex';
@@ -250,7 +252,7 @@ const styles = stylex.create({
     },
     opacity: {
       default: null,
-      ':disabled': 0.5,
+      ':disabled': control.disabledOpacity,
     },
   },
   toolButtonActive: { color: 'hsl(var(--foreground))' },
@@ -283,6 +285,10 @@ const styles = stylex.create({
     lineHeight: '1.25rem',
     color: 'hsl(var(--foreground))',
     outline: 'none',
+  },
+  previewToggleTooltip: {
+    [tooltip.text]: 'var(--text-xs)',
+    [tooltip.leading]: 'var(--text-xs--line-height)',
   },
   previewToggle: {
     display: 'flex',
@@ -335,7 +341,7 @@ const styles = stylex.create({
   },
   statusItem: { display: 'flex', minWidth: 0, flexShrink: 0, alignItems: 'center', gap: '4px' },
   statusSeparator: { marginInlineEnd: '2px', color: 'hsl(var(--muted-foreground) / 0.55)' },
-  statusDot: { width: '6px', height: '6px', flexShrink: 0, borderRadius: '9999px' },
+  statusDot: { width: '6px', height: '6px', flexShrink: 0, borderRadius: sharedRadius.full },
   statusPositiveDot: { backgroundColor: '#10b981' },
   statusMutedDot: { backgroundColor: 'hsl(var(--muted-foreground) / 0.5)' },
   statusWarningDot: { backgroundColor: '#f59e0b' },
@@ -2368,7 +2374,10 @@ function FilePreviewToggle({
           </button>
         }
       />
-      <Tooltip.Content side="bottom" className="text-xs">
+      <Tooltip.Content
+        side="bottom"
+        className={stylex.props(styles.previewToggleTooltip).className}
+      >
         {label}
       </Tooltip.Content>
     </Tooltip.Root>

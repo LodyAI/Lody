@@ -13,7 +13,7 @@ export function planLocalCheck(scope = null) {
           '--no-sort',
           '--filter',
           '!{**/acp-extension-*}',
-          '--workspace-concurrency=4',
+          '--workspace-concurrency=2',
           'run',
           'typecheck',
         ],
@@ -44,7 +44,7 @@ export function planLocalCheck(scope = null) {
             [
               '-r',
               '--no-sort',
-              '--workspace-concurrency=4',
+              '--workspace-concurrency=2',
               ...packages.flatMap((name) => ['--filter', name]),
               'run',
               'typecheck',

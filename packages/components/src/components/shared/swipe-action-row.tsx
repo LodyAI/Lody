@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import {
   useCallback,
   useEffect,
@@ -10,7 +11,17 @@ import {
   type ReactNode,
 } from 'react';
 import { clamp } from '@/lib/clamp';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 const SWIPE_ACTION_ROW_OPEN_EVENT = 'lody:swipe-action-row-open';
 const HORIZONTAL_LOCK_PX = 8;
@@ -19,8 +30,65 @@ const CLOSE_THRESHOLD_PX = 28;
 const DEFAULT_ACTION_WIDTH = 72;
 const DEFAULT_COMMIT_DISTANCE = 52;
 const CLICK_SUPPRESS_MS = 350;
-const SPRING_TRANSITION_CLASS =
-  'duration-300 [transition-timing-function:cubic-bezier(0.2,1.35,0.22,1)]';
+const styles = stylex.create({
+  root: { position: 'relative', overflow: 'hidden', borderRadius: themeRadius.md },
+  actions: {
+    position: 'absolute',
+    insetBlock: 0,
+    right: 0,
+    display: 'flex',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+    borderRadius: themeRadius.md,
+  },
+  action: {
+    display: 'flex',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingInline: themeSpace[1.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    outline: {
+      default: null,
+      ':focus-visible': '2px solid transparent',
+      '@media (forced-colors: active)': { ':focus-visible': 'auto' },
+    },
+    outlineOffset: { default: null, ':focus-visible': 2 },
+  },
+  dragColors: {
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+  },
+  spring: {
+    transitionDuration: themeDuration[300],
+    transitionTimingFunction: 'cubic-bezier(0.2,1.35,0.22,1)',
+  },
+  actionTransition: { transitionProperty: 'width,background-color,color' },
+  actionContent: {
+    display: 'flex',
+    maxWidth: '100%',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[1],
+  },
+  noTransition: { transitionProperty: 'none' },
+  actionContentTransition: { transitionProperty: 'transform, translate, scale, rotate' },
+  label: { maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  content: {
+    position: 'relative',
+    zIndex: 10,
+    touchAction: 'pan-y',
+    backgroundColor: themeColors.background,
+    willChange: 'transform',
+  },
+  contentTransition: { transitionProperty: 'translate,scale' },
+});
 
 export type SwipeActionRowAction = {
   key: string;
@@ -29,6 +97,7 @@ export type SwipeActionRowAction = {
   icon?: ReactNode;
   hideLabel?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   onClick: () => void;
 };
 
@@ -48,6 +117,8 @@ type SwipeActionRowProps = {
   children: ReactNode;
   className?: string;
   contentClassName?: string;
+  rootXstyle?: stylex.StyleXStyles;
+  contentXstyle?: stylex.StyleXStyles;
   actionWidth?: number;
   commitDistance?: number;
   onCommit?: () => void;
@@ -59,6 +130,8 @@ export function SwipeActionRow({
   children,
   className,
   contentClassName,
+  rootXstyle,
+  contentXstyle,
   actionWidth = DEFAULT_ACTION_WIDTH,
   commitDistance = DEFAULT_COMMIT_DISTANCE,
   onCommit,
@@ -290,9 +363,9 @@ export function SwipeActionRow({
   }
 
   return (
-    <div ref={rootRef} className={cn('relative overflow-hidden rounded-md', className)}>
+    <div ref={rootRef} {...withClassName(stylex.props(styles.root, rootXstyle), className)}>
       <div
-        className="absolute inset-y-0 right-0 flex justify-end overflow-hidden rounded-md"
+        {...stylex.props(styles.actions)}
         style={{ width: maxSwipeWidth }}
         aria-hidden={!isOpen && !isDragging}
       >
@@ -302,15 +375,19 @@ export function SwipeActionRow({
             <button
               key={action.key}
               type="button"
-              className={cn(
-                'flex h-full items-center justify-center px-1.5 text-xs font-medium',
-                isDragging
-                  ? 'transition-colors'
-                  : `transition-[width,background-color,color] ${SPRING_TRANSITION_CLASS}`,
-                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60',
+              className={clsx(
+                stylex.props(
+                  styles.action,
+                  isDragging ? styles.dragColors : styles.actionTransition,
+                  !isDragging && styles.spring,
+                  action.xstyle
+                ).className,
                 action.className
               )}
-              style={{ width: shouldStretchAction ? commitActionWidth : actionWidth }}
+              style={{
+                ...stylex.props(action.xstyle).style,
+                width: shouldStretchAction ? commitActionWidth : actionWidth,
+              }}
               aria-label={action.ariaLabel ?? action.label}
               tabIndex={isOpen ? 0 : -1}
               onClick={(event) => {
@@ -321,9 +398,10 @@ export function SwipeActionRow({
               }}
             >
               <span
-                className={cn(
-                  'flex max-w-full flex-col items-center justify-center gap-1',
-                  isDragging ? 'transition-none' : `transition-transform ${SPRING_TRANSITION_CLASS}`
+                {...stylex.props(
+                  styles.actionContent,
+                  isDragging ? styles.noTransition : styles.actionContentTransition,
+                  !isDragging && styles.spring
                 )}
                 style={
                   shouldStretchAction
@@ -337,7 +415,7 @@ export function SwipeActionRow({
               >
                 {action.icon}
                 {action.hideLabel ? null : (
-                  <span className="max-w-full truncate">{action.label}</span>
+                  <span {...stylex.props(styles.label)}>{action.label}</span>
                 )}
               </span>
             </button>
@@ -345,14 +423,19 @@ export function SwipeActionRow({
         })}
       </div>
       <div
-        className={cn(
-          'relative z-10 touch-pan-y bg-background will-change-transform',
-          isDragging
-            ? 'transition-none'
-            : `transition-[translate,scale] ${SPRING_TRANSITION_CLASS}`,
+        {...withClassName(
+          stylex.props(
+            styles.content,
+            isDragging ? styles.noTransition : styles.contentTransition,
+            !isDragging && styles.spring,
+            contentXstyle
+          ),
           contentClassName
         )}
-        style={{ transform: `translate3d(${visualOffset}px, 0, 0)` }}
+        style={{
+          ...stylex.props(contentXstyle).style,
+          transform: `translate3d(${visualOffset}px, 0, 0)`,
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

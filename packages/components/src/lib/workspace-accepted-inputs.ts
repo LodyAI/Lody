@@ -13,9 +13,12 @@ import {
 import i18next from 'i18next';
 import { createAcceptedSessionInputs, SessionInputNotSentError } from './session-accepted-inputs';
 import { createSessionInputStorage } from './session-input-storage';
+import { requireEncryptedRoostOwner } from './encrypted-roost-history';
+import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
 import { encryptedLocalInstance, type E2eeLocalDataIdentity } from './e2ee-local-data';
 import {
   deliverUserTurn,
+  prepareSignedIntent,
   prepareUserTurnWrite,
   persistHumanInputReceipt,
   type SessionSendRuntime,
@@ -68,6 +71,15 @@ export function createWorkspaceAcceptedInputs(args: {
       throw new SessionInputNotSentError(text('sessions.inputTargetChanged'));
     }
     const machine = await runtime.repo.getDocMeta(getMachineRoomId(send.targetMachineId));
+    if (runtime.contentMode === 'e2ee') {
+      requireEncryptedRoostOwner(machine?.meta as MachineMeta | undefined);
+      if (send.entry.userId !== args.accountId)
+        throw new SessionInputNotSentError(text('sessions.sendError'));
+      assertProtectedAttachmentReferences([
+        ...normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, ''),
+        ...send.attachments.flatMap((item) => (item.ready ? [item.ready] : [])),
+      ]);
+    }
     if (
       !machineSupportsSessionInputAcceptance(machine?.meta as MachineMeta | undefined) ||
       (send.delivery.kind === 'dispatch' &&
@@ -96,6 +108,16 @@ export function createWorkspaceAcceptedInputs(args: {
         );
       return navigator.locks.request(`lody-session-input:${scope}:${sessionId}`, { signal }, work);
     },
+    ...(runtime.contentMode === 'e2ee' && {
+      prepareIntent: async (send: PendingSessionSend, signal: AbortSignal) => {
+        await validateTarget(send);
+        return prepareSignedIntent(runtime, send.sessionId, {
+          ...send.entry,
+          machineId: send.targetMachineId,
+          signal,
+        });
+      },
+    }),
     write: async (send, signal) => {
       await validateTarget(send);
       await prepareUserTurnWrite(runtime, send, signal);

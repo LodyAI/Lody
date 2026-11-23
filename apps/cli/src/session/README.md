@@ -308,7 +308,8 @@ submissions never retry. Exact-instance retirement detaches lifecycle listeners 
 termination, preserving the assistant entry and output owner through resume. Until retirement
 succeeds, the disconnected-execution release path retains the old Session for cleanup,
 including missing-session errors and Stop. Success clears the old prompt's cancellation drain,
-so Stop reaches the reusable replacement.
+republishes running presence and status before the retry, and lets Stop reach the reusable
+replacement.
 
 History promotion and activation can fail independently. `promotion-failed` preserves proof
 of non-delivery. `recoveryOwned` tells the renderer not to publish a conflicting activation;
@@ -552,6 +553,19 @@ Memory identity references travel with turn configuration. `Session.createAgent`
 them through `../lib/memory-providers.ts` at spawn; the execution service restarts a
 resident ACP process when the next turn changes identity. See the
 [memory Spec](../../../../specs/agent-role-memory.md).
+
+## Encrypted Roost history
+
+The owner keeps SQLite history, its sidecars, and its writer identity in the retained
+device's content directory under `roost/`. Member removal and device revocation drain
+the owner and erase this directory. A durable identity receipt retries cleanup before
+reopen. Other devices and workspaces keep their own files. Roost streams stay local.
+
+Remote clients require `e2eeRoostHistory: 1` and use encrypted feature RPC.
+A read uses exact-session read authority. Input acceptance requires session execution
+authority and a signed user entry. The owner verifies the intent and the sender before
+writing, and verifies the stored input again at execution. Fork and edit-and-resend run
+on the owner. Attachment manifests retain their original storage session.
 
 ## Roost history paging
 

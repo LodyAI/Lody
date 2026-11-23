@@ -1,5 +1,4 @@
 import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 import type { Atom, PrimitiveAtom } from 'jotai';
 import { createStore, useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { selectAtom } from 'jotai/utils';
@@ -7,7 +6,7 @@ import { useCallback } from 'react';
 import { readStoredAuthToken } from './auth-bootstrap';
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+  return clsx(inputs);
 }
 
 export const getToken = () => {

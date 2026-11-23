@@ -498,9 +498,7 @@ describe('phone Status grouping', () => {
       ],
       sections: [],
     });
-    expect(
-      rowElement('woken').querySelector('[aria-label="Unread messages"], .bg-primary')
-    ).not.toBeNull();
+    expect(rowElement('woken').querySelector('[data-unread-dot]')).not.toBeNull();
     const later = container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!;
     expect(later.textContent).toContain('Later2');
     expect(later.querySelector('[aria-label="Unread messages"]')).not.toBeNull();

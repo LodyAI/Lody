@@ -279,7 +279,14 @@ jobs:
         run: corepack pnpm --dir apps/cli prepare:publish
       - name: Publish lody to npm
         working-directory: apps/cli/.publish/lody
-        run: pnpm publish --access public --no-git-checks --tag "${NPM_DIST_TAG}"
+        env:
+          NPM_CONFIG_LOGLEVEL: verbose
+        run: |
+          node --version
+          pnpm --version
+          npm --version
+          pnpm exec npm --version
+          pnpm publish --access public --no-git-checks --tag "${NPM_DIST_TAG}"
   build-electron:
     needs:
       - release
@@ -304,9 +311,9 @@ jobs:
         ${{
           fromJSON(
             needs.release.outputs.target_environment == 'production' && needs.release.outputs.linux_arm64 != 'true' &&
-            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux"}]}' ||
+            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"}]}' ||
             needs.release.outputs.target_environment == 'production' &&
-            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux"},{"os":"ubuntu-24.04-arm","target":"linux-arm64","build_script":"build:linux:arm64"}]}' ||
+            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"},{"os":"ubuntu-24.04-arm","target":"linux-arm64","build_script":"build:linux:arm64:release"}]}' ||
             '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:staging"}]}'
           )
         }}

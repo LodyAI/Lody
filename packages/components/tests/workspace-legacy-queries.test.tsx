@@ -1,4 +1,9 @@
+import {
+  useGithubWorkspaceQuery,
+  useGithubWorkspaceMutation,
+} from '../src/hooks/use-github-workspace';
 // @vitest-environment jsdom
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { usePersonalGitHubAuthorization } from '../src/hooks/use-personal-github-authorization';
 import { storePersonalGitHubProof } from '../src/components/settings/github-personal-authorization';
 import { ErrorBoundary } from '../src/components/error-boundary';
@@ -237,6 +242,7 @@ it('keeps unknown-mode catalogs pending while the real local composer stays usab
       describe: async () => {
         throw new Error('The UI must consume the runtime admission, never start another describe');
       },
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },
@@ -632,4 +638,99 @@ it('preserves an OAuth return until ordinary mode admission is available', async
     window.location.hash = '';
     sessionStorage.removeItem('lody:githubPersonalAuthorization');
   }
+});
+
+it('fences retained GitHub mutations on verified role, workspace and account changes', async () => {
+  const store = createTourStore(DEFAULT_TOUR_IDENTITY);
+  const runtime = store.get(runtimeAtom)!;
+  let role: 'owner' | 'admin' | 'member' | 'guest' | null = 'owner';
+  const listeners = new Set<() => void>();
+  store.set(runtimeAtom, {
+    ...runtime,
+    accountId: TOUR_USER_ID,
+    contentMode: 'e2ee',
+    protectedMemberRole: {
+      get: () => role,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    },
+  });
+  store.set(workspaceContentModeAtom, {
+    accountId: TOUR_USER_ID,
+    workspaceSlug: TOUR_WORKSPACE_SLUG,
+    workspaceId: TOUR_WORKSPACE_ID,
+    descriptor: {
+      workspaceId: TOUR_WORKSPACE_ID,
+      contentMode: 'e2ee',
+      activation: 'active',
+      contentModeVersion: 1,
+      cryptoOrgId: 'ab'.repeat(32),
+      genesisHash: 'ab'.repeat(32),
+    },
+  });
+  const writes: unknown[] = [];
+  let retained:
+    | ((args: { workspaceId: string; repoFullName: string; enabled: boolean }) => Promise<unknown>)
+    | undefined;
+  function GitHubProbe() {
+    const repos = useGithubWorkspaceQuery(cloudOperations.github.getWorkspaceRepositories, {
+      workspaceId: TOUR_WORKSPACE_ID,
+    });
+    const mutate = useGithubWorkspaceMutation(cloudOperations.github.setRepoEnabled);
+    retained ??= mutate;
+    return <output>{JSON.stringify(repos ?? [])}</output>;
+  }
+  const platform: PlatformProvider = {
+    ...TEST_CLOUD_PLATFORM,
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useQuery: (_operation, args) =>
+        args === 'skip' ? undefined : ([{ fullName: 'owner/repo' }] as never),
+      useMutation: () => async (args) => {
+        writes.push(args);
+        return undefined as never;
+      },
+    },
+  };
+  await act(async () =>
+    root.render(
+      <PlatformContext.Provider value={platform}>
+        <Provider store={store}>
+          <GitHubProbe />
+        </Provider>
+      </PlatformContext.Provider>
+    )
+  );
+  const args = { workspaceId: TOUR_WORKSPACE_ID, repoFullName: 'owner/repo', enabled: true };
+  await retained!(args);
+  expect(writes).toEqual([args]);
+  await act(async () => {
+    role = 'member';
+    for (const listener of listeners) listener();
+  });
+  expect(container.textContent).toContain('owner/repo');
+  await expect(retained!(args)).rejects.toMatchObject({
+    code: 'legacy_workspace_admission_blocked',
+  });
+  await act(async () => {
+    role = 'guest';
+    for (const listener of listeners) listener();
+  });
+  expect(container.textContent).toBe('[]');
+  await act(async () => {
+    role = 'admin';
+    for (const listener of listeners) listener();
+  });
+  await retained!(args);
+  expect(writes).toEqual([args, args]);
+  await expect(retained!({ ...args, workspaceId: 'another-workspace' })).rejects.toThrow();
+  await act(async () => store.set(userAtom, { id: 'another-account' } as never));
+  await expect(retained!(args)).rejects.toMatchObject({
+    code: 'legacy_workspace_admission_account_changed',
+  });
+  expect(writes).toHaveLength(2);
 });

@@ -83,6 +83,8 @@ type RoostHistoryTransport = {
 };
 
 type RoostHistoryObservationOptions = {
+  readonly cacheNamespace?: string;
+  readonly pollIntervalMs?: number;
   readonly coherentInspection?: boolean | (() => boolean);
   readonly incremental?: boolean | (() => boolean);
   readonly live?: boolean | (() => boolean);
@@ -281,7 +283,7 @@ const createRoostSessionDataFactoryFromTransport =
       incrementalEnabled() &&
       (typeof options.live === 'function' ? options.live() : options.live === true);
     let disposed = false;
-    const cache = createRoostHistoryCache(cacheScope(sessionId));
+    const cache = createRoostHistoryCache(cacheScope(sessionId), options.cacheNamespace);
     let cacheWarningReported = false;
     const cached = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
       try {
@@ -1075,12 +1077,13 @@ const createRoostSessionDataFactoryFromTransport =
         }
       } finally {
         refreshing = false;
-        if (refreshRequested && !disposed && listeners.size > 0 && active()) {
-          refreshTimerDelay = retryDelay;
+        const delay = refreshRequested ? retryDelay : options.pollIntervalMs;
+        if (delay !== undefined && !disposed && listeners.size > 0 && active()) {
+          refreshTimerDelay = delay;
           refreshTimer = setTimeout(() => {
             refreshTimer = undefined;
             void refresh();
-          }, retryDelay);
+          }, delay);
         }
       }
     };

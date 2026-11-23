@@ -84,6 +84,9 @@ export interface PlatformE2eeWorkspaces {
    * same request, never generate another identity or silently create plaintext.
    */
   readonly create: (input: E2eeWorkspaceCreateRequest) => Promise<E2eeWorkspaceCreateResult>;
+  readonly deleteWorkspace: (request: {
+    workspaceId: string;
+  }) => Promise<{ workspaceId: string; deleted: true }>;
   /** Resolve persisted mode or explicit legacy admission. Workspaces with local
    * encrypted evidence or an encrypted listing need it before cloud attachment;
    * others open provisionally and are verified in the background.

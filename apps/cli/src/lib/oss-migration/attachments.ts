@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { LoroDoc, type Change } from 'loro-crdt';
 import {
   SESSION_FILE_MAX_SIZE_BYTES,
+  assertEncryptedAttachmentReference,
   type SessionHistoryInput,
   type SessionId,
   type WorkspaceId,
@@ -229,6 +230,8 @@ export async function migrateAttachments(
   transfer: SessionAttachmentTransfer,
   signal?: AbortSignal
 ): Promise<void> {
+  if (manifest.targetContentMode === 'protected' && transfer.contentMode !== 'protected')
+    throw new Error('E2EE migration requires a protected attachment transfer before upload');
   const mirror = createSessionMirror({ doc, initialState: {} });
   try {
     const history = mirror.historyWriter.readStored();
@@ -240,6 +243,8 @@ export async function migrateAttachments(
       if (receipt) {
         if (receipt.sha256 !== file.sha256 || receipt.sizeBytes !== file.sizeBytes)
           throw new Error('Attachment receipt does not match frozen history');
+        if (manifest.targetContentMode === 'protected')
+          assertEncryptedAttachmentReference('file', String(receipt.fileId), receipt.encryption);
         continue;
       }
       const absolutePath = path.join(directory, 'blobs', key);
@@ -260,7 +265,10 @@ export async function migrateAttachments(
       if (uploaded.sha256 !== file.sha256 || uploaded.sizeBytes !== file.sizeBytes) {
         throw new Error('Uploaded attachment integrity metadata does not match the frozen source');
       }
+      if (manifest.targetContentMode === 'protected')
+        assertEncryptedAttachmentReference('file', uploaded.fileId, uploaded.encryption);
       journal.attachments[key] = {
+        ...(uploaded.encryption ? { encryption: uploaded.encryption } : {}),
         fileId: uploaded.fileId,
         sha256: file.sha256,
         sizeBytes: file.sizeBytes,
@@ -281,6 +289,7 @@ export async function migrateAttachments(
           ...original,
           fileId: receipt.fileId,
           transport: 'r2',
+          ...(receipt.encryption ? { encryption: receipt.encryption } : {}),
           storageSessionId: file.storageSessionId ?? sessionId,
         },
       });
@@ -291,7 +300,13 @@ export async function migrateAttachments(
       const uploaded = journal.attachments[attachmentKey(file, sessionId)];
       if (!uploaded || typeof uploaded.fileId !== 'string')
         throw new Error('Missing uploaded attachment receipt');
-      const result = { ...item, fileId: uploaded.fileId, transport: 'r2', machineId: undefined };
+      const result = {
+        ...item,
+        fileId: uploaded.fileId,
+        transport: 'r2',
+        machineId: undefined,
+        ...(uploaded.encryption ? { encryption: uploaded.encryption } : {}),
+      };
       delete (result as { machineId?: unknown }).machineId;
       return result;
     };

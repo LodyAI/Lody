@@ -244,7 +244,13 @@ describe('MessageHandler machine registration', () => {
         acpAuthenticationInteractions: 2,
         acpAuthenticationMethodSelection: 1,
         ...(encryptedWorkspace
-          ? { e2eeAcpInteraction: 1, e2eeSessionFork: 1, e2eeSessionEditAndResend: 1 }
+          ? {
+              e2eeAcpInteraction: 1,
+              e2eeSessionFork: 1,
+              e2eeSessionEditAndResend: 1,
+              e2eeRemoteControl: 1,
+              e2eeRoostHistory: 1,
+            }
           : {}),
         previewControl: 1,
         previewStopProcess: 1,

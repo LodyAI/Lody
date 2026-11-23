@@ -1,3 +1,6 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import type { PinSection } from '@lody/shared';
@@ -188,7 +191,7 @@ function StatusViewPlayground({
   const selected = sessions.find((s) => s.id === selectedId);
 
   return (
-    <div className="flex h-[720px] w-full bg-background text-foreground">
+    <div {...stylex.props(themeStyles.row)}>
       <LoroSidebar
         workspaceName="Lody"
         userEmail="alex@lody.ai"
@@ -230,11 +233,11 @@ function StatusViewPlayground({
         }
       />
 
-      <div className="flex flex-1 flex-col gap-3 border-l border-border/60 p-6">
-        <div className="text-sm font-medium text-foreground">
+      <div {...stylex.props(previewStyles.column)}>
+        <div {...stylex.props(themeStyles.copy)}>
           {selected ? selected.title : 'Select a session'}
         </div>
-        <div className="max-w-lg space-y-2 text-xs text-muted-foreground">
+        <div {...stylex.props(previewStyles.hint)}>
           <p>
             <strong>Focus (进行中)</strong>: drag rows to reorder with fractional index (reuses
             Pinned&apos;s pointer drag + 100ms settle animation).
@@ -278,3 +281,13 @@ export const ExpandedLaterAndSettled: Story = {
     },
   },
 };
+
+const themeStyles = stylex.create({
+  row: { display: 'flex', height: '720px', width: '100%', backgroundColor: uiColors.background, color: uiColors.label },
+  copy: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500, color: uiColors.label },
+});
+
+const previewStyles = stylex.create({
+  column: { display: 'flex', flex: '1 1 0%', flexDirection: 'column', gap: 'calc(var(--spacing) * 3)', padding: 'calc(var(--spacing) * 6)' },
+  hint: { maxWidth: '32rem', display: 'flex', flexDirection: 'column', rowGap: 'calc(var(--spacing) * 2)', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+});

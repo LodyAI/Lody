@@ -20,6 +20,32 @@ test('rejects ordinary hooks, imperative calls, and escaped references to new le
   }
 });
 
+test('permits the encrypted numeric usage and own activity endpoints without opening other legacy APIs', () => {
+  for (const name of [
+    'getWorkspaceUsageCalendar',
+    'getWorkspaceUsageDay',
+    'getWorkspaceUsageSummary',
+    'getWorkspaceUsageTimeline',
+  ]) {
+    const result = auditLegacyCloudSource(
+      file,
+      `import { cloudOperations } from '@/lib/cloud-api-operations'; useCloudQuery(cloudOperations.usage.${name}, { workspaceId });`
+    );
+    assert.deepEqual(result.errors, []);
+    assert.match(result.rows[0].protection, /Numeric accounting/);
+  }
+  const activity = auditLegacyCloudSource(
+    file,
+    `import { cloudOperations } from '@/lib/cloud-api-operations'; useCloudMutation(cloudOperations.activity.recordMyWorkspaceDailyActiveUser);`
+  );
+  assert.deepEqual(activity.errors, []);
+  const unknown = auditLegacyCloudSource(
+    file,
+    `import { cloudOperations } from '@/lib/cloud-api-operations'; useCloudMutation(cloudOperations.activity.otherMutation);`
+  );
+  assert.equal(unknown.errors.length, 1);
+});
+
 test('accepts only the owning admission wrappers, including real import aliases', () => {
   const result = auditLegacyCloudSource(
     file,
@@ -154,5 +180,24 @@ test('limits the imperative session-access composition exception to its owner an
       ).errors.length,
       1
     );
+  }
+});
+
+test('GitHub metadata wrappers never admit hosted PR caches or legacy identity repair', () => {
+  for (const [name, allowed] of [
+    ['getWorkspaceRepositories', true],
+    ['createGitHubInstallState', true],
+    ['getPrCacheVersions', false],
+    ['resolveLegacyPrRepositoryIdentity', false],
+  ]) {
+    const result = auditLegacyCloudSource(
+      file,
+      `
+      import { cloudOperations } from '@/lib/cloud-api-operations';
+      import { useGithubWorkspaceQuery as read } from '@/hooks/use-github-workspace';
+      read(cloudOperations.github.${name}, { workspaceId });
+    `
+    );
+    assert.equal(result.errors.length, allowed ? 0 : 1);
   }
 });

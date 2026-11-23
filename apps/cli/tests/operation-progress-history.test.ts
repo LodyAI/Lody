@@ -4,7 +4,6 @@ import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it } from 'vitest';
 import { Loro } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
-;
 
 import type {
   LodyOperationItemResult,
@@ -12,7 +11,8 @@ import type {
   OperationProgressStatus,
   SessionHistoryInput,
   SessionId,
-  StoredLodyOperation} from '@lody/shared';
+  StoredLodyOperation,
+} from '@lody/shared';
 import {
   buildOperationProgressContent,
   mergeOperationProgressContent,

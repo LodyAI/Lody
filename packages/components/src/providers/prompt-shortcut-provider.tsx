@@ -18,10 +18,7 @@ import {
 } from 'react';
 import { useAtomValue } from 'jotai';
 import type { LoroRepo } from 'loro-repo';
-import type {
-  PromptShortcutRuntime,
-  ShortcutRuntimeSnapshot,
-} from '@lody/shared/prompt-shortcuts';
+import type { PromptShortcutRuntime, ShortcutRuntimeSnapshot } from '@lody/shared/prompt-shortcuts';
 import { getShortcutResourceStreamId } from '@lody/shared/prompt-shortcuts/access';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';

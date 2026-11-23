@@ -48,7 +48,8 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionToCreate,
-  type WorkspaceId} from '@lody/shared';
+  type WorkspaceId,
+} from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStaticStore,
@@ -641,6 +642,30 @@ describe('useSessionActions', () => {
     expect(result.sessionMeta.historyBackend).toBe('loro');
   });
 
+  it.each([undefined, 0, 1, 2])(
+    'negotiates encrypted Roost creation with owner capability %s',
+    async (version) => {
+      const store = createStore();
+      store.set(developerModeEnabledAtom, true);
+      store.set(roostHistoryExperimentEnabledAtom, true);
+      const metaRepo = createSessionMetaRepo([]);
+      const payload = createSessionPayload('encrypted-roost' as SessionId);
+      metaRepo.setMeta(getMachineRoomId(payload.machineId), {
+        protocolCapabilities: version === undefined ? {} : { e2eeRoostHistory: version },
+      });
+      const runtime = Object.assign(createRuntime({ repo: metaRepo.repo }), {
+        contentMode: 'e2ee' as const,
+      });
+      const actions = await renderActions(runtime, { store });
+      const creating = actions.createSession(payload);
+      if (version) expect((await creating).sessionMeta.historyBackend).toBe('roost');
+      else {
+        await expect(creating).rejects.toThrow(/Update Lody/);
+        expect(metaRepo.getSession('encrypted-roost' as SessionId)).toBeUndefined();
+      }
+    }
+  );
+
   it('keeps creating ordinary Loro sessions on targets without Roost capability', async () => {
     const store = createStore();
     store.set(developerModeEnabledAtom, true);
@@ -935,6 +960,8 @@ describe('useSessionActions', () => {
     ['promotion-failed', 'canceled', false],
     ['promotion-failed', 'failed', false],
     ['promotion-failed', 'removed', false],
+    ['unsupported', 'pending_apply', true],
+    ['unsupported', 'pending_apply', false, true],
     ['delivery-unknown', 'pending_apply', false],
     ['applied', 'pending_apply', false],
     ['no-active-turn', 'pending_apply', false, true],
@@ -1644,11 +1671,7 @@ describe('useSessionActions', () => {
       await answerConfirmation(labels.all);
       await expect(result).resolves.toBe(true);
       // Opened Sessions follow; contained Tabs keep no status fields of their own.
-      for (const session of [
-        tree.rootSession,
-        tree.openedSession,
-        tree.openedFromTabSession,
-      ]) {
+      for (const session of [tree.rootSession, tree.openedSession, tree.openedFromTabSession]) {
         expect(applied(tree.metaRepo.getSession(session.id))).toBe(true);
       }
       for (const session of [tree.tabSession, tree.openedTab]) {

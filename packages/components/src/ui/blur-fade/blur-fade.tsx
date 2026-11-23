@@ -1,12 +1,12 @@
-import * as React from "react";
+import * as React from 'react';
 
-import { cn } from "@/lib/utils";
-import styles from "./fade.module.css";
+import { clsx } from 'clsx';
+import styles from './fade.module.css';
 
 export type FadeProps = {
   stop?: string;
   blur?: string;
-  side?: "top" | "bottom" | "left" | "right";
+  side?: 'top' | 'bottom' | 'left' | 'right';
   className?: string;
   background: string;
   debug?: boolean;
@@ -14,22 +14,22 @@ export type FadeProps = {
 };
 
 export const Fade = React.forwardRef<HTMLDivElement, FadeProps>(function Fade(
-  { stop, blur, side = "top", className, background, style, debug },
+  { stop, blur, side = 'top', className, background, style, debug },
   ref
 ) {
   return (
     <div
       ref={ref}
       aria-hidden
-      className={cn(styles.root, className)}
+      className={clsx(styles.root, className)}
       data-side={side}
       style={
         {
-          "--stop": stop,
-          "--blur": blur,
-          "--background": background,
+          '--stop': stop,
+          '--blur': blur,
+          '--background': background,
           ...(debug && {
-            outline: "2px solid red",
+            outline: '2px solid red',
           }),
           ...style,
         } as React.CSSProperties

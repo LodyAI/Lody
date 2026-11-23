@@ -4,6 +4,7 @@
 
 - Accounting uses Core cumulative `modelUsage`; optional `delta` is already included.
   Coalesce pending snapshots, including Grok; never add delta to cumulative totals.
+- Encrypted account-token reporting skips turns attributed to another user before queueing. Keep prompts, titles and paths out of usage payloads.
 - Project persistence payloads to token/cost fields; only aggregate usage retains
   contextWindow. Do not forward webSearchRequests or other provider-only fields.
 - Usage accepts custom agents as `custom` and builtin agents from the builtin catalog,

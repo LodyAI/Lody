@@ -173,6 +173,11 @@ export class PersonalHostPlatform extends Context.Service<
       | LedgerViewSource
       | import('@lody/e2ee-core').InstalledEpochHistory
     >;
+    /** Persistent remote CLI approval ports, bound to this exact installation. */
+    remoteMachine?(
+      binding: ClientCustodyBinding,
+      credential: Uint8Array
+    ): import('./remote-machine').PersonalRemoteMachinePorts;
     /** Replacement requires actual quiescence of every owner of the old incarnation before its atomic switch. */
     drainOld?(binding: ClientCustodyBinding): Effect.Effect<void, unknown>;
     /** Upper bound of each remote round held under a serial permit; see `boundedBy`. */

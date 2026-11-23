@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo } from 'react';
 import { Provider, createStore } from 'jotai';
@@ -23,6 +24,14 @@ import {
   ScheduleEditProposalNotice,
   ScheduleProposalNotice,
 } from '@/components/schedules/schedule-proposal-notice';
+
+const storyLayout = stylex.create({
+  frame: {
+    width: '640px',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 /** Offline platform plus the three metas the card resolves its target from. */
 const storyPlatform = createLocalPlatformProvider({
@@ -83,7 +92,7 @@ const meta = {
     (Story) => (
       <StoryShell>
         <Tooltip.Provider>
-          <div className="w-[640px] bg-background p-4">
+          <div {...stylex.props(storyLayout.frame)}>
             <Story />
           </div>
         </Tooltip.Provider>

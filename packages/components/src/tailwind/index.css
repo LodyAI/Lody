@@ -1,52 +1,20 @@
 @layer theme, base, stylex, components, utilities;
 @import './fonts.css';
 @import 'katex/dist/katex.min.css';
-@import 'tw-animate-css';
-@import 'tailwindcss';
-@import 'konsta/theme.css';
+@import './reset.css';
+@import './theme-defaults.css';
 @import './scrollbars.css';
 
-@config "../../tailwind.config.js";
-@source "../**/*.{ts,tsx}";
-/* Konsta is imported for its theme, safe-area utilities and the `safe-areas`
-   hook only; no Konsta component is rendered. Do NOT scan Konsta's sources:
-   that generates utilities such as `last-child-hairline-b-none`, whose
-   unanchored `:last-child … ::after` selectors make every portal open/close
-   restyle the whole app (~25ms per popover on a large workspace). */
-
-/* Sidebar session-row lists: skip style, layout and paint for rows scrolled out
-   of view. `auto` remembers each row's last rendered height; 50px is only the
-   estimate for rows never on screen (two-line repo rows are 54px, child and
-   chat rows 30-36px), kept close so the scrollbar barely moves as rows render.
-   See SIDEBAR_ROW_LIST_CLASS. */
-@utility sidebar-row-list {
-  & > * {
+@layer utilities {
+  /* Sidebar session-row lists: skip style, layout and paint for rows scrolled out
+     of view. `auto` remembers each row's last rendered height; 50px is only the
+     estimate for rows never on screen (two-line repo rows are 54px, child and
+     chat rows 30-36px), kept close so the scrollbar barely moves as rows render.
+     See SIDEBAR_ROW_LIST_CLASS. */
+  .sidebar-row-list > * {
     content-visibility: auto;
     contain-intrinsic-size: auto 50px;
   }
-}
-
-@custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
-/* `placeholder:` also styles the composer editor's placeholder (`ui/mention/mention-input.tsx`),
-   painted as its `::before`, so a composer's placeholder colour is the textarea's in every
-   engine. WebKit reports no computed style for `::placeholder`, so it cannot be copied. */
-@custom-variant placeholder (&::placeholder, &[data-composer-editor]::before);
-
-@theme inline {
-  --font-ios: var(--font-sans);
-  --font-material: var(--font-sans);
-
-  /* Re-claim `--color-primary` from konsta/theme.css. That stylesheet's
-     `@theme { --color-primary: var(--k-color-primary); }` block wins
-     over the legacy v3 JS preset's `colors.primary = hsl(var(--primary))`
-     under Tailwind v4 (CSS @theme > @config), which made every
-     `text-primary` / `bg-primary` utility — sidebar Button, mobile
-     tabbar active highlight, mobile filter pills — render as Konsta's
-     static iOS blue (#007aff) instead of the project's themed primary.
-     Konsta's own components keep working: they reference their
-     `--k-color-*` namespace directly, not the bare `--color-primary`. */
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
 }
 
 /* Override @pierre/diffs italic font style */
@@ -56,9 +24,8 @@
   /* Appearance's document baseline; @lody/ui text tokens derive every role. */
   --ui-font-size: 14px;
 
-  /* Dialogs use CSS variables in Tailwind arbitrary z-index classes. Keep these
-     concrete at runtime so ordinary Radix portals (`z-50`) stay under modal
-     overlays instead of winning when an undefined variable invalidates z-index. */
+  /* Editor z-indexes live behind CSS variables so the values stay concrete at
+     runtime and stack predictably under the app's modal overlays. */
   --z-editor-diff-gutter: 10;
   --z-editor-selection: 20;
   --z-editor-cursor: 30;
@@ -106,8 +73,7 @@ body {
 
 /* Monospace font for code */
 code,
-pre,
-.font-mono {
+pre {
   font-family: var(--font-mono);
   font-variant-ligatures: var(--lody-font-ligatures, contextual);
 }
@@ -118,16 +84,10 @@ pre,
 }
 
 @layer utilities {
-  /* Links are jellyfish cyan (the brand accent, #7CC4E8 in dark themes).
-     Markdown anchors take it from the `.markdown-renderer a` rule: a
-     hand-written class has no `[&_a]:` variant in Tailwind v4, so the
-     renderer's `[&_a]:text-markdown-link` never applied and links inherited
-     the prose color. */
-  .text-markdown-link,
+  /* Markdown links and reference chips share the brand cyan. */
   .markdown-renderer a {
     color: hsl(200 72% 34%);
   }
-  .dark .text-markdown-link,
   .dark .markdown-renderer a {
     color: hsl(200 69% 70%);
   }
@@ -151,42 +111,6 @@ pre,
   }
   .dark .markdown-renderer :is(a, button, span).markdown-reference-chip {
     --reference-chip-hue: 200 69% 70%;
-  }
-  .text-pr-merged {
-    color: hsl(var(--github-merged));
-  }
-  .text-balance {
-    text-wrap: balance;
-  }
-  .field-sizing-content {
-    field-sizing: content;
-    /* Set reasonable constraints to prevent UI breakage */
-    max-width: min(80vw, 600px);
-    min-width: 10ch;
-  }
-
-  /* Fallback for browsers that don't support field-sizing */
-  @supports not (field-sizing: content) {
-    .field-sizing-content {
-      /* JavaScript will handle the auto-sizing */
-      overflow: hidden;
-    }
-  }
-
-  .line-clamp-2 {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .text-modified-file {
-    color: hsl(var(--modified-file));
-  }
-
-  /* 防止移动端长按选择文本 - 特别是在 iOS Safari 上 */
-  .-webkit-touch-callout-none {
-    -webkit-touch-callout: none;
   }
 }
 
@@ -572,32 +496,20 @@ pre,
 }
 
 @layer components {
-  /* Mobile home (Konsta). Tints Konsta's iOS/Material chrome with project
-     theme tokens. Two layout vars expose the sticky header height + the
-     Konsta Tabbar height so the sticky machine bar can park beneath the
-     header and the scroll region can reserve bottom space for the Tabbar.
-
-     Rejected: per-element class overrides on Konsta internals — re-derives
-     upstream layout and drifts on Konsta upgrades. We retint at the
-     `.k-list-*` and `.k-tabbar` level only. */
+  /* Mobile home. Tints the iOS/Material chrome with project theme tokens.
+     Two layout vars expose the sticky header height + the tabbar height so
+     the sticky machine bar can park beneath the header and the scroll region
+     can reserve bottom space for the tabbar. */
 
   .mobile-home-app {
     --mobile-tabbar-height: 3.75rem;
     --mobile-home-header-height: calc(3.25rem + var(--k-safe-area-top, 0px));
   }
 
-  /* Konsta's Material tabbar reserves more vertical space for the top label
-     padding. Theme via `.k-material` so each theme gets the right height. */
-  .mobile-home-app.k-material {
-    --mobile-tabbar-height: 4.25rem;
-  }
-
-  /* iOS-style translucent material for the sticky header + machine bar.
-     Mirrors Konsta's `.translucent` recipe (`saturate(180%) blur(20px)` +
-     ~70% bg opacity) so the custom bars match the Konsta Tabbar and Popover
-     that already opt in. The `-webkit-` prefix is for WKWebView, which still
-     ships the prefixed version of backdrop-filter alongside the unprefixed
-     one. */
+  /* iOS-style translucent material for the sticky header + machine bar
+     (`saturate(180%) blur(20px)` + ~70% bg opacity). The `-webkit-` prefix
+     is for WKWebView, which still ships the prefixed version of
+     backdrop-filter alongside the unprefixed one. */
   @supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
     .mobile-home-glass {
       background: hsl(var(--background) / 0.72);
@@ -612,27 +524,6 @@ pre,
     }
   }
 
-  /* Sticky machine / owner heading inside the home tab lists.
-     Translucent + backdrop-blur like `.mobile-home-glass`, but the
-     opacity is bumped to 0.9 (vs 0.72 for the screen header) because
-     the rows scrolling underneath are full-opacity Konsta List cards
-     — with 0.72 the row content reads through the heading background
-     as soft ghosting. The backdrop-blur catches the rest so the
-     heading still feels like the iOS material rather than a flat
-     opaque bar. */
-  @supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
-    .mobile-home-group-heading {
-      background: hsl(var(--background) / 0.9);
-      -webkit-backdrop-filter: saturate(180%) blur(20px);
-      backdrop-filter: saturate(180%) blur(20px);
-    }
-  }
-  @supports not ((backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px))) {
-    .mobile-home-group-heading {
-      background: hsl(var(--background));
-    }
-  }
-
   /* Hide horizontal scrollbar on the machine chip row. */
   .mobile-home-shell .hide-scrollbar {
     scrollbar-width: none;
@@ -640,32 +531,6 @@ pre,
 
   .mobile-home-shell .hide-scrollbar::-webkit-scrollbar {
     display: none;
-  }
-
-  /* GitHub row description: single line, ellipsis on overflow. Konsta's
-     subtitle slot has no width constraints of its own, and Tailwind's
-     line-clamp-1 utility wasn't being authored in this layer, so we own
-     the rule here. */
-  .mobile-home-row-description {
-    display: -webkit-box;
-    -webkit-line-clamp: 1;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    word-break: break-word;
-  }
-
-  /* Active machine pill: a 2px primary-tinted ring makes the selected chip
-     obviously distinct from the rest of the row. The default floating pill
-     only carries a shadow, which reads as a flat row of chips when scanning
-     quickly. Pair with a faint primary background tint so the pill is still
-     legible in low-contrast environments. */
-  .mobile-home-machine-pill--active {
-    box-shadow:
-      0 0 0 2px hsl(var(--primary) / 0.55),
-      0 1px 2px rgba(0, 0, 0, 0.04),
-      0 8px 24px -12px rgba(0, 0, 0, 0.18) !important;
-    background-color: hsl(var(--primary) / 0.08) !important;
   }
 
   /* Chat landing keyboard navigation: the option under the roving
@@ -678,197 +543,6 @@ pre,
   [data-qs-active] {
     box-shadow: inset 0 0 0 2px hsl(var(--primary) / 0.75) !important;
     background-color: hsl(var(--primary) / 0.08) !important;
-  }
-
-  /* Konsta List surfaces: use shadow elevation to float the card above the
-     scroll surface. In dark mode --card may match --background, so add a 1px
-     border to keep the card distinguishable.
-
-     Konsta's default surface is `bg-ios-light-surface-1` /
-     `dark:bg-ios-dark-surface-1` — those are hard-coded greys that ignore
-     our HSL theme tokens. Force the surface to use `--card` so the list
-     follows whatever theme the rest of the app uses (warm white in light,
-     dark navy in dark).
-
-     Tighten Konsta's `inset` left/right margin (defaults to ml-safe-4 /
-     mr-safe-4 = 16px each side) so list rows reach closer to the screen
-     edge. The full design uses a roomy card; we go down to 12px = ps-safe-3
-     so rows still breathe and the rounded corners remain visible. */
-  .mobile-home-list {
-    border: none !important;
-    margin-left: max(0.75rem, env(safe-area-inset-left, 0px)) !important;
-    margin-right: max(0.75rem, env(safe-area-inset-right, 0px)) !important;
-    background: hsl(var(--card)) !important;
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.04),
-      0 8px 24px -16px rgba(0, 0, 0, 0.12);
-  }
-
-  .dark .mobile-home-list,
-  .mobile-home-app.dark .mobile-home-list {
-    border: 1px solid hsl(var(--border) / 0.55) !important;
-    box-shadow: none;
-  }
-
-  .mobile-home-list :where(.k-list-item) {
-    background: transparent;
-    color: hsl(var(--foreground));
-  }
-
-  .mobile-home-list :where(.k-list-item:not(:last-child)) {
-    border-color: hsl(var(--border) / 0.55);
-  }
-
-  .mobile-home-list :where(.k-list-item-content) {
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  /* Konsta renders the row's interactive surface as a `<button>` that sizes
-     to content. With short titles ("lody", "loro") `justify-between` in the
-     title wrap collapses to the title width and the `after` badge ends up
-     beside the text instead of at the row's right edge. Force the row to
-     fill the list width (then the after slot snaps to the rounded card
-     edge) and reset the browser default `text-align: center` on `<button>`,
-     which otherwise leaks into the subtitle block below the title wrap. */
-  .mobile-home-list :where(.k-list-item) > :where(button, a, div, span) {
-    width: 100%;
-    text-align: start;
-  }
-
-  .mobile-home-list :where(.k-list-item-content:active) {
-    background: hsl(var(--muted) / 0.7);
-  }
-
-  /* Konsta hard-codes font-semibold on the iOS strong-list title; dial that
-     back to medium so list rows match the rest of the project's Inter
-     typography. */
-  .mobile-home-list :where(.k-list-item-title),
-  .mobile-home-list :where(div[class*='shrink'].font-semibold) {
-    color: hsl(var(--foreground));
-    font-weight: 500 !important;
-    letter-spacing: -0.005em;
-  }
-
-  .mobile-home-list :where(.k-list-item-subtitle),
-  .mobile-home-list :where(.k-list-item-text) {
-    color: hsl(var(--muted-foreground));
-  }
-
-  .mobile-home-list :where(.k-list-item-inner) {
-    min-width: 0;
-  }
-
-  /* Bottom dock pill surface (Chat / Projects). Solid elevated card —
-     frosted / semi-transparent experiments were dropped (no useful
-     blur over white canvas). Crisp rim + soft outer lift only. */
-  .mobile-tabbar-glass {
-    background: hsl(var(--card)) !important;
-    border: 1px solid hsl(var(--foreground) / 0.1);
-    box-shadow:
-      0 0 0 0.5px hsl(var(--foreground) / 0.04),
-      0 6px 20px -6px rgba(0, 0, 0, 0.14),
-      0 18px 40px -16px rgba(0, 0, 0, 0.16) !important;
-  }
-
-  .dark .mobile-tabbar-glass,
-  .mobile-home-app.dark .mobile-tabbar-glass {
-    background: hsl(var(--card)) !important;
-    border-color: hsl(0 0% 100% / 0.16);
-    box-shadow:
-      0 0 0 0.5px hsl(0 0% 100% / 0.08),
-      0 8px 24px -6px rgba(0, 0, 0, 0.5),
-      0 20px 48px -16px rgba(0, 0, 0, 0.45) !important;
-  }
-
-  .mobile-home-tabbar {
-    height: calc(var(--mobile-tabbar-height) + var(--k-safe-area-bottom, 0px)) !important;
-    padding-bottom: var(--k-safe-area-bottom, 0px) !important;
-  }
-
-  .mobile-home-tabbar
-    :where(.k-toolbar-pane, [class*='bg-ios-light-glass'], [class*='bg-ios-dark-glass']) {
-    background: hsl(var(--card)) !important;
-    border: 1px solid hsl(var(--foreground) / 0.1) !important;
-    box-shadow:
-      0 0 0 0.5px hsl(var(--foreground) / 0.04),
-      0 6px 20px -6px rgba(0, 0, 0, 0.14),
-      0 18px 40px -16px rgba(0, 0, 0, 0.16) !important;
-  }
-
-  .dark
-    .mobile-home-tabbar
-    :where(.k-toolbar-pane, [class*='bg-ios-light-glass'], [class*='bg-ios-dark-glass']),
-  .mobile-home-app.dark
-    .mobile-home-tabbar
-    :where(.k-toolbar-pane, [class*='bg-ios-light-glass'], [class*='bg-ios-dark-glass']) {
-    background: hsl(var(--card)) !important;
-    border-color: hsl(0 0% 100% / 0.16) !important;
-    box-shadow:
-      0 0 0 0.5px hsl(0 0% 100% / 0.08),
-      0 8px 24px -6px rgba(0, 0, 0, 0.5),
-      0 20px 48px -16px rgba(0, 0, 0, 0.45) !important;
-  }
-
-  .mobile-home-tabbar :where(.k-tabbar-link-active) {
-    color: hsl(var(--primary)) !important;
-  }
-
-  /* Project detail screen reuses the home screen's chrome (App shell, glass
-     bars, popovers, tab dock spacing), so its surface tokens piggyback off
-     the existing `.mobile-home-*` rules. The card itself is plain so we
-     style it with Tailwind utilities + this one block: same shadow/border
-     story as the Konsta List card but on a plain <div>. */
-  .mobile-project-list-card {
-    margin-left: max(0.75rem, env(safe-area-inset-left, 0px));
-    margin-right: max(0.75rem, env(safe-area-inset-right, 0px));
-    border-radius: 1.5rem;
-    background: hsl(var(--card));
-    overflow: hidden;
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.04),
-      0 8px 24px -16px rgba(0, 0, 0, 0.12);
-  }
-
-  .dark .mobile-project-list-card,
-  .mobile-home-app.dark .mobile-project-list-card {
-    border: 1px solid hsl(var(--border) / 0.55);
-    box-shadow: none;
-  }
-
-  /* Filter popover lives inside Konsta's Glass inner — drop its default
-     padding so our own per-section padding lines up cleanly with the
-     popover edges. */
-  .mobile-project-filter-panel {
-    padding-bottom: 0.5rem;
-  }
-
-  .mobile-project-filter-panel + * {
-    /* nothing yet — placeholder for future sub-panels */
-  }
-
-  /* Popover for workspace switcher / overflow / project-screen filter +
-     scope menus. Konsta's Popover renders two concentric containers: the
-     outer `.k-popover` (positioning wrapper) and an inner Glass child
-     (`bg-ios-light-glass`, `rounded-4xl` = 32px). We let Konsta's inner
-     Glass own the rounded shape (the radius matches the list rows
-     inside) but retint the background to the project theme — Konsta's
-     default surface is a hard-coded translucent grey that doesn't
-     follow our HSL tokens, which read as off-theme in dark mode. The
-     border + drop shadow give the popover the same lift as the home
-     screen's floating chips. */
-  .mobile-home-popover > :where(div) {
-    background: hsl(var(--popover)) !important;
-    color: hsl(var(--popover-foreground));
-    border: 1px solid hsl(var(--border) / 0.55);
-    box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.35);
-  }
-
-  .mobile-home-popover-item-active {
-    background: hsl(var(--muted)) !important;
-  }
-
-  .mobile-home-popover-item-active :where(a, button) {
-    background: transparent !important;
   }
 
   .mobile-home-shell button:focus-visible,
@@ -1065,11 +739,8 @@ pre,
     --shadow-panel: 0 1px 2px hsl(0 0% 0% / 0.08), 0 10px 30px hsl(0 0% 0% / 0.1);
     --shadow-popover: 0 2px 6px hsl(0 0% 0% / 0.1), 0 18px 50px hsl(0 0% 0% / 0.14);
     --tracking-normal: 0rem;
-    /*
-     * Tailwind v4 spacing utilities resolve through this variable. Keep the
-     * default 0.25rem unit so v3-era classes like h-9, px-3, and size-5 retain
-     * their previous dimensions after migration.
-     */
+    /* Shared spacing unit (0.25rem) that `calc(var(--spacing) * n)` spacing
+       expressions across the app resolve against. */
     --spacing: 0.25rem;
     --safe-area-top: env(safe-area-inset-top, 0px);
     --safe-area-right: env(safe-area-inset-right, 0px);
@@ -1221,16 +892,19 @@ pre,
   }
 
   * {
-    @apply border-border outline-ring/50;
+    border-color: hsl(var(--border) / 1);
+    outline-color: color-mix(in oklab, hsl(var(--ring) / 1) 50%, transparent);
   }
 
   html {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--background) / 1);
+    color: hsl(var(--foreground) / 1);
     overflow: hidden;
   }
 
   body {
-    @apply bg-background text-foreground;
+    background-color: hsl(var(--background) / 1);
+    color: hsl(var(--foreground) / 1);
   }
 
   /* Pro selection style */
@@ -1305,7 +979,11 @@ pre,
   /* The composer editor (`ui/mention/mention-input.tsx`) is a contenteditable
      that lays out, scrolls and paints its placeholder exactly like the textarea
      it replaced: a textarea's UA box, `rows` lines tall plus its padding and
-     border, with utilities still free to size it. */
+     border, with StyleX still free to size it. WebKit reports no computed style
+     for `::placeholder`, so it cannot be copied — the composer's placeholder
+     colour is the textarea's in every engine (`usePlaceholderPaint` probes a
+     real textarea styled the same and forwards `::placeholder`'s colour via
+     `--composer-placeholder-color`). */
   [data-composer-editor] {
     display: inline-block;
     white-space: pre-wrap;
@@ -1372,8 +1050,6 @@ pre,
   *:focus,
   *:focus-visible {
     outline: none !important;
-    --tw-ring-offset-shadow: 0 0 #0000 !important;
-    --tw-ring-shadow: 0 0 #0000 !important;
   }
 
   /* Global CodeMirror cursor visibility fixes */
@@ -1643,11 +1319,10 @@ pre,
    * a task description and a chat message read at the same size.
    *
    * These are real rules with `!important` for the same reason as the task-item
-   * margin below: meowdown ships its typography inside `@layer meowdown`, and
-   * Tailwind utilities live in `@layer utilities`, so the utility classes on the
-   * wrapper LOSE the layer-order comparison regardless of specificity. Measured:
-   * the wrapper computed to 14px while `.ProseMirror` inside it stayed at
-   * meowdown's 17px, and every heading utility was being ignored too.
+   * margin below: meowdown ships its typography inside `@layer meowdown`, so a
+   * rule in a later layer (or no layer) loses the layer-order comparison
+   * regardless of specificity. Measured: the wrapper computed to 14px while
+   * `.ProseMirror` inside it stayed at meowdown's 17px.
    *
    * Keep these in step with CONVERSATION_TEXT_FONT_SIZE_CLASSES.default.
    */
@@ -1682,11 +1357,9 @@ pre,
    * zeroing padding does nothing. Scoped with `>` to DIRECT children of the
    * content root so genuinely nested task lists keep their indentation.
    *
-   * This lives here rather than as a Tailwind arbitrary variant on the editor
-   * wrapper because that variant compiles to NOTHING — verified in the browser:
-   * the class string was present on the element and zero matching CSS rules
-   * existed. Selectors with a child combinator plus an attribute selector are
-   * not reliably generated; a real stylesheet rule is.
+   * This lives here as a real stylesheet rule rather than an inline variant
+   * because the selector needs a child combinator plus an attribute selector
+   * — a reliable, always-emitted rule.
    *
    * `!important` because this block is inside `@layer components` while
    * prosemirror-flat-list ships its `margin-left` UNLAYERED, and any unlayered
@@ -1858,94 +1531,10 @@ pre,
   }
 }
 
-/*
- * dvh/svh fallbacks for browsers that don't support dynamic/small viewport units
- * (Safari < 15.4, Chrome < 108, Firefox < 101).
- * Tailwind utilities like h-dvh, min-h-svh, h-svh output dvh/svh values which are
- * silently ignored by older browsers, leaving elements with no height.
- * These @supports rules provide vh-based fallbacks.
- */
+/* The workspace keeps its viewport height on older embedded browsers. */
 @supports not (height: 1dvh) {
-  @layer utilities {
-    .h-dvh {
-      height: 100vh !important;
-    }
-    .min-h-\[100dvh\] {
-      min-height: 100vh !important;
-    }
-    .max-h-\[80dvh\] {
-      max-height: 80vh !important;
-    }
-    .max-h-\[90dvh\] {
-      max-height: 90vh !important;
-    }
-    .max-h-\[min\(40dvh\2c 20rem\)\] {
-      max-height: min(40vh, 20rem) !important;
-    }
-    .h-svh {
-      height: 100vh !important;
-    }
-    .min-h-svh {
-      min-height: 100vh !important;
-    }
-    .max-h-\[70svh\] {
-      max-height: 70vh !important;
-    }
-  }
-}
-
-/*
- ---break---
- */
-
-/* Spinners must rotate about their OWN center, not orbit a point.
-   `animate-spin` is `rotate(360deg)` with the default
-   `transform-origin: 50% 50%`, and `transform-box`'s initial value is
-   `view-box` — for an SVG that percentage resolves against the nearest
-   SVG viewport rather than the element's CSS box. A root `<svg>` has a
-   CSS layout box, so `view-box` is specified to act as `border-box`
-   there and modern engines land on the box center. But nothing in the
-   markup states that intent, so any element that loses its CSS layout
-   box, is sized asymmetrically, or is rotated by an engine resolving
-   the percentage against the 24-unit `viewBox` pivots off-center — the
-   glyph then sweeps a circle around a point beside it (measured: a
-   14px icon pivoting on the viewBox center orbits with a ~14px
-   diameter, i.e. wider than the icon itself) instead of turning in
-   place. Pinning both properties states the intent once, globally.
-
-   `flex-shrink: 0` belongs here for the same reason: in a tight flex
-   row (the mobile home status pill, whose label truncates) a spinner
-   without it is compressed to a non-square box, so the rotation
-   sweeps an ellipse and the glyph visibly wobbles. Measured 14×14 →
-   13.55×15.43 in the reconnecting pill before this rule.
-
-   Spinning an `<svg>` directly is no longer done anywhere in this
-   package: Chromium refuses to composite a transform animation on an SVG
-   target whose effective zoom is not 1 (crbug.com/1186312), which is every
-   SVG on a Retina display, so the rotation re-ran style, pre-paint and
-   layerize on the main thread at the refresh rate. `ui/spinner.tsx` puts
-   the animation on an HTML wrapper instead. The `svg` rule below stays as
-   a safety net for any stray `<svg class="animate-spin">`.
-
-   `@layer base` keeps this below utilities, so an explicit
-   `origin-*` / `shrink` utility at a call site still wins. */
-@layer base {
-  svg.animate-spin {
-    transform-box: border-box;
-    transform-origin: 50% 50%;
-    flex-shrink: 0;
-  }
-
-  /* `ui/spinner.tsx` animates an HTML wrapper instead of the glyph so
-     the rotation composites. A wrapper is only equivalent while its box
-     matches the glyph's: the moment anything else lands inside it (a
-     label, a gap) its box grows, its center moves off the glyph, and the
-     glyph orbits. It must therefore stay icon-only and explicitly sized;
-     centering the origin here makes that failure mode a wobble-free
-     no-op rather than an orbit. */
-  span.animate-spin {
-    transform-box: border-box;
-    transform-origin: 50% 50%;
+  .workspace-viewport {
+    height: 100vh !important;
   }
 }
 
@@ -2187,17 +1776,6 @@ pre,
 
 [data-sidebar-session-row][data-sidebar-title-swiping='true'] [data-sidebar-title-clip] {
   overflow: hidden;
-}
-
-/* Focus rings are for keyboard navigation. `installFocusModality` (@lody/ui)
-   marks the document `pointer` until Tab or an arrow key moves focus, and zeroes
-   `focus.ringWidth` for every StyleX ring; this does the same for the legacy
-   Tailwind `focus-visible:ring-*` utilities. Unlayered, so it outranks them.
-   Text entry keeps its ring: whoever is typing needs to see where. */
-html[data-focus-modality='pointer']
-  :focus-visible:not(input, textarea, select, [contenteditable='true'], [contenteditable='']) {
-  --tw-ring-shadow: 0 0 #0000;
-  --tw-ring-offset-shadow: 0 0 #0000;
 }
 
 /* The new-chat page's typed transition (`components/chat/home/home-dashboard.tsx`). Keep

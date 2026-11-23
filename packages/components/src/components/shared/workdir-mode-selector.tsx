@@ -1,8 +1,10 @@
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
+import { control, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { ChevronDown, Folder, GitBranch } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space, text } from '@lody/ui/tokens/scales.stylex';
 
 import { withClassName } from '@/lib/stylex';
 import { Button } from '@lody/ui/button';
@@ -19,10 +21,10 @@ const styles = stylex.create({
     flexShrink: 0,
     gap: space[1.5],
     paddingInline: space[2],
-    borderRadius: '6px',
+    borderRadius: radius.mini,
     backgroundColor: {
-      default: 'hsl(var(--hover))',
-      ':hover': 'color-mix(in oklab, hsl(var(--hover)) 80%, transparent)',
+      default: colors.secondaryBackground,
+      ':hover': popup.highlight,
     },
     fontSize: text.subheadlineSize,
     lineHeight: text.subheadlineLeading,
@@ -32,29 +34,29 @@ const styles = stylex.create({
     cursor: 'pointer',
     transitionProperty:
       'color, background-color, border-color, text-decoration-color, fill, stroke',
-    transitionDuration: '150ms',
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
   checkboxPillDisabled: {
     cursor: 'not-allowed',
-    backgroundColor: { default: 'hsl(var(--hover))', ':hover': 'hsl(var(--hover))' },
+    backgroundColor: { default: colors.secondaryBackground, ':hover': colors.secondaryBackground },
     color: { default: colors.secondaryLabel, ':hover': colors.secondaryLabel },
   },
   checkboxPillContext: {
     borderRadius: 0,
     backgroundColor: {
       default: 'transparent',
-      ':hover': `color-mix(in oklab, ${colors.label} 6%, transparent)`,
+      ':hover': popup.highlight,
     },
     color: {
-      default: `color-mix(in oklab, ${colors.label} 80%, transparent)`,
+      default: colors.secondaryLabel,
       ':hover': colors.label,
     },
   },
   checkboxPillContextDisabled: {
     color: {
-      default: `color-mix(in oklab, ${colors.label} 80%, transparent)`,
-      ':hover': `color-mix(in oklab, ${colors.label} 80%, transparent)`,
+      default: colors.secondaryLabel,
+      ':hover': colors.secondaryLabel,
     },
   },
   tooltipTrigger: { display: 'inline-flex' },
@@ -63,16 +65,15 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '28px',
+    height: control.small,
     gap: space[1.5],
-    paddingInline: '10px',
-    borderRadius: '8px',
-    fontSize: '13px',
+    paddingInline: field.paddingXSmall,
+    borderRadius: radius.small,
+    fontSize: text.subheadlineSize,
     lineHeight: 1,
     fontWeight: 500,
-    letterSpacing: '-0.01em',
+    letterSpacing: text.controlTracking,
     color: colors.secondaryLabel,
-    opacity: 0.8,
     whiteSpace: 'nowrap',
     userSelect: 'none',
   },
@@ -81,7 +82,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '12px',
+    fontSize: text.footnoteSize,
     lineHeight: 1.25,
     fontWeight: 500,
   },

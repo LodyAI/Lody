@@ -50,7 +50,7 @@ export function runCiTypecheck({
   runPnpm(execFileSync, cwd, [
     '-r',
     '--no-sort',
-    '--workspace-concurrency=4',
+    '--workspace-concurrency=2',
     ...EXCLUDED_FILTERS.flatMap((filter) => ['--filter', filter]),
     ...typecheckPackages.flatMap((name) => ['--filter', name]),
     'run',

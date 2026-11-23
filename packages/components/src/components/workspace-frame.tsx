@@ -1,8 +1,8 @@
+import { clsx } from 'clsx';
 import type { ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { WORKSPACE_FRAME_CSS } from '@/lib/workspace-frame';
-import { cn } from '@/lib/utils';
 import { DocumentStyle } from './document-style';
 
 const styles = stylex.create({
@@ -12,6 +12,12 @@ const styles = stylex.create({
    * sidebar; the other edges keep one spacing step of shell colour around the page.
    */
   card: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    width: '100%',
+    flex: 1,
+    flexDirection: 'column',
+    overflow: 'hidden',
     '--lody-frame-gutter': space[1],
     '--lody-frame-radius': radius.large,
   },
@@ -38,11 +44,7 @@ export function WorkspaceCard({
       <div
         data-workspace-card
         data-anchored={anchored}
-        className={cn(
-          'lody-workspace-card flex min-w-0 w-full flex-1 flex-col overflow-hidden',
-          stylex.props(styles.card).className,
-          className
-        )}
+        className={clsx('lody-workspace-card', stylex.props(styles.card).className, className)}
       >
         {children}
       </div>
