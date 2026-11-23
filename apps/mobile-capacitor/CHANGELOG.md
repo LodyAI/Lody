@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.114.1](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.114.0...lody-mobile-v0.114.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* validate macOS packaging before merge ([#3210](https://github.com/LodyAI/Lody/issues/3210)) ([42ff871](https://github.com/LodyAI/Lody/commit/42ff871f837b05abcd92be1d99308e0d8c2ae7f9))
+
 ## [0.114.0](https://github.com/LodyAI/Lody/compare/efd385764538ae7d447f30a021737cbf22712a35...lody-mobile-v0.114.0) (2026-11-23)
 
 ### Features
