@@ -138,9 +138,11 @@ function SessionIosSimulatorPanelController({
   const isLocalMachine = localMachineId === session.machineId;
   const availability =
     platform === 'android'
-      ? machineSupportsAndroidEmulatorProtocol(machine)
-        ? 'available'
-        : 'upgrade-required'
+      ? runtime?.contentMode === 'e2ee' && !isLocalMachine
+        ? 'hidden'
+        : machineSupportsAndroidEmulatorProtocol(machine)
+          ? 'available'
+          : 'upgrade-required'
       : getIosSimulatorPanelAvailability(machine, runtime?.contentMode);
   // Same-machine Electron talks to the local daemon directly, so cloud presence
   // going offline does not cut it off.
@@ -795,6 +797,8 @@ function SessionIosSimulatorPanelController({
     viewerState,
     viewerDiagnostics,
   ]);
+
+  if (availability === 'hidden') return null;
 
   return (
     <>

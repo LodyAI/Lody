@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
-  it('negotiates blob persistence and admits encrypted Guest diff reads', async () => {
+  it('negotiates blob persistence and read-classified encrypted diff calls', async () => {
     for (const [plane, protectedContent, supported, persist] of [
       ['local', false, true, false],
       ['cloud', false, true, true],

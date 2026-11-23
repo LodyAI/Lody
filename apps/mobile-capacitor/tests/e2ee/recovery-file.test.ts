@@ -1,8 +1,16 @@
-import { afterEach, expect, it, vi } from 'vitest';
-const native = vi.hoisted(() => ({ writeFile: vi.fn(), deleteFile: vi.fn(), share: vi.fn() }));
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+const native = vi.hoisted(() => ({
+  writeFile: vi.fn(),
+  deleteFile: vi.fn(),
+  share: vi.fn(),
+  readdir: vi.fn(),
+  platform: vi.fn(),
+}));
+vi.mock('@capacitor/core', () => ({ Capacitor: { getPlatform: native.platform } }));
 vi.mock('@capacitor/filesystem', () => ({ Directory: { Cache: 'CACHE' }, Filesystem: native }));
 vi.mock('@capacitor/share', () => ({ Share: native }));
 import { exportMobileRecoveryFile } from '../../src/recovery/recovery-file';
+beforeEach(() => native.platform.mockReturnValue('ios'));
 afterEach(() => vi.resetAllMocks());
 
 it.each(['saved', 'cancelled', 'failed'] as const)(
@@ -69,4 +77,34 @@ it('an export cannot report success when its secret temporary could not be remov
   await expect(exportMobileRecoveryFile(new Uint8Array([1]), () => {})).rejects.toThrow(
     'e2ee_recovery_storage'
   );
+});
+
+it('Android keeps shared bytes readable after chooser completion and cleans only older recovery files on next export', async () => {
+  native.platform.mockReturnValue('android');
+  const old = 'lody-recovery-11111111-1111-4111-8111-111111111111.lodyrecovery';
+  const files = new Map([
+    [old, 'previous export'],
+    ['unrelated.txt', 'keep'],
+  ]);
+  native.readdir.mockImplementation(async () => ({
+    files: [...files.keys()].map((name) => ({ name, type: 'file' })),
+  }));
+  native.writeFile.mockImplementation(async ({ path, data }) => {
+    files.set(path, data);
+    return { uri: `file:///cache/${path}` };
+  });
+  native.deleteFile.mockImplementation(async ({ path }) => {
+    files.delete(path);
+  });
+  native.share.mockResolvedValue({});
+  const bytes = new Uint8Array([1, 2, 255]);
+  expect(await exportMobileRecoveryFile(bytes, () => {})).toBe(true);
+  const shared = native.writeFile.mock.calls[0]![0].path;
+  expect(Buffer.from(files.get(shared)!, 'base64')).toEqual(Buffer.from(bytes));
+  expect(files.has(old)).toBe(false);
+  expect(await exportMobileRecoveryFile(new Uint8Array([42]), () => {})).toBe(true);
+  expect(files.has(shared)).toBe(false);
+  const next = native.writeFile.mock.calls[1]![0].path;
+  expect(Buffer.from(files.get(next)!, 'base64')).toEqual(Buffer.from([42]));
+  expect(files.get('unrelated.txt')).toBe('keep');
 });

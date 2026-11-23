@@ -23,7 +23,8 @@ Parent mobile and repository rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   [Entry, lifetime and acceptance boundary](../../e2ee-passkey.md).
 
 - `recovery-file.ts` writes at most 4 KiB to a unique Capacitor Cache file, shares
-  only its URI, and removes it after native settlement (including cancellation).
+  only its URI. iOS removes it after native settlement (including cancellation);
+  Android retains it for the receiving app and deletes prior recovery temporaries before the next export.
   The provider asks for a fresh tap to choose the saved file; only exact readback
   allows core to upload the file wrap. No file bytes or unlocked vault enter React state.
   Logout/setting changes fence export, readback and every cloud write. Native passkeys

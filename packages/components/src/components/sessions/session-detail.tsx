@@ -2103,7 +2103,9 @@ const SessionDetail = ({
       ? simulatorOwnerSession
       : null;
   const activeAndroidEmulatorSession =
-    simulatorOwnerSession && machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
+    simulatorOwnerSession &&
+    (runtime?.contentMode !== 'e2ee' || simulatorOwnerSession.machineId === localMachineId) &&
+    machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
       ? simulatorOwnerSession
       : null;
   const [androidEmulatorOpen, setAndroidEmulatorOpen] = useState(false);

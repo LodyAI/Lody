@@ -831,7 +831,7 @@ it('protects feature requests and chunked results with workspace signatures and 
   ).rejects.toThrow('intent_conflict');
 });
 
-it.each([true, false])('allows Guest diff reads; refuses saves (guest=%s)', async (guest) => {
+it.each([true, false])('classifies diff reads; refuses Guest saves (guest=%s)', async (guest) => {
   const f = encryptedRpcFixture({ guest });
   fixtures.push(f);
   const requests = [

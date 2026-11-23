@@ -163,6 +163,7 @@ afterEach(() => {
 async function renderPanel(options: {
   machine: ReturnType<typeof createFakeMachine>;
   platform?: 'ios' | 'android';
+  contentMode?: 'plaintext' | 'e2ee';
   androidControl?: WorkspaceRuntime['requestAndroidEmulatorControl'];
   meta?: MachineMeta;
   presence?: 'synced' | 'idle';
@@ -175,6 +176,7 @@ async function renderPanel(options: {
   store.set(runtimeAtom, {
     workspaceId: WORKSPACE,
     workspaceSlug: 'sim',
+    contentMode: options.contentMode,
     requestIosSimulatorControl: options.machine.requestIosSimulatorControl,
     requestAndroidEmulatorControl: options.androidControl,
   } as unknown as WorkspaceRuntime);
@@ -239,6 +241,41 @@ async function advance(ms: number) {
   });
   await flush();
 }
+
+it.each([false, true])(
+  'encrypted Android previews are shown only for a local machine (local=%s)',
+  async (localMachine) => {
+    const machine = createFakeMachine({ devices: [] });
+    await renderPanel({
+      machine,
+      platform: 'android',
+      contentMode: 'e2ee',
+      localMachine,
+      meta: macMeta({ androidEmulator: 1 }),
+      androidControl: async ({ sessionId, command }) => ({
+        type: 'android-emulator/control_response',
+        sessionId,
+        success: true,
+        devices:
+          command.action === 'list'
+            ? [
+                {
+                  id: 'Pixel_A',
+                  name: 'Pixel A',
+                  runtime: 'Android',
+                  deviceType: 'AVD',
+                  state: 'Booted',
+                  available: true,
+                  occupancy: 'available',
+                },
+              ]
+            : undefined,
+      }),
+    });
+    if (localMachine) expect(text()).toContain('Pixel A');
+    else expect(container?.innerHTML).toBe('');
+  }
+);
 
 describe('SessionIosSimulatorPanel', () => {
   it('discovers an agent replacement when reopening instead of querying the cached operation', async () => {

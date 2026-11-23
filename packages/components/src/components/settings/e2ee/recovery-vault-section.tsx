@@ -167,6 +167,17 @@ const statusBadge: Record<RecoveryWorkspaceStatus['kind'], { key: string; tone: 
   unknown: { key: 'e2ee.recovery.workspace.unknown', tone: 'neutral' },
 };
 
+export function preferredRecoveryUnlock(
+  methods: RecoveryPlan['methods'],
+  passkey: boolean
+): RecoveryUnlockMethod | undefined {
+  if (!methods) return undefined;
+  if (passkey && methods.hasPasskey === true) return 'passkey';
+  if (methods.hasFile) return 'file';
+  if (methods.hasPassword) return 'password';
+  return passkey && methods.hasPasskey !== false ? 'passkey' : 'file';
+}
+
 /**
  * Account recovery vault controls, enabled by default; desktop main independently honors
  * `LODY_E2EE_RECOVERY_VAULT=off` as an emergency kill switch. The host's recovery port
@@ -331,18 +342,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     }
   };
 
-  const preferredUnlock: RecoveryUnlockMethod | undefined =
-    methods === undefined
-      ? undefined
-      : passkey && hasPasskey === true
-        ? 'passkey'
-        : hasFile
-          ? 'file'
-          : hasPassword
-            ? 'password'
-            : passkey && hasPasskey !== false
-              ? 'passkey'
-              : 'file';
+  const preferredUnlock = preferredRecoveryUnlock(methods, passkey);
 
   const triggerWithUnlock = (
     action: (
