@@ -1,3 +1,4 @@
+import { closeSync, openSync, readdirSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -255,16 +256,46 @@ async function openTransport(dataDir: string) {
   return connectSocketTransport(endpoint.socket);
 }
 
+/**
+ * The host outlives whoever launched it, so it must not keep that process's
+ * descriptors: a pipe or socket it holds keeps the launcher's own parent waiting
+ * for end-of-file (a test runner waiting for Electron to close). Electron main
+ * leaves descriptors it inherited without close-on-exec, so a child would inherit
+ * them; Node marks them close-on-exec only once the host starts, after which the
+ * host's `closeInheritedDescriptors()` no longer recognizes them. `'ignore'` does
+ * not help: it replaces only descriptors 0 to 2. So every slot from 3 up to the
+ * highest one open here starts as /dev/null in the host. Windows inherits only stdio.
+ */
+function hostStdio(devNull: number | undefined): (number | 'ignore')[] | 'ignore' {
+  if (devNull === undefined) return 'ignore';
+  let open: number[] = [];
+  try {
+    open = readdirSync(process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd').map(Number);
+  } catch {
+    return 'ignore';
+  }
+  const highest = Math.min(Math.max(2, ...open.filter(Number.isInteger)), HOST_STDIO_SLOTS - 1);
+  return Array.from({ length: highest + 1 }, (_, fd) => (fd < 3 ? 'ignore' : devNull));
+}
+/** The descriptor slots a launch covers; Lody processes stay far below this. */
+const HOST_STDIO_SLOTS = 1024;
+
 /** The host owns its own lifetime (files.lock + idle exit); this process never stops it. */
 function launchHost(dataDir: string, resolveLauncher: () => NativeRepoHostLauncher) {
   const launcher = resolveLauncher();
-  const handle = startProcessLegacy({
-    command: launcher.command,
-    args: [...launcher.args, dataDir],
-    options: { stdio: 'ignore', env: launcher.env ?? process.env },
-    processGroup: true,
-    windowsDetached: true,
-  });
+  const devNull = process.platform === 'win32' ? undefined : openSync('/dev/null', 'r');
+  let handle: ReturnType<typeof startProcessLegacy>;
+  try {
+    handle = startProcessLegacy({
+      command: launcher.command,
+      args: [...launcher.args, dataDir],
+      options: { stdio: hostStdio(devNull), env: launcher.env ?? process.env },
+      processGroup: true,
+      windowsDetached: true,
+    });
+  } finally {
+    if (devNull !== undefined) closeSync(devNull);
+  }
   handle.child.unref();
   handle.child.once('error', () => {});
 }
