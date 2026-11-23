@@ -42,11 +42,11 @@ const styles = stylex.create({
 });
 
 /**
- * Account recovery outside any workspace, for a host whose recovery port is its own
- * (desktop main's vault): Settings > Account opens it through the router's
- * `recoveryPage`. It renders the same section as the encryption console's Recovery
- * tab, so it needs no encrypted workspace. Without a cloud account, a signed-in user or
- * a recovery section (switch off), it says recovery is unavailable and calls nothing.
+ * Account recovery page for a host whose recovery port is its own (desktop main's vault):
+ * Settings > Account opens it from encrypted workspaces through the router's `recoveryPage`,
+ * and the route itself renders the same section as the encryption console's Recovery tab.
+ * Without a cloud account, a signed-in user or a recovery section (switch off), it says
+ * recovery is unavailable and calls nothing.
  */
 export function RecoveryAccountPage() {
   const { t } = useTranslation();
