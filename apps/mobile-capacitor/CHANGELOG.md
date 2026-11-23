@@ -1,11 +1,5 @@
 # Changelog
 
-## [0.115.1](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.115.0...lody-mobile-v0.115.1) (2026-11-24)
-
-### Bug Fixes
-
-* **ios:** expose the shared StyleX theme scale for Stable builds ([4d8ed17](https://github.com/LodyAI/Lody/commit/4d8ed1730059dd0bc8d7ddecf7cee155e287dd81))
-
 ## [0.115.0](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.114.1...lody-mobile-v0.115.0) (2026-11-23)
 
 
