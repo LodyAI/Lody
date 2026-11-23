@@ -1,32 +1,5 @@
 # Changelog
 
-## [0.116.0](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.115.1...lody-mobile-v0.116.0) (2026-11-23)
-
-
-### Features
-
-* [risk:high] enable E2EE push, live activity and inbox clients ([#3224](https://github.com/LodyAI/Lody/issues/3224)) ([4477241](https://github.com/LodyAI/Lody/commit/4477241aaa8eddc1fed2bacf736793aad8f08a54))
-* **components:** make text unselectable by default outside reading surfaces ([#3076](https://github.com/LodyAI/Lody/issues/3076)) ([acda568](https://github.com/LodyAI/Lody/commit/acda5687460232f0e3b300bf043be604874f5291))
-* **e2ee:** [risk:high] support portable remote CLI pairing ([#3220](https://github.com/LodyAI/Lody/issues/3220)) ([a2d065f](https://github.com/LodyAI/Lody/commit/a2d065f20057232fe36707d7bcf6497e82e9509e))
-* migrate Capacitor client and shared E2EE composition ([#3029](https://github.com/LodyAI/Lody/issues/3029)) ([fc07d94](https://github.com/LodyAI/Lody/commit/fc07d94e504c0b7d1b1cc835dee64e913baeba84))
-
-
-### Bug Fixes
-
-* [risk:high] repair recovery UI and E2EE RPC boundaries ([#3163](https://github.com/LodyAI/Lody/issues/3163)) ([611c776](https://github.com/LodyAI/Lody/commit/611c776bf1406284254170e402663e5c98a70b7b))
-* [risk:medium] address E2EE GA setup and disclosure gaps ([#3207](https://github.com/LodyAI/Lody/issues/3207)) ([59c9bd7](https://github.com/LodyAI/Lody/commit/59c9bd752df17ff79ae8e559d82143199ddc2c7e))
-* **e2ee:** [risk:high] bind recovery files to the canonical site origin ([#3211](https://github.com/LodyAI/Lody/issues/3211)) ([e752e01](https://github.com/LodyAI/Lody/commit/e752e012aee004efed3ada9324698ea805b62ba5))
-* **e2ee:** gate account recovery entry to encrypted workspaces and align layout ([#3232](https://github.com/LodyAI/Lody/issues/3232)) ([3916e9d](https://github.com/LodyAI/Lody/commit/3916e9d6384089c4031b6ea2841554cf924c188d))
-* **mobile:** contain E2EE metadata and native resources [risk:high] ([#3162](https://github.com/LodyAI/Lody/issues/3162)) ([507f76b](https://github.com/LodyAI/Lody/commit/507f76b2364047fb02de677d4d807e9b64a7b112))
-* **mobile:** wait for i18n before the first render ([#3107](https://github.com/LodyAI/Lody/issues/3107)) ([8297dd6](https://github.com/LodyAI/Lody/commit/8297dd65647586e122b3d2247b3884cefa016c93))
-* validate macOS packaging before merge ([#3210](https://github.com/LodyAI/Lody/issues/3210)) ([42ff871](https://github.com/LodyAI/Lody/commit/42ff871f837b05abcd92be1d99308e0d8c2ae7f9))
-
-
-### Documentation
-
-* [risk:high] bound 0.114.0 changelogs to previous stable source ([986e8c7](https://github.com/LodyAI/Lody/commit/986e8c7dfcffeb086729b4e35cfa3c617d3e06a1))
-* **mobile:** add Stable 0.115.1 changelog entry ([5b890ee](https://github.com/LodyAI/Lody/commit/5b890eef217ffb1bcd254d442501241f3d744039))
-
 ## [0.115.1](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.115.0...lody-mobile-v0.115.1) (2026-11-24)
 
 ### Bug Fixes
