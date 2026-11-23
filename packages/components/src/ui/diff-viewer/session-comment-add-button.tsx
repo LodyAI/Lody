@@ -4,7 +4,12 @@ import { Plus } from 'lucide-react';
 import { withClassName } from '@/lib/stylex';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
-import { themeDuration, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+import {
+  themeDuration,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
   button: {
@@ -18,10 +23,10 @@ const styles = stylex.create({
       default: themeColors.primary,
       '@media (hover: hover)': {
         default: null,
-        ':hover': 'color-mix(in oklab, hsl(var(--primary) / 1) 90%, transparent)',
+        ':hover': `color-mix(in oklab, ${themeColors.primary} 90%, transparent)`,
       },
     },
-    boxShadow: 'var(--shadow-xs)',
+    boxShadow: themeShadow.xs,
     scale: { default: null, ':active': '95% 95%' },
     color: themeColors.primaryForeground,
     transitionProperty: 'all',

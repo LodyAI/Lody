@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { media } from '@lody/ui/tokens/colors.stylex';
 import type { AvatarCropArea } from '@/lib/avatar-crop';
 
 const MIN_SIZE_PX = 64;
@@ -40,16 +41,16 @@ const styles = stylex.create({
     boxSizing: 'border-box',
     pointerEvents: 'none',
     // The huge spread shadow dims everything outside the selection.
-    boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)',
+    boxShadow: `0 0 0 9999px ${media.scrim}`,
   },
   box: {
     position: 'absolute',
     boxSizing: 'border-box',
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: 'white',
+    borderColor: media.label,
     // A faint dark halo keeps the dashed line readable over light images.
-    boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.3)',
+    boxShadow: `0 0 0 1px color-mix(in oklab, ${media.scrim} 50%, transparent)`,
     cursor: 'move',
     outlineOffset: 3,
   },
@@ -59,7 +60,7 @@ const styles = stylex.create({
     borderRadius: '50%',
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: 'rgba(255, 255, 255, 0.6)',
+    borderColor: `color-mix(in oklab, ${media.label} 60%, transparent)`,
     pointerEvents: 'none',
   },
   handle: {
@@ -67,10 +68,10 @@ const styles = stylex.create({
     width: 10,
     height: 10,
     boxSizing: 'border-box',
-    backgroundColor: 'white',
+    backgroundColor: media.label,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: 'rgba(0, 0, 0, 0.5)',
+    borderColor: `color-mix(in oklab, ${media.scrim} 83%, transparent)`,
     borderRadius: 2,
   },
   nw: { top: -6, left: -6, cursor: 'nwse-resize' },

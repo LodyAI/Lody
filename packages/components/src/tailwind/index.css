@@ -599,6 +599,8 @@ pre {
     --sidebar-row-foreground: 0 0% 28%;
     --switch-track: 0 0% 64%;
     --ring: 220 82% 65%;
+    /* Chart series defaults; `vscode-theme-css.ts` overrides them from the
+       active theme so unthemed surfaces still render distinct rungs. */
     --chart-1: 220 82% 65%;
     --chart-2: 210 70% 45%;
     --chart-3: 262 60% 55%;
@@ -794,11 +796,6 @@ pre {
     --composer: var(--input);
     --switch-track: 220 13% 40%;
     --ring: 210 90% 62%;
-    --chart-1: 210 90% 62%;
-    --chart-2: 197 85% 58%;
-    --chart-3: 261 84% 70%;
-    --chart-4: 28 88% 62%;
-    --chart-5: 154 68% 52%;
     --sidebar-background: 222 55% 9.6%;
     --sidebar-foreground: 210 40% 96%;
     --sidebar-row-foreground: var(--sidebar-foreground);

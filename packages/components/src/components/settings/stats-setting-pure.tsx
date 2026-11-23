@@ -13,6 +13,7 @@ import {
   type StackedAreaSeriesMarkerRender,
 } from './usage-stacked-area-chart';
 import { UsageCalendarSkeleton } from './usage-calendar-skeleton';
+import { themeShadow } from '../../style/theme-scale.stylex';
 import type {
   SettingsUsageCalendarData,
   SettingsUsageDayData,
@@ -122,7 +123,7 @@ const styles = stylex.create({
   rangeTabSelected: {
     backgroundColor: 'hsl(var(--background))',
     color: 'hsl(var(--foreground))',
-    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    boxShadow: themeShadow.xs,
   },
   statGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' },
   statTile: {
