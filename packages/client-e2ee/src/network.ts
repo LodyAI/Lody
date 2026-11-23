@@ -1,3 +1,5 @@
+import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing';
+import type { RemoteMachineRelay } from '@lody/e2ee-client/remote-machine';
 import { SeatInvitePreviewSchema } from '@lody/cloud-api/seat-invite-preview';
 import {
   isTransientGatewayStatus,
@@ -214,6 +216,7 @@ export type PersonalCloudConnection = {
       args: FunctionArgs<A>
     ): Promise<FunctionReturnType<A>>;
   };
+  readonly remoteMachineEndpoints?: { deploymentUrl: string; ingressUrl: string };
   readonly currentAccount: () => Effect.Effect<string | null, unknown>;
 };
 
@@ -1249,7 +1252,52 @@ export function makePersonalCloudNetwork(
         sharingReplySchemas.commit
       ),
   };
+  const pairingFailure = (error: unknown) =>
+    error instanceof BackendError &&
+    error.cause instanceof BackendRefusal &&
+    error.cause.code === 'e2ee_pairing_key_revoked'
+      ? new Error('e2ee_pairing_key_revoked')
+      : error;
+  const pairingRequest = <I extends { workspaceId: string }, A>(
+    input: I,
+    send: (original: I) => Promise<unknown>,
+    schema: z.ZodType<A>
+  ) => sharingRequest(input, send, schema).pipe(Effect.mapError(pairingFailure));
+  const remoteMachine: RemoteMachineRelay = {
+    begin: (input) =>
+      pairingRequest(
+        input,
+        (original) => client.mutation(api.e2eeMachinePairing.begin, original),
+        RemoteMachineStatusSchema
+      ),
+    inspect: (input) =>
+      pairingRequest(
+        input,
+        (original) => client.query(api.e2eeMachinePairing.inspect, original),
+        RemoteMachineStatusSchema
+      ),
+    authorizeExisting: (input) =>
+      pairingRequest(
+        input,
+        (original) => client.mutation(api.e2eeMachinePairing.authorizeExisting, original),
+        RemoteMachineStatusSchema
+      ),
+    cancel: (input) =>
+      pairingRequest(
+        input,
+        (original) => client.mutation(api.e2eeMachinePairing.cancel, original),
+        RemoteMachineStatusSchema
+      ),
+    append: (input) =>
+      input.workspaceId === scope.workspaceId
+        ? request(
+            () => client.action(api.e2eeWorkspaces.appendRecord, { ...input }),
+            z.unknown()
+          ).pipe(Effect.mapError(pairingFailure))
+        : Effect.fail(failure()),
+  };
   return Object.freeze({
+    remoteMachine,
     remote: { ...remote, history: (credential: Uint8Array) => allHistory(hex(credential)) },
     ledger,
     mailbox,

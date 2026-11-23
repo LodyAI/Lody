@@ -223,6 +223,15 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         ingest: (page: Parameters<RawSession['ingest']>[0]) => call(raw.ingest(page)),
         activateAccountPairing: (...args: Parameters<RawSession['activateAccountPairing']>) =>
           call(raw.activateAccountPairing(...args)),
+        remoteMachine: Object.freeze({
+          begin: () => call(raw.remoteMachine.begin()),
+          inspect: (...args: Parameters<RawSession['remoteMachine']['inspect']>) =>
+            call(raw.remoteMachine.inspect(...args)),
+          approve: (...args: Parameters<RawSession['remoteMachine']['approve']>) =>
+            call(raw.remoteMachine.approve(...args)),
+          cancel: (...args: Parameters<RawSession['remoteMachine']['cancel']>) =>
+            call(raw.remoteMachine.cancel(...args)),
+        }),
         accountApproval: Object.freeze({
           checkpoint: () => call(raw.accountApproval.checkpoint()),
           ingest: (page: Parameters<RawSession['ingest']>[0]) =>

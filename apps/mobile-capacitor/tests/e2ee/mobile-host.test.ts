@@ -1,3 +1,4 @@
+import type { RemoteMachineOffer } from '@lody/shared/e2ee-remote-pairing';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Effect, Exit, Result, Scope, ManagedRuntime } from 'effect';
 import { TestClock } from 'effect/testing';
@@ -166,6 +167,8 @@ async function fixture() {
     membershipId: '0a'.repeat(16),
     pairingSessionId: '11'.repeat(16),
   };
+  let remoteOffer: RemoteMachineOffer | undefined;
+  let remoteCancelled = false;
   const records: Uint8Array[] = [signed.record];
   let request: ReturnType<typeof decodePersonalRequest> | undefined,
     requestHex = '',
@@ -240,6 +243,21 @@ async function fixture() {
     }
     const refused = refusals.get(name) ?? (input.credential ? credentialRefusal : null);
     if (refused) throw new Refusal(refused);
+    if (name.startsWith('e2eeMachinePairing:')) {
+      if (name === 'e2eeMachinePairing:begin') {
+        remoteOffer = input.offer as RemoteMachineOffer;
+        remoteCancelled = false;
+      }
+      if (name === 'e2eeMachinePairing:cancel') remoteCancelled = true;
+      return {
+        pairingSessionId: remoteOffer!.pairingSessionId,
+        status: remoteCancelled ? 'cancelled' : 'pending',
+        expiresAt: remoteOffer!.expiresAt,
+        material: null,
+        location: null,
+        ...(remoteCancelled ? { noAdmissionReserved: true } : {}),
+      };
+    }
     if (name === 'e2eeMembers:submit') {
       memberCalls.submit++;
       submitted = String(input.keyPackageHex);
@@ -1757,4 +1775,31 @@ it('finishes a retained account request and installs its key while workspace dir
   expect(f.workspaceListReads.count).toBe(0);
   const installed = await phone.runtime.open(id);
   expect(installed.hasCurrentKey).toBe(true);
+});
+
+it('inherits portable remote CLI command and cancellation on the native mobile host', async () => {
+  vi.stubEnv('VITE_CONVEX_DEPLOY_URL', 'https://deployment.example');
+  vi.stubEnv('VITE_SERVER_URL', 'https://ingress.example');
+  try {
+    const f = await fixture();
+    const app = f.boot();
+    const id = f.offer.workspaceId;
+    await app.runtime.preparePersonalJoin!(f.offer);
+    await f.approve();
+    await app.runtime.claimPersonalJoin!(id, f.offer.pairingSessionId);
+    await app.runtime.open(id, undefined, 'account-A', 'remote-reader');
+    const first = await app.runtime.beginRemoteMachinePairing!(id);
+    expect(first.command).toMatch(/^lody machine pair --offer [A-Za-z0-9_-]+$/);
+    expect(
+      (await app.runtime.inspectRemoteMachinePairing!(id, first.pairingSessionId)).summary
+    ).toBeNull();
+    expect((await app.runtime.cancelRemoteMachinePairing!(id, first.pairingSessionId)).status).toBe(
+      'cancelled'
+    );
+    const second = await app.runtime.beginRemoteMachinePairing!(id);
+    expect(second.pairingSessionId).not.toBe(first.pairingSessionId);
+    await app.runtime.cancelRemoteMachinePairing!(id, second.pairingSessionId);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
