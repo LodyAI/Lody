@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -655,6 +656,7 @@ export type SessionInfoHoverCardProps = Omit<SessionInfoCardProps, 'now'> & {
   children: ReactNode;
   /** Skip the hover card entirely (e.g. on touch devices with no hover). */
   disabled?: boolean;
+  menuOpen?: boolean;
   /**
    * Optional fixed "now" for the card's relative times. When omitted the card
    * ticks itself via `useStableNow()` — and only while open (the popover
@@ -720,12 +722,14 @@ function suppressCardsUntilPointerMoves(x: number, y: number) {
 export function SessionInfoHoverCard({
   children,
   disabled,
+  menuOpen,
   now,
   ...cardProps
 }: SessionInfoHoverCardProps) {
   return (
     <SidebarHoverCard
       disabled={disabled}
+      menuOpen={menuOpen}
       content={<SessionInfoCardWithNow {...cardProps} now={now} />}
     >
       {children}
@@ -744,6 +748,7 @@ export function SessionInfoHoverCard({
 export function SidebarHoverCard({
   children,
   disabled,
+  menuOpen = false,
   content,
   triggerClassName,
 }: {
@@ -751,6 +756,7 @@ export function SidebarHoverCard({
   children: ReactNode;
   /** Skip the hover card entirely (e.g. on touch devices with no hover). */
   disabled?: boolean;
+  menuOpen?: boolean;
   content: ReactNode;
   /** Layout of the hover area around `children` (e.g. to fill a flex row). */
   triggerClassName?: string;
@@ -815,7 +821,7 @@ export function SidebarHoverCard({
   // Hover intent: instant while warm, otherwise wait out the warmup delay.
   const requestOpen = useCallback(() => {
     clearClose();
-    if (openRef.current || pressSuppression) return;
+    if (menuOpen || openRef.current || pressSuppression) return;
     const warm = performance.now() - lastCardInteractionAt < WARM_WINDOW_MS;
     if (warm) {
       openNow(true);
@@ -823,7 +829,7 @@ export function SidebarHoverCard({
     }
     clearOpen();
     openTimer.current = window.setTimeout(() => openNow(false), WARMUP_DELAY_MS);
-  }, [clearClose, clearOpen, openNow]);
+  }, [clearClose, clearOpen, menuOpen, openNow]);
 
   // Leaving cancels a pending warmup (so the card never appears after the cursor
   // is gone) and schedules the close grace for an already-open card.
@@ -841,6 +847,10 @@ export function SidebarHoverCard({
     },
     [closeSelf]
   );
+
+  useLayoutEffect(() => {
+    if (menuOpen) closeSelf();
+  }, [closeSelf, menuOpen]);
 
   // Release the shared slot whenever this card is closed (incl. Escape / outside).
   useEffect(() => {
@@ -860,7 +870,7 @@ export function SidebarHoverCard({
 
   return (
     <PreviewCard.Root
-      open={open}
+      open={open && !menuOpen}
       onOpenChange={(next) => {
         if (!next) closeSelf();
       }}
@@ -874,19 +884,21 @@ export function SidebarHoverCard({
       >
         {children}
       </div>
-      <PreviewCard.Content
-        anchor={anchorRef}
-        side="right"
-        align="start"
-        sideOffset={6}
-        collisionPadding={12}
-        onPointerEnter={clearClose}
-        onPointerLeave={scheduleClose}
-        noAnimation={inRun}
-        className={stylex.props(styles.size).className}
-      >
-        {content}
-      </PreviewCard.Content>
+      {!menuOpen && (
+        <PreviewCard.Content
+          anchor={anchorRef}
+          side="right"
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          onPointerEnter={clearClose}
+          onPointerLeave={scheduleClose}
+          noAnimation={inRun}
+          className={stylex.props(styles.size).className}
+        >
+          {content}
+        </PreviewCard.Content>
+      )}
     </PreviewCard.Root>
   );
 }
