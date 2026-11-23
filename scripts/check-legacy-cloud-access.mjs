@@ -29,6 +29,16 @@ const legacyNames = new Set([
   'workspaceJoinRequests:reviewRequest',
 ]);
 const safeNames = new Map([
+  ...[
+    'usage:getWorkspaceUsageCalendar',
+    'usage:getWorkspaceUsageDay',
+    'usage:getWorkspaceUsageSummary',
+    'usage:getWorkspaceUsageTimeline',
+    'activity:recordMyWorkspaceDailyActiveUser',
+  ].map((name) => [
+    name,
+    'Numeric accounting and own daily activity support active encrypted ledger members; no workspace content.',
+  ]),
   [
     'auth:getUserById',
     'Display-only profile lookup returns null on denied membership/mode; never throws the mode refusal into render.',
@@ -80,7 +90,7 @@ const exceptions = new Map([
     new Map([
       [
         'usage:upsertSessionUsageFromCli',
-        'Ordinary CLI usage service only; encrypted machine composition has no usage capability. Rejections remain failed queued records.',
+        'Account-token numeric usage only; encrypted turns for other users are skipped before queueing. Device-only machine composition has no usage capability. Rejections remain queued.',
       ],
     ]),
   ],

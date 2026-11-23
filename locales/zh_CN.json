@@ -4412,6 +4412,8 @@
   "workspace.transfer.errors.support": "此计费账户的所有权转移需要联系支持。",
   "workspace.transfer.errors.billingBusy": "请先完成当前计费操作，然后重试。",
   "workspace.transfer.errors.freeLimit": "该成员拥有的免费工作区已达到上限。",
+  "workspace.transfer.errors.activeSubscription": "请先在计费设置中取消当前付费订阅的自动续费，再转移工作区所有权。",
+  "workspace.transfer.errors.paymentRequired": "请先在计费设置中结清未付余额，再转移工作区所有权。",
   "workspace.transfer.errors.failed": "无法完成转移，请刷新确认当前所有者后再重试。",
   "workspace.transfer.encryptedHelper": "在加密控制台的成员页选择新所有者。转出后你会变成管理员，这次变更会记入变更记录。",
   "workspace.transfer.encryptedButton": "转移…",

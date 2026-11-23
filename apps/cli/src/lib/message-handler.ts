@@ -1373,6 +1373,8 @@ export class MessageHandler {
         return;
       }
 
+      if (this.encryptedAttachments && userId !== this.cloudPort.identity.userId) return;
+
       this.usageTrackingService?.recordSessionUsageUpdate({
         workspaceId: this.workspaceId,
         sessionId,
