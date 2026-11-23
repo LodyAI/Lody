@@ -35,7 +35,6 @@ const { createConversationSession } = await import(
     resolve(root, 'packages/components/src/lib/conversation-view/create-conversation-session.ts')
   ).href
 );
-// Resolve the exact Loro instance used by each checkout, not a second WASM copy.
 const { createRequire } = await import('node:module');
 const require = createRequire(resolve(root, 'packages/components/package.json'));
 const { LoroDoc, LoroMap, LoroText } = require('loro-crdt');
@@ -121,7 +120,6 @@ const view = session.history;
 let range: ReturnType<typeof view.acquireRange> | undefined;
 try {
   await view.ready;
-  // Initial directory is asynchronous, so acquire only once membership exists.
   range = view.acquireRange(0, 1);
   await range.ready;
   assert.equal(view.turn(0)?.items.length, tools + 1);

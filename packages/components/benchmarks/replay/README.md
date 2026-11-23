@@ -46,6 +46,8 @@ Outline lazy-loading changes the workload: `idleTail` replaces the old full-summ
 `resume.ts` prepares the same deterministic snapshot and thirty small remote text
 updates, warms the production view, and replays the updates into its retained turn.
 The default turn has 1,200 completed tools with 8 KiB of synthetic output each.
+Each checkout uses its own installed Loro instance. The measured range is acquired
+after the initial directory is ready.
 It reports import time, display-body read time, time to the updated view, and delay
 until another Node task can run. The fixture hash must match between comparisons.
 
