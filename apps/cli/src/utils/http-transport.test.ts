@@ -342,7 +342,6 @@ describe('installAcpAdapterHttpProxySupport', () => {
       const warnings: string[] = [];
       installAcpAdapterHttpProxySupport({ onWarn: (msg) => warnings.push(msg) });
 
-      // Update proxy env after install (like claude-acp-entry's policy.effective.env).
       process.env.HTTPS_PROXY = `http://127.0.0.1:${proxyAddress.port}`;
       process.env.HTTP_PROXY = `http://127.0.0.1:${proxyAddress.port}`;
 
@@ -404,7 +403,6 @@ describe('installAcpAdapterHttpProxySupport', () => {
         tunneledTargets.filter((target) => target === `127.0.0.1:${httpAddress.port}`)
       ).toHaveLength(2);
 
-      // NO_PROXY bypasses the proxy for both node:http (live per request) and globalThis.fetch (fresh origin).
       process.env.NO_PROXY = '127.0.0.1,localhost';
       const countBeforeBypass = tunneledTargets.length;
       const directFetch = await globalThis.fetch(`http://localhost:${httpAddress.port}/direct`);
@@ -427,7 +425,6 @@ describe('installAcpAdapterHttpProxySupport', () => {
       });
       expect(tunneledTargets).toHaveLength(countBeforeBypass);
 
-      // Unsupported socks5:// falls back to direct and emits warning via onWarn.
       delete process.env.NO_PROXY;
       delete process.env.HTTP_PROXY;
       delete process.env.HTTPS_PROXY;
