@@ -1,16 +1,17 @@
 import http from 'node:http';
 import https from 'node:https';
+import { hasProxyEnvValue } from '@lody/shared/proxy-env';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import {
   Agent,
   Pool,
   ProxyAgent,
-  fetch as undiciFetch,
   getGlobalDispatcher,
   setGlobalDispatcher,
   type Dispatcher,
 } from 'undici';
 import { resolveProxyUrlCore } from './proxy-core';
+import { fetchWithUndiciDispatcher } from './undici-fetch-compat';
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_CONCURRENT_STREAMS = 100;
@@ -130,7 +131,7 @@ function patchGlobalAgent(
  */
 export function installAcpAdapterHttpProxySupport(options: AcpAdapterHttpProxyOptions = {}): void {
   const env = options.env ?? process.env;
-  if (isTransportDisabled(env)) {
+  if (isTransportDisabled(env) || !hasProxyEnvValue(env)) {
     return;
   }
 
@@ -175,17 +176,12 @@ export function installAcpAdapterHttpProxySupport(options: AcpAdapterHttpProxyOp
 
   if (!installedFetchWrapper) {
     originalGlobalFetch = globalThis.fetch;
-    installedFetchWrapper = async (input, init) => {
+    installedFetchWrapper = (input, init) => {
       const dispatcher = activeDispatcher;
       if (!dispatcher) {
         return (originalGlobalFetch ?? fetch)(input, init);
       }
-      const nextInit = {
-        ...(init ?? {}),
-        dispatcher,
-      } as NonNullable<Parameters<typeof undiciFetch>[1]>;
-      const response = await undiciFetch(input as Parameters<typeof undiciFetch>[0], nextInit);
-      return response as unknown as Response;
+      return fetchWithUndiciDispatcher(input, init, dispatcher);
     };
     globalThis.fetch = installedFetchWrapper;
   }

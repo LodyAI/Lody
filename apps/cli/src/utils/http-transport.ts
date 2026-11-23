@@ -4,7 +4,6 @@ import {
   Agent,
   Pool,
   ProxyAgent,
-  fetch as undiciFetch,
   getGlobalDispatcher,
   setGlobalDispatcher,
   type Dispatcher,
@@ -12,6 +11,7 @@ import {
 import { sanitizeUrlForLogging } from './log-sanitize';
 import { getLogger, type Logger } from './logger';
 import { resolveProxyUrl } from './proxy';
+import { fetchWithUndiciDispatcher } from './undici-fetch-compat';
 
 export type CliFetch = typeof globalThis.fetch;
 
@@ -153,14 +153,7 @@ export function createCliHttpTransport(
     },
   });
 
-  const fetchImpl: CliFetch = async (input, init) => {
-    const nextInit = {
-      ...(init ?? {}),
-      dispatcher,
-    } as NonNullable<Parameters<typeof undiciFetch>[1]>;
-    const response = await undiciFetch(input as Parameters<typeof undiciFetch>[0], nextInit);
-    return response as unknown as Response;
-  };
+  const fetchImpl: CliFetch = (input, init) => fetchWithUndiciDispatcher(input, init, dispatcher);
 
   return {
     dispatcher,

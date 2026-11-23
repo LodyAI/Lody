@@ -8,7 +8,13 @@ import { connect, getDefaultAutoSelectFamily, setDefaultAutoSelectFamily } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, fetch as undiciFetch } from 'undici';
+import {
+  MockAgent,
+  Pool,
+  getGlobalDispatcher,
+  setGlobalDispatcher,
+  fetch as undiciFetch,
+} from 'undici';
 import { version } from '@/pkg';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -167,10 +173,23 @@ describe('resolveCliHttpTransportConfig', () => {
     }
   );
 
-  it('routes globalThis.fetch through ProxyAgent when installCliHttpGlobalDispatcher is active', async () => {
+  it('routes globalThis.fetch (including native Request) through ProxyAgent and preserves caller dispatcher', async () => {
     const logger = createLogger({ transports: 'console', level: 'silent' });
-    const origin = createServer((_request, response) => {
-      response.end('proxied-global-fetch');
+    let lastRequest: { method?: string; body: string; header?: string } | undefined;
+    const origin = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        lastRequest = {
+          method: request.method,
+          body: Buffer.concat(chunks).toString('utf8'),
+          header:
+            typeof request.headers['x-native-req'] === 'string'
+              ? request.headers['x-native-req']
+              : undefined,
+        };
+        response.end('proxied-global-fetch');
+      });
     });
     const gateway = createServer();
     const sockets = new Set<Duplex>();
@@ -183,6 +202,7 @@ describe('resolveCliHttpTransportConfig', () => {
     const previousHttpProxy = process.env.HTTP_PROXY;
     const previousNoProxy = process.env.NO_PROXY;
     const previousLowerNoProxy = process.env.no_proxy;
+    let directPool: Pool | undefined;
     try {
       origin.listen(0, '127.0.0.1');
       await once(origin, 'listening');
@@ -215,9 +235,41 @@ describe('resolveCliHttpTransportConfig', () => {
 
       installCliHttpGlobalDispatcher({ logger });
       const response = await globalThis.fetch(`http://127.0.0.1:${originAddress.port}/hello`);
+      expect(response).toBeInstanceOf(globalThis.Response);
       expect(await response.text()).toBe('proxied-global-fetch');
       expect(tunneledTargets).toEqual([`127.0.0.1:${originAddress.port}`]);
+
+      const nativeRequest = new globalThis.Request(
+        `http://127.0.0.1:${originAddress.port}/native-req`,
+        {
+          method: 'POST',
+          headers: { 'x-native-req': 'yes' },
+          body: 'native-payload',
+        }
+      );
+      const nativeResponse = await globalThis.fetch(nativeRequest);
+      expect(nativeResponse).toBeInstanceOf(globalThis.Response);
+      expect(await nativeResponse.text()).toBe('proxied-global-fetch');
+      expect(lastRequest).toEqual({
+        method: 'POST',
+        body: 'native-payload',
+        header: 'yes',
+      });
+      expect(tunneledTargets).toEqual([
+        `127.0.0.1:${originAddress.port}`,
+        `127.0.0.1:${originAddress.port}`,
+      ]);
+
+      directPool = new Pool(`http://127.0.0.1:${originAddress.port}`);
+      const callerDispatcherResponse = await globalThis.fetch(
+        `http://127.0.0.1:${originAddress.port}/direct-pool`,
+        { dispatcher: directPool } as RequestInit
+      );
+      expect(callerDispatcherResponse).toBeInstanceOf(globalThis.Response);
+      expect(await callerDispatcherResponse.text()).toBe('proxied-global-fetch');
+      expect(tunneledTargets).toHaveLength(2);
     } finally {
+      await directPool?.close();
       await resetCliHttpTransportForTests();
       if (previousHttpsProxy === undefined) delete process.env.HTTPS_PROXY;
       else process.env.HTTPS_PROXY = previousHttpsProxy;
@@ -239,6 +291,20 @@ describe('resolveCliHttpTransportConfig', () => {
 });
 
 describe('installAcpAdapterHttpProxySupport', () => {
+  it('leaves globalThis.fetch and globalAgents untouched when no proxy env is configured', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousHttpAddRequest = http.globalAgent.addRequest;
+    const previousHttpsAddRequest = https.globalAgent.addRequest;
+    try {
+      installAcpAdapterHttpProxySupport({ env: {} });
+      expect(globalThis.fetch).toBe(previousFetch);
+      expect(http.globalAgent.addRequest).toBe(previousHttpAddRequest);
+      expect(https.globalAgent.addRequest).toBe(previousHttpsAddRequest);
+    } finally {
+      await resetAcpAdapterHttpProxySupportForTests();
+    }
+  });
+
   it('routes node:https.request, node:http.request, and globalThis.fetch through env proxies while preserving User-Agent and NO_PROXY', async () => {
     const certDir = mkdtempSync(join(tmpdir(), 'lody-acp-proxy-test-'));
     const keyPath = join(certDir, 'key.pem');
@@ -340,10 +406,9 @@ describe('installAcpAdapterHttpProxySupport', () => {
       }
 
       const warnings: string[] = [];
-      installAcpAdapterHttpProxySupport({ onWarn: (msg) => warnings.push(msg) });
-
       process.env.HTTPS_PROXY = `http://127.0.0.1:${proxyAddress.port}`;
       process.env.HTTP_PROXY = `http://127.0.0.1:${proxyAddress.port}`;
+      installAcpAdapterHttpProxySupport({ onWarn: (msg) => warnings.push(msg) });
 
       const httpsBody = await new Promise<string>((resolve, reject) => {
         const req = https.request(
@@ -395,9 +460,12 @@ describe('installAcpAdapterHttpProxySupport', () => {
       expect(httpBody).toBe('custom-adapter/2.0');
       expect(tunneledTargets).toContain(`127.0.0.1:${httpAddress.port}`);
 
-      const fetchRes = await globalThis.fetch(`http://127.0.0.1:${httpAddress.port}/models`, {
-        headers: { 'User-Agent': 'gateway-fetcher/1.0' },
-      });
+      const fetchRes = await globalThis.fetch(
+        new globalThis.Request(`http://127.0.0.1:${httpAddress.port}/models`, {
+          headers: { 'User-Agent': 'gateway-fetcher/1.0' },
+        })
+      );
+      expect(fetchRes).toBeInstanceOf(globalThis.Response);
       expect(await fetchRes.text()).toBe('gateway-fetcher/1.0');
       expect(
         tunneledTargets.filter((target) => target === `127.0.0.1:${httpAddress.port}`)
