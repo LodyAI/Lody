@@ -2434,13 +2434,7 @@ async function readAgentAcpCapabilitySnapshot(args: AgentAcpCapabilityReadArgs):
     workspaceId: args.workspaceId,
     machineId: args.machineId,
   });
-  if (daemonTarget.isLocalEnvironment) {
-    return {
-      capability: await readAgentAcpCapabilityFromRepo(args),
-      freshness: { confirmed: true },
-    };
-  }
-  if (daemonTarget.sameReplica) {
+  if (!daemonTarget.isLocalEnvironment && daemonTarget.sameReplica) {
     const localCapability = await readAgentAcpCapabilityFromRepo(args);
     if (localCapability !== undefined) {
       return { capability: localCapability, freshness: { confirmed: true } };
