@@ -29,3 +29,13 @@
 - The command owns the native token provider Scope. Borrow the shared Legacy facade
   only for the Streams SDK Promise callbacks; close target connections before the
   facade and provider Scope. Never pass native Effect callbacks directly to the SDK.
+
+- E2EE targets require this account's active paired machine, verified pinned ledger
+  and installed current epoch key before any upload. Use only its device-authenticated
+  content bucket and encrypted attachment transfer; never borrow ordinary account tokens.
+- Encrypt atomic stream creation and CAS index/meta batches with the same logical-room
+  binding as StreamsCrdt. Imported session and schedule fences derive from original
+  source bytes before clearing queues or changing activations. Reject legacy task/index
+  rooms and Roost rather than routing unsupported encrypted rooms to plaintext.
+- Bind target mode and genesis in the manifest. Keep encrypted attachment manifests in
+  receipts and both current and historical references across retries.

@@ -5,6 +5,13 @@ import * as stylex from '@stylexjs/stylex';
 import { field } from '@lody/ui/field/field.tokens.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { control, text, duration, ease, corner } from '@lody/ui/tokens/scales.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeSpace,
+  themeZ,
+} from '../style/theme-scale.stylex';
 import type { TextareaAppearance } from '@lody/ui/textarea';
 
 import { withClassName } from '@/lib/stylex';
@@ -16,24 +23,27 @@ const styles = stylex.create({
     ':is(*) [data-tag]': {
       display: 'inline-block',
       borderRadius: '0.25rem',
-      paddingInline: 'calc(var(--spacing) * 0.5)',
+      paddingInline: themeSpace[0.5],
       paddingBlock: '1px',
     },
   },
   label: {
     display: 'block',
-    paddingBlock: 'calc(var(--spacing) * 1.5)',
-    paddingInline: 'calc(var(--spacing) * 0.5)',
-    fontWeight: 'var(--font-weight-semibold)',
-    fontSize: 'var(--text-sm)',
-    lineHeight: 'var(--text-sm--line-height)',
+    paddingBlock: themeSpace[1.5],
+    paddingInline: themeSpace[0.5],
+    fontWeight: themeFontWeight.semibold,
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
   },
   inputShell: { width: '100%', minWidth: 0 },
   inputWell: {
     '--mention-chip-surface': colors.background,
     '--mention-chip-overlay': `linear-gradient(${field.background},${field.background})`,
     backgroundColor: field.background,
-    boxShadow: { default: field.well, ':focus-within': `0 0 0 ${field.ringWidth} ${field.ring}, ${field.well}` },
+    boxShadow: {
+      default: field.well,
+      ':focus-within': `0 0 0 ${field.ringWidth} ${field.ring}, ${field.well}`,
+    },
     borderRadius: field.radiusMedium,
     cornerShape: corner.round,
     transitionProperty: 'box-shadow, opacity',
@@ -76,7 +86,7 @@ const styles = stylex.create({
   bareInput: { padding: 0 },
   content: {
     position: 'relative',
-    zIndex: 'var(--z-popover)',
+    zIndex: themeZ.popover,
     minWidth: '8rem',
     overflow: 'hidden',
   },

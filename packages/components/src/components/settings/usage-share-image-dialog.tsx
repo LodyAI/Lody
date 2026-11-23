@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@/lib/posthog-context';
 import * as stylex from '@stylexjs/stylex';
 import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
+import { media } from '@lody/ui/tokens/colors.stylex';
 import { Check, Copy, Download } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Dialog } from '@/ui/dialog';
@@ -175,10 +176,12 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgb(0 0 0 / 15%)',
-    color: 'white',
+    backgroundColor: `color-mix(in oklab, ${media.scrim} 25%, transparent)`,
+    color: media.label,
   },
-  backdropCheckGlyph: { filter: 'drop-shadow(0 1px 1px rgb(0 0 0 / 25%))' },
+  backdropCheckGlyph: {
+    filter: `drop-shadow(0 1px 1px color-mix(in oklab, ${media.scrim} 42%, transparent))`,
+  },
   qrRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' },
   previewPane: {
     minHeight: 0,

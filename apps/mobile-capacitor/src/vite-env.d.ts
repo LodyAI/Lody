@@ -9,6 +9,8 @@ declare const __APP_VERSION__: string;
 
 interface ImportMetaEnv {
   readonly VITE_SERVER_URL: string;
+  /** Product site URL; recovery files carry its canonical origin (default Lody Cloud). */
+  readonly VITE_SITE_URL?: string;
 }
 
 interface ImportMeta {

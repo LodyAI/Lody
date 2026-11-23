@@ -339,6 +339,11 @@ function requestFailure(error: unknown): BackendError {
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
   if (code === 'e2ee_recovery_vault_disabled') return new E2eeRecoveryDisabledError()
+  if (
+    code === 'workspace_transfer_active_subscription' ||
+    code === 'workspace_transfer_payment_required'
+  )
+    return new E2eeCloudDiagnosticError(code)
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
   const refusal = accountPairingRefusals.get(code)
   if (refusal) return new E2eeAccountPairingRefusedError(refusal)

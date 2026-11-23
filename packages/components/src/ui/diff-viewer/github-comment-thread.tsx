@@ -7,6 +7,7 @@ import type { CommentReferencePayload } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
 import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Avatar } from '@lody/ui/avatar';
 import { CachedAvatarImage } from '@/components/cached-avatar-img';
@@ -129,11 +130,11 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   excerptAdded: {
-    backgroundColor: 'hsl(var(--github-addition) / 0.1)',
+    backgroundColor: `hsl(from ${themeColors.githubAddition} h s l / 0.1)`,
     color: colors.label,
   },
   excerptRemoved: {
-    backgroundColor: 'hsl(var(--github-deletion) / 0.1)',
+    backgroundColor: `hsl(from ${themeColors.githubDeletion} h s l / 0.1)`,
     color: colors.label,
   },
 

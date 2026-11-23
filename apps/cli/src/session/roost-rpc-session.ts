@@ -31,6 +31,7 @@ import type { RoostSessionBackendServices } from './roost-session-backend';
 /** A command client has no native history owner, even when it runs on that machine. */
 export type RoostSessionRpc = {
   readonly coherentInspection?: boolean;
+  readonly encryptedInputOwner?: string;
   subscribe?: (
     subscription: Extract<SessionHistorySubscription, { action: 'open' }>,
     onPublication: (publication: SessionHistoryPublication) => void,
@@ -43,6 +44,8 @@ export type RoostSessionRpc = {
   ): Promise<SessionHistoryWriteResponse>;
 };
 
+const accepted = (id: string) =>
+  z.object({ status: z.literal('accepted'), turnId: z.literal(id), active: z.boolean() });
 const historyEntriesSchema = z.array(
   z
     .object({
@@ -393,9 +396,28 @@ export function createRoostRpcSessionServices(
     sessionData: createRoostSessionData({
       sessionId: doc.sessionId,
       history,
+      ...(rpc.encryptedInputOwner
+        ? {
+            inputAcceptance: {
+              targetMachineId: rpc.encryptedInputOwner,
+              accept: async (entry) =>
+                accepted(entry.id).parse(await write('accept_input', { entry })),
+              acceptAndDispatch: async (entry) =>
+                accepted(entry.id).parse(await write('accept_input_and_dispatch', { entry })),
+              lookup: async (entry) =>
+                accepted(entry.id)
+                  .or(z.object({ status: z.literal('unobserved') }))
+                  .parse(await readResult({ kind: 'inputAcceptance', entry })),
+            },
+          }
+        : {}),
       commands: {
         applyHistoryAction: (action) => write<SessionActionResult>('apply_action', { action }),
-        appendTurn: (entry) => write<void>('append', { entry }),
+        appendTurn: async (entry) => {
+          if (rpc.encryptedInputOwner) {
+            accepted(entry.id).parse(await write('accept_input', { entry }));
+          } else await write<void>('append', { entry });
+        },
         replaceTurn: (turnId, entry) => write<void>('replace', { turnId, entry }),
         respondPermission: (requestId, outcome, options) =>
           write<boolean>('respond_permission', { requestId, outcome, options }),

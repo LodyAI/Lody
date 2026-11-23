@@ -4,6 +4,15 @@ import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { PanelLeftIcon } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../style/theme-scale.stylex';
 
 import { useIsMobile } from '@/hooks/use-mobile';
 import { clsx } from 'clsx';
@@ -28,7 +37,7 @@ const styles = stylex.create({
     minHeight: { default: '100svh', '@supports not (height: 1dvh)': '100vh' },
     backgroundColor: {
       default: null,
-      ':has([data-variant="inset"])': 'hsl(var(--sidebar-background) / 1)',
+      ':has([data-variant="inset"])': themeColors.sidebar,
     },
   },
   uncollapsed: {
@@ -36,10 +45,10 @@ const styles = stylex.create({
     height: '100%',
     width: 'var(--sidebar-width)',
     flexDirection: 'column',
-    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    backgroundColor: themeColors.sidebar,
   },
   mobilePanel: {
-    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    backgroundColor: themeColors.sidebar,
     width: 'var(--sidebar-width)',
     padding: 0,
     paddingInlineStart: 0,
@@ -49,7 +58,7 @@ const styles = stylex.create({
   },
   mobileColumn: { display: 'flex', height: '100%', width: '100%', flexDirection: 'column' },
   desktopFrame: {
-    color: 'hsl(var(--sidebar-foreground) / 1)',
+    color: themeColors.sidebarForeground,
     display: { default: 'none', '@media (width >= 48rem)': 'block' },
   },
   gap: {
@@ -62,7 +71,7 @@ const styles = stylex.create({
   },
   gapClosed: { width: 0 },
   gapIcon: { width: 'var(--sidebar-width-icon)' },
-  gapIconPadded: { width: 'calc(var(--sidebar-width-icon) + var(--spacing) * 4)' },
+  gapIconPadded: { width: `calc(var(--sidebar-width-icon) + ${themeSpace[4]})` },
   gapRight: { rotate: '180deg' },
   container: {
     position: 'fixed',
@@ -83,25 +92,25 @@ const styles = stylex.create({
   trailing: { right: 0 },
   offcanvasLeading: { left: 'calc(var(--sidebar-width) * -1)' },
   offcanvasTrailing: { right: 'calc(var(--sidebar-width) * -1)' },
-  padding: { padding: 'calc(var(--spacing) * 2)' },
+  padding: { padding: themeSpace[2] },
   containerIcon: { width: 'var(--sidebar-width-icon)' },
-  containerIconPadded: { width: 'calc(var(--sidebar-width-icon) + var(--spacing) * 4 + 2px)' },
+  containerIconPadded: { width: `calc(var(--sidebar-width-icon) + ${themeSpace[4]} + 2px)` },
   borderLeading: { borderRightWidth: 1 },
   borderTrailing: { borderLeftWidth: 1 },
   inner: {
-    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    backgroundColor: themeColors.sidebar,
     display: 'flex',
     height: '100%',
     width: '100%',
     flexDirection: 'column',
   },
   floating: {
-    borderColor: 'hsl(var(--sidebar-border) / 1)',
+    borderColor: themeColors.sidebarBorder,
     borderWidth: 1,
-    borderRadius: 'var(--radius-lg)',
-    boxShadow: 'var(--shadow-xs)',
+    borderRadius: themeRadius.lg,
+    boxShadow: themeShadow.xs,
   },
-  triggerGlyph: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+  triggerGlyph: { width: themeSpace[4], height: themeSpace[4] },
   accessibleLabel: {
     position: 'absolute',
     width: '1px',
@@ -118,20 +127,20 @@ const styles = stylex.create({
     insetBlock: 0,
     zIndex: 20,
     display: { default: 'none', '@media (width >= 40rem)': 'flex' },
-    width: 'calc(var(--spacing) * 4)',
+    width: themeSpace[4],
     translate: '-50% 0',
     transitionProperty: 'all',
     transitionDuration: 'var(--default-transition-duration)',
     transitionTimingFunction: 'linear',
     right: {
       default: null,
-      ':is([data-side="left"] *)': 'calc(var(--spacing) * -4)',
-      ':is([data-side="left"][data-collapsible="offcanvas"] *)': 'calc(var(--spacing) * -2)',
+      ':is([data-side="left"] *)': `calc(-1 * ${themeSpace[4]})`,
+      ':is([data-side="left"][data-collapsible="offcanvas"] *)': `calc(-1 * ${themeSpace[2]})`,
     },
     left: {
       default: null,
       ':is([data-side="right"] *)': 0,
-      ':is([data-side="right"][data-collapsible="offcanvas"] *)': 'calc(var(--spacing) * -2)',
+      ':is([data-side="right"][data-collapsible="offcanvas"] *)': `calc(-1 * ${themeSpace[2]})`,
     },
     cursor: {
       default: null,
@@ -143,7 +152,7 @@ const styles = stylex.create({
     backgroundColor: {
       default: null,
       ':is([data-collapsible="offcanvas"] *):hover': {
-        '@media (hover: hover)': 'hsl(var(--sidebar-background) / 1)',
+        '@media (hover: hover)': themeColors.sidebar,
       },
     },
     '::after': {
@@ -154,7 +163,7 @@ const styles = stylex.create({
       width: 2,
       backgroundColor: {
         default: null,
-        ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-border) / 1)' },
+        ':hover': { '@media (hover: hover)': themeColors.sidebarBorder },
       },
     },
   },
@@ -168,38 +177,38 @@ const styles = stylex.create({
     width: '100%',
     flex: 1,
     flexDirection: 'column',
-    backgroundColor: 'hsl(var(--background) / 1)',
+    backgroundColor: themeColors.background,
     '@media (width >= 48rem)': {
-      margin: { default: null, ':is([data-variant="inset"] ~ *)': 'calc(var(--spacing) * 2)' },
+      margin: { default: null, ':is([data-variant="inset"] ~ *)': themeSpace[2] },
       marginLeft: {
         default: null,
         ':is([data-variant="inset"] ~ *)': 0,
-        ':is([data-variant="inset"][data-state="collapsed"] ~ *)': 'calc(var(--spacing) * 2)',
+        ':is([data-variant="inset"][data-state="collapsed"] ~ *)': themeSpace[2],
       },
-      borderRadius: { default: null, ':is([data-variant="inset"] ~ *)': 'var(--radius-xl)' },
-      boxShadow: { default: null, ':is([data-variant="inset"] ~ *)': 'var(--shadow-xs)' },
+      borderRadius: { default: null, ':is([data-variant="inset"] ~ *)': themeRadius.xl },
+      boxShadow: { default: null, ':is([data-variant="inset"] ~ *)': themeShadow.xs },
     },
   },
   input: {
-    height: 'calc(var(--spacing) * 8)',
+    height: themeSpace[8],
     width: '100%',
-    [field.background]: 'hsl(var(--input-field) / 1)',
+    [field.background]: themeColors.inputField,
     [field.well]: 'none',
     [field.ringWidth]: '2px',
   },
   stack: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 'calc(var(--spacing) * 2)',
-    padding: 'calc(var(--spacing) * 2)',
+    gap: themeSpace[2],
+    padding: themeSpace[2],
   },
-  separator: { marginInline: 'calc(var(--spacing) * 2)', width: 'auto' },
+  separator: { marginInline: themeSpace[2], width: 'auto' },
   content: {
     display: 'flex',
     minHeight: 0,
     flex: 1,
     flexDirection: 'column',
-    gap: 'calc(var(--spacing) * 2)',
+    gap: themeSpace[2],
     overflow: { default: 'auto', ':is([data-collapsible="icon"] *)': 'hidden' },
   },
   group: {
@@ -208,23 +217,23 @@ const styles = stylex.create({
     width: '100%',
     minWidth: 0,
     flexDirection: 'column',
-    padding: 'calc(var(--spacing) * 2)',
+    padding: themeSpace[2],
   },
   label: {
     display: 'flex',
-    height: 'calc(var(--spacing) * 8)',
+    height: themeSpace[8],
     flexShrink: 0,
     alignItems: 'center',
-    borderRadius: 'var(--radius-md)',
-    paddingInline: 'calc(var(--spacing) * 2)',
-    fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--text-xs--line-height)',
-    fontWeight: 'var(--font-weight-medium)',
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
     color: colors.tertiaryLabel,
     transitionProperty: 'margin,opacity',
     transitionDuration: '.2s',
     transitionTimingFunction: 'linear',
-    marginTop: { default: null, ':is([data-collapsible="icon"] *)': 'calc(var(--spacing) * -8)' },
+    marginTop: { default: null, ':is([data-collapsible="icon"] *)': `calc(-1 * ${themeSpace[8]})` },
     opacity: { default: null, ':is([data-collapsible="icon"] *)': 0 },
   },
   focus: {
@@ -234,25 +243,25 @@ const styles = stylex.create({
   glyphs: {
     ':is(*) > svg': {
       flexShrink: 0,
-      width: 'calc(var(--spacing) * 4)',
-      height: 'calc(var(--spacing) * 4)',
+      width: themeSpace[4],
+      height: themeSpace[4],
     },
   },
   action: {
     position: 'absolute',
     aspectRatio: '1 / 1',
-    width: 'calc(var(--spacing) * 5)',
+    width: themeSpace[5],
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 'var(--radius-md)',
+    borderRadius: themeRadius.md,
     padding: 0,
     color: {
-      default: 'hsl(var(--sidebar-foreground) / 1)',
-      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+      default: themeColors.sidebarForeground,
+      ':hover': { '@media (hover: hover)': themeColors.sidebarHoverForeground },
     },
     backgroundColor: {
       default: null,
-      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
+      ':hover': { '@media (hover: hover)': themeColors.sidebarHover },
     },
     transitionProperty: 'transform, translate, scale, rotate',
     transitionDuration: 'var(--default-transition-duration)',
@@ -261,55 +270,55 @@ const styles = stylex.create({
     '::after': {
       content: '""',
       position: 'absolute',
-      inset: 'calc(var(--spacing) * -2)',
+      inset: `calc(-1 * ${themeSpace[2]})`,
       display: { default: null, '@media (width >= 48rem)': 'none' },
     },
   },
-  groupAction: { top: 'calc(var(--spacing) * 3.5)', right: 'calc(var(--spacing) * 3)' },
+  groupAction: { top: themeSpace[3.5], right: themeSpace[3] },
   groupContent: {
     width: '100%',
-    fontSize: 'var(--text-sm)',
-    lineHeight: 'var(--text-sm--line-height)',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
   },
   menu: {
     display: 'flex',
     width: '100%',
     minWidth: 0,
     flexDirection: 'column',
-    gap: 'calc(var(--spacing) * 1)',
+    gap: themeSpace[1],
   },
   relative: { position: 'relative' },
   menuButton: {
     display: 'flex',
     width: '100%',
     alignItems: 'center',
-    gap: 'calc(var(--spacing) * 2)',
+    gap: themeSpace[2],
     overflow: 'hidden',
-    borderRadius: 'var(--radius-md)',
-    padding: 'calc(var(--spacing) * 2)',
+    borderRadius: themeRadius.md,
+    padding: themeSpace[2],
     textAlign: 'left',
-    fontSize: 'var(--text-sm)',
-    lineHeight: 'var(--text-sm--line-height)',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
     transitionProperty: 'width,height,padding',
     transitionDuration: 'var(--default-transition-duration)',
     transitionTimingFunction: 'var(--default-transition-timing-function)',
     backgroundColor: {
       default: null,
-      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
-      ':active': 'hsl(var(--sidebar-hover) / 1)',
-      ':is([data-active="true"])': 'hsl(var(--sidebar-selection) / 1)',
+      ':hover': { '@media (hover: hover)': themeColors.sidebarHover },
+      ':active': themeColors.sidebarHover,
+      ':is([data-active="true"])': themeColors.sidebarSelection,
     },
     color: {
       default: null,
-      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)' },
-      ':active': 'hsl(var(--sidebar-hover-foreground) / 1)',
-      ':is([data-active="true"])': 'hsl(var(--sidebar-selection-foreground) / 1)',
+      ':hover': { '@media (hover: hover)': themeColors.sidebarHoverForeground },
+      ':active': themeColors.sidebarHoverForeground,
+      ':is([data-active="true"])': themeColors.sidebarSelectionForeground,
     },
-    fontWeight: { default: null, ':is([data-active="true"])': 'var(--font-weight-medium)' },
+    fontWeight: { default: null, ':is([data-active="true"])': themeFontWeight.medium },
     paddingRight: {
       default: null,
       ':is([data-sidebar="menu-item"]:has([data-sidebar="menu-action"]) *):not(:is([data-collapsible="icon"] *))':
-        'calc(var(--spacing) * 8)',
+        themeSpace[8],
     },
     ':is(*) > span:last-child': {
       overflow: 'hidden',
@@ -325,50 +334,50 @@ const styles = stylex.create({
       ':is([aria-disabled="true"])': control.disabledOpacity,
     },
   },
-  buttonDefault: { height: 'calc(var(--spacing) * 8)' },
+  buttonDefault: { height: themeSpace[8] },
   buttonSmall: {
-    height: 'calc(var(--spacing) * 7)',
-    fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--text-xs--line-height)',
+    height: themeSpace[7],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
   },
-  buttonLarge: { height: 'calc(var(--spacing) * 12)' },
+  buttonLarge: { height: themeSpace[12] },
   buttonIcon: {
     ':is([data-collapsible="icon"] *)': {
-      width: 'calc(var(--spacing) * 8)',
-      height: 'calc(var(--spacing) * 8)',
-      padding: 'calc(var(--spacing) * 2)',
+      width: themeSpace[8],
+      height: themeSpace[8],
+      padding: themeSpace[2],
     },
   },
   buttonLargeIcon: { ':is([data-collapsible="icon"] *)': { padding: 0 } },
   outline: {
-    backgroundColor: 'hsl(var(--background) / 1)',
+    backgroundColor: themeColors.background,
     boxShadow: {
-      default: '0 0 0 1px hsl(var(--sidebar-border))',
-      ':focus-visible': '0 0 0 1px hsl(var(--sidebar-border))',
-      ':hover': { '@media (hover: hover)': '0 0 0 1px hsl(var(--sidebar-hover))' },
+      default: `0 0 0 1px ${themeColors.sidebarBorder}`,
+      ':focus-visible': `0 0 0 1px ${themeColors.sidebarBorder}`,
+      ':hover': { '@media (hover: hover)': `0 0 0 1px ${themeColors.sidebarHover}` },
     },
   },
   menuAction: {
     top: {
-      default: 'calc(var(--spacing) * 1.5)',
-      ':is([data-size="sm"] ~ *)': 'calc(var(--spacing) * 1)',
-      ':is([data-size="lg"] ~ *)': 'calc(var(--spacing) * 2.5)',
+      default: themeSpace[1.5],
+      ':is([data-size="sm"] ~ *)': themeSpace[1],
+      ':is([data-size="lg"] ~ *)': themeSpace[2.5],
     },
-    right: 'calc(var(--spacing) * 1)',
+    right: themeSpace[1],
     color: {
       default: null,
       ':is([data-sidebar="menu-button"]:hover ~ *)': {
-        '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)',
+        '@media (hover: hover)': themeColors.sidebarHoverForeground,
       },
     },
   },
   menuPosition: {
     top: {
-      default: 'calc(var(--spacing) * 1.5)',
-      ':is([data-size="sm"] ~ *)': 'calc(var(--spacing) * 1)',
-      ':is([data-size="lg"] ~ *)': 'calc(var(--spacing) * 2.5)',
+      default: themeSpace[1.5],
+      ':is([data-size="sm"] ~ *)': themeSpace[1],
+      ':is([data-size="lg"] ~ *)': themeSpace[2.5],
     },
-    right: 'calc(var(--spacing) * 1)',
+    right: themeSpace[1],
   },
   showOnHover: {
     opacity: {
@@ -382,85 +391,85 @@ const styles = stylex.create({
     },
     color: {
       default: null,
-      ':is([data-active="true"] ~ *)': 'hsl(var(--sidebar-selection-foreground) / 1)',
+      ':is([data-active="true"] ~ *)': themeColors.sidebarSelectionForeground,
     },
   },
   badge: {
     position: 'absolute',
-    right: 'calc(var(--spacing) * 1)',
+    right: themeSpace[1],
     display: { default: 'flex', ':is([data-collapsible="icon"] *)': 'none' },
     pointerEvents: 'none',
-    height: 'calc(var(--spacing) * 5)',
-    minWidth: 'calc(var(--spacing) * 5)',
+    height: themeSpace[5],
+    minWidth: themeSpace[5],
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 'var(--radius-md)',
-    paddingInline: 'calc(var(--spacing) * 1)',
-    fontSize: 'var(--text-xs)',
-    lineHeight: 'var(--text-xs--line-height)',
-    fontWeight: 'var(--font-weight-medium)',
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
     fontVariantNumeric: 'tabular-nums',
     userSelect: 'none',
     color: {
-      default: 'hsl(var(--sidebar-foreground) / 1)',
+      default: themeColors.sidebarForeground,
       ':is([data-sidebar="menu-button"]:hover ~ *)': {
-        '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)',
+        '@media (hover: hover)': themeColors.sidebarHoverForeground,
       },
-      ':is([data-active="true"] ~ *)': 'hsl(var(--sidebar-selection-foreground) / 1)',
+      ':is([data-active="true"] ~ *)': themeColors.sidebarSelectionForeground,
     },
   },
   skeleton: {
     display: 'flex',
-    height: 'calc(var(--spacing) * 8)',
+    height: themeSpace[8],
     alignItems: 'center',
-    gap: 'calc(var(--spacing) * 2)',
-    borderRadius: 'var(--radius-md)',
-    paddingInline: 'calc(var(--spacing) * 2)',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
   },
   skeletonText: { maxWidth: 'var(--skeleton-width)', flex: 1 },
   sub: {
     display: { default: 'flex', ':is([data-collapsible="icon"] *)': 'none' },
     minWidth: 0,
     flexDirection: 'column',
-    marginInline: 'calc(var(--spacing) * 3.5)',
+    marginInline: themeSpace[3.5],
     translate: '1px 0',
-    gap: 'calc(var(--spacing) * 1)',
+    gap: themeSpace[1],
     borderLeftWidth: 1,
-    borderColor: 'hsl(var(--sidebar-border) / 1)',
-    paddingInline: 'calc(var(--spacing) * 2.5)',
-    paddingBlock: 'calc(var(--spacing) * .5)',
+    borderColor: themeColors.sidebarBorder,
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[0.5],
   },
   subButton: {
     display: { default: 'flex', ':is([data-collapsible="icon"] *)': 'none' },
-    height: 'calc(var(--spacing) * 7)',
+    height: themeSpace[7],
     minWidth: 0,
     translate: '-1px 0',
     alignItems: 'center',
-    gap: 'calc(var(--spacing) * 2)',
+    gap: themeSpace[2],
     overflow: 'hidden',
-    borderRadius: 'var(--radius-md)',
-    paddingInline: 'calc(var(--spacing) * 2)',
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
     color: {
-      default: 'hsl(var(--sidebar-foreground) / 1)',
-      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover-foreground) / 1)' },
-      ':active': 'hsl(var(--sidebar-hover-foreground) / 1)',
-      ':is([data-active="true"])': 'hsl(var(--sidebar-selection-foreground) / 1)',
+      default: themeColors.sidebarForeground,
+      ':hover': { '@media (hover: hover)': themeColors.sidebarHoverForeground },
+      ':active': themeColors.sidebarHoverForeground,
+      ':is([data-active="true"])': themeColors.sidebarSelectionForeground,
     },
     backgroundColor: {
       default: null,
-      ':hover': { '@media (hover: hover)': 'hsl(var(--sidebar-hover) / 1)' },
-      ':active': 'hsl(var(--sidebar-hover) / 1)',
-      ':is([data-active="true"])': 'hsl(var(--sidebar-selection) / 1)',
+      ':hover': { '@media (hover: hover)': themeColors.sidebarHover },
+      ':active': themeColors.sidebarHover,
+      ':is([data-active="true"])': themeColors.sidebarSelection,
     },
-    ':is(*) > svg': { color: 'hsl(var(--sidebar-hover-foreground) / 1)' },
+    ':is(*) > svg': { color: themeColors.sidebarHoverForeground },
     ':is(*) > span:last-child': {
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
     },
   },
-  textSmall: { fontSize: 'var(--text-sm)', lineHeight: 'var(--text-sm--line-height)' },
-  textExtraSmall: { fontSize: 'var(--text-xs)', lineHeight: 'var(--text-xs--line-height)' },
+  textSmall: { fontSize: themeFontSize.sm, lineHeight: themeLineHeight.sm },
+  textExtraSmall: { fontSize: themeFontSize.xs, lineHeight: themeLineHeight.xs },
 });
 
 type SidebarStyleProps = {
@@ -764,7 +773,7 @@ function SidebarInput({ className, xstyle, ...props }: React.ComponentProps<type
     <Input
       data-slot="sidebar-input"
       data-sidebar="input"
-      controlHeight="calc(var(--spacing) * 8)"
+      controlHeight={themeSpace[8]}
       className={className}
       xstyle={[styles.input, xstyle]}
       {...props}
@@ -994,7 +1003,7 @@ function SidebarMenuButton({
 
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={500} render={button}/>
+      <Tooltip.Trigger delay={500} render={button} />
       <Tooltip.Content
         side="right"
         align="center"

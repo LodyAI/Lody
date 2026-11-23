@@ -198,6 +198,7 @@ export interface AccountSettingsPureProps {
   onDeleteAccount: () => Promise<void>;
   onRenameOrganization?: (name: string) => Promise<void>;
   onOpenBilling?: () => void;
+  onOpenRecovery?: () => void;
   getInviteLink: (invitation: Invitation) => string;
   // Profile: user name + user/workspace avatar + OAuth bindings + password.
   onUpdateUserName?: (name: string) => Promise<void>;
@@ -259,6 +260,7 @@ export function AccountSettingsPure({
   onDeleteAccount,
   onRenameOrganization,
   onOpenBilling,
+  onOpenRecovery,
   getInviteLink,
   onUpdateUserName,
   onUploadAvatar,
@@ -616,6 +618,7 @@ export function AccountSettingsPure({
           deleteBillingGuard={deleteBillingGuard}
           onDeleteAccount={onDeleteAccount}
           onRenameOrganization={onRenameOrganization}
+          onOpenRecovery={onOpenRecovery}
           getInviteLink={getInviteLink}
           onUpdateUserName={onUpdateUserName}
           onUploadAvatar={onUploadAvatar}
@@ -1119,6 +1122,21 @@ export function AccountSettingsPure({
               ) : null,
             ]
           )}
+        </CompactSection>
+      ) : null}
+
+      {surface === 'account' && onOpenRecovery ? (
+        <CompactSection title={t('e2ee.security.title')}>
+          <CompactRow label={t('e2ee.recovery.manage')} helper={t('e2ee.recovery.explanation')}>
+            <Button
+              variant="secondary"
+              size="small"
+              data-testid="e2ee-account-recovery"
+              onClick={onOpenRecovery}
+            >
+              {t('e2ee.recovery.passkeyManage')}
+            </Button>
+          </CompactRow>
         </CompactSection>
       ) : null}
 

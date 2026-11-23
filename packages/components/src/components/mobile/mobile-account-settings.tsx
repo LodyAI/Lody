@@ -360,6 +360,7 @@ export function MobileAccountSettings({
   deleteBillingGuard = null,
   onDeleteAccount,
   onRenameOrganization,
+  onOpenRecovery,
   getInviteLink,
   onUpdateUserName,
   onUploadAvatar,
@@ -1148,6 +1149,25 @@ export function MobileAccountSettings({
                   </Button>
                 </MobileSettingsRow>
               )}
+            </MobileSettingsSection>
+          ) : null}
+
+          {surface === 'account' && onOpenRecovery ? (
+            <MobileSettingsSection title={t('e2ee.security.title')}>
+              <MobileSettingsRow
+                label={t('e2ee.recovery.manage')}
+                helper={t('e2ee.recovery.explanation')}
+                stack
+              >
+                <Button
+                  variant="secondary"
+                  size="small"
+                  data-testid="e2ee-account-recovery"
+                  onClick={onOpenRecovery}
+                >
+                  {t('e2ee.recovery.passkeyManage')}
+                </Button>
+              </MobileSettingsRow>
             </MobileSettingsSection>
           ) : null}
 

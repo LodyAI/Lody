@@ -23,6 +23,16 @@ const DEFAULT_PERSONAL_TOKEN_CACHE_MS = 45 * 60 * 1000;
 const DEFAULT_APP_TOKEN_CACHE_MS = 15 * 60 * 1000;
 
 const tokenCache = new Map<string, TokenEntry>();
+const workspaceTokenScopes = new Map<string, string>();
+
+function checkTokenScope(workspaceId: string) {
+  const scope = requireGitHubTokenPort().assertAccess?.(workspaceId);
+  if (scope !== undefined && workspaceTokenScopes.get(workspaceId) !== scope) {
+    clearGitHubTokensForWorkspace(workspaceId);
+    workspaceTokenScopes.set(workspaceId, scope);
+  }
+  return scope;
+}
 const inFlightRequests = new Map<string, InFlightToken>();
 const workspaceInvalidationListeners = new Set<(workspaceId: string) => void>();
 let tokenCacheGeneration = 0;
@@ -215,6 +225,7 @@ export async function getGitHubRepoToken(
   repoFullName: string,
   options?: { rejectedToken?: string }
 ): Promise<string> {
+  const scope = checkTokenScope(workspaceId);
   const entry = await acquireToken(
     cacheKey(workspaceId, repoFullName),
     async () => {
@@ -230,6 +241,8 @@ export async function getGitHubRepoToken(
     },
     options?.rejectedToken
   );
+  if (checkTokenScope(workspaceId) !== scope)
+    throw new GitHubClientTokenError('unauthorized', 'GitHub access changed');
   return entry.token;
 }
 
@@ -257,6 +270,7 @@ export async function getGitHubOperationToken(
   operation: GitHubOperation,
   options?: { invalidatedPersonalToken?: string; rejectedToken?: string }
 ): Promise<TokenEntry> {
+  const scope = checkTokenScope(workspaceId);
   const rejected = options?.rejectedToken ?? options?.invalidatedPersonalToken;
   const fetchToken = async (rejectedToken: string | undefined): Promise<TokenEntry> => {
     // Only personal tokens are long-lived enough for the backend to hand back again.
@@ -283,7 +297,7 @@ export async function getGitHubOperationToken(
     };
   };
 
-  return await acquireToken(
+  const entry = await acquireToken(
     operationCacheKey(workspaceId, repoFullName, operation),
     async (rejectedToken) => {
       try {
@@ -295,6 +309,9 @@ export async function getGitHubOperationToken(
     },
     rejected
   );
+  if (checkTokenScope(workspaceId) !== scope)
+    throw new GitHubClientTokenError('unauthorized', 'GitHub access changed');
+  return entry;
 }
 
 export function invalidateGitHubOperationToken(

@@ -1,3 +1,5 @@
+import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing';
+import type { RemoteMachineRelay } from '@lody/e2ee-client/remote-machine';
 import { SeatInvitePreviewSchema } from '@lody/cloud-api/seat-invite-preview';
 import {
   isTransientGatewayStatus,
@@ -162,10 +164,15 @@ const selfServiceRateLimit = (cause: unknown) => {
     : null;
 };
 const accessLossCodes = new Set(['e2ee_device_revoked', 'e2ee_member_removed']);
-/** The backend's `ConvexError` refusal code, if it is a well-formed `e2ee_*` code. */
+/** A backend E2EE refusal or one of the two allowlisted ownership-transfer billing codes. */
 export const refusalCode = (cause: unknown) => {
   const code = (cause as { data?: { code?: unknown } } | null)?.data?.code;
-  return typeof code === 'string' && /^e2ee_[a-z0-9_-]{1,64}$/.test(code) ? code : null;
+  return typeof code === 'string' &&
+    (/^e2ee_[a-z0-9_-]{1,64}$/.test(code) ||
+      code === 'workspace_transfer_active_subscription' ||
+      code === 'workspace_transfer_payment_required')
+    ? code
+    : null;
 };
 const invitationRefusal = (cause: unknown) => {
   const code = refusalCode(cause);
@@ -214,6 +221,7 @@ export type PersonalCloudConnection = {
       args: FunctionArgs<A>
     ): Promise<FunctionReturnType<A>>;
   };
+  readonly remoteMachineEndpoints?: { deploymentUrl: string; ingressUrl: string };
   readonly currentAccount: () => Effect.Effect<string | null, unknown>;
 };
 
@@ -709,7 +717,12 @@ export function makePersonalCloudNetwork(
                     reason: 'self-service-rate-limited',
                     retryAt: error.cause.retryAt,
                   })
-                : new LedgerLogError({})
+                : error instanceof BackendError &&
+                    error.cause instanceof BackendRefusal &&
+                    (error.cause.code === 'workspace_transfer_active_subscription' ||
+                      error.cause.code === 'workspace_transfer_payment_required')
+                  ? new LedgerLogError({ cause: error.cause })
+                  : new LedgerLogError({})
             )
           );
         },
@@ -1249,7 +1262,52 @@ export function makePersonalCloudNetwork(
         sharingReplySchemas.commit
       ),
   };
+  const pairingFailure = (error: unknown) =>
+    error instanceof BackendError &&
+    error.cause instanceof BackendRefusal &&
+    error.cause.code === 'e2ee_pairing_key_revoked'
+      ? new Error('e2ee_pairing_key_revoked')
+      : error;
+  const pairingRequest = <I extends { workspaceId: string }, A>(
+    input: I,
+    send: (original: I) => Promise<unknown>,
+    schema: z.ZodType<A>
+  ) => sharingRequest(input, send, schema).pipe(Effect.mapError(pairingFailure));
+  const remoteMachine: RemoteMachineRelay = {
+    begin: (input) =>
+      pairingRequest(
+        input,
+        (original) => client.mutation(api.e2eeMachinePairing.begin, original),
+        RemoteMachineStatusSchema
+      ),
+    inspect: (input) =>
+      pairingRequest(
+        input,
+        (original) => client.query(api.e2eeMachinePairing.inspect, original),
+        RemoteMachineStatusSchema
+      ),
+    authorizeExisting: (input) =>
+      pairingRequest(
+        input,
+        (original) => client.mutation(api.e2eeMachinePairing.authorizeExisting, original),
+        RemoteMachineStatusSchema
+      ),
+    cancel: (input) =>
+      pairingRequest(
+        input,
+        (original) => client.mutation(api.e2eeMachinePairing.cancel, original),
+        RemoteMachineStatusSchema
+      ),
+    append: (input) =>
+      input.workspaceId === scope.workspaceId
+        ? request(
+            () => client.action(api.e2eeWorkspaces.appendRecord, { ...input }),
+            z.unknown()
+          ).pipe(Effect.mapError(pairingFailure))
+        : Effect.fail(failure()),
+  };
   return Object.freeze({
+    remoteMachine,
     remote: { ...remote, history: (credential: Uint8Array) => allHistory(hex(credential)) },
     ledger,
     mailbox,

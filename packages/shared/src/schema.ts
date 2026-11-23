@@ -182,6 +182,8 @@ export type TitleGenerationConfig = {
 export type AgentSessionDefaults = {
   modelId?: string;
   configOptionValues: Record<string, AcpConfigOptionValue>;
+  /** Per-model option defaults (e.g. thought_level, fast-mode), keyed by modelId then configId. */
+  modelConfigOptionValues?: Record<string, Record<string, AcpConfigOptionValue>>;
 };
 
 export type AgentConfigMeta = {

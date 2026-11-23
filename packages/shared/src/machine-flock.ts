@@ -1,3 +1,4 @@
+import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
 import { isMagpieGatewayUrl, normalizeMagpieGateway } from './magpie-import';
 import { MemoryAssociationSchema, type MemoryAssociation } from './memory-provider';
 import type { RateLimit } from 'acp-extension-core';
@@ -1878,14 +1879,35 @@ const normalizeAgentSessionDefaults = (
   const configOptionValues: Record<string, string | boolean> = {};
   if (isRecord(value.configOptionValues)) {
     for (const [configId, optionValue] of Object.entries(value.configOptionValues)) {
-      if (!configId) continue;
+      if (!configId || isSensitiveAcpConfigOptionId(configId)) continue;
       if (typeof optionValue === 'string' || typeof optionValue === 'boolean')
         configOptionValues[configId] = optionValue;
     }
   }
+  const modelConfigOptionValues: Record<string, Record<string, string | boolean>> = {};
+  if (isRecord(value.modelConfigOptionValues)) {
+    for (const [entryModelId, modelRecord] of Object.entries(value.modelConfigOptionValues)) {
+      if (!entryModelId || !isRecord(modelRecord)) continue;
+      const normalizedModelValues: Record<string, string | boolean> = {};
+      for (const [configId, optionValue] of Object.entries(modelRecord)) {
+        if (!configId || isSensitiveAcpConfigOptionId(configId)) continue;
+        if (typeof optionValue === 'string' || typeof optionValue === 'boolean') {
+          normalizedModelValues[configId] = optionValue;
+        }
+      }
+      if (Object.keys(normalizedModelValues).length > 0) {
+        modelConfigOptionValues[entryModelId] = normalizedModelValues;
+      }
+    }
+  }
+  const hasModelValues = Object.keys(modelConfigOptionValues).length > 0;
   const modelId = isNonEmptyString(value.modelId) ? value.modelId : undefined;
-  if (!modelId && !Object.keys(configOptionValues).length) return undefined;
-  return { ...(modelId ? { modelId } : {}), configOptionValues };
+  if (!modelId && !Object.keys(configOptionValues).length && !hasModelValues) return undefined;
+  return {
+    ...(modelId ? { modelId } : {}),
+    configOptionValues,
+    ...(hasModelValues ? { modelConfigOptionValues } : {}),
+  };
 };
 
 const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined => {

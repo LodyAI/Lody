@@ -248,4 +248,121 @@ describe('role maintenance at workspace startup', () => {
       ],
     });
   });
+
+  it('reconciles unsupported borrowed options when passive observedModelConfigOptions sync in after startup', async () => {
+    const flock = new Flock('passive-observed-role');
+    const role: AgentRole = {
+      v: AGENT_ROLE_VERSION,
+      id: 'carbon-role' as never,
+      machineId: 'machine' as never,
+      agentConfigId: 'antigravity-config' as never,
+      ownerUserId: 'owner',
+      visibility: 'private',
+      name: 'Carbon',
+      runConfig: {
+        modeId: 'agent',
+        modelId: 'gemini-orchestrator',
+        configOptionValues: { thought_level: 'high' },
+      },
+      revision: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const key = workspaceFlockKeys.agentRole(role.id);
+    flock.set(key, role as never);
+    flock.commit();
+    const repo = { openFlockDoc: async () => ({ flock, syncOnce: async () => {} }) };
+    const baseCapability = {
+      cliType: 'custom' as const,
+      agentType: 'antigravity-acp',
+      provenance: 'runtime' as const,
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      fetchedAt: 2,
+      modes: [{ id: 'agent', name: 'Agent' }],
+      models: [
+        { modelId: 'claude-opus-4-6-thinking', name: 'Claude Opus' },
+        { modelId: 'gemini-orchestrator', name: 'Carbon' },
+      ],
+      configOptions: [
+        {
+          id: 'thought_level',
+          category: 'thought_level',
+          name: 'Thinking',
+          type: 'select' as const,
+          currentValue: 'high',
+          options: [{ value: 'high', name: 'High' }],
+        },
+      ],
+    };
+    let probeCount = 0;
+    const runtime = {
+      workspaceId: 'workspace',
+      repo,
+      writer: createDirectWorkspaceWriter({ repo } as never),
+      requestMachineAcpCapabilitiesRefresh: async () => {
+        probeCount += 1;
+        return {
+          success: true,
+          machineId: 'machine',
+          configId: 'antigravity-config',
+          cliType: 'custom',
+          agentType: 'antigravity-acp',
+          capability: baseCapability,
+        };
+      },
+    };
+    state.roles = [role];
+    state.synced = true;
+    state.machines = new Map([
+      ['machine', { id: 'machine', acpCapabilities: { 'antigravity-config': baseCapability } }],
+    ]);
+    state.atoms = new Map<string, unknown>([
+      ['runtime', runtime],
+      ['user', { id: 'owner' }],
+      ['online', new Set(['machine'])],
+      [
+        'configs',
+        [
+          {
+            id: 'antigravity-config',
+            machineId: 'machine',
+            cliType: 'custom',
+            agentType: 'antigravity-acp',
+          },
+        ],
+      ],
+    ]);
+    const root = createRoot(document.createElement('div'));
+    roots.push(root);
+    await act(async () => root.render(<Startup />));
+    await act(async () => {});
+    expect(probeCount).toBe(1);
+    expect(flock.get(key)).toEqual(role);
+
+    state.machines = new Map([
+      [
+        'machine',
+        {
+          id: 'machine',
+          acpCapabilities: {
+            'antigravity-config': {
+              ...baseCapability,
+              observedModelConfigOptions: { 'gemini-orchestrator': [] },
+            },
+          },
+        },
+      ],
+    ]);
+    await act(async () => root.render(<Startup />));
+    await act(async () => {});
+
+    expect(probeCount).toBe(1);
+    expect(flock.get(key)).toMatchObject({
+      runConfig: {
+        modeId: 'agent',
+        modelId: 'gemini-orchestrator',
+      },
+      revision: 2,
+    });
+  });
 });

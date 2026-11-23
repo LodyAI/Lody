@@ -1,3 +1,11 @@
+import {
+  useWorkspaceNotificationQuery,
+  useWorkspaceNotificationMutation,
+} from '../src/hooks/use-workspace-notifications';
+import {
+  useGithubWorkspaceQuery,
+  useGithubWorkspaceMutation,
+} from '../src/hooks/use-github-workspace';
 // @vitest-environment jsdom
 import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { usePersonalGitHubAuthorization } from '../src/hooks/use-personal-github-authorization';
@@ -633,5 +641,244 @@ it('preserves an OAuth return until ordinary mode admission is available', async
   } finally {
     window.location.hash = '';
     sessionStorage.removeItem('lody:githubPersonalAuthorization');
+  }
+});
+
+it('fences retained GitHub mutations on verified role, workspace and account changes', async () => {
+  const store = createTourStore(DEFAULT_TOUR_IDENTITY);
+  const runtime = store.get(runtimeAtom)!;
+  let role: 'owner' | 'admin' | 'member' | 'guest' | null = 'owner';
+  const listeners = new Set<() => void>();
+  store.set(runtimeAtom, {
+    ...runtime,
+    accountId: TOUR_USER_ID,
+    contentMode: 'e2ee',
+    protectedMemberRole: {
+      get: () => role,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    },
+  });
+  store.set(workspaceContentModeAtom, {
+    accountId: TOUR_USER_ID,
+    workspaceSlug: TOUR_WORKSPACE_SLUG,
+    workspaceId: TOUR_WORKSPACE_ID,
+    descriptor: {
+      workspaceId: TOUR_WORKSPACE_ID,
+      contentMode: 'e2ee',
+      activation: 'active',
+      contentModeVersion: 1,
+      cryptoOrgId: 'ab'.repeat(32),
+      genesisHash: 'ab'.repeat(32),
+    },
+  });
+  const writes: unknown[] = [];
+  let retained:
+    | ((args: { workspaceId: string; repoFullName: string; enabled: boolean }) => Promise<unknown>)
+    | undefined;
+  function GitHubProbe() {
+    const repos = useGithubWorkspaceQuery(cloudOperations.github.getWorkspaceRepositories, {
+      workspaceId: TOUR_WORKSPACE_ID,
+    });
+    const mutate = useGithubWorkspaceMutation(cloudOperations.github.setRepoEnabled);
+    retained ??= mutate;
+    return <output>{JSON.stringify(repos ?? [])}</output>;
+  }
+  const platform: PlatformProvider = {
+    ...TEST_CLOUD_PLATFORM,
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useQuery: (_operation, args) =>
+        args === 'skip' ? undefined : ([{ fullName: 'owner/repo' }] as never),
+      useMutation: () => async (args) => {
+        writes.push(args);
+        return undefined as never;
+      },
+    },
+  };
+  await act(async () =>
+    root.render(
+      <PlatformContext.Provider value={platform}>
+        <Provider store={store}>
+          <GitHubProbe />
+        </Provider>
+      </PlatformContext.Provider>
+    )
+  );
+  const args = { workspaceId: TOUR_WORKSPACE_ID, repoFullName: 'owner/repo', enabled: true };
+  await retained!(args);
+  expect(writes).toEqual([args]);
+  await act(async () => {
+    role = 'member';
+    for (const listener of listeners) listener();
+  });
+  expect(container.textContent).toContain('owner/repo');
+  await expect(retained!(args)).rejects.toMatchObject({
+    code: 'legacy_workspace_admission_blocked',
+  });
+  await act(async () => {
+    role = 'guest';
+    for (const listener of listeners) listener();
+  });
+  expect(container.textContent).toBe('[]');
+  await act(async () => {
+    role = 'admin';
+    for (const listener of listeners) listener();
+  });
+  await retained!(args);
+  expect(writes).toEqual([args, args]);
+  await expect(retained!({ ...args, workspaceId: 'another-workspace' })).rejects.toThrow();
+  await act(async () => store.set(userAtom, { id: 'another-account' } as never));
+  await expect(retained!(args)).rejects.toMatchObject({
+    code: 'legacy_workspace_admission_account_changed',
+  });
+  expect(writes).toHaveLength(2);
+});
+
+it('admits E2EE Inbox and push registration only for the current authenticated content runtime', async () => {
+  const store = createTourStore(DEFAULT_TOUR_IDENTITY);
+  const runtime = {
+    ...store.get(runtimeAtom)!,
+    accountId: TOUR_USER_ID,
+    contentMode: 'e2ee' as const,
+  };
+  const descriptor = {
+    workspaceId: TOUR_WORKSPACE_ID,
+    contentMode: 'e2ee' as const,
+    contentModeVersion: 1 as const,
+    activation: 'control-only' as const,
+    cryptoOrgId: 'ab'.repeat(32),
+    genesisHash: 'ab'.repeat(32),
+  };
+  store.set(runtimeAtom, runtime);
+  store.set(workspaceContentModeAtom, {
+    accountId: TOUR_USER_ID,
+    workspaceSlug: TOUR_WORKSPACE_SLUG,
+    workspaceId: TOUR_WORKSPACE_ID,
+    descriptor,
+  });
+  const signedIn = { status: 'authenticated' as const, user: { id: TOUR_USER_ID } };
+  const signedOut = { status: 'unauthenticated' as const };
+  let authenticated = true;
+  const inbox = {
+    id: 'notice',
+    read: false,
+    dismissed: false,
+    suppressed: false,
+    reconciled: false,
+  };
+  let registration: unknown;
+  const platform: PlatformProvider = {
+    ...TEST_CLOUD_PLATFORM,
+    identity: {
+      ...TEST_CLOUD_PLATFORM.identity,
+      session: {
+        get: () => (authenticated ? signedIn : signedOut),
+        subscribe: () => () => {},
+      },
+    },
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useQuery: ((operation, args) =>
+        args === 'skip'
+          ? undefined
+          : operation.name === 'inbox:listMine'
+            ? [inbox]
+            : { sourceRevision: 'revision' }) as CloudApi['useQuery'],
+      useMutation: ((operation) => async (args: unknown) => {
+        if (operation.name === 'pushSubscriptions:register') registration = args;
+        if (operation.name === 'inbox:markRead') inbox.read = true;
+        if (operation.name === 'inbox:dismiss') inbox.dismissed = true;
+        if (operation.name === 'inbox:suppressSharingReview') inbox.suppressed = true;
+        if (operation.name === 'inbox:reconcileSharingReview') inbox.reconciled = true;
+      }) as CloudApi['useMutation'],
+    },
+  };
+  let writes: Array<() => Promise<unknown>> = [];
+  function Notifications() {
+    const rows = useWorkspaceNotificationQuery(cloudOperations.inbox.listMine, {
+      workspaceId: TOUR_WORKSPACE_ID,
+    });
+    const review = useWorkspaceNotificationQuery(cloudOperations.inbox.getSharingReviewState, {
+      workspaceId: TOUR_WORKSPACE_ID,
+    });
+    const mark = useWorkspaceNotificationMutation(cloudOperations.inbox.markRead);
+    const dismiss = useWorkspaceNotificationMutation(cloudOperations.inbox.dismiss);
+    const suppress = useWorkspaceNotificationMutation(cloudOperations.inbox.suppressSharingReview);
+    const reconcile = useWorkspaceNotificationMutation(
+      cloudOperations.inbox.reconcileSharingReview
+    );
+    const register = useWorkspaceNotificationMutation(cloudOperations.pushSubscriptions.register);
+    writes = [
+      () => mark({ itemId: 'notice' }),
+      () => dismiss({ itemId: 'notice' }),
+      () => suppress({ workspaceId: TOUR_WORKSPACE_ID }),
+      () => reconcile({ workspaceId: TOUR_WORKSPACE_ID } as never),
+      () =>
+        register({
+          workspaceId: TOUR_WORKSPACE_ID,
+          installationId: 'installation',
+          token: 'token',
+          platform: 'ios',
+          purpose: 'notification',
+          language: 'en',
+        }),
+    ];
+    return <output>{rows ? JSON.stringify({ inbox: rows, review }) : 'blocked'}</output>;
+  }
+  const render = async () =>
+    act(async () =>
+      root.render(
+        <PlatformContext.Provider value={platform}>
+          <Provider store={store}>
+            <WorkspaceRouteTargetProvider slug={TOUR_WORKSPACE_SLUG}>
+              <Notifications />
+            </WorkspaceRouteTargetProvider>
+          </Provider>
+        </PlatformContext.Provider>
+      )
+    );
+  await render();
+  expect(container.textContent).toContain('notice');
+  const retained = writes;
+  for (const write of writes) await write();
+  await render();
+  expect(inbox).toMatchObject({ read: true, dismissed: true, suppressed: true, reconciled: true });
+  expect(registration).toMatchObject({ workspaceId: TOUR_WORKSPACE_ID, token: 'token' });
+  expect(container.textContent).toContain('revision');
+  for (const state of [
+    'unauthenticated',
+    'revoked',
+    'unrelated',
+    'unadmitted',
+    'different-account',
+  ] as const) {
+    authenticated = state !== 'unauthenticated';
+    await act(async () => {
+      store.set(
+        runtimeAtom,
+        state === 'revoked'
+          ? null
+          : state === 'unrelated'
+            ? { ...runtime, workspaceId: 'other' as never }
+            : runtime
+      );
+      store.set(workspaceContentModeAtom, {
+        accountId: TOUR_USER_ID,
+        workspaceSlug: TOUR_WORKSPACE_SLUG,
+        workspaceId: TOUR_WORKSPACE_ID,
+        descriptor: state === 'unadmitted' ? null : descriptor,
+      });
+      if (state === 'different-account')
+        store.set(userAtom, { ...store.get(userAtom)!, id: 'other' });
+    });
+    await render();
+    expect(container.textContent, state).toBe('blocked');
+    for (const write of retained)
+      await expect(write(), state).rejects.toThrow(/unavailable|still being verified/);
   }
 });

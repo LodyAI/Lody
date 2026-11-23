@@ -169,24 +169,24 @@ const defaultDatabase = (): string =>
   process.env.LODY_ROOST_DB_PATH?.trim() ||
   join(getLodyDataDir(undefined, homedir()), 'roost-history.sqlite3');
 
-let ownerPool:
-  | {
-      key: string;
-      client: RoostNativeClient;
-      owner: Uint8Array;
-      projectionLanes: Semaphore.Semaphore;
-      remoteAuth: Map<string, RoostRemoteAuth>;
-      refs: number;
-      closePromise?: Promise<void>;
-    }
-  | undefined;
+type OwnerPool = {
+  client: RoostNativeClient;
+  owner: Uint8Array;
+  projectionLanes: Semaphore.Semaphore;
+  remoteAuth: Map<string, RoostRemoteAuth>;
+  refs: number;
+};
+const ownerPools = new Map<string, OwnerPool>();
 
 const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerLease> => {
   const dbPath = resolve(options.dbPath ?? defaultDatabase());
   const seed = await loadRoostOwnerSeedLegacy(dbPath, options.seed);
   const owner = Identity.fromSeed(seed).owner();
-  const key = `${dbPath}:${bytesHex(owner)}`;
-  if (ownerPool?.key === key && !ownerPool.closePromise) {
+  const key = dbPath;
+  const ownerPool = ownerPools.get(key);
+  if (ownerPool) {
+    if (bytesHex(ownerPool.owner) !== bytesHex(owner))
+      throw new Error('Roost owner identity changed while open');
     ownerPool.refs += 1;
     return {
       client: ownerPool.client,
@@ -196,7 +196,6 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
       release: async () => releaseOwner(key),
     };
   }
-  if (ownerPool) await releaseOwnerUnlocked(ownerPool.key, true);
   await mkdir(dirname(dbPath), { recursive: true });
   const remoteAuth = new Map<string, RoostRemoteAuth>();
   const client = new RoostNativeClient({
@@ -235,7 +234,7 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
   const projectionLanes = Effect.runSync(
     Semaphore.make(Math.max(1, Math.min(8, Math.floor((options.maxQueuedRequests ?? 32) / 2))))
   );
-  ownerPool = { key, client, owner, projectionLanes, remoteAuth, refs: 1 };
+  ownerPools.set(key, { client, owner, projectionLanes, remoteAuth, refs: 1 });
   return {
     client,
     owner: owner.slice(),
@@ -278,23 +277,19 @@ export async function acquireRoostCloudUploadOwner() {
   };
 }
 
-const releaseOwnerUnlocked = async (key: string, force = false): Promise<void> => {
-  if (!ownerPool || ownerPool.key !== key) return;
-  if (!force) ownerPool.refs = Math.max(0, ownerPool.refs - 1);
-  if (!force && ownerPool.refs > 0) return;
-  const current = ownerPool;
-  ownerPool = undefined;
-  current.closePromise ??= current.client.close();
-  try {
-    await current.closePromise;
-  } catch (error) {
-    reportRoostHistoryFailure(error, { stage: 'close' });
-    throw error;
-  }
-};
-
-const releaseOwner = (key: string, force = false): Promise<void> =>
-  serializeOwnerTransition(() => releaseOwnerUnlocked(key, force));
+const releaseOwner = (key: string): Promise<void> =>
+  serializeOwnerTransition(async () => {
+    const pool = ownerPools.get(key);
+    if (!pool || --pool.refs > 0) return;
+    try {
+      await pool.client.close();
+    } catch (error) {
+      reportRoostHistoryFailure(error, { stage: 'close' });
+      throw error;
+    } finally {
+      ownerPools.delete(key);
+    }
+  });
 
 const clone = <T>(value: T): T => structuredClone(value);
 
@@ -3585,7 +3580,8 @@ const createNodeServicesForLease = async (
   };
   const acceptInput = async (
     entry: SessionTurn,
-    dispatch = false
+    dispatch = false,
+    assertCurrent?: () => void
   ): Promise<SessionInputAcceptanceResult> => {
     const identity = inputIdentity(entry);
     await withWrites(
@@ -3611,15 +3607,18 @@ const createNodeServicesForLease = async (
           const existing = (await sessionDoc.getDocState())?.humanInputReceipts?.[entry.id];
           if (existing && existing.userId !== userId)
             throw new HistoryWriteError([{ path: ['userId'], code: 'input_identity_conflict' }]);
+          assertCurrent?.();
           sessionDoc.recordHumanInputReceipt(entry.id, userId);
         }
         if (!prior) {
           const branch = await ensureHeadSealed();
+          const parents = await parentForHead(branch);
+          assertCurrent?.();
           const accepted = await roostHistory.acceptInputToView({
             ...identity,
             expectedRevision: branch.state.revision,
             expectedHead: branch.state.head,
-            input: { ...identity.input, parents: await parentForHead(branch) },
+            input: { ...identity.input, parents },
           });
           created = accepted.created;
           await refreshProjectedMessage(accepted.turnId, accepted);
@@ -3650,8 +3649,10 @@ const createNodeServicesForLease = async (
             ) {
               // The existing writer queue orders this check and activation with
               // every competing accept. A recovered older input cannot move it back.
-              if (latest?.id === entry.id && meta.latestUserMsgId !== entry.id)
+              if (latest?.id === entry.id && meta.latestUserMsgId !== entry.id) {
+                assertCurrent?.();
                 await sessionDoc.publishUserTurnActivation(entry.id);
+              }
             }
           }
         }
@@ -3675,8 +3676,8 @@ const createNodeServicesForLease = async (
           }
         : { status: 'unobserved' };
     },
-    accept: (entry) => acceptInput(entry),
-    acceptAndDispatch: (entry) => acceptInput(entry, true),
+    accept: (entry, assertCurrent) => acceptInput(entry, false, assertCurrent),
+    acceptAndDispatch: (entry, assertCurrent) => acceptInput(entry, true, assertCurrent),
   };
 
   const sessionData: RoostSessionData = createRoostSessionData({
@@ -4014,7 +4015,11 @@ const createNodeServices = async (
   try {
     if (sessionDoc.handle?.doc.getByPath('roostHistoryCursor/cursor') !== undefined)
       throw new Error('Unsupported Roost control publication format; create a new test session');
-    lease = await acquireOwner(ownerOptions);
+    lease = await acquireOwner(
+      sessionDoc.encryptedRepositoryDirectory
+        ? { dbPath: join(sessionDoc.encryptedRepositoryDirectory, 'roost', 'history.sqlite3') }
+        : ownerOptions
+    );
     return await createNodeServicesForLease(sessionDoc, lease);
   } catch (error) {
     reportRoostHistoryFailure(error, { stage: 'initialize', sessionId: sessionDoc.sessionId });

@@ -28,6 +28,90 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('binds protected history retries to the owner, operation and turn on either plane', async () => {
+    let version: number | undefined;
+    let failure: 'outer' | 'inner' | undefined;
+    const ids: string[] = [];
+    const entry = {
+      id: 'turn-1',
+      role: 'user',
+      userId: 'account',
+      e2eeIntent: 'test-signature',
+      inputConfig: { inputBlocks: [] },
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineProtocolCapabilities: async () =>
+        version === undefined ? {} : { e2eeRoostHistory: version },
+      getMachineRpcClient: async () => {
+        throw new Error('unexpected plaintext RPC');
+      },
+      requestEncryptedFeature: async (request, options) => {
+        expect(request.machineId).toBe(remoteMachineId);
+        expect(request.workspaceId).toBe(workspaceId);
+        if (failure === 'outer') return { ok: false, error: 'denied' };
+        if (request.method === 'session/history-read')
+          return {
+            ok: true,
+            result: {
+              type: 'session/history-read_response',
+              sessionId,
+              success: failure !== 'inner',
+              result: [],
+              historyRevision: 1,
+              historyCount: 0,
+            },
+          };
+        if (request.method !== 'session/history-write') throw new Error('unexpected method');
+        expect(request.params.payload.entry).toEqual(entry);
+        ids.push(options!.requestId);
+        return {
+          ok: true,
+          result: {
+            type: 'session/history-write_response',
+            sessionId,
+            operation: request.params.operation,
+            success: failure !== 'inner',
+            result: { status: 'accepted', turnId: entry.id, active: true },
+            historyRevision: 1,
+            historyCount: 1,
+            historyChange: null,
+          },
+        };
+      },
+    });
+    const read = () =>
+      facade.requestSessionHistoryRead(remoteMachineId, sessionId, { kind: 'readMetadata' });
+    const write = (operation: 'accept_input' | 'accept_input_and_dispatch') =>
+      facade.requestSessionHistoryWrite(remoteMachineId, {
+        sessionId,
+        operation,
+        payload: { entry },
+      });
+    for (version of [undefined, 0]) {
+      await expect(read()).rejects.toThrow();
+      await expect(write('accept_input')).rejects.toThrow();
+    }
+    version = 2;
+    await expect(read()).resolves.toMatchObject({ success: true, result: [] });
+    for (const operation of ['accept_input', 'accept_input', 'accept_input_and_dispatch'] as const)
+      await expect(write(operation)).resolves.toMatchObject({
+        result: { status: 'accepted', turnId: 'turn-1', active: true },
+      });
+    expect(ids[0]).toMatch(/^[0-9a-f]{32}$/);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
+    for (failure of ['inner', 'outer'] as const) {
+      await expect(read()).rejects.toThrow();
+      await expect(write('accept_input')).rejects.toThrow();
+    }
+  });
+
   it('negotiates blob persistence and read-classified encrypted diff calls', async () => {
     for (const [plane, protectedContent, supported, persist] of [
       ['local', false, true, false],
@@ -2107,3 +2191,79 @@ describe('encrypted remote files from a browser or mobile device', () => {
     });
   });
 });
+
+it.each(['ios-simulator', 'android-emulator'] as const)(
+  'routes encrypted remote %s previews without ordinary RPC or preview proof',
+  async (platform) => {
+    const requests: unknown[] = [];
+    let access: 'write' | 'read' = 'write';
+    let outcome: unknown = {
+      type: `${platform}/control_response`,
+      sessionId,
+      success: true,
+      preview: {
+        operationId: 'operation',
+        ...(platform === 'ios-simulator'
+          ? { udid: '00000000-0000-4000-8000-000000000001' }
+          : { id: 'Pixel_A' }),
+        phase: 'ready',
+        transport: 'remote',
+        viewerUrl: 'https://preview.example.test/viewer#synthetic',
+      },
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      protectedCodeCollabRole: () => access,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('ordinary RPC must stay closed');
+      },
+      requestEncryptedFeature: async (request) => {
+        requests.push(request);
+        return { ok: true, result: outcome } as never;
+      },
+    });
+    const control =
+      platform === 'ios-simulator'
+        ? facade.requestIosSimulatorControl
+        : facade.requestAndroidEmulatorControl;
+    const args = {
+      machineId: remoteMachineId,
+      sessionId,
+      requestedByUserId: 'owner',
+      command: { action: 'status' as const },
+    };
+    expect(await control(args)).toMatchObject({
+      success: true,
+      preview: { transport: 'remote', viewerUrl: 'https://preview.example.test/viewer#synthetic' },
+    });
+    expect(requests).toEqual([
+      {
+        workspaceId,
+        machineId: remoteMachineId,
+        method: `${platform}/control`,
+        params: { sessionId, requestedByUserId: 'owner', command: args.command },
+        timeoutMs: 15000,
+      },
+    ]);
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+    access = 'read';
+    expect(await control(args)).toMatchObject({ success: false });
+    expect(requests).toHaveLength(1);
+    access = 'write';
+    outcome = { type: `${platform}/control_response`, sessionId: 'other-session', success: true };
+    expect(await control(args)).toMatchObject({ success: false });
+    outcome = {
+      type: `${platform}/control_response`,
+      sessionId,
+      success: true,
+      preview: { viewerUrl: 'invalid' },
+    };
+    expect(await control(args)).toMatchObject({ success: false });
+  }
+);

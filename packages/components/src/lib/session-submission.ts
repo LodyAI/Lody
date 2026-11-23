@@ -1,4 +1,5 @@
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
+import { requireEncryptedRoostOwner } from './encrypted-roost-history';
 import { acceptSessionUserTurn } from './session-send-admission';
 import { dispatchUserTurn, steerUserTurn } from './session-send-delivery';
 import type {
@@ -139,17 +140,16 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
 
   const prepareCreate = async (payload: SessionToCreate): Promise<CreateSessionResult> => {
     const encrypted = runtime?.contentMode === 'e2ee';
-    const wanted = encrypted
-      ? LEGACY_SESSION_HISTORY_BACKEND
-      : (payload.historyBackend ?? defaultHistoryBackend);
+    const wanted = payload.historyBackend ?? defaultHistoryBackend;
     const machine =
       wanted === 'roost'
         ? ((await runtime!.repo.getDocMeta(getMachineRoomId(payload.machineId)))?.meta as
             | MachineMeta
             | undefined)
         : undefined;
+    if (encrypted && wanted === 'roost') requireEncryptedRoostOwner(machine);
     const backend = encrypted
-      ? LEGACY_SESSION_HISTORY_BACKEND
+      ? wanted
       : resolveNewSessionHistoryBackend(machine, {
           requested: payload.historyBackend,
           preferred: defaultHistoryBackend,

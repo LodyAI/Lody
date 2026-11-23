@@ -17,25 +17,6 @@
  * hook stores only user edits, feeds the capability lookup from CANDIDATES,
  * and resolves the runtime-omitted key once, so this must mount and settle.
  */
-
-/**
- * The composer's selector options are built FROM the selection (the
- * `useSessionAcpSelectorContext` cycle), and the regression these tests pin
- * comes from a real session (51e236e0-b0d0-4c47-a74b-f8cfe2e97a91, 0.89.x,
- * React error #185 on open). Its stored turn preferences carry a config option
- * the agent's runtime snapshot does not report:
- *
- *   turn inputConfig: builtin/claude, mode `auto`, model `claude-fable-5[1m]`,
- *     configOptionValues `{ effort: high, fast: false }`
- *   acpRuntimeConfig (revision 1, based on that same turn): mode `auto`,
- *     model `claude-fable-5`,
- *     configOptionValues `{ effort: high, mode: auto, model: claude-fable-5 }`
- *
- * The old reconcile/apply layout-effect pair alternated on that key once per
- * render until React aborted with "Maximum update depth exceeded". The derived
- * hook stores only user edits, feeds the capability lookup from CANDIDATES,
- * and resolves the runtime-omitted key once, so this must mount and settle.
- */
 import { act, useMemo } from 'react';
 import { Provider, createStore } from 'jotai';
 import {
@@ -591,6 +572,24 @@ describe('existing-session run-config drafts', () => {
     expect(visible()).toBe('false');
   });
 
+  it('keeps model-dependent Fast edits independent per model across model switches', () => {
+    render();
+    toggle(true);
+    expect(visible()).toBe('true');
+
+    flushSync(() => selection.selectModel('next'));
+    expect(visible()).toBe('false');
+
+    flushSync(() => selection.selectModel('chosen'));
+    expect(visible()).toBe('true');
+
+    flushSync(() => selection.selectModel('next'));
+    toggle(false);
+    expect(visible()).toBe('false');
+    flushSync(() => selection.selectModel('chosen'));
+    expect(visible()).toBe('true');
+  });
+
   it('consumes captured edits only after the local write succeeds, even after unmount', async () => {
     render();
     toggle(true);
@@ -636,7 +635,8 @@ describe('existing-session run-config drafts', () => {
     });
     expect(selection.selection.edits).toEqual({
       model: { value: 'next' },
-      configOptions: { 'fast-mode': false },
+      configOptions: {},
+      modelConfigOptions: { next: { 'fast-mode': false } },
     });
   });
 

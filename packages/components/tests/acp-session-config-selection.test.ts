@@ -171,6 +171,104 @@ describe('ACP session config derivation', () => {
     ).toEqual({});
   });
 
+  it('resolves independent per-model preferences and edits without bleeding outgoing model values', () => {
+    const options: AcpSessionSelectorOptionsInput = {
+      capabilityAuthority: 'authoritative',
+      modeOptions: [],
+      modelOptions: [
+        { value: 'model-a', label: 'Model A' },
+        { value: 'model-b', label: 'Model B' },
+      ],
+      defaultModeId: null,
+      defaultModelId: 'model-a',
+      configOptionSelectors: [
+        {
+          configId: 'reasoning_effort',
+          category: 'thought_level',
+          label: 'Reasoning effort',
+          type: 'select',
+          currentValue: 'medium',
+          options: ['low', 'medium', 'high'].map((value) => ({ value, label: value })),
+        },
+        {
+          configId: 'fast-mode',
+          label: 'Fast',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+        {
+          configId: 'plan_mode',
+          label: 'Plan',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+    };
+
+    const preferences = {
+      modelId: 'model-a',
+      configOptionValues: { plan_mode: true },
+      modelConfigOptionValues: {
+        'model-a': { reasoning_effort: 'high', 'fast-mode': true },
+        'model-b': { reasoning_effort: 'low', 'fast-mode': false },
+      },
+    };
+
+    expect(
+      resolveAcpSessionConfigSelection({ edits: emptyEdits, preferences }, options)
+        .configOptionValues
+    ).toEqual({
+      plan_mode: true,
+      reasoning_effort: 'high',
+      'fast-mode': true,
+    });
+
+    expect(
+      resolveAcpSessionConfigSelection(
+        {
+          edits: { model: { value: 'model-b' }, configOptions: {} },
+          preferences,
+          runtimePreferences: {
+            modelId: 'model-a',
+            configOptionValues: {
+              plan_mode: true,
+              reasoning_effort: 'high',
+              'fast-mode': true,
+            },
+          },
+        },
+        options
+      ).configOptionValues
+    ).toEqual({
+      plan_mode: true,
+      reasoning_effort: 'low',
+      'fast-mode': false,
+    });
+
+    expect(
+      resolveAcpSessionConfigSelection(
+        {
+          edits: {
+            model: { value: 'model-b' },
+            configOptions: {},
+            modelConfigOptions: {
+              'model-a': { reasoning_effort: 'low' },
+              'model-b': { 'fast-mode': true },
+            },
+          },
+          preferences,
+        },
+        options
+      ).configOptionValues
+    ).toEqual({
+      plan_mode: true,
+      reasoning_effort: 'low',
+      'fast-mode': true,
+    });
+  });
+
   it('normalizes model-dependent selectors against the RESOLVED model', () => {
     /* An authoritative capability refresh removed the persisted extended Codex
        model (`gpt-5.6-sol`). The selector catalog was built for that stale

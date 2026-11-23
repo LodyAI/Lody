@@ -311,8 +311,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
               const link = Link.openPartial(lease.storage, stream, scope, linkLimitsForSync());
               const offset = await link.position();
               if (offset === undefined) return;
-              // The SDK receipt can survive a crash before its frames were
-              // applied. Drain it locally before exposing an applied cursor.
               await link.catchUpAt(offset);
               await changes(replica);
               replica.forwardOffset = offset;
@@ -334,9 +332,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   const network = async <T>(replica: Replica, operation: () => Promise<T>): Promise<T> => {
     const perform = async () => {
       assertLive();
-      // Primary browser tabs share the persisted replica. Serialize intake
-      // where Web Locks is available, and reload its hints AFTER acquiring
-      // the lock. Native Inbox/Replay CAS remains the durability boundary.
       const space = replica.stream.space('lody_remote_reader_v1');
       const raw = await replica.lease.storage.transact(false, function* (tx) {
         return yield* tx.get(space, new Uint8Array());
@@ -475,8 +470,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
           identity = (await replica.stream.readValue(event.update.turnId, [{ key: 'lodyHistory' }]))
             .value;
         } catch (error) {
-          // Unknown application envelopes are not history rows. Storage or
-          // admission errors still fail the read and retain its event cursor.
           if (error instanceof StoreError && error.code === 'invalid') continue;
           throw error;
         }
@@ -538,7 +531,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       const tail = report.fetchedRange?.[1] ?? originalTail;
       if ((await replica.link!.position()) === undefined) {
         if (tail === undefined) throw new Error('Roost history window has no tail boundary');
-        // This is the tail observed by THIS window, never a later HEAD.
         await replica.link!.catchUpAt(tail);
       }
       replica.forwardOffset = await replica.link!.position();
@@ -548,8 +540,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         reachedStart: report.reachedStart,
         before: report.fetchedRange?.[0] ?? replica.meta.before,
       };
-      // Receipts/imports and the initial catch-up position are durable first.
-      // Losing this derived hint only causes a repeated, deduplicated window.
       await persistMeta(replica);
       await changes(replica);
       return;
@@ -776,8 +766,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       return await page(replica, { before, limit });
     } catch (error) {
       if (!(error instanceof Error) || !('code' in error) || error.code !== 'stale') throw error;
-      // A replacement invalidates ancestry. Rebuild only the requested window
-      // on the new branch; a stale cursor cannot resurrect a replaced suffix.
       let current = await latest(replica, limit);
       while (current.startPosition > before.position && current.cursor)
         current = await older(replica, current.cursor, limit);

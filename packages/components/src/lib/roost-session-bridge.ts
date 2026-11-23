@@ -85,6 +85,8 @@ type RoostHistoryTransport = {
 
 type RoostHistoryObservationOptions = {
   readonly cloudHistory?: (sessionId: SessionId) => ReturnType<typeof createRoostHistoryReplica>;
+  readonly cacheNamespace?: string;
+  readonly pollIntervalMs?: number;
   readonly coherentInspection?: boolean | (() => boolean);
   readonly incremental?: boolean | (() => boolean);
   readonly live?: boolean | (() => boolean);
@@ -284,7 +286,7 @@ const createRoostSessionDataFactoryFromTransport =
       incrementalEnabled() &&
       (typeof options.live === 'function' ? options.live() : options.live === true);
     let disposed = false;
-    const cache = createRoostHistoryCache(cacheScope(sessionId));
+    const cache = createRoostHistoryCache(cacheScope(sessionId), options.cacheNamespace);
     let cacheWarningReported = false;
     const cached = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
       try {
@@ -818,8 +820,6 @@ const createRoostSessionDataFactoryFromTransport =
         const checkpoint = prior?.checkpoint ?? prior?.recoveryCheckpoint;
         let ownerReset = false;
         if (incrementalEnabled() && prior && !checkpoint) {
-          // No verified interval remains. Establish a new bounded window;
-          // unknown older bodies must not become a patch baseline.
           replacingSnapshot = true;
           bodies.clear();
         }
@@ -985,8 +985,6 @@ const createRoostSessionDataFactoryFromTransport =
             notifyAppliedChanges(from, Math.max(prior.count, count), change.ids);
             retryDelay = refreshRequested ? 0 : 250;
             consecutiveSupersessions = 0;
-            // Complete checkpoint coverage repairs the retained window even
-            // when older pages have never been loaded. Do not reread its tail.
             return;
           } else {
             // Revisions belong to a Native generation. An explicit owner reset
@@ -1078,12 +1076,13 @@ const createRoostSessionDataFactoryFromTransport =
         }
       } finally {
         refreshing = false;
-        if (refreshRequested && !disposed && listeners.size > 0 && active()) {
-          refreshTimerDelay = retryDelay;
+        const delay = refreshRequested ? retryDelay : options.pollIntervalMs;
+        if (delay !== undefined && !disposed && listeners.size > 0 && active()) {
+          refreshTimerDelay = delay;
           refreshTimer = setTimeout(() => {
             refreshTimer = undefined;
             void refresh();
-          }, retryDelay);
+          }, delay);
         }
       }
     };

@@ -16,6 +16,7 @@ import {
 } from '@lody/shared';
 
 import { agentConfigMetaCacheAtom } from '../src/atoms/doc-meta';
+import { MobileFastModeToggle } from '../src/components/mobile/mobile-fast-plan-toggles';
 import { MobileRunConfigSheet } from '../src/components/mobile/mobile-run-config-sheet';
 import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { initI18n } from '../src/i18n';
@@ -322,6 +323,76 @@ describe('MobileRunConfigSheet', () => {
       document.querySelector('button[aria-label="Permission"], button[aria-label="Mode"]')
     ).toBeNull();
     expect(document.querySelector('button[aria-label="Model"]')).not.toBeNull();
+  });
+
+  it('cycles MobileFastModeToggle through Standard -> Fast -> Ultrafast -> Standard for multi-tier Codex models', async () => {
+    const selectors = buildAcpSelectorOptions({
+      configId: agentConfig.id,
+      cliType: 'builtin',
+      agentType: 'codex',
+      selectedModelId: 'gpt-6.2-sol',
+      machine: {
+        acpCapabilities: {
+          [agentConfig.id]: {
+            cliType: 'builtin',
+            agentType: 'codex',
+            cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+            provenance: 'runtime',
+            fetchedAt: 1,
+            modes: [],
+            models: [],
+            configOptions: [
+              selectOption('model', 'model', ['gpt-6.2-sol']),
+              {
+                id: 'fast-mode',
+                name: 'Speed',
+                category: 'model_config',
+                type: 'boolean',
+                currentValue: false,
+                options: [],
+              },
+            ],
+            declaredModelControls: {
+              'gpt-6.2-sol': { fastMode: true, speedTiers: ['fast', 'ultrafast'] },
+            },
+          },
+        },
+      },
+    }).configOptionSelectors;
+
+    function SpeedCycleHarness() {
+      const [speed, setSpeed] = useState<string | boolean>('off');
+      return (
+        <>
+          <output data-testid="speed">{String(speed)}</output>
+          <MobileFastModeToggle
+            configOptionSelectors={selectors}
+            configOptionValues={{ 'fast-mode': speed }}
+            onConfigOptionChange={(_, next) => setSpeed(next)}
+          />
+        </>
+      );
+    }
+
+    await act(async () => {
+      root?.render(<SpeedCycleHarness />);
+    });
+
+    const getToggle = () => container!.querySelector<HTMLButtonElement>('button')!;
+    expect(container!.querySelector('[data-testid="speed"]')?.textContent).toBe('off');
+    expect(getToggle().getAttribute('aria-pressed')).toBe('false');
+
+    await act(async () => getToggle().click());
+    expect(container!.querySelector('[data-testid="speed"]')?.textContent).toBe('fast');
+    expect(getToggle().getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => getToggle().click());
+    expect(container!.querySelector('[data-testid="speed"]')?.textContent).toBe('ultrafast');
+    expect(getToggle().getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => getToggle().click());
+    expect(container!.querySelector('[data-testid="speed"]')?.textContent).toBe('off');
+    expect(getToggle().getAttribute('aria-pressed')).toBe('false');
   });
 
   it.each(['permission', 'agent', 'role', 'model', 'interaction', 'reasoning'])(

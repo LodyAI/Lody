@@ -8,14 +8,27 @@ struct LodyLiveActivityPermissionActionConfiguration {
 enum LodyLiveActivityPermissionActionStore {
     static let appGroupIdentifier = "group.ai.lody.mobile.onesignal"
 
+    private static let enabledKey = "LodyLiveActivityPermissionActionsEnabled"
+
+    static func permissionActionConfiguration(
+        from defaults: UserDefaults? = UserDefaults(suiteName: appGroupIdentifier)
+    ) -> LodyLiveActivityPermissionActionConfiguration? {
+        guard defaults?.bool(forKey: enabledKey) == true else { return nil }
+        return configuration(from: defaults)
+    }
+
     private static let authTokenKey = "LodyLiveActivityPermissionActionAuthToken"
     private static let convexSiteUrlKey = "LodyLiveActivityPermissionActionConvexSiteUrl"
 
-    static func save(authToken: String?, convexSiteUrl: String?) {
-        guard let defaults = UserDefaults(suiteName: appGroupIdentifier) else {
+    static func save(
+        authToken: String?, convexSiteUrl: String?, permissionActionsEnabled: Bool = false,
+        to defaults: UserDefaults? = UserDefaults(suiteName: appGroupIdentifier)
+    ) {
+        guard let defaults else {
             return
         }
 
+        defaults.set(permissionActionsEnabled, forKey: enabledKey)
         let normalizedAuthToken = normalizeString(authToken)
         let normalizedSiteUrl = normalizeURLString(convexSiteUrl)
         if let normalizedSiteUrl {
@@ -30,8 +43,10 @@ enum LodyLiveActivityPermissionActionStore {
         _ = defaults.synchronize()
     }
 
-    static func configuration() -> LodyLiveActivityPermissionActionConfiguration? {
-        guard let defaults = UserDefaults(suiteName: appGroupIdentifier) else {
+    static func configuration(
+        from defaults: UserDefaults? = UserDefaults(suiteName: appGroupIdentifier)
+    ) -> LodyLiveActivityPermissionActionConfiguration? {
+        guard let defaults else {
             return nil
         }
 
