@@ -1,3 +1,4 @@
+import { isLoroStreamsWebSocketEnabled } from '../../packages/shared/src/loro-streams-websocket'
 import { resolveSessionShareOrigin } from '../../scripts/session-share-origin.mjs'
 import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker'
 
@@ -67,6 +68,11 @@ function loadBuildEnv(buildMode: string): Record<string, string> {
     if (!env[key]?.trim()) throw new Error(`Cloud Electron requires ${key}`)
   }
   env.VITE_LODY_PLATFORM = 'cloud'
+  const streamsWebSocket =
+    process.env.LODY_LORO_STREAMS_WS_ENABLED ?? env.VITE_LORO_STREAMS_WS_ENABLED
+  env.VITE_LORO_STREAMS_WS_ENABLED = isLoroStreamsWebSocketEnabled(undefined, streamsWebSocket)
+    ? '1'
+    : '0'
   return env
 }
 
