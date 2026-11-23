@@ -231,6 +231,29 @@ describe('EngineKeyringSync', () => {
     expect(await syncInto(f, keyring, f.owner, [0, 1])).toEqual(report);
   });
 
+  it('a device that may not write completes its first sync on a fresh keyring and opens content', async () => {
+    const f = workspace();
+    f.addPhone();
+    const ownerKeyring = new ContentKeyring();
+    await syncInto(f, ownerKeyring, f.owner, [0]);
+    const byOwner = seal(ownerKeyring);
+    f.revokePhone();
+    const fresh = new ContentKeyring();
+    expect(await syncInto(f, fresh, f.phone, [0])).toMatchObject({ mayWrite: false });
+    expect(() => seal(fresh)).toThrow(/CONTENT_KEYRING:(missing_provider|unauthorized)/);
+    expect(
+      fresh.open({
+        namespace: NS,
+        room,
+        payloadKind: 'update_batch',
+        continuationOffset: null,
+        header: byOwner.header,
+        sealed: byOwner.sealed,
+        additionalData: openAad(byOwner.header),
+      })
+    ).toEqual(new Uint8Array([9]));
+  });
+
   it('keeps admitting a device revoked later, so its frames still open', async () => {
     const f = workspace();
     f.addPhone();

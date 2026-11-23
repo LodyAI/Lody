@@ -110,7 +110,8 @@ device holds except abandoned epochs, and the seal epoch. The seal epoch is the
 current epoch when its key is installed, otherwise a retained earlier epoch
 inside `VerifiedLedger`'s fifteen-minute budget. When the device may not write
 (Guest, recovery, removed, or no sealable epoch), its writer's sealing is held
-first; otherwise the platform installs its own seed and sealing is released.
+as soon as the namespace is configured, before any key is installed, because a
+fresh engine refuses a hold for an unconfigured namespace; otherwise the platform installs its own seed and sealing is released.
 Every step is idempotent, so callers run `sync` on each trigger (admission, a
 new epoch, a ledger advance, a lost permission, an engine reconnect). This is
 the single exception to "epoch keys have no public byte export"
