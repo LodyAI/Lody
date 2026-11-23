@@ -13,7 +13,7 @@ import {
   type StackedAreaSeriesMarkerRender,
 } from './usage-stacked-area-chart';
 import { UsageCalendarSkeleton } from './usage-calendar-skeleton';
-import { themeShadow } from '@/style/theme-scale.stylex';
+import { themeShadow } from '../../style/theme-scale.stylex';
 import type {
   SettingsUsageCalendarData,
   SettingsUsageDayData,
