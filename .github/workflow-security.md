@@ -28,6 +28,29 @@ replace main-push evidence. PRs affecting the CLI or its workspace dependencies 
 run the full CLI suite on Darwin before merge; docs-only and unrelated scopes may
 skip it using the fail-open CI scope planner. Only superseded PR runs cancel;
 main-push coverage remains non-canceling.
+PRs also run the Electron release/packaging suite as `macOS packaging tests` on
+Darwin, including architecture validation that Linux skips. This check runs for
+every PR so dependency and packaging changes cannot silently miss it.
+
+## Merge admission
+
+Repository rules, rather than agent instructions, enforce merge admission. The
+recommended default-branch rules require `Static checks`, `Tests`,
+`macOS CLI tests`, and `macOS packaging tests` from GitHub Actions, with the
+branch up to date before merging and no routine bypass. A new required check is
+activated only after its workflow has reported on a PR; otherwise existing PRs
+can wait forever for a check that their workflow never emits.
+
+Require a pull request and block force pushes/deletion. Do not use `Restrict
+updates` as a CI gate: without bypass actors it blocks all branch updates,
+including PR merges. Auto-merge can wait for required checks once enabled by an
+owner. A merge queue is a later option for busy branches; CI workflows must first
+handle `merge_group` events and validate the queued combination.
+
+These workflow files do not configure repository rules or enable auto-merge.
+Main-only native coverage remains independent from the required `Tests` check;
+full macOS product coverage on main still detects Darwin failures outside the PR
+CLI and packaging suites.
 
 ## Private composition builds
 
