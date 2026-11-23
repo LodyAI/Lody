@@ -40,7 +40,9 @@ import {
   DEFAULT_LORO_STREAMS_BASE_URL,
   LEGACY_LORO_STREAMS_BASE_URL,
   getLoroStreamIdForDocId,
+  getSessionRoomId,
   LORO_STREAMS_BUCKET_ID,
+  type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
@@ -60,6 +62,7 @@ import {
   WorkspaceStreamsConfigurationError,
   type WorkspaceStreamsContent,
 } from '../src/providers/workspace-streams-transport';
+import { createLoroSessionSyncProgress } from '../src/providers/loro-session-sync-progress';
 
 const sdkOptions = vi.hoisted(() => [] as unknown[]);
 vi.mock('loro-repo/transport/streams', async (importOriginal) => {
@@ -397,7 +400,9 @@ const docUrl = (workspaceId: WorkspaceId, docId: string) =>
   });
 
 /** Byte storage only: CRDT encoding, merge, protection and cursor logic all run in the SDK. */
-function createByteServer(respond?: (url: URL, method: string) => Response | undefined) {
+function createByteServer(
+  respond?: (url: URL, method: string) => Response | undefined | Promise<Response | undefined>
+) {
   type Room = {
     batches: Uint8Array[];
     trimmed?: boolean;
@@ -426,7 +431,7 @@ function createByteServer(respond?: (url: URL, method: string) => Response | und
     const body = new Uint8Array(await new Response(init?.body).arrayBuffer());
     const headers = new Headers(init?.headers);
     requests.push({ url, method, body, auth: headers.get('Authorization') });
-    const intercepted = respond?.(url, method);
+    const intercepted = await respond?.(url, method);
     if (intercepted) return intercepted;
     const path = url.pathname.replace(/\/(bootstrap|snapshot(?:\/.*)?)$/, '');
     const value = room(path);
@@ -547,6 +552,116 @@ function createByteServer(respond?: (url: URL, method: string) => Response | und
     tail,
   };
 }
+
+it('publishes Loro session progress from the persisted stream cursor and resets it on 410', async () => {
+  const id = getSessionRoomId('progress' as SessionId);
+  const tab = await openTab(`session-progress-${++sequence}` as WorkspaceId);
+  const name = docUrl(tab.workspaceId, id);
+  const path = new URL(name).pathname;
+  const author = new LoroDoc();
+  const text = author.getText('history');
+  text.push('cached');
+  author.commit();
+  const replica = (await tab.repo.openPersistedDoc(id)).doc;
+  const append = (word: string) => {
+    const from = author.version();
+    text.push(word);
+    author.commit();
+    const update = author.export({ mode: 'update', from });
+    const packet = new Uint8Array(update.byteLength + 4);
+    new DataView(packet.buffer).setUint32(0, update.byteLength);
+    packet.set(update, 4);
+    return packet;
+  };
+  const initial = await streamsSnapshotCodec.compress(author.export({ mode: 'snapshot' }));
+  const first = append('|first');
+  const second = append('|second');
+  const replacement = await streamsSnapshotCodec.compress(author.export({ mode: 'snapshot' }));
+  const releasePage = Promise.withResolvers<void>();
+  const releaseRetirement = Promise.withResolvers<void>();
+  let catchingUp = false;
+  let retired = false;
+  const server = createByteServer(async (url, method) => {
+    if (!catchingUp || retired || method !== 'GET' || url.pathname !== path) return;
+    const offset = url.searchParams.get('offset');
+    if (offset === server.offset(0)) {
+      await releasePage.promise;
+      return new Response(toArrayBuffer(first), {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Stream-Next-Offset': server.offset(first.byteLength),
+          'Stream-Up-To-Date': 'false',
+        },
+      });
+    }
+    if (offset === server.offset(first.byteLength)) {
+      await releaseRetirement.promise;
+      retired = true;
+      server.room(path).snapshot = { offset: server.tail(path), body: replacement };
+      return new Response(null, { status: 410 });
+    }
+  });
+  server.room(path).snapshot = { offset: server.offset(0), body: initial };
+  const cursors = new InMemoryRemoteCursorStore();
+  const baseline = transportFor(tab, undefined, cursors);
+  expect((await baseline.syncDoc(id, replica)).ok).toBe(true);
+  expect(replica.getText('history').toString()).toBe('cached');
+  expect((await cursors.load(name))?.nextOffset).toBe(server.offset(0));
+  await baseline.close();
+  openTransports.delete(baseline);
+
+  server.room(path).batches.push(first, second);
+  catchingUp = true;
+  const progress = createLoroSessionSyncProgress(() => 'cloud');
+  const events: ReturnType<typeof progress.getSnapshot>[] = [];
+  const total = first.byteLength + second.byteLength;
+  const plan = Promise.withResolvers<void>();
+  const page = Promise.withResolvers<void>();
+  const stop = progress.subscribe(() => {
+    const value = progress.getSnapshot();
+    events.push(value);
+    if (value?.kind === 'updates' && value.total === total) {
+      if (value.received === 0) plan.resolve();
+      if (value.received === first.byteLength) page.resolve();
+    }
+  });
+  const resumed = createWorkspaceStreamsTransport({
+    repo: tab.repo,
+    workspaceId: tab.workspaceId,
+    documentRemoteCursorStore: cursors,
+    streamsBaseUrl,
+    shardHostSuffix: undefined,
+    auth: async () => 'streams-jwt',
+    getDocumentProgress: (docId) => (docId === id ? progress : undefined),
+    content: { mode: 'plaintext' },
+  });
+  openTransports.add(resumed);
+  const finished = resumed.syncDoc(id, replica);
+  try {
+    await plan.promise;
+    releasePage.resolve();
+    await page.promise;
+    expect(replica.getText('history').toString()).toBe('cached|first');
+    releaseRetirement.resolve();
+    expect((await finished).ok).toBe(true);
+    expect(replica.getText('history').toString()).toBe('cached|first|second');
+    const retirement = events.findIndex((value) => value === null);
+    expect(events[retirement - 1]).toEqual({ kind: 'updates', received: first.byteLength, total });
+    expect(events[retirement + 1]).toEqual({ kind: 'bootstrap', received: 0 });
+    const envelope = '--bytes\r\nContent-Type: application/octet-stream\r\n\r\n\r\n--bytes--\r\n';
+    const snapshotSize = new TextEncoder().encode(envelope).byteLength + replacement.byteLength;
+    expect(events.at(-1)).toEqual({ kind: 'bootstrap', received: snapshotSize, total: snapshotSize });
+    expect(
+      server.requests.some(({ url, method }) => url.pathname === path && method === 'HEAD')
+    ).toBe(true);
+    progress.updateState('synced');
+    expect(progress.getSnapshot()).toBeNull();
+  } finally {
+    releasePage.resolve();
+    releaseRetirement.resolve();
+    stop();
+  }
+}, 10_000);
 
 /** Synthetic reversible provider: verifies SDK AAD binding; deliberately not cryptography. */
 function testProtection(): PayloadProtectionProvider {

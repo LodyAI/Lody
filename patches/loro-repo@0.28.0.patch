@@ -1,0 +1,48 @@
+diff --git a/dist/streams.d.cts b/dist/streams.d.cts
+index 78eb11d8ecd60303ed605c8909fc5c0a588ab005..3365777c62a4ff486dfd8a758b1550621c452be1 100644
+--- a/dist/streams.d.cts
++++ b/dist/streams.d.cts
+@@ -238,6 +238,7 @@ interface StreamsTransportBaseOptions {
+    * instead of intercepting global console output.
+    */
+   readonly diagnostics?: RepoDiagnosticSink;
++  readonly documentReadOptions?: (docId: string, cursorStore: RemoteCursorStore) => Pick<StreamsCrdtOptions<JsonObject>, "fetch" | "remoteCursorStore"> | undefined;
+   /**
+    * Label used as `transportId` on emitted errors and diagnostics. Defaults
+    * to `"streams"`; set it when several Streams adapters are registered.
+diff --git a/dist/streams.d.ts b/dist/streams.d.ts
+index 4463b0fcd585f11551649ec7d372b5a73cad6755..65127931099b698c57fae4c8ad22132e38418bb5 100644
+--- a/dist/streams.d.ts
++++ b/dist/streams.d.ts
+@@ -238,6 +238,7 @@ interface StreamsTransportBaseOptions {
+    * instead of intercepting global console output.
+    */
+   readonly diagnostics?: RepoDiagnosticSink;
++  readonly documentReadOptions?: (docId: string, cursorStore: RemoteCursorStore) => Pick<StreamsCrdtOptions<JsonObject>, "fetch" | "remoteCursorStore"> | undefined;
+   /**
+    * Label used as `transportId` on emitted errors and diagnostics. Defaults
+    * to `"streams"`; set it when several Streams adapters are registered.
+diff --git a/dist/transport/streams.cjs b/dist/transport/streams.cjs
+index 605f03a93b7ecc5e60918dd808d04a86719e7163..b12df7070a0e5ca443ad416f891a0646c83ab917 100644
+--- a/dist/transport/streams.cjs
++++ b/dist/transport/streams.cjs
+@@ -1775,6 +1775,7 @@ var StreamsTransportAdapter = class {
+ 					kind: "doc",
+ 					docId
+ 				}),
++				...this.options.documentReadOptions?.(docId, this.remoteCursorStore),
+ 				beforeRemoteCursorSave: persistDoc ? this.retireOnStaleReplica(() => persistDoc(docId, doc), () => this.retireDocSession(session)) : void 0
+ 			}),
+ 			doc,
+diff --git a/dist/transport/streams.js b/dist/transport/streams.js
+index d6245b2d47c4661b847a16df650ebbfdb21d264f..94c3edefd4daaa12e16961aeb5f8e1311cb54303 100644
+--- a/dist/transport/streams.js
++++ b/dist/transport/streams.js
+@@ -1769,6 +1769,7 @@ var StreamsTransportAdapter = class {
+ 					kind: "doc",
+ 					docId
+ 				}),
++				...this.options.documentReadOptions?.(docId, this.remoteCursorStore),
+ 				beforeRemoteCursorSave: persistDoc ? this.retireOnStaleReplica(() => persistDoc(docId, doc), () => this.retireDocSession(session)) : void 0
+ 			}),
+ 			doc,

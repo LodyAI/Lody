@@ -48,10 +48,8 @@ import {
   roostCachedChangesSince,
   type RoostCachedHead,
 } from './roost-history-cache';
-import type {
-  ConversationSessionDataFactory,
-  HistorySyncProgress,
-} from './conversation-view/create-conversation-session';
+import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
+import type { SessionSyncProgress } from '@lody/shared';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
 import { SessionHistoryChangesSchema } from '@lody/shared';
 
@@ -313,11 +311,11 @@ const createRoostSessionDataFactoryFromTransport =
     const pendingReads = new Map<string, Promise<SessionHistoryReadResponse>>();
     const listeners = new Set<SessionDataChangeListener>();
     const snapshotProvenance = new WeakSet<object>();
-    let historySyncProgress: HistorySyncProgress | null = null;
+    let sessionSyncProgress: SessionSyncProgress | null = null;
     const progressListeners = new Set<() => void>();
-    const setHistorySyncProgress = (progress: HistorySyncProgress | null) => {
-      if (progress === historySyncProgress) return;
-      historySyncProgress = progress;
+    const setSessionSyncProgress = (progress: SessionSyncProgress | null) => {
+      if (progress === sessionSyncProgress) return;
+      sessionSyncProgress = progress;
       for (const listener of progressListeners) {
         try {
           listener();
@@ -584,7 +582,7 @@ const createRoostSessionDataFactoryFromTransport =
       // A different reader committed this projection. Fence reads and cursors
       // from the previous local view, including a retired owner generation.
       historyEpoch++;
-      setHistorySyncProgress(null);
+      setSessionSyncProgress(null);
       ownerRevision = head.revision;
       observedHistoryRevision = head.revision;
       observedHistoryCount = head.count;
@@ -892,7 +890,7 @@ const createRoostSessionDataFactoryFromTransport =
                 : undefined;
             const reportProgress = () => {
               if (total !== undefined && !disposed && epoch === historyEpoch) {
-                setHistorySyncProgress({ received: replacements.length, total });
+                setSessionSyncProgress({ kind: 'history', received: replacements.length, total });
               }
             };
             reportProgress();
@@ -1103,7 +1101,7 @@ const createRoostSessionDataFactoryFromTransport =
           retryDelay = Math.min(10_000, Math.max(250, retryDelay) * 2);
         }
       } finally {
-        setHistorySyncProgress(null);
+        setSessionSyncProgress(null);
         refreshing = false;
         if (refreshRequested && !disposed && listeners.size > 0 && active()) {
           refreshTimerDelay = retryDelay;
@@ -1420,7 +1418,7 @@ const createRoostSessionDataFactoryFromTransport =
       },
       dispose: () => {
         disposed = true;
-        setHistorySyncProgress(null);
+        setSessionSyncProgress(null);
         progressListeners.clear();
         stopSubscription();
         unsubscribeWake?.();
@@ -1432,8 +1430,8 @@ const createRoostSessionDataFactoryFromTransport =
     });
     return {
       ...sessionData,
-      historySyncProgress: {
-        getSnapshot: () => historySyncProgress,
+      sessionSyncProgress: {
+        getSnapshot: () => sessionSyncProgress,
         subscribe(listener) {
           if (disposed) return () => {};
           progressListeners.add(listener);

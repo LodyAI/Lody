@@ -16,7 +16,7 @@ import type {
 import { hasWorkspaceChanges, sanitizeGoalObjective } from '@lody/shared';
 import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import type { HistorySyncProgressView } from '@/lib/conversation-view/create-conversation-session';
+import type { SessionSyncProgressView } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
 import { ActionChip, PopoverActionChip } from './info-chip';
@@ -107,7 +107,7 @@ export type SessionInfoBarProps = {
   syncing?: boolean;
   /** Overrides `syncing` with a specific conversation content-sync state. */
   syncStatus?: SessionSyncIndicatorVariant | null;
-  historySyncProgress?: HistorySyncProgressView;
+  sessionSyncProgress?: SessionSyncProgressView;
   /** Mobile native shell only: lift the bar above the session drawer's
    *  transparent z-30 left-edge swipe-back strip, which otherwise covers the
    *  leftmost ~48px of the row and swallows taps on the first chip. Same
@@ -161,7 +161,7 @@ const styles = stylex.create({
   },
 });
 
-const emptyHistorySyncProgress: HistorySyncProgressView = {
+const emptySessionSyncProgress: SessionSyncProgressView = {
   getSnapshot: () => null,
   subscribe: () => () => {},
 };
@@ -199,16 +199,16 @@ export function SessionInfoBar({
   diffStat,
   syncing = false,
   syncStatus,
-  historySyncProgress = emptyHistorySyncProgress,
+  sessionSyncProgress = emptySessionSyncProgress,
   protectFromEdgeBackZone = false,
   initialStage,
   queue,
 }: SessionInfoBarProps) {
   const { t } = useTranslation();
-  const historyProgress = useSyncExternalStore(
-    historySyncProgress.subscribe,
-    historySyncProgress.getSnapshot,
-    emptyHistorySyncProgress.getSnapshot
+  const syncProgress = useSyncExternalStore(
+    sessionSyncProgress.subscribe,
+    sessionSyncProgress.getSnapshot,
+    emptySessionSyncProgress.getSnapshot
   );
   const hasDiff = hasWorkspaceChanges(diffStat);
   const hasContext = !!pr || !!projectName || !!branch || hasDiff || !!contextActions?.length;
@@ -295,7 +295,7 @@ export function SessionInfoBar({
     onOpenIosSimulator ||
     onOpenAndroidEmulator ||
     ambientSync ||
-    historyProgress ||
+    syncProgress ||
     privateAccessStatus
   );
   if (!hasSurfaceContent && !hasMachine) {
@@ -523,11 +523,11 @@ export function SessionInfoBar({
               sync-only mode nothing else consumes the row's free space, so
               ml-auto keeps the spinner pinned right; with a stage present
               its flex-1 has already eaten the space (no-op). */}
-          {ambientSync || historyProgress ? (
+          {ambientSync || syncProgress ? (
             <div className="ml-auto inline-flex shrink-0 items-center">
               <SessionSyncingIndicator
                 variant={ambientSync ?? undefined}
-                historyProgress={historyProgress}
+                syncProgress={syncProgress}
                 labelClassName="hidden @[560px]:inline"
               />
             </div>

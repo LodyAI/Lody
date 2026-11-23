@@ -505,6 +505,10 @@ export class DocUpdateChunkAssembler {
     this.parts = [];
   }
 
+  get progress() {
+    return this.chunkCount > 0 ? { received: this.parts.length, total: this.chunkCount } : null;
+  }
+
   /** Feed one chunk; returns the full base64 string when the transfer completes. */
   push(payload: LocalLoroDocChunkPayload): string | null {
     if (payload.transferId !== this.transferId) {

@@ -238,14 +238,18 @@ labelClassName`) so the stage diffstat never clips. Wired from
     with the green bordered Mergeable pill; the active row hides both because the
     Info Bar owns the merge control.
 
-## History catch-up progress
+## Session sync progress
 
-Multi-page Roost catch-up uses the ambient slot above the composer. The reader
-fixes the total to the retained bodies it will stage at one checkpoint and
-advances the count after validating each page. A retry of the current page
-preserves the count. The bar says Applying while the completed range commits to
-the local cache, then clears when the attempt finishes or its checkpoint is
-superseded. The existing sync and cache owners still control readiness.
+Web, Electron, iOS and Android use the trailing slot above the composer for
+Roost and Loro. Roost fixes the total to the records it will stage at one
+checkpoint, advances after validating each page, and preserves the count on a
+page retry. Loro counts received bootstrap response bytes, then advances by
+stream offsets after importing incremental updates. A bounded head query
+provides a target for that round when available. The bar stays indeterminate
+while the total is unknown. Local Electron counts validated Loro update chunks.
+The Streams transport observes the existing document fetch and persisted cursor
+without creating another history reader. Readiness stays with the existing
+owners. The bar clears after application or when a round is abandoned.
 
 ## Related-Sessions chip
 

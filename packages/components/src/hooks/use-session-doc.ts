@@ -24,7 +24,7 @@ import { browserOnlineAtom } from '@/atoms/control-connection';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { subscribeLatestOnAnimationFrame } from '@/lib/latest-frame-subscription';
 import { subscribeOnFrame, type ConversationView } from '@/lib/conversation-view';
-import type { HistorySyncProgressView } from '@/lib/conversation-view/create-conversation-session';
+import type { SessionSyncProgressView } from '@lody/shared';
 
 declare global {
   interface Window {
@@ -63,7 +63,7 @@ export type UseSessionDocResult = {
    * must read history only through this view.
    */
   history: ConversationView | null;
-  historySyncProgress?: HistorySyncProgressView;
+  sessionSyncProgress?: SessionSyncProgressView;
   addHistory: (
     history: Omit<SessionHistoryInput, 'id'> & { id?: string },
     options?: {
@@ -477,12 +477,12 @@ export function useSessionDoc(
     doc: state,
     loadError,
     history,
-    historySyncProgress:
+    sessionSyncProgress:
       enabled &&
       syncEnabled &&
       loadedStore?.sessionId === sessionId &&
       runtime?.peekSessionStore?.(sessionId) === loadedStore
-        ? loadedStore.sessionData?.historySyncProgress
+        ? loadedStore.sessionData?.sessionSyncProgress
         : undefined,
     addHistory,
     pushMessageQueue,

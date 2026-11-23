@@ -438,7 +438,12 @@ describe('local data plane doc-update chunking', () => {
       return doc;
     }
 
-    createAdapter(peerId: string): LocalLoroTransportAdapter {
+    createAdapter(
+      peerId: string,
+      onDocSyncProgress?: ConstructorParameters<
+        typeof LocalLoroTransportAdapter
+      >[0]['onDocSyncProgress']
+    ): LocalLoroTransportAdapter {
       const connection = {
         send: (message: LocalLoroDataPlaneClientMessage) => {
           this.tasks.push(async () => {
@@ -458,6 +463,7 @@ describe('local data plane doc-update chunking', () => {
         peerId,
         connection,
         maxPayloadBytes: MAX_PAYLOAD_BYTES,
+        onDocSyncProgress,
       });
     }
 
@@ -489,7 +495,10 @@ describe('local data plane doc-update chunking', () => {
     const harness = new ChunkHarness();
     appendText(harness.serverDoc('doc-1'), bigText('server-history '));
 
-    const renderer = harness.createAdapter('renderer:a');
+    const progress: Array<[string, { kind: string; received: number; total?: number } | null]> = [];
+    const renderer = harness.createAdapter('renderer:a', (docId, count) =>
+      progress.push([docId, count])
+    );
     const docA = new LoroDoc();
     const sub = renderer.joinDocRoom('doc-1', docA);
     await harness.settle();
@@ -497,6 +506,17 @@ describe('local data plane doc-update chunking', () => {
     expect(errorFrames(harness.pushed)).toEqual([]);
     expect(text(docA)).toBe(text(harness.serverDoc('doc-1')));
     expect(sub.status).toBe('joined');
+    const chunks = harness.pushed.flatMap((message) =>
+      'payload' in message && message.payload?.kind === 'doc-update-chunk' ? [message.payload] : []
+    );
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(progress).toEqual([
+      ...chunks.map(({ chunkIndex, chunkCount }) => [
+        'doc-1',
+        { kind: 'chunks', received: chunkIndex + 1, total: chunkCount },
+      ]),
+      ['doc-1', null],
+    ]);
   });
 
   it('an oversized live push after join is chunked and converges', async () => {

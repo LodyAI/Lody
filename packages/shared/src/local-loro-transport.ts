@@ -30,6 +30,7 @@ import {
   type LocalLoroDataPlaneServerMessage,
   type LocalLoroServerErrorMessage,
 } from './local-loro-data-plane';
+import type { SessionSyncProgress } from './session-sync-progress';
 
 /**
  * Persistent, push-capable link to the CLI data-plane server. The renderer wires
@@ -133,6 +134,7 @@ export type LocalLoroTransportAdapterOptions = {
   workspaceId: string;
   peerId?: string;
   connection: LocalLoroDataPlaneConnection;
+  onDocSyncProgress?: (docId: string, progress: SessionSyncProgress | null) => void;
   maxPayloadBytes?: number;
   /** Bounded lifetime for one connected join attempt (defaults to 120 seconds). */
   joinAttemptTimeoutMs?: number;
@@ -145,6 +147,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   private readonly workspaceId: string;
   private readonly peerId: string;
   private readonly connection: LocalLoroDataPlaneConnection;
+  private readonly onDocSyncProgress?: LocalLoroTransportAdapterOptions['onDocSyncProgress'];
   private readonly maxPayloadBytes: number;
   private readonly joinAttemptTimeoutMs: number;
   private readonly scheduleTimeout: (callback: () => void, delayMs: number) => unknown;
@@ -158,6 +161,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     this.workspaceId = options.workspaceId;
     this.peerId = options.peerId ?? createPeerId();
     this.connection = options.connection;
+    this.onDocSyncProgress = options.onDocSyncProgress;
     this.maxPayloadBytes = options.maxPayloadBytes ?? LOCAL_LORO_DATA_PLANE_MAX_PAYLOAD_BYTES;
     this.joinAttemptTimeoutMs = options.joinAttemptTimeoutMs ?? 120_000;
     if (!Number.isFinite(this.joinAttemptTimeoutMs) || this.joinAttemptTimeoutMs <= 0) {
@@ -416,6 +420,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       state.syncGeneration += 1;
     }
     state.joined = false;
+    this.resetDocTransfer(state);
     this.sendJoin(state);
   }
 
@@ -728,7 +733,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     state.joined = true;
     // A (re)join restarts the catch-up stream; a partial chunk transfer from
     // before must never be concatenated with post-join frames.
-    state.docChunkAssembler = null;
+    this.resetDocTransfer(state);
     if (state.isDoc) {
       if (serverVersion) {
         state.serverVersion = VersionVector.decode(base64ToBytes(serverVersion));
@@ -846,11 +851,27 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     this.resolveSyncedWaiters(state);
   }
 
+  private reportDocProgress(state: RoomState, progress: SessionSyncProgress | null): void {
+    if (state.room.scope !== 'doc') return;
+    try {
+      this.onDocSyncProgress?.(state.room.docId, progress);
+    } catch (error) {
+      console.error('Local Loro sync progress observer failed', error);
+    }
+  }
+
+  private resetDocTransfer(state: RoomState): void {
+    if (!state.docChunkAssembler) return;
+    state.docChunkAssembler = null;
+    this.reportDocProgress(state, null);
+  }
+
   private applyPayload(state: RoomState, payload: LocalLoroDataPlanePayload | undefined): void {
     if (!payload) {
       return;
     }
     if (payload.kind === 'doc-update') {
+      this.resetDocTransfer(state);
       // Imports fire the local subscription with `by: 'import'`, which the
       // subscribe filter ignores, so applying a server push never bounces back.
       (state.target as LoroDoc).import(base64ToBytes(payload.dataBase64));
@@ -863,10 +884,21 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       state.docChunkAssembler ??= new DocUpdateChunkAssembler();
       const dataBase64 = state.docChunkAssembler.push(payload);
       if (dataBase64 === null) {
+        const progress = state.docChunkAssembler.progress;
+        if (progress) this.reportDocProgress(state, { kind: 'chunks', ...progress });
+        else this.resetDocTransfer(state);
         return;
       }
-      state.docChunkAssembler = null;
-      (state.target as LoroDoc).import(base64ToBytes(dataBase64));
+      this.reportDocProgress(state, {
+        kind: 'chunks',
+        received: payload.chunkCount,
+        total: payload.chunkCount,
+      });
+      try {
+        (state.target as LoroDoc).import(base64ToBytes(dataBase64));
+      } finally {
+        this.resetDocTransfer(state);
+      }
       return;
     }
     const flock = state.target as FlockLike;
@@ -882,7 +914,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
         state.syncGeneration += 1;
         state.joined = false;
         // Frames of an in-flight chunked transfer are lost with the socket.
-        state.docChunkAssembler = null;
+        this.resetDocTransfer(state);
         if (!state.terminalError) {
           this.setRoomStatus(state, 'reconnecting');
         }
@@ -959,6 +991,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   }
 
   private setRoomStatus(state: RoomState, status: TransportRoomStatus): void {
+    if (status === 'disconnected' || status === 'error') this.resetDocTransfer(state);
     if (state.status === status) {
       return;
     }

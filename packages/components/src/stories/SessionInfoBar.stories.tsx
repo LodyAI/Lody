@@ -156,7 +156,7 @@ function StoryHarness({
   actionLabels?: string[];
   mergeAction?: boolean;
   syncing?: boolean;
-  historyProgress?: { received: number; total: number };
+  historyProgress?: import('@lody/shared').SessionSyncProgress;
 }) {
   const [currentGoal, setCurrentGoal] = useState(goal);
   const [mergeMethod, setMergeMethod] = useState<GitHubMergeMethod>('merge');
@@ -220,7 +220,7 @@ function StoryHarness({
         }
         diffStat={diffStat}
         syncing={syncing}
-        historySyncProgress={
+        sessionSyncProgress={
           historyProgress
             ? { getSnapshot: () => historyProgress, subscribe: () => () => {} }
             : undefined
@@ -720,11 +720,11 @@ export const SyncOnly: Story = {
 };
 
 export const RoostHistoryCatchUp: Story = {
-  args: { syncing: true, historyProgress: { received: 500, total: 1240 } },
+  args: { syncing: true, historyProgress: { kind: 'history', received: 500, total: 1240 } },
 };
 
 export const RoostHistoryApplying: Story = {
-  args: { width: 390, historyProgress: { received: 1240, total: 1240 } },
+  args: { width: 390, historyProgress: { kind: 'history', received: 1240, total: 1240 } },
 };
 
 /** With no items and no syncing the bar still hides entirely. */
@@ -823,4 +823,8 @@ export const BothSimulatorPreviews: Story = {
 export const MobileSimulatorPreviews: Story = {
   ...BothSimulatorPreviews,
   args: { simulatorPreview: 'both', compactMachineInfo: true, width: 360 },
+};
+
+export const LoroSessionCatchUp: Story = {
+  args: { syncing: true, historyProgress: { kind: 'updates', received: 512, total: 1024 } },
 };

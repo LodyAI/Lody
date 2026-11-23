@@ -2539,7 +2539,7 @@ it('retries only a timed-out page and commits the exact repair despite a newer r
       throw new Error('Unexpected write');
     },
   })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
-  const progress = data.historySyncProgress!;
+  const progress = data.sessionSyncProgress!;
   const progressUpdates: ReturnType<typeof progress.getSnapshot>[] = [];
   const unsubscribeProgress = progress.subscribe(() =>
     progressUpdates.push(progress.getSnapshot())
@@ -2553,16 +2553,16 @@ it('retries only a timed-out page and commits the exact repair despite a newer r
     await observation.initial;
     (await timers.next()).callback();
     await lastPageStarted.promise;
-    expect(progress.getSnapshot()).toEqual({ received: 501, total: 502 });
+    expect(progress.getSnapshot()).toEqual({ kind: 'history', received: 501, total: 502 });
     expect(await data.history.readTurn(tail.id)).toMatchObject({ state: 'ready', turn: newTail });
     expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-1', count: 1 });
     releaseLastPage.resolve();
     const followup = await timers.next();
     expect(progressUpdates).toEqual([
-      { received: 0, total: 502 },
-      { received: 1, total: 502 },
-      { received: 501, total: 502 },
-      { received: 502, total: 502 },
+      { kind: 'history', received: 0, total: 502 },
+      { kind: 'history', received: 1, total: 502 },
+      { kind: 'history', received: 501, total: 502 },
+      { kind: 'history', received: 502, total: 502 },
       null,
     ]);
     expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-2', count: 502 });
@@ -2653,7 +2653,7 @@ it('clears partial history progress before recovering a replaced checkpoint', as
       throw new Error(`Unexpected ${query.kind}`);
     },
   })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
-  const progress = data.historySyncProgress!;
+  const progress = data.sessionSyncProgress!;
   const observation = data.history.observe(() => {
     void h.cache.getHead().then((head) => {
       if (head?.checkpoint === 'checkpoint-3') applied.resolve();
@@ -2663,7 +2663,7 @@ it('clears partial history progress before recovering a replaced checkpoint', as
     await observation.initial;
     (await timers.next()).callback();
     await secondPageStarted.promise;
-    expect(progress.getSnapshot()).toEqual({ received: 500, total: 601 });
+    expect(progress.getSnapshot()).toEqual({ kind: 'history', received: 500, total: 601 });
     replaceCheckpoint.resolve();
     const retry = await timers.next();
     expect(progress.getSnapshot()).toBeNull();

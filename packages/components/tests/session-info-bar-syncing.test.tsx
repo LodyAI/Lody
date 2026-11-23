@@ -2,7 +2,11 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SESSION_GOAL_COMMANDS, type SessionGoalMessage } from '@lody/shared';
+import {
+  SESSION_GOAL_COMMANDS,
+  type SessionGoalMessage,
+  type SessionSyncProgress,
+} from '@lody/shared';
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import type { SessionMachineInfo } from '../src/components/sessions/session-machine-info';
 import { createTestI18n, withTestI18n } from './test-i18n';
@@ -122,9 +126,9 @@ describe('SessionInfoBar ambient information', () => {
   });
 
   it('shows the exact history count through application and then hides the readout', () => {
-    let snapshot: { received: number; total: number } | null = null;
+    let snapshot: SessionSyncProgress | null = null;
     let notify = () => {};
-    const historySyncProgress = {
+    const sessionSyncProgress = {
       getSnapshot: () => snapshot,
       subscribe(listener: () => void) {
         notify = listener;
@@ -136,7 +140,7 @@ describe('SessionInfoBar ambient information', () => {
     act(() =>
       root.render(
         withTestI18n(
-          <SessionInfoBar {...CONTEXT_LESS_PROPS} historySyncProgress={historySyncProgress} />,
+          <SessionInfoBar {...CONTEXT_LESS_PROPS} sessionSyncProgress={sessionSyncProgress} />,
           testI18n
         )
       )
@@ -144,7 +148,7 @@ describe('SessionInfoBar ambient information', () => {
     expect(container.querySelector('[role="progressbar"]')).toBeNull();
 
     act(() => {
-      snapshot = { received: 500, total: 1240 };
+      snapshot = { kind: 'history', received: 500, total: 1240 };
       notify();
     });
     const bar = container.querySelector('[role="progressbar"]');
@@ -153,10 +157,35 @@ describe('SessionInfoBar ambient information', () => {
     expect(bar?.getAttribute('aria-valuemax')).toBe('1240');
 
     act(() => {
-      snapshot = { received: 1240, total: 1240 };
+      snapshot = { kind: 'history', received: 1240, total: 1240 };
       notify();
     });
     expect(bar?.textContent).toContain('Applying 1,240 / 1,240');
+    act(() => {
+      snapshot = { kind: 'bootstrap', received: 512 };
+      notify();
+    });
+    expect(container.querySelector('[role="progressbar"]')?.textContent).toContain('Syncing 512 B');
+    expect(
+      container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')
+    ).toBeNull();
+    act(() => {
+      snapshot = { kind: 'updates', received: 512, total: 1024 };
+      notify();
+    });
+    expect(container.querySelector('[role="progressbar"]')?.textContent).toContain(
+      'Syncing 512 / 1,024 B'
+    );
+    expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuemax')).toBe(
+      '1024'
+    );
+    act(() => {
+      snapshot = { kind: 'chunks', received: 2, total: 4 };
+      notify();
+    });
+    expect(container.querySelector('[role="progressbar"]')?.textContent).toContain(
+      'Syncing 2 / 4 chunks'
+    );
     act(() => {
       snapshot = null;
       notify();

@@ -9,6 +9,7 @@ import {
   getLoroMetaStreamId,
   getLoroStreamIdForDocId,
   getLoroStreamsShardUrls,
+  isSessionDocRoomId,
   LORO_STREAMS_BUCKET_ID,
   type WorkspaceId,
 } from '@lody/shared';
@@ -18,6 +19,7 @@ import {
   createRepoStreamsPersistence,
   type StreamsRoomPayloadProtectionResolver,
 } from 'loro-repo/transport/streams';
+import type { LoroSessionSyncProgress } from './loro-session-sync-progress';
 
 import {
   WorkspaceStreamsConfigurationError,
@@ -50,6 +52,7 @@ export type WorkspaceStreamsTransportOptions = {
   /** Explicit transport policy, separate from workspace admission evidence. */
   content: WorkspaceStreamsContent;
   bucketId?: string;
+  getDocumentProgress?: (docId: string) => LoroSessionSyncProgress | undefined;
 };
 
 /** The key under which the transport checkpoints this workspace's Meta room. */
@@ -116,6 +119,44 @@ export const createWorkspaceStreamsTransport = (
         bucketId: options.bucketId ?? LORO_STREAMS_BUCKET_ID,
         metaStreamId: getLoroMetaStreamId(options.workspaceId),
         docStreamId: (docId) => getLoroStreamIdForDocId(options.workspaceId, docId),
+        documentReadOptions(docId, store) {
+          if (!options.getDocumentProgress || !isSessionDocRoomId(docId)) return;
+          const progress = () => options.getDocumentProgress?.(docId);
+          const readTail = (url: string) => async (signal: AbortSignal) => {
+            const token =
+              typeof options.auth === 'function'
+                ? await options.auth({ reason: 'request' }, signal)
+                : options.auth;
+            signal.throwIfAborted();
+            const response = await fetch(url, {
+              method: 'HEAD',
+              redirect: 'error',
+              signal,
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            });
+            return response.ok
+              ? (response.headers.get('Stream-Next-Offset') ?? undefined)
+              : undefined;
+          };
+          return {
+            fetch: (input, init) => progress()?.fetch(input, init) ?? fetch(input, init),
+            remoteCursorStore: {
+              async load(url) {
+                const observer = progress();
+                const cursor = await store.load(url);
+                if (observer && progress() === observer)
+                  observer.loaded(cursor?.nextOffset, readTail(url));
+                return cursor;
+              },
+              async save(cursor) {
+                const observer = progress();
+                await store.save(cursor);
+                if (observer && progress() === observer) observer.saved(cursor.nextOffset);
+              },
+              delete: store.delete?.bind(store),
+            },
+          };
+        },
         flockDocStreamId: (flockDocId) => flockDocId,
         auth: options.auth,
         snapshotCodec:
