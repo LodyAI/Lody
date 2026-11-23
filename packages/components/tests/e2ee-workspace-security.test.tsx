@@ -4,13 +4,20 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Provider, createStore } from 'jotai';
 import { PlatformContext } from '@lody/platform/react';
-import { createStaticStore, type E2eeManagementState, type PlatformProvider } from '@lody/platform';
+import {
+  LOCAL_PLATFORM_CAPABILITIES,
+  createStaticStore,
+  type E2eeManagementState,
+  type PlatformProvider,
+} from '@lody/platform';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { E2eeMachineSharingSettings } from '../src/components/settings/e2ee/machine-sharing-settings';
 import { WorkspaceSettings } from '../src/components/settings/e2ee/workspace-security';
 import { E2eeWorkspaceConsole } from '../src/components/pages/e2ee-workspace-console';
 import { RecoveryVaultSection } from '../src/components/settings/e2ee/recovery-vault-section';
+import { RecoveryAccountPage } from '../src/components/settings/e2ee/recovery-account-page';
+import { StableSessionContext, type StableSessionValue } from '../src/hooks/useStableSession';
 import { E2eeRecoveryHostContext } from '../src/components/settings/e2ee/recovery-host';
 import type { RecoveryPlan, RecoveryPort } from '../src/components/settings/e2ee/recovery-port';
 import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '../src/atoms/settings';
@@ -27,6 +34,7 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => async (target: unknown) => {
     navigation.target = target;
   },
+  useRouter: () => ({ history: { canGoBack: () => false, back: () => {} } }),
 }));
 vi.mock('../src/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => ({ requestAuthRecovery: vi.fn() }),
@@ -128,6 +136,72 @@ describe('recovery vault settings', () => {
       act(() => root.unmount());
       container.remove();
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('desktop account recovery page', () => {
+  const signedIn = { data: { user: { id: 'account-1' } } } as unknown as StableSessionValue;
+  const renderPage = async (platform: PlatformProvider) => {
+    const calls: string[] = [];
+    vi.stubGlobal('ipc', {
+      invoke: async (channel: string) => {
+        calls.push(channel);
+        return channel === 'e2ee.recoveryReplacementPlan'
+          ? { hasVault: false, replaceable: false, replacing: false, covered: [], uncovered: [] }
+          : channel === 'e2ee.recoveryPasskeyAvailable'
+            ? false
+            : [];
+      },
+      on: () => () => {},
+    });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <PlatformContext.Provider value={platform}>
+          <StableSessionContext.Provider value={signedIn}>
+            <Provider store={createStore()}>
+              <RecoveryAccountPage />
+            </Provider>
+          </StableSessionContext.Provider>
+        </PlatformContext.Provider>
+      );
+    });
+    for (let tick = 0; tick < 10; tick++) await act(async () => {});
+    return {
+      calls,
+      text: container.textContent ?? '',
+      dispose: () => {
+        act(() => root.unmount());
+        container.remove();
+        vi.unstubAllGlobals();
+      },
+    };
+  };
+
+  it('manages recovery from Settings > Account without opening an encrypted workspace', async () => {
+    const page = await renderPage(TEST_CLOUD_PLATFORM);
+    try {
+      expect(page.text).toContain('e2ee.recovery.createWithPassword');
+      expect(page.calls).toContain('e2ee.recoveryReplacementPlan');
+    } finally {
+      page.dispose();
+    }
+  });
+
+  it('says recovery is unavailable on a local-only desktop and never asks main', async () => {
+    const page = await renderPage({
+      ...TEST_CLOUD_PLATFORM,
+      kind: 'local',
+      capabilities: LOCAL_PLATFORM_CAPABILITIES,
+    });
+    try {
+      expect(page.text).toContain('e2ee.recovery.unavailable');
+      expect(page.calls).toEqual([]);
+    } finally {
+      page.dispose();
     }
   });
 });

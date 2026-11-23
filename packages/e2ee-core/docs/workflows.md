@@ -294,7 +294,10 @@ CAS replaces the local journal before the next invocation submits it. Legacy set
 journals recover the position from the signed predecessor in verified history
 only while registration is pending. An already active R reconciles its original
 submission even when retention removed the admission hash. Finished setup clears
-the original and position, retaining R's public key for explicit abandonment.
+the original and position, retaining R's public key for explicit abandonment. A personal
+restore keeps the device its journal names; another device's restore is refused unless
+verified history shows that device admitted and since revoked, and only then signs and
+journals its own admission by CAS.
 
 ## Documents
 

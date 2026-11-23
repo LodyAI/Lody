@@ -56,3 +56,8 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   partial key recovery distinct, and key rows by workspace id because names repeat.
   Scope observers and final results to the originating account, port and operation;
   leaving the section detaches observation, never cancels the producer or its journal.
+- The lost-access restore page offers deleting or leaving only when the backup does not
+  cover this workspace; a `Pending`, `Unconfirmed` or failed row is checked or retried
+  instead. A partial key restore of this workspace still opens it, marked partial.
+- Desktop Settings > Account opens `recovery-account-page.tsx` through the router's
+  `recoveryPage`: desktop main's vault needs no encrypted workspace.

@@ -4,12 +4,13 @@ import Darwin
 
 /// No access groups, arbitrary paths, synchronizable items, or key export bridge.
 final class LodyKeychainKekStorage: LodyKekStorage {
+    private static let service = "ai.lody.mobile.e2ee.kek.v1"
+    private static let directoryName = "LodyE2eeCustody"
     private let directory: URL
-    private let service = "ai.lody.mobile.e2ee.kek.v1"
 
     init() throws {
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        directory = support.appendingPathComponent("LodyE2eeCustody", isDirectory: true)
+        directory = support.appendingPathComponent(Self.directoryName, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
         var url = directory
@@ -46,9 +47,31 @@ final class LodyKeychainKekStorage: LodyKekStorage {
 
     private func query(_ id: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: service, kSecAttrAccount as String: id,
+         kSecAttrService as String: Self.service, kSecAttrAccount as String: id,
          kSecAttrSynchronizable as String: false,
          kSecUseDataProtectionKeychain as String: true]
+    }
+
+    /// Full native reset only, once WebKit storage (which held every wrapped original) is
+    /// gone and no LodyKek call is still admitted. Deletes every KEK of this service, then
+    /// the receipts: a key never outlives its receipt, so a partial purge still refuses reuse.
+    static func purgeAll() -> Bool {
+        let all: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                  kSecAttrService as String: service,
+                                  kSecAttrSynchronizable as String: false,
+                                  kSecUseDataProtectionKeychain as String: true]
+        let deleted = SecItemDelete(all as CFDictionary)
+        guard deleted == errSecSuccess || deleted == errSecItemNotFound else { return false }
+        var remaining = all
+        remaining[kSecMatchLimit as String] = kSecMatchLimitOne
+        guard SecItemCopyMatching(remaining as CFDictionary, nil) == errSecItemNotFound else { return false }
+        guard let support = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                         appropriateFor: nil, create: false) else { return false }
+        let receipts = support.appendingPathComponent(directoryName, isDirectory: true)
+        if FileManager.default.fileExists(atPath: receipts.path) {
+            do { try FileManager.default.removeItem(at: receipts) } catch { return false }
+        }
+        return !FileManager.default.fileExists(atPath: receipts.path)
     }
 
     private func check(_ status: OSStatus) throws {

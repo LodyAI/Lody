@@ -30,9 +30,21 @@ afterAll(async () => {
 /** A page on the real RP origin, served locally, with a CDP virtual authenticator. */
 async function page(options: {
   hasPrf: boolean;
+  /** Replaces the browser's own capability report, as on browsers without PRF. */
+  capabilities?: 'absent' | 'no-prf' | 'throws';
 }): Promise<{ page: Page; cdp: CDPSession; authenticatorId: string }> {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const opened = await context.newPage();
+  if (options.capabilities)
+    await opened.addInitScript((mode) => {
+      const target = PublicKeyCredential as unknown as Record<string, unknown>;
+      if (mode === 'absent') delete target.getClientCapabilities;
+      else
+        target.getClientCapabilities =
+          mode === 'throws'
+            ? () => Promise.reject(new Error('unsupported'))
+            : () => Promise.resolve({ passkeyPlatformAuthenticator: true, 'extension:prf': false });
+    }, options.capabilities);
   await opened.route(`${ORIGIN}/**`, (route) =>
     route.fulfill({ contentType: 'text/html', body: `<!doctype html><script>${script}</script>` })
   );
@@ -93,4 +105,13 @@ it('turns a refused system prompt into a cancellation', { timeout: 20_000 }, asy
   expect(await target.evaluate(() => (globalThis as Surface).PasskeyFixture.dismissed())).toMatch(
     /^E2eePasskeyCancelled:/
   );
+});
+
+it('offers passkeys only where the browser itself reports PRF', async () => {
+  const available = (target: Page) =>
+    target.evaluate(() => (globalThis as Surface).PasskeyFixture.available());
+  expect(await available((await page({ hasPrf: true })).page)).toBe(true);
+  expect(await available((await page({ hasPrf: true, capabilities: 'no-prf' })).page)).toBe(false);
+  expect(await available((await page({ hasPrf: true, capabilities: 'absent' })).page)).toBe(false);
+  expect(await available((await page({ hasPrf: true, capabilities: 'throws' })).page)).toBe(false);
 });

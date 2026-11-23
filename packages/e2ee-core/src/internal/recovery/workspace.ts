@@ -728,8 +728,17 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
           intent = yield* attempt(() =>
             Result.getOrThrow(Schema.decodeUnknownResult(RestoreSchema)(parseCanonical(before)))
           );
-          if (intent.personal !== hex(personal.publicKey.toBytes()))
-            return yield* vaultError('conflict');
+          if (intent.personal !== hex(personal.publicKey.toBytes())) {
+            if (view.classifyDevice?.(intent.personal) !== 'revoked')
+              return yield* vaultError('conflict');
+            intent = yield* signAdmission(view);
+            const next = canonical(intent);
+            if ((yield* local.compareAndSwap(restoreKey, before, next)) !== 'Committed')
+              return yield* vaultError('conflict');
+            const read = yield* local.read(restoreKey);
+            if (!read || !bytesEqual(read, next)) return yield* vaultError('storage');
+            raw = next;
+          }
         } else {
           intent = yield* signAdmission(view);
           raw = canonical(intent);

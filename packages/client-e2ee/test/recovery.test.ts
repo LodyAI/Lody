@@ -40,7 +40,12 @@ function fixture() {
         entries.set(args.entry.entryId, args.entry);
         value = { ok: true };
       } else if (path === 'e2eeRecoveryVault:readEntry') value = entries.get(args.entryId) ?? null;
-      else if (path === 'e2eeRecoveryVault:readIndex') value = index;
+      else if (path === 'e2eeRecoveryVault:readEntries')
+        value = (args.entryIds as string[]).map((id) => entries.get(id) ?? null);
+      else if (path === 'e2eeRecoveryVault:deleteUnreferenced') {
+        entries.delete(args.entryId);
+        value = { ok: true };
+      } else if (path === 'e2eeRecoveryVault:readIndex') value = index;
       else if (path === 'e2eeRecoveryVault:compareAndSwapIndex') {
         index = args.next;
         value = { outcome: 'Committed' };
@@ -220,3 +225,38 @@ it('bounds hung vault and workspace recovery RPCs at 90s while preserving 30s Un
     await clock.dispose();
   }
 });
+it('sets, rotates and removes the vault password wrap from a browser login, keeping the file', async () => {
+  const f = fixture();
+  let file = new Uint8Array();
+  const { vaultId } = await Effect.runPromise(
+    f.service.create(async (bytes) => {
+      file = bytes.slice();
+      return bytes.slice();
+    })
+  );
+  try {
+    const first = 'correct horse battery';
+    const second = 'staple orbit lantern';
+    await Effect.runPromise(f.service.setPassword({ file }, first));
+    expect(await Effect.runPromise(f.service.list({ password: first }))).toMatchObject({
+      workspaces: 0,
+    });
+    expect(await Effect.runPromise(f.service.methods(vaultId))).toMatchObject({
+      hasFile: true,
+      hasPassword: true,
+    });
+    await Effect.runPromise(f.service.setPassword({ password: first }, second));
+    await expect(Effect.runPromise(f.service.list({ password: first }))).rejects.toBeDefined();
+    expect(await Effect.runPromise(f.service.list({ password: second }))).toMatchObject({
+      workspaces: 0,
+    });
+    expect(await Effect.runPromise(f.service.removePassword({ file }))).toEqual({
+      removed: true,
+      pending: false,
+    });
+    await expect(Effect.runPromise(f.service.list({ password: second }))).rejects.toBeDefined();
+    expect(await Effect.runPromise(f.service.list({ file }))).toMatchObject({ workspaces: 0 });
+  } finally {
+    file.fill(0);
+  }
+}, 120_000);

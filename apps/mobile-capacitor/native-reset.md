@@ -53,8 +53,15 @@ Auth scope is pinned to better-auth-capacitor 0.3.6 with `storagePrefix: 'better
   The dependency contract test deliberately fails when the catalog or installed
   Better Auth version (0.3.6), or installed Preferences version (8.0.1), changes;
   re-audit namespace/storage ownership before updating that guard.
-- This auth package and the shell write no Keychain items. Do not add broad
-  Keychain deletion or clear the entire Preferences domain.
+- This auth package writes no Keychain items. The only shell Keychain items are the
+  E2EE KEKs of `LodyKek` (fixed service `ai.lody.mobile.e2ee.kek.v1`), whose receipts live
+  in Application Support `LodyE2eeCustody`. They protect only originals held in WebKit
+  storage, so a full reset removes every item of that one service and then that directory,
+  never another service, and never the entire Preferences domain. Live reset does this
+  only after WebKit records are verified empty and every admitted `LodyKek` call has
+  returned (`LodyKekCallQueue.afterAdmitted`); a failure rejects the reset into root
+  recovery. Fallback acknowledgement repeats it best effort after the shared web wipe and
+  before the app import; a failure there never blocks boot, and the next reset retries.
 - Shared native cookies are cleared best-effort, and `OneSignal.logout()` is
   called after renderer quiescence. The Cordova SDK initializes natively
   at launch with its saved app ID, including when the renderer fails to boot.
@@ -95,7 +102,9 @@ the app unloaded. `native-reset-contract.test.mjs` checks dependency versions
 and compiles/runs the actual Foundation-only credential policy when `swiftc` is
 available (explicit skip otherwise): recreated cookies, additional auth keys,
 retained unrelated preferences, failure counts across policy recreation, and
-counter reset. These tests do not validate WebKit deletion.
+counter reset. These tests do not validate WebKit deletion. The macOS custody suite
+(`scripts/test-kek-ios.mjs`) runs the reset barrier against hung native calls and
+typechecks the Keychain purge; it never touches a real Keychain.
 
 On a test device, using an iOS build with public PR #1531 integrated:
 
@@ -109,7 +118,9 @@ On a test device, using an iOS build with public PR #1531 integrated:
    Pause before the bundle reopens stores to inspect `indexedDB.databases()` and
    localStorage: both should be empty. Normal startup may create new storage.
    Verify SessionStorage, Cache Storage, service workers, cookies, and both native
-   auth keys are gone; sign in and open the workspace again. Check OneSignal has
+   auth keys are gone; with an encrypted workspace opened before the reset, also verify
+   no `ai.lody.mobile.e2ee.kek.v1` Keychain item or `LodyE2eeCustody` receipt remains.
+   Sign in and open the workspace again. Check OneSignal has
    no previous external user binding, including after an offline reset/relaunch.
 3. Block the entry bundle and let the 12-second inline watchdog fire. Confirm
    “Reset app data” is visible after the splash hides and works without React.

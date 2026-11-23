@@ -87,6 +87,21 @@ private struct SharedCustodyVector: Decodable {
         let reused = DispatchSemaphore(value: 0)
         queue.enqueue(route: "same-routing-scope") { reused.signal() }
         precondition(reused.wait(timeout: .now() + 30) == .success, "settled route did not reopen")
+        // A full reset purges custody only after every admitted call on every route returns.
+        let hung = DispatchSemaphore(value: 0), entered = DispatchSemaphore(value: 0)
+        let purged = DispatchSemaphore(value: 0)
+        order = []
+        queue.enqueue(route: "reset-route-a") { append("a-entered"); entered.signal(); hung.wait(); append("a-settled") }
+        precondition(entered.wait(timeout: .now() + 30) == .success, "native start signal missing")
+        queue.enqueue(route: "reset-route-b") { append("b-settled") }
+        queue.afterAdmitted(on: .global()) { append("purge"); purged.signal() }
+        hung.signal()
+        precondition(purged.wait(timeout: .now() + 30) == .success, "reset purge never ran")
+        state.lock(); let reset = order; state.unlock()
+        check(reset.last == "purge" && reset.contains("a-settled") && reset.contains("b-settled"), "reset purge ran before admitted calls returned")
+        let idle = DispatchSemaphore(value: 0)
+        LodyKekCallQueue().afterAdmitted(on: .global()) { idle.signal() }
+        precondition(idle.wait(timeout: .now() + 30) == .success, "idle reset purge never ran")
     }
     static func main() throws {
         nativeQueue()

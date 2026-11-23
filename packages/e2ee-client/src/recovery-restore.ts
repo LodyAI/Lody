@@ -185,6 +185,35 @@ export const recoveryRestoreIncomplete = (
   workspaceId: string
 ) => Effect.map(local.read(restoreProgressKey(workspaceId)), isIncomplete);
 
+/** Durable progress for a restore that is not driven by `restoreVaultWorkspaces` (the
+ * personal host's single-workspace restore). The same markers and keys keep a partial
+ * or interrupted restore retryable from the same plan. `begin` returns the marker to
+ * replace on completion; a finished marker from an earlier vault is reopened. */
+export const recoveryRestoreProgress = (
+  local: WorkspaceRecoveryInput['local'],
+  workspaceId: string
+) => {
+  const key = restoreProgressKey(workspaceId);
+  return {
+    begin: () =>
+      Effect.gen(function* () {
+        const progress = yield* local.read(key);
+        if (isOpen(progress)) return;
+        const opened = yield* local.compareAndSwap(key, progress, RESTORE_OPEN);
+        if (opened !== 'Committed')
+          return yield* Effect.fail(new RecoveryVaultError({ code: 'conflict' }));
+      }),
+    finish: (partialEpochKey: boolean | undefined) =>
+      Effect.asVoid(
+        local.compareAndSwap(
+          key,
+          RESTORE_OPEN,
+          partialEpochKey === true ? RESTORE_PARTIAL : RESTORE_DONE
+        )
+      ),
+  };
+};
+
 /** One workspace a vault can restore onto this device. */
 export interface RecoveryRestoreTarget {
   readonly id: string;

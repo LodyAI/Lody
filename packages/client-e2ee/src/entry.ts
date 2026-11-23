@@ -1205,7 +1205,7 @@ export function personalEntry(options: PersonalEntryOptions) {
         const result = await execute(commands.restore(input));
         check(opened.accountId);
         if (opened.entry.retired) throw fail('closed');
-        if (result.outcome === 'Committed') {
+        if (result.outcome === 'Committed' && result.partialEpochKey !== true) {
           await execute(options.pins.finish(opened.accountId, result.offer, 'ready'));
           check(opened.accountId);
           if (opened.entry.retired) throw fail('closed');

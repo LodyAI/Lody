@@ -21,7 +21,13 @@ import {
 } from './recovery';
 import { clientRecoveryJournal } from './recovery-journal';
 import { hex, raw, historyPage } from './network';
-export type RecoveryWorkspaceResult = { workspaceId: string; name: string; outcome: string };
+export type RecoveryWorkspaceResult = {
+  workspaceId: string;
+  name: string;
+  outcome: string;
+  /** A committed restore whose newer epoch keys still await repair. */
+  partialEpochKey?: boolean;
+};
 export type RecoveryWorkspaceProgress = {
   results: RecoveryWorkspaceResult[];
   waiting: boolean;
@@ -162,7 +168,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
           const reference = (yield* vault.readIndex()).value.entries.find(
             (ref) => !ref.retired && ref.genesis === workspace.genesisHash
           );
-          if (!reference) return 'not-backed-up';
+          if (!reference) return { outcome: 'not-backed-up' };
           const offer = yield* Effect.acquireUseRelease(
             vault.readEntry(reference),
             (bundle) =>
@@ -180,7 +186,8 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
               ),
             (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
           );
-          const previous = yield* pins.read(options.accountId, workspace.id);
+          const pinned = yield* pins.read(options.accountId, workspace.id);
+          const previous = pinned?.phase === 'cancelled' ? null : pinned;
           const read = () => pages(workspace.id);
           const view = () => Effect.flatMap(read(), (rows) => verifyPersonalHistory(offer, rows));
           const fetchCurrentEnvelope = envelope(workspace.id, view);
@@ -222,7 +229,12 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                 ),
             })
           );
-          return result.outcome;
+          return {
+            outcome: result.outcome as string,
+            ...(result.outcome === 'Committed' && result.partialEpochKey === true
+              ? { partialEpochKey: true }
+              : {}),
+          };
         }
         // A reused session may have been opened for reading. Authorize every backup
         // against the current replacement state before borrowing workspace keys.
@@ -232,7 +244,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
         if (vault.vaultId !== state.current || state.replacing !== null)
           return yield* Effect.fail(failure());
         const pin = yield* pins.read(options.accountId, workspace.id);
-        if (pin?.phase !== 'ready') return 'not-admitted';
+        if (pin?.phase !== 'ready') return { outcome: 'not-admitted' };
         const result = yield* request(() =>
           options.commands.setup(workspace.id, {
             vault,
@@ -259,7 +271,9 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
               ),
           })
         );
-        return result.outcome === 'Committed' && result.recoverable ? 'recoverable' : 'Pending';
+        return {
+          outcome: result.outcome === 'Committed' && result.recoverable ? 'recoverable' : 'Pending',
+        };
       })
     );
   type Run = (
@@ -357,7 +371,7 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                               yield* Deferred.succeed(owned.done, {
                                 workspaceId: workspace.id,
                                 name: workspace.name,
-                                outcome: Exit.isSuccess(result) ? result.value : 'Failed',
+                                ...(Exit.isSuccess(result) ? result.value : { outcome: 'Failed' }),
                               });
                             }).pipe(
                               Effect.ensuring(Effect.sync(release)),

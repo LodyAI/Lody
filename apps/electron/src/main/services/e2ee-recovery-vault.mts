@@ -54,6 +54,20 @@ export const recoveryVaultEnabled = (env: NodeJS.ProcessEnv = process.env) => {
   return value === undefined || value.trim() === 'on'
 }
 
+/**
+ * The locator a desktop recovery file names: this build's Convex deployment URL.
+ * Cloud builds require it at build time (`electron.cloud.config.ts`); a build without
+ * it has no recovery service, so every recovery entry refuses as `disabled` before a
+ * passkey ceremony, save dialog or vault write rather than failing later in core or
+ * leaving an orphaned platform passkey. The value is returned unchanged: existing
+ * files carry it verbatim.
+ */
+export const recoveryVaultLocator = (configured: string | undefined): string => {
+  if (typeof configured !== 'string' || configured.trim() === '')
+    throw new Error('e2ee_recovery_disabled')
+  return configured
+}
+
 /** A canonical vault-v1 file is about 150 bytes; anything larger is not one. */
 export const MAX_RECOVERY_FILE_BYTES = 4096
 

@@ -37,6 +37,7 @@ import {
   recoveryRestoreTarget,
   recoveryVaultEnabled,
   recoveryVaultFailure,
+  recoveryVaultLocator,
   restoreAccountWorkspaces,
   saveAccountRecoveryFile,
   saveRecoveryFile,
@@ -169,6 +170,12 @@ void test('recovery defaults on while off and malformed explicit configuration r
   assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: ' on ' }), true)
   for (const mode of ['off', ' off ', '', ' ', 'maybe', 'ON'])
     assert.equal(recoveryVaultEnabled({ LODY_E2EE_RECOVERY_VAULT: mode }), false)
+})
+
+void test('a build without a deployment URL refuses recovery as disabled instead of naming an empty locator', () => {
+  for (const configured of [undefined, '', '   '])
+    assert.throws(() => recoveryVaultLocator(configured), { message: 'e2ee_recovery_disabled' })
+  assert.equal(recoveryVaultLocator('https://example.convex.cloud'), 'https://example.convex.cloud')
 })
 
 void test('creates an account vault, reopens it from the saved file through the wire, and rejects a foreign file', async () => {

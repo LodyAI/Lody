@@ -13,3 +13,6 @@ Parent package and repository instructions apply. Edit `AGENTS.md` only.
 
 Restores report partial epoch-key recovery separately from admission and content
 readiness, and retain the retryable journal until the current epoch key is installed.
+The host's single-workspace `restoreRecovery` writes the same progress markers through
+`recoveryRestoreProgress`. Without a retained offer it restores the account identity,
+and an identity the verified history shows revoked restores as its replacement.

@@ -811,7 +811,7 @@ it.each(['chromium', 'webkit'] as const)(
 );
 
 it.each([
-  { options: {}, expected: { ok: true, outcome: 'Committed', sealed: true } },
+  { options: {}, expected: { ok: true, outcome: 'Committed', sealed: true, progress: 'done' } },
   {
     options: { runtime: true },
     expected: {
@@ -828,11 +828,11 @@ it.each([
   },
   {
     options: { blockedEpoch: 'missing' as const },
-    expected: { ok: true, sealed: true, partialEpochKey: true },
+    expected: { ok: true, sealed: true, partialEpochKey: true, progress: 'partial' },
   },
   {
     options: { blockedEpoch: 'corrupt' as const },
-    expected: { ok: true, sealed: true, partialEpochKey: true },
+    expected: { ok: true, sealed: true, partialEpochKey: true, progress: 'partial' },
   },
   { options: { setup: true }, expected: { ok: true, sealed: true, recoveryVerified: true } },
   {
@@ -841,6 +841,10 @@ it.each([
   },
   { options: { repair: true }, expected: { ok: true, sealed: true, noDuplicateAdmission: true } },
   { options: { repair: true, revokePersonal: true }, expected: { ok: false } },
+  {
+    options: { repair: true, revokePersonal: true, replaceRevoked: true },
+    expected: { ok: true, sealed: true, replaced: true, progress: 'done' },
+  },
   { options: { wrongAccount: true }, expected: { ok: false, phase: null } },
   { options: { revokedRecovery: true }, expected: { ok: false } },
   { options: { tamperedPackage: true }, expected: { ok: false, phase: null } },

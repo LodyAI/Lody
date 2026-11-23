@@ -28,4 +28,17 @@ final class LodyKekCallQueue {
         }
         metadata.unlock()
     }
+
+    /// Runs `done` on `queue` once every call already admitted, on every route, has returned.
+    /// Calls admitted later are not awaited; the caller must have stopped their source.
+    func afterAdmitted(on queue: DispatchQueue, _ done: @escaping () -> Void) {
+        let group = DispatchGroup()
+        metadata.lock()
+        for entry in entries.values {
+            group.enter()
+            entry.queue.async { group.leave() }
+        }
+        metadata.unlock()
+        group.notify(queue: queue, execute: done)
+    }
 }

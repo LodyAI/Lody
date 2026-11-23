@@ -13,6 +13,7 @@ import {
   prepareEpochEnvelope,
   encodeCbor,
   prepareLedgerRecord,
+  prepareLedgerCommand,
   signLedgerRecord,
   commitEpochKey,
   sealHistoryPacket,
@@ -68,6 +69,10 @@ let emptyMailbox = false;
 let historyReads = 0;
 let stagingReads = 0;
 const stagedGroups = new Map<string, EpochStagedGroup>();
+/** Committed epochs whose envelopes have not reached staging yet. */
+const heldGroups = new Map<string, EpochStagedGroup>();
+/** Epoch 0 envelopes signed before a newer epoch, by `workspace:recipient`. */
+const epochZero = new Map<string, Uint8Array>();
 const failures: string[] = [];
 let actual: Promise<unknown>[] = [];
 let now = 0;
@@ -148,7 +153,7 @@ async function server(path: string, args: Record<string, unknown>) {
     };
   }
   if (path === 'e2eeMailbox:fetch') {
-    if (emptyMailbox) return { items: [], next: null };
+    if (emptyMailbox || Number(args.epoch) !== 0) return { items: [], next: null };
     const hash = hex(
       new Uint8Array(
         await crypto.subtle.digest('SHA-256', new Uint8Array(raw(String(args.credential))))
@@ -156,19 +161,22 @@ async function server(path: string, args: Record<string, unknown>) {
     );
     const recipient = w!.credentials.get(hash);
     if (!recipient) throw new Error('synthetic credential missing');
-    const frame = await run(
-      prepareEpochEnvelope({
-        context: {
-          genesis: view(w!).genesis,
-          epoch: Result.getOrThrow(Bytes.epochNumber(0)),
-          sender: w!.owner.publicKey,
-          recipient: Result.getOrThrow(Bytes.signingPublicKey(raw(recipient))),
-        },
-        key,
-        signer: w!.owner,
-        ledger: () => Effect.succeed(view(w!)),
-      })
-    );
+    const retained = epochZero.get(`${w!.id}:${recipient}`);
+    const frame =
+      retained ??
+      (await run(
+        prepareEpochEnvelope({
+          context: {
+            genesis: view(w!).genesis,
+            epoch: Result.getOrThrow(Bytes.epochNumber(0)),
+            sender: w!.owner.publicKey,
+            recipient: Result.getOrThrow(Bytes.signingPublicKey(raw(recipient))),
+          },
+          key,
+          signer: w!.owner,
+          ledger: () => Effect.succeed(view(w!)),
+        })
+      ));
     return {
       items: [{ sender: hex(w!.owner.publicKey.toBytes()), frameHex: hex(frame) }],
       next: null,
@@ -510,12 +518,28 @@ export function historyTransport(options: { metadata: boolean; emptyMailbox?: bo
 
 /** Commit a genuine publication and its complete staged envelopes after the vault
  * backup. The recovery device therefore has to open the newer epoch from staging. */
-export async function commitStagedEpoch() {
+export async function commitStagedEpoch(options: { publish?: boolean } = {}) {
   await run(
     Effect.gen(function* () {
       const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(43)));
       for (const w of workspaces.values()) {
         const before = view(w);
+        if (options.publish === false)
+          for (const device of before.inspectState().devices.keys())
+            epochZero.set(
+              `${w.id}:${device}`,
+              yield* prepareEpochEnvelope({
+                context: {
+                  genesis: before.genesis,
+                  epoch: Result.getOrThrow(Bytes.epochNumber(0)),
+                  sender: w.owner.publicKey,
+                  recipient: Result.getOrThrow(Bytes.signingPublicKey(raw(device))),
+                },
+                key,
+                signer: w.owner,
+                ledger: () => Effect.succeed(before),
+              })
+            );
         const body = Result.getOrThrow(
           encodeCbor([
             before.head.toBytes(),
@@ -564,11 +588,11 @@ export async function commitStagedEpoch() {
         };
         // Check publication, every recipient and every envelope signature before serving it.
         Result.getOrThrow(authenticateEpochStagedGroup(committed, group, true));
-        stagedGroups.set(w.id, group);
+        (options.publish === false ? heldGroups : stagedGroups).set(w.id, group);
       }
     })
   );
-  emptyMailbox = true;
+  if (options.publish !== false) emptyMailbox = true;
 }
 
 /** Inspect installed key readiness through real runtime acquisition, releasing only
@@ -584,4 +608,55 @@ export async function restoredKeys(ids: string[]) {
       }
     })
   );
+}
+
+/** Serve the envelopes `commitStagedEpoch({ publish: false })` held back. */
+export function publishStagedEpoch() {
+  for (const [id, group] of heldGroups) stagedGroups.set(id, group);
+  heldGroups.clear();
+}
+
+/** The routing phase of this account's entry pin for a workspace. */
+export const pinPhase = async (workspaceId: string) =>
+  (await run(personalEntryPins('lody-e2ee:web:v1:entry-pins').read('abc', workspaceId)))?.phase ??
+  null;
+
+/** The owner revokes every personal device but its own; returns the revoked keys. */
+export async function revokePersonalDevices(workspaceId: string) {
+  const w = workspaces.get(workspaceId)!;
+  const owner = hex(w.owner.publicKey.toBytes());
+  const targets = [...view(w).inspectState().devices]
+    .filter(([id, row]) => row.kind === 'personal' && id !== owner)
+    .map(([id]) => id);
+  for (const target of targets) {
+    const proposal = Result.getOrThrow(
+      prepareLedgerCommand(view(w), w.owner.publicKey, {
+        _tag: 'RevokeDevice',
+        target: Result.getOrThrow(Bytes.signingPublicKey(raw(target))),
+      })
+    );
+    append(w, await run(signLedgerRecord(proposal, w.owner)));
+  }
+  return targets;
+}
+
+/** Open a workspace through the real runtime; refusals are returned as their message. */
+export async function openStatus(workspaceId: string) {
+  let reader: string | undefined;
+  try {
+    reader = (await runtime.open(workspaceId, undefined, 'abc')).readerOwner;
+    const status = await runtime.refresh(workspaceId);
+    return { signingPublicKey: status.signingPublicKey, hasCurrentKey: status.hasCurrentKey };
+  } catch (error) {
+    return { refused: error instanceof Error ? error.message : String(error) };
+  } finally {
+    if (reader) await runtime.close(workspaceId, 'abc', reader).catch(() => undefined);
+  }
+}
+
+/** Restore through the console's port, recording every streamed row. */
+export async function portRestore() {
+  const observed: unknown[] = [];
+  const restored = await consolePort().restore('file', undefined, (row) => observed.push(row));
+  return { restored, observed };
 }

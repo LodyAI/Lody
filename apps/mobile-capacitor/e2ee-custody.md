@@ -72,6 +72,9 @@ logging must remain disabled, including debug shells.
   deletes only that scope. A new approval uses a new device identity; deletion
   never silently reinstalls the old one. App DB/journal cleanup is B3 work. Missing marker with a residual key refuses
   deletion; malformed or wrong-incarnation markers cannot authorize cleanup.
+- The user's full native reset is the one unscoped deletion: once WebKit storage (the
+  wrapped originals) is gone and admitted calls have returned, it deletes every KEK of
+  the fixed service, then the receipt directory. See [native reset](native-reset.md).
 
 References: [Apple accessibility](https://developer.apple.com/documentation/security/ksecattraccessibleafterfirstunlockthisdeviceonly).
 ThisDeviceOnly prevents migration to another device; excluding the receipt also

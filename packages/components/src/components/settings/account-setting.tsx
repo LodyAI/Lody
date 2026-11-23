@@ -36,11 +36,8 @@ import {
   type OrganizationMemberRef,
   type OrganizationMemberRole,
 } from '@/lib/organization-member-role';
-import {
-  AccountSettingsPure,
-  type AccountSettingsSurface,
-  type WorkspaceDeleteBillingGuard,
-} from './account-setting-pure';
+import { AccountSettingsPure, type AccountSettingsSurface } from './account-setting-pure';
+import { useWorkspaceDeleteBillingGuard } from './workspace-delete-billing-guard';
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { DeletedWorkspaceBilling } from './deleted-workspace-billing';
@@ -169,37 +166,7 @@ function CloudAccountSettings({
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
     activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  // Deleting a paid workspace needs a billing-aware guard: a live subscription
-  // blocks deletion (cancel first); a cancel-scheduled one gets a warning that
-  // deletion preserves its scheduled end and any accrued charges.
-  const billingOverview = useCloudQuery(
-    cloudOperations.billing.getBillingOverview,
-    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
-  );
-  const deleteBillingGuard: WorkspaceDeleteBillingGuard | null = useMemo(() => {
-    if (
-      !billingOverview ||
-      billingOverview.effectivePlanTier === 'free' ||
-      (billingOverview.entitlementSource === 'stripe_gift' && !billingOverview.autoRenewAfterGift)
-    ) {
-      return null;
-    }
-    if (billingOverview.cancelAtPeriodEnd) {
-      const entitlementEnd =
-        billingOverview.giftEndsAt && billingOverview.giftEndsAt > Date.now()
-          ? billingOverview.giftEndsAt
-          : billingOverview.currentPeriodEnd;
-      return {
-        kind: 'cancel-scheduled',
-        formattedPeriodEnd: entitlementEnd
-          ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(
-              new Date(entitlementEnd)
-            )
-          : null,
-      };
-    }
-    return { kind: 'active-subscription' };
-  }, [billingOverview]);
+  const deleteBillingGuard = useWorkspaceDeleteBillingGuard(activeOrganizationId);
 
   const sortedMembers = useMemo(() => {
     const members = activeOrganization?.members ?? [];

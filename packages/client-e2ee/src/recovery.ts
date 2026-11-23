@@ -1,4 +1,4 @@
-import { Effect, Layer, Semaphore, type Scope } from 'effect';
+import { Effect, Exit, Layer, Semaphore, type Scope } from 'effect';
 import { api } from '@lody/cloud-api';
 import { makeFunctionReference } from 'convex/server';
 import type { PersonalCloudConnection } from '@lody/client-e2ee';
@@ -535,6 +535,37 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
       ),
     remove: (unlock: ClientRecoveryUnlock, entryId: string) =>
       use(unlock, true, (vault) => vault.removePasskey(entryId)),
+    /** Set or rotate the current vault's password wrap, then prove it opens that vault. */
+    setPassword: (unlock: ClientRecoveryUnlock, password: string) =>
+      use(unlock, true, (vault) =>
+        Effect.gen(function* () {
+          yield* vault.setPassword({ password });
+          const reopened = yield* (yield* RecoveryVaults).openWithPassword({
+            vaultId: vault.vaultId,
+            locator: accountId,
+            password,
+          });
+          if (reopened.vaultId !== vault.vaultId)
+            return yield* Effect.fail({ code: 'authentication' });
+          yield* Effect.ignore(rememberMethods(reopened));
+        })
+      ),
+    /** Remove the password wrap once a file or passkey still unlocks the vault. A removal
+     * that failed after its intent was journaled reports itself as still pending. */
+    removePassword: (unlock: ClientRecoveryUnlock) =>
+      use(unlock, true, (vault) =>
+        Effect.gen(function* () {
+          const hasFile = yield* vault.hasRecoveryFile();
+          const passkeys = yield* vault.listPasskeys();
+          if (!hasFile && passkeys.length === 0) return yield* Effect.fail({ code: 'conflict' });
+          const removed = yield* Effect.exit(vault.removePassword());
+          const pending = yield* vault.pendingPasswordRemovals();
+          yield* Effect.ignore(rememberMethods(vault));
+          if (Exit.isFailure(removed) && pending.length === 0)
+            return yield* Effect.failCause(removed.cause);
+          return { removed: Exit.isSuccess(removed), pending: pending.length > 0 };
+        })
+      ),
     dispose: () => {
       retired = true;
     },

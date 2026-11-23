@@ -348,8 +348,12 @@ safe. `abandonVaultReplacement` gives up on the device that started, and
 
 `browserPasskeyPort` implements the platform passkey port over `navigator.credentials`.
 It reports what the browser returned and decides nothing: a browser without PRF reports
-`prfEnabled: false` and no result, and `passkey-unlock` refuses it. Its test runs real
-Chromium on the `lody.ai` origin with a CDP virtual authenticator. No page uses it yet.
+`prfEnabled: false` and no result, and `passkey-unlock` refuses it. `available()` is true
+only when `PublicKeyCredential.getClientCapabilities()` reports `extension:prf`; WebAuthn
+alone is not enough (Safari 16.4–17.x and older Firefox create passkeys without PRF), and a
+missing or failing capability API counts as unavailable. Its test runs real Chromium on the
+`lody.ai` origin with a CDP virtual authenticator, including replaced capability reports.
+No page uses it yet.
 
 ## Verification and limits
 
