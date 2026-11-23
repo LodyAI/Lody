@@ -32,12 +32,21 @@ const styles = stylex.create({
   },
   text: { color: colors.label, margin: 0, whiteSpace: 'pre-wrap', lineHeight: text.bodyLeading },
   textMuted: { color: colors.secondaryLabel },
+  iconDanger: { color: colors.destructive },
+  iconSuccess: { color: colors.success },
+  iconWarning: { color: colors.warning },
+  iconAccent: { color: colors.accent },
   heading: { color: colors.label, margin: 0, fontWeight: 600, lineHeight: text.headlineLeading },
   badgeRow: { display: 'inline-flex', alignItems: 'center' },
   sliderRow: { display: 'flex', alignItems: 'center', gap: space[2], flex: 1 },
   range: { accentColor: colors.accent, flex: 1, margin: 0 },
   rangeValue: { color: colors.secondaryLabel, fontVariantNumeric: 'tabular-nums' },
-  icon: { display: 'inline-flex', color: colors.secondaryLabel, flexShrink: 0 },
+  icon: {
+    display: 'inline-flex',
+    color: colors.secondaryLabel,
+    flexShrink: 0,
+    verticalAlign: '-0.125em',
+  },
 });
 
 type IconName = keyof typeof icons;
@@ -129,11 +138,20 @@ export const GENU_CATALOG: Record<string, GenuiRenderer> = {
       {children}
     </Badge>
   ),
-  icon: ({ name, size }) => {
+  icon: ({ name, size, color }) => {
     const Icon = icons[pascal(str(name)) as IconName];
     const px = num(size, 14);
+    const tone = str(color);
     return Icon ? (
-      <span {...stylex.props(styles.icon)}>
+      <span
+        {...stylex.props(
+          styles.icon,
+          (tone === 'danger' || tone === 'destructive') && styles.iconDanger,
+          tone === 'success' && styles.iconSuccess,
+          tone === 'warning' && styles.iconWarning,
+          (tone === 'accent' || tone === 'running') && styles.iconAccent
+        )}
+      >
         <Icon size={px} aria-hidden />
       </span>
     ) : null;
@@ -175,3 +193,9 @@ export const GENU_CATALOG: Record<string, GenuiRenderer> = {
   select: (props) => <GenuiSelect {...props} />,
   slider: (props) => <GenuiSlider {...props} />,
 };
+
+/**
+ * Tags allowed outside a `genui` fence as inline markdown elements. They are
+ * leaf, presentational, and take literal props only — no state, no events.
+ */
+export const GENUI_INLINE_TAGS: ReadonlySet<string> = new Set(['icon', 'badge']);

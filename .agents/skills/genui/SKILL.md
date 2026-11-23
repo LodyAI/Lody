@@ -1,6 +1,6 @@
 ---
 name: genui
-description: Author `genui` fenced blocks — declarative, stateful, interactive UI inside chat answers. Use when a reply benefits from controls (sliders, switches, selects, buttons) instead of static text. Read a reference file only for the component families you actually use.
+description: Author `genui` fenced blocks — declarative, stateful, interactive UI inside chat answers — or inline catalog tags in ordinary markdown. Use when a reply benefits from controls (sliders, switches, selects, buttons) instead of static text. Read a reference file only for the component families you actually use.
 ---
 
 # GenUI surface authoring
@@ -42,6 +42,27 @@ Emit one ```` ```genui ```` fence per interactive surface. The block is two regi
 - Every tag must be in the catalog below — an unknown tag renders as an
   inline `<tag>` placeholder plus a diagnostic, never a crash.
 - Text between tags is literal; wrap dynamic text in `{...}` expressions.
+
+## Inline catalog tags (no fence)
+
+Leaf, presentational tags also work inside ordinary markdown — sentences,
+table cells, list items — with literal props only:
+
+```markdown
+| 检查项 | #2620 |
+|---|---|
+| CLI tests | <icon name="x-circle" color="danger" inline/> 失败 |
+
+服务在线 <badge tone="success">running</badge>，一个仍在启动 <badge tone="warning">pending</badge>。
+```
+
+- Allowed tags: `icon`, `badge` (the `GENUI_INLINE_TAGS` allowlist).
+- Self-closing `<icon ... />`, or the pair form `<badge ...>plain text</badge>`.
+- Literal props and plain-text children only — `{expr}`, events, or nested
+  markup keep the tag as raw text. A half-written tag renders as text until
+  it closes.
+- `icon` inline props: `name`, `color` (danger/success/warning/accent),
+  `size`; `inline` is accepted and ignored — inline tags always render inline.
 
 ## Catalog index
 

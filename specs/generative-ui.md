@@ -23,6 +23,14 @@ theme already in place.
   Markdown. The block contains JSX-subset markup plus `{@state}` directives.
   An incomplete (still streaming) fence stays a plain code block; the surface
   commits only when the fence closes.
+- **Inline tags**: leaf catalog tags (`GENUI_INLINE_TAGS`, currently `icon`
+  and `badge`) may also appear directly in ordinary Markdown — inside a
+  sentence or a table cell — as `<icon ... />` or `<badge ...>text</badge>`.
+  Literal props and plain-text children only; expressions, events, nested
+  markup, or non-allowlist tags leave the markup as plain text. A remark
+  pass (`remarkGenuiInline`) rewrites qualifying nodes to the same
+  `GENUI_CATALOG` renderers, and a tag commits only when it closes, so a
+  half-streamed tag never mounts.
 - **`@lody/genui` (packages/genui)**: the framework-free runtime — directive
   splitting, acorn/acorn-jsx parsing into a `UiNode` tree, a confined
   interpreter for `{expr}` holes and callbacks, and `SurfaceState`, the
@@ -99,5 +107,8 @@ theme already in place.
 - Runtime: `packages/genui/src/` (`directives.ts`, `jsx.ts`, `evaluate.ts`,
   `state.ts`, `surface.ts`); tests in `packages/genui/test/genui.test.ts`.
 - React adapter: `packages/components/src/components/ai-gui/genui/`.
+- Inline dispatch: `remark-genui-inline.ts` + the `genui-inline` entry in
+  `markdown-renderer.tsx` `createMarkdownComponents`; tests in
+  `remark-genui-inline.test.ts`.
 - Fence dispatch: `markdown-renderer.tsx` `MarkdownPre` (`genui` language).
 - Authoring contract: `.agents/skills/genui/` (index + per-family references).
