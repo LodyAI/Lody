@@ -11,6 +11,7 @@ import {
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { prepareDraftAttachments } from '@/lib/session-attachment-preparation';
+import { assertProtectedAttachmentReferences } from '@/lib/encrypted-session-attachment';
 
 /** One-time message reservations share delivery policy across the composer and quota continue. */
 export const SCHEDULED_MESSAGE_POLICY = {
@@ -76,6 +77,9 @@ export async function prepareScheduledMessage(args: {
     },
     update: args.onAttachments,
   });
+
+  if (content.mode === 'protected')
+    assertProtectedAttachmentReferences(prepared.entry.inputConfig?.inputBlocks ?? []);
 
   return ScheduledMessageSchema.parse({
     ...args.message,

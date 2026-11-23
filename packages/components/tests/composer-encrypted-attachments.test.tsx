@@ -16,6 +16,7 @@ import {
   SESSION_FILE_MAX_COUNT,
   SESSION_IMAGE_MAX_SIZE_BYTES,
   type SessionHistory,
+  type SessionInputBlock,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -43,7 +44,6 @@ import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { fetchSessionFilePreview } from '../src/lib/session-file-download';
 import { initI18n } from '../src/i18n';
-import { prepareDraftAttachments } from '../src/lib/session-attachment-preparation';
 import { prepareScheduledMessage } from '../src/components/schedules/scheduled-message-write';
 
 vi.mock('../src/components/mentions/mention-session-source', async (original) => ({
@@ -355,71 +355,55 @@ it.each(['send', 'schedule'] as const)(
     local.enabled = true;
     const f = fixture();
     const server = relay();
-    const sessionId = 'session' as SessionId;
-    const attachments = [
-      {
-        id: 'image',
-        kind: 'image' as const,
-        source: new Blob([imageBytes]),
-        name: 'secret.png',
-        mimeType: 'image/png',
-      },
-      {
-        id: 'file',
-        kind: 'file' as const,
-        source: new Blob(['private file bytes']),
-        name: 'secret.txt',
-        mimeType: 'text/plain',
-      },
+    let sessionId = 'session' as SessionId;
+    let inputBlocks: SessionInputBlock[];
+    const files = [
+      new File([imageBytes], 'secret.png', { type: 'image/png' }),
+      new File(['private file bytes'], 'secret.txt', { type: 'text/plain' }),
     ];
-    const common = {
-      sessionId,
-      attachments,
-      localMachineId: 'machine' as never,
-      signal: new AbortController().signal,
-    };
-    const inputBlocks =
-      kind === 'schedule'
-        ? (
-            await prepareScheduledMessage({
-              ...common,
-              runtime: f.runtime,
-              scheduleId: 'schedule',
-              machineId: 'machine' as never,
-              actorId: 'account',
-              inputBlocks: [],
-              token: 'ordinary-token',
-              onAttachments: () => {},
-            })
-          ).inputBlocks
-        : (
-            await prepareDraftAttachments({
-              content: { mode: 'protected' },
-              resources: f.runtime.sendResources,
-              signal: common.signal,
-              token: () => 'ordinary-token',
-              attachmentToken: f.runtime.attachmentToken,
-              localMachineId: () => common.localMachineId,
-              record: {
-                workspaceId,
-                sessionId,
-                targetMachineId: 'machine' as never,
-                attachments,
-                entry: {
-                  id: 'turn',
-                  role: 'user',
-                  userId: 'account',
-                  timestamp: '2026-10-29T00:00:00Z',
-                  items: [],
-                  fileDiff: [],
-                  inputConfig: { inputBlocks: [] },
-                },
-              },
-              update: () => {},
-            })
-          ).entry.inputConfig!.inputBlocks!;
-    expect(f.runtime.pendingSends!.canPrepareAttachmentsLocally('machine' as never)).toBe(false);
-    expect(inputBlocks.map((block) => block.type)).toEqual(['image', 'file']);
+    if (kind === 'send') {
+      await mount(f.runtime);
+      await attach('select', files);
+      await submit();
+      expect(container.querySelector('output')!.textContent).toBe('');
+      await f.until(
+        () =>
+          f.session.historyWriter.readStored().length > 0 ||
+          !!f.runtime.pendingSends!.getSnapshot()[0]?.error
+      );
+      expect(f.runtime.pendingSends!.getSnapshot()).toEqual([]);
+      const [turn] = f.session.historyWriter.readStored();
+      expect(turn).toBeDefined();
+      inputBlocks = turn!.inputConfig!.inputBlocks!;
+      sessionId = [...f.metas.values()][0]!.id as SessionId;
+    } else {
+      inputBlocks = (
+        await prepareScheduledMessage({
+          runtime: f.runtime,
+          scheduleId: 'schedule',
+          sessionId,
+          machineId: 'machine' as never,
+          actorId: 'account',
+          inputBlocks: [],
+          attachments: files.map((file, index) => ({
+            id: file.name,
+            kind: index === 0 ? 'image' : 'file',
+            source: file,
+            name: file.name,
+            mimeType: file.type,
+            lastModified: file.lastModified,
+          })),
+          token: 'ordinary-token',
+          localMachineId: 'machine' as never,
+          signal: new AbortController().signal,
+          onAttachments: () => {},
+        })
+      ).inputBlocks;
+    }
+    const attachments = inputBlocks.filter(
+      (block) => block.type === 'image' || block.type === 'file'
+    );
+    expect(attachments.map((block) => block.type)).toEqual(['image', 'file']);
     expect(local.files).toEqual([]);
     expect(server.requests).toHaveLength(2);
     for (const request of server.requests) {
@@ -427,7 +411,7 @@ it.each(['send', 'schedule'] as const)(
       expect(request.headers.get('Authorization')).toBe('Bearer attachment-only-token');
       expect(new TextDecoder().decode(request.bytes)).not.toContain('private file bytes');
     }
-    for (const block of inputBlocks) {
+    for (const block of attachments) {
       if (block.type !== 'image' && block.type !== 'file') throw new Error('Expected attachment');
       expect(block.transport).not.toBe('local');
       expect(block.encryption).toBeDefined();
@@ -439,6 +423,61 @@ it.each(['send', 'schedule'] as const)(
       });
       expect(await blob.text()).toBe(block.type === 'image' ? imageContent : 'private file bytes');
     }
+  }
+);
+
+it.each(['input-only', 'ready-only', 'mixed-ready'] as const)(
+  'rejects unencrypted scheduled attachments when preparation returns early: %s',
+  async (source) => {
+    const f = fixture();
+    const server = relay();
+    const image: SessionInputBlock = {
+      type: 'image',
+      imageId: 'plaintext-image',
+      fileName: 'secret.png',
+      mimeType: 'image/png',
+      sizeBytes: imageBytes.length,
+    };
+    const file: SessionInputBlock = {
+      type: 'file',
+      fileId: 'plaintext-file',
+      fileName: 'secret.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 7,
+      sha256: 'a'.repeat(64),
+      textPreview: false,
+      uploadedAt: 1,
+      transport: 'r2',
+    };
+    await expect(
+      prepareScheduledMessage({
+        runtime: f.runtime,
+        scheduleId: 'schedule',
+        sessionId: 'session' as SessionId,
+        machineId: 'machine' as never,
+        actorId: 'account',
+        inputBlocks: source === 'ready-only' ? [] : [image],
+        attachments:
+          source === 'input-only'
+            ? []
+            : [
+                {
+                  id: 'ready-file',
+                  kind: 'file',
+                  name: 'secret.txt',
+                  mimeType: 'text/plain',
+                  lastModified: 1,
+                  ready: file,
+                },
+              ],
+        token: 'ordinary-token',
+        localMachineId: 'machine' as never,
+        signal: new AbortController().signal,
+        onAttachments: () => {},
+      })
+    ).rejects.toThrow('e2ee_attachment_unprotected');
+    expect(server.requests).toEqual([]);
+    expect(f.session.historyWriter.readStored()).toEqual([]);
   }
 );
 

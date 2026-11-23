@@ -26,6 +26,9 @@ export function createWorkspacePendingSends(args: {
   onDelivered?(sessionId: SessionId, turnId: string): void;
 }) {
   const { runtime } = args;
+  const content = {
+    mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext',
+  } as const;
   const inputOwner = createWorkspaceAcceptedInputs({
     ...args,
     visible: (send, signal) =>
@@ -45,7 +48,7 @@ export function createWorkspacePendingSends(args: {
   const held = createPendingSessionSends({
     prepare: (send, signal, update) =>
       prepareDraftAttachments({
-        content: { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+        content,
         record: send,
         signal,
         resources: runtime.sendResources,
@@ -112,7 +115,7 @@ export function createWorkspacePendingSends(args: {
   return {
     canPrepareAttachmentsLocally: (machineId: MachineId) =>
       resolveAttachmentRoute({
-        content: { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+        content,
         native: isElectronRenderer(),
         localMachineId: args.localMachineId(),
         targetMachineId: machineId,
