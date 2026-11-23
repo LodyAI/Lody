@@ -898,7 +898,6 @@ const createRoostSessionDataFactoryFromTransport =
                     )
                   );
             for (const row of affected) {
-              // Rows read one body at a time; count each staged row as it lands.
               if (replacements.length > 0) reportProgress();
               const operations = patches.get(row.turnId);
               if (operations) {

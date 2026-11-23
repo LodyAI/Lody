@@ -321,8 +321,6 @@ export function SessionInfoBar({
   queue,
 }: SessionInfoBarProps) {
   const { t } = useTranslation();
-  // Only whether progress exists shapes the bar; the indicator subscribes to
-  // the counts itself so each step does not re-render the whole bar.
   const hasSyncProgress = useSyncExternalStore(
     sessionSyncProgress.subscribe,
     () => sessionSyncProgress.getSnapshot() !== null,

@@ -62,8 +62,6 @@ export function createLoroSessionSyncProgress(
     fetch(input: string, init?: RequestInit) {
       refreshOwner();
       if (!catchingUp()) {
-        // A synced room can still lose its cursor; forget it so a later
-        // reconnect does not measure catch-up from the retired offset.
         const retired = init?.method === 'GET' && new URL(input).searchParams.has('offset');
         return fetch(input, init).then((response) => {
           if (retired && response.status === 410) discardCursor();
@@ -97,8 +95,6 @@ export function createLoroSessionSyncProgress(
         stream.catchUp(lastOffset, readTail);
       }
     },
-    /** Hides progress without touching `state`: that mirrors the room tracker,
-     *  which keeps a released-but-still-joined room synced until it stops. */
     clear() {
       stream.clear();
       publish(null);

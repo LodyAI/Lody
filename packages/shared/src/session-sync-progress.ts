@@ -9,9 +9,6 @@ export type SessionSyncProgressView = {
   readonly subscribe: (listener: () => void) => () => void;
 };
 
-/** True when `next` is worth a render: start, finish, a kind or total change,
- *  completion, a regression, or at least 1% of the total (or of the bytes seen
- *  so far when the total is unknown). */
 function isVisibleProgressStep(
   previous: SessionSyncProgress | null,
   next: SessionSyncProgress | null
@@ -23,11 +20,7 @@ function isVisibleProgressStep(
   return (next.received - previous.received) * 100 >= (next.total ?? previous.received);
 }
 
-/**
- * Display state for one session's catch-up. Catch-up arrives as many small
- * chunks, pages or records; publishing each would re-render every observer per
- * step, so steps below 1% are dropped while start and finish always publish.
- */
+/** Drops steps under 1% so per-chunk catch-up does not re-render per chunk. */
 export function createSessionSyncProgressStore(observerLabel: string) {
   let snapshot: SessionSyncProgress | null = null;
   const listeners = new Set<() => void>();
@@ -64,7 +57,6 @@ function streamOffset(offset: string): bigint | undefined {
   return /^\d{1,20}$/.test(offset) ? BigInt(offset) : undefined;
 }
 
-/** Bounds the head query that supplies a catch-up round's target offset. */
 export type LoroTailDeadline = () => AbortSignal;
 
 const defaultTailDeadline: LoroTailDeadline = () => AbortSignal.timeout(1500);
@@ -82,8 +74,6 @@ function trackLoroCatchUp(
   const signal = AbortSignal.any([controller.signal, tailDeadline()]);
   const report = () => {
     if (start === undefined || current === undefined || controller.signal.aborted) return;
-    // The round is over once the applied cursor reaches the observed tail;
-    // the room may stay unsynced (live poll pending), so clear it here.
     if (target !== undefined && current >= target) {
       controller.abort();
       publish(null);

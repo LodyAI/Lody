@@ -612,7 +612,6 @@ it('publishes Loro session progress from the persisted stream cursor and resets 
 
   server.room(path).batches.push(first, second);
   catchingUp = true;
-  // The head query must not race a wall-clock deadline under test load.
   const progress = createLoroSessionSyncProgress(() => 'cloud', {
     tailDeadline: () => new AbortController().signal,
   });
@@ -679,12 +678,10 @@ it('clears Loro catch-up progress at the stream tail and keeps a still-synced re
     progress.loaded('100', async () => '300');
     await planned.promise;
     expect(progress.getSnapshot()).toEqual({ kind: 'updates', received: 0, total: 200 });
-    // The cursor reaches the tail before the live poll marks the room synced.
     progress.saved('300');
     expect(progress.getSnapshot()).toBeNull();
 
     progress.updateState('synced');
-    // Lease released, then re-acquired before the room leaves: still synced.
     progress.clear();
     progress.loaded('300', async () => '400');
     expect(progress.getSnapshot()).toBeNull();

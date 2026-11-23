@@ -33,7 +33,6 @@ export type SessionSyncIndicatorVariant = 'syncing' | 'updating';
 const noProgress = (): SessionSyncProgress | null => null;
 const noProgressSubscription = () => () => {};
 
-/** Subscribes the indicator alone, so each published step re-renders only it. */
 function useSessionSyncProgress(view: SessionSyncProgressView | undefined) {
   return useSyncExternalStore(
     view?.subscribe ?? noProgressSubscription,

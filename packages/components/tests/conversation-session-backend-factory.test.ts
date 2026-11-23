@@ -2605,7 +2605,6 @@ it('retries only a timed-out page and commits the exact repair despite a newer r
     releaseLastPage.resolve();
     const followup = await timers.next();
     expect(progressUpdates).toEqual([
-      // The single repaired row is under 1% of the round, so it is not drawn.
       { kind: 'history', received: 0, total: 502 },
       { kind: 'history', received: 501, total: 502 },
       { kind: 'history', received: 502, total: 502 },
