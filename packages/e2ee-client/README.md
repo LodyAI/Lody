@@ -344,6 +344,19 @@ safe. `abandonVaultReplacement` gives up on the device that started, and
 `recoverySubmitOriginal` and `recoveryFetchEnvelope` adapt the service to core.
 [Spec](../../specs/e2ee/recovery-vault.md).
 
+## Recovery service locator
+
+`recoveryServiceLocator` (`./recovery-locator`) turns the product site URL into the
+`serviceLocator` that every host writes into recovery files and passes to core's open:
+its canonical origin, `https://lody.ai` for Lody Cloud and the `SITE_URL` origin for a
+self-hosted deployment. HTTPS is required, except HTTP on loopback hosts. A missing or
+unusable URL returns `null` and the host refuses recovery as `disabled`; a backend
+deployment URL or account ID is never a locator. Desktop reads `VITE_SITE_URL`, mobile reads
+`VITE_SITE_URL` with the Lody Cloud default, and Web passes its site origin, so one file
+opens on all three. Core rejects a file naming another locator as `locator-mismatch`, which
+hosts report as `e2ee_recovery_authentication` (the wrong-file message).
+[Spec](../../specs/e2ee/recovery-vault.md#recovery-material-and-ciphertext).
+
 ## Browser passkeys
 
 `browserPasskeyPort` implements the platform passkey port over `navigator.credentials`.
