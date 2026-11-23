@@ -2190,6 +2190,102 @@ it('rejects a late reset window after another tab advances the durable cache', a
   }
 });
 
+it('retries only a timed-out page and commits the exact repair despite a newer read', async () => {
+  const h = await cachedRecoveryFixture('paged-repair', 1);
+  const timers = controlledRefreshTimers();
+  const lastPageStarted = Promise.withResolvers<void>();
+  const releaseLastPage = Promise.withResolvers<void>();
+  const nextCommitted = Promise.withResolvers<void>();
+  const suffix = Array.from({ length: 501 }, (_, index) => ({
+    ...h.entries[0]!,
+    id: `missed-${index}`,
+  }));
+  const readPages: number[] = [];
+  const tail = suffix.at(-1)!;
+  const newTail = { ...tail, items: [{ type: 'text' as const, text: 'new revision' }] };
+  const reply = (revision: number, result: unknown) => ({
+    ...h.reply(revision, result).responses[0]!,
+    historyCount: 1 + suffix.length,
+  });
+  const data = createRemoteRoostSessionDataFactory({
+    incremental: true,
+    workspaceId: h.workspaceId,
+    machineId: h.machineId,
+    requestHistoryRead: async (_owner, _session, query) => {
+      if (query.kind === 'readChanges') {
+        if (query.checkpoint === 'checkpoint-1')
+          return reply(2, { state: 'ready', checkpoint: 'checkpoint-2', ids: [], from: 1 });
+        expect(query.checkpoint).toBe('checkpoint-2');
+        return reply(3, {
+          state: 'ready',
+          checkpoint: 'checkpoint-3',
+          ids: [tail.id],
+          bodies: { changed: [newTail], suffix: [] },
+        });
+      }
+      if (query.kind === 'readRange') {
+        expect(query.atCheckpoint).toBe('checkpoint-2');
+        readPages.push(query.from);
+        if (readPages.length === 2) {
+          lastPageStarted.resolve();
+          await releaseLastPage.promise;
+          return {
+            ...reply(2, undefined),
+            success: false,
+            error: 'History request timed out',
+            rpcFailure: {
+              source: 'transport',
+              code: 'response_timeout',
+              requestId: 'timed-out-page',
+              machineId: h.machineId,
+            },
+          };
+        }
+        return reply(
+          2,
+          suffix.slice(query.from - 1, query.to - 1).map((turn) => ({ state: 'ready', turn }))
+        );
+      }
+      if (query.kind === 'readTurn' && query.turnId === tail.id && !query.atCheckpoint)
+        return reply(3, { state: 'ready', turn: newTail });
+      throw new Error(`Unexpected ${query.kind}`);
+    },
+    requestHistoryWrite: async () => {
+      throw new Error('Unexpected write');
+    },
+  })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+  const observation = data.history.observe(() => {
+    void h.cache.getHead().then((head) => {
+      if (head?.checkpoint === 'checkpoint-3') nextCommitted.resolve();
+    });
+  });
+  try {
+    await observation.initial;
+    (await timers.next()).callback();
+    await lastPageStarted.promise;
+    expect(await data.history.readTurn(tail.id)).toMatchObject({ state: 'ready', turn: newTail });
+    expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-1', count: 1 });
+    releaseLastPage.resolve();
+    const followup = await timers.next();
+    expect(await h.cache.getHead()).toMatchObject({ checkpoint: 'checkpoint-2', count: 502 });
+    expect(await h.cache.readTurn(tail.id)).toEqual(tail);
+    expect(readPages).toEqual([1, 501, 501]);
+    followup.callback();
+    await nextCommitted.promise;
+    expect(await h.cache.readTurn(tail.id)).toEqual(newTail);
+    expect((await h.cache.readRows(0, 501))?.map((row) => row.turn)).toEqual([
+      ...h.entries,
+      ...suffix.slice(0, -1),
+    ]);
+  } finally {
+    releaseLastPage.resolve();
+    observation.unsubscribe();
+    data.dispose?.();
+    h.cache.dispose();
+    timers.restore();
+  }
+});
+
 it('notifies the actual view for a committed non-inline interval even when a newer hint arrives during its transaction', async () => {
   const h = await cachedRecoveryFixture('commit-notification', 600, 560);
   const timers = controlledRefreshTimers();

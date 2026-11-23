@@ -8885,7 +8885,7 @@ export class MessageHandler {
 
   private async readSessionHistoryForRpc(
     sessionId: SessionId,
-    query: SessionHistoryReadQuery,
+    query: SessionHistoryReadQuery & { inlineOnly?: true },
     signal?: AbortSignal
   ): Promise<SessionHistoryReadResponse> {
     try {
@@ -8913,6 +8913,21 @@ export class MessageHandler {
       if (backend.kind !== 'roost') {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
+      const catchupSignal = signal
+        ? AbortSignal.any([signal, this.historyOwnerAbort.signal])
+        : this.historyOwnerAbort.signal;
+      if (query.kind === 'readChanges') {
+        if (!backend.readHistoryCatchup)
+          throw new Error('History incremental recovery is unavailable');
+        await backend.flushLocalWrites();
+        const response = await backend.readHistoryCatchup(query, catchupSignal);
+        if (!response) throw new Error('History incremental recovery is unavailable');
+        return response;
+      }
+      if ((query.kind === 'readRange' || query.kind === 'readTurn') && query.atCheckpoint) {
+        const retained = await backend.readHistoryCatchup?.(query, catchupSignal);
+        if (retained) return retained;
+      }
       const history = backend.history;
       if (
         query.kind === 'readMetadata' ||
@@ -8936,50 +8951,6 @@ export class MessageHandler {
         let result: unknown;
         let pageTurns: SessionHistoryReadResponse['pageTurns'];
         switch (query.kind) {
-          case 'readChanges': {
-            if (!history.readChanges)
-              throw new Error('History incremental recovery is unavailable');
-            const changes = await history.readChanges(
-              query.checkpoint,
-              query.withPatches ? { withPatches: true } : undefined
-            );
-            result = changes;
-            if (changes.state === 'ready' && query.includeBodiesFrom !== undefined) {
-              const count = await history.count();
-              const retainedFrom =
-                query.includeBodiesFrom >= count && count > 0
-                  ? Math.max(0, count - 40)
-                  : Math.min(query.includeBodiesFrom, count);
-              const from =
-                changes.from === undefined
-                  ? undefined
-                  : Math.max(retainedFrom, Math.min(changes.from, count));
-              // Normal streaming edits/appends fit in one coherent reply. A large
-              // structural rewrite retains the bounded checkpoint-read path.
-              if (changes.ids.length + (from === undefined ? 0 : count - from) <= 500) {
-                const changed: SessionHistoryInput[] = [];
-                const patched = new Set(changes.patches?.turns.map((turn) => turn.turnId));
-                for (const id of changes.ids) {
-                  if (patched.has(id)) continue;
-                  const read = await history.readTurn(id);
-                  if (read.state === 'ready') changed.push(read.turn as SessionHistoryInput);
-                }
-                const suffix =
-                  from === undefined
-                    ? []
-                    : (await history.readRange(from, count)).map((read) => {
-                        if (read.state !== 'ready')
-                          throw new Error('History suffix body is unavailable');
-                        return read.turn as SessionHistoryInput;
-                      });
-                result = {
-                  ...changes,
-                  bodies: { changed, ...(from === undefined ? {} : { from }), suffix },
-                };
-              }
-            }
-            break;
-          }
           case 'count':
             result = query.withCheckpoint
               ? { count: await history.count(), checkpoint: before.checkpoint }
@@ -9061,7 +9032,6 @@ export class MessageHandler {
         )
           continue;
         const protectedRead =
-          query.kind === 'readChanges' ||
           ((query.kind === 'readLatestPage' || query.kind === 'readOlderPage') &&
             query.withCheckpoint) ||
           ((query.kind === 'readTurn' ||

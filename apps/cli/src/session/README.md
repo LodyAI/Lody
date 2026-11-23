@@ -672,10 +672,34 @@ full catch-up and recovery. No private SDK index formats are copied into Lody.
 See the [atomic metadata decision](../../../../.agents/notes/implemented/architecture/2026-10-21-roost-atomic-commit-metadata.md).
 
 Normal repairs request affected bodies with the change interval in one reply, bounded at
-500 changed/suffix bodies. Larger repairs use checkpoint-protected ranges. The renderer
-atomically commits bodies, positions, revision and checkpoint. Coherent replies may advance
-behind newer control hints and immediately catch up again, so streaming does not need to
-stop for a stable observation. Body-only edits retain cached directory cursor validity.
+500 changed/suffix bodies. The owner verifies receipts for a fixed checkpoint outside
+the writer queue and stops reading new receipt pages on cancellation. The serialized
+body read can add up to 128 newer events to the verified interval. A larger advance
+triggers another scan outside the queue.
+
+For a larger repair, the owner retains the needed bodies at the verified checkpoint.
+It releases the writer queue between body pages. A final receipt scan identifies any
+changed IDs and structural suffix that need to be reread at the new published head.
+The final serialized repair batches the remaining body reads within one page's limit.
+When more changed bodies need repair, the verified interval still supports current-head
+paging. Inline-only subscription reads never reserve catch-up pages.
+Requests for that exact checkpoint page through the retained bodies while the Agent
+commits later updates. A capture holds at most 4,000 bodies and 16 MiB of encoded data
+and expires after two minutes or owner disposal. The daemon budgets 16 concurrent
+captures and 64 MiB across retained and in-progress captures. Requests from the same
+applied checkpoint and retained window share preparation through caller timeouts
+and newer publications. Each caller can cancel its own wait. The owner cancels
+unfinished preparation after two minutes, on generation retirement, or on disposal.
+In-progress work keeps its quota until it settles.
+When a capture cannot fit those bounds, the verified interval still permits paging
+against the matching current head. Superseded pages preserve the cache and retry
+from the last applied checkpoint. A reset requires missing or invalid change coverage.
+The renderer atomically commits bodies, positions, revision and checkpoint against its original
+cache head. Exact-checkpoint pages are validated against the repair's revision and
+count. If a body read times out, the reader can retry that request once at the
+same checkpoint and keep its verified pages. A newer observation schedules the
+next repair while this checkpoint can still be committed.
+Body-only edits retain cached directory cursor validity.
 A successful delta repair finishes even for a partial tail cache, without rereading
 the unchanged latest page.
 
