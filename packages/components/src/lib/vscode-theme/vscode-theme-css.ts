@@ -677,7 +677,6 @@ const CHART_RUNG_COLOR_ID_CANDIDATES = [
     'terminal.ansiBlue',
     'terminal.ansiBrightBlue',
   ],
-  // Success family.
   [
     'charts.green',
     'gitDecoration.addedResourceForeground',
@@ -685,9 +684,7 @@ const CHART_RUNG_COLOR_ID_CANDIDATES = [
     'terminal.ansiBrightGreen',
     'testing.iconPassed',
   ],
-  // Warning family. `terminal.ansiYellow` precedes `editorWarning.foreground`:
-  // Vesper and Ayu paint the warning in their accent hue, which would collide
-  // with rung 1.
+  // ansiYellow precedes editorWarning: Vesper/Ayu paint warnings in accent, colliding with rung 1.
   [
     'charts.yellow',
     'charts.orange',
@@ -697,7 +694,6 @@ const CHART_RUNG_COLOR_ID_CANDIDATES = [
     'list.warningForeground',
     'terminal.ansiBrightMagenta',
   ],
-  // Danger family.
   [
     'charts.red',
     'editorError.foreground',
@@ -706,7 +702,6 @@ const CHART_RUNG_COLOR_ID_CANDIDATES = [
     'terminal.ansiBrightRed',
     'gitDecoration.deletedResourceForeground',
   ],
-  // Info / merged family.
   [
     'charts.purple',
     'terminal.ansiMagenta',
@@ -1185,7 +1180,6 @@ const distinctChartRung = (
   const seedSaturation = seedHsl?.saturation ?? 0;
 
   if (seed && seedSaturation > 0.12) {
-    // Same hue, different shade: preserves the rung's family.
     for (const [satDelta, lightDelta] of [
       [0, -0.18],
       [0, 0.18],
@@ -1207,9 +1201,8 @@ const distinctChartRung = (
     }
   }
 
-  // The seed was missing or achromatic, or no shade offset cleared the
-  // neighbors: take a hue-wheel slot. Rung-indexed angles keep successive
-  // derived rungs apart, and the lightness tracks the theme's polarity.
+  // Missing/achromatic seed or crowded shades: take a rung-indexed hue-wheel
+  // slot; lightness tracks the theme's polarity.
   const saturation = seedSaturation > 0.12 ? Math.max(0.5, seedSaturation) : 0.55;
   const baseLightness = seed && seedSaturation > 0.12 ? lightness : lightCanvas ? 0.42 : 0.68;
   for (let step = 0; step < 12; step += 1) {
@@ -1223,8 +1216,7 @@ const distinctChartRung = (
     }
   }
 
-  // A crowded wheel could not clear: fall back to a lightness ramp away from
-  // the canvas, which always separates on the shared background.
+  // Last resort: a lightness ramp away from the canvas always separates.
   for (const ratio of [0.2, 0.4, 0.6, 0.35, 0.55, 0.75]) {
     const candidate = mixHexColors(canvas, lightCanvas ? '#000000' : '#FFFFFF', ratio);
     if (isChartRungUsable(candidate, placed, canvas)) {

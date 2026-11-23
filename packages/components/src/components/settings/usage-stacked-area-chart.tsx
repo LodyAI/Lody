@@ -71,8 +71,7 @@ type UsagePerspectiveChartProps = {
   className?: string;
 };
 
-// Series hues come from the chart palette so they follow the theme, the same
-// rule the composition rings in usage-calendar-visualization.tsx document.
+// Series hues from the chart palette so they follow the theme (see usage-calendar-visualization).
 const DEFAULT_COLORS = [
   'hsl(var(--chart-1))',
   'hsl(var(--chart-2))',

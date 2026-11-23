@@ -186,10 +186,7 @@ describe('vscode-theme-css', () => {
     });
 
     it('derives five distinct, canvas-visible chart rungs from the active theme', () => {
-      // A theme that reuses one accent for link/warning and omits terminal and
-      // git colors cannot satisfy the rungs by lookup alone; the derivation
-      // must still produce five series that do not collapse onto each other or
-      // the page behind them.
+      // A minimal theme reusing one accent can't satisfy rungs by lookup; derivation must keep five series distinct and off the canvas.
       const minimal: LodyResolvedVSCodeTheme = {
         ...themeFixture,
         colors: {
@@ -211,7 +208,6 @@ describe('vscode-theme-css', () => {
             `rungs ${i + 1} and ${j + 1} collapse onto each other`
           ).toBeGreaterThanOrEqual(30);
         }
-        // Every rung reads against the canvas, never sinks into it.
         expect(
           rgbDistance(rungs[i]!, background),
           `rung ${i + 1} blends into the canvas`

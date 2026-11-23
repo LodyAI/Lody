@@ -599,11 +599,8 @@ pre {
     --sidebar-row-foreground: 0 0% 28%;
     --switch-track: 0 0% 64%;
     --ring: 220 82% 65%;
-    /* Chart series defaults, overridden by themed builds (`vscode-theme-css.ts`
-       resolves them from the active VS Code theme's `charts.*`/semantic workbench
-       colors). These exist so unthemed surfaces (Storybook, exported share cards
-       before their `.light-scope`/`.dark-scope` stylesheet is injected) still
-       render five distinguishable rungs. */
+    /* Chart series defaults; `vscode-theme-css.ts` overrides them from the
+       active theme so unthemed surfaces still render distinct rungs. */
     --chart-1: 220 82% 65%;
     --chart-2: 210 70% 45%;
     --chart-3: 262 60% 55%;

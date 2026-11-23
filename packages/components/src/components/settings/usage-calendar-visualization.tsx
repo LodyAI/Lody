@@ -1322,8 +1322,7 @@ function UsageWeekMatrix({
 }
 
 const COMPOSITION_SEGMENT_LIMIT = 5;
-// Per-subject alpha ramps over the chart palette: models take the blue anchor,
-// members the violet one, so the hues follow the theme like RING_COLORS does.
+// Per-subject alpha over the chart palette so series hues follow the theme.
 const MODEL_SERIES_COLORS = [
   'hsl(var(--chart-1))',
   'hsl(var(--chart-1) / 0.82)',
