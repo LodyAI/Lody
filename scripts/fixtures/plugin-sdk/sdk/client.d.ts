@@ -54,10 +54,12 @@ import {
   type SessionSummary,
   type SessionTurnRecord,
   type SessionTurnSummary,
+  type SignedTurnOrigin,
   type SkillSummary,
   type SubagentRunDetail,
   type SubagentRunSummary,
   type ToolDescriptor,
+  type TurnStopReason,
   type WorkspaceMemberSummary,
   type WorkspaceRef,
   type WorktreeEntry,
@@ -112,9 +114,11 @@ export {
   type SessionSummary,
   type SessionTurnRecord,
   type SessionTurnSummary,
+  type SignedTurnOrigin,
   type SkillSummary,
   type SubagentRunDetail,
   type SubagentRunSummary,
+  type TurnStopReason,
   type WorkspaceMemberSummary,
   type WorkspaceRef,
   type WorktreeEntry,
@@ -201,6 +205,13 @@ export interface MatchedToolRenderProps {
 }
 
 export interface MessageBlockRenderProps {
+  /** Owning assistant Turn ID, stable from Turn creation through completion. */
+  readonly turnId: string;
+  /**
+   * Deterministic fenced-block identity (`<turnId>:block:<ordinal>`) preserved across streaming
+   * chunks and `streaming: true -> false` closure so mounted React state is never reset mid-stream.
+   */
+  readonly blockId: string;
   readonly language: string;
   readonly code: string;
   readonly meta?: string;
@@ -331,8 +342,9 @@ export interface ClientPluginRegistry {
   };
   readonly messages: {
     /**
-     * Renders structured assistant fenced code blocks / custom artifacts inline, paired with a
-     * host-owned `"View Raw Markdown"` toggle and `SurfaceErrorBoundary` isolation.
+     * Renders structured assistant fenced code blocks / custom artifacts inline with stable
+     * `blockId` mount identity across streaming updates, paired with a host-owned
+     * `"View Raw Markdown"` toggle and `SurfaceErrorBoundary` isolation.
      */
     renderBlock(spec: {
       readonly id: string;

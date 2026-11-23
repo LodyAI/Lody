@@ -28,7 +28,9 @@ import {
   type SendSessionMessageRequest,
   type SessionDetail,
   type SessionRef,
+  type SignedTurnOrigin,
   type ToolDescriptor,
+  type TurnStopReason,
   type WorkspaceRef,
 } from "./shared";
 
@@ -54,6 +56,8 @@ export {
   type SendSessionMessageRequest,
   type SessionDetail,
   type SessionRef,
+  type SignedTurnOrigin,
+  type TurnStopReason,
   type WorkspaceRef,
 };
 
@@ -67,9 +71,10 @@ export interface MachineHostPort {
   readonly sessions: {
     /**
      * Symmetric with `LodyClient.sessions`. In E2EE workspaces, `create`, `send`, and
-     * `respondInteraction` succeed from `ToolExecutionContext` and from `MachineEventContext` /
-     * `MachineStartupContext` rooted in a verified `userTurnId` or human-signed workflow
-     * activation on this machine; un-rooted `MachineContext` queries/mutations reject with `forbidden`.
+     * `respondInteraction` verify `originTurn` (auto-populated in `ToolExecutionContext` and
+     * rooted `MachineEventContext`, or passed from `SessionTurnSummary.userTurnId` during
+     * `machine.onStart` recovery) against the stored human-signed user Turn in local `sessionData`
+     * (or a machine-owner signed workflow activation); un-rooted calls reject with `forbidden`.
      */
     create(
       target: MachineRef | ProjectRef,

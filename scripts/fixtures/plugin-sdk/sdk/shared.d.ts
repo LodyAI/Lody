@@ -231,6 +231,17 @@ export interface AttachmentSourceDescriptor<
   readonly metadataSchema?: TMeta;
 }
 
+/**
+ * Verifiable reference to a human-signed user Turn stored in local `sessionData` on the
+ * same machine. Maps 1:1 to E2EE `machineInput.derivedFrom` (`{ sessionId, userTurnId }`),
+ * allowing `machine.events.on` and `machine.onStart` recovery to preserve human-signed
+ * execution provenance across daemon restarts without bypassing E2EE signing gates.
+ */
+export interface SignedTurnOrigin {
+  readonly session: SessionRef;
+  readonly userTurnId: string;
+}
+
 export interface CreateSessionRequest {
   /**
    * Stable operation identity under `(workspace, user, target, pluginId, requestId)`.
@@ -249,6 +260,12 @@ export interface CreateSessionRequest {
   readonly providerId?: string;
   /** Optional parent Session pointer recorded in `SessionMeta.openedBySessionId` / `openedByRootSessionId`. */
   readonly parentSession?: SessionRef;
+  /**
+   * Optional E2EE human-signed root Turn provenance on the same machine (`derivedFrom`).
+   * Auto-populated in `ToolExecutionContext` and rooted `MachineEventContext`; explicitly
+   * supplied during `machine.onStart` reconciliation from `SessionTurnSummary.userTurnId`.
+   */
+  readonly originTurn?: SignedTurnOrigin;
   readonly prompt: string;
   readonly skillIds?: readonly string[];
   /** Optional initial PR link recorded on Session creation. */
@@ -261,6 +278,8 @@ export interface SendSessionMessageRequest {
   readonly prompt: string;
   readonly attachments?: readonly AttachmentSnapshot[];
   readonly delivery?: "queue" | "steer";
+  /** Optional E2EE human-signed root Turn provenance for daemon-side workflow/recovery calls. */
+  readonly originTurn?: SignedTurnOrigin;
 }
 
 export interface SendSessionMessageReceipt {
@@ -303,6 +322,8 @@ export interface RespondInteractionRequest {
   readonly requestId: string;
   readonly turnId?: string;
   readonly outcome: InteractionOutcome;
+  /** Optional E2EE human-signed root Turn provenance for daemon-side workflow/recovery calls. */
+  readonly originTurn?: SignedTurnOrigin;
 }
 
 export interface LodyQueryDescriptor<S extends PluginScope, TInput, TOutput> {
@@ -380,6 +401,8 @@ export interface InstalledPluginSummary {
   readonly enabled: boolean;
   readonly state: "disabled" | "starting" | "running" | "stopping" | "faulted";
   readonly clientDigest?: string;
+  /** True when linked via `lody plugin link --dev`, eligible for scoped Trusted Dev Session HMR. */
+  readonly devMode?: boolean;
   readonly machine?: MachineRef;
 }
 
@@ -427,12 +450,23 @@ export interface SessionSummary {
   }[];
 }
 
+export type TurnStopReason =
+  | "end_turn"
+  | "cancelled"
+  | "error"
+  | "max_tokens"
+  | "unknown";
+
 export interface SessionTurnSummary {
   readonly turnId: string;
   readonly role: "user" | "assistant";
+  /** Originating human-signed user Turn ID on this Session/derivation chain (when applicable). */
+  readonly userTurnId?: string;
   readonly previewText: string;
   readonly createdAt: number;
   readonly finished: boolean;
+  /** Populated on finished assistant turns so `machine.onStart` can reconcile missed `end_turn` completions. */
+  readonly stopReason?: TurnStopReason;
 }
 
 export interface SubagentRunSummary {
@@ -553,12 +587,7 @@ export interface MachineHostEventMap {
     readonly project?: ProjectRef;
     readonly turnId: string;
     readonly userTurnId?: string;
-    readonly stopReason:
-      | "end_turn"
-      | "cancelled"
-      | "error"
-      | "max_tokens"
-      | "unknown";
+    readonly stopReason: TurnStopReason;
     readonly durationMs?: number;
   };
   readonly "session.tool.started": {
@@ -657,13 +686,17 @@ export declare const lodyQueries: {
   readonly sessions: LodyQueryDescriptor<
     "workspace" | "machine" | "project",
     {
+      readonly sessionIds?: readonly string[];
       readonly archived?: boolean;
       readonly status?: "idle" | "busy" | "waiting" | "stopped";
+      readonly agentRoleId?: string;
       readonly createdByMe?: boolean;
       readonly createdByPlugin?: boolean;
       readonly businessKey?: string;
       readonly rootSessionId?: string;
       readonly machineId?: string;
+      /** Inclusive `updatedAt >= updatedAfter` watermark filter for incremental workflow reconciliation. */
+      readonly updatedAfter?: number;
       readonly search?: string;
       readonly limit?: number;
       readonly cursor?: string;

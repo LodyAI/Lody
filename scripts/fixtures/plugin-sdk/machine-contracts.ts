@@ -90,6 +90,7 @@ export const machineWorkflowEventChecks = defineMachinePlugin((machine) => {
     await ctx.lody.sessions.respondInteraction(event.session, {
       requestId: "req_1",
       outcome: { outcome: "selected", optionId: "allow_once" },
+      originTurn: { session: event.session, userTurnId: "user_turn_1" },
     });
   });
 });

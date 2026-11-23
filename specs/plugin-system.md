@@ -215,8 +215,9 @@ Plugins MUST NOT be restricted to rendering only their own `defineTool` descript
      2. An exact own-tool `tools.render` registration (unless another matcher has explicit user override), else
      3. Highest `priority` (`default = 0`), tie-broken deterministically by `(plugin_id ASC, spec.id ASC)`.
    - Shadowed matchers record a `matcher_shadowed` diagnostic entry in the Plugin Inspector (Section 11.3).
-3. **Structured Message Block Renderer (`messages.renderBlock(spec)`):**
-   - Matches assistant fenced code blocks whose language tag appears in `spec.languages` (e.g., `sorbet-plan`, `test-report`, `openapi-preview`), streaming live `code` updates with `streaming: true` until fence closure (`streaming: false`).
+3. **Structured Message Block Renderer & Stable Block Identity (`messages.renderBlock(spec)`):**
+   - Matches assistant fenced code blocks whose language tag appears in `spec.languages` (e.g., `sorbet-plan`, `test-report`, `openapi-preview`), passing `turnId`, deterministic `blockId = "<turnId>:block:<ordinal>"` (`0`-indexed fenced-block ordinal within that assistant turn), `code`, `meta`, and `streaming` (`true` while open, `false` upon fence closure).
+   - **Stateful Incremental Updates:** `ClientPluginHost` MUST key mounted block subtrees by `(session.sessionId, blockId, winner.plugin_id, winner.id)` — NEVER by `code`, `meta`, `streaming`, or transient AST node references. While tokens stream into an open block and across the `streaming: true -> false` transition, the host MUST preserve the mounted React component instance and update props in place so interactive local state (`useState`, `useRef`, form inputs, chart zoom/selection, canvas contexts) is never reset. Unmounting within a visible turn is permitted ONLY on `"View Raw Markdown"` toggle, `SurfaceErrorBoundary` crash, winning renderer / `clientDigest` replacement, or parent turn/session unmount.
 4. **Mandatory Ground-Truth Escape Toggle & `ai-gui` Invariants:**
    - Whenever a `"replace"`-mode `tools.matchRender` or `messages.renderBlock` mounts, the host shell MUST render a non-spoofable chrome toggle (**`"View Raw Output"`** / **`"View Raw Markdown"`**) outside the plugin subtree and wrap the plugin subtree in `SurfaceErrorBoundary`.
    - Per [`packages/components/src/components/ai-gui/AGENTS.md`](../packages/components/src/components/ai-gui/AGENTS.md), plugin tool/block renderers MUST NOT inject `searchBlockId` into Lody's prose-only conversation search index, MUST NOT mount nested full-height scroll traps inside collapsed activity groups, and MUST preserve turn-folding layout invariants.
@@ -274,7 +275,10 @@ To guarantee custom Workspace / multi-Agent control planes are never bottlenecke
    - Replaying the identical normalized payload returns the original `SessionRef` even after Session archive; replaying `requestId` with a modified payload rejects with `idempotency_conflict`.
    - A new `requestId` targeting an already-active (non-archived) `businessKey` rejects with `business_key_conflict`; archiving the Session releases `businessKey` while retaining the `requestId` receipt.
 2. **Symmetric 1:1 ACP Interaction Settlement (`sessions.respondInteraction`):**
-   - Both `LodyClient.sessions.respondInteraction` (custom sidebars, hover cards, voice/hardware controllers) and `MachineHostPort.sessions.respondInteraction` (Telegram/Slack approval bridges, policy orchestrators) settle pending `permission` or `elicitation` requests via `{ requestId, turnId?, outcome }`, mapping 1:1 to `sessionData.commands.respondPermission` / `PermissionOutcomeSchema` ([`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts), [`message-schemas.ts`](../packages/shared/src/message-schemas.ts)) with zero artificial browser `userActivation` heuristics and zero tool-specific wrappers like `answerQuestion`. Plugins needing full elicitation form schemas read the turn via `readSnapshot` / `useLodySnapshot({ kind: "session-transcript", session, turnIds: [turnId] })`.
+   - Both `LodyClient.sessions.respondInteraction` (custom sidebars, hover cards, voice/hardware controllers) and `MachineHostPort.sessions.respondInteraction` (Telegram/Slack approval bridges, policy orchestrators) settle pending `permission` or `elicitation` requests via `{ requestId, turnId?, outcome, originTurn? }`, mapping 1:1 to `sessionData.commands.respondPermission` / `PermissionOutcomeSchema` ([`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts), [`message-schemas.ts`](../packages/shared/src/message-schemas.ts)) with zero artificial browser `userActivation` heuristics and zero tool-specific wrappers like `answerQuestion`. Plugins needing full elicitation form schemas read the turn via `readSnapshot` / `useLodySnapshot({ kind: "session-transcript", session, turnIds: [turnId] })`.
+3. **Incremental Workflow Reconciliation Without a Durable Event Broker:**
+   - `lodyQueries.sessions` supports `sessionIds`, `agentRoleId`, and inclusive `updatedAfter` (`updatedAt >= updatedAfter`) filtering, while `SessionTurnSummary` / `SessionTurnRecord` expose `userTurnId` and `stopReason`.
+   - On `machine.onStart(ctx)`, workflow plugins achieve full crash/offline recovery without a separate Durable Event Broker by combining three existing primitives: (a) resolving unfinished `ctx.dataDir` journal entries via `lodyQueries.sessions({ sessionIds })` to recover host-minted `SessionSummary.session` (`SessionRef`) and `SessionSummary.project` (`ProjectRef`) so original project targets and `parentSession` lineage are preserved, (b) scanning `lodyQueries.sessions({ agentRoleId, updatedAfter })` + `lodyQueries.sessionTurns` to catch `stopReason === "end_turn"` completions missed while the daemon was down before advancing the persisted watermark, and (c) replaying deterministic `(requestId, businessKey)` against `SessionCreationReceipt`.
 
 ---
 
@@ -320,7 +324,7 @@ Source-linked `--dev` plugins compile inside `DevPluginCompiler`, which exits au
 `PluginHost` and the `machine` subprocess communicate over `stdio: ['ignore', 'pipe', 'pipe', 'ipc']`:
 
 - **Host -> Child:** `init` (`pluginId`, `instanceId`, `dataDir`, `config`), `start` (dispatched once after `ready` to invoke `machine.onStart`), `invoke` (`callId`, `kind`, `descriptorId`, `scope`, `target`, `input`), `event` (`eventId`, `eventType`, `payload`, `rootUserTurnId?`), `cancel` (`callId`), `host_result` (`hostCallId`, `ok`, `data`/`error`), `shutdown` (`graceMs`).
-- **Child -> Host:** `ready` (`handlers`, `subscribedEvents`), `result` (`callId`, `ok`, `data`/`error`), `invalidate` (`descriptorId`, `scope`, `target?`), `host_call` (`hostCallId`, `op`: `"lody.read" | "lody.readSnapshot" | "sessions.create" | "sessions.send" | "sessions.requestStop" | "sessions.requestArchive"`, `payload`).
+- **Child -> Host:** `ready` (`handlers`, `subscribedEvents`), `result` (`callId`, `ok`, `data`/`error`), `invalidate` (`descriptorId`, `scope`, `target?`), `host_call` (`hostCallId`, `op`: `"lody.read" | "lody.readSnapshot" | "sessions.create" | "sessions.send" | "sessions.respondInteraction" | "sessions.requestStop" | "sessions.requestArchive"`, `payload`).
 - `stdout` and `stderr` are strictly diagnostic pipes captured into `logs_ring`; malformed IPC frames kill the child and transition to `Faulted`.
 
 ### 9.2 Core Remote `MachineRpc` & Bundle Streaming
@@ -381,7 +385,7 @@ Each `ClientPluginInstance` owns an isolated `query_cache` keyed by `(descriptor
 ### 11.2 Live `--dev` Hot-Reload & Simultaneous Desktop + Web Preview
 
 1. `lody plugin link --dev <path>` watches `lody.plugin.json`, `client`, `machine`, `themes`, `styles`, `assets`, `skills`, and `agentRoles`.
-2. Saving a client/theme/style edit triggers `DevPluginCompiler` (`1000 ms` idle reap), updates `clientDigest`, and hot-swaps the `ClientPluginInstance` **simultaneously across both local Electron Desktop AND connected Web Browser sessions** without restarting the `machine` subprocess or interrupting active Agent Turns.
+2. Saving a client/theme/style edit triggers `DevPluginCompiler` (`1000 ms` idle reap), updates `clientDigest`, and hot-swaps the `ClientPluginInstance` **simultaneously across both local Electron Desktop AND connected Web Browser sessions** (with zero per-save confirmation prompts once the developer grants a scoped **Trusted Dev Session** per Section 13.2) without restarting the `machine` subprocess or interrupting active Agent Turns.
 3. Saving a `machine` edit runs serialized `Drain-Before-Respawn` and re-registers handlers/events within a single workflow command.
 4. `lody plugin preview <path>` opens a local/sandboxed preview harness with synthetic `ObservedToolCall`, `MessageBlock`, and `SessionSummary` fixtures so UI and renderer matchers can be verified across Desktop, Web, and compact Mobile viewports without spending live LLM tokens.
 
@@ -440,10 +444,15 @@ Users MUST be able to ask any Lody Agent _"Build me a plugin that..."_ and go fr
 - Only interactive human UI actions (Settings / `plugin_proposal` Approve button) or authenticated human CLI commands (`LODY_AGENT_SESSION_ID` absent) MAY activate or reload plugin code.
 - Spawned `machine`, `mcpServers`, and `acpProviders` child processes MUST receive a scrubbed environment (`PATH`, `HOME`, `TMPDIR`, `LANG`, `TZ`, `NODE_ENV`) plus ONLY `envKeys` explicitly referencing that plugin's own declared `manifest.config`. Daemon E2EE signing keys, KEKs, cloud auth tokens, and sibling plugins' secrets MUST NEVER enter child `process.env`.
 
-### 13.2 Client Bundle Trust & `lody --safe-mode`
+### 13.2 Client Bundle Trust, Scoped `Trusted Dev Session` & `lody --safe-mode`
 
-- Remote `clientDigest` bundles on Web, Mobile, and collaborator Desktops require explicit per-`(workspace_id, plugin_id, clientDigest)` trust approval before evaluating `client.js`.
-- Launching with `lody --safe-mode` (or `?safeMode=1` on Web) MUST skip all `client.js` evaluation, `themes`, and `styles` while keeping core Session viewing, permissions, and `Stop` operational.
+- **Installed / Published Plugins (`devMode !== true`):** Remote `clientDigest` bundles on Web, Mobile, and collaborator Desktops require explicit per-`(workspace_id, plugin_id, clientDigest)` trust approval before evaluating `client.js`.
+- **Scoped `Trusted Dev Session` for `--dev` HMR:** When the machine owner links a plugin via `lody plugin link --dev`, `PluginHost` attaches an ephemeral 128-bit `devSessionNonce` (`devMode: true` in `plugin/catalog`, visible ONLY to the machine owner). Remote Web/Desktop/Mobile sessions authenticated as that machine owner MAY grant an explicit, opt-in **Trusted Dev Session** lease bound strictly to `(workspace_id, machine_id, plugin_id, devSessionNonce)` in ephemeral session state (`sessionStorage` / memory, never durable cross-session trust):
+  1. Subsequent `clientDigest` rebuilds on that exact `devSessionNonce` auto-accept and hot-swap without repetitive approval prompts;
+  2. Host chrome displays a persistent, non-spoofable **`Dev HMR Trusted · Revoke`** indicator for one-click revocation;
+  3. Any `lody.plugin.json` change adding a new capability class (`machine`, `mcpServers`, `acpProviders`, or `secret` config) pauses auto-HMR and re-prompts capability disclosure;
+  4. Unlinking `--dev`, restarting `link --dev` (rotating `devSessionNonce`), closing the browser tab/session, or entering `?safeMode=1` immediately expires the lease. Collaborators NEVER receive `Trusted Dev Session` leases.
+- **Emergency Escape Hatch (`lody --safe-mode`):** Launching with `lody --safe-mode` (or `?safeMode=1` on Web) MUST skip all `client.js` evaluation, `themes`, and `styles` while keeping core Session viewing, permissions, and `Stop` operational.
 
 ### 13.3 E2EE Guest (`read`) vs Non-Guest Execution Gate
 
@@ -463,7 +472,7 @@ Per [`specs/e2ee/machine-sharing.md`](e2ee/machine-sharing.md):
 Per [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts):
 
 - Client `useLody().sessions.create` / `send` / `respondInteraction` signs `E2EE_INTENT_KIND.memberInput` (`kind = 1`) on the personal device.
-- Daemon `ToolExecutionContext` AND `MachineEventContext` / `MachineStartupContext` rooted in a verified `rootUserTurnId` (or a human-signed workflow activation declaration on that same machine) MAY sign `derivedFrom` `E2EE_INTENT_KIND.machineInput` (`kind = 2`) for `sessions.create`, `send`, and `respondInteraction`, enforcing the **20-derivation cap** and **single-machine rule**.
+- Daemon `ToolExecutionContext` AND `MachineEventContext` / `MachineStartupContext` MAY sign `derivedFrom` `E2EE_INTENT_KIND.machineInput` (`kind = 2`) for `sessions.create`, `send`, and `respondInteraction` when rooted in a verified `SignedTurnOrigin` (`originTurn: { session, userTurnId }`, auto-populated from live turn events or passed during `machine.onStart` reconciliation from `SessionTurnSummary.userTurnId`) or a machine-owner signed workflow activation declaration on that same machine. Per [shared-member derivation](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md), the daemon verifies `(originTurn.session.sessionId, originTurn.userTurnId)` directly against the stored human-signed `memberInput` Turn row in local `sessionData` (enforcing the **single-machine rule**, active member/project `MachineSharing`, and the **20-derivation cap**, with no start-time expiration deadline — making post-restart `onStart` recovery cryptographically sound without forging or weakening E2EE signatures).
 - Un-rooted `MachineContext` (`query`, `mutation`, `attachmentSource`) MUST reject `sessions.create`, `sessions.send`, and `sessions.respondInteraction` with `forbidden` in E2EE workspaces.
 
 ### 13.6 Custody Isolation, Snapshot Redaction, Static Share & Network Disclosure
@@ -495,7 +504,7 @@ Per [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee
 
 ### 14.3 Restart Semantics
 
-- **Daemon Restart & Workflow Recovery:** Re-evaluates persisted `enabled = true` plugins, preserves `ctx.dataDir`, `SessionCreationReceipt`, and `PluginProposalRecord` rows, and invokes `machine.onStart(ctx)` so workflow plugins recover unfinished multi-Session tasks idempotently using persisted `(requestId, businessKey)` without modifying Lody Core.
+- **Daemon Restart & Workflow Recovery:** Re-evaluates persisted `enabled = true` plugins, preserves `ctx.dataDir`, `SessionCreationReceipt`, and `PluginProposalRecord` rows, and invokes `machine.onStart(ctx)` so workflow plugins reconcile both unfinished `ctx.dataDir` journal entries AND missed `session.turn.completed` history transitions (`lodyQueries.sessions` `updatedAfter` + `lodyQueries.sessionTurns`), preserving `ProjectRef`, `parentSession`, and E2EE `originTurn` provenance idempotently without modifying Lody Core.
 - **Client Reload / Reconnect:** Reconciles `clientDigest` from catalog/cache without restarting daemon subprocesses.
 
 ### 14.4 Operator Intervention Points
@@ -635,6 +644,18 @@ function resolve_tool_renderer(client_host, user_prefs, observed_call):
 
   # Host shell ALWAYS wraps replacement renderers with non-spoofable Raw Output toggle + ErrorBoundary
   return wrap_with_host_raw_toggle_and_error_boundary(winner.Component, fallback=BuiltinRawToolSheet)
+
+function mount_message_block_renderer(client_host, session_ref, turn_id, block_ordinal, block_ast, winner):
+  block_id = turn_id + ":block:" + string(block_ordinal)
+  stable_mount_key = session_ref.sessionId + ":" + block_id + ":" + winner.plugin_id + ":" + winner.id
+  # INVARIANT: key NEVER includes block_ast.code, block_ast.meta, or block_ast.streaming;
+  # React updates props in place across streaming chunks and streaming: true -> false closure.
+  return render_keyed_with_raw_toggle_and_error_boundary(
+    key=stable_mount_key,
+    Component=winner.Component,
+    props={turnId: turn_id, blockId: block_id, language: block_ast.lang, code: block_ast.code, meta: block_ast.meta, streaming: block_ast.streaming, session: session_ref},
+    fallback=BuiltinMarkdownCodeFence
+  )
 ```
 
 ### 15.4 Agent Propose-Confirm Lifecycle Gate (`lody_plugin` MCP)
@@ -677,12 +698,16 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
   if context_kind == "tool_execution":
     return sign_derived_machine_input(root_turn_id=caller_or_event.active_user_turn_id, max_hops=20, target_machine_id)
 
-  if context_kind == "machine_event":
-    if caller_or_event.root_user_turn_id is present:
-      return sign_derived_machine_input(root_turn_id=caller_or_event.root_user_turn_id, max_hops=20, target_machine_id)
+  if context_kind in ["machine_event", "machine_startup"]:
+    origin = request.origin_turn ?? caller_or_event.ambient_origin_turn
+    if origin is present:
+      verified_root = verify_stored_human_signed_turn_in_local_session_data(kernel, origin.session, origin.userTurnId, target_machine_id)
+      if verified_root is ok:
+        return sign_derived_machine_input(root_turn=verified_root, max_hops=20, target_machine_id)
+      return deny("forbidden: invalid or unauthorized E2EE originTurn")
     if has_verified_human_workflow_declaration(kernel, caller_or_event.plugin_id, target_machine_id):
       return sign_declared_workflow_machine_input(caller_or_event.plugin_id, target_machine_id)
-    return deny("forbidden: un-rooted E2EE machine event cannot originate Session turns")
+    return deny("forbidden: un-rooted E2EE machine context cannot originate Session turns")
 
   # Un-rooted query / mutation / attachmentSource
   return deny("forbidden: un-rooted MachineContext cannot originate E2EE Session turns")
@@ -709,24 +734,24 @@ Validation profiles follow Section 1.1: Sections 16.1–16.6 are `Core Conforman
 ### 16.3 Core Conformance — Extensibility: Events, Universal Renderers, Sidebars & Themes
 
 - **Product Scenario — Sound Effect Plugin:** Client-only plugin composes `lody.events.on` (`ui.message.submitted`, `session.turn.completed`, `session.waiting_input`), declarative `config` (`pack`, `volume`), `lody.assets.url`, `lody.signal`, and standard Web Audio (`AudioContext` / `HTMLAudioElement`) with zero audio-specific SDK wrappers, pausing active clips on `signal` abort and detaching `100%` of listeners upon disablement.
-- **Product Scenario — Universal Tool & Block Renderers:** `tools.matchRender` matches Claude/Codex/MCP `execute` test runs by priority, renders interactive failure triage cards, records `matcher_shadowed` for lower-priority contenders, always exposes the host `"View Raw Output"` toggle, falls back cleanly via `SurfaceErrorBoundary` on throw, and preserves `ai-gui` prose-only search and turn-folding invariants; `messages.renderBlock` streams and settles fenced artifact blocks identically.
+- **Product Scenario — Universal Tool & Block Renderers:** `tools.matchRender` matches Claude/Codex/MCP `execute` test runs by priority, renders interactive failure triage cards, records `matcher_shadowed` for lower-priority contenders, always exposes the host `"View Raw Output"` toggle, falls back cleanly via `SurfaceErrorBoundary` on throw, and preserves `ai-gui` prose-only search and turn-folding invariants; `messages.renderBlock` assigns stable `blockId = "<turnId>:block:<ordinal>"` and preserves the mounted component instance and local interactive state across incremental `streaming: true -> false` updates.
 - **Sidebars & Two-Tier Appearance:** Three-layer sidebars compose across `"Default"` and custom views; `--*` theme tokens and disposable `<style>` sheets apply and revert cleanly; `lody --safe-mode` bypasses all client plugin execution and stylesheets.
 
 ### 16.4 Core Conformance — Workspace Data, Raw Snapshots & Workflow Roles/MCP
 
 - **Product Scenario — Custom Multi-Agent Control Plane:** Custom screen combines `lodyQueries.sessionTurns` / `subagentRun` / `agentConfigs` with `useLodySnapshot({ kind: "workspace-state" | "session-transcript" }, selector)`; returned `RawDocumentSnapshot` is deeply frozen (`Object.freeze`), redacted against secrets/foreign `businessKey`s, and triggers React re-renders only when selected slice values change.
-- **Product Scenario — Workflow Role + MCP + Event Orchestration & Daemon-Restart Recovery:** Enabling a workflow plugin registers `plugin:<id>:<role>` and spawns `manifest.mcpServers` out-of-daemon; `machine.events.on("session.turn.completed")` journals task intent to `ctx.dataDir`, reads scoped session snapshots, and spawns a child verifier Session with atomic `(requestId, businessKey)` idempotency; if the daemon restarts mid-workflow, `machine.onStart(ctx)` reconciles `ctx.dataDir` and resumes without duplicating Sessions.
+- **Product Scenario — Workflow Role + MCP + Event Orchestration & Daemon-Restart Recovery:** Enabling a workflow plugin registers `plugin:<id>:<role>` and spawns `manifest.mcpServers` out-of-daemon; `machine.events.on("session.turn.completed")` journals task intent to `ctx.dataDir`, reads scoped session snapshots, and spawns a child verifier Session with atomic `(requestId, businessKey)` idempotency; if the daemon exits either mid-`sessions.create` or before `session.turn.completed` reaches the plugin, `machine.onStart(ctx)` reconciles `ctx.dataDir` + `lodyQueries.sessions` (`updatedAfter`) + `lodyQueries.sessionTurns` and resumes with the original `ProjectRef`, `parentSession`, and E2EE `originTurn` without duplicating Sessions.
 
 ### 16.5 Core Conformance — DX, UX, Propose-Confirm & Desktop/Web/Mobile Parity
 
-- **Product Scenario — Zero-to-Live DX:** `lody plugin create` scaffolds a passing plugin; `lody plugin link --dev` hot-swaps UI edits across **both Desktop Electron and Web Browser simultaneously** while `DevPluginCompiler` exits after `1000 ms` idle; `Plugin Inspector` and `lody plugin doctor` surface structured diagnostics.
+- **Product Scenario — Zero-to-Live DX:** `lody plugin create` scaffolds a passing plugin; `lody plugin link --dev` hot-swaps UI edits across **both Desktop Electron and Web Browser simultaneously** under an opt-in, revocable `Trusted Dev Session` (`(workspace_id, machine_id, plugin_id, devSessionNonce)`, while normal installed plugins enforce per-release `clientDigest` trust) and `DevPluginCompiler` exits after `1000 ms` idle; `Plugin Inspector` and `lody plugin doctor` surface structured diagnostics.
 - **Product Scenario — Agent-Assisted Authoring (`lody_plugin`):** An Agent scaffolds a plugin and calls `propose_install`; Lody renders one idempotent `plugin_proposal` card in chat; zero code executes until the human clicks `Approve & Enable`; First-Run Onboarding prompts for required `manifest.config` fields and immediately transitions the plugin to `Running`.
 - **Product Scenario — Cross-Device Parity:** Opening the workspace on **Web** streams the `<= 4 MiB` `clientDigest`-verified bundle via `plugin/bundle-chunk` and renders identical screens, sidebars, matchers, and themes as Desktop; **Mobile Capacitor** renders inline tool/message cards and declarative settings cleanly while gating unsupported wide-only views via `useHostCapabilities()`.
 
 ### 16.6 Core Conformance — Security & E2EE Gates
 
 - Subprocess environments for `machine`, `mcpServers`, and `acpProviders` exclude daemon E2EE keys, cloud tokens, and sibling plugins' secrets.
-- In E2EE workspaces: Guests cannot invoke `plugin/query` or `plugin/mutate`; non-owners cannot invoke `'machine'` scope; collaborators require active `MachineSharing` across all bound projects; rooted `ToolExecutionContext` and `MachineEventContext` enforce the 20-derivation `machineInput` cap while un-rooted queries/mutations reject `sessions.create`/`send` with `forbidden`; `<account>/<workspace>/<genesis>/<signing-key>` caches wipe on member removal or device revocation.
+- In E2EE workspaces: Guests cannot invoke `plugin/query` or `plugin/mutate`; non-owners cannot invoke `'machine'` scope; collaborators require active `MachineSharing` across all bound projects; rooted `ToolExecutionContext`, `MachineEventContext`, and `MachineStartupContext` (`originTurn` verified against stored human-signed `sessionData` turns) enforce the 20-derivation `machineInput` cap while un-rooted queries/mutations reject `sessions.create`/`send`/`respondInteraction` with `forbidden`; `<account>/<workspace>/<genesis>/<signing-key>` caches wipe on member removal or device revocation.
 
 ### 16.7 Conditional Conformance — Workflow ACP Providers & Mobile Extended UI
 

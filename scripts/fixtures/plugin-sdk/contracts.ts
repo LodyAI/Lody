@@ -18,7 +18,9 @@ import {
   useLodyQuery,
   useMutation,
   useQuery,
+  type MessageBlockRenderProps,
   type ProjectPageProps,
+  type SignedTurnOrigin,
   type ToolRenderProps,
 } from "@lody/plugin-sdk/client";
 import type { PluginManifest } from "@lody/plugin-sdk/manifest";
@@ -173,6 +175,14 @@ export const minimalShellPlugin = defineClientPlugin((lody) => {
 
   return async () => {};
 });
+
+export function verifyBlockRenderStableIdentity(
+  props: MessageBlockRenderProps,
+): string {
+  const turnId: string = props.turnId;
+  const blockId: string = props.blockId;
+  return `${turnId}/${blockId}:${props.streaming ? "live" : "done"}`;
+}
 
 export function verifyToolRenderStateNarrowing(
   props: ToolRenderProps<
@@ -413,13 +423,36 @@ export async function verifyExtensibilityAndRawSnapshots(
   // @ts-expect-error Config setter validates value types per declared key.
   void cfg.set("volume", "loud");
 
+  const pluginsRead = useLodyQuery(workspace, lodyQueries.plugins);
+  if (pluginsRead.status === "ready") {
+    const isDevLinked: boolean | undefined = pluginsRead.data.items[0]?.devMode;
+    void isDevLinked;
+  }
+
+  const incrementalSessions = useLodyQuery(workspace, lodyQueries.sessions, {
+    sessionIds: ["sess_1"],
+    agentRoleId: "plugin:sorbet-workflow:sorbet-architect",
+    updatedAfter: 1_700_000_000_000,
+  });
+  void incrementalSessions;
+
   const turnsRead = useLodyQuery(session, lodyQueries.sessionTurns, {
     limit: 20,
   });
   if (turnsRead.status === "ready") {
-    const firstToolName: string | undefined =
-      turnsRead.data.items[0]?.toolCalls[0]?.toolName;
+    const firstTurn = turnsRead.data.items[0];
+    const firstToolName: string | undefined = firstTurn?.toolCalls[0]?.toolName;
+    const rootUserTurnId: string | undefined = firstTurn?.userTurnId;
+    const stopReason = firstTurn?.stopReason;
+    if (rootUserTurnId) {
+      const origin: SignedTurnOrigin = {
+        session,
+        userTurnId: rootUserTurnId,
+      };
+      void origin;
+    }
     void firstToolName;
+    void stopReason;
   }
 
   const subagentRead = useLodyQuery(session, lodyQueries.subagentRun, {

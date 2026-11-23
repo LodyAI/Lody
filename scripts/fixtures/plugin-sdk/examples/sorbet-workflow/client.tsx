@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   defineClientPlugin,
   useHostCapabilities,
@@ -39,26 +40,54 @@ function UniversalTestRunCard({
   );
 }
 
-function SorbetPlanArtifact({
+export function SorbetPlanArtifact({
+  turnId,
+  blockId,
   code,
   streaming,
   project,
   session,
 }: MessageBlockRenderProps) {
   const lody = useLody();
+  // Local interactive selection survives incremental streaming updates because the host
+  // keys this mounted block renderer by stable `blockId` (`<turnId>:block:<ordinal>`).
+  const [selectedSteps, setSelectedSteps] = useState<readonly string[]>([]);
+  const steps = code
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  function toggleStep(step: string) {
+    setSelectedSteps((prev) =>
+      prev.includes(step) ? prev.filter((s) => s !== step) : [...prev, step],
+    );
+  }
+
   return (
-    <div>
+    <div data-turn-id={turnId} data-block-id={blockId}>
       <Badge tone={streaming ? "neutral" : "success"}>
         {streaming ? "Drafting Sorbet Plan" : "Sorbet Plan Ready"}
       </Badge>
-      <pre>{code}</pre>
+      <ul>
+        {steps.map((step, index) => (
+          <li key={`${blockId}-step-${index}`}>
+            <Button onClick={() => toggleStep(step)}>
+              {selectedSteps.includes(step) ? "[x]" : "[ ]"} {step}
+            </Button>
+          </li>
+        ))}
+      </ul>
       {!streaming && project ? (
         <Button
           onClick={() =>
             lody.drafts.open(project, {
               roleId: "plugin:sorbet-workflow:sorbet-architect",
               providerId: "plugin:sorbet-workflow:sorbet-acp",
-              prompt: `Execute approved plan from ${session.sessionId}:\n${code}`,
+              prompt: `Execute approved plan (${blockId}) from ${
+                session.sessionId
+              }:\n${
+                selectedSteps.length > 0 ? selectedSteps.join("\n") : code
+              }`,
             })
           }
         >
