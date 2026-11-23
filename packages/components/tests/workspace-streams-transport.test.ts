@@ -2805,7 +2805,6 @@ describe('workspace Flock snapshot probe deduplication', () => {
     releaseHead.resolve();
     await Promise.all([first, second]);
 
-    // Subsequent cursorStore.load() calls on the same URL/owner must not emit another HEAD probe.
     await store.load(targetUrl);
     await wrapped.persistence
       .cursorStoreFor({ kind: 'flock', flock: { version: () => ({}) } })

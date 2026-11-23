@@ -1172,13 +1172,11 @@ describe('Machine Flock Phase 0 optimizations', () => {
         createElement(
           Fragment,
           null,
-          // Unscoped lease creates & settles the live room first.
           createElement(RowsProbe, {
             key: 'unscoped',
             machineId,
             onRows: () => undefined,
           }),
-          // Presence arrives later: must reuse the settled live room without syncOnce().
           createElement(RowsStateProbe, {
             key: 'presence-aware',
             machineId,
@@ -1307,12 +1305,10 @@ describe('Machine Flock Phase 0 optimizations', () => {
     );
     await flushMicrotasks();
 
-    // Timeout while firstSync is still pending returns false cleanly.
     expect(await waitForActiveMachineFlockRoomSync(runtime, machineId, { timeoutMs: 10 })).toBe(
       false
     );
 
-    // Waiting while firstSync resolves returns true.
     const waiting = waitForActiveMachineFlockRoomSync(runtime, machineId, { timeoutMs: 5000 });
     firstSync.resolve();
     await expect(waiting).resolves.toBe(true);

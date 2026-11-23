@@ -419,7 +419,6 @@ describe('startup network behavior', () => {
       getAuthorizedMachineIds: () => new Set([machineId]),
     });
 
-    // Mount active consumer holding the live Machine Flock room.
     const store = createStore();
     store.set(runtimeAtom, runtime as unknown as WorkspaceRuntime);
     store.set(currentWorkspaceIdAtom, workspaceId);
@@ -436,7 +435,6 @@ describe('startup network behavior', () => {
     });
     await flushPromises();
 
-    // Presence reports machine online -> startup refresh cooldown runs.
     mocks.emitPresenceSnapshot({
       [`machine:${machineId}`]: {
         kind: 'machine',
@@ -452,7 +450,6 @@ describe('startup network behavior', () => {
     );
     await flushPromises();
 
-    // Verify ZERO syncOnce() calls and capability applied into Jotai cache overlay.
     expect(syncOnce).not.toHaveBeenCalled();
     expect(getStreamsHttpFallbackCounts()['forced-sync']).toBe(0);
     expect(mocks.opLog.filter((entry) => entry.op === 'rpc.acpRefresh')).toEqual([
@@ -607,12 +604,10 @@ describe('startup network behavior', () => {
 
     await vi.waitFor(() => expect(rpcCalls).toHaveLength(1));
 
-    // Fan-out progress to both active consumers.
     rpcCalls[0]!.emitProgress('step-1');
     expect(progress1).toEqual(['step-1']);
     expect(progress2).toEqual(['step-1']);
 
-    // Aborting consumer 1 resolves consumer 1 to null without aborting the shared probe.
     controller1.abort();
     await expect(p1).resolves.toBeNull();
     expect(rpcCalls[0]!.signal?.aborted).toBe(false);
@@ -628,7 +623,6 @@ describe('startup network behavior', () => {
     firstDeferred.resolve(response1);
     await expect(p2).resolves.toEqual(response1);
 
-    // No renderer-side TTL cache: a subsequent request runs a fresh probe.
     const p3 = runtime.requestMachineAcpCapabilitiesRefresh({
       type: 'machine/acp-capabilities-refresh',
       workspaceId,
@@ -637,7 +631,6 @@ describe('startup network behavior', () => {
     });
     await vi.waitFor(() => expect(rpcCalls).toHaveLength(2));
 
-    // Distinct (force) key also bypasses dedupe cleanly; test aborting sole consumer cancels probe.
     const controllerAll = new AbortController();
     const p4 = runtime.requestMachineAcpCapabilitiesRefresh(
       {
@@ -696,7 +689,6 @@ describe('startup network behavior', () => {
     );
     await vi.waitFor(() => expect(rpcCalls).toHaveLength(1));
 
-    // Abort consumer 1 and immediately issue consumer 2 synchronously before any microtask (.finally) runs.
     c1.abort();
     const p2 = runtime.requestMachineAcpCapabilitiesRefresh({
       type: 'machine/acp-capabilities-refresh',
@@ -742,7 +734,6 @@ describe('startup network behavior', () => {
             callback: (lock: object | null) => Promise<void>
           ) => {
             lockRequests.push(name);
-            // Simulate lock held by another Electron window.
             await callback(null);
           }
         ),
