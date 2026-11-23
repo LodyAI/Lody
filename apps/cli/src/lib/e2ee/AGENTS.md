@@ -155,9 +155,7 @@
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
   fresh approval/KEK. OS/unknown stays OS.
 
-Member removal: verify identity/persist receipt before custody release. Drain execution/sync;
-erase only account/genesis/device content under identity lease/pairing mutex. Retry busy
-cleanup before open; preserve projects. Rejoin with new member/keys.
+Verify member removal and persist its receipt before custody release. Drain execution/sync; erase scoped content under identity lease/pairing mutex. Retry before open, preserve projects, and rejoin with fresh keys. [Roost cleanup](../../session/README.md#encrypted-roost-history).
 
 - `client-loss-observer.ts` is read-only E2E diagnostics, requiring nonrelease build
   opt-in and runtime `LODY_E2E=1`. Bind baseline requester identity to verified ledger
