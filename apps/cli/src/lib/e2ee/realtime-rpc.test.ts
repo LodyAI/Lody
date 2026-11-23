@@ -722,6 +722,8 @@ effectIt.effect(
       const streams = memoryStreams();
       const asked = new Set<string>();
       const handled: unknown[] = [];
+      const authority = new AbortController();
+      let writable = true;
       const receiveOptions = {
         workspaceId: f.workspaceId,
         genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
@@ -730,10 +732,13 @@ effectIt.effect(
         journal: () => f.receipts,
         authorize: () => Effect.die('Session control used owner-only authority'),
         authorizeRead: () => Effect.die('a project read used machine read authority'),
+        authoritySignal: () => authority.signal,
         authorizeSessionExecution: (_workspace: string, _device: string, sessionId: string) =>
           Effect.sync(() => {
             asked.add(`session:${sessionId}`);
-            return { _tag: 'Authorized' as const };
+            return writable
+              ? { _tag: 'Authorized' as const, isCurrent: () => writable }
+              : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' };
           }),
         authorizeProjectExecution: (_workspace: string, _device: string, project?: string) =>
           Effect.sync(() => {
@@ -754,7 +759,7 @@ effectIt.effect(
           return { ok: false as const, error: 'SYNTHETIC_HANDLED' };
         },
       };
-      const call = (id: string, method: string, params: unknown) =>
+      const call = (id: string, method: string, params: unknown, delivery = 1) =>
         Effect.gen(function* () {
           const input = {
             requestId: id.repeat(16),
@@ -765,7 +770,7 @@ effectIt.effect(
             Effect.gen(function* () {
               const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
               yield* receive({ id: original.requestId, frame: original.frameHex });
-              yield* streams.waitResponse(original.requestId, 1);
+              yield* streams.waitResponse(original.requestId, delivery);
             })
           );
           const reply = streams.writes.filter((write) => write.stream.includes(':res:')).at(-1)
@@ -805,6 +810,22 @@ effectIt.effect(
         yield* call('74', 'project/probe-local-member', { localProjectId: 'project-2' })
       ).toMatchObject({ ok: false, code: 'e2ee_machine_not_shared' });
       expect(handled).toHaveLength(3);
+      const params = {
+        sessionId,
+        operation: 'accept_input',
+        payload: { entry: { role: 'user', id: 'sample' } },
+      };
+      expect(yield* call('75', 'session/history-write', params)).toMatchObject({
+        error: 'SYNTHETIC_HANDLED',
+      });
+      expect(yield* call('75', 'session/history-write', params, 2)).toMatchObject({
+        error: 'SYNTHETIC_HANDLED',
+      });
+      writable = false;
+      expect(yield* call('76', 'session/history-write', params)).toMatchObject({
+        code: 'e2ee_machine_not_shared',
+      });
+      expect(handled.slice(3)).toEqual([{ method: 'session/history-write', requester }]);
     })
 );
 

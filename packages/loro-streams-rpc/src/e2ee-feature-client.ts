@@ -297,6 +297,7 @@ export function makeE2eeFeatureRpcClient(options: {
             if (bytes.length > E2EE_FEATURE_MAX_REQUEST_BYTES)
               return yield* Effect.fail(new Error('e2ee_feature_size'));
             const count = Math.ceil(bytes.length / chunkBytes);
+            if (count > 128) return yield* Effect.fail(new Error('e2ee_feature_size'));
             const binding = yield* options.binding(e2eeRpcResource(machineId));
             for (let index = 0; index < count; index++) {
               const chunk = bytes.subarray(index * chunkBytes, (index + 1) * chunkBytes);
@@ -543,7 +544,10 @@ export function makeE2eeFeatureRpcClient(options: {
       !saved ||
       saved.target !== args.request.machineId ||
       saved.signer !==
-        (yield* options.targetSigner(saved.target, e2eeFeatureTarget(args.request).kind !== 'machine'))
+        (yield* options.targetSigner(
+          saved.target,
+          e2eeFeatureTarget(args.request).kind !== 'machine'
+        ))
     )
       return yield* Effect.fail(new Error('e2ee_rpc_original_missing'));
     const original = yield* openFrames(saved.target, unpackFrames(saved.frame));
