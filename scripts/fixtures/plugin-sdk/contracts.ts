@@ -350,3 +350,74 @@ export async function verifyClientTypeSafety(
   // @ts-expect-error Route params are immutable; navigation goes through lody.pages.openProject.
   pageProps.params.pr = "99";
 }
+
+import {
+  useHostCapabilities,
+  useLodySnapshot,
+  usePluginConfig,
+} from "@lody/plugin-sdk/client";
+
+export const invalidClientSecretManifest: PluginManifest = {
+  id: "bad-secret-scope",
+  version: "0.1.0",
+  sdk: "^1.0.0",
+  title: "Bad Secret Scope",
+  config: {
+    // @ts-expect-error Secret config fields MUST NOT target client scope.
+    API_SECRET: {
+      type: "secret",
+      label: "Secret Key",
+      scope: "client",
+    },
+  },
+};
+
+export async function verifyExtensibilityAndRawSnapshots(
+  workspace: WorkspaceRef,
+  session: SessionRef,
+) {
+  const lody = useLody();
+  const caps = useHostCapabilities();
+  const platform: "desktop" | "web" | "mobile" = caps.platform;
+  void platform;
+
+  const cfg = usePluginConfig<{ readonly volume: number }>();
+  await cfg.set("volume", 0.8);
+  // @ts-expect-error Config setter validates value types per declared key.
+  void cfg.set("volume", "loud");
+
+  const turnsRead = useLodyQuery(session, lodyQueries.sessionTurns, {
+    limit: 20,
+  });
+  if (turnsRead.status === "ready") {
+    const firstToolName: string | undefined =
+      turnsRead.data.items[0]?.toolCalls[0]?.toolName;
+    void firstToolName;
+  }
+
+  const subagentRead = useLodyQuery(session, lodyQueries.subagentRun, {
+    runId: "run_1",
+  });
+  if (subagentRead.status === "ready") {
+    const nestedTurnCount: number | undefined = subagentRead.data?.turns.length;
+    void nestedTurnCount;
+  }
+
+  const rawSnap = await lody.readSnapshot({
+    kind: "session-transcript",
+    session,
+  });
+  const rev: string = rawSnap.revision;
+  void rev;
+  // @ts-expect-error RawDocumentSnapshot is deeply readonly; mutations go through Kernel/HistoryWriter APIs.
+  rawSnap.doc.mutated = true;
+
+  const selectedSnap = useLodySnapshot(
+    { kind: "session-meta", session },
+    (snap) => snap.schemaVersion,
+  );
+  if (selectedSnap.status === "ready") {
+    const ver: number = selectedSnap.data;
+    void ver;
+  }
+}

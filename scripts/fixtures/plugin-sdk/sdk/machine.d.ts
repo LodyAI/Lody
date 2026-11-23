@@ -9,12 +9,17 @@ import {
   type AttachmentSourceDescriptor,
   type CreateSessionRequest,
   type LodyQueryDescriptor,
+  type MachineHostEventMap,
+  type MachineHostEventType,
   type MachinePluginScope,
   type MachineRef,
   type MutationDescriptor,
   type PluginScope,
   type ProjectRef,
   type QueryDescriptor,
+  type RawDocumentSnapshot,
+  type RawSnapshotTarget,
+  type ReadonlyJsonPrimitive,
   type ScopeTarget,
   type SendSessionMessageReceipt,
   type SendSessionMessageRequest,
@@ -31,9 +36,14 @@ export {
   lodyQueries,
   type CreateSessionRequest,
   type LodyQueryDescriptor,
+  type MachineHostEventMap,
+  type MachineHostEventType,
   type MachinePluginScope,
   type MachineRef,
   type ProjectRef,
+  type RawDocumentSnapshot,
+  type RawSnapshotTarget,
+  type ReadonlyJsonPrimitive,
   type SendSessionMessageReceipt,
   type SendSessionMessageRequest,
   type SessionDetail,
@@ -47,11 +57,12 @@ export interface MachineHostPort {
     query: LodyQueryDescriptor<S, TInput, TOutput>,
     ...[input]: [void] extends [TInput] ? [input?: TInput] : [input: TInput]
   ): Promise<TOutput>;
+  readSnapshot(target: RawSnapshotTarget): Promise<RawDocumentSnapshot>;
   readonly sessions: {
     /**
-     * In E2EE workspaces, `create` and `send` succeed from `ToolExecutionContext` (signed as
-     * `derivedFrom` the active human root Turn); calls from un-rooted `MachineContext` handlers
-     * reject with `forbidden` because no member device signed the execution prompt.
+     * In E2EE workspaces, `create` and `send` succeed from `ToolExecutionContext` and from
+     * `MachineEventContext` rooted in a verified `userTurnId` or human-signed workflow activation
+     * on this machine; un-rooted `MachineContext` queries/mutations reject with `forbidden`.
      */
     create(
       target: MachineRef | ProjectRef,
@@ -72,14 +83,10 @@ export interface MachineContext<
   readonly target: ScopeTarget<S>;
   readonly machine: MachineRef;
   readonly workspace: WorkspaceRef;
-  /**
-   * Workspace- and identity-generation-scoped plugin directory on this daemon.
-   * Large per-call or per-session artifacts store files under `dataDir` keyed by immutable IDs.
-   */
   readonly dataDir: string;
   readonly env: Readonly<Record<string, string | undefined>>;
+  readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
   readonly signal: AbortSignal;
-  /** Unified programmatic Lody SDK handle on the daemon (matches `useLody()` on the client). */
   readonly lody: MachineHostPort;
   invalidate<QS extends MachinePluginScope>(
     descriptor: QueryDescriptor<QS, z.ZodType, z.ZodType>,
@@ -95,8 +102,27 @@ export interface ToolExecutionContext {
   readonly workspace: WorkspaceRef;
   readonly dataDir: string;
   readonly env: Readonly<Record<string, string | undefined>>;
+  readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
   readonly signal: AbortSignal;
-  /** Unified programmatic Lody SDK handle on the daemon (matches `useLody()` on the client). */
+  readonly lody: MachineHostPort;
+  invalidate<QS extends MachinePluginScope>(
+    descriptor: QueryDescriptor<QS, z.ZodType, z.ZodType>,
+    target?: ScopeTarget<QS>,
+  ): void;
+}
+
+export interface MachineEventContext<
+  K extends MachineHostEventType = MachineHostEventType,
+> {
+  readonly eventType: K;
+  readonly workspace: WorkspaceRef;
+  readonly machine: MachineRef;
+  readonly session?: SessionRef;
+  readonly project?: ProjectRef;
+  readonly dataDir: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
+  readonly signal: AbortSignal;
   readonly lody: MachineHostPort;
   invalidate<QS extends MachinePluginScope>(
     descriptor: QueryDescriptor<QS, z.ZodType, z.ZodType>,
@@ -111,6 +137,7 @@ export interface AttachmentContext {
   readonly workspace: WorkspaceRef;
   readonly dataDir: string;
   readonly env: Readonly<Record<string, string | undefined>>;
+  readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
   readonly signal: AbortSignal;
 }
 
@@ -159,6 +186,19 @@ export interface MachinePluginRegistry {
         | AttachmentSnapshot<z.input<TMeta>>;
     },
   ): void;
+  /**
+   * Subscribes to daemon-side Session/Turn/Tool lifecycle events so workflow plugins (e.g. Sorbet
+   * Super Assistant or CI/review orchestrators) can react without polling.
+   */
+  readonly events: {
+    on<K extends MachineHostEventType>(
+      type: K,
+      handler: (
+        ctx: MachineEventContext<K>,
+        event: MachineHostEventMap[K],
+      ) => void | Promise<void>,
+    ): void;
+  };
 }
 
 export type MachinePluginCleanup = () => void | Promise<void>;

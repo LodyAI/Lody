@@ -57,11 +57,11 @@ function verifyTsconfig(configFileName, minFiles) {
 }
 
 test("plugin SDK browser-pure client contracts and dogfood UI examples typecheck cleanly", () => {
-  verifyTsconfig("tsconfig.json", 8);
+  verifyTsconfig("tsconfig.json", 11);
 });
 
 test("plugin SDK Node machine contracts and durable dataDir examples typecheck without DOM globals", () => {
-  verifyTsconfig("tsconfig.machine.json", 7);
+  verifyTsconfig("tsconfig.machine.json", 9);
 });
 
 // The runtime SDK is still a proposal. Supply its registration functions while
@@ -111,6 +111,7 @@ function loadIssueMachine(io = fs) {
     query() {},
     attachmentSource() {},
     tool() {},
+    events: { on() {} },
     mutation(descriptor, handler) {
       mutations.set(descriptor.id, handler);
     },
@@ -261,4 +262,166 @@ test("issue plugin preserves committed data and remains usable after failed temp
       });
     });
   }
+});
+
+test("sound-effects client plugin subscribes to host events, plays configured cues, and cleans up subscriptions", async () => {
+  const listeners = new Map();
+  const played = [];
+  const source = readFileSync(
+    path.join(fixtureDir, "examples/sound-effects/client.tsx"),
+    "utf8",
+  );
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2023,
+    },
+  }).outputText;
+  const mod = { exports: {} };
+  new Function("require", "module", "exports", compiled)(
+    (id) => {
+      if (id === "@lody/plugin-sdk/client") {
+        return { defineClientPlugin: (register) => ({ register }) };
+      }
+      throw new Error(`Unexpected import: ${id}`);
+    },
+    mod,
+    mod.exports,
+  );
+
+  let currentConfig = { pack: "soft-wood", volume: 0.5, playOnSend: true };
+  const cleanup = mod.exports.default.register({
+    events: {
+      on(type, fn) {
+        listeners.set(type, fn);
+        return () => listeners.delete(type);
+      },
+    },
+    config: {
+      get: () => currentConfig,
+    },
+    audio: {
+      async play(asset, opts) {
+        played.push({ asset, ...opts });
+      },
+    },
+  });
+
+  await listeners.get("ui.message.submitted")({});
+  await listeners.get("session.turn.completed")({ stopReason: "cancelled" });
+  await listeners.get("session.turn.completed")({ stopReason: "end_turn" });
+  await listeners.get("session.waiting_input")({});
+
+  assert.deepEqual(played, [
+    { asset: "./assets/soft-wood-send.mp3", volume: 0.5 },
+    { asset: "./assets/soft-wood-complete.mp3", volume: 0.5 },
+    { asset: "./assets/soft-wood-question.mp3", volume: 0.5 },
+  ]);
+
+  cleanup();
+  assert.equal(listeners.size, 0);
+});
+
+test("sorbet-workflow machine plugin inspects raw session snapshots and spawns idempotent verifier sessions on turn completion", async () => {
+  const eventHandlers = new Map();
+  const queries = new Map();
+  const createdSessions = [];
+
+  function loadTs(relPath) {
+    const fullPath = path.join(fixtureDir, relPath);
+    const compiled = ts.transpileModule(readFileSync(fullPath, "utf8"), {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2023,
+      },
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("require", "module", "exports", compiled)(
+      (id) => {
+        if (id === "zod") return requireShared("zod");
+        if (id === "@lody/plugin-sdk") {
+          return { defineQuery: (scope, qid, s) => ({ scope, id: qid, ...s }) };
+        }
+        if (id === "@lody/plugin-sdk/machine") {
+          return { defineMachinePlugin: (register) => ({ register }) };
+        }
+        if (id === "./shared") {
+          return loadTs("examples/sorbet-workflow/shared.ts");
+        }
+        throw new Error(`Unexpected import: ${id}`);
+      },
+      mod,
+      mod.exports,
+    );
+    return mod.exports;
+  }
+
+  loadTs("examples/sorbet-workflow/machine.ts").default.register({
+    query(desc, fn) {
+      queries.set(desc.id, fn);
+    },
+    mutation() {},
+    tool() {},
+    attachmentSource() {},
+    events: {
+      on(type, fn) {
+        eventHandlers.set(type, fn);
+      },
+    },
+  });
+
+  const sessionRef = {
+    workspaceId: "ws_1",
+    machineId: "m_1",
+    sessionId: "sess_arch_1",
+  };
+  const projectRef = {
+    workspaceId: "ws_1",
+    machineId: "m_1",
+    projectId: "proj_1",
+  };
+
+  await eventHandlers.get("session.turn.completed")(
+    {
+      config: { autoVerify: true },
+      invalidate() {},
+      lody: {
+        async readSnapshot() {
+          return Object.freeze({
+            schemaVersion: 1,
+            revision: "r1",
+            doc: Object.freeze({
+              agentRoleId: "plugin:sorbet-workflow:sorbet-architect",
+            }),
+          });
+        },
+        sessions: {
+          async create(target, req) {
+            createdSessions.push({ target, req });
+            return { ...sessionRef, sessionId: "sess_verifier_1" };
+          },
+        },
+      },
+    },
+    {
+      workspace: { workspaceId: "ws_1" },
+      machine: { workspaceId: "ws_1", machineId: "m_1" },
+      session: sessionRef,
+      project: projectRef,
+      turnId: "turn_42",
+      stopReason: "end_turn",
+    },
+  );
+
+  assert.equal(createdSessions.length, 1);
+  assert.equal(createdSessions[0].req.requestId, "verify-sess_arch_1-turn_42");
+  assert.equal(createdSessions[0].req.businessKey, "verify/sess_arch_1");
+  assert.equal(
+    createdSessions[0].req.providerId,
+    "plugin:sorbet-workflow:sorbet-acp",
+  );
+  assert.deepEqual(queries.get("workflow.status")({ target: sessionRef }), {
+    lastVerifiedTurnId: "turn_42",
+    verifierSessionId: "sess_verifier_1",
+  });
 });

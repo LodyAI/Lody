@@ -10,7 +10,7 @@ export const MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES = 16_384;
 /**
  * Maximum UTF-8 byte length of a single `plugin/query` or `plugin/mutate` request payload.
  * Sized so encrypted E2EE RPC envelopes fit within a single 1 MiB `purpose 8` frame on the
- * direct Desktop-to-Machine Iroh P2P fast path without spilling into multi-frame Streams fallback.
+ * direct Client-to-Machine Iroh P2P fast path without spilling into multi-frame Streams fallback.
  */
 export const MAX_PLUGIN_RPC_REQUEST_BYTES = 262_144;
 
@@ -84,6 +84,77 @@ export interface PluginCallError extends Error {
   readonly code: PluginCallErrorCode;
 }
 
+export type ReadonlyJsonPrimitive = string | number | boolean | null;
+export type ReadonlyJsonArray = readonly ReadonlyJsonValue[];
+export type ReadonlyJsonObject = { readonly [key: string]: ReadonlyJsonValue };
+export type ReadonlyJsonValue =
+  | ReadonlyJsonPrimitive
+  | ReadonlyJsonArray
+  | ReadonlyJsonObject;
+
+/**
+ * Detached, deeply frozen read-only snapshot of an authorized Lody workspace or session state tree.
+ * Gives custom Workspace / multi-Agent panels unrestricted read freedom beyond fixed summary shapes,
+ * while keeping `HistoryWriter` and Kernel commands as the sole mutation path.
+ */
+export interface RawDocumentSnapshot<
+  TDoc extends ReadonlyJsonValue = ReadonlyJsonObject,
+> {
+  readonly schemaVersion: number;
+  readonly revision: string;
+  readonly doc: TDoc;
+}
+
+export type RawSnapshotTarget =
+  | { readonly kind: "workspace-state"; readonly workspace: WorkspaceRef }
+  | { readonly kind: "session-meta"; readonly session: SessionRef }
+  | {
+      readonly kind: "session-transcript";
+      readonly session: SessionRef;
+      readonly turnIds?: readonly string[];
+    }
+  | { readonly kind: "project-state"; readonly project: ProjectRef }
+  | {
+      readonly kind: "schedule-doc";
+      readonly workspace: WorkspaceRef;
+      readonly scheduleId: string;
+    };
+
+export type AcpToolKind =
+  | "read"
+  | "edit"
+  | "delete"
+  | "move"
+  | "search"
+  | "execute"
+  | "think"
+  | "fetch"
+  | "switch_mode"
+  | "other";
+
+export interface ObservedToolLocation {
+  readonly path: string;
+  readonly line?: number;
+}
+
+/**
+ * Normalized cross-provider tool call projection covering built-in, ACP (Claude, Codex, Antigravity,
+ * custom ACP providers), and MCP tools, consumed by both `tools.matchRender` and `sessionTurns`.
+ */
+export interface ObservedToolCall {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly mcpServer?: string;
+  readonly acpKind: AcpToolKind;
+  readonly title: string;
+  readonly status: "running" | "completed" | "failed" | "cancelled";
+  readonly command?: string;
+  readonly outputText?: string;
+  readonly locations: readonly ObservedToolLocation[];
+  readonly rawInput?: ReadonlyJsonValue;
+  readonly rawOutput?: ReadonlyJsonValue;
+}
+
 export interface QueryDescriptor<
   S extends MachinePluginScope = MachinePluginScope,
   TInput extends z.ZodType = z.ZodType,
@@ -148,19 +219,18 @@ export interface CreateSessionRequest {
   /**
    * Stable operation identity under `(workspace, user, target, pluginId, requestId)`.
    * Retrying the same normalized request returns the original SessionRef, including after
-   * archive. A changed request rejects with `idempotency_conflict`. The caller retains
-   * this ID and the complete request across uncertain outcomes; it never generates a new ID to retry.
+   * archive. A changed request rejects with `idempotency_conflict`.
    */
   readonly requestId: string;
   /**
    * Optional per-user active-task identity within `(workspace, user, target, pluginId, businessKey)`.
-   * A different requestId with an already-active businessKey rejects with
-   * `business_key_conflict`. Archive releases only this active-task reservation,
-   * never the original request receipt. A new generation uses a new requestId.
+   * A different requestId with an already-active businessKey rejects with `business_key_conflict`.
    */
   readonly businessKey?: string;
-  /** Workspace `AgentRole` ID to instantiate for this Session. */
+  /** Workspace or plugin-contributed `AgentRole` ID (`plugin:<plugin_id>:<role_id>`). */
   readonly roleId?: string;
+  /** Built-in Agent config ID or plugin ACP provider ID (`plugin:<plugin_id>:<provider_id>`). */
+  readonly providerId?: string;
   /** Optional parent Session pointer recorded in `SessionMeta.openedBySessionId` / `openedByRootSessionId`. */
   readonly parentSession?: SessionRef;
   readonly prompt: string;
@@ -182,11 +252,6 @@ export interface SendSessionMessageReceipt {
   readonly disposition: "started" | "queued" | "steered";
 }
 
-/**
- * Lightweight pending-interaction indicator on `SessionSummary` (mirrors `PermissionRequestKind`
- * in `packages/shared/src/schema.ts`) so sidebar rows and HUD badges can immediately display
- * `? Input` or `Approval needed` states without N+1 detail queries.
- */
 export interface PendingInteractionSummary {
   readonly kind: "permission" | "ask_user_question";
   readonly requestId: string;
@@ -199,7 +264,6 @@ export interface ElicitationOption {
 }
 
 export interface ElicitationQuestion {
-  /** Canonical answer key resolved via `getAskUserQuestionAnswerKey` (`packages/shared/src/acp/ask-user-question.ts`). */
   readonly answerKey: string;
   readonly id?: string;
   readonly header: string;
@@ -210,11 +274,6 @@ export interface ElicitationQuestion {
   readonly isSecret?: boolean;
 }
 
-/**
- * Structured `ask_user_question` prompt parsed from Lody, Claude Code, or Codex ACP elicitation
- * (`packages/shared/src/acp/ask-user-question.ts`). Note: tool `permission` approvals remain
- * exclusively owned by Lody's trusted kernel UI so plugins can never spoof or auto-approve tools.
- */
 export interface PendingQuestionPrompt {
   readonly requestId: string;
   readonly source: "lody" | "claude" | "codex";
@@ -257,8 +316,19 @@ export interface AgentRoleSummary {
   readonly name: string;
   readonly description?: string;
   readonly emoji?: string;
+  readonly sourcePluginId?: string;
   readonly visibility: "private" | "workspace";
   readonly availability: "ready" | "unavailable" | "unknown";
+}
+
+export interface AgentProviderSummary {
+  readonly providerId: string;
+  readonly cliType: string;
+  readonly label: string;
+  readonly source: "builtin" | "plugin";
+  readonly sourcePluginId?: string;
+  readonly machine?: MachineRef;
+  readonly availability: "ready" | "auth_required" | "offline";
 }
 
 export interface WorkspaceMemberSummary {
@@ -277,12 +347,24 @@ export interface ScheduleSummary {
   readonly nextRunAt?: number;
 }
 
-/**
- * Raw visible `SessionMeta` + ephemeral presence record exposed directly through `lodyQueries.sessions`
- * so custom sidebars, row hover popovers, and multi-Agent dashboards can reconstruct parent/child
- * lineages (`openedBySessionId` / `openedByRootSessionId`), Role lanes (`agentRoleId`), and
- * waiting-input indicators (`pendingInteraction`) without bespoke host groups.
- */
+export interface SessionAutomationSummary {
+  readonly automationId: string;
+  readonly reason?: string;
+  readonly intervalMs?: number;
+  readonly expiresAt?: number;
+  readonly status: "active" | "completed" | "cancelled";
+}
+
+export interface InstalledPluginSummary {
+  readonly pluginId: string;
+  readonly title: string;
+  readonly version: string;
+  readonly enabled: boolean;
+  readonly state: "disabled" | "starting" | "running" | "stopping" | "faulted";
+  readonly clientDigest?: string;
+  readonly machine?: MachineRef;
+}
+
 export interface SessionSummary {
   readonly session: SessionRef;
   readonly title: string;
@@ -316,11 +398,8 @@ export interface SessionSummary {
     readonly usedTokens: number;
     readonly maxTokens?: number;
   };
-  /** Present when the Session is currently awaiting an elicitation answer or tool permission. */
   readonly pendingInteraction?: PendingInteractionSummary;
-  /** Present when the Session was created by a plugin (`pluginId`). */
   readonly createdByPluginId?: string;
-  /** Present only when the Session was created by the calling plugin (`pluginId`). */
   readonly businessKey?: string;
   readonly pullRequests: readonly {
     readonly url: string;
@@ -338,6 +417,26 @@ export interface SessionTurnSummary {
   readonly finished: boolean;
 }
 
+export interface SubagentRunSummary {
+  readonly runId: string;
+  readonly title: string;
+  readonly status: "running" | "completed" | "failed" | "cancelled" | "unknown";
+  readonly latestStepPreview?: string;
+}
+
+export interface SessionTurnRecord extends SessionTurnSummary {
+  readonly proseMarkdown: string;
+  readonly thoughtMarkdown?: string;
+  readonly planMarkdown?: string;
+  readonly toolCalls: readonly ObservedToolCall[];
+  readonly subagentRuns: readonly SubagentRunSummary[];
+  readonly endedAt?: number;
+}
+
+export interface SubagentRunDetail extends SubagentRunSummary {
+  readonly turns: readonly SessionTurnRecord[];
+}
+
 export interface SessionDetail extends SessionSummary {
   readonly activeWait?: {
     readonly reason?: string;
@@ -345,7 +444,6 @@ export interface SessionDetail extends SessionSummary {
   };
   readonly queuedCount: number;
   readonly pendingPermission: boolean;
-  /** Present when `pendingInteraction?.kind === 'ask_user_question'`. */
   readonly pendingQuestion?: PendingQuestionPrompt;
   readonly recentTurns: readonly SessionTurnSummary[];
 }
@@ -405,11 +503,106 @@ export interface SkillSummary {
 }
 
 /**
- * Lody's published client/host read & network SDK.
- * Workspace/session catalog descriptors subscribe directly to Lody's shared ref-counted Loro/Flock
- * rooms with zero extra RPC; machine/project/network descriptors reuse Lody's authenticated
- * `WorkspaceMachineRpcFacade` and platform cloud ports.
+ * Canonical host lifecycle events consumable on BOTH `machine.events.on` and `lody.events.on`.
  */
+export interface MachineHostEventMap {
+  readonly "session.created": {
+    readonly workspace: WorkspaceRef;
+    readonly machine: MachineRef;
+    readonly session: SessionRef;
+    readonly project?: ProjectRef;
+    readonly agentRoleId?: string;
+    readonly createdByPluginId?: string;
+  };
+  readonly "session.status.changed": {
+    readonly workspace: WorkspaceRef;
+    readonly machine: MachineRef;
+    readonly session: SessionRef;
+    readonly project?: ProjectRef;
+    readonly previousStatus: SessionSummary["status"];
+    readonly status: SessionSummary["status"];
+  };
+  readonly "session.turn.started": {
+    readonly workspace: WorkspaceRef;
+    readonly machine: MachineRef;
+    readonly session: SessionRef;
+    readonly project?: ProjectRef;
+    readonly turnId: string;
+    readonly userTurnId?: string;
+  };
+  readonly "session.turn.completed": {
+    readonly workspace: WorkspaceRef;
+    readonly machine: MachineRef;
+    readonly session: SessionRef;
+    readonly project?: ProjectRef;
+    readonly turnId: string;
+    readonly userTurnId?: string;
+    readonly stopReason:
+      | "end_turn"
+      | "cancelled"
+      | "error"
+      | "max_tokens"
+      | "unknown";
+    readonly durationMs?: number;
+  };
+  readonly "session.tool.started": {
+    readonly workspace: WorkspaceRef;
+    readonly machine: MachineRef;
+    readonly session: SessionRef;
+    readonly project?: ProjectRef;
+    readonly turnId: string;
+    readonly toolCall: ObservedToolCall;
+  };
+  readonly "session.tool.completed": {
+    readonly workspace: WorkspaceRef;
+    readonly machine: MachineRef;
+    readonly session: SessionRef;
+    readonly project?: ProjectRef;
+    readonly turnId: string;
+    readonly toolCall: ObservedToolCall;
+  };
+  readonly "session.waiting_input": {
+    readonly workspace: WorkspaceRef;
+    readonly machine: MachineRef;
+    readonly session: SessionRef;
+    readonly project?: ProjectRef;
+    readonly interaction: PendingInteractionSummary;
+    readonly question?: PendingQuestionPrompt;
+  };
+}
+
+export type MachineHostEventType = keyof MachineHostEventMap;
+
+/**
+ * Client-side host event map combining visible workspace/session lifecycle transitions with
+ * local UI interaction events (enabling Sound Effect, HUD, and coach plugins with zero DOM scraping).
+ */
+export interface ClientHostEventMap extends MachineHostEventMap {
+  readonly "ui.message.submitted": {
+    readonly workspace: WorkspaceRef;
+    readonly session: SessionRef;
+    readonly project?: ProjectRef;
+  };
+  readonly "ui.session.switched": {
+    readonly workspace: WorkspaceRef;
+    readonly session?: SessionRef;
+    readonly previousSession?: SessionRef;
+  };
+  readonly "ui.interaction.resolved": {
+    readonly workspace: WorkspaceRef;
+    readonly session: SessionRef;
+    readonly requestId: string;
+    readonly kind: "permission" | "ask_user_question";
+  };
+  readonly "ui.command.invoked": {
+    readonly workspace: WorkspaceRef;
+    readonly commandId: string;
+    readonly session?: SessionRef;
+  };
+}
+
+export type ClientHostEventType = keyof ClientHostEventMap;
+
 export declare const lodyQueries: {
   readonly machines: LodyQueryDescriptor<
     "workspace",
@@ -425,6 +618,16 @@ export declare const lodyQueries: {
     "workspace",
     void,
     { readonly items: readonly AgentRoleSummary[]; readonly synced: boolean }
+  >;
+  readonly agentConfigs: LodyQueryDescriptor<
+    "workspace",
+    void,
+    { readonly items: readonly AgentProviderSummary[] }
+  >;
+  readonly plugins: LodyQueryDescriptor<
+    "workspace",
+    void,
+    { readonly items: readonly InstalledPluginSummary[] }
   >;
   readonly members: LodyQueryDescriptor<
     "workspace",
@@ -442,13 +645,9 @@ export declare const lodyQueries: {
       readonly archived?: boolean;
       readonly status?: "idle" | "busy" | "waiting" | "stopped";
       readonly createdByMe?: boolean;
-      /** Filter to Sessions created by the calling plugin (`pluginId`). */
       readonly createdByPlugin?: boolean;
-      /** Business-task lookup within the calling plugin's namespace; archive filtering is independent. */
       readonly businessKey?: string;
-      /** Filter to descendants opened by a root Session (`openedByRootSessionId`). */
       readonly rootSessionId?: string;
-      /** Optional execution-machine filter when querying at `workspace` scope. */
       readonly machineId?: string;
       readonly search?: string;
       readonly limit?: number;
@@ -460,6 +659,24 @@ export declare const lodyQueries: {
     "session",
     { readonly recentTurnLimit?: number } | void,
     SessionDetail
+  >;
+  readonly sessionTurns: LodyQueryDescriptor<
+    "session",
+    { readonly limit?: number; readonly cursor?: string } | void,
+    {
+      readonly items: readonly SessionTurnRecord[];
+      readonly nextCursor?: string;
+    }
+  >;
+  readonly subagentRun: LodyQueryDescriptor<
+    "session",
+    { readonly runId: string },
+    SubagentRunDetail | null
+  >;
+  readonly automations: LodyQueryDescriptor<
+    "session",
+    void,
+    { readonly items: readonly SessionAutomationSummary[] }
   >;
   readonly gitState: LodyQueryDescriptor<
     "project" | "session",

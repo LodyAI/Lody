@@ -1,0 +1,45 @@
+{
+  "id": "sound-effects",
+  "version": "0.1.0",
+  "sdk": "^1.0.0",
+  "title": "Workspace Sound Effects",
+  "description": "Plays subtle audio cues on message send, Agent completion, and pending user questions.",
+  "client": "./client.tsx",
+  "assets": [
+    "./assets/send.mp3",
+    "./assets/complete.mp3",
+    "./assets/question.mp3"
+  ],
+  "config": {
+    "pack": {
+      "type": "select",
+      "scope": "client",
+      "label": "Sound Pack",
+      "default": "soft-wood",
+      "options": [
+        { "value": "soft-wood", "label": "Soft Wood" },
+        { "value": "retro-synth", "label": "Retro Synth" }
+      ]
+    },
+    "volume": {
+      "type": "number",
+      "scope": "client",
+      "label": "Volume",
+      "default": 0.6,
+      "min": 0,
+      "max": 1,
+      "step": 0.1
+    },
+    "playOnSend": {
+      "type": "boolean",
+      "scope": "client",
+      "label": "Play cue on message submit",
+      "default": true
+    }
+  },
+  "onboarding": {
+    "title": "Configure Sound Effects",
+    "summary": "Pick a cue style and volume before your next Agent session.",
+    "fields": ["pack", "volume"]
+  }
+}

@@ -6,20 +6,29 @@ import {
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
   lodyQueries,
+  type AcpToolKind,
+  type AgentProviderSummary,
   type AgentRoleSummary,
   type AnswerQuestionRequest,
   type AttachmentItem,
   type AttachmentSnapshot,
   type AttachmentSourceDescriptor,
+  type ClientHostEventMap,
+  type ClientHostEventType,
   type CreateSessionRequest,
   type ElicitationOption,
   type ElicitationQuestion,
   type FilePreviewEntry,
+  type InstalledPluginSummary,
   type LodyQueryDescriptor,
+  type MachineHostEventMap,
+  type MachineHostEventType,
   type MachinePluginScope,
   type MachineRef,
   type MachineSummary,
   type MutationDescriptor,
+  type ObservedToolCall,
+  type ObservedToolLocation,
   type PendingInteractionSummary,
   type PendingQuestionPrompt,
   type PluginCallError,
@@ -29,17 +38,26 @@ import {
   type ProjectSummary,
   type PullRequestSummary,
   type QueryDescriptor,
+  type RawDocumentSnapshot,
+  type RawSnapshotTarget,
+  type ReadonlyJsonObject,
+  type ReadonlyJsonPrimitive,
+  type ReadonlyJsonValue,
   type RepositoryGitState,
   type ScheduleSummary,
   type ScopeTarget,
   type SendSessionMessageReceipt,
   type SendSessionMessageRequest,
+  type SessionAutomationSummary,
   type SessionDetail,
   type SessionDiffSummary,
   type SessionRef,
   type SessionSummary,
+  type SessionTurnRecord,
   type SessionTurnSummary,
   type SkillSummary,
+  type SubagentRunDetail,
+  type SubagentRunSummary,
   type ToolDescriptor,
   type WorkspaceMemberSummary,
   type WorkspaceRef,
@@ -51,16 +69,25 @@ export {
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
   lodyQueries,
+  type AcpToolKind,
+  type AgentProviderSummary,
   type AgentRoleSummary,
   type AnswerQuestionRequest,
+  type ClientHostEventMap,
+  type ClientHostEventType,
   type CreateSessionRequest,
   type ElicitationOption,
   type ElicitationQuestion,
   type FilePreviewEntry,
+  type InstalledPluginSummary,
   type LodyQueryDescriptor,
+  type MachineHostEventMap,
+  type MachineHostEventType,
   type MachinePluginScope,
   type MachineRef,
   type MachineSummary,
+  type ObservedToolCall,
+  type ObservedToolLocation,
   type PendingInteractionSummary,
   type PendingQuestionPrompt,
   type PluginCallError,
@@ -71,16 +98,25 @@ export {
   type ProjectRef,
   type ProjectSummary,
   type PullRequestSummary,
+  type RawDocumentSnapshot,
+  type RawSnapshotTarget,
+  type ReadonlyJsonObject,
+  type ReadonlyJsonPrimitive,
+  type ReadonlyJsonValue,
   type RepositoryGitState,
   type ScheduleSummary,
   type SendSessionMessageReceipt,
   type SendSessionMessageRequest,
+  type SessionAutomationSummary,
   type SessionDetail,
   type SessionDiffSummary,
   type SessionRef,
   type SessionSummary,
+  type SessionTurnRecord,
   type SessionTurnSummary,
   type SkillSummary,
+  type SubagentRunDetail,
+  type SubagentRunSummary,
   type WorkspaceMemberSummary,
   type WorkspaceRef,
   type WorktreeEntry,
@@ -107,6 +143,20 @@ export interface MutationHandle<TInput, TOutput> {
   readonly pending: boolean;
 }
 
+export interface HostCapabilities {
+  readonly platform: "desktop" | "web" | "mobile";
+  readonly formFactor: "wide" | "compact";
+  readonly surfaces: {
+    readonly inlineCards: boolean;
+    readonly declarativeConfig: boolean;
+    readonly fullScreenViews: boolean;
+    readonly customSidebars: boolean;
+    readonly sessionPanels: boolean;
+    readonly audioPlayback: boolean;
+  };
+  readonly machineExecution: boolean;
+}
+
 export type DraftItem =
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "attachment"; readonly snapshot: AttachmentSnapshot };
@@ -128,6 +178,37 @@ export type ToolRenderProps<TInput, TOutput> = {
     }
 );
 
+/**
+ * Declarative + predicate matcher allowing plugins to render built-in, ACP (Codex, Claude,
+ * Antigravity, custom ACP), and MCP tool calls with deterministic priority and raw fallback.
+ */
+export interface ToolCallMatcher {
+  readonly toolNames?: readonly string[];
+  readonly mcpServer?: string;
+  readonly acpKinds?: readonly AcpToolKind[];
+  readonly commandPattern?: string;
+  readonly when?: (call: ObservedToolCall) => boolean;
+}
+
+export interface MatchedToolRenderProps {
+  readonly call: ObservedToolCall;
+  readonly session: SessionRef;
+  readonly project?: ProjectRef;
+  readonly appendToDraft: (item: DraftItem) => void;
+  /** Switches this tool row back to Lody's native raw terminal/tool detail sheet. */
+  readonly showRawOutput: () => void;
+}
+
+export interface MessageBlockRenderProps {
+  readonly language: string;
+  readonly code: string;
+  readonly meta?: string;
+  readonly streaming: boolean;
+  readonly session: SessionRef;
+  readonly project?: ProjectRef;
+  readonly appendToDraft: (item: DraftItem) => void;
+}
+
 export interface ComposerActionProps {
   readonly session: SessionRef;
   readonly project?: ProjectRef;
@@ -146,10 +227,6 @@ export interface ScreenProps {
   readonly params: Readonly<Record<string, string>>;
 }
 
-/**
- * Surface props carry only capability references and URL params; raw repository/session/catalog
- * data is pulled reactively via `useLodyQuery` / `useQuery` rather than stuffed into props.
- */
 export interface ProjectPageProps {
   readonly workspace: WorkspaceRef;
   readonly project: ProjectRef;
@@ -174,20 +251,11 @@ export interface SessionRowSlotProps {
   readonly active: boolean;
 }
 
-/**
- * Paseo-style pure custom sidebar view body rendered between the sidebar header and footer.
- * Multiple plugins may contribute selectable sidebar views (`"Default"`, `"Agent Tree"`, `"T3 Cards"`)
- * without overwriting one another via a singleton `replace` or relying on toy host filter schemas.
- */
 export interface SidebarViewProps {
   readonly workspace: WorkspaceRef;
   readonly activeSession?: SessionRef;
 }
 
-/**
- * Native sidebar navigation row primitive backed by `sidebarSurface` (`packages/components`),
- * ensuring `sidebar.headerItems` / `footerItems` and custom views match built-in row metrics.
- */
 export interface SidebarRowProps {
   readonly icon?: ReactNode;
   readonly label: ReactNode;
@@ -198,11 +266,6 @@ export interface SidebarRowProps {
 
 export declare const SidebarRow: ComponentType<SidebarRowProps>;
 
-/**
- * Native session row primitive backed by `sidebarSurface` that automatically composes every
- * enabled `sidebar.sessionRow` decorator (`trailing` badges and `hoverCard` popovers), even
- * when rendered inside a plugin's custom `sidebar.views` tree.
- */
 export interface SessionRowProps {
   readonly session: SessionSummary;
   readonly selected?: boolean;
@@ -213,7 +276,42 @@ export interface SessionRowProps {
 
 export declare const SessionRow: ComponentType<SessionRowProps>;
 
+export interface PluginConfigHandle<
+  TConfig extends Readonly<Record<string, ReadonlyJsonPrimitive>> = Readonly<
+    Record<string, ReadonlyJsonPrimitive>
+  >,
+> {
+  readonly values: TConfig;
+  set<K extends keyof TConfig>(key: K, value: TConfig[K]): Promise<void>;
+}
+
 export interface ClientPluginRegistry {
+  /**
+   * Subscribes to canonical host lifecycle & UI interaction events without DOM scraping or polling.
+   * Subscriptions are automatically torn down when the plugin disables or hot-reloads.
+   */
+  readonly events: {
+    on<K extends ClientHostEventType>(
+      type: K,
+      handler: (event: ClientHostEventMap[K]) => void | Promise<void>,
+    ): () => void;
+  };
+  readonly config: {
+    get<
+      TConfig extends Readonly<
+        Record<string, ReadonlyJsonPrimitive>
+      > = Readonly<Record<string, ReadonlyJsonPrimitive>>,
+    >(): TConfig;
+  };
+  readonly assets: {
+    url(relativePath: string): string;
+  };
+  readonly audio: {
+    play(
+      relativePath: string,
+      options?: { readonly volume?: number },
+    ): Promise<void>;
+  };
   readonly tools: {
     render<TInput extends z.ZodType, TOutput extends z.ZodType>(
       tool: ToolDescriptor<TInput, TOutput>,
@@ -221,6 +319,30 @@ export interface ClientPluginRegistry {
         ToolRenderProps<z.infer<TInput>, z.infer<TOutput>>
       >,
     ): void;
+    /**
+     * Universal tool renderer matching built-in, ACP, or MCP tool calls.
+     * In `"replace"` mode, Lody always provides a host-owned `"View Raw Output"` toggle and
+     * `SurfaceErrorBoundary` fallback so ground-truth output can never be hidden or lost.
+     */
+    matchRender(spec: {
+      readonly id: string;
+      readonly match: ToolCallMatcher;
+      readonly priority?: number;
+      readonly mode?: "replace" | "enhance";
+      readonly Component: ComponentType<MatchedToolRenderProps>;
+    }): void;
+  };
+  readonly messages: {
+    /**
+     * Renders structured assistant fenced code blocks / custom artifacts inline, paired with a
+     * host-owned `"View Raw Markdown"` toggle and `SurfaceErrorBoundary` isolation.
+     */
+    renderBlock(spec: {
+      readonly id: string;
+      readonly languages: readonly string[];
+      readonly priority?: number;
+      readonly Component: ComponentType<MessageBlockRenderProps>;
+    }): void;
   };
   readonly composer: {
     readonly attachments: {
@@ -247,7 +369,6 @@ export interface ClientPluginRegistry {
     };
   };
   readonly screens: {
-    /** Registers a full main-area canvas/workspace screen (e.g. Swarm Hub or PR Review Center). */
     add(spec: {
       readonly id: string;
       readonly title: string;
@@ -263,13 +384,6 @@ export interface ClientPluginRegistry {
       }): void;
     };
   };
-  /**
-   * Three orthogonal sidebar extension layers:
-   * 1. `sessionRow.decorate`: Composable row-level badges & interactive hover popovers (e.g.
-   *    answering `ask_user_question` on hover without switching threads) across native and `<SessionRow />` views.
-   * 2. `headerItems` / `footerItems`: Native `<SidebarRow />` navigation entries opening `screens` or popovers.
-   * 3. `views.add`: Selectable full custom sidebar body between header and footer (e.g. Swarm tree or card layout).
-   */
   readonly sidebar: {
     readonly sessionRow: {
       decorate(spec: {
@@ -317,10 +431,6 @@ export interface ClientPluginRegistry {
       ): void;
     };
   };
-  /**
-   * Stable SemVer theme contract: derives root CSS custom properties (`vscode-theme-dom.ts`)
-   * for colors, typography, radius, and density across app chrome, diffs, Monaco, Shiki, and terminal.
-   */
   readonly themes: {
     add(spec: {
       readonly id: string;
@@ -330,26 +440,31 @@ export interface ClientPluginRegistry {
       readonly tokens?: PluginThemeTokens;
     }): void;
   };
-  /**
-   * Host-managed custom CSS snippets (Obsidian-style escape hatch) for local opt-in customization.
-   * Tracked per plugin installation so disablement/HMR removes `<style>` cleanly and `lody --safe-mode`
-   * bypasses all injected stylesheets. Documented CSS variables (`--*`) are SemVer-stable; internal
-   * React DOM hierarchy is not frozen.
-   */
   readonly styles: {
     add(spec: { readonly id: string; readonly css: string }): void;
   };
 }
 
-/**
- * Programmatic Lody Client SDK handle exposed inside client plugins via `useLody()`.
- */
 export interface LodyClient {
   read<S extends PluginScope, TInput, TOutput>(
     target: ScopeTarget<S>,
     query: LodyQueryDescriptor<S, TInput, TOutput>,
     ...[input]: [void] extends [TInput] ? [input?: TInput] : [input: TInput]
   ): Promise<TOutput>;
+  /**
+   * Reads a detached, deeply frozen raw document/state-tree snapshot for power panels needing
+   * upstream workspace or transcript fields beyond fixed `lodyQueries` summaries.
+   */
+  readSnapshot(target: RawSnapshotTarget): Promise<RawDocumentSnapshot>;
+  readonly assets: {
+    url(relativePath: string): string;
+  };
+  readonly audio: {
+    play(
+      relativePath: string,
+      options?: { readonly volume?: number },
+    ): Promise<void>;
+  };
   readonly sessions: {
     open(session: SessionRef): void;
     create(
@@ -360,12 +475,6 @@ export interface LodyClient {
       session: SessionRef,
       request: SendSessionMessageRequest,
     ): Promise<SendSessionMessageReceipt>;
-    /**
-     * Submits user answers to a pending `ask_user_question` elicitation without switching the
-     * active Session, authoring the response through `WorkspaceWriter.respondSessionPermission`
-     * (non-Guest authorized in E2EE workspaces). Tool `permission` prompts remain strictly owned
-     * by Lody's trusted kernel UI and are rejected here.
-     */
     answerQuestion(
       session: SessionRef,
       request: AnswerQuestionRequest,
@@ -379,6 +488,7 @@ export interface LodyClient {
       draft: {
         readonly prompt?: string;
         readonly roleId?: string;
+        readonly providerId?: string;
         readonly skillIds?: readonly string[];
         readonly attachments?: readonly AttachmentSnapshot[];
       },
@@ -386,7 +496,6 @@ export interface LodyClient {
     append(session: SessionRef, item: DraftItem): void;
   };
   readonly panels: {
-    /** Opens a companion Session side panel registered by this plugin and passes URL-safe params. */
     openSession(
       session: SessionRef,
       panelId: string,
@@ -408,15 +517,10 @@ export interface LodyClient {
     ): void;
   };
   readonly themes: {
-    /** Switches the local client's active theme to a built-in or plugin-contributed theme ID. */
     activate(themeId: string): void;
   };
 }
 
-/**
- * Subscribes to Lody's built-in raw reactive stores (shared Loro/Flock rooms & presence) or
- * authenticated host network / `MachineRpc` adapters (`lodyQueries.*`).
- */
 export declare function useLodyQuery<S extends PluginScope, TInput, TOutput>(
   target: ScopeTarget<S>,
   query: LodyQueryDescriptor<S, TInput, TOutput>,
@@ -424,8 +528,23 @@ export declare function useLodyQuery<S extends PluginScope, TInput, TOutput>(
 ): QueryResult<TOutput>;
 
 /**
- * Subscribes to a plugin-defined `QueryDescriptor` routed to the target machine's plugin process.
+ * Reactive subscription to a detached, read-only raw document/state-tree snapshot with optional
+ * selector projection so custom Workspace / Agent dashboards re-render only on relevant changes.
  */
+export declare function useLodySnapshot<TSelected = RawDocumentSnapshot>(
+  target: RawSnapshotTarget,
+  selector?: (snapshot: RawDocumentSnapshot) => TSelected,
+  isEqual?: (prev: TSelected, next: TSelected) => boolean,
+): QueryResult<TSelected>;
+
+export declare function usePluginConfig<
+  TConfig extends Readonly<Record<string, ReadonlyJsonPrimitive>> = Readonly<
+    Record<string, ReadonlyJsonPrimitive>
+  >,
+>(): PluginConfigHandle<TConfig>;
+
+export declare function useHostCapabilities(): HostCapabilities;
+
 export declare function useQuery<
   S extends MachinePluginScope,
   TInput extends z.ZodType,

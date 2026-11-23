@@ -18,7 +18,9 @@
       "@lody/ui": ["../../../packages/ui/src/index.ts"],
       "zod": ["../../../packages/shared/node_modules/zod"],
       "react": ["../../../packages/ui/node_modules/@types/react"],
-      "react/jsx-runtime": ["../../../packages/ui/node_modules/@types/react/jsx-runtime"]
+      "react/jsx-runtime": [
+        "../../../packages/ui/node_modules/@types/react/jsx-runtime"
+      ]
     }
   },
   "include": [
