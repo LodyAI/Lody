@@ -434,10 +434,7 @@ export class MachineRuntime {
     message: LocalMachineRpcRequestValidated,
     signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
-    if (
-      this.options.handlerConfig.encryptedWorkspace &&
-      (message.method === 'session/dispatch-turn' || message.method.startsWith('ios-simulator/'))
-    )
+    if (this.options.handlerConfig.encryptedWorkspace && message.method === 'session/dispatch-turn')
       throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();
     return await handler.handleLocalMachineRpc(message, signal);
