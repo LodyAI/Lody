@@ -1,4 +1,4 @@
-# Typecheck with tsgo everywhere; components stays checked by each consumer
+# Typecheck with tsgo at concurrency 2; components stays checked by each consumer
 
 Status: implemented
 Translation: current
@@ -14,6 +14,8 @@ Its program, like `apps/electron`'s renderer program, reaches all of
 `packages/components` through source path aliases, so the 480k-line components
 source is checked three times. Mobile and the `e2e` suite now use `tsgo`, which
 checks the same mobile program with the same result in 13 s instead of 94 s.
+Because the three big tsgo programs then overlap, typecheck workspace concurrency
+drops from 4 to 2: at 4 the run peaks at 18 GB, which killed the 16 GB CI runner.
 Replacing the repeated source checks with components declarations was measured
 and rejected: it saves about 30 CPU seconds per consumer, needs emit fixes, and
 drops checks that only a consumer's own compiler options and path overrides make.
@@ -34,15 +36,29 @@ each program run alone:
 | `apps/mobile-capacitor` `tsconfig.app.json`, `tsc` | 6445 | 94 s | 117 s | 3.5 GB |
 | All 14 tsgo programs | — | 66 s | 347 s | — |
 
-The whole root typecheck under `taskset -c 0-3` (four cores) took 84 s with
-`--workspace-concurrency=4` and 80 s with 2.
+The whole root typecheck, with the summed resident memory of its processes
+sampled every 0.5 s:
+
+| Cores | Concurrency | Wall | Peak memory |
+| --- | --- | --- | --- |
+| 4 (`taskset -c 0-3`) | 4 | 82 s | 18.1 GB |
+| 4 (`taskset -c 0-3`) | 2 | 79 s | 12.0 GB |
+| 16 | 4 | 24 s | — |
+| 16 | 2 | 35 s | — |
+
+The first CI run with tsgo at concurrency 4 (run `45169803765`) lost its
+`Static checks` runner: the typecheck step was cancelled after 94 s and the job
+never reported completion, matching an out-of-memory kill on the 16 GB runner.
 
 ## Decision
 
 Every Lody-owned typecheck script runs `tsgo --noEmit`, resolved from the root
 `@typescript/native-preview` dev dependency as the other packages already do.
 ACP adapter submodules keep their own `tsc` builds; they emit artifacts and are
-maintained independently. Workspace concurrency stays at 4.
+maintained independently. Typecheck runs at `--workspace-concurrency=2` in the
+root `typecheck` script, `.github/scripts/run-ci-typecheck.mjs` and
+`scripts/run-local-check.mjs`, which keeps the peak under 16 GB for CI runners and
+16 GB developer machines. A 16-core machine pays about 11 s for it.
 
 ## Rejected alternatives
 
@@ -59,8 +75,6 @@ maintained independently. Workspace concurrency stays at 4.
   components call sites only because the consumer checks that source. Revisit
   only if components stops importing electron main modules and the consumers no
   longer override components modules.
-- **Lower typecheck workspace concurrency.** 80 s against 84 s on four cores is
-  within noise, and lower concurrency slows multi-core developer machines.
 
 ## Verification
 
