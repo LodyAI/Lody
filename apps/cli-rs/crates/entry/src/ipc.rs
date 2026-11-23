@@ -10,7 +10,9 @@ use lody_app::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::hash_map::DefaultHasher;
+use std::fmt::Write as _;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -90,17 +92,35 @@ fn resolve_socket_paths(data_dir: &Path) -> io::Result<(PathBuf, PathBuf)> {
     ))
 }
 
-fn generate_ipc_token() -> String {
+fn generate_ipc_token(data_dir: &Path) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("tok-{:x}-{nanos:x}", std::process::id())
+    let seed = format!(
+        "lody-ipc:{}:{nanos}:{}",
+        std::process::id(),
+        data_dir.to_string_lossy()
+    );
+    let digest = Sha256::digest(seed.as_bytes());
+    let mut hex = String::with_capacity(64);
+    for b in digest {
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
+}
+
+fn current_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 struct ServerState {
     service: Arc<dyn ApplicationService>,
     machine_id: String,
+    home_dir: String,
     version: String,
     token: String,
     shutdown: Arc<Notify>,
@@ -232,15 +252,19 @@ async fn handle_healthz(State(st): State<Arc<ServerState>>) -> Json<Value> {
         "machineId": st.machine_id,
         "pid": std::process::id(),
         "cliVersion": st.version,
+        "homeDir": st.home_dir,
     }))
 }
 
 async fn handle_probe_state(State(st): State<Arc<ServerState>>) -> Json<Value> {
     Json(json!({
+        "schemaVersion": 1,
         "phase": "running",
         "startupStage": "ready",
         "machineId": st.machine_id,
         "pid": std::process::id(),
+        "updatedAtMs": current_epoch_ms(),
+        "issues": [],
     }))
 }
 
@@ -266,7 +290,7 @@ async fn handle_project_control(
     let kind = payload.get("type").and_then(Value::as_str).unwrap_or("");
     let service = Arc::clone(&st.service);
     match kind {
-        "project/add" => {
+        "local-project/add" | "project/add" => {
             let root_str = payload
                 .get("rootPath")
                 .and_then(Value::as_str)
@@ -285,10 +309,13 @@ async fn handle_project_control(
             .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
             if let AppResponse::ProjectRegistered(rec) = resp {
                 Ok(Json(json!({
+                    "ok": true,
+                    "type": "local-project/add",
                     "result": {
                         "localProjectId": rec.project_id.0,
                         "name": rec.name,
                         "rootPath": rec.root_path,
+                        "workspaceIds": ["local"],
                     }
                 })))
             } else {
@@ -304,7 +331,32 @@ async fn handle_project_control(
                     .await
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
                     .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-            Ok(Json(json!({ "result": resp })))
+            let projects_json: Vec<Value> = match resp {
+                AppResponse::ProjectsListed { projects } => projects
+                    .into_iter()
+                    .map(|p| {
+                        json!({
+                            "localProjectId": p.project_id.0,
+                            "name": p.name,
+                            "rootPath": p.root_path,
+                        })
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            Ok(Json(json!({
+                "ok": true,
+                "type": "local-project/list",
+                "result": {
+                    "workspaces": [
+                        {
+                            "workspaceId": "local",
+                            "workspaceName": "Local Workspace",
+                            "projects": projects_json,
+                        }
+                    ]
+                }
+            })))
         }
     }
 }
@@ -538,6 +590,7 @@ async fn handle_session_control(
 #[cfg(unix)]
 pub async fn serve_local_daemon(
     data_dir: &Path,
+    home_dir: &Path,
     version: &str,
     service: Arc<dyn ApplicationService>,
 ) -> PortResult<()> {
@@ -570,7 +623,7 @@ pub async fn serve_local_daemon(
     let _ = fs::set_permissions(&probe_path, fs::Permissions::from_mode(0o600));
     let _ = fs::set_permissions(&control_path, fs::Permissions::from_mode(0o600));
 
-    let token = generate_ipc_token();
+    let token = generate_ipc_token(data_dir);
     let meta = DaemonRunMetadata {
         pid: my_pid,
         socket_path: probe_path.to_string_lossy().into_owned(),
@@ -595,6 +648,7 @@ pub async fn serve_local_daemon(
     let shared = Arc::new(ServerState {
         service,
         machine_id,
+        home_dir: home_dir.to_string_lossy().into_owned(),
         version: version.to_string(),
         token,
         shutdown: Arc::clone(&shutdown),
@@ -645,6 +699,7 @@ pub async fn serve_local_daemon(
 #[cfg(not(unix))]
 pub async fn serve_local_daemon(
     _data_dir: &Path,
+    _home_dir: &Path,
     _version: &str,
     _service: Arc<dyn ApplicationService>,
 ) -> PortResult<()> {

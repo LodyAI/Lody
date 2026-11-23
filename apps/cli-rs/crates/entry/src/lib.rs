@@ -4,7 +4,8 @@ pub mod ipc;
 
 use clap::{Parser, Subcommand};
 pub use ipc::{
-    DaemonRunMetadata, format_history_json, probe_live_daemon, send_unix_http, serve_local_daemon,
+    DaemonRunMetadata, ensure_bootstrap_files, format_history_json, probe_live_daemon,
+    send_unix_http, serve_local_daemon,
 };
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, PortError, PortErrorKind, PortResult,
@@ -229,14 +230,32 @@ pub fn try_execute_via_live_daemon(
 
     match action {
         OneShotAction::ProjectAdd { path, .. } => {
+            let machine_id =
+                ensure_bootstrap_files(data_dir).unwrap_or_else(|_| "local".to_string());
             let res = send_unix_http(
                 control,
                 "POST",
                 "/project-control",
                 tok,
                 Some(&json!({
-                    "type": "project/add",
+                    "type": "local-project/add",
+                    "machineId": machine_id,
                     "rootPath": path,
+                })),
+            );
+            Some(res.map(|(_, body)| body).map_err(|e| e.to_string()))
+        }
+        OneShotAction::ProjectList { .. } => {
+            let machine_id =
+                ensure_bootstrap_files(data_dir).unwrap_or_else(|_| "local".to_string());
+            let res = send_unix_http(
+                control,
+                "POST",
+                "/project-control",
+                tok,
+                Some(&json!({
+                    "type": "local-project/list",
+                    "machineId": machine_id,
                 })),
             );
             Some(res.map(|(_, body)| body).map_err(|e| e.to_string()))
@@ -330,10 +349,13 @@ pub fn execute_offline_oneshot(
             )?;
             if let AppResponse::ProjectRegistered(rec) = resp {
                 serde_json::to_string(&json!({
+                    "ok": true,
+                    "type": "local-project/add",
                     "result": {
                         "localProjectId": rec.project_id.0,
                         "name": rec.name,
                         "rootPath": rec.root_path,
+                        "workspaceIds": ["local"],
                     }
                 }))
                 .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))

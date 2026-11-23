@@ -9,20 +9,20 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 pub struct GitWorktreeManager {
-    worktrees_root: PathBuf,
+    repos_root: PathBuf,
 }
 
 impl GitWorktreeManager {
-    pub fn new(worktrees_root: impl Into<PathBuf>) -> Self {
+    pub fn new(repos_root: impl Into<PathBuf>) -> Self {
         Self {
-            worktrees_root: worktrees_root.into(),
+            repos_root: repos_root.into(),
         }
     }
 }
 
 impl Default for GitWorktreeManager {
     fn default() -> Self {
-        Self::new(".lody-oss/worktrees")
+        Self::new(".lody-oss/repos")
     }
 }
 
@@ -52,6 +52,21 @@ fn verify_existing_worktree_belongs_to_repo(worktree_path: &Path, project_root: 
     fs::canonicalize(candidate).is_ok_and(|actual| actual == expected_git_dir)
 }
 
+fn is_worktree_dirty(worktree_path: &Path) -> bool {
+    let Ok(out) = Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=normal"])
+        .current_dir(worktree_path)
+        .stdin(Stdio::null())
+        .output()
+    else {
+        return true;
+    };
+    if !out.status.success() {
+        return true;
+    }
+    !String::from_utf8_lossy(&out.stdout).trim().is_empty()
+}
+
 impl WorktreePort for GitWorktreeManager {
     fn supports_git_worktree(&self) -> bool {
         true
@@ -69,8 +84,12 @@ impl WorktreePort for GitWorktreeManager {
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect();
-        let branch_name = format!("lody/session-{sanitized_sid}");
-        let worktree_path = self.worktrees_root.join(&project_id.0).join(&sanitized_sid);
+        let branch_name = format!("session/{sanitized_sid}");
+        let worktree_path = self
+            .repos_root
+            .join(&project_id.0)
+            .join("worktrees")
+            .join(&sanitized_sid);
 
         if worktree_path.exists() {
             if verify_existing_worktree_belongs_to_repo(&worktree_path, project_root) {
@@ -130,16 +149,17 @@ impl WorktreePort for GitWorktreeManager {
     }
 
     fn release_worktree(&self, lease: &WorktreeLease) -> PortResult<()> {
+        if !lease.worktree_path.exists() || is_worktree_dirty(&lease.worktree_path) {
+            return Ok(());
+        }
+        let wt_str = lease.worktree_path.to_string_lossy();
+        let _ = Command::new("git")
+            .args(["worktree", "remove", "--force", wt_str.as_ref()])
+            .current_dir(&lease.worktree_path)
+            .stdin(Stdio::null())
+            .output();
         if lease.worktree_path.exists() {
-            let wt_str = lease.worktree_path.to_string_lossy();
-            let _ = Command::new("git")
-                .args(["worktree", "remove", "--force", wt_str.as_ref()])
-                .current_dir(&lease.worktree_path)
-                .stdin(Stdio::null())
-                .output();
-            if lease.worktree_path.exists() {
-                let _ = fs::remove_dir_all(&lease.worktree_path);
-            }
+            let _ = fs::remove_dir_all(&lease.worktree_path);
         }
         Ok(())
     }

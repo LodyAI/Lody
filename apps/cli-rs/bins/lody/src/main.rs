@@ -4,8 +4,9 @@ use lody_acp::{ManagedArtifactInstaller, StdioAcpLauncher};
 use lody_app::ApplicationService;
 use lody_engine::RepoEngineClient;
 use lody_entry::{
-    DispatchPlan, execute_offline_oneshot, parse_cli_args, probe_live_daemon, serve_local_daemon,
-    start_daemon_detached, stop_running_daemon, try_execute_via_live_daemon,
+    DispatchPlan, ensure_bootstrap_files, execute_offline_oneshot, parse_cli_args,
+    probe_live_daemon, serve_local_daemon, start_daemon_detached, stop_running_daemon,
+    try_execute_via_live_daemon,
 };
 use lody_env::HostEnv;
 use lody_ports::{BackendPort, ManagedArtifactSource, PortResult, StorageLeaseMode};
@@ -67,10 +68,14 @@ fn compose_runtime(
     backend: Option<Arc<dyn BackendPort>>,
     lease_mode: StorageLeaseMode,
 ) -> PortResult<DaemonRuntime> {
+    let machine_id = ensure_bootstrap_files(&effective_data_dir).map_err(|e| {
+        lody_ports::PortError::new(lody_ports::PortErrorKind::Unavailable, e.to_string())
+    })?;
     let artifact_source = resolve_artifact_source(host_env, backend.as_ref());
-    let worktrees_root = effective_data_dir.join("worktrees");
-    let sqlite = Arc::new(SqliteStore::open(SqliteDataLayout::new(
+    let repos_root = effective_data_dir.join("repos");
+    let sqlite = Arc::new(SqliteStore::open(SqliteDataLayout::with_machine_id(
         effective_data_dir,
+        machine_id,
     ))?);
     Ok(DaemonRuntime::new(DaemonDependencies {
         storage_lease_mode: lease_mode,
@@ -81,7 +86,7 @@ fn compose_runtime(
         diff_store: Arc::new(LocalTurnDiffStore),
         artifacts: Arc::new(ManagedArtifactInstaller::new(artifact_source)),
         acp: Arc::new(StdioAcpLauncher::default()),
-        worktree: Arc::new(GitWorktreeManager::new(worktrees_root)),
+        worktree: Arc::new(GitWorktreeManager::new(repos_root)),
         backend,
     }))
 }
@@ -154,9 +159,18 @@ fn main() -> ExitCode {
                         return ExitCode::FAILURE;
                     }
                 };
+                let home_dir = host_env
+                    .home_dir
+                    .clone()
+                    .unwrap_or_else(|| effective_data_dir.clone());
                 let svc = Arc::clone(&runtime) as Arc<dyn ApplicationService>;
-                let res =
-                    serve_local_daemon(&effective_data_dir, env!("CARGO_PKG_VERSION"), svc).await;
+                let res = serve_local_daemon(
+                    &effective_data_dir,
+                    &home_dir,
+                    env!("CARGO_PKG_VERSION"),
+                    svc,
+                )
+                .await;
                 match res {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {

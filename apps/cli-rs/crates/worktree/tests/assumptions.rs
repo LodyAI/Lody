@@ -33,30 +33,50 @@ fn init_git_repo(dir: &Path) {
 }
 
 #[test]
-fn reacquiring_existing_worktree_preserves_uncommitted_files_and_refuses_foreign_dir_deletion() {
+fn worktree_uses_repos_layout_retains_dirty_tree_on_release_and_removes_clean_tree() {
     let temp = tempfile::tempdir().unwrap();
     let repo_a = temp.path().join("repo-a");
     init_git_repo(&repo_a);
 
-    let wt_root = temp.path().join("worktrees");
-    let mgr = GitWorktreeManager::new(&wt_root);
-    let pid = LocalProjectId("proj_1".to_string());
-    let sid = SessionId("00000000-0000-4000-8000-000000000001".to_string());
+    let repos_root = temp.path().join("repos");
+    let mgr = GitWorktreeManager::new(&repos_root);
+    let pid = LocalProjectId("local-project-abc123".to_string());
+    let dirty_sid = SessionId("00000000-0000-4000-8000-000000000001".to_string());
 
-    let lease1 = mgr.acquire_worktree(&pid, &repo_a, &sid, None).unwrap();
+    let lease1 = mgr
+        .acquire_worktree(&pid, &repo_a, &dirty_sid, None)
+        .unwrap();
+    assert_eq!(
+        lease1.worktree_path,
+        repos_root
+            .join("local-project-abc123")
+            .join("worktrees")
+            .join("00000000-0000-4000-8000-000000000001")
+    );
     let dirty_file = lease1.worktree_path.join("uncommitted.txt");
     fs::write(&dirty_file, "user work in progress").unwrap();
 
-    let lease2 = mgr.acquire_worktree(&pid, &repo_a, &sid, None).unwrap();
+    let lease2 = mgr
+        .acquire_worktree(&pid, &repo_a, &dirty_sid, None)
+        .unwrap();
     assert_eq!(lease2.worktree_path, lease1.worktree_path);
+    mgr.release_worktree(&lease2).unwrap();
     assert_eq!(
         fs::read_to_string(&dirty_file).unwrap(),
         "user work in progress"
     );
 
+    let clean_sid = SessionId("00000000-0000-4000-8000-000000000003".to_string());
+    let clean_lease = mgr
+        .acquire_worktree(&pid, &repo_a, &clean_sid, None)
+        .unwrap();
+    mgr.release_worktree(&clean_lease).unwrap();
+    assert!(!clean_lease.worktree_path.exists());
+
     let sid_conflict = SessionId("00000000-0000-4000-8000-000000000002".to_string());
-    let foreign_path = wt_root
-        .join("proj_1")
+    let foreign_path = repos_root
+        .join("local-project-abc123")
+        .join("worktrees")
         .join("00000000-0000-4000-8000-000000000002");
     fs::create_dir_all(&foreign_path).unwrap();
     let precious = foreign_path.join("precious.txt");
