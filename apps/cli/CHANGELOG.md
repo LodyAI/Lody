@@ -1,5 +1,92 @@
 # Changelog
 
+## [0.114.0](https://github.com/LodyAI/Lody/compare/efd385764538ae7d447f30a021737cbf22712a35...lody-cli-v0.114.0) (2026-11-23)
+
+### Features
+
+- add the experimental Today daily outline with inline conversation mentions ([#2982](https://github.com/LodyAI/Lody/issues/2982)) ([b3a5587](https://github.com/LodyAI/Lody/commit/b3a5587792b54d58386ce79ca957101cf29a94a2))
+- **cli:** let Session editors manage automations on shared machines [risk:high] ([#3059](https://github.com/LodyAI/Lody/issues/3059)) ([fe365ab](https://github.com/LodyAI/Lody/commit/fe365abd3d542122b349ad361f874d6e68335de6))
+- **cli:** Lody MCP action tools and Session PR link actions (30 -&gt; 21 tools) ([#3026](https://github.com/LodyAI/Lody/issues/3026)) ([c55f7f6](https://github.com/LodyAI/Lody/commit/c55f7f67682e818b8d939566755eeb18a163b80d))
+- **cli:** run long commands under Lody and resume the Session on exit ([#3013](https://github.com/LodyAI/Lody/issues/3013)) ([dacbabb](https://github.com/LodyAI/Lody/commit/dacbabb0f77e4dca35bc7583156d7cc77f433b71))
+- **cli:** slim the Lody MCP tool surface (40 -&gt; 30 tools) ([#3022](https://github.com/LodyAI/Lody/issues/3022)) ([75b26ce](https://github.com/LodyAI/Lody/commit/75b26ce0f6d2ff791d3c04cce5864af878b92ce4))
+- **cli:** workspace bundle export and import ([#2904](https://github.com/LodyAI/Lody/issues/2904)) ([2b629fa](https://github.com/LodyAI/Lody/commit/2b629fa26dda7b8ca59dc43d41f8066935548c52))
+- **components:** draw the Lody Agent harness surface in StyleX ([#2903](https://github.com/LodyAI/Lody/issues/2903)) ([effc96a](https://github.com/LodyAI/Lody/commit/effc96ab2b66dc38ba97ea10f953de7c7ccab74b))
+- **components:** make text unselectable by default outside reading surfaces ([#3076](https://github.com/LodyAI/Lody/issues/3076)) ([acda568](https://github.com/LodyAI/Lody/commit/acda5687460232f0e3b300bf043be604874f5291))
+- **components:** make the Lody Agent settings real ([#3105](https://github.com/LodyAI/Lody/issues/3105)) ([90c01bf](https://github.com/LodyAI/Lody/commit/90c01bf0fd2cc118537f22dad6109401a6dbba0e))
+- continue Turns interrupted by a restart with one continue input ([#2916](https://github.com/LodyAI/Lody/issues/2916)) ([c01933f](https://github.com/LodyAI/Lody/commit/c01933f9ae0b1d1b5e469be7c15fce09ec5a0118))
+- explicit pull-request links for a Session (shim report, manual link/unlink) ([#3025](https://github.com/LodyAI/Lody/issues/3025)) ([60c7bf5](https://github.com/LodyAI/Lody/commit/60c7bf5701586406af12b08c6c1546c9092dc430))
+- gate workspace Streams WebSocket options behind explicit opt-in ([986f0cf](https://github.com/LodyAI/Lody/commit/986f0cff90324d6a18c0fb342afd07872daabf2a))
+- hand a Session's pull request to Auto delivery ([#3014](https://github.com/LodyAI/Lody/issues/3014)) ([f252323](https://github.com/LodyAI/Lody/commit/f252323c74ab7b4ad5446f74337a9f1ae09dead9))
+- **memory:** add EverMe as an account-scoped memory provider ([22fc6a8](https://github.com/LodyAI/Lody/commit/22fc6a8998ae7eaae589fbf6d9c23a8a6e50a57d))
+- **memory:** add EverMe for shared memory across agents ([e0bb4b0](https://github.com/LodyAI/Lody/commit/e0bb4b0ec3f349c38728b1128996bdccd03e7d48))
+- migrate cloud CLI and Electron packaging into public workspace ([#3031](https://github.com/LodyAI/Lody/issues/3031)) ([ddaec32](https://github.com/LodyAI/Lody/commit/ddaec32140388479bb0a486eeb29c64a33d708e5))
+- **notifications:** [risk:high] skip mobile push while a desktop is focused ([71c0b7c](https://github.com/LodyAI/Lody/commit/71c0b7c6c451184ed3cce370cefbaa4000097440))
+- opt in workspace Streams WebSockets and permit mobile WSS ([2208695](https://github.com/LodyAI/Lody/commit/22086955c4779d94bb197fe0ed128f06c2bbe969))
+- support Codex Ultrafast speed tier dropdown ([#2979](https://github.com/LodyAI/Lody/issues/2979)) ([b45836e](https://github.com/LodyAI/Lody/commit/b45836efa10f0e7ca87854cc0371aed04b4dd2fd))
+- support remote Antigravity sign-in in Lody ([#3019](https://github.com/LodyAI/Lody/issues/3019)) ([60fd939](https://github.com/LodyAI/Lody/commit/60fd9392aaedfa18d60d3aed2615d0c69dfb6d13))
+- toggle the iOS simulator software keyboard from previews [risk:medium] ([#2885](https://github.com/LodyAI/Lody/issues/2885)) ([b112991](https://github.com/LodyAI/Lody/commit/b112991e3280783d755a83ea83049ecad5299575))
+
+### Bug Fixes
+
+- [risk:high] encrypted remote control, shared-member RPC and CLI E2EE client ([#3169](https://github.com/LodyAI/Lody/issues/3169)) ([0700db1](https://github.com/LodyAI/Lody/commit/0700db1d7322eb77a9674f1541b8d4b3bff4511d))
+- [risk:high] repair recovery UI and E2EE RPC boundaries ([#3163](https://github.com/LodyAI/Lody/issues/3163)) ([611c776](https://github.com/LodyAI/Lody/commit/611c776bf1406284254170e402663e5c98a70b7b))
+- accept any Magpie model metadata in the catalog ([#2954](https://github.com/LodyAI/Lody/issues/2954)) ([eef73dc](https://github.com/LodyAI/Lody/commit/eef73dc10b8858ea9aa3d4d29359846e2d84b230))
+- accept Magpie vendor reasoning effort words in model catalog ([4f00812](https://github.com/LodyAI/Lody/commit/4f00812b01c58afc1e19495c3b6c322047ccf81e))
+- advance catalog test clocks per waiter ([#3007](https://github.com/LodyAI/Lody/issues/3007)) ([817a9e6](https://github.com/LodyAI/Lody/commit/817a9e612342080ea49ce4af7d843c3e87988faa))
+- **automations:** index ledger queries, batch poller demand, converge durable denials ([#3057](https://github.com/LodyAI/Lody/issues/3057)) ([925399c](https://github.com/LodyAI/Lody/commit/925399ca765081dc213032eec7d75e7849880395))
+- **ci:** add repository.url for npm provenance and tolerate GitHub jobs API total_count drift ([#3058](https://github.com/LodyAI/Lody/issues/3058)) ([0c06d78](https://github.com/LodyAI/Lody/commit/0c06d783d18d989b8737f36ca84ebf0faeb11034))
+- **ci:** read candidate.ossSha for LODY_SOURCE_SHA and raise CLI bundle heap to 4GB ([#3048](https://github.com/LodyAI/Lody/issues/3048)) ([b9c4e44](https://github.com/LodyAI/Lody/commit/b9c4e44e518016a1f1626670c8bf7ec963be580a))
+- **ci:** stabilize test fixtures and check Darwin CLI on PRs ([#3108](https://github.com/LodyAI/Lody/issues/3108)) ([2b2e8cf](https://github.com/LodyAI/Lody/commit/2b2e8cf2cb72c0cb9c1bb58c5616b31602c193b0))
+- **cli:** accept null or blank cursor as the first page in session history [risk:medium] ([#3027](https://github.com/LodyAI/Lody/issues/3027)) ([bbed0d8](https://github.com/LodyAI/Lody/commit/bbed0d88bb3aa86a47d39a3bce08ee927b4d98ba))
+- **cli:** avoid redundant cloud sync for one-shot commands ([#3103](https://github.com/LodyAI/Lody/issues/3103)) ([8a885f0](https://github.com/LodyAI/Lody/commit/8a885f0c670fc65890f89f94a95f44afc58e47ab))
+- **cli:** back off watchdog rejoin of persistently errored Streams rooms [risk:medium] ([#2946](https://github.com/LodyAI/Lody/issues/2946)) ([6e6ba4e](https://github.com/LodyAI/Lody/commit/6e6ba4e72a95231d1ad91adfe47ffc433aff7628))
+- **cli:** cut daemon process memory ([#3034](https://github.com/LodyAI/Lody/issues/3034)) ([bcaaf6d](https://github.com/LodyAI/Lody/commit/bcaaf6d66705bae9e544cf92484f730c0dcf7abe))
+- **cli:** delete one-shot title and quota ACP sessions ([#3018](https://github.com/LodyAI/Lody/issues/3018)) ([e24158f](https://github.com/LodyAI/Lody/commit/e24158fbc63964aa6f71c211b95cc1992ba83daf))
+- **cli:** eliminate same-machine Cloud MCP sync waits and isolate coordinator recovery fibers ([#3050](https://github.com/LodyAI/Lody/issues/3050)) ([b09dfac](https://github.com/LodyAI/Lody/commit/b09dfac902714b4fd1cffe06b5bdd33027092dcf))
+- **cli:** inline vendor ../package.json manifest reads in bundled chunks ([#3073](https://github.com/LodyAI/Lody/issues/3073)) ([c433137](https://github.com/LodyAI/Lody/commit/c43313746ce1c09d5540ec9df824be220e1acd72))
+- **cli:** narrow automation usage guidance ([#3037](https://github.com/LodyAI/Lody/issues/3037)) ([bec92bb](https://github.com/LodyAI/Lody/commit/bec92bbb17efae6574553c73830e8311d7c9259e))
+- **cli:** prevent Antigravity background tracker from sticking sessions in working state ([#3085](https://github.com/LodyAI/Lody/issues/3085)) ([ab452db](https://github.com/LodyAI/Lody/commit/ab452dbc5521dc3458de048bbac0f4f5e5af5b48))
+- **cli:** reduce context usage metadata writes ([#2878](https://github.com/LodyAI/Lody/issues/2878)) ([52b37bf](https://github.com/LodyAI/Lody/commit/52b37bf5f92fbb4f9e23d1b4f008158ab948218f))
+- **cli:** remove heuristic Antigravity sessionActivity synthesis ([#3097](https://github.com/LodyAI/Lody/issues/3097)) ([34eb2c1](https://github.com/LodyAI/Lody/commit/34eb2c16ccbd7d0374758d70de2f0a2d098f8bb7))
+- **cli:** restore running state after stale ACP recovery ([#3201](https://github.com/LodyAI/Lody/issues/3201)) ([290d8f3](https://github.com/LodyAI/Lody/commit/290d8f336cb72247f3555b7b0a51d9d84cc51593))
+- **cli:** upgrade simulator preview to upstream Baguette 0.2.15 [risk:medium] ([#2881](https://github.com/LodyAI/Lody/issues/2881)) ([6bda926](https://github.com/LodyAI/Lody/commit/6bda926e0a4ae185034b2eafd8a48b6294ef36a8))
+- continue unsubmitted turns after GitHub owner changes ([#2886](https://github.com/LodyAI/Lody/issues/2886)) ([d4ebe8b](https://github.com/LodyAI/Lody/commit/d4ebe8b37d998c88b4b828bc536a1d231f166544))
+- deduplicate machine flock capability and quota writes ([#2875](https://github.com/LodyAI/Lody/issues/2875)) ([2bea089](https://github.com/LodyAI/Lody/commit/2bea0895b8a83e4e5a9cbc0cfd9ca827f7cab36f))
+- drop remaining bounds on Magpie model metadata ([eef73dc](https://github.com/LodyAI/Lody/commit/eef73dc10b8858ea9aa3d4d29359846e2d84b230))
+- drop remaining bounds on Magpie model metadata ([adeaf37](https://github.com/LodyAI/Lody/commit/adeaf376b8d0ada8c7f96fb6a5c08e8f6d05f3d5))
+- **e2ee:** text-only encrypted bug reports, transient Streams retries, late first key and ledger quota mapping [risk:high] ([#3168](https://github.com/LodyAI/Lody/issues/3168)) ([4174604](https://github.com/LodyAI/Lody/commit/4174604a102e7695e9c080646285b010e3362105))
+- expose the lody command after standalone install [risk:medium] ([#3000](https://github.com/LodyAI/Lody/issues/3000)) ([5a8f28e](https://github.com/LodyAI/Lody/commit/5a8f28e5f92ce1d0005b14947ce4cc83e55a38c1))
+- let the installer replace a running Lody after confirmation [risk:high] ([#2899](https://github.com/LodyAI/Lody/issues/2899)) ([588d8a7](https://github.com/LodyAI/Lody/commit/588d8a71f7ab2f981857f9612b9c737906b94093))
+- load complete workspace changes when opening the list ([#2891](https://github.com/LodyAI/Lody/issues/2891)) ([32536a5](https://github.com/LodyAI/Lody/commit/32536a521f1d03187e4e5c52d79840cd3ba835df))
+- make an explicit reinstall activate the installed daemon release [risk:medium] ([#3004](https://github.com/LodyAI/Lody/issues/3004)) ([28b6894](https://github.com/LodyAI/Lody/commit/28b68941f8f56e455c189ebebcbf25f5e29a5c89))
+- **memory:** keep EverMe setup progressing on slow machines ([f3d8ee2](https://github.com/LodyAI/Lody/commit/f3d8ee24d35875e4460a12491abbb9748569ea00))
+- persist Session metadata immediately so a crash cannot drop new Sessions ([#2915](https://github.com/LodyAI/Lody/issues/2915)) ([1c43179](https://github.com/LodyAI/Lody/commit/1c431793d791ea4ef96fed760abe9b01fec4de41))
+- persist Streams recovery across process restarts ([#3109](https://github.com/LodyAI/Lody/issues/3109)) ([c6ed7f3](https://github.com/LodyAI/Lody/commit/c6ed7f31029e6739b5265e4a17556dcadba659d3))
+- prevent session room sync lifecycle wedges and decouple local data-plane joins [risk:high] ([#2931](https://github.com/LodyAI/Lody/issues/2931)) ([2bbce0b](https://github.com/LodyAI/Lody/commit/2bbce0be4f5ddfc40a0c9238ab624de66b113f31))
+- **preview:** keep previews alive across conversation switches and cache browser links ([#2973](https://github.com/LodyAI/Lody/issues/2973)) ([eb84b90](https://github.com/LodyAI/Lody/commit/eb84b90da91aadc79268bf4ae51f7cfacd5f2516))
+- push committed Roost history from the owner ([#2923](https://github.com/LodyAI/Lody/issues/2923)) ([9c6ead1](https://github.com/LodyAI/Lody/commit/9c6ead128084bde60fdd0358aa15e69d246de28f))
+- reconcile WS opt-in with main and native submodules ([77f06f5](https://github.com/LodyAI/Lody/commit/77f06f59ae97398f4bf5f5672b3a915f92894b2c))
+- reject cloud Streams auth failures before gateway requests ([#3131](https://github.com/LodyAI/Lody/issues/3131)) ([c27e232](https://github.com/LodyAI/Lody/commit/c27e232564d2c651e392dae01f5b9520f29d7274))
+- resolve project assets and redirects in previews ([#2879](https://github.com/LodyAI/Lody/issues/2879)) ([4b79e4a](https://github.com/LodyAI/Lody/commit/4b79e4a0470589088da875d574f19f234058b4d9))
+- retain Roost catch-up pages across owner writes ([#2949](https://github.com/LodyAI/Lody/issues/2949)) ([e333ac8](https://github.com/LodyAI/Lody/commit/e333ac85a6ae69bbdead66804a2730c12a78a193))
+- retain stopped queue drafts for explicit sending ([#2969](https://github.com/LodyAI/Lody/issues/2969)) ([4ddb8e4](https://github.com/LodyAI/Lody/commit/4ddb8e49df99259c7028c6d5eb5fc88c6c6e35bd))
+- route ACP adapter, CLI fetch, WebSocket, Electron E2EE, and automation traffic through proxies ([#3172](https://github.com/LodyAI/Lody/issues/3172)) ([285a884](https://github.com/LodyAI/Lody/commit/285a8843f8eb0e253a3a8126f22dacb561d09ef1))
+- **session:** bound stored history payloads and CRDT snapshot bloat ([#2943](https://github.com/LodyAI/Lody/issues/2943)) ([d7ba971](https://github.com/LodyAI/Lody/commit/d7ba9714c27d5c5ce26b0f171e46770d4d992171))
+- show Antigravity slash commands and skills ([#2960](https://github.com/LodyAI/Lody/issues/2960)) ([f194b4d](https://github.com/LodyAI/Lody/commit/f194b4d6db008a72470154b0e8d2f053f3026081)), closes [#2956](https://github.com/LodyAI/Lody/issues/2956)
+- skip repeated disabled Git commit identity lookups ([#3122](https://github.com/LodyAI/Lody/issues/3122)) ([c66cf0c](https://github.com/LodyAI/Lody/commit/c66cf0cda41f72ede1271cf9e472556ae7495d49))
+- sync local project git summary and paginate remote branch queries ([#3117](https://github.com/LodyAI/Lody/issues/3117)) ([643c56e](https://github.com/LodyAI/Lody/commit/643c56e2d2dc813ada5e446e8b49db968c0bd2ba))
+- **sync:** choose size-aware Flock snapshot catch-up ([#2876](https://github.com/LodyAI/Lody/issues/2876)) ([2d55ac5](https://github.com/LodyAI/Lody/commit/2d55ac571f168679ee6c8fa6f811e7e3942ce245))
+- timestamp queued messages when promoted to session history ([#2937](https://github.com/LodyAI/Lody/issues/2937)) ([70aade4](https://github.com/LodyAI/Lody/commit/70aade4e51343e7d043c5e3519d4348bab3271a2))
+
+### Performance
+
+- search remote project files on the host and skip unchanged skill payloads ([#3114](https://github.com/LodyAI/Lody/issues/3114)) ([5e07e9e](https://github.com/LodyAI/Lody/commit/5e07e9e7dcab6544562695a98a97eb4be8e66f49))
+- **shared,components:** defer loro/flock WASM init to workspace runtime ([#2993](https://github.com/LodyAI/Lody/issues/2993)) ([d52d285](https://github.com/LodyAI/Lody/commit/d52d2856ca13316abb9432003d3990fe4cf1b3d7))
+
+### Refactors
+
+- **memory:** drop cross-provider reveal and share job polling ([81bbaed](https://github.com/LodyAI/Lody/commit/81bbaedde9a49206253d3488eb4aa82b9c45e7b1))
+
 ## [0.76.0](https://github.com/loro-dev/lody/compare/lody-cli-v0.75.1...lody-cli-v0.76.0) (2026-08-03)
 
 

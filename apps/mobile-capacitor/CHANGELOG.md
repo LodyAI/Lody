@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.114.0](https://github.com/LodyAI/Lody/compare/efd385764538ae7d447f30a021737cbf22712a35...lody-mobile-v0.114.0) (2026-11-23)
+
+### Features
+
+- **components:** make text unselectable by default outside reading surfaces ([#3076](https://github.com/LodyAI/Lody/issues/3076)) ([acda568](https://github.com/LodyAI/Lody/commit/acda5687460232f0e3b300bf043be604874f5291))
+- migrate Capacitor client and shared E2EE composition ([#3029](https://github.com/LodyAI/Lody/issues/3029)) ([fc07d94](https://github.com/LodyAI/Lody/commit/fc07d94e504c0b7d1b1cc835dee64e913baeba84))
+
+### Bug Fixes
+
+- [risk:high] repair recovery UI and E2EE RPC boundaries ([#3163](https://github.com/LodyAI/Lody/issues/3163)) ([611c776](https://github.com/LodyAI/Lody/commit/611c776bf1406284254170e402663e5c98a70b7b))
+- **mobile:** contain E2EE metadata and native resources [risk:high] ([#3162](https://github.com/LodyAI/Lody/issues/3162)) ([507f76b](https://github.com/LodyAI/Lody/commit/507f76b2364047fb02de677d4d807e9b64a7b112))
+- **mobile:** wait for i18n before the first render ([#3107](https://github.com/LodyAI/Lody/issues/3107)) ([8297dd6](https://github.com/LodyAI/Lody/commit/8297dd65647586e122b3d2247b3884cefa016c93))
+
 ## [0.112.0](https://github.com/loro-dev/lody/compare/lody-mobile-v0.111.1...lody-mobile-v0.112.0) (2026-11-12)
 
 ### Features
