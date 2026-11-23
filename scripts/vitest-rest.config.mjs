@@ -10,6 +10,7 @@ export const REST_PACKAGES = [
   'e2ee-core',
   'e2ee-lab',
   'e2ee-machine-sharing',
+  'genui',
   'iroh-native',
   'loro-streams-rpc',
   'platform',
