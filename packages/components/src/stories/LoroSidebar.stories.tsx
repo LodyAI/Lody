@@ -7,14 +7,16 @@ import {
 import { __resetPlatformCacheForTests } from '@/lib/commands/platform';
 import type { Meta, StoryObj } from '@storybook/react';
 import { TodayColumnSash, TodayPinnedCard } from '@/components/today/today-pinned-column';
-import { TodayToolbar } from '@/components/today/today-view';
-import todayDayStreamMeta, { TodayWithEarlierDay } from './TodayDayStream.stories';
+import todayDayStreamMeta, {
+  PinnedTodayToolbar,
+  TodayWithEarlierDay,
+} from './TodayDayStream.stories';
 
 const TodayDayStreamDemo = todayDayStreamMeta.component!;
 import { E2eeOfflineSummaryText } from '@/components/e2ee-offline-window';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtom } from 'jotai';
-import { CalendarDays, FolderPlus, MoreHorizontal, PinOff } from 'lucide-react';
+import { FolderPlus } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import type {
@@ -684,17 +686,7 @@ export const PinnedToday: Story = {
           label="Today"
           sash={<TodayColumnSash width={360} onWidthChange={() => {}} label="Resize Today" />}
         >
-          <TodayToolbar pinned title={null}>
-            <Button variant="ghost" size="small" icon aria-label="Pick a date">
-              <CalendarDays size={16} strokeWidth={1.5} />
-            </Button>
-            <Button variant="ghost" size="small" icon aria-label="Unpin Today">
-              <PinOff size={16} strokeWidth={1.5} />
-            </Button>
-            <Button variant="ghost" size="small" icon aria-label="More">
-              <MoreHorizontal size={16} strokeWidth={1.5} />
-            </Button>
-          </TodayToolbar>
+          <PinnedTodayToolbar />
           <TodayDayStreamDemo dates={TodayWithEarlierDay.args!.dates!} />
         </TodayPinnedCard>
       }
@@ -1448,7 +1440,7 @@ function ProductionLikeTopContent({
                           }))
                         }
                         onShowMore={() => {}}
-                  onShowLess={() => {}}
+                        onShowLess={() => {}}
                         onRequestRemoval={() => {}}
                       />
                     );

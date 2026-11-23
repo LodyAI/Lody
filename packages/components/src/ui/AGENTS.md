@@ -76,7 +76,9 @@ strings on i18n rather than the registry's inline English.
 - Tooltips come from `@lody/ui/tooltip` (Base UI): `Tooltip.Provider/Root/
 Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   provider. The chip is visual-only — no `role="tooltip"`, no
-  `aria-describedby` — so an icon-only trigger names itself with `aria-label`.
+  `aria-describedby` — so an icon-only trigger names itself with `aria-label`
+  (keep it static on `aria-pressed` `Toggle`s). Pass `disabled={open}` on
+  `Menu.Trigger`/`Popover.Trigger` tooltips.
 - Overlay list hover (menus, command palette, select) is
   `bg-foreground/[0.05]` in light and `bg-white/[0.10]` in dark. Do not use
   `--hover` on popovers — it is sized for the page/sidebar and vanishes on the

@@ -117,7 +117,7 @@ function FocusHarness(props: { initial?: Target }) {
     <TodayEditorContext.Provider value={controller}>
       <div style={{ maxWidth: 720, height: 360, display: 'flex', flexDirection: 'column' }}>
         <TodayToolbar
-          pinned
+          surface="pinned"
           interactiveTitle={!!focusDate}
           title={
             focusDate ? (

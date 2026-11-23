@@ -7,8 +7,8 @@ import {
   Maximize2,
   MessageSquarePlus,
   MoreHorizontal,
+  PictureInPicture2,
   Pin,
-  PinOff,
   Square,
   SquareCheck,
   Trash2,
@@ -43,8 +43,10 @@ import {
 import { Button } from '@lody/ui/button';
 import { Menu } from '@lody/ui/menu';
 import { Popover } from '@lody/ui/popover';
+import { Toggle } from '@lody/ui/toggle';
+import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { userAtom } from '@/atoms';
 import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
@@ -128,6 +130,18 @@ const styles = stylex.create({
   // the traffic lights and the sidebar header's controls at y=23.
   toolbarOnTrafficLightLine: { marginTop: -1 },
   controls: { display: 'flex', alignItems: 'center', gap: space[1] },
+  pinIcon: {
+    transform: 'rotate(0deg)',
+    transitionProperty: {
+      default: 'transform',
+      '@media (prefers-reduced-motion: reduce)': 'none',
+    },
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  pinUnpinned: {
+    transform: 'rotate(45deg)',
+  },
   title: {
     flex: 1,
     minWidth: 0,
@@ -245,6 +259,7 @@ export function TodayView(props: {
   const [registered, setRegistered] = useState<readonly TodayDate[]>([]);
   const [fullWidth, setFullWidth] = useAtom(todayFullWidthAtom);
   const [empty, setEmpty] = useState<ReadonlySet<TodayDate>>(new Set());
+  const [moreOpen, setMoreOpen] = useState(false);
   const { members, isMultiMember } = useWorkspaceMembers();
   const membersById = useMemo(
     () => new Map(members.map((member) => [member.userId, member] as const)),
@@ -369,13 +384,30 @@ export function TodayView(props: {
   }, [controller, focusDate]);
 
   if (!runtime || !userId) return null;
+  const toolbarSurface: TodayToolbarSurface = standalone
+    ? 'standalone'
+    : pinnedColumn
+      ? 'pinned'
+      : 'page';
+  const openWindowLabel = t('today.openWindow', 'Open in new window');
+  // Keep Toggle aria-label static to match aria-pressed; the tooltip states the next action.
+  const pinControlLabel = standalone
+    ? t('today.pinWindow', 'Keep on top')
+    : t('today.pin', 'Pin to sidebar');
+  const pinTooltip = standalone
+    ? props.pinned
+      ? t('today.unpinWindow', 'Stop keeping on top')
+      : pinControlLabel
+    : props.pinned
+      ? t('today.unpin', 'Unpin')
+      : pinControlLabel;
+  const moreLabel = t('today.more', 'More');
   return (
     <TodayEditorContext.Provider value={controller}>
       <TodayMembersContext.Provider value={membersById}>
         <div {...stylex.props(styles.root)} data-testid="today-view">
           <TodayToolbar
-            pinned={pinnedColumn}
-            standalone={standalone}
+            surface={toolbarSurface}
             title={
               focusDate ? (
                 <TodayFocusCrumbs
@@ -396,110 +428,127 @@ export function TodayView(props: {
             }
             interactiveTitle={!!focusDate}
           >
-            <TodayCalendar
-              today={today}
-              selected={anchor ?? today}
-              registered={registered}
-              language={i18n.language}
-              onPick={(date) =>
-                props.onNavigate({ ...props.target, date: date === today ? undefined : date })
-              }
-            />
-            {!standalone && workspaceSlug && isElectronRenderer() ? (
-              <Button
-                variant="ghost"
-                size="small"
-                icon
-                aria-label={t('today.openWindow', 'Open Today in a new window')}
-                onClick={() =>
-                  openTodayWindow({
-                    workspace: workspaceSlug,
-                    member: props.target.member,
-                    date: props.target.date,
-                  })
-                }
-              >
-                <OpenWindowIcon />
-              </Button>
-            ) : null}
-            {props.onTogglePin ? (
-              <Button
-                variant="ghost"
-                size="small"
-                icon
-                aria-pressed={props.pinned ?? false}
-                aria-label={
-                  standalone
-                    ? props.pinned
-                      ? t('today.unpinWindow', 'Stop keeping on top')
-                      : t('today.pinWindow', 'Keep on top of other windows')
-                    : props.pinned
-                      ? t('today.unpin', 'Unpin Today')
-                      : t('today.pin', 'Pin Today beside the sidebar')
-                }
-                onClick={props.onTogglePin}
-              >
-                {props.pinned ? (
-                  <PinOff size={16} strokeWidth={1.5} />
-                ) : (
-                  <Pin size={16} strokeWidth={1.5} />
-                )}
-              </Button>
-            ) : null}
-            <Menu.Root>
-              <Menu.Trigger
-                render={
-                  <Button variant="ghost" size="small" icon aria-label={t('today.more', 'More')}>
-                    <MoreHorizontal size={16} strokeWidth={1.5} />
-                  </Button>
+            <Tooltip.Provider delay={400}>
+              <TodayCalendar
+                today={today}
+                selected={anchor ?? today}
+                registered={registered}
+                language={i18n.language}
+                onPick={(date) =>
+                  props.onNavigate({ ...props.target, date: date === today ? undefined : date })
                 }
               />
-              <Menu.Content>
-                {isMultiMember ? (
-                  <Menu.Submenu>
-                    <Menu.SubmenuTrigger>
-                      {t('today.viewMember', "View a member's Today")}
-                    </Menu.SubmenuTrigger>
-                    <Menu.Content>
-                      {members.map((member) => (
-                        <Menu.Item
-                          key={member.userId}
-                          icon={<UserAvatar user={{ id: member.userId, ...member }} size="mini" />}
-                          onClick={() =>
-                            props.onNavigate({
-                              date: props.target.date,
-                              member: member.userId === self ? undefined : member.userId,
-                            })
-                          }
-                        >
-                          {member.name}
-                        </Menu.Item>
-                      ))}
-                    </Menu.Content>
-                  </Menu.Submenu>
-                ) : null}
-                {pinnedColumn || standalone ? null : (
-                  <Menu.CheckboxItem
-                    checked={fullWidth}
-                    indicatorSide="end"
-                    onCheckedChange={(checked) => setFullWidth(checked)}
+              {!standalone && workspaceSlug && isElectronRenderer() ? (
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        icon
+                        aria-label={openWindowLabel}
+                        onClick={() =>
+                          openTodayWindow({
+                            workspace: workspaceSlug,
+                            member: props.target.member,
+                            date: props.target.date,
+                          })
+                        }
+                      >
+                        <PictureInPicture2 size={16} strokeWidth={1.5} />
+                      </Button>
+                    }
+                  />
+                  <Tooltip.Content side="bottom">{openWindowLabel}</Tooltip.Content>
+                </Tooltip.Root>
+              ) : null}
+              {props.onTogglePin ? (
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
+                      <Toggle
+                        size="small"
+                        icon
+                        pressed={props.pinned ?? false}
+                        aria-label={pinControlLabel}
+                        onPressedChange={() => props.onTogglePin?.()}
+                      >
+                        <Pin
+                          size={16}
+                          strokeWidth={1.5}
+                          fill="none"
+                          {...stylex.props(styles.pinIcon, !props.pinned && styles.pinUnpinned)}
+                        />
+                      </Toggle>
+                    }
+                  />
+                  <Tooltip.Content side="bottom">{pinTooltip}</Tooltip.Content>
+                </Tooltip.Root>
+              ) : null}
+              <Menu.Root open={moreOpen} onOpenChange={setMoreOpen}>
+                <Tooltip.Root disabled={moreOpen}>
+                  <Tooltip.Trigger
+                    render={
+                      <Menu.Trigger
+                        render={
+                          <Button variant="ghost" size="small" icon aria-label={moreLabel}>
+                            <MoreHorizontal size={16} strokeWidth={1.5} />
+                          </Button>
+                        }
+                      />
+                    }
+                  />
+                  <Tooltip.Content side="bottom">{moreLabel}</Tooltip.Content>
+                </Tooltip.Root>
+                <Menu.Content>
+                  {isMultiMember ? (
+                    <Menu.Submenu>
+                      <Menu.SubmenuTrigger>
+                        {t('today.viewMember', "View a member's Today")}
+                      </Menu.SubmenuTrigger>
+                      <Menu.Content>
+                        {members.map((member) => (
+                          <Menu.Item
+                            key={member.userId}
+                            icon={
+                              <UserAvatar user={{ id: member.userId, ...member }} size="mini" />
+                            }
+                            onClick={() =>
+                              props.onNavigate({
+                                date: props.target.date,
+                                member: member.userId === self ? undefined : member.userId,
+                              })
+                            }
+                          >
+                            {member.name}
+                          </Menu.Item>
+                        ))}
+                      </Menu.Content>
+                    </Menu.Submenu>
+                  ) : null}
+                  {pinnedColumn || standalone ? null : (
+                    <Menu.CheckboxItem
+                      checked={fullWidth}
+                      indicatorSide="end"
+                      onCheckedChange={(checked) => setFullWidth(checked)}
+                    >
+                      {t('today.fullWidth', 'Full width')}
+                    </Menu.CheckboxItem>
+                  )}
+                  <Menu.Item
+                    onClick={() => {
+                      void writeTextToClipboard(
+                        buildTodayLink(runtime.workspaceId, userId, anchor ?? today)
+                      ).then((copied) => {
+                        if (copied) toast.success(t('today.linkCopied', 'Link copied'));
+                      });
+                    }}
                   >
-                    {t('today.fullWidth', 'Full width')}
-                  </Menu.CheckboxItem>
-                )}
-                <Menu.Item
-                  onClick={() => {
-                    void writeTextToClipboard(
-                      buildTodayLink(runtime.workspaceId, userId, anchor ?? today)
-                    ).then((copied) => {
-                      if (copied) toast.success(t('today.linkCopied', 'Link copied'));
-                    });
-                  }}
-                >
-                  {t('today.copyLink', 'Copy link')}
-                </Menu.Item>
-              </Menu.Content>
-            </Menu.Root>
+                    {t('today.copyLink', 'Copy link')}
+                  </Menu.Item>
+                </Menu.Content>
+              </Menu.Root>
+            </Tooltip.Provider>
           </TodayToolbar>
           <TodayOutlineSurface
             controller={controller}
@@ -551,17 +600,16 @@ export function TodayView(props: {
   );
 }
 
+export type TodayToolbarSurface = 'page' | 'pinned' | 'standalone';
+
 /**
- * The Today toolbar. The full page's row is the window top: it sits under the
- * workspace's window drag strip, so its controls are drag-exempt or Electron
- * swallows their clicks, and while the navigation sidebar is hidden it carries
- * the sidebar's toggle and Back/Forward, which would otherwise be unreachable.
- * The pinned column is not at the window top and needs none of this.
+ * The Today toolbar. Full-page and standalone-window rows sit at the window top
+ * under its drag strip (so controls must be drag-exempt), and when the sidebar
+ * is hidden the main window's leftmost Today surface carries sidebar navigation.
+ * A pinned sidebar column is never window-drag chrome.
  */
 export function TodayToolbar(props: {
-  pinned: boolean;
-  /** The standalone Today window's top row: window chrome without sidebar controls. */
-  standalone?: boolean;
+  surface?: TodayToolbarSurface;
   title: ReactNode;
   /** The title holds controls (the focus view's breadcrumb): they must take clicks. */
   interactiveTitle?: boolean;
@@ -577,17 +625,19 @@ export function TodayToolbar(props: {
     insideWorkspaceFrame: true,
     includeDesktopWeb: true,
   });
-  const page = !props.pinned;
-  // Both forms sit in a page card's window-top row and line up with its
-  // controls; only the page is window chrome (drag region, caption buttons).
-  const exemptClassName = page && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
+  const surface = props.surface ?? 'page';
+  const hasDragChrome = surface !== 'pinned';
+  const standalone = surface === 'standalone';
+  // All surfaces line up in the window-top row; only full-page and standalone
+  // window headers participate in window drag and caption padding.
+  const exemptClassName = hasDragChrome && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
   const besideTrafficLights =
-    (props.standalone || !sidebarVisible) &&
+    (standalone || !sidebarVisible) &&
     !isNativeAppShell() &&
     isMacOSElectronRenderer() &&
     !fullscreen;
   const chromeClassName = (
-    page
+    hasDragChrome
       ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
       : [captionRowPadClass, trafficLightRowPadClass]
   )
@@ -608,7 +658,7 @@ export function TodayToolbar(props: {
     >
       {/* With the sidebar hidden, Today (page or pinned column) is the window's
           leftmost surface and carries the sidebar toggle and Back/Forward. */}
-      {!sidebarVisible && !props.standalone ? (
+      {!sidebarVisible && !standalone ? (
         <SidebarHistoryControls onToggleSidebar={showSidebar} className={exemptClassName} />
       ) : null}
       <span
@@ -803,26 +853,6 @@ export function TodayFocusCrumbs(props: {
 
 const noopSubscribe = () => () => {};
 const noSnapshot = () => null;
-
-/** Two stacked windows, the front one lower left: opens Today on its own. */
-function OpenWindowIcon() {
-  return (
-    <svg
-      width={16}
-      height={16}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x={3} y={7} width={14} height={14} rx={2} />
-      <path d="M7 7V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2" />
-    </svg>
-  );
-}
 
 /** The scroll surface: focus, keys and clipboard for block selection. */
 export function TodayOutlineSurface(props: {
@@ -1133,6 +1163,7 @@ function TodayCalendar(props: {
     year: 'numeric',
     month: 'long',
   });
+  const calendarLabel = t('today.calendar', 'Pick a date');
   return (
     <Popover.Root
       open={open}
@@ -1141,13 +1172,20 @@ function TodayCalendar(props: {
         if (next) setMonth(todayDateToLocalDate(props.selected));
       }}
     >
-      <Popover.Trigger
-        render={
-          <Button variant="ghost" size="small" icon aria-label={t('today.calendar', 'Pick a date')}>
-            <CalendarDays size={16} strokeWidth={1.5} />
-          </Button>
-        }
-      />
+      <Tooltip.Root disabled={open}>
+        <Tooltip.Trigger
+          render={
+            <Popover.Trigger
+              render={
+                <Button variant="ghost" size="small" icon aria-label={calendarLabel}>
+                  <CalendarDays size={16} strokeWidth={1.5} />
+                </Button>
+              }
+            />
+          }
+        />
+        <Tooltip.Content side="bottom">{calendarLabel}</Tooltip.Content>
+      </Tooltip.Root>
       <Popover.Content>
         <div {...stylex.props(styles.calendar)}>
           <div {...stylex.props(styles.calendarHead)}>

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider } from 'jotai';
 
 import { sidebarCollapsedAtom } from '../src/atoms/sidebar-state';
-import { TodayToolbar } from '../src/components/today/today-view';
+import { TodayToolbar, type TodayToolbarSurface } from '../src/components/today/today-view';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
 // The desktop window: the workspace drag strip covers the Today page's toolbar row.
@@ -21,14 +21,16 @@ describe('Today toolbar window chrome', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
-  afterEach(() => {
-    if (root) flushSync(() => root?.unmount());
+  afterEach(async () => {
+    await act(async () => {
+      if (root) root.unmount();
+    });
     root = undefined;
     container?.remove();
     container = undefined;
   });
 
-  async function renderToolbar(pinned: boolean, collapsed: boolean, standalone = false) {
+  async function renderToolbar(surface: TodayToolbarSurface, collapsed: boolean) {
     const store = createStore();
     store.set(sidebarCollapsedAtom, collapsed);
     container = document.createElement('div');
@@ -38,7 +40,7 @@ describe('Today toolbar window chrome', () => {
       root?.render(
         withTestI18n(
           <Provider store={store}>
-            <TodayToolbar pinned={pinned} standalone={standalone} title={null}>
+            <TodayToolbar surface={surface} title={null}>
               <button type="button">Pick a date</button>
               <button type="button">Pin</button>
               <button type="button">More</button>
@@ -61,7 +63,7 @@ describe('Today toolbar window chrome', () => {
   }
 
   it('keeps every page control clickable and restores the sidebar controls while it is hidden', async () => {
-    const { store, toolbar } = await renderToolbar(false, true);
+    const { store, toolbar } = await renderToolbar('page', true);
     expect(toolbar.classList.contains('app-region-drag')).toBe(true);
     const buttons = [...toolbar.querySelectorAll('button')];
     expect(
@@ -83,7 +85,7 @@ describe('Today toolbar window chrome', () => {
   });
 
   it('keeps the pinned column out of the drag chrome, carrying the sidebar controls while the sidebar is hidden', async () => {
-    const hidden = await renderToolbar(true, true);
+    const hidden = await renderToolbar('pinned', true);
     expect(hidden.toolbar.classList.contains('app-region-drag')).toBe(false);
     // Pinned with the sidebar hidden, the column is the leftmost surface.
     expect(
@@ -106,7 +108,7 @@ describe('Today toolbar window chrome', () => {
   it('makes the standalone Today window toolbar its own drag chrome, without sidebar controls', async () => {
     // The Today window has no navigation sidebar, whatever its stored state says.
     for (const collapsed of [false, true]) {
-      const { toolbar } = await renderToolbar(false, collapsed, true);
+      const { toolbar } = await renderToolbar('standalone', collapsed);
       expect(toolbar.classList.contains('app-region-drag')).toBe(true);
       const buttons = [...toolbar.querySelectorAll('button')];
       expect(buttons.map((button) => button.textContent)).toEqual(['Pick a date', 'Pin', 'More']);
