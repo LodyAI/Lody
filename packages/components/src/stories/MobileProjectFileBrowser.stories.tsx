@@ -1,5 +1,8 @@
 import { useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import * as stylex from '@stylexjs/stylex';
+import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
+import { useResolvedTheme } from '@/theme-provider';
 import { ChevronLeft } from 'lucide-react';
 import {
   MobileProjectFileBrowser,
@@ -11,6 +14,83 @@ import {
   type FileWorkspaceProviderEntry,
   type FileWorkspaceSnapshot,
 } from '@/lib/file-workspace-provider';
+const fileBrowserStory = stylex.create({
+  device: {
+    position: 'relative',
+    marginInline: 'auto',
+    height: 680,
+    width: 390,
+    overflow: 'hidden',
+    borderWidth:"1px",borderStyle:"solid",borderColor:"hsl(var(--border) / 1)",
+    backgroundColor: 'hsl(var(--background) / 1)',
+    '--mobile-tabbar-height': '0px',
+  },
+  header: {
+    position: 'absolute',
+    insetInline: 0,
+    top: 0,
+    zIndex: 30,
+    display: 'flex',
+    alignItems: 'center',
+    borderBottomWidth:"1px",borderBottomStyle:"solid",borderBottomColor:"color-mix(in oklab,hsl(var(--border) / 1) 50%,transparent)",
+    backgroundColor: 'color-mix(in oklab,hsl(var(--background) / 1) 90%,transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    backdropFilter: 'blur(var(--blur-sm))',
+  },
+  back: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 8)',
+    width: 'calc(var(--spacing) * 8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'hsl(var(--card) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+    scale: { default: null, ':active': '.95' },
+  },
+  footer: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    zIndex: 40,
+    borderTopWidth:"1px",borderTopStyle:"solid",borderTopColor:"hsl(var(--border) / 1)",
+    backgroundColor: 'hsl(var(--card) / 1)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+});
+const storyLayoutStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+  },
+});
+
+const storyLayout = stylex.create({
+  label: {
+    flex: '1',
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'text-align': 'center',
+    'font-size': '0.98rem',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  frame: {
+    width: 'calc(var(--spacing) * 8)',
+  },
+  overlay: {
+    position: 'absolute',
+    'inset-inline': 'calc(var(--spacing) * 0)',
+    top: '3.25rem',
+    bottom: 'calc(var(--spacing) * 0)',
+  },
+});
 
 // Thin wrapper around the production mobile file browser. Exercises the
 // drill-down stack (folder push, file preview) with a fake provider so
@@ -113,34 +193,38 @@ function FileBrowserHarness({
      preview in place. */
   onOpenFile,
   openedPath,
+  height,
 }: {
   provider: FileWorkspaceProvider | null;
   message?: string;
   projectName: string;
   onOpenFile?: (path: string) => void;
   openedPath?: string | null;
+  height?: number;
 }) {
   const ref = useRef<MobileProjectFileBrowserHandle>(null);
   return (
-    <div className="relative mx-auto h-[680px] w-[390px] overflow-hidden border border-border bg-background [--mobile-tabbar-height:0px]">
+    <div
+      data-file-browser-harness
+      style={height === undefined ? undefined : { height }}
+      {...stylex.props(fileBrowserStory.device)}
+    >
       {/* Stand-in for the production project header. The breadcrumb lives
           inside the browser body, so the harness header is just back +
           project name. */}
-      <div className="absolute inset-x-0 top-0 z-30 flex items-center border-b border-border/50 bg-background/90 px-3 py-2 backdrop-blur">
+      <div {...stylex.props(fileBrowserStory.header)}>
         <button
           type="button"
           onClick={() => ref.current?.goBack()}
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-card text-foreground active:scale-95"
+          {...stylex.props(fileBrowserStory.back)}
           aria-label="Back"
         >
-          <ChevronLeft className="h-5 w-5" />
+          <ChevronLeft {...stylex.props(storyLayoutStyles.frame)} />
         </button>
-        <span className="flex-1 truncate text-center text-[0.98rem] font-semibold">
-          {projectName}
-        </span>
-        <span className="w-8" />
+        <span {...stylex.props(storyLayout.label)}>{projectName}</span>
+        <span {...stylex.props(storyLayout.frame)} />
       </div>
-      <div className="absolute inset-x-0 bottom-0 top-[3.25rem]">
+      <div {...stylex.props(storyLayout.overlay)}>
         <MobileProjectFileBrowser
           ref={ref}
           provider={provider}
@@ -151,9 +235,7 @@ function FileBrowserHarness({
       {/* The host's viewer, stubbed: in production this is the session's
           file viewer tab. */}
       {openedPath ? (
-        <div className="absolute inset-x-0 bottom-0 z-40 border-t border-border bg-card px-3 py-2 font-mono text-xs">
-          opened in host viewer: {openedPath}
-        </div>
+        <div {...stylex.props(fileBrowserStory.footer)}>opened in host viewer: {openedPath}</div>
       ) : null}
     </div>
   );
@@ -210,4 +292,59 @@ export const Unavailable: Story = {
   render: (args) => (
     <FileBrowserHarness provider={args.provider} message={args.message} projectName="lody" />
   ),
+};
+
+export const HtmlSourceHeightBoundary: Story = {
+  args: { provider: createFakeFileWorkspaceProvider({ files: repoFiles, snapshots }) },
+  render: (args) => <FileBrowserHarness provider={args.provider} projectName="lody" height={220} />,
+};
+
+const monacoCallerStyles = stylex.create({
+  frame: { width: 320, height: 320 },
+  height: { height: 128 },
+  width: { width: 180 },
+  overflow: { overflow: 'visible' },
+  minHeight: { minHeight: 480 },
+});
+
+function MonacoCallerFixture({
+  contract = 'default',
+}: {
+  contract?: 'default' | 'height' | 'width' | 'overflow' | 'minHeight';
+}) {
+  const theme = useResolvedTheme();
+  return (
+    <div data-monaco-caller-fixture={contract} {...stylex.props(monacoCallerStyles.frame)}>
+      <SessionMonacoTextViewer
+        text={'const answer = 42;\n// actual Monaco layout caller contract\n'}
+        language="typescript"
+        resolvedTheme={theme}
+        className={
+          contract === 'default' ? undefined : stylex.props(monacoCallerStyles[contract]).className
+        }
+      />
+    </div>
+  );
+}
+
+export const MonacoDefaultCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture />,
+};
+export const MonacoHeightCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture contract="height" />,
+};
+export const MonacoWidthCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture contract="width" />,
+};
+export const MonacoOverflowCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture contract="overflow" />,
+};
+
+export const MonacoMinHeightCaller: Story = {
+  args: { provider: null },
+  render: () => <MonacoCallerFixture contract="minHeight" />,
 };

@@ -1,3 +1,6 @@
+import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
+import { corner as uiCorner, radius as uiRadius } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import {
   useCallback,
   useEffect,
@@ -94,7 +97,7 @@ function FocusRowGhost({ source }: { source: HTMLElement | null }) {
     <div
       ref={hostRef}
       data-pin-drag-overlay=""
-      className="overflow-hidden rounded-md border border-sidebar-border bg-sidebar"
+      {...stylex.props(themeStyles.panel)}
       style={{
         boxShadow: FOCUS_ROW_LIFT_SHADOW,
         cursor: 'grabbing',
@@ -149,7 +152,7 @@ function FocusDropFlight() {
   return createPortal(
     <div
       ref={hostRef}
-      className="overflow-hidden rounded-md border border-sidebar-border bg-sidebar"
+      {...stylex.props(themeStyles.panel)}
       style={{
         position: 'fixed',
         top: 0,
@@ -378,3 +381,7 @@ export function SidebarFocusDndContainer({
     </DndContext>
   );
 }
+
+const themeStyles = stylex.create({
+  panel: { overflow: 'hidden', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground },
+});

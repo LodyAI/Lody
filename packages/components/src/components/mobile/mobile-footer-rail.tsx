@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
 
 /* Footer rail for the mobile composer: a horizontal scroller with a
    right-edge fade only while there is more content to reach. The fade is a
@@ -35,22 +36,40 @@ export function MobileFooterRail({ children }: { children: ReactNode }) {
   }, [updateFade]);
 
   return (
-    <div className="relative flex min-w-0 flex-1 items-center">
-      <div
-        ref={railRef}
-        className={cn(
-          'flex w-full min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto',
-          '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
-        )}
-      >
+    <div {...stylex.props(styles.root)}>
+      <div ref={railRef} {...stylex.props(styles.rail)}>
         {children}
       </div>
-      {showFade ? (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent"
-        />
-      ) : null}
+      {showFade ? <div aria-hidden="true" {...stylex.props(styles.fade)} /> : null}
     </div>
   );
 }
+
+const styles = stylex.create({
+  root: {
+    position: 'relative',
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    alignItems: 'center',
+  },
+  rail: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    gap: '6px',
+    overflowX: 'auto',
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
+  },
+  fade: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    insetBlock: 0,
+    right: 0,
+    width: '40px',
+    backgroundImage: `linear-gradient(to left,${themeColors.background},transparent)`,
+  },
+});

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
@@ -5,6 +6,60 @@ import type { SessionId, WorkspaceId } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { authTokenAtom } from '@/atoms/runtime';
 import { ImageGroupBubble, type ImageBubbleAlign } from '@/components/ai-gui/view';
+const sceneStyles = stylex.create({
+  messageRow: { display: 'flex', width: '100%' },
+  userRow: { justifyContent: 'flex-end' },
+  assistantRow: { justifyContent: 'flex-start' },
+  bubble: {
+    width: '100%',
+    maxWidth: '34rem',
+    borderRadius: '24px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    padding: 'calc(var(--spacing) * 4)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  userBubble: {
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--primary) / 1) 20%, transparent)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--primary) / 1) 30%, transparent)',
+    },
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--primary) / 1) 10%, transparent)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--primary) / 1) 20%, transparent)',
+    },
+  },
+  assistantBubble: {
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--card) / 1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  frame: {
+    width: '100%',
+    'max-width': '42rem',
+    'border-radius': '28px',
+    'border-style': 'dashed',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+    padding: 'calc(var(--spacing) * 5)',
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    width: '100%',
+    'max-width': '56rem',
+    'justify-content': 'center',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const STORY_WORKSPACE_ID = 'workspace-storybook' as WorkspaceId;
 const STORY_SESSION_ID = 'session-storybook' as SessionId;
@@ -143,18 +198,22 @@ function StoryPreview({ align, imageCount, speaker }: StoryPreviewProps) {
     type: 'image_group' as const,
     images: storyImages.slice(0, imageCount),
   };
-  const bubbleTone =
-    speaker === 'user'
-      ? 'border-primary/20 bg-primary/10 dark:border-primary/30 dark:bg-primary/20'
-      : 'border-border/70 bg-card';
 
   return (
     <Provider store={store}>
-      <div className="mx-auto flex w-full max-w-4xl justify-center p-6">
-        <div className="w-full max-w-[42rem] rounded-[28px] border border-dashed border-border/70 bg-muted/20 p-5">
-          <div className={`flex w-full ${speaker === 'user' ? 'justify-end' : 'justify-start'}`}>
+      <div {...stylex.props(storyLayout.row)}>
+        <div {...stylex.props(storyLayoutStyles.frame)}>
+          <div
+            {...stylex.props(
+              sceneStyles.messageRow,
+              speaker === 'user' ? sceneStyles.userRow : sceneStyles.assistantRow
+            )}
+          >
             <div
-              className={`w-full max-w-[34rem] rounded-[24px] border p-4 shadow-xs ${bubbleTone}`}
+              {...stylex.props(
+                sceneStyles.bubble,
+                speaker === 'user' ? sceneStyles.userBubble : sceneStyles.assistantBubble
+              )}
             >
               <ImageGroupBubble
                 content={content}

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Check, Circle, Download, Square, Trash2, X } from 'lucide-react';
@@ -9,6 +10,195 @@ import {
 import { DEFAULT_ARRIVAL_INTENT_CONFIG } from '@/components/ai-gui/conversation-outline-arrival-intent';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { Button } from '@lody/ui/button';
+const sceneStyles = stylex.create({
+  layout: {
+    display: 'grid',
+    minHeight: '100vh',
+    gridTemplateColumns: {
+      default: 'repeat(1, minmax(0, 1fr))',
+      '@media (min-width: 64rem)': 'minmax(640px,1fr) 320px',
+    },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  conversation: {
+    containerType: 'inline-size',
+    position: 'relative',
+    height: { default: '58vh', '@media (min-width: 64rem)': '100vh' },
+    minHeight: { default: '520px', '@media (min-width: 64rem)': '680px' },
+    overflow: 'hidden',
+    borderBottomWidth: { default: '1px', '@media (min-width: 64rem)': 0 },
+    borderRightWidth: { default: 0, '@media (min-width: 64rem)': '1px' },
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 1)',
+  },
+  entry: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    paddingBlock: 'calc(var(--spacing) * 4)',
+  },
+  inspector: {
+    display: 'flex',
+    minHeight: { default: '42vh', '@media (min-width: 64rem)': '680px' },
+    height: { default: null, '@media (min-width: 64rem)': '100vh' },
+    flexDirection: 'column',
+    overflowY: 'auto',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 15%, transparent)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  status: {
+    height: 'calc(var(--spacing) * 2.5)',
+    width: 'calc(var(--spacing) * 2.5)',
+    borderRadius: 'calc(infinity * 1px)',
+  },
+  prediction: { backgroundColor: 'var(--color-emerald-500)' },
+  recording: { backgroundColor: 'var(--color-red-500)' },
+  idle: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 35%, transparent)',
+  },
+  icon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+  trials: {
+    ':is(*) > :not(:last-child)': {
+      borderBottomWidth: '1px',
+      borderBottomStyle: 'solid',
+      borderColor: 'hsl(var(--border) / 1)',
+    },
+  },
+  trialId: {
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  intended: {
+    color: {
+      default: 'var(--color-emerald-600)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-emerald-400)',
+    },
+  },
+  accidental: {
+    color: {
+      default: 'var(--color-red-600)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-red-400)',
+    },
+  },
+  unlabeled: { color: 'hsl(var(--muted-foreground) / 1)' },
+  metric: {
+    marginTop: 'calc(var(--spacing) * 0.5)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: '11px',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  caption2: {
+    'margin-top': 'calc(var(--spacing) * 1)',
+    'font-size': '13px',
+    'line-height': 'var(--leading-relaxed)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'space-between',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'padding-bottom': 'calc(var(--spacing) * 3)',
+  },
+  caption3: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  caption4: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  grid: {
+    display: 'grid',
+    'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
+    'column-gap': 'calc(var(--spacing) * 4)',
+    'row-gap': 'calc(var(--spacing) * 3)',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'padding-block': 'calc(var(--spacing) * 4)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+  row2: {
+    display: 'flex',
+    'flex-wrap': 'wrap',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'padding-block': 'calc(var(--spacing) * 4)',
+  },
+  caption5: {
+    'margin-bottom': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  grid2: {
+    display: 'grid',
+    'grid-template-columns': '32px 1fr auto',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+  },
+  section: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    'max-width': '46rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 3)',
+    overflow: 'hidden',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 8)',
+  },
+  frame: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    'padding-block': 'calc(var(--spacing) * 3)',
+  },
+  section: {
+    'min-width': 'calc(var(--spacing) * 0)',
+  },
+  caption: {
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 const meta = {
   title: 'Sessions/ConversationOutlineRail/ArrivalIntentLab',
@@ -246,19 +436,17 @@ function ArrivalIntentLab() {
   const accidentalCount = trials.filter((trial) => trial.manualLabel === 'accidental').length;
   const bypassCount = trials.filter((trial) => trial.openSource === 'arrival-intent').length;
   return (
-    <div className="grid min-h-screen grid-cols-1 bg-background text-foreground lg:grid-cols-[minmax(640px,1fr)_320px]">
-      <div className="@container relative h-[58vh] min-h-[520px] overflow-hidden border-b border-border lg:h-screen lg:min-h-[680px] lg:border-r lg:border-b-0">
-        <div className="mx-auto flex h-full w-full max-w-[46rem] flex-col gap-3 overflow-hidden px-4 py-8">
+    <div {...stylex.props(sceneStyles.layout)}>
+      <div {...stylex.props(sceneStyles.conversation)}>
+        <div {...stylex.props(storyLayout.stack)}>
           {entries.slice(activeIndex, activeIndex + 7).map((item, offset) => (
             <div
               key={item.key}
-              className="border-b border-border/70 py-4"
+              {...stylex.props(sceneStyles.entry)}
               style={{ opacity: Math.max(1 - offset * 0.1, 0.45) }}
             >
-              <div className="text-sm font-medium">{item.title}</div>
-              <div className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-                {item.preview}
-              </div>
+              <div {...stylex.props(storyLayoutStyles.caption)}>{item.title}</div>
+              <div {...stylex.props(storyLayoutStyles.caption2)}>{item.preview}</div>
             </div>
           ))}
         </div>
@@ -271,27 +459,28 @@ function ArrivalIntentLab() {
         />
       </div>
 
-      <aside className="flex min-h-[42vh] flex-col overflow-y-auto bg-muted/15 p-4 lg:h-screen lg:min-h-[680px]">
-        <div className="flex items-center justify-between border-b border-border pb-3">
+      <aside {...stylex.props(sceneStyles.inspector)}>
+        <div {...stylex.props(storyLayoutStyles.row)}>
           <div>
-            <h2 className="text-sm font-semibold">Arrival intent lab</h2>
-            <div className="mt-0.5 text-xs text-muted-foreground">
+            <h2 {...stylex.props(storyLayoutStyles.caption3)}>Arrival intent lab</h2>
+            <div {...stylex.props(storyLayoutStyles.caption4)}>
               {recording ? 'Recording locally' : 'Idle'}
             </div>
           </div>
           <span
-            className={`h-2.5 w-2.5 rounded-full ${
+            {...stylex.props(
+              sceneStyles.status,
               liveReading.predictionActive
-                ? 'bg-emerald-500'
+                ? sceneStyles.prediction
                 : recording
-                  ? 'bg-red-500'
-                  : 'bg-muted-foreground/35'
-            }`}
+                  ? sceneStyles.recording
+                  : sceneStyles.idle
+            )}
             aria-label={liveReading.predictionActive ? 'Prediction active' : 'Prediction inactive'}
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 border-b border-border py-4 text-xs">
+        <div {...stylex.props(storyLayoutStyles.grid)}>
           <Metric label="Distance" value={metric(liveReading.distancePx, ' px')} />
           <Metric label="Speed" value={metric(liveReading.recentSpeedPxPerMs, ' px/ms')} />
           <Metric label="Braking" value={metric(liveReading.brakingRatio)} />
@@ -302,14 +491,14 @@ function ArrivalIntentLab() {
           <Metric label="Labels" value={`${intendedCount} / ${accidentalCount}`} />
         </div>
 
-        <div className="flex flex-wrap gap-2 border-b border-border py-4">
+        <div {...stylex.props(storyLayoutStyles.row2)}>
           {recording ? (
             <Button variant="secondary" size="small" onClick={stopCapture}>
-              <Square className="size-4" /> Stop
+              <Square {...stylex.props(sceneStyles.icon)} /> Stop
             </Button>
           ) : (
             <Button size="small" onClick={startCapture}>
-              <Circle className="size-4" /> Record
+              <Circle {...stylex.props(sceneStyles.icon)} /> Record
             </Button>
           )}
           <Button
@@ -318,7 +507,7 @@ function ArrivalIntentLab() {
             disabled={!latestTrial}
             onClick={() => labelLatestTrial('intended')}
           >
-            <Check className="size-4" /> Intended
+            <Check {...stylex.props(sceneStyles.icon)} /> Intended
           </Button>
           <Button
             variant="secondary"
@@ -326,7 +515,7 @@ function ArrivalIntentLab() {
             disabled={!latestTrial}
             onClick={() => labelLatestTrial('accidental')}
           >
-            <X className="size-4" /> Accidental
+            <X {...stylex.props(sceneStyles.icon)} /> Accidental
           </Button>
           <Button
             variant="ghost"
@@ -336,7 +525,7 @@ function ArrivalIntentLab() {
             title="Export capture"
             onClick={exportCapture}
           >
-            <Download className="size-4" />
+            <Download {...stylex.props(sceneStyles.icon)} />
           </Button>
           <Button
             variant="ghost"
@@ -346,34 +535,31 @@ function ArrivalIntentLab() {
             title="Clear capture"
             onClick={clearCapture}
           >
-            <Trash2 className="size-4" />
+            <Trash2 {...stylex.props(sceneStyles.icon)} />
           </Button>
         </div>
 
-        <div className="min-h-0 flex-1 py-3">
-          <div className="mb-2 text-xs font-medium text-muted-foreground">Recent trials</div>
-          <div className="divide-y divide-border">
+        <div {...stylex.props(storyLayout.frame)}>
+          <div {...stylex.props(storyLayoutStyles.caption5)}>Recent trials</div>
+          <div {...stylex.props(sceneStyles.trials)}>
             {trials
               .slice(-8)
               .reverse()
               .map((trial) => (
-                <div
-                  key={trial.id}
-                  className="grid grid-cols-[32px_1fr_auto] items-center gap-2 py-2 text-xs"
-                >
-                  <span className="font-mono text-muted-foreground">#{trial.id}</span>
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">{trial.openSource}</div>
-                    <div className="text-muted-foreground">{trial.inferredOutcome}</div>
+                <div key={trial.id} {...stylex.props(storyLayoutStyles.grid2)}>
+                  <span {...stylex.props(sceneStyles.trialId)}>#{trial.id}</span>
+                  <div {...stylex.props(storyLayout.section)}>
+                    <div {...stylex.props(storyLayoutStyles.section)}>{trial.openSource}</div>
+                    <div {...stylex.props(storyLayout.caption)}>{trial.inferredOutcome}</div>
                   </div>
                   <span
-                    className={
+                    {...stylex.props(
                       trial.manualLabel === 'intended'
-                        ? 'text-emerald-600 dark:text-emerald-400'
+                        ? sceneStyles.intended
                         : trial.manualLabel === 'accidental'
-                          ? 'text-red-600 dark:text-red-400'
-                          : 'text-muted-foreground'
-                    }
+                          ? sceneStyles.accidental
+                          : sceneStyles.unlabeled
+                    )}
                   >
                     {trial.manualLabel ?? 'unlabeled'}
                   </span>
@@ -388,9 +574,9 @@ function ArrivalIntentLab() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <div className="text-muted-foreground">{label}</div>
-      <div className="mt-0.5 truncate font-mono text-[11px] text-foreground">{value}</div>
+    <div {...stylex.props(storyLayout.section)}>
+      <div {...stylex.props(storyLayout.caption)}>{label}</div>
+      <div {...stylex.props(sceneStyles.metric)}>{value}</div>
     </div>
   );
 }

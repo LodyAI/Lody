@@ -1,6 +1,24 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { WorkspaceMcpServerMeta } from '@lody/shared';
 import { McpConnectionForm } from '@/components/settings/mcp-connection-form';
+const formPreview = stylex.create({ fill: { minHeight: 0, flex: '1' } });
+const storyLayout = stylex.create({
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    height: '620px',
+    width: '620px',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 4)',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const stdioEntry: WorkspaceMcpServerMeta = {
   id: 'stdio-files' as WorkspaceMcpServerMeta['id'],
@@ -35,13 +53,13 @@ const httpEntry: WorkspaceMcpServerMeta = {
 const meta = {
   title: 'Settings/McpConnectionForm',
   component: McpConnectionForm,
-  args: { onSubmit: () => undefined, onCancel: () => undefined, className: 'min-h-0 flex-1' },
+  args: { onSubmit: () => undefined, onCancel: () => undefined, xstyle: formPreview.fill },
   decorators: [
     // Mirrors the settings dialog that hosts the form: a fixed-height panel the
     // form's own scroll body and sticky footer size themselves against. The
     // panel pads its content; the form has no padding of its own.
     (Story) => (
-      <div className="mx-auto flex h-[620px] w-[620px] flex-col gap-4 overflow-hidden rounded-lg border bg-background p-4">
+      <div {...stylex.props(storyLayout.stack)}>
         <Story />
       </div>
     ),

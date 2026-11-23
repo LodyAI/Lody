@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { getServerNow, type SessionFilePayload } from '@lody/shared';
@@ -47,10 +49,6 @@ const PLAIN_TEXT = Array.from(
   (_, i) => `line ${i + 1}: lorem ipsum dolor sit amet`
 ).join('\n');
 
-// Content designed to blow past the dialog width: a very long unbreakable
-// token, a wide code block (long lines, no spaces), and a wide table. These are
-// exactly the shapes that make the preview body overflow the modal instead of
-// scrolling inside it.
 const LONG_TOKEN = `x${'-verylongunbreakabletoken'.repeat(12)}`;
 
 const WIDE_MARKDOWN = `# Wide content
@@ -72,6 +70,19 @@ const WIDE_PLAIN_TEXT = [
   ...Array.from({ length: 10 }, (_, i) => `line ${i + 1}: short content`),
 ].join('\n');
 
+const storyStyles = stylex.create({
+  pane: {
+    display: 'flex',
+    height: '560px',
+    width: '640px',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    backgroundColor: colors.background,
+    color: colors.label,
+  },
+  body: { minHeight: 0, flex: 1 },
+});
+
 const meta = {
   title: 'AI/SessionFilePreviewPanel',
   component: SessionFilePreviewPanel,
@@ -82,9 +93,6 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// The panel renders a `Dialog.Title`, which requires a Dialog.Root ancestor — mirror
-// the real composition (SessionFilePreviewDialog wraps it in Dialog.Root/Dialog.Content)
-// so the story exercises the panel exactly as users see it.
 const wrap = (content: React.ReactNode) => (
   <Dialog.Root open>
     <Dialog.Content closeButton={false} width="48rem">
@@ -224,10 +232,8 @@ export const MobileTextAttachment: Story = {
   },
 };
 
-/* The desktop composition: an attachment opens as a side-panel tab. The name and
-   actions sit directly under the tab strip and the body fills the panel. */
 const sidePanel = (args: React.ComponentProps<typeof SessionFilePreviewPanel>) => (
-  <div className="flex h-[560px] w-[640px] flex-col overflow-hidden bg-background text-foreground">
+  <div {...stylex.props(storyStyles.pane)}>
     <SessionSidePanelTabBar
       tabs={[
         {
@@ -243,7 +249,7 @@ const sidePanel = (args: React.ComponentProps<typeof SessionFilePreviewPanel>) =
       onTabClose={() => {}}
       closeTabLabel={(label) => `Close ${label}`}
     />
-    <div className="min-h-0 flex-1">
+    <div {...stylex.props(storyStyles.body)}>
       <SessionFilePreviewPanel {...args} variant="pane" />
     </div>
   </div>

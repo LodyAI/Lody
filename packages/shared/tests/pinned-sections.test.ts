@@ -124,9 +124,7 @@ describe('pinned conversation moves', () => {
     expect(write?.pinSectionId).toBe('maintenance');
 
     const moved = items.map((item) =>
-      item.id === 'x'
-        ? { ...item, pinSectionId: 'maintenance', orderKey: write?.orderKey }
-        : item
+      item.id === 'x' ? { ...item, pinSectionId: 'maintenance', orderKey: write?.orderKey } : item
     );
     expect(idsBySection(buildPinnedSectionLayout(moved, sections, (item) => item))).toEqual([
       [null, []],
@@ -166,9 +164,7 @@ describe('pinned conversation moves', () => {
     const byId = new Map(writes.map((write) => [write.sessionId, write]));
     const moved = items.map((item) => {
       const write = byId.get(item.id);
-      return write
-        ? { ...item, pinSectionId: write.pinSectionId, orderKey: write.orderKey }
-        : item;
+      return write ? { ...item, pinSectionId: write.pinSectionId, orderKey: write.orderKey } : item;
     });
     expect(idsBySection(buildPinnedSectionLayout(moved, sections, (item) => item))).toEqual([
       [null, ['keyed', 'legacy-new', 'mover', 'legacy-old']],

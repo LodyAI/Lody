@@ -1,8 +1,154 @@
+import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
+import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { parseDiffFromFile } from '@pierre/diffs';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    'border-bottom-style': 'solid',
+    'border-bottom-width': '1px',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 2)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+  },
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  canvas: {
+    'margin-left': 'auto',
+    'flex-shrink': '0',
+    'border-radius': 'var(--radius-sm)',
+    'background-color': 'color-mix(in oklab, var(--color-green-500) 20%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 1.5)',
+    'padding-block': 'calc(var(--spacing) * 0.5)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'var(--color-green-600)',
+  },
+  label2: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+  label3: {
+    'margin-left': 'auto',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    height: '100vh',
+    overflow: 'auto',
+  },
+  canvas: {
+    'margin-inline': 'auto',
+    'max-width': '64rem',
+    overflow: 'auto',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  frame2: {
+    height: '100%',
+    overflow: 'auto',
+  },
+  frame3: {
+    'margin-inline': 'calc(var(--spacing) * 2)',
+    height: 'calc(var(--spacing) * 4)',
+    width: '1px',
+    'background-color': 'hsl(var(--border) / 1)',
+  },
+  frame4: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});
+
+const multiFileStyles = stylex.create({
+  filePath: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: { default: 'none', '@media (width >= 40rem)': 'inline' },
+    marginLeft: 'calc(var(--spacing) * 2)',
+  },
+  deletions: {
+    flexShrink: 0,
+    borderRadius: 'var(--radius-sm)',
+    backgroundColor: 'color-mix(in oklab, var(--color-red-500) 20%, transparent)',
+    paddingInline: 'calc(var(--spacing) * 1.5)',
+    paddingBlock: 'calc(var(--spacing) * 0.5)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'var(--color-red-600)',
+  },
+  adjacentCount: { marginLeft: 'calc(var(--spacing) * 1)' },
+  trailingCount: { marginLeft: 'auto' },
+  toolbar: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 10,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 95%, transparent)',
+    padding: 'calc(var(--spacing) * 3)',
+    backdropFilter: 'blur(var(--blur-xs))',
+  },
+  styleChoice: {
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+  selectedChoice: {
+    backgroundColor: 'hsl(var(--primary) / 1)',
+    color: 'hsl(var(--primary-foreground) / 1)',
+  },
+  idleChoice: {
+    backgroundColor: {
+      default: 'hsl(var(--muted) / 1)',
+      '@media (hover: hover)': {
+        ':hover': 'color-mix(in oklab, hsl(var(--muted) / 1) 80%, transparent)',
+      },
+    },
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  fileList: {
+    padding: 'calc(var(--spacing) * 3)',
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 4)',
+    },
+  },
+});
 
 const meta = {
   title: 'UI/DiffViewer',
@@ -22,7 +168,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="scrollbar-pro h-screen overflow-auto">
+      <div className={clsx(stylex.props(storyLayout.frame).className, 'scrollbar-pro')}>
         <Story />
       </div>
     ),
@@ -47,23 +193,23 @@ export function ProjectList({ projects }: { projects: Project[] }) {
   }, [projects]);
 
   return (
-    <section className="space-y-4">
-      <header className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Projects</h2>
-        <span className="text-xs text-muted-foreground">
+    <section {...stylex.props(themeStyles.layout)}>
+      <header {...stylex.props(themeStyles.row)}>
+        <h2 {...stylex.props(themeStyles.copy)}>Projects</h2>
+        <span {...stylex.props(themeStyles.hint)}>
           {visible.length} total
         </span>
       </header>
-      <ul className="divide-y divide-border/70">
+      <ul >
         {visible.map((project) => (
-          <li key={project.id} className="flex items-center justify-between py-3">
-            <div className="space-y-1">
-              <div className="text-sm font-medium">{project.name}</div>
-              <div className="text-xs text-muted-foreground">
+          <li key={project.id} {...stylex.props(themeStyles.row2)}>
+            <div {...stylex.props(themeStyles.layout2)}>
+              <div {...stylex.props(themeStyles.copy2)}>{project.name}</div>
+              <div {...stylex.props(themeStyles.hint)}>
                 {STATUS_LABELS[project.status] ?? 'Unknown'}
               </div>
             </div>
-            <button className="text-xs text-primary hover:underline">Open</button>
+            <button {...stylex.props(previewStyles.copy)}>Open</button>
           </li>
         ))}
       </ul>
@@ -73,7 +219,6 @@ export function ProjectList({ projects }: { projects: Project[] }) {
 `;
 
 const newText = `import { useMemo } from 'react';
-import type { Project } from '../types';
 import { cn } from '../lib/cn';
 
 const STATUS_LABELS = {
@@ -98,38 +243,35 @@ export function ProjectList({
 
   if (visible.length === 0) {
     return (
-      <section className="rounded-lg border border-dashed border-border/60 p-6 text-sm text-muted-foreground">
+      <section {...stylex.props(themeStyles.hint2)}>
         No projects yet. Create your first workspace.
       </section>
     );
   }
 
   return (
-    <section className="space-y-4">
-      <header className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Projects</h2>
+    <section {...stylex.props(themeStyles.layout)}>
+      <header {...stylex.props(themeStyles.row)}>
+        <h2 {...stylex.props(themeStyles.copy)}>Projects</h2>
         {showCount ? (
-          <span className="text-xs text-muted-foreground">
+          <span {...stylex.props(themeStyles.hint)}>
             {visible.length} total
           </span>
         ) : null}
       </header>
-      <ul className="divide-y divide-border/70">
+      <ul >
         {visible.map((project) => (
           <li
             key={project.id}
-            className={cn(
-              'flex items-center justify-between py-3',
-              project.state === 'error' ? 'bg-amber-50/40' : ''
-            )}
+            {...stylex.props(projectSceneStyles.row, project.state === 'error' && projectSceneStyles.error)}
           >
-            <div className="space-y-1">
-              <div className="text-sm font-medium">{project.name}</div>
-              <div className="text-xs text-muted-foreground">
+            <div {...stylex.props(themeStyles.layout2)}>
+              <div {...stylex.props(themeStyles.copy2)}>{project.name}</div>
+              <div {...stylex.props(themeStyles.hint)}>
                 {getStatusLabel(project.state)}
               </div>
             </div>
-            <button className="text-xs text-primary hover:underline">View</button>
+            <button {...stylex.props(previewStyles.copy)}>View</button>
           </li>
         ))}
       </ul>
@@ -145,7 +287,7 @@ export const ComplexExample: Story = {
     newText,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -159,7 +301,7 @@ export const WithFileHeaderActions: Story = {
     onOpenFile: fn(),
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -173,7 +315,7 @@ export const SplitView: Story = {
     diffStyle: 'split',
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -187,7 +329,7 @@ export const WithoutHeader: Story = {
     showHeader: false,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -232,7 +374,7 @@ export const SparseChanges: Story = {
     newText: sparseNewText,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -246,7 +388,7 @@ export const SparseChangesSplit: Story = {
     diffStyle: 'split',
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -268,7 +410,7 @@ export const NewFile: Story = {
     newText: newFileText,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -281,7 +423,7 @@ export const DeletedFile: Story = {
     newText: '',
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -292,8 +434,14 @@ const largeContext = Array.from(
   (_, index) => `export const generated_${index} = ${index};\n`
 ).join('');
 const largePreparsedDiff = parseDiffFromFile(
-  { name: 'src/generated/large-snapshot.ts', contents: `${largeContext}export const mode = "old";\n` },
-  { name: 'src/generated/large-snapshot.ts', contents: `${largeContext}export const mode = "new";\n` }
+  {
+    name: 'src/generated/large-snapshot.ts',
+    contents: `${largeContext}export const mode = "old";\n`,
+  },
+  {
+    name: 'src/generated/large-snapshot.ts',
+    contents: `${largeContext}export const mode = "new";\n`,
+  }
 );
 
 export const ProviderSidePreparsedLargeDiff: Story = {
@@ -307,7 +455,7 @@ export const ProviderSidePreparsedLargeDiff: Story = {
     commentsEnabled: true,
   },
   render: (args) => (
-    <div className="scrollbar-pro mx-auto max-w-5xl p-6 overflow-auto">
+    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -355,18 +503,17 @@ function MultiFileDiffListComponent() {
     deletions: number;
     CollapseToggle: React.FC<{ className?: string }>;
   }) => (
-    <div className="flex items-center gap-1 px-2 py-1.5 border-b bg-muted/30">
+    <div {...stylex.props(storyLayoutStyles.row)}>
       <CollapseToggle />
-      <span className="truncate text-sm font-medium text-foreground">{fileName}</span>
-      <span className="text-xs text-muted-foreground truncate hidden sm:inline ml-2">{path}</span>
-      {additions > 0 && (
-        <span className="ml-auto shrink-0 rounded-sm bg-green-500/20 px-1.5 py-0.5 text-xs text-green-600">
-          +{additions}
-        </span>
-      )}
+      <span {...stylex.props(storyLayoutStyles.label)}>{fileName}</span>
+      <span {...stylex.props(multiFileStyles.filePath)}>{path}</span>
+      {additions > 0 && <span {...stylex.props(storyLayoutStyles.canvas)}>+{additions}</span>}
       {deletions > 0 && (
         <span
-          className={`shrink-0 rounded-sm bg-red-500/20 px-1.5 py-0.5 text-xs text-red-600 ${additions > 0 ? 'ml-1' : 'ml-auto'}`}
+          {...stylex.props(
+            multiFileStyles.deletions,
+            additions > 0 ? multiFileStyles.adjacentCount : multiFileStyles.trailingCount
+          )}
         >
           -{deletions}
         </span>
@@ -375,46 +522,44 @@ function MultiFileDiffListComponent() {
   );
 
   return (
-    <div className="scrollbar-pro h-full overflow-auto">
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 p-3 backdrop-blur-xs">
-        <span className="text-sm font-medium">Diff Style:</span>
+    <div className={clsx(stylex.props(storyLayout.frame2).className, 'scrollbar-pro')}>
+      <div {...stylex.props(multiFileStyles.toolbar)}>
+        <span {...stylex.props(storyLayoutStyles.label2)}>Diff Style:</span>
         <button
           type="button"
           onClick={() => setDiffStyle('unified')}
-          className={`rounded-md px-3 py-1 text-sm ${
-            diffStyle === 'unified'
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-muted text-muted-foreground hover:bg-muted/80'
-          }`}
+          {...stylex.props(
+            multiFileStyles.styleChoice,
+            diffStyle === 'unified' ? multiFileStyles.selectedChoice : multiFileStyles.idleChoice
+          )}
         >
           Stack
         </button>
         <button
           type="button"
           onClick={() => setDiffStyle('split')}
-          className={`rounded-md px-3 py-1 text-sm ${
-            diffStyle === 'split'
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-muted text-muted-foreground hover:bg-muted/80'
-          }`}
+          {...stylex.props(
+            multiFileStyles.styleChoice,
+            diffStyle === 'split' ? multiFileStyles.selectedChoice : multiFileStyles.idleChoice
+          )}
         >
           Split
         </button>
-        <div className="mx-2 h-4 w-px bg-border" />
-        <label className="flex items-center gap-1.5 text-sm">
+        <div {...stylex.props(storyLayout.frame3)} />
+        <label {...stylex.props(storyLayoutStyles.row2)}>
           <input
             type="checkbox"
             checked={useCustomHeader}
             onChange={(e) => setUseCustomHeader(e.target.checked)}
-            className="h-4 w-4"
+            {...stylex.props(storyLayout.frame4)}
           />
           Custom Header
         </label>
-        <span className="ml-auto text-xs text-muted-foreground">
+        <span {...stylex.props(storyLayoutStyles.label3)}>
           {multiFileDiffs.length} files changed
         </span>
       </div>
-      <div className="space-y-4 p-3">
+      <div {...stylex.props(multiFileStyles.fileList)}>
         {multiFileDiffs.map((file) => (
           <DiffViewer
             key={file.path}
@@ -438,3 +583,20 @@ export const MultiFileDiffList: Story = {
   },
   render: () => <MultiFileDiffListComponent />,
 };
+
+const themeStyles = stylex.create({
+  layout: { display: 'flex', flexDirection: 'column', rowGap: 'calc(var(--spacing) * 4)' },
+  row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  copy: { fontSize: uiText.headlineSize, lineHeight: uiText.headlineLeading, fontWeight: 600 },
+  hint: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  row2: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBlock: 'calc(var(--spacing) * 3)' },
+  layout2: { display: 'flex', flexDirection: 'column', rowGap: 'calc(var(--spacing) * 1)' },
+  copy2: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500 },
+  hint2: { borderRadius: uiRadius.medium, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+});
+
+const previewStyles = stylex.create({
+  copy: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.accent, textDecorationLine: { ':hover': 'underline' } },
+});
+
+const projectSceneStyles = stylex.create({ row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBlock: 'calc(var(--spacing) * 3)' }, error: { color: uiColors.warning } });

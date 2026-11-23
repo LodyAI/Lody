@@ -104,7 +104,7 @@ const styles = stylex.create({
     letterSpacing: text.controlTracking,
     whiteSpace: 'nowrap',
     cursor: { default: 'pointer', ':disabled': 'default' },
-    opacity: { default: 1, ':disabled': 0.45 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     outlineStyle: 'none',
     boxShadow: { default: 'none', ':focus-visible': RING },
     transitionProperty: 'color, background-color, box-shadow, opacity',
@@ -129,7 +129,7 @@ const styles = stylex.create({
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
   },
-  dimmed: { opacity: 0.45 },
+  dimmed: { opacity: control.disabledOpacity },
 
   swatches: { display: 'flex', alignItems: 'center', gap: space[1.5] },
   // A swatch is a pressable that paints its ground: raised, no edge of its own,
@@ -149,7 +149,7 @@ const styles = stylex.create({
     cornerShape: corner.round,
     backgroundColor: colors.raisedBackground,
     cursor: { default: 'pointer', ':disabled': 'default' },
-    opacity: { default: 1, ':disabled': 0.45 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
     outlineStyle: 'none',
     boxShadow: {
       default: shadow.raised,

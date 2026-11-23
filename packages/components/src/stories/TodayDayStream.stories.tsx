@@ -1,3 +1,6 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { LoroDoc } from 'loro-crdt';
 import { useEffect, useMemo, useState } from 'react';
@@ -178,14 +181,14 @@ function PinnedAtWindowEdge() {
   }, [setCollapsed]);
   if (!ready) return null;
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-sidebar text-foreground">
+    <div {...stylex.props(themeStyles.row)}>
       <TrafficLights />
       <TodayPinnedCard width={360} anchored={false} label="Today">
         <PinnedTodayToolbar />
         <DayStream dates={[TODAY, '2026-11-18' as TodayDate]} placement="pinnedAtWindowEdge" />
       </TodayPinnedCard>
       <WorkspaceCard anchored>
-        <div className="p-6 text-sm text-muted-foreground">Conversation</div>
+        <div {...stylex.props(themeStyles.hint)}>Conversation</div>
       </WorkspaceCard>
     </div>
   );
@@ -201,3 +204,8 @@ export const PinnedSidebarHidden: StoryObj<typeof DayStream> = {
   parameters: { layout: 'fullscreen' },
   render: () => <PinnedAtWindowEdge />,
 };
+
+const themeStyles = stylex.create({
+  row: { display: 'flex', height: '100dvh', width: '100%', overflow: 'hidden', backgroundColor: uiColors.secondaryBackground, color: uiColors.label },
+  hint: { padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+});

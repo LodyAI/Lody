@@ -1,5 +1,11 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SessionShareConsent } from '@/components/sharing/session-share-request-cards';
+const storyLayout = stylex.create({
+  frame: {
+    width: 'min(560px, calc(100vw - 32px))',
+  },
+});
 
 const idle = {
   busy: false,
@@ -16,7 +22,7 @@ const meta = {
   parameters: { layout: 'centered' },
   decorators: [
     (Story) => (
-      <div className="w-[min(560px,calc(100vw-32px))]">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

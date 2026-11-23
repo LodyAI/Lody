@@ -1,3 +1,5 @@
+import { duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as stylex from '@stylexjs/stylex';
 import {
   CalendarDays,
@@ -45,8 +47,6 @@ import { Menu } from '@lody/ui/menu';
 import { Popover } from '@lody/ui/popover';
 import { Toggle } from '@lody/ui/toggle';
 import { Tooltip } from '@lody/ui/tooltip';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { userAtom } from '@/atoms';
 import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
@@ -82,7 +82,7 @@ import { TodayEditorController } from './editor/today-editor-controller';
 import { TodayLiveSessionPicker } from './today-mention-picker';
 import { TodayMembersContext } from './today-members';
 import { TodayDaySection } from './today-day-section';
-import { TodayMoreAtEndContext, todayOutline } from './outline.stylex';
+import { TodayMoreAtEndContext, todayOutline, todaySurfaceMarker } from './outline.stylex';
 import { TodayConvertDialog } from './today-convert-dialog';
 import { TodaySelectionBar } from './today-selection-bar';
 import { TodayMentionStatusMenuHost } from './today-mention-status-menu';
@@ -881,6 +881,7 @@ export function TodayOutlineSurface(props: {
   return (
     <div
       {...stylex.props(
+        todaySurfaceMarker,
         styles.scroller,
         props.placement !== undefined && props.placement !== 'page' && styles.scrollerPinned,
         props.placement === 'pinnedAtWindowEdge' && styles.scrollerAtWindowEdge
@@ -985,7 +986,7 @@ const dragStyles = stylex.create({
       default: 'top, left, opacity',
       '@media (prefers-reduced-motion: reduce)': 'none',
     },
-    transitionDuration: '120ms',
+    transitionDuration: duration.fast,
     transitionTimingFunction: 'ease-out',
   },
 });

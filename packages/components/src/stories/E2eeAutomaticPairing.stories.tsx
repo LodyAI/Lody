@@ -1,3 +1,6 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, type ReactNode } from 'react';
 import type { E2eeAutomaticPairingState, E2eeWorkspaceRuntime } from '@lody/platform';
@@ -137,7 +140,7 @@ function Preview({
   if (mode === 'addDevice')
     return (
       <Layout form={form}>
-        <div className="mx-auto max-w-xl p-8">
+        <div {...stylex.props(previewStyles.glyph)}>
           <E2eeAddDeviceCard runtime={runtime} />
         </div>
       </Layout>
@@ -153,14 +156,14 @@ function body(
 ) {
   return mode === 'approval' ? (
     <E2eeAutomaticPairingInbox runtime={runtime}>
-      <div className="min-h-dvh bg-background text-foreground">
-        <header className="flex h-16 items-center gap-6 border-b px-6">
-          <span className="font-semibold">Lody Design</span>
+      <div {...stylex.props(themeStyles.copy)}>
+        <header {...stylex.props(themeStyles.row)}>
+          <span {...stylex.props(themeStyles.layout)}>Lody Design</span>
           <E2eeDeviceRequestsButton />
         </header>
-        <main className="mx-auto max-w-2xl p-8">
-          <h1 className="text-xl font-medium">设备授权预览</h1>
-          <p className="mt-3 text-muted-foreground">
+        <main {...stylex.props(previewStyles.glyph2)}>
+          <h1 {...stylex.props(previewStyles.copy)}>设备授权预览</h1>
+          <p {...stylex.props(themeStyles.hint)}>
             此处为合成数据；审批不会连接账号或授予真实权限。
           </p>
         </main>
@@ -262,3 +265,16 @@ export const DeviceApproval: Story = { args: { mode: 'approval', form: 'desktop'
 export const DeviceApprovalOnPhone: Story = { args: { mode: 'approval' } };
 /** The console's Devices tab entry. */
 export const AddDeviceCard: Story = { args: { mode: 'addDevice', form: 'desktop' } };
+
+const themeStyles = stylex.create({
+  copy: { minHeight: '100dvh', backgroundColor: uiColors.background, color: uiColors.label },
+  row: { display: 'flex', height: 'calc(var(--spacing) * 16)', alignItems: 'center', gap: 'calc(var(--spacing) * 6)', paddingInline: 'calc(var(--spacing) * 6)' },
+  layout: { fontWeight: 600 },
+  hint: { marginTop: 'calc(var(--spacing) * 3)', color: uiColors.secondaryLabel },
+});
+
+const previewStyles = stylex.create({
+  glyph: { marginInline: 'auto', maxWidth: '36rem', padding: 'calc(var(--spacing) * 8)' },
+  glyph2: { marginInline: 'auto', maxWidth: '42rem', padding: 'calc(var(--spacing) * 8)' },
+  copy: { fontSize: uiText.headlineSize, lineHeight: uiText.headlineLeading, fontWeight: 500 },
+});

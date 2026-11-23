@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import { cn } from '@/lib/utils';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 import { WorkspaceCard } from '../workspace-frame';
 import { getWebWorkspaceLayoutRootClassName } from '../workspace-layout-utils';
@@ -36,7 +35,9 @@ export function TodayWindow(props: { memberId?: string; anchorDate?: string }) {
     document.title = t('today.nav', 'Today');
   }, [t]);
   return (
-    <div className={cn(getWebWorkspaceLayoutRootClassName(), 'relative bg-sidebar')}>
+    <div
+      className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true, surface: 'sidebar' })}
+    >
       <WindowDragStrip />
       <WorkspaceCard anchored={false}>
         <TodayView

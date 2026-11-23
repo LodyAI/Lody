@@ -48,11 +48,25 @@ One rung per component. The rung fixes background and shadow together.
 - `success` and `warning` report an outcome rather than an action, so they mark
   and tint a message and never fill a control a person presses. `destructive`
   is the third: an action that destroys, and an outcome that failed.
-- Disabled is 45% opacity on the whole control, not a color.
+- Disabled reads `control.disabledOpacity`: 45% on the whole control, not a color.
 - Semantic first, gray second. `gray…gray6` only for things with no role:
   scrollbar, tracks, kbd, skeleton, an avatar's stand-in.
 - Lody Light's neutral color roles, gray ramp and shadow ink use zero saturation.
   Keep hue for named semantic colors such as the accent, success and warning.
+
+### Text over images
+
+External images do not follow the UI palette. Non-interactive image captions,
+progress labels and their scrims pair `media.scrim` (black at 60%) with
+`media.label` (white), in both light and dark mode. Over a white image this pair
+has about 5.74:1 contrast; darker image pixels only increase it. The Gallery
+renders this pair over an image with bright, dark and colored regions and reads
+the resulting colors off the caption.
+
+These roles are not control fills or modal backdrops. Ordinary controls use their
+component tokens, and `colors.overlay` remains the backdrop for UI surfaces. Do
+not replace image contrast with `colors.label` or `colors.overlay`: their palette
+changes describe the interface, not the pixels of an external image.
 
 ## Fields
 
@@ -93,6 +107,11 @@ two controls side by side are two edges and two rings for one fact. The slot is 
 square the well's height less a 4px inset, at the well's radius less that inset.
 A pressable glyph fills it and draws no edge, because the well rings on
 `:focus-within`; a character is centred in it in `field.icon`.
+Trailing status content belongs in `Input.trailing`, inside the same shell and
+at its own width rather than in the leading square. Either slot uses a 4px edge
+inset; an unoccupied value edge keeps the field's padding. The shell alone owns
+the well, focus/invalid ring and disabled opacity; the native input retains its
+ref, label, events and caller style, while `xstyle` composes on the shell.
 
 A checkbox and a radio are the "16px things" the corner rule names: a
 `field.boxSize` box at `radius.mini`, round for a radio. A switch is a
@@ -114,7 +133,8 @@ The control's own text follows the control rule at every size on the ladder: 13
 at weight 500 with `text.controlTracking`. Label at 12 weight 500 in
 `field.label`, help at 12 weight 400 in `field.hint`, error at 12 weight 400 in
 `field.error`, stacked at `field.gap`. Disabled reads `field.disabledOpacity`
-rather than a literal, so the control and its label cannot drift apart.
+as an alias of `control.disabledOpacity`, so fields, buttons and popup rows share
+the system state while the field family keeps its public token.
 
 `Field.Root` owns the name, the disabled flag and validity. A control reads that
 state and picks its own classes from it; it does not take a second `invalid` or

@@ -189,6 +189,7 @@ export type AgentRoleFormProps = {
   onSubmit: () => void;
   onCancel: () => void;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
   /** Memory choices for the active machine's target. */
   memoryPicker?: ReactNode;
   /** The agent config name of every target, for the collapsed rows. */
@@ -232,6 +233,7 @@ export function AgentRoleForm({
   onSubmit,
   onCancel,
   className,
+  xstyle,
   memoryPicker,
   targetAgentLabels = {},
   addMachineItem: AddMachineItem = PlainAddMachineItem,
@@ -455,7 +457,7 @@ export function AgentRoleForm({
   );
 
   return (
-    <form {...withClassName(stylex.props(catalog.editorForm), className)} onSubmit={submit}>
+    <form {...withClassName(stylex.props(catalog.editorForm, xstyle), className)} onSubmit={submit}>
       <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
         <div {...stylex.props(styles.groups)}>
           {/* The Role's own label, shown as itself: an emoji and a name need no

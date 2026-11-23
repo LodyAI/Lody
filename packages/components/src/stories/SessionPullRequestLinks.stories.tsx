@@ -1,3 +1,6 @@
+import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
+import { corner as uiCorner, radius as uiRadius } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { resolveSessionPullRequestLinkList, type SessionMeta } from '@lody/shared';
@@ -41,7 +44,7 @@ export function useStoryPullRequestLinks(initial: SessionMeta): SessionPullReque
 function Harness({ initial }: { initial: SessionMeta }) {
   const links = useStoryPullRequestLinks(initial);
   return (
-    <div className="w-[22rem] rounded-xl bg-popover shadow-xl">
+    <div {...stylex.props(previewStyles.panel)}>
       <SessionPullRequestLinksPanel {...links} />
     </div>
   );
@@ -60,3 +63,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Light: Story = { globals: { theme: 'light' } };
 export const Dark: Story = { globals: { theme: 'dark' } };
+
+const previewStyles = stylex.create({
+  panel: { width: '22rem', borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: uiColors.raisedBackground, boxShadow: uiShadow.popover },
+});

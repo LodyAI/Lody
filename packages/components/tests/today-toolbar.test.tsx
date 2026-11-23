@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider } from 'jotai';
 
 import { sidebarCollapsedAtom } from '../src/atoms/sidebar-state';
+import { WINDOW_DRAG_REGION_CLASS, WINDOW_DRAG_EXEMPT_CLASS } from '../src/ui/window-drag-region';
 import { TodayToolbar, type TodayToolbarSurface } from '../src/components/today/today-view';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
@@ -56,15 +57,15 @@ describe('Today toolbar window chrome', () => {
   /** A click lands on a control only when no drag region claims it first. */
   function clickable(button: Element, toolbar: Element) {
     for (let node: Element | null = button; node && node !== toolbar; node = node.parentElement) {
-      if (node.classList.contains('app-region-no-drag')) return true;
-      if (node.classList.contains('app-region-drag')) return false;
+      if (node.classList.contains(WINDOW_DRAG_EXEMPT_CLASS)) return true;
+      if (node.classList.contains(WINDOW_DRAG_REGION_CLASS)) return false;
     }
-    return !toolbar.classList.contains('app-region-drag');
+    return !toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS);
   }
 
   it('keeps every page control clickable and restores the sidebar controls while it is hidden', async () => {
     const { store, toolbar } = await renderToolbar('page', true);
-    expect(toolbar.classList.contains('app-region-drag')).toBe(true);
+    expect(toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
     const buttons = [...toolbar.querySelectorAll('button')];
     expect(
       buttons.map((button) => button.getAttribute('aria-label') ?? button.textContent)
@@ -86,7 +87,7 @@ describe('Today toolbar window chrome', () => {
 
   it('keeps the pinned column out of the drag chrome, carrying the sidebar controls while the sidebar is hidden', async () => {
     const hidden = await renderToolbar('pinned', true);
-    expect(hidden.toolbar.classList.contains('app-region-drag')).toBe(false);
+    expect(hidden.toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(false);
     // Pinned with the sidebar hidden, the column is the leftmost surface.
     expect(
       [...hidden.toolbar.querySelectorAll('button')].map(
@@ -109,7 +110,7 @@ describe('Today toolbar window chrome', () => {
     // The Today window has no navigation sidebar, whatever its stored state says.
     for (const collapsed of [false, true]) {
       const { toolbar } = await renderToolbar('standalone', collapsed);
-      expect(toolbar.classList.contains('app-region-drag')).toBe(true);
+      expect(toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
       const buttons = [...toolbar.querySelectorAll('button')];
       expect(buttons.map((button) => button.textContent)).toEqual(['Pick a date', 'Pin', 'More']);
       for (const button of buttons) expect(clickable(button, toolbar)).toBe(true);

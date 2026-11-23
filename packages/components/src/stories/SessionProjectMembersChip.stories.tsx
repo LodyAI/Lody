@@ -1,8 +1,20 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { ProjectMemberId } from '@lody/shared';
 import { SessionInfoBar } from '@/components/sessions/session-info-bar';
 import { SessionProjectMembersChip } from '@/components/sessions/session-project-members-chip';
 import type { SessionProjectMemberRow } from '@/lib/session-project-members';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'max-width': '100%',
+    'flex-direction': 'column',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  frame: {
+    height: 'calc(var(--spacing) * 64)',
+  },
+});
 
 const rows: SessionProjectMemberRow[] = [
   {
@@ -58,8 +70,8 @@ const meta = {
   // The popover takes the width of the info bar it opens from, so the story
   // renders the real bar rather than the chip alone.
   render: (args) => (
-    <div className="flex max-w-full flex-col p-6" style={{ width: 720 }}>
-      <div className="h-64" />
+    <div {...stylex.props(storyLayout.stack)} style={{ width: 720 }}>
+      <div {...stylex.props(storyLayout.frame)} />
       <SessionInfoBar
         status={null}
         projectName="acme/web"

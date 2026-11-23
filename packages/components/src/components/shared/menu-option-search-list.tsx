@@ -10,6 +10,7 @@ import { composerSurface } from './composer-surface';
 import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';
 
 const styles = stylex.create({
+  search: { minWidth: 'calc(var(--spacing) * 56)' },
   body: { display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 },
   list: {
     display: 'flex',
@@ -104,7 +105,7 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
           onSubmit={submitTopMatch}
           // The width floor belongs to the field, not the list: a menu with no
           // search field keeps the menu surface's own narrow minimum.
-          className="min-w-56"
+          xstyle={styles.search}
         />
       ) : null}
       {/* `scroll-pro scrollbar-pro` are the app's global scrollbar skin. */}

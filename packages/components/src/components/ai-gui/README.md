@@ -426,7 +426,8 @@ Session data and action controls continue updating. This is independent of
 `message-selection.tsx`, which selects messages for image sharing.
 
 The chat quote action floats above the first visible selected line, centered on
-that line. It measures its rendered size, flips below the selection when there is
+that line, and stays beneath modal backdrops and panels. It measures its rendered
+size, flips below the selection when there is
 no room above, and stays inside the conversation and safe viewport bounds. A
 continuous selection may span text rows of the same turn when every intervening
 row is mounted and contains quoteable text. Other cross-region selections request
