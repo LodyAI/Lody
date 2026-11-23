@@ -31,6 +31,7 @@ import { createNativeFlockDocs } from '@lody/shared/node/native-flock-docs';
 import {
   finishNativeWipe,
   nativeEncryptedPendingUpload,
+  nativeLocalIdentities,
   nativePendingWipeMarker,
 } from '@lody/shared/node/native-encrypted-workspace';
 import {
@@ -124,7 +125,8 @@ export async function finishPendingNativeWipe(workspaceId: string) {
   const pendingWipe = nativePendingWipeMarker(dataDir, workspaceId);
   if (!(await pendingWipe.read())) return;
   const { client } = await connectCliNativeRepo();
-  await finishNativeWipe({ client, workspaceId, pendingWipe });
+  const identities = nativeLocalIdentities(dataDir, workspaceId);
+  await finishNativeWipe({ client, workspaceId, pendingWipe, identities });
 }
 
 const flockRoom = (id: string) => ({ kind: 'flock' as const, id });

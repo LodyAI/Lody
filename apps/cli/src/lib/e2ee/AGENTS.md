@@ -118,7 +118,8 @@
   Never skip rejected records or reset pins. Close cancels pending retry timers.
 - The native engine (`attachNativeEngine`) receives the machine seed only through
   custody's purpose-limited `withEngineSeed`, never a general export. Device
-  revocation retires only this writer; recorded member removal writes the
+  revocation retires this writer and, when the verified ledger shows no other recorded
+  identity of this installation current, wipes as member removal does; recorded member removal writes the
   pending-wipe marker before the drain, and the start-up refusal finishes the wipe.
   An engine failure (host down, drop busy) never stops erasing the removed identity.
 - An encrypted workspace keeps one bounded background authority check: credential

@@ -85,7 +85,7 @@ import { desktopPasskeyPort } from '../../services/e2ee-passkey-macos.mjs'
 import { assertProductWindowSender } from '../assert-sender'
 import { observeClientLossOperation } from '../../services/e2ee-client-loss-probe'
 import { getIpcServiceDeps } from '../ipc-service-deps'
-import { removeNativeWorkspace } from './native-workspace-meta-ipc'
+import { nativeLocalIdentityCandidates, removeNativeWorkspace } from './native-workspace-meta-ipc'
 import { setNativeCatchUp } from '../../services/native-encrypted-workspaces'
 /** Same spacing as the JS content catch-up (RECEIVE_KEY_COOLDOWN_MS). */
 const NATIVE_CATCH_UP_SPACING_MS = 3_000
@@ -2037,6 +2037,10 @@ export class E2eeIpc extends ProductWindowIpcService {
     if (!signingPublicKey) throw new Error('e2ee_local_cleanup_pending')
     let cleanup: Effect.Effect<void, unknown> = Effect.void
     const hinted = new Set<number>()
+    const writer = `personal:${signingPublicKey}`
+    /** The other local identities this device's verified ledger judged, and those still current. */
+    const judged = new Set<string>()
+    const stillCurrent = new Set<string>()
     try {
       await withDesktopE2eeAccount(
         (owner) =>
@@ -2061,6 +2065,14 @@ export class E2eeIpc extends ProductWindowIpcService {
               }))
             )
               return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+            if (reason === 'device_revoked')
+              for (const other of yield* Effect.promise(() =>
+                nativeLocalIdentityCandidates(workspaceId, writer)
+              )) {
+                judged.add(other.writer)
+                if (yield* owner.host.keyDeliveryTarget(workspaceId, other.signingPublicKey))
+                  stillCurrent.add(other.writer)
+              }
             for (const reader of owner.readers.get(workspaceId)?.keys() ?? [])
               if (reader > 0) hinted.add(reader)
             return undefined
@@ -2077,9 +2089,11 @@ export class E2eeIpc extends ProductWindowIpcService {
         false,
         retiring
       )
-      await removeNativeWorkspace(workspaceId, reason).catch(() =>
-        this.cleanupDiagnostic('e2ee_cleanup_pending')
-      )
+      await removeNativeWorkspace(workspaceId, reason, {
+        writer,
+        stillCurrent: async (others) =>
+          others.some((other) => !judged.has(other) || stillCurrent.has(other))
+      }).catch(() => this.cleanupDiagnostic('e2ee_cleanup_pending'))
       // Receipt is durable. Notify now; terminal erase may be indefinitely slow.
       for (const reader of hinted) {
         const window = readerWindows.get(reader)

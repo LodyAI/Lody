@@ -3,8 +3,9 @@ import { EngineKeyringSinkError } from '@lody/e2ee-core/services'
 import type { NativeEncryptedAccess } from './native-session-read'
 import {
   attachNativeEncryptedWorkspace,
+  nativeLocalIdentities,
   nativePendingWipeMarker,
-  wipeNativeNamespace
+  removeNativeLocalIdentity
 } from '@lody/shared/node/native-encrypted-workspace'
 import type { NativeRepoConnection } from '@lody/shared/node/native-repo'
 import {
@@ -141,31 +142,29 @@ function attach(
         await leased((owner) => Effect.succeed(owner.host.syncEngineKeyring(workspaceId, sink)))
       ),
     pendingWipe: nativePendingWipeMarker(dataDir, workspaceId),
+    identities: nativeLocalIdentities(dataDir, workspaceId),
     onOpenPending: () => catchUpNativeWorkspace(workspaceId)
   })
 }
 
 /**
- * Durable access loss (after the removal receipt): views close, then device
- * revocation retires main's writer and member removal drops the namespace. An
- * interrupted drop keeps its marker; the next connection finishes it.
+ * Durable access loss (after the removal receipt): views close, then member
+ * removal drops the namespace. Device revocation retires main's writer and drops
+ * the namespace only when no other identity of this installation is current
+ * (owner decision A, 2026-11-22): `stillCurrent` answers from main's verified
+ * ledger. An interrupted drop keeps its marker, written before the host is
+ * reached; the next connection finishes it.
  */
 export async function removeNativeEncryptedWorkspace(
   workspaceId: string,
   reason: 'member_removed' | 'device_revoked',
-  connect: () => Promise<{ client: RepoClient; dataDir: string }>
+  native: {
+    dataDir: string
+    connect: () => Promise<{ client: RepoClient; dataDir: string }>
+    writer: string
+    stillCurrent: (writers: readonly string[]) => Promise<boolean>
+  }
 ) {
   const handle = await takeNativeWorkspace(workspaceId)
-  if (reason === 'device_revoked') {
-    await handle?.retireWriter()
-    handle?.close()
-    return
-  }
-  if (handle) return handle.wipe()
-  const { client, dataDir } = await connect()
-  await wipeNativeNamespace({
-    client,
-    workspaceId,
-    pendingWipe: nativePendingWipeMarker(dataDir, workspaceId)
-  })
+  await removeNativeLocalIdentity({ workspaceId, reason, ...native, ...(handle ? { handle } : {}) })
 }

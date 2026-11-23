@@ -60,7 +60,9 @@ import type { RepoClient } from '@loro-dev/loro-repo-client';
 import { finishPendingNativeWipe } from '../loro/native-workspace-meta';
 import {
   attachNativeEncryptedWorkspace,
+  nativeLocalIdentities,
   nativePendingWipeMarker,
+  nativeWriterSigningKey,
   type NativeEncryptedWorkspace,
 } from '@lody/shared/node/native-encrypted-workspace';
 import { decodeEpochStagedGroup } from '@lody/e2ee-core/host';
@@ -1211,6 +1213,7 @@ async function openWorkspaceOwned(
       },
       syncKeyring: () => run(opened.runtime.syncEngineKeyring(sink)),
       pendingWipe: nativePendingWipeMarker(dataDir, ws),
+      identities: nativeLocalIdentities(dataDir, ws),
       onOpenPending: () => contentCatchUp.pending(),
       ...(options.machineId ? { machineId: options.machineId } : {}),
     });
@@ -1385,6 +1388,25 @@ async function openWorkspaceOwned(
           .write()
           .catch((cause: unknown) => nativeFailures.push(cause));
       await retired;
+      /** Owner decision A: the last current identity of this installation wipes. */
+      let wipeRevoked = false;
+      if (recorded && deviceRevoked && native) {
+        const stillCurrent = async (writers: readonly string[]) => {
+          const state = (await run(opened.runtime.executionLedger())).inspectState();
+          return writers.some((writer) => {
+            const device = state.devices.get(nativeWriterSigningKey(writer));
+            return !!device && state.members.has(hex(device.membershipId.toBytes()));
+          });
+        };
+        wipeRevoked = await native.handle.decideRevocation(stillCurrent).catch((cause) => {
+          nativeFailures.push(cause);
+          return false;
+        });
+        if (wipeRevoked)
+          await nativePendingWipeMarker(native.dataDir, options.workspaceId)
+            .write()
+            .catch((cause: unknown) => nativeFailures.push(cause));
+      }
       try {
         // Even a local persistence failure must stop the execution owner.
         await hooks.onRemoved?.(reason, recorded);
@@ -1396,6 +1418,8 @@ async function openWorkspaceOwned(
       } catch (cause) {
         if (!failures.includes(cause)) failures.push(cause);
       }
+      if (failures.length === 0 && wipeRevoked)
+        await native?.handle.wipe().catch((cause: unknown) => nativeFailures.push(cause));
       if (failures.length === 0 && memberRemoved) {
         if (recorded)
           await native?.handle.wipe().catch((cause: unknown) => nativeFailures.push(cause));

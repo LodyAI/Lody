@@ -444,11 +444,35 @@ main calls `nativeCatchUp`, which ingests the ledger and receives keys. Both end
 in the notification table's reinstall. Forged frames (`invalid_frame`) never
 trigger it.
 
-Removal follows the whitepaper's split. Device revocation calls `retireWriter()`:
-it holds and removes only this device's writer, because another device of the
-member on this installation keeps using the namespace. Credential-confirmed
-member removal calls `wipe()`, which clears the keyring, removes the remote and
-drops the namespace. With the host unreachable (removal while it is down),
+Credential-confirmed member removal calls `wipe()`, which removes the remote and
+then drops the namespace. The drop also clears the namespace's keyring, writer
+bindings and keyring participants, and any connection may send it. A separate
+`keyringClear` is refused to a connection that never configured the namespace while
+another process still does, so the wipe does not use one (loro-repo #351). Device revocation follows owner
+decision A (2026-11-22). It always retires the revoked writer, and it also wipes
+when no other identity of this installation is still current
+(`removeNativeLocalIdentity`). The namespace is shared, so a wipe triggered while
+the other identity is still current would destroy that identity's data and its
+unuploaded rows. Keeping the namespace after the last identity is revoked would
+leave decrypted content on a lost or stolen computer.
+
+Each attaching process records its writer in the engine data directory
+(`nativeLocalIdentities`): main records `personal:<key>`, the daemon records
+`machine:<key>`. A recorded entry is only a candidate. Whether its device is
+current (an admitted device of an active member) is decided against the revoked
+process's own verified ledger:
+
+- the daemon reads `executionLedger()`;
+- main reads its host's `keyDeliveryTarget`, inside the removal's account turn,
+  before the workspace closes.
+
+Each process decides only for its own identity, so neither needs the other's
+custody or ledger. The decision runs under a machine-wide file lock and removes
+the revoked entry in the same step. If both identities are revoked, the later
+decision therefore no longer finds the earlier one's entry and wipes, even if its
+ledger has not yet ingested the earlier revocation. An unknown entry counts as
+current, so a decision fails toward retiring rather than wiping. A wipe drops the
+registry with the namespace. With the host unreachable (removal while it is down),
 `wipeNativeNamespace` finishes the drop as soon as the connection is back. The
 pending-wipe marker (`nativePendingWipeMarker`) lives in the engine data
 directory, beside the namespace. The daemon writes it as soon as

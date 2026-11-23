@@ -159,7 +159,7 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
       Object.hasOwn(dependencies, id)
         ? dependencies[id]
         : id === './native-workspace-meta-ipc'
-          ? { removeNativeWorkspace: async () => {} }
+          ? { removeNativeWorkspace: async () => {}, nativeLocalIdentityCandidates: async () => [] }
           : id === './native-encrypted-workspaces' ||
               id === '../../services/native-encrypted-workspaces'
             ? { detachNativeWorkspace() {}, refreshNativeWorkspace() {}, setNativeCatchUp() {} }
