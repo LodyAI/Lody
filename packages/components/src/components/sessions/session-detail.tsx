@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
@@ -238,7 +239,7 @@ import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
 import type { SemanticActionRouter } from '@/lib/commands/semantic-action-router';
 import { allChangesDiffScopeAtom, semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
-import { cn, getBasename } from '@/lib';
+import { getBasename } from '@/lib';
 
 import {
   resolveSessionFileOpenTarget,
@@ -348,10 +349,7 @@ import {
   resolveSessionDetailPresenceState,
   resolveSessionDetailVisibilityState,
 } from '@/lib/session-detail-presence';
-import {
-  getSessionDetailSkipTargetId,
-  getSessionDetailTouchIconButtonClassName,
-} from '@/lib/session-detail-a11y';
+import { getSessionDetailSkipTargetId } from '@/lib/session-detail-a11y';
 import {
   canUseProjectHistoryProjectControl,
   importProjectHistoryForLocalProject,
@@ -559,6 +557,26 @@ const PR_SIDEBAR_MIN_WIDTH_PX = 500;
 const DEVICE_SPLIT_SIDEBAR_MIN_WIDTH_PX = 720;
 
 const detailStyles = stylex.create({
+  muted: { color: 'hsl(var(--muted-foreground) / 1)' },
+  confirmSmall: { maxWidth: '24rem' },
+  confirmMedium: { maxWidth: '28rem' },
+  mobileHeader: {
+    position: 'absolute',
+    insetInline: 'calc(var(--spacing) * 0)',
+    top: 'calc(var(--spacing) * 0)',
+    zIndex: 30,
+    borderBottomWidth: 0,
+    backgroundColor: 'color-mix(in oklab, hsl(var(--background) / 1) 55%, transparent)',
+    backdropFilter: 'blur(var(--blur-xl))',
+  },
+  fullDrawer: {
+    width: '100%',
+    maxWidth: 'none',
+    inset: 'calc(var(--spacing) * 0)',
+    borderWidth: 0,
+    borderRadius: 0,
+  },
+  touchBackButton: { marginLeft: 'calc(var(--spacing) * -1)', flexShrink: 0 },
   projectInfo: {
     display: 'flex',
     minWidth: 0,
@@ -1035,7 +1053,7 @@ function AdaptiveMobileSessionHeader({
     <BaseHeader
       truncateTitle={false}
       hideMenuButton
-      className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/90 backdrop-blur-xl"
+      xstyle={detailStyles.mobileHeader}
       style={{ height: inset, paddingTop: 'var(--safe-area-top, 0px)' }}
       leading={sideRailVisible ? undefined : <MobileSessionHeaderBackButton onBack={onBack} />}
       title={title}
@@ -5996,7 +6014,10 @@ const SessionDetail = ({
     <div {...stylex.props(detailStyles.loading)}>
       {showPendingChildTabState ? (
         <>
-          <Spinner className="h-5 w-5 text-muted-foreground" />
+          <Spinner
+            diameter="calc(var(--spacing) * 5)"
+            className={stylex.props(detailStyles.muted).className}
+          />
           <p {...stylex.props(detailStyles.loadingText)}>
             {t('sessions.tabWaitingForSync', 'Waiting for this conversation to sync…')}
           </p>
@@ -6010,7 +6031,7 @@ const SessionDetail = ({
 
   const deleteConfirmDialog = (
     <Dialog.Root open={deleteConfirmOpen} onOpenChange={(open) => setDeleteConfirmOpen(open)}>
-      <Dialog.Content className={cn(isMobile ? '' : 'max-w-sm')}>
+      <Dialog.Content xstyle={!isMobile && detailStyles.confirmSmall}>
         <Dialog.Header>
           <Dialog.Title>{t('archive.deleteConfirm.title', 'Delete permanently?')}</Dialog.Title>
           <Dialog.Description>
@@ -6078,7 +6099,7 @@ const SessionDetail = ({
         if (!open) cancelDirtyFork();
       }}
     >
-      <Dialog.Content className={cn(isMobile ? '' : 'max-w-md')}>
+      <Dialog.Content xstyle={!isMobile && detailStyles.confirmMedium}>
         <Dialog.Header>
           <Dialog.Title>{t('sessions.forkDirty.title', 'Uncommitted changes found')}</Dialog.Title>
           <Dialog.Description>
@@ -6122,7 +6143,11 @@ const SessionDetail = ({
     />
   );
 
-  const renderViewerTabContent = (tab: ViewerTab, className = 'h-full', active = true) =>
+  const renderViewerTabContent = (
+    tab: ViewerTab,
+    className = stylex.props(detailStyles.rootFill).className,
+    active = true
+  ) =>
     tab.type === 'attachment' ? (
       <SessionFileAttachmentPane
         key={`${activeSession.id}:${tab.id}`}
@@ -6310,7 +6335,7 @@ const SessionDetail = ({
           ) : activeSessionSharing.visibility === 'private' ? (
             <LockKeyhole {...stylex.props(detailStyles.icon14)} />
           ) : (
-            <Spinner className="h-3.5 w-3.5" />
+            <Spinner diameter="calc(var(--spacing) * 3.5)" />
           ),
         label: t('sessions.sharing.visibility', 'Visibility'),
         value: `${getSessionSharingLabel(t, activeSessionSharing)} — ${getSessionSharingDescription(t, activeSessionSharing)}`,
@@ -6334,7 +6359,7 @@ const SessionDetail = ({
           mobileMenuActions.push({
             id: 'fork',
             icon: pendingFork ? (
-              <Spinner className="h-3.5 w-3.5" />
+              <Spinner diameter="calc(var(--spacing) * 3.5)" />
             ) : (
               <GitFork {...stylex.props(detailStyles.icon14)} />
             ),
@@ -6455,7 +6480,7 @@ const SessionDetail = ({
         id: 'share-with-team',
         icon:
           activeSessionSharing.visibility === 'unknown' ? (
-            <Spinner className="h-3.5 w-3.5" />
+            <Spinner diameter="calc(var(--spacing) * 3.5)" />
           ) : activeSessionSharing.privateReason === 'machine-not-registered' ? (
             <Monitor {...stylex.props(detailStyles.icon14)} />
           ) : activeSessionSharing.canManage ? (
@@ -6852,7 +6877,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -6865,7 +6891,9 @@ const SessionDetail = ({
                     type="button"
                     variant="ghost"
                     icon
-                    className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                    width="calc(var(--spacing) * 11)"
+                    height="calc(var(--spacing) * 11)"
+                    xstyle={detailStyles.touchBackButton}
                     /* Same order as the edge swipe: pop a directory level
                        first, close the drawer only at the root. */
                     onClick={() => {
@@ -6920,7 +6948,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -6940,7 +6969,9 @@ const SessionDetail = ({
                       type="button"
                       variant="ghost"
                       icon
-                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      width="calc(var(--spacing) * 11)"
+                      height="calc(var(--spacing) * 11)"
+                      xstyle={detailStyles.touchBackButton}
                       onClick={handleClosePrTab}
                       aria-label={t('common.back', 'Back')}
                     >
@@ -6973,7 +7004,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -7008,7 +7040,9 @@ const SessionDetail = ({
                       type="button"
                       variant="ghost"
                       icon
-                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      width="calc(var(--spacing) * 11)"
+                      height="calc(var(--spacing) * 11)"
+                      xstyle={detailStyles.touchBackButton}
                       onClick={handleCloseBrowserTab}
                       aria-label={t('common.back', 'Back')}
                     >
@@ -7032,7 +7066,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -7052,7 +7087,9 @@ const SessionDetail = ({
                       type="button"
                       variant="ghost"
                       icon
-                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      width="calc(var(--spacing) * 11)"
+                      height="calc(var(--spacing) * 11)"
+                      xstyle={detailStyles.touchBackButton}
                       onClick={handleCloseIosSimulator}
                       aria-label={t('common.back', 'Back')}
                     >
@@ -7075,7 +7112,8 @@ const SessionDetail = ({
         >
           <DrawerContent
             nativeKeyboardInset
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            width="full"
+            xstyle={detailStyles.fullDrawer}
             data-sidebar-swipe-open-disabled
           >
             <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
@@ -7096,7 +7134,9 @@ const SessionDetail = ({
                       type="button"
                       variant="ghost"
                       icon
-                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      width="calc(var(--spacing) * 11)"
+                      height="calc(var(--spacing) * 11)"
+                      xstyle={detailStyles.touchBackButton}
                       onClick={() => setAndroidEmulatorOpen(false)}
                       aria-label={t('common.back', 'Back')}
                     >
@@ -7341,7 +7381,7 @@ const SessionDetail = ({
       onMentionSession={handleInsertDroppedSessionMention}
       leftSlot={leftSidebarExpandButton}
       rightSlot={desktopHeaderToolbar}
-      className={cn(
+      className={clsx(
         stylex.props(
           detailStyles.topBarHeight,
           detailStyles.parentActiveScope,
@@ -7554,7 +7594,7 @@ const SessionDetail = ({
     <div
       data-lody-session-tab-region="side-panel"
       data-lody-action-scope="side-panel"
-      className={cn(
+      className={clsx(
         'group/close-scope',
         stylex.props(stylex.defaultMarker(), detailStyles.desktopPanelShell).className
       )}
@@ -7580,7 +7620,7 @@ const SessionDetail = ({
           />
         }
         endSlot={sidebarToggleButton}
-        className={cn(
+        className={clsx(
           stylex.props(detailStyles.sideTabBar).className,
           // Right panel is never under the macOS traffic lights (top-left) —
           // it must not reserve the titlebar inset the left sidebar needs. It

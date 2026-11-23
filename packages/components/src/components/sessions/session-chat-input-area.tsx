@@ -22,6 +22,7 @@ import {
 import { formatMessageQuoteExcerpt } from '@/components/ai-gui/message-quote-markdown';
 import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
 import * as stylex from '@stylexjs/stylex';
+import { composerActionButtonTheme } from '../chat/composer-action-button.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
   snapshotAttachmentDrafts,
@@ -169,6 +170,32 @@ import {
 const sessionDraftsCache = new Map<SessionId, string>();
 
 const styles = stylex.create({
+  mobileUsage: { height: 'calc(var(--spacing) * 8)' },
+  primaryAction: {
+    boxShadow: {
+      default: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':focus-visible': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':active': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    },
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+    translate: { default: null, ':active': '0 1px' },
+  },
+  shell: {
+    position: 'relative',
+    flexShrink: 0,
+    paddingTop: 0,
+    marginBottom: 'var(--native-keyboard-height, 0px)',
+    paddingBottom:
+      'calc(0.5rem + max(0px, env(safe-area-inset-bottom, 0px) - var(--native-keyboard-height, 0px)))',
+    backgroundColor: colors.background,
+    transitionProperty: 'margin-bottom',
+    transitionDuration: '250ms',
+    transitionTimingFunction: 'var(--ease-out, cubic-bezier(0, 0, 0.2, 1))',
+  },
+  shellEdgeBackLayer: { zIndex: 40 },
   footerSelectors: {
     display: 'flex',
     minWidth: 0,
@@ -229,7 +256,7 @@ const styles = stylex.create({
     fontSize: '0.75rem',
     fontWeight: 500,
     lineHeight: '1rem',
-    boxShadow: '0 1px 2px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.05))',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
   },
   freeTurnUpgrade: {
     fontWeight: 600,
@@ -2500,7 +2527,7 @@ export const SessionChatInputArea = memo(
           isContextCompacting={isContextCompacting}
           showRateLimitWithoutContext
           showCodexResetForecast={showCodexResetForecast}
-          className={isMobile ? 'h-8 shrink-0' : 'shrink-0'}
+          xstyle={isMobile && styles.mobileUsage}
         />
       </div>
     );
@@ -2508,7 +2535,7 @@ export const SessionChatInputArea = memo(
     const externalHistorySyncNode =
       isExternalHistoryRefreshing && externalHistorySyncLabel ? (
         <div {...stylex.props(styles.externalSync)}>
-          <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />
           <span {...stylex.props(styles.externalSyncLabel)}>{externalHistorySyncLabel}</span>
         </div>
       ) : null;
@@ -2549,12 +2576,13 @@ export const SessionChatInputArea = memo(
           onClick={() => {
             void onStop();
           }}
-          variant="ghost"
+          variant="solid"
           size={isMobile ? 'medium' : 'small'}
           shape="pill"
           icon
           aria-label={t('sessions.stop')}
-          className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+          className={stylex.props(composerActionButtonTheme).className}
+          xstyle={styles.primaryAction}
         >
           <span
             {...stylex.props(
@@ -2569,7 +2597,7 @@ export const SessionChatInputArea = memo(
           data-testid="composer-send"
           type="button"
           icon
-          variant="ghost"
+          variant="solid"
           size={isMobile ? 'medium' : 'small'}
           shape="pill"
           onClick={() => {
@@ -2582,7 +2610,8 @@ export const SessionChatInputArea = memo(
               ? externalHistorySyncLabel
               : t('sessions.send')
           }
-          className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+          className={stylex.props(composerActionButtonTheme).className}
+          xstyle={styles.primaryAction}
         >
           {submissionPending || isExternalHistoryRefreshing ? (
             <Spinner size={isMobile ? 'medium' : 'small'} />

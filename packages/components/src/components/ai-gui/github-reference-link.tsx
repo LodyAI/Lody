@@ -1,7 +1,37 @@
 import { Children, isValidElement, type ReactNode } from 'react';
 import { CircleDot, GitPullRequest } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
+import { visuallyHidden } from './surface';
+import { themeFontWeight } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  chip: {
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'baseline',
+    alignSelf: 'baseline',
+    gap: '0.35em',
+  },
+  glyph: {
+    width: '0.95em',
+    height: '0.95em',
+    flexShrink: 0,
+    alignSelf: 'center',
+  },
+  label: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  number: {
+    flexShrink: 0,
+    fontWeight: themeFontWeight.medium,
+    fontVariantNumeric: 'tabular-nums',
+  },
+});
 
 export type GitHubReference = {
   kind: 'pull' | 'issue';
@@ -80,15 +110,15 @@ export function GitHubReferenceChip({
   return (
     <span
       data-github-reference={reference.kind}
-      className={cn('inline-flex max-w-full items-baseline gap-[0.35em] align-baseline', className)}
+      className={clsx(stylex.props(styles.chip).className, className)}
     >
       {/* Keep the icon out of baseline alignment so the text supplies the inline baseline. */}
-      <KindIcon className="h-[0.95em] w-[0.95em] shrink-0 self-center" aria-hidden="true" />
-      <span className="sr-only">{kindLabel} </span>
-      <span className="min-w-0 truncate">
+      <KindIcon {...stylex.props(styles.glyph)} aria-hidden="true" />
+      <span {...stylex.props(visuallyHidden.hidden)}>{kindLabel} </span>
+      <span {...stylex.props(styles.label)}>
         {reference.owner}/{reference.repo}
       </span>
-      <span className="shrink-0 font-medium tabular-nums">#{reference.number}</span>
+      <span {...stylex.props(styles.number)}>#{reference.number}</span>
     </span>
   );
 }

@@ -1,7 +1,18 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { WeekBento } from '@/components/chat/home/week-bento';
 import { homeWeekAgentIcon, homeWeekAgentLabel, homeWeekFixture } from './fixtures/home-week';
+const storyLayout = stylex.create({
+  frame: {
+    width: '640px',
+    'max-width': '100%',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 10)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const meta = {
   title: 'Chat/WeekBento',
@@ -10,7 +21,7 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="w-[640px] max-w-full rounded-2xl bg-background p-10 text-foreground">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

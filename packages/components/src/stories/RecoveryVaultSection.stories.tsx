@@ -1,3 +1,5 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createStore, Provider } from 'jotai';
 import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '@/atoms/settings';
@@ -65,7 +67,7 @@ function Harness({ plan, browser }: { plan: PlanAnswer; browser?: { canCreate: b
     <Provider store={store}>
       <E2eeRecoveryHostContext.Provider value={host}>
         {/* Follows the viewport, so narrow viewports show how the rows wrap. */}
-        <div className="w-full max-w-[640px] bg-background p-4">
+        <div {...stylex.props(themeStyles.glyph)}>
           <RecoveryVaultSection />
         </div>
       </E2eeRecoveryHostContext.Provider>
@@ -201,7 +203,7 @@ export const RestoreInProgress: Story = {
     return (
       <Provider store={store}>
         <E2eeRecoveryHostContext.Provider value={{ port }}>
-          <div className="w-full max-w-[640px] bg-background p-4">
+          <div {...stylex.props(themeStyles.glyph)}>
             <RecoveryVaultSection accountId="synthetic-preview" />
           </div>
         </E2eeRecoveryHostContext.Provider>
@@ -209,3 +211,7 @@ export const RestoreInProgress: Story = {
     );
   },
 };
+
+const themeStyles = stylex.create({
+  glyph: { width: '100%', maxWidth: '640px', backgroundColor: uiColors.background, padding: 'calc(var(--spacing) * 4)' },
+});

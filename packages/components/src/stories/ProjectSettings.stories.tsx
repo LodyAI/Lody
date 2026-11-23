@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import {
@@ -16,6 +17,20 @@ import {
   type GithubProjectSettingsSection,
 } from '@/components/settings/project-settings';
 import { SettingsStoryProviders } from './settings-story-shell';
+const storyLayout = stylex.create({
+  frame: {
+    marginInline: 'auto',
+    height: 'min(90vh, 950px)',
+    maxWidth: '1100px',
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-xl)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const machineLocal = 'machine-local' as MachineId;
 const machineRemote = 'machine-remote' as MachineId;
@@ -182,7 +197,7 @@ function StoryWrapper({
   const [currentGithubSections, setCurrentGithubSections] = useState(githubSections);
 
   return (
-    <div className="mx-auto h-[min(90vh,950px)] max-w-[1100px] overflow-hidden rounded-xl border border-border bg-background p-4">
+    <div {...stylex.props(storyLayout.frame)}>
       <ProjectSettingsView
         sections={currentSections}
         multiRepoProjects={multiRepoProjects}

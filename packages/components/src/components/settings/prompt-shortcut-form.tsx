@@ -76,6 +76,7 @@ const styles = stylex.create({
   mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
   /** The command's live warning floats above the field rather than pushing the
       form down while the draft settles. */
+  slugWarningPopup: { pointerEvents: 'none' },
   slugWarning: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -309,7 +310,7 @@ export function PromptShortcutForm({
                   // owns dismissal by fixing or leaving the draft.
                   initialFocus={false}
                   finalFocus={false}
-                  className="pointer-events-none"
+                  className={stylex.props(styles.slugWarningPopup).className}
                 >
                   <div {...stylex.props(styles.slugWarning)}>
                     <AlertTriangle aria-hidden="true" {...stylex.props(styles.slugWarningMark)} />

@@ -1,18 +1,52 @@
 'use client';
 
 import { Plus } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeDuration, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  button: {
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    backgroundColor: {
+      default: themeColors.primary,
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--primary) / 1) 90%, transparent)',
+      },
+    },
+    boxShadow: 'var(--shadow-xs)',
+    scale: { default: null, ':active': '95% 95%' },
+    color: themeColors.primaryForeground,
+    transitionProperty: 'all',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+  },
+  glyph: { height: themeSpace[3], width: themeSpace[3] },
+});
 
 interface SessionCommentAddButtonProps {
   onClick: () => void;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 /**
  * The "+" button shown when hovering over a commentable line in the diff viewer.
  * Positioned in the gutter area, similar to GitHub's review button.
  */
-export function SessionCommentAddButton({ onClick, className }: SessionCommentAddButtonProps) {
+export function SessionCommentAddButton({
+  onClick,
+  className,
+  xstyle,
+}: SessionCommentAddButtonProps) {
   return (
     <button
       type="button"
@@ -20,17 +54,10 @@ export function SessionCommentAddButton({ onClick, className }: SessionCommentAd
         e.stopPropagation();
         onClick();
       }}
-      className={cn(
-        'flex h-5 w-5 items-center justify-center rounded-sm',
-        'bg-primary text-primary-foreground shadow-xs',
-        'hover:bg-primary/90 active:scale-95',
-        'transition-all duration-100',
-        'touch-action-manipulation',
-        className
-      )}
+      {...withClassName(stylex.props(styles.button, xstyle), className)}
       aria-label="Add comment"
     >
-      <Plus className="h-3 w-3" />
+      <Plus {...stylex.props(styles.glyph)} />
     </button>
   );
 }

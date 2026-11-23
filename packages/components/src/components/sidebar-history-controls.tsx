@@ -1,3 +1,5 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
+import { themeSpace as appSpace } from '../style/theme-scale.stylex';
 import { type ReactNode, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -106,18 +108,7 @@ function SidebarHeaderIconButton({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        // The same box, ink and fills as the footer's icon buttons.
-        stylex.props(sidebarSurface.iconButton).className,
-        'outline-hidden transition-colors',
-        disabled
-          ? // pointer-events-none keeps the hover fill off a control that cannot act.
-            // 60% keeps a disabled Back or Forward legible as "unavailable"
-            // rather than missing.
-            'pointer-events-none cursor-default text-sidebar-foreground-muted/60'
-          : 'focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
-        className
-      )}
+      className={cn(stylex.props(sidebarSurface.iconButton, navStyles.button, disabled && navStyles.disabled).className, className)}
     >
       {children}
     </button>
@@ -126,7 +117,7 @@ function SidebarHeaderIconButton({
   return (
     <Tooltip.Root>
       <Tooltip.Trigger render={button} />
-      <Tooltip.Content side="bottom" className="flex items-center gap-1.5">
+      <Tooltip.Content side="bottom" xstyle={themeStyles.row}>
         <span>{label}</span>
         {shortcut ? <Kbd>{shortcut}</Kbd> : null}
       </Tooltip.Content>
@@ -155,12 +146,7 @@ export function SidebarHistoryControls({
   return (
     <Tooltip.Provider delay={400}>
       <div
-        className={cn(
-          // `gap-0.5` between full-size buttons keeps Back and Forward
-          // apart as two targets instead of one fused control.
-          'flex shrink-0 items-center gap-0.5',
-          className
-        )}
+        className={cn(stylex.props(navStyles.row).className, className)}
       >
         {onToggleSidebar ? (
           <SidebarHeaderIconButton
@@ -169,9 +155,9 @@ export function SidebarHistoryControls({
             onClick={() => onToggleSidebar()}
             // Always visible: the collapse control is found where it
             // was last seen, not revealed by hovering the header.
-            className="focus-visible:outline-hidden"
+
           >
-            <CuidaSidebarExpandOutline className="h-4 w-4" />
+            <CuidaSidebarExpandOutline {...stylex.props(themeStyles.glyph)} />
           </SidebarHeaderIconButton>
         ) : null}
         <SidebarHeaderIconButton
@@ -183,7 +169,7 @@ export function SidebarHistoryControls({
             if (!commands.execute('nav.back')) window.history.back();
           }}
         >
-          <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
+          <ChevronLeft {...stylex.props(themeStyles.glyph)} strokeWidth={1.5} />
         </SidebarHeaderIconButton>
         <SidebarHeaderIconButton
           disabled={!canGoForward}
@@ -194,9 +180,20 @@ export function SidebarHistoryControls({
             if (!commands.execute('nav.forward')) window.history.forward();
           }}
         >
-          <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
+          <ChevronRight {...stylex.props(themeStyles.glyph)} strokeWidth={1.5} />
         </SidebarHeaderIconButton>
       </div>
     </Tooltip.Provider>
   );
 }
+
+const themeStyles = stylex.create({
+  row: { display: 'flex', alignItems: 'center', gap: appSpace[1.5] },
+  glyph: { height: appSpace[4], width: appSpace[4] },
+});
+
+const navStyles = stylex.create({
+  button: { outline: 'none' },
+  disabled: { pointerEvents: 'none', cursor: 'default', opacity: control.disabledOpacity },
+  row: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: appSpace[0.5] },
+});

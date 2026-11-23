@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { toast } from '@/lib/toast';
 import { Toast } from '@lody/ui';
@@ -5,6 +6,16 @@ import { toastManager } from '@/lib/toast';
 import { Button } from '@lody/ui/button';
 import { RoostHistoryError, SessionHistoryRequestError } from '@/lib/roost-history-error';
 import { useTranslation } from 'react-i18next';
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    'min-height': '60vh',
+    'flex-direction': 'column',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 3)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 /**
  * The global toast surface. Close is always on the far right. Title stays
@@ -17,7 +28,7 @@ const meta: Meta<typeof Toast.Provider> = {
     layout: 'fullscreen',
   },
   render: (args) => (
-    <div className="flex min-h-[60vh] flex-col items-start gap-3 p-8">
+    <div {...stylex.props(storyLayout.stack)}>
       <Toast.Provider manager={toastManager} {...args} />
       <Button
         variant="secondary"

@@ -217,10 +217,7 @@ export const acquireDevicePreviewFrame = ({
   return { entry, reused: false };
 };
 
-export const releaseDevicePreviewFrame = (
-  cacheKey: string,
-  iframe: HTMLIFrameElement
-): boolean => {
+export const releaseDevicePreviewFrame = (cacheKey: string, iframe: HTMLIFrameElement): boolean => {
   const entry = frames.get(cacheKey);
   if (!entry || entry.iframe !== iframe) {
     iframe.remove();

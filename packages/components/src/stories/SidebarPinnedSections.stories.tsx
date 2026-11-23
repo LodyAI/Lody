@@ -1,3 +1,6 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useState } from 'react';
 import {
@@ -74,7 +77,6 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
     pinSectionId: 'releases',
     orderKey: '80',
   },
-  // Pinned extras so the pinned area itself overflows too.
   ...Array.from({ length: 16 }, (_, index) => ({
     id: `pinned-extra-${index + 1}`,
     title: `Pinned thread ${index + 1}`,
@@ -91,8 +93,6 @@ const INITIAL_CONVERSATIONS: DemoConversation[] = [
   },
   { id: 'c8', title: 'Review onboarding copy', latestMessageAt: NOW - 4 * HOUR, isPinned: false },
   { id: 'c9', title: 'Plan Q1 roadmap', latestMessageAt: NOW - 26 * HOUR, isPinned: false },
-  // Enough rows to overflow the viewport: drag one toward the top edge and the
-  // list auto-scrolls up to the pin sections.
   ...Array.from({ length: 80 }, (_, index) => ({
     id: `extra-${index + 1}`,
     title: `Follow-up thread ${index + 1}`,
@@ -146,8 +146,8 @@ function PinnedSectionsPlayground({
   );
 
   return (
-    <div className="flex h-screen bg-sidebar">
-      <div className="h-full w-[280px] shrink-0">
+    <div {...stylex.props(previewStyles.row)}>
+      <div {...stylex.props(themeStyles.glyph)}>
         <LoroSidebar
           workspaceName="Loro"
           userEmail="demo@example.com"
@@ -180,12 +180,12 @@ function PinnedSectionsPlayground({
       </div>
       <SessionMentionDropLayer
         enabled
-        className="flex-1"
+        {...stylex.props(themeStyles.row)}
         onDropSessionId={(sessionId) =>
           setMentioned(conversations.find((entry) => entry.id === sessionId)?.title ?? sessionId)
         }
       >
-        <div className="p-6 text-sm text-muted-foreground" data-story-mention-target="">
+        <div {...stylex.props(themeStyles.hint)} data-story-mention-target="">
           <p>Drag conversations between rows and onto section headers.</p>
           <p>Hold a dragged conversation near the top or bottom edge to auto-scroll.</p>
           <p>Drag a section header to reorder sections.</p>
@@ -193,13 +193,13 @@ function PinnedSectionsPlayground({
           <p>Use a named section’s ⋯ menu to hide, rename or delete it.</p>
           <p>A named section’s ⋯ menu also opens a new chat pinned into that section.</p>
           <p>Use Pinned → ⋯ → Visible Sections to show or hide any section.</p>
-          <p className="mt-4">
+          <p {...stylex.props(themeStyles.spaced)}>
             Drop a conversation on this pane to mention it, as on a conversation.
           </p>
-          <p className="mt-2 text-foreground" data-story-mentioned="">
+          <p {...stylex.props(themeStyles.copy)} data-story-mentioned="">
             {mentioned ? `Mentioned: ${mentioned}` : 'Nothing mentioned yet'}
           </p>
-          <p className="mt-2 text-foreground" data-story-new-chat-section="">
+          <p {...stylex.props(themeStyles.copy)} data-story-new-chat-section="">
             {newChatSection ? `New chat for section: ${newChatSection}` : 'No new chat started'}
           </p>
         </div>
@@ -215,8 +215,6 @@ function PinnedSectionsPlayground({
  */
 function HiddenByScopeDemo() {
   const [selected, setSelected] = useState<string | null>('c1');
-  // What the scope leaves visible: c3/c4/c5 (maintenance) and one default row
-  // are filtered out before the pinned area is built.
   const visiblePinned = useMemo(
     () => INITIAL_CONVERSATIONS.filter((entry) => ['c1', 'c2', 'c6'].includes(entry.id)),
     []
@@ -237,8 +235,8 @@ function HiddenByScopeDemo() {
   const pinnedItems = useMemo(() => visiblePinned.map(toItem), [visiblePinned]);
 
   return (
-    <div className="flex h-screen bg-sidebar">
-      <div className="h-full w-[280px] shrink-0">
+    <div {...stylex.props(previewStyles.row)}>
+      <div {...stylex.props(themeStyles.glyph)}>
         <LoroSidebar
           workspaceName="Loro"
           userEmail="demo@example.com"
@@ -255,7 +253,7 @@ function HiddenByScopeDemo() {
           onSelectUpdatedItem={setSelected}
         />
       </div>
-      <div className="flex-1 p-6 text-sm text-muted-foreground">
+      <div {...stylex.props(themeStyles.row2)}>
         <p>Maintenance renders its header and names the rows this view hides.</p>
         <p>The default section keeps its visible rows and reports the rest.</p>
         <p>A folded section hides the hint; its header already implies content.</p>
@@ -282,3 +280,16 @@ export const HiddenSections: Story = {
 export const HiddenByScope: Story = {
   render: () => <HiddenByScopeDemo />,
 };
+
+const themeStyles = stylex.create({
+  glyph: { height: '100%', width: '280px', flexShrink: 0 },
+  row: { flex: '1 1 0%' },
+  hint: { padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  spaced: { marginTop: 'calc(var(--spacing) * 4)' },
+  copy: { marginTop: 'calc(var(--spacing) * 2)', color: uiColors.label },
+  row2: { flex: '1 1 0%', padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+});
+
+const previewStyles = stylex.create({
+  row: { display: 'flex', height: '100vh', backgroundColor: uiColors.secondaryBackground },
+});
