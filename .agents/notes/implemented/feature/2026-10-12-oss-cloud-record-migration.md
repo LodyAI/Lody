@@ -102,3 +102,27 @@ borrows the existing shared Legacy facade at the SDK boundary (no additional run
 or cache). Success and failure both close target connections before the facade and
 provider Scope. Validate against the PR merged with current main: an older standalone
 branch can typecheck while the merged native token API does not.
+
+## Encrypted target ownership
+
+The command also borrows the existing activated machine workspace owner for E2EE
+imports; ordinary targets keep their original token Scope and transport path. The
+owner validates the exact account/machine against its pinned verified ledger and
+requires the current installed key. This reuses admission and custody rather than
+creating an import-specific key store or treating cloud login as device approval.
+Target transports close before the token facade/provider Scope, then the machine
+owner. Cancellation retains the same scoped migration I/O and close boundary.
+
+Atomic ownership PUT and shared-index CAS cannot become separate create/append or
+ordinary sync calls: either would weaken crash recovery or row collision protection.
+The pinned SDK exposes encrypted CRDT sync, but no atomic encrypted CAS payload
+encoder. A small v2 envelope adapter therefore seals those batches with the same
+provider and published logical-room AAD encoder, and real SDK readers verify them.
+Framing upgrades require this compatibility regression. Encrypted attachment receipts
+retain the full protected descriptor; dropping it would strand restored ciphertext.
+
+The manifest binds target mode/genesis, and fences derive from original source bytes
+before clearing queues. Legacy task/index rooms remain unsupported in the encrypted
+resolver and are refused rather than exported into an ordinary bucket. These tests
+use signed synthetic ledgers and local custody; they do not establish hosted migration
+or installed-device acceptance.

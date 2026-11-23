@@ -1710,6 +1710,46 @@ async function openWorkspaceOwned(
       })
     );
   return {
+    /** OSS import requires this account's admitted machine and the installed current epoch. */
+    authorizeImport: async () => {
+      await refreshInBackground();
+      await run(
+        Effect.gen(function* () {
+          if (closed || ledgerBlocked || !requireActivation)
+            return yield* Effect.fail(
+              new Error(
+                'e2ee_import_unauthorized: Migration requires this account’s active approved non-guest CLI machine in the target workspace.'
+              )
+            );
+          const state = (yield* opened.runtime.executionLedger()).inspectState();
+          const device = state.devices.get(opened.signingPublicKey);
+          const member = device && state.members.get(hex(device.membershipId.toBytes()));
+          const account = member && accountIdFromUserId(member.userId);
+          if (
+            !device ||
+            device.kind !== 'machine' ||
+            device.machineId !== options.machineId ||
+            !member ||
+            member.role === 'guest' ||
+            !account ||
+            Result.isFailure(account) ||
+            account.success !== options.accountId
+          )
+            return yield* Effect.fail(
+              new Error(
+                'e2ee_import_unauthorized: Migration requires this account’s active approved non-guest CLI machine in the target workspace.'
+              )
+            );
+          const status = yield* opened.runtime.status();
+          if (!status.hasCurrentKey || status.position === null)
+            return yield* Effect.fail(
+              new Error(
+                'e2ee_import_current_key_required: Install the current workspace epoch key on this paired CLI machine, then retry.'
+              )
+            );
+        })
+      );
+    },
     attachmentToken: async () => {
       if (closed) throw new Error('e2ee_closed');
       const result = await options.cloud.getContentToken({
