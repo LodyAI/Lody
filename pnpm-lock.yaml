@@ -1220,6 +1220,9 @@ importers:
       '@lody/platform':
         specifier: workspace:*
         version: link:../platform
+      '@lody/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@noble/hashes':
         specifier: 2.2.0
         version: 2.2.0

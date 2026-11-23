@@ -35,7 +35,7 @@ export type BugReportDialogProps = {
   machines: BugReportMachineOption[];
   /** Machine preselected when the dialog opens (e.g. the user's most recently used online machine). */
   initialMachineId?: MachineId | null;
-  descriptionOnly?: boolean;
+  descriptionOnly?: 'encrypted' | 'pending';
   state: BugReportSubmitState;
   /** `machineId: null` files a report with client diagnostics and no machine logs. */
   onSubmit: (args: { machineId: MachineId | null; description: string }) => void;
@@ -106,7 +106,7 @@ export function BugReportDialog({
   open,
   machines,
   initialMachineId,
-  descriptionOnly = false,
+  descriptionOnly,
   state,
   onSubmit,
   onClose,
@@ -127,7 +127,7 @@ export function BugReportDialog({
   }, [open]);
 
   const machineId =
-    !descriptionOnly &&
+    descriptionOnly === undefined &&
     selectedMachineId != null &&
     machines.some((machine) => machine.id === selectedMachineId)
       ? selectedMachineId
@@ -232,15 +232,20 @@ export function BugReportDialog({
             <Dialog.Header>
               <Dialog.Title>{t('bugReport.title', 'Report a bug')}</Dialog.Title>
               <Dialog.Description>
-                {descriptionOnly
+                {descriptionOnly === 'encrypted'
                   ? t(
                       'bugReport.dialogDescriptionEncrypted',
                       'This workspace is end-to-end encrypted, so your report includes only your description and the app build. No client diagnostics or machine logs are attached.'
                     )
-                  : t(
-                      'bugReport.dialogDescription',
-                      "Your report includes this client's version, system, device/browser information and recent errors. Select a machine to also include its recent CLI logs."
-                    )}
+                  : descriptionOnly === 'pending'
+                    ? t(
+                        'bugReport.dialogDescriptionPending',
+                        "This workspace's encryption mode is not confirmed yet, so your report includes only your description and the app build. No client diagnostics or machine logs are attached."
+                      )
+                    : t(
+                        'bugReport.dialogDescription',
+                        "Your report includes this client's version, system, device/browser information and recent errors. Select a machine to also include its recent CLI logs."
+                      )}
               </Dialog.Description>
               <p {...stylex.props(styles.hint)}>
                 {t(
@@ -267,53 +272,53 @@ export function BugReportDialog({
                 />
               </div>
               {descriptionOnly ? null : (
-              <div {...stylex.props(styles.field)}>
-                <UiField.Label htmlFor="bug-report-machine">
-                  {t('bugReport.machineLabel', 'Machine')}
-                </UiField.Label>
-                {machines.length === 0 ? (
-                  <p {...stylex.props(styles.hint)}>
-                    {t(
-                      'bugReport.noMachines',
-                      'No machines are online. Client diagnostics will still be uploaded.'
-                    )}
-                  </p>
-                ) : (
-                  <>
-                    <Select.Root
-                      items={machineOptions}
-                      value={machineId ?? NO_MACHINE_VALUE}
-                      disabled={submitting}
-                      onValueChange={(value) =>
-                        setSelectedMachineId(
-                          value === NO_MACHINE_VALUE ? null : (value as MachineId)
-                        )
-                      }
-                    >
-                      <Select.Trigger id="bug-report-machine">
-                        <Select.Value
-                          placeholder={t('bugReport.machinePlaceholder', 'Select a machine')}
-                        />
-                      </Select.Trigger>
-                      <Select.Content>
-                        {machineOptions.map((option) => (
-                          <Select.Item key={option.value} value={option.value}>
-                            {option.label}
-                          </Select.Item>
-                        ))}
-                      </Select.Content>
-                    </Select.Root>
-                    {machineId == null ? (
-                      <p {...stylex.props(styles.hint)}>
-                        {t(
-                          'bugReport.noMachineHint',
-                          'Client diagnostics will be uploaded without machine logs.'
-                        )}
-                      </p>
-                    ) : null}
-                  </>
-                )}
-              </div>
+                <div {...stylex.props(styles.field)}>
+                  <UiField.Label htmlFor="bug-report-machine">
+                    {t('bugReport.machineLabel', 'Machine')}
+                  </UiField.Label>
+                  {machines.length === 0 ? (
+                    <p {...stylex.props(styles.hint)}>
+                      {t(
+                        'bugReport.noMachines',
+                        'No machines are online. Client diagnostics will still be uploaded.'
+                      )}
+                    </p>
+                  ) : (
+                    <>
+                      <Select.Root
+                        items={machineOptions}
+                        value={machineId ?? NO_MACHINE_VALUE}
+                        disabled={submitting}
+                        onValueChange={(value) =>
+                          setSelectedMachineId(
+                            value === NO_MACHINE_VALUE ? null : (value as MachineId)
+                          )
+                        }
+                      >
+                        <Select.Trigger id="bug-report-machine">
+                          <Select.Value
+                            placeholder={t('bugReport.machinePlaceholder', 'Select a machine')}
+                          />
+                        </Select.Trigger>
+                        <Select.Content>
+                          {machineOptions.map((option) => (
+                            <Select.Item key={option.value} value={option.value}>
+                              {option.label}
+                            </Select.Item>
+                          ))}
+                        </Select.Content>
+                      </Select.Root>
+                      {machineId == null ? (
+                        <p {...stylex.props(styles.hint)}>
+                          {t(
+                            'bugReport.noMachineHint',
+                            'Client diagnostics will be uploaded without machine logs.'
+                          )}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                </div>
               )}
               {state.status === 'error' ? (
                 <p {...stylex.props(styles.error)}>{state.message}</p>

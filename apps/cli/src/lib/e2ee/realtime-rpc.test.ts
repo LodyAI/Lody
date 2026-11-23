@@ -336,18 +336,33 @@ function memoryStreams() {
 }
 
 effectIt.effect.each([
-  { name: 'gateway 502/503', req: [503], res: [502, 503], acked: true, attempts: [2, 3] },
-  { name: 'origin 500', req: [500], res: [], acked: false, attempts: [1, 0] },
+  {
+    name: 'gateway 502/503',
+    req: [503],
+    ensure: [0, 503],
+    res: [502],
+    acked: true,
+    attempts: [2, 4, 2],
+  },
+  { name: 'origin 500', req: [500], ensure: [], res: [], acked: false, attempts: [1, 1, 0] },
 ])(
-  'retries an encrypted request and response append only after a $name, with bounded backoff',
-  ({ req, res, acked, attempts }) =>
+  'retries encrypted request appends and response stream setup only after a $name, with bounded backoff',
+  ({ req, ensure, res, acked, attempts }) =>
     Effect.gen(function* () {
       const f = fixture();
       const streams = memoryStreams();
-      const failing = { req: [...req], res: [...res] };
-      const tried = { req: 0, res: 0 };
+      const failing = { req: [...req], res: [...res], ensure: [...ensure] };
+      const tried = { req: 0, res: 0, ensure: 0 };
       const client: LoroStreamsJsonStreamClient = {
         ...streams.client,
+        ensureJsonStream: async (stream, retention) => {
+          if (stream.includes(':res:')) {
+            tried.ensure++;
+            const status = failing.ensure.shift();
+            if (status) throw new LoroStreamsGatewayError('synthetic gateway', status);
+          }
+          return streams.client.ensureJsonStream(stream, retention);
+        },
         appendJson: async (stream, value) => {
           const lane = stream.includes(':req:') ? 'req' : 'res';
           tried[lane]++;
@@ -388,7 +403,7 @@ effectIt.effect.each([
           expect(yield* Fiber.join(pending)).toEqual(acked ? f.ack : null);
         })
       );
-      expect([tried.req, tried.res]).toEqual(attempts);
+      expect([tried.req, tried.ensure, tried.res]).toEqual(attempts);
       expect(streams.writes.filter((write) => write.stream.includes(':req:'))).toHaveLength(
         acked ? 1 : 0
       );

@@ -1,7 +1,7 @@
 import { Clock, Deferred, Effect } from 'effect';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type { makeE2eeRpcNative } from '@lody/loro-streams-rpc/e2ee-native';
-import { e2eeRpcEnvelope, retryTransientGateway } from '@lody/loro-streams-rpc/e2ee-streams';
+import { makeEncryptedStreamsEnvelopeDelivery } from '@lody/loro-streams-rpc/e2ee-streams';
 import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import type {
   LocalMachineRpcRequest,
@@ -174,6 +174,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
   client?: LoroStreamsJsonStreamClient;
 }) {
   const scope = yield* Effect.scope;
+  const delivery = options.client ? makeEncryptedStreamsEnvelopeDelivery(options.client) : null;
   const reads = new Set<string>(),
     writes = new Set<string>();
   const receive = Effect.fnUntraced(function* (
@@ -286,32 +287,21 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           error: 'This machine or one of its projects is not shared with you.',
         });
         yield* options.native.verifyFeatureRequest(opened);
-        const client = options.client;
-        if (!sink && !client) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
+        if (!sink && !delivery) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
         const stream = options.native.responseStream(opened.requesterDevice);
-        if (!sink)
-          yield* Effect.tryPromise({
-            try: () => client!.ensureJsonStream(stream, 86400),
-            catch: (cause) => cause,
-          });
+        if (!sink) yield* delivery!.ensure(stream);
         for (const frame of refusal) {
           if (!options.isOpen() || (yield* Clock.currentTimeMillis) >= opened.expiresAt)
             return yield* Effect.void;
-          yield* retryTransientGateway(
-            Effect.tryPromise({
-              try: async () => {
-                if (sink) return await sink.deliver(opened.requestId, frame);
-                await client!.appendJson(
-                  stream,
-                  e2eeRpcEnvelope({
-                    id: opened.requestId,
-                    frame: Buffer.from(frame).toString('hex'),
-                  })
-                );
-              },
-              catch: (cause) => cause,
-            })
-          );
+          yield* sink
+            ? Effect.tryPromise({
+                try: () => sink.deliver(opened.requestId, frame),
+                catch: (cause) => cause,
+              })
+            : delivery!.deliver(stream, {
+                id: opened.requestId,
+                frame: Buffer.from(frame).toString('hex'),
+              });
         }
         return yield* Effect.void;
       }
@@ -475,14 +465,9 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       )
         return yield* Effect.void;
       yield* options.native.verifyFeatureRequest(opened);
-      const client = options.client;
-      if (!sink && !client) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
+      if (!sink && !delivery) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
       const stream = options.native.responseStream(opened.requesterDevice);
-      if (!sink)
-        yield* Effect.tryPromise({
-          try: () => client!.ensureJsonStream(stream, 86400),
-          catch: (cause) => cause,
-        });
+      if (!sink) yield* delivery!.ensure(stream);
       for (const frame of frames) {
         // Metadata can change without a ledger/policy revision (for example an
         // assigned owner transfer). Re-resolve actual target access after stream I/O.
@@ -497,28 +482,28 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
           (yield* Clock.currentTimeMillis) >= opened.expiresAt
         )
           return yield* Effect.void;
-        yield* retryTransientGateway(
-          Effect.tryPromise({
-            try: async () => {
-              if (
-                !options.isOpen() ||
-                !currentAdmission() ||
-                (latest.isCurrent && !latest.isCurrent()) ||
-                clock.currentTimeMillisUnsafe() >= opened.expiresAt
-              )
-                throw new Error('e2ee_history_authority_withdrawn');
-              if (sink) return await sink.deliver(opened.requestId, frame);
-              await client!.appendJson(
-                stream,
-                e2eeRpcEnvelope({
-                  id: opened.requestId,
-                  frame: Buffer.from(frame).toString('hex'),
-                })
-              );
-            },
-            catch: (cause) => cause,
-          })
-        );
+        const admit = () => {
+          if (
+            !options.isOpen() ||
+            !currentAdmission() ||
+            (latest.isCurrent && !latest.isCurrent()) ||
+            clock.currentTimeMillisUnsafe() >= opened.expiresAt
+          )
+            throw new Error('e2ee_history_authority_withdrawn');
+        };
+        yield* sink
+          ? Effect.tryPromise({
+              try: async () => {
+                admit();
+                await sink.deliver(opened.requestId, frame);
+              },
+              catch: (cause) => cause,
+            })
+          : delivery!.deliver(
+              stream,
+              { id: opened.requestId, frame: Buffer.from(frame).toString('hex') },
+              admit
+            );
       }
       return yield* Effect.void;
     }).pipe(

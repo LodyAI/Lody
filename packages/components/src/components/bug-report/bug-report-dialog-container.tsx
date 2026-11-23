@@ -51,13 +51,21 @@ export function BugReportDialogContainer() {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const runtime = useAtomValue(runtimeAtom);
   const contentMode = useAtomValue(workspaceContentModeAtom);
-  const encrypted =
-    workspaceId != null &&
-    ((contentMode?.workspaceId === workspaceId &&
-      contentMode.descriptor != null &&
-      'contentMode' in contentMode.descriptor &&
-      contentMode.descriptor.contentMode === 'e2ee') ||
-      (runtime?.workspaceId === workspaceId && runtime.contentMode === 'e2ee'));
+  const descriptor = contentMode?.workspaceId === workspaceId ? contentMode.descriptor : null;
+  const reportMode: 'ordinary' | 'e2ee' | 'unknown' =
+    workspaceId == null
+      ? 'unknown'
+      : (descriptor && 'contentMode' in descriptor && descriptor.contentMode === 'e2ee') ||
+          (runtime?.workspaceId === workspaceId && runtime.contentMode === 'e2ee')
+        ? 'e2ee'
+        : descriptor &&
+            (('contentMode' in descriptor &&
+              descriptor.contentMode === 'plaintext' &&
+              descriptor.contentModeVersion === 1) ||
+              ('admission' in descriptor && descriptor.admission === 'legacy-unclassified'))
+          ? 'ordinary'
+          : 'unknown';
+  const descriptionOnly = reportMode !== 'ordinary';
   const [state, setState] = useState<BugReportSubmitState>({ status: 'idle' });
   const pendingReport = useRef<PendingReport | null>(null);
   const submitting = useRef(false);
@@ -114,13 +122,13 @@ export function BugReportDialogContainer() {
   // Offline machines cannot answer the log-upload RPC, so they are not listed.
   const machines = useMemo<BugReportMachineOption[]>(() => {
     const options: BugReportMachineOption[] = [];
-    if (encrypted) return options;
+    if (descriptionOnly) return options;
     for (const [id, meta] of visibleMachines) {
       if (!onlineMachineIds.has(id)) continue;
       options.push({ id, name: meta.name || id });
     }
     return options.sort((a, b) => a.name.localeCompare(b.name));
-  }, [encrypted, visibleMachines, onlineMachineIds]);
+  }, [descriptionOnly, visibleMachines, onlineMachineIds]);
 
   // Preselect the user's most recently used machine (the chat-landing default
   // persisted per workspace) when it is online; otherwise fall back to any
@@ -163,7 +171,7 @@ export function BugReportDialogContainer() {
       let diagnostics: string;
       try {
         const reportDescription = appendClientBuildInfo(description);
-        if (encrypted) {
+        if (descriptionOnly) {
           const result = await submitWebBugReport({
             workspaceId,
             description: reportDescription,
@@ -254,7 +262,7 @@ export function BugReportDialogContainer() {
         if (isCurrent()) submitting.current = false;
       }
     },
-    [encrypted, runtime, t, user?.id, workspaceId, uploadDiagnostics]
+    [descriptionOnly, runtime, t, user?.id, workspaceId, uploadDiagnostics]
   );
 
   const handleClose = useCallback(() => {
@@ -268,7 +276,9 @@ export function BugReportDialogContainer() {
       open={open}
       machines={machines}
       initialMachineId={initialMachineId}
-      descriptionOnly={encrypted}
+      descriptionOnly={
+        descriptionOnly ? (reportMode === 'e2ee' ? 'encrypted' : 'pending') : undefined
+      }
       state={state}
       onSubmit={(args) => {
         void handleSubmit(args);

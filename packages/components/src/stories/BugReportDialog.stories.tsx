@@ -105,18 +105,24 @@ export const ClientDiagnosticsFailed: Story = {
 
 export const EncryptedWorkspace: Story = {
   args: {
-    descriptionOnly: true,
+    descriptionOnly: 'encrypted',
   },
 };
 
 export const EncryptedWorkspaceSuccess: Story = {
   args: {
-    descriptionOnly: true,
+    descriptionOnly: 'encrypted',
     state: {
       status: 'success',
       bugReportId: 'k57c2mvf8q1zx0e9w3jh4t6ya',
       withLogs: false,
       clientDiagnostics: 'omitted',
     },
+  },
+};
+
+export const UnconfirmedWorkspaceMode: Story = {
+  args: {
+    descriptionOnly: 'pending',
   },
 };

@@ -1,8 +1,7 @@
 import { Clock, Effect } from 'effect';
 import type { E2eeDispatchInput, E2eeDispatchAck } from '@lody/shared/e2ee-rpc';
 import {
-  e2eeRpcEnvelope,
-  retryTransientGateway,
+  makeEncryptedStreamsEnvelopeDelivery,
   type E2eeRpcTiming,
 } from '@lody/loro-streams-rpc/e2ee-streams';
 import type { makeE2eeRpcNative } from '@lody/loro-streams-rpc/e2ee-native';
@@ -32,7 +31,7 @@ export function makeEncryptedRpcReceiver(options: {
   trace?: (event: E2eeRpcTiming) => void;
 }) {
   const pendingResponses = new Map<string, { permit: RealtimeStartPermit; frame: Uint8Array }>();
-  const responseStreams = new Set<string>();
+  const deliver = options.client ? makeEncryptedStreamsEnvelopeDelivery(options.client) : null;
   return Effect.fnUntraced(function* (
     envelope: { id: string; frame: string },
     sink?: EncryptedReplySink
@@ -107,29 +106,10 @@ export function makeEncryptedRpcReceiver(options: {
       });
       return;
     }
-    const client = options.client;
-    if (!client) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
-    const stream = options.native.responseStream(opened.requesterDevice);
-    yield* retryTransientGateway(
-      Effect.tryPromise({
-        try: async () => {
-          if (!responseStreams.has(stream)) {
-            await client.ensureJsonStream(stream, 86400);
-            if (responseStreams.size >= 128) responseStreams.clear();
-            responseStreams.add(stream);
-          }
-          try {
-            await client.appendJson(
-              stream,
-              e2eeRpcEnvelope({ id: opened.requestId, frame: Buffer.from(saved).toString('hex') })
-            );
-          } catch (cause) {
-            responseStreams.delete(stream);
-            throw cause;
-          }
-        },
-        catch: (cause) => cause,
-      })
-    );
+    if (!deliver) return yield* Effect.fail(new Error('e2ee_rpc_unavailable'));
+    yield* deliver.deliver(options.native.responseStream(opened.requesterDevice), {
+      id: opened.requestId,
+      frame: Buffer.from(saved).toString('hex'),
+    });
   });
 }

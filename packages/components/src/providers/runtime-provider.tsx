@@ -709,8 +709,27 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let nativeHasUsableKey = false;
     let nativeRefresh: Promise<void> | null = null;
     let nativeRefreshAgain = false;
-    let firstReceptionRetry: ReturnType<typeof setTimeout> | undefined;
-    let firstReceptionAttempts = 0;
+    const firstKeyPoll = (() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let attempts = 0;
+      return {
+        stop: () => {
+          clearTimeout(timer);
+          timer = undefined;
+        },
+        next: (poll: () => void): boolean => {
+          if (timer !== undefined) return true;
+          const delay = FIRST_KEY_RECEPTION_RETRY_MS[attempts];
+          if (delay === undefined) return false;
+          attempts++;
+          timer = setTimeout(() => {
+            timer = undefined;
+            poll();
+          }, delay);
+          return true;
+        },
+      };
+    })();
     let nativeLedgerStatus: import('@lody/platform').E2eeRuntimeStatus | undefined;
     let unsubscribeNativeLedger: (() => void) | undefined;
     const acceptStatus = async (status: import('@lody/platform').E2eeRuntimeStatus) => {
@@ -737,13 +756,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         (status.hasCurrentKey || status.writeEpoch != null)
       ) {
         nativeHasUsableKey = true;
+        firstKeyPoll.stop();
         retryAdmission((value) => value + 1);
       }
     };
     const refreshNative = (): void => {
-      if (disposed || !nativeLease) return;
-      clearTimeout(firstReceptionRetry);
-      firstReceptionRetry = undefined;
+      if (disposed || retired || !nativeLease) return;
       if (nativeRefresh) {
         nativeRefreshAgain = true;
         return;
@@ -784,11 +802,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           !nativeRefresh &&
           !nativeHasUsableKey &&
           workspaceRuntime === null
-        ) {
-          const delay = FIRST_KEY_RECEPTION_RETRY_MS[firstReceptionAttempts++];
-          if (delay === undefined) setRuntimeInitializing(false);
-          else firstReceptionRetry = setTimeout(refreshNative, delay);
-        }
+        )
+          if (!firstKeyPoll.next(refreshNative)) setRuntimeInitializing(false);
       });
     };
     retryKeyUpdateRef.current = refreshNative;
@@ -1015,6 +1030,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const retire = () => {
       if (retired) return;
       retired = true;
+      firstKeyPoll.stop();
       initializationAbort.abort(new Error('Runtime disposed'));
       setRuntime(null);
       setRuntimeInitializing(false);
@@ -1335,7 +1351,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         workspaceSlug,
       });
       disposed = true;
-      clearTimeout(firstReceptionRetry);
+      firstKeyPoll.stop();
       window.removeEventListener('online', retryContentAdmission);
       window.removeEventListener('online', refreshNative);
       unsubscribeLedgerChange();

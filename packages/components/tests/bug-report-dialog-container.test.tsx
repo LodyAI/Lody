@@ -66,7 +66,7 @@ function button(label: string) {
   return result;
 }
 
-async function setup(options: { encrypted?: boolean } = {}) {
+async function setup(mode: 'ordinary' | 'e2ee' | 'unknown' = 'ordinary') {
   const requests: Array<{
     body: unknown;
     signal: AbortSignal | null | undefined;
@@ -87,12 +87,16 @@ async function setup(options: { encrypted?: boolean } = {}) {
     });
   });
   const store = createStore();
-  if (options.encrypted)
+  if (mode !== 'unknown')
     store.set(workspaceContentModeAtom, {
       accountId: 'reporter',
       workspaceSlug: 'workspace',
       workspaceId: 'workspace',
-      descriptor: { workspaceId: 'workspace', contentMode: 'e2ee', contentModeVersion: 1 } as never,
+      descriptor: {
+        workspaceId: 'workspace',
+        contentMode: mode === 'e2ee' ? 'e2ee' : 'plaintext',
+        contentModeVersion: 1,
+      } as never,
     });
   mounted = await mount(
     <Provider store={store}>
@@ -114,18 +118,24 @@ async function setup(options: { encrypted?: boolean } = {}) {
   return { store, requests, urls, submit, created: () => created };
 }
 
-it('files an encrypted workspace report as description only, with no machine logs or diagnostics', async () => {
-  machineIndex.machines.set('machine-1', { name: 'online laptop' });
-  machineIndex.online.add('machine-1');
-  const { urls, submit } = await setup({ encrypted: true });
-  expect(document.querySelector('#bug-report-machine')).toBeNull();
-  expect(document.body.textContent).toContain('end-to-end encrypted');
-  await submit();
-  expect(urls).toEqual(['https://auth.test/api/bug-reports/create']);
-  expect(document.body.textContent).toContain('report-1');
-  expect(document.body.textContent).not.toContain('client diagnostics');
-  expect(document.body.textContent).not.toContain('Client diagnostics');
-});
+it.each([
+  ['e2ee', 'end-to-end encrypted'],
+  ['unknown', 'not confirmed yet'],
+] as const)(
+  'files a %s workspace report as description only, with no machine logs or diagnostics',
+  async (mode, notice) => {
+    machineIndex.machines.set('machine-1', { name: 'online laptop' });
+    machineIndex.online.add('machine-1');
+    const { urls, submit } = await setup(mode);
+    expect(document.querySelector('#bug-report-machine')).toBeNull();
+    expect(document.body.textContent).toContain(notice);
+    await submit();
+    expect(urls).toEqual(['https://auth.test/api/bug-reports/create']);
+    expect(document.body.textContent).toContain('report-1');
+    expect(document.body.textContent).not.toContain('client diagnostics');
+    expect(document.body.textContent).not.toContain('Client diagnostics');
+  }
+);
 
 it.each(['Close', 'cross', 'Escape', 'backdrop'])(
   'shows the saved ID and permits %s while diagnostics never respond',
