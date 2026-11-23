@@ -243,5 +243,14 @@ test('hovering Status and Workspace session rows reveals end-slot actions with t
     await expect(confirmBtn).toBeVisible();
     const confirmColor = await confirmBtn.evaluate((el) => getComputedStyle(el).color);
     expect(confirmColor).not.toBe('rgb(0, 0, 0)');
+
+    // Later snooze countdown pill must use a translucent foreground tint so it
+    // reads against the resting sidebar surface instead of matching its solid fill.
+    const snoozeRow = page.locator('[data-sidebar-updated-id="later-1"]');
+    await expect(snoozeRow).toBeVisible();
+    const snoozeChip = snoozeRow.locator('[data-snooze-countdown]');
+    await expect(snoozeChip).toBeVisible();
+    const snoozeBg = await snoozeChip.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(snoozeBg).toMatch(/^rgba\(.+,\s*0\.1\)$/);
   }
 });

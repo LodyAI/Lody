@@ -2375,5 +2375,19 @@ const bucketStyles = stylex.create({
 });
 
 const previewStyles = stylex.create({
-  row: { display: 'inline-flex', alignItems: 'center', gap: themeSpace[1], borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: themeSpace[1.5], paddingBlock: themeSpace[0.5], fontSize: uiText.captionSize, lineHeight: 1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
+  row: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: uiRadius.full,
+    cornerShape: uiCorner.round,
+    backgroundColor: 'hsl(var(--sidebar-foreground) / 0.1)',
+    paddingInline: themeSpace[1.5],
+    paddingBlock: themeSpace[0.5],
+    fontSize: uiText.captionSize,
+    lineHeight: 1,
+    fontWeight: 500,
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.sidebarForegroundMuted,
+  },
 });
