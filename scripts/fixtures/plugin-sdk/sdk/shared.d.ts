@@ -105,15 +105,31 @@ export interface RawDocumentSnapshot<
   readonly doc: TDoc;
 }
 
+/**
+ * Scoped target for lazy, on-demand snapshot materialization directly over Lody's existing
+ * Loro/Flock and `sessionData`/Roost readers (zero parallel Domain Store, zero whole-tree rebuilds
+ * on unrelated commits or streaming tokens).
+ */
 export type RawSnapshotTarget =
-  | { readonly kind: "workspace-state"; readonly workspace: WorkspaceRef }
+  | {
+      readonly kind: "workspace-state";
+      readonly workspace: WorkspaceRef;
+      /** Optional top-level collection/key path slice to avoid materializing unrelated workspace state. */
+      readonly path?: readonly string[];
+    }
   | { readonly kind: "session-meta"; readonly session: SessionRef }
   | {
       readonly kind: "session-transcript";
       readonly session: SessionRef;
+      /** Specific turn IDs or bounded recent window (defaults to latest bounded page; never sweeps full history). */
       readonly turnIds?: readonly string[];
+      readonly limit?: number;
     }
-  | { readonly kind: "project-state"; readonly project: ProjectRef }
+  | {
+      readonly kind: "project-state";
+      readonly project: ProjectRef;
+      readonly path?: readonly string[];
+    }
   | {
       readonly kind: "schedule-doc";
       readonly workspace: WorkspaceRef;

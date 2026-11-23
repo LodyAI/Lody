@@ -108,6 +108,7 @@ function loadIssueMachine(io = fs) {
   load(
     path.join(fixtureDir, "examples/issue-context/machine.ts"),
   ).default.register({
+    onStart() {},
     query() {},
     attachmentSource() {},
     tool() {},
@@ -322,106 +323,149 @@ test("sound-effects client plugin subscribes to host events, plays configured cu
   assert.equal(listeners.size, 0);
 });
 
-test("sorbet-workflow machine plugin inspects raw session snapshots and spawns idempotent verifier sessions on turn completion", async () => {
-  const eventHandlers = new Map();
-  const queries = new Map();
-  const createdSessions = [];
+test("sorbet-workflow persists task progress to ctx.dataDir and recovers unfinished verifier sessions across daemon restart via machine.onStart", async (t) => {
+  const dataDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "lody-sorbet-workflow-"),
+  );
+  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
 
-  function loadTs(relPath) {
-    const fullPath = path.join(fixtureDir, relPath);
-    const compiled = ts.transpileModule(readFileSync(fullPath, "utf8"), {
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2023,
+  function mountWorkflowInstance() {
+    let startHook = null;
+    const eventHandlers = new Map();
+    const queries = new Map();
+
+    function loadTs(relPath) {
+      const fullPath = path.join(fixtureDir, relPath);
+      const compiled = ts.transpileModule(readFileSync(fullPath, "utf8"), {
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+          target: ts.ScriptTarget.ES2023,
+          esModuleInterop: true,
+        },
+      }).outputText;
+      const mod = { exports: {} };
+      new Function("require", "module", "exports", compiled)(
+        (id) => {
+          if (id.startsWith("node:")) return require(id);
+          if (id === "zod") return requireShared("zod");
+          if (id === "@lody/plugin-sdk") {
+            return {
+              defineQuery: (scope, qid, s) => ({ scope, id: qid, ...s }),
+            };
+          }
+          if (id === "@lody/plugin-sdk/machine") {
+            return { defineMachinePlugin: (register) => ({ register }) };
+          }
+          if (id === "./shared") {
+            return loadTs("examples/sorbet-workflow/shared.ts");
+          }
+          throw new Error(`Unexpected import: ${id}`);
+        },
+        mod,
+        mod.exports,
+      );
+      return mod.exports;
+    }
+
+    loadTs("examples/sorbet-workflow/machine.ts").default.register({
+      onStart(fn) {
+        startHook = fn;
       },
-    }).outputText;
-    const mod = { exports: {} };
-    new Function("require", "module", "exports", compiled)(
-      (id) => {
-        if (id === "zod") return requireShared("zod");
-        if (id === "@lody/plugin-sdk") {
-          return { defineQuery: (scope, qid, s) => ({ scope, id: qid, ...s }) };
-        }
-        if (id === "@lody/plugin-sdk/machine") {
-          return { defineMachinePlugin: (register) => ({ register }) };
-        }
-        if (id === "./shared") {
-          return loadTs("examples/sorbet-workflow/shared.ts");
-        }
-        throw new Error(`Unexpected import: ${id}`);
+      query(desc, fn) {
+        queries.set(desc.id, fn);
       },
-      mod,
-      mod.exports,
-    );
-    return mod.exports;
+      mutation() {},
+      tool() {},
+      attachmentSource() {},
+      events: {
+        on(type, fn) {
+          eventHandlers.set(type, fn);
+        },
+      },
+    });
+    return { startHook, eventHandlers, queries };
   }
-
-  loadTs("examples/sorbet-workflow/machine.ts").default.register({
-    query(desc, fn) {
-      queries.set(desc.id, fn);
-    },
-    mutation() {},
-    tool() {},
-    attachmentSource() {},
-    events: {
-      on(type, fn) {
-        eventHandlers.set(type, fn);
-      },
-    },
-  });
 
   const sessionRef = {
     workspaceId: "ws_1",
     machineId: "m_1",
     sessionId: "sess_arch_1",
   };
-  const projectRef = {
-    workspaceId: "ws_1",
-    machineId: "m_1",
-    projectId: "proj_1",
+  const machineRef = { workspaceId: "ws_1", machineId: "m_1" };
+  const receipts = new Map();
+  let crashDuringFirstCreate = true;
+
+  const hostSessions = {
+    async create(_target, req) {
+      // Simulate daemon/transport crash AFTER receipt or BEFOREplugin receives response
+      if (!receipts.has(req.requestId)) {
+        receipts.set(req.requestId, {
+          ...sessionRef,
+          sessionId: "sess_verifier_1",
+        });
+      }
+      if (crashDuringFirstCreate) {
+        crashDuringFirstCreate = false;
+        throw Object.assign(new Error("daemon_interrupted"), {
+          code: "outcome_unknown",
+        });
+      }
+      return receipts.get(req.requestId);
+    },
   };
 
-  await eventHandlers.get("session.turn.completed")(
-    {
-      config: { autoVerify: true },
-      invalidate() {},
-      lody: {
-        async readSnapshot() {
-          return Object.freeze({
-            schemaVersion: 1,
-            revision: "r1",
-            doc: Object.freeze({
-              agentRoleId: "plugin:sorbet-workflow:sorbet-architect",
-            }),
-          });
-        },
-        sessions: {
-          async create(target, req) {
-            createdSessions.push({ target, req });
-            return { ...sessionRef, sessionId: "sess_verifier_1" };
+  // Generation 1: turn completes, plugin writes intent to ctx.dataDir, then crashes mid-create
+  const gen1 = mountWorkflowInstance();
+  await assert.rejects(
+    gen1.eventHandlers.get("session.turn.completed")(
+      {
+        dataDir,
+        config: { autoVerify: true },
+        invalidate() {},
+        lody: {
+          async readSnapshot() {
+            return Object.freeze({
+              schemaVersion: 1,
+              revision: "r1",
+              doc: Object.freeze({
+                agentRoleId: "plugin:sorbet-workflow:sorbet-architect",
+              }),
+            });
           },
+          sessions: hostSessions,
         },
       },
-    },
-    {
-      workspace: { workspaceId: "ws_1" },
-      machine: { workspaceId: "ws_1", machineId: "m_1" },
-      session: sessionRef,
-      project: projectRef,
-      turnId: "turn_42",
-      stopReason: "end_turn",
-    },
+      {
+        workspace: { workspaceId: "ws_1" },
+        machine: machineRef,
+        session: sessionRef,
+        turnId: "turn_42",
+        stopReason: "end_turn",
+      },
+    ),
+    { code: "outcome_unknown" },
   );
 
-  assert.equal(createdSessions.length, 1);
-  assert.equal(createdSessions[0].req.requestId, "verify-sess_arch_1-turn_42");
-  assert.equal(createdSessions[0].req.businessKey, "verify/sess_arch_1");
-  assert.equal(
-    createdSessions[0].req.providerId,
-    "plugin:sorbet-workflow:sorbet-acp",
-  );
-  assert.deepEqual(queries.get("workflow.status")({ target: sessionRef }), {
-    lastVerifiedTurnId: "turn_42",
-    verifierSessionId: "sess_verifier_1",
+  // Generation 2 (Daemon Restart): new subprocess boots, runs machine.onStart, and recovers idempotently
+  const gen2 = mountWorkflowInstance();
+  await gen2.startHook({
+    workspace: { workspaceId: "ws_1" },
+    machine: machineRef,
+    dataDir,
+    config: { autoVerify: true },
+    invalidate() {},
+    lody: { sessions: hostSessions },
   });
+
+  assert.equal(receipts.size, 1);
+  assert.deepEqual(
+    await gen2.queries.get("workflow.status")({
+      dataDir,
+      target: sessionRef,
+    }),
+    {
+      lastVerifiedTurnId: "turn_42",
+      verifierSessionId: "sess_verifier_1",
+    },
+  );
 });

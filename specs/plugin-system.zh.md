@@ -260,12 +260,12 @@ flowchart TB
 
 ### 7.2 只读原始文档与状态树快照（`useLodySnapshot` / `readSnapshot`）
 
-为彻底消除固定 Summary 类型对自定义工作台与多 Agent 指挥面板的数据限制：
+在彻底消除固定 Summary 类型数据围墙的同时，保持宿主零额外内存与计算负担：
 
-1. **支持的目标（`RawSnapshotTarget`）：** `workspace-state`、`session-meta`、`session-transcript`（全量或按 `turnIds` 切片）、`project-state` 与 `schedule-doc`。
-2. **脱离底层句柄与深度只读冻结：** 返回的 `RawDocumentSnapshot`（`{ schemaVersion, revision, doc }`）**MUST** 与底层 Loro/Roost 可变句柄彻底分离并经深度只读冻结（`Object.freeze`）。一切写操作仍严格经由内核命令与 `HistoryWriter` 执行（[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)）。
-3. **细粒度 Selector 记忆化订阅：** `useLodySnapshot(target, selector, isEqual)` 直接监听底层文档提交，仅当 `selector(snapshot)` 在 `isEqual`（默认 `Object.is`）下发生变化时才触发组件重渲染。
-4. **安全脱敏与一致授权：** 原始快照严格复用与 `lodyQueries` 相同的工作区及 E2EE 可见性门禁，并在冻结返回前剥离钥匙串密钥、认证令牌、E2EE KEK/签名私钥以及外部插件私有 `businessKey`。
+1. **直接复用现有 Loro/Flock 与 `sessionData`/Roost 读取与订阅底座（严禁引入第二套 Domain Store）：** 宿主 **MUST NOT** 为插件单独维护第二套 Domain Store 或影子状态镜像，且 **MUST NOT** 在每次文档提交或流式 Token 输出时重新构建整棵状态树。`lodyQueries` 与 `useLodySnapshot` / `readSnapshot` 直接挂接在 Lody 现有的共享 Loro/Flock 房间读取器及 `sessionData` / Roost 窄目录与窗口化回合读取器（`readSessionHistory`、`readTurn`、`readTurnOutput`、`readSubagentRun`）之上。
+2. **按需惰性局部物化（`RawSnapshotTarget`）：** 无插件订阅时不产生任何快照序列化开销；存在活跃订阅时，仅当底层窄变更通知（变更 `turnIds`、结构区间或 Flock 键更新）命中目标范围时，才按需物化授权范围内的局部切片（`workspace-state` / `project-state` 的可选 `path` 子树、`session-meta`、`schedule-doc`，或 `session-transcript` 的指定 `turnIds` / 有界 `limit` 窗口，严禁自动全历史扫描）。
+3. **脱离底层句柄、深度只读冻结与 Selector 记忆化：** 物化后的 `RawDocumentSnapshot`（`{ schemaVersion, revision, doc }`）**MUST** 与底层可变 CRDT 句柄分离并执行深度只读冻结（`Object.freeze`），一切写操作仍严格经由内核命令与 `HistoryWriter` 完成（[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)）；`useLodySnapshot(target, selector, isEqual)` 仅在 `selector(snapshot)` 变化时触发组件重渲染。
+4. **安全脱敏与一致授权：** 快照严格复用与 `lodyQueries` 相同的工作区及 E2EE 可见性门禁，并在冻结前剥离钥匙串密钥、认证令牌、E2EE KEK/签名私钥以及外部插件私有 `businessKey`。
 
 ### 7.3 会话编排、幂等回执与原地回答追问（`answerQuestion`）
 
@@ -284,7 +284,7 @@ flowchart TB
 
 - `Disabled`：未启用；`0` 子进程，`0` 工具/事件/Role/MCP/ACP 注册。
 - `Starting`：清单校验通过；存在 `manifest.machine` 时派生 `child_process.fork` 并等待 `10_000 ms` `ready` 握手；不含 `manifest.machine` 的插件直接以 `0` 子进程跃迁至 `Running`。
-- `Running`：活跃 `instance_id` 正常响应 RPC、事件、工具与工作流贡献。
+- `Running`：活跃 `instance_id` 正常响应 RPC、事件、工具与工作流贡献；每次进入 `Running`（含守护进程重启恢复）后立即派发 `machine.onStart(ctx)`，使工作流插件可对账持久化的 `ctx.dataDir` 任务日志并幂等恢复未完成步骤。
 - `Stopping`：按 `shutdown -> 2s SIGTERM -> 2s SIGKILL` 排空终止中。
 - `Stopped`：`reload` 或守护进程退出过程中的已排空中间态（`active_instance = null`）。
 - `Faulted`：意外退出、握手超时、缺失必填密钥/配置或 IPC 协议违规后的隔离态。**严禁后台自动无限重启**；仅在显式 `reload`、`disable` 或 `remove`（或补齐配置保存）时离开 `Faulted`。
@@ -319,7 +319,7 @@ flowchart TB
 
 `PluginHost` 与 `machine` 子进程通过 `stdio: ['ignore', 'pipe', 'pipe', 'ipc']` 通信：
 
-- **Host -> Child：** `init`（`pluginId`、`instanceId`、`dataDir`、`env`、`config`）、`invoke`（`callId`、`kind`、`descriptorId`、`scope`、`target`、`input`）、`event`（`eventId`、`eventType`、`payload`、`rootUserTurnId?`）、`cancel`（`callId`）、`host_result`、`shutdown`（`graceMs`）。
+- **Host -> Child：** `init`（`pluginId`、`instanceId`、`dataDir`、`env`、`config`）、`start`（`ready` 后派发一次以触发 `machine.onStart`）、`invoke`（`callId`、`kind`、`descriptorId`、`scope`、`target`、`input`）、`event`（`eventId`、`eventType`、`payload`、`rootUserTurnId?`）、`cancel`（`callId`）、`host_result`、`shutdown`（`graceMs`）。
 - **Child -> Host：** `ready`（`handlers`、`subscribedEvents`）、`result`（`callId`、`ok`、`data`/`error`）、`invalidate`、`host_call`（`op`: `"lody.read" | "lody.readSnapshot" | "sessions.create" | "sessions.send" | "sessions.requestStop" | "sessions.requestArchive"`）。
 - `stdout` 与 `stderr` 仅作诊断日志写入 `logs_ring`；畸形 IPC 帧立即终止子进程并置为 `Faulted`。
 
@@ -495,7 +495,7 @@ flowchart TB
 
 ### 14.3 宿主重启恢复语义
 
-- **守护进程重启：** 重新拉起持久化 `enabled = true` 的插件；`SessionCreationReceipt` 与 `PluginProposalRecord` 跨重启完整保留。
+- **守护进程重启与工作流恢复：** 重新拉起持久化 `enabled = true` 的插件，完整保留 `ctx.dataDir`、`SessionCreationReceipt` 与 `PluginProposalRecord`，并调用 `machine.onStart(ctx)` 使工作流插件基于持久化的 `(requestId, businessKey)` 幂等恢复未完成的跨会话任务，无需修改 Lody Core。
 - **客户端刷新 / 重连：** 基于 `clientDigest` 幂等调和，不触发守护进程子进程重启。
 
 ### 14.4 操作员干预控制点
@@ -715,7 +715,7 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
 ### 16.4 Core Conformance — 工作区数据、原始只读快照与工作流 Role/MCP
 
 - **产品验收场景 —— 全自由度多 Agent 指挥面板：** 自定义全屏视图组合 `lodyQueries.sessionTurns` / `subagentRun` / `agentConfigs` 与 `useLodySnapshot({ kind: "workspace-state" | "session-transcript" }, selector)`；返回的 `RawDocumentSnapshot` 深度只读冻结（`Object.freeze`）、自动剥离敏感密钥与外部 `businessKey`，且仅在 Selector 投影值变化时重渲染。
-- **产品验收场景 —— 工作流 Role + MCP + 事件编排：** 启用工作流插件自动注册 `plugin:<id>:<role>` 并以进程外方式拉起 `manifest.mcpServers`；`machine.events.on("session.turn.completed")` 读取会话原始快照并以 `(requestId, businessKey)` 幂等拉起验证子会话。
+- **产品验收场景 —— 工作流 Role + MCP + 事件编排与守护进程重启恢复：** 启用工作流插件自动注册 `plugin:<id>:<role>` 并以进程外方式拉起 `manifest.mcpServers`；`machine.events.on("session.turn.completed")` 先将任务意图原子写入 `ctx.dataDir`、读取局部会话快照并以 `(requestId, businessKey)` 幂等拉起验证子会话；若守护进程中途重启，`machine.onStart(ctx)` 对账 `ctx.dataDir` 自动续跑且绝不重复创建会话。
 
 ### 16.5 Core Conformance — DX、UX、提议-确认审批与 Desktop/Web/Mobile 跨端体验
 

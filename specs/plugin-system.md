@@ -260,12 +260,12 @@ A single plugin package MAY ship an end-to-end multi-Agent workflow:
 
 ### 7.2 Raw Read-Only Document & State-Tree Snapshots (`useLodySnapshot` / `readSnapshot`)
 
-To guarantee custom Workspace / multi-Agent control planes are never bottlenecked by fixed summary types:
+To guarantee custom Workspace / multi-Agent control planes are never bottlenecked by fixed summary types while keeping Lody's core runtime zero-overhead:
 
-1. **Supported Targets (`RawSnapshotTarget`):** `workspace-state`, `session-meta`, `session-transcript` (full or filtered by `turnIds`), `project-state`, and `schedule-doc`.
-2. **Detachment & Deep Immutability:** Every returned `RawDocumentSnapshot` (`{ schemaVersion, revision, doc }`) MUST be detached from live Loro/Roost handles and deeply frozen (`Object.freeze` in development/strict mode). Plugins MUST NOT receive mutable CRDT containers; all writes go through Kernel / `HistoryWriter` APIs ([`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)).
-3. **Selector Memoization:** `useLodySnapshot(target, selector, isEqual)` subscribes to underlying document commits and re-renders the React component ONLY when `selector(snapshot)` changes under `isEqual` (default `Object.is`).
-4. **Redaction & Authorization:** Raw snapshots MUST apply the exact same workspace/E2EE visibility gates as `lodyQueries` and MUST strip keychain secrets, auth tokens, E2EE KEKs/signing keys, and other plugins' `businessKey` values prior to freezing.
+1. **Direct Reuse of Existing Loro/Flock & `sessionData`/Roost Infrastructure (Zero Parallel Domain Store):** Hosts MUST NOT introduce a separate plugin Domain Store or shadow state mirror, and MUST NOT rebuild or freeze full state trees on every document commit or streaming token. `lodyQueries` and `useLodySnapshot` / `readSnapshot` bind directly to Lody's existing shared Loro/Flock room readers and `sessionData` / Roost narrow directory & windowed turn readers (`readSessionHistory`, `readTurn`, `readTurnOutput`, `readSubagentRun`).
+2. **Lazy, On-Demand Scoped Materialization (`RawSnapshotTarget`):** When zero plugins subscribe to a target, zero snapshot allocation occurs. Active subscriptions hook Lody's existing narrow change notifications (changed `turnIds`, structural ranges, or Flock key updates) and materialize **only** the authorized, scoped slice (`path` on `workspace-state` / `project-state`, `session-meta`, `schedule-doc`, or bounded `turnIds` / `limit` window on `session-transcript` — never performing automatic whole-history sweeps).
+3. **Detachment, Deep Immutability & Selector Memoization:** Every materialized `RawDocumentSnapshot` (`{ schemaVersion, revision, doc }`) MUST be detached from live CRDT handles and deeply frozen (`Object.freeze` in development/strict mode) while `HistoryWriter` and Kernel commands remain the sole write path ([`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)). `useLodySnapshot(target, selector, isEqual)` re-renders ONLY when `selector(snapshot)` changes under `isEqual` (default `Object.is`).
+4. **Redaction & Authorization:** Snapshots apply the exact same workspace/E2EE visibility gates as `lodyQueries` and strip keychain secrets, auth tokens, E2EE KEKs/signing keys, and other plugins' `businessKey` values prior to freezing.
 
 ### 7.3 Session Orchestration, Idempotency & `answerQuestion`
 
@@ -284,7 +284,7 @@ To guarantee custom Workspace / multi-Agent control planes are never bottlenecke
 
 - `Disabled`: Not running; zero subprocesses, zero active tools/events/roles/MCP/ACP registrations.
 - `Starting`: Manifest validated; spawning `child_process.fork` (if `manifest.machine` is present) and awaiting `ready` within `10_000 ms`. Plugins without `manifest.machine` transition `Disabled -> Running` directly with `0` subprocesses.
-- `Running`: Active `instance_id` serving RPCs, `events`, tools, and workflow contributions.
+- `Running`: Active `instance_id` serving RPCs, `events`, tools, and workflow contributions; immediately upon entering `Running` (including after daemon restart), `PluginHost` dispatches `machine.onStart(ctx)` so workflow plugins can reconcile durable `ctx.dataDir` progress journals and resume incomplete steps idempotently.
 - `Stopping`: Draining via `shutdown -> 2s SIGTERM -> 2s SIGKILL`.
 - `Stopped`: Transient drained state (`active_instance = null`) during `reload` or daemon shutdown.
 - `Faulted`: Quarantined after unexpected exit, `ready` timeout, missing required secret/config, or IPC protocol violation. **Zero automatic background restarts**; exits `Faulted` ONLY on explicit `reload`, `disable`, or `remove`.
@@ -319,7 +319,7 @@ Source-linked `--dev` plugins compile inside `DevPluginCompiler`, which exits au
 
 `PluginHost` and the `machine` subprocess communicate over `stdio: ['ignore', 'pipe', 'pipe', 'ipc']`:
 
-- **Host -> Child:** `init` (`pluginId`, `instanceId`, `dataDir`, `env`, `config`), `invoke` (`callId`, `kind`, `descriptorId`, `scope`, `target`, `input`), `event` (`eventId`, `eventType`, `payload`, `rootUserTurnId?`), `cancel` (`callId`), `host_result` (`hostCallId`, `ok`, `data`/`error`), `shutdown` (`graceMs`).
+- **Host -> Child:** `init` (`pluginId`, `instanceId`, `dataDir`, `env`, `config`), `start` (dispatched once after `ready` to invoke `machine.onStart`), `invoke` (`callId`, `kind`, `descriptorId`, `scope`, `target`, `input`), `event` (`eventId`, `eventType`, `payload`, `rootUserTurnId?`), `cancel` (`callId`), `host_result` (`hostCallId`, `ok`, `data`/`error`), `shutdown` (`graceMs`).
 - **Child -> Host:** `ready` (`handlers`, `subscribedEvents`), `result` (`callId`, `ok`, `data`/`error`), `invalidate` (`descriptorId`, `scope`, `target?`), `host_call` (`hostCallId`, `op`: `"lody.read" | "lody.readSnapshot" | "sessions.create" | "sessions.send" | "sessions.requestStop" | "sessions.requestArchive"`, `payload`).
 - `stdout` and `stderr` are strictly diagnostic pipes captured into `logs_ring`; malformed IPC frames kill the child and transition to `Faulted`.
 
@@ -495,7 +495,7 @@ Per [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee
 
 ### 14.3 Restart Semantics
 
-- **Daemon Restart:** Re-evaluates persisted `enabled = true` plugins; `SessionCreationReceipt` and `PluginProposalRecord` rows survive restarts cleanly.
+- **Daemon Restart & Workflow Recovery:** Re-evaluates persisted `enabled = true` plugins, preserves `ctx.dataDir`, `SessionCreationReceipt`, and `PluginProposalRecord` rows, and invokes `machine.onStart(ctx)` so workflow plugins recover unfinished multi-Session tasks idempotently using persisted `(requestId, businessKey)` without modifying Lody Core.
 - **Client Reload / Reconnect:** Reconciles `clientDigest` from catalog/cache without restarting daemon subprocesses.
 
 ### 14.4 Operator Intervention Points
@@ -715,7 +715,7 @@ Validation profiles follow Section 1.1: Sections 16.1–16.6 are `Core Conforman
 ### 16.4 Core Conformance — Workspace Data, Raw Snapshots & Workflow Roles/MCP
 
 - **Product Scenario — Custom Multi-Agent Control Plane:** Custom screen combines `lodyQueries.sessionTurns` / `subagentRun` / `agentConfigs` with `useLodySnapshot({ kind: "workspace-state" | "session-transcript" }, selector)`; returned `RawDocumentSnapshot` is deeply frozen (`Object.freeze`), redacted against secrets/foreign `businessKey`s, and triggers React re-renders only when selected slice values change.
-- **Product Scenario — Workflow Role + MCP + Event Orchestration:** Enabling a workflow plugin registers `plugin:<id>:<role>` and spawns `manifest.mcpServers` out-of-daemon; `machine.events.on("session.turn.completed")` reads session snapshots and spawns a child verifier Session with atomic `(requestId, businessKey)` idempotency.
+- **Product Scenario — Workflow Role + MCP + Event Orchestration & Daemon-Restart Recovery:** Enabling a workflow plugin registers `plugin:<id>:<role>` and spawns `manifest.mcpServers` out-of-daemon; `machine.events.on("session.turn.completed")` journals task intent to `ctx.dataDir`, reads scoped session snapshots, and spawns a child verifier Session with atomic `(requestId, businessKey)` idempotency; if the daemon restarts mid-workflow, `machine.onStart(ctx)` reconciles `ctx.dataDir` and resumes without duplicating Sessions.
 
 ### 16.5 Core Conformance — DX, UX, Propose-Confirm & Desktop/Web/Mobile Parity
 

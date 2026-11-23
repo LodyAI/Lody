@@ -130,6 +130,25 @@ export interface MachineEventContext<
   ): void;
 }
 
+/**
+ * Context passed to `machine.onStart` when the plugin subprocess enters `Running` (including after
+ * a daemon restart or `reload`), enabling workflow plugins to reconcile durable `ctx.dataDir`
+ * progress journals against live `lodyQueries.sessions` and resume unfinished steps idempotently.
+ */
+export interface MachineStartupContext {
+  readonly workspace: WorkspaceRef;
+  readonly machine: MachineRef;
+  readonly dataDir: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly config: Readonly<Record<string, ReadonlyJsonPrimitive | undefined>>;
+  readonly signal: AbortSignal;
+  readonly lody: MachineHostPort;
+  invalidate<QS extends MachinePluginScope>(
+    descriptor: QueryDescriptor<QS, z.ZodType, z.ZodType>,
+    target?: ScopeTarget<QS>,
+  ): void;
+}
+
 export interface AttachmentContext {
   readonly session?: SessionRef;
   readonly project?: ProjectRef;
@@ -142,6 +161,11 @@ export interface AttachmentContext {
 }
 
 export interface MachinePluginRegistry {
+  /**
+   * Invoked once per subprocess generation immediately after `ready` (including after daemon restart),
+   * allowing workflow plugins to recover durable task state from `ctx.dataDir` without polling.
+   */
+  onStart(handler: (ctx: MachineStartupContext) => void | Promise<void>): void;
   query<
     S extends MachinePluginScope,
     TInput extends z.ZodType,
