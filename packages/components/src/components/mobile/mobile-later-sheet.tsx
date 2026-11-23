@@ -9,6 +9,7 @@ import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { buildSnoozePresets, type SnoozePresetId } from '@lody/shared';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { toIntlLocale } from '@/lib/intl-locale';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useFoldAwareSheetHeight } from './use-vertical-division';
 
@@ -40,8 +41,9 @@ export function resolveCustomLaterTime(value: string, nowMs: number): number | n
  * with its date, so two presets on different Mondays never read the same.
  */
 export function presetTimeFormatter(locale: string | undefined, nowMs: number) {
-  const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' });
-  const dated = new Intl.DateTimeFormat(locale, {
+  const intlLocale = toIntlLocale(locale);
+  const time = new Intl.DateTimeFormat(intlLocale, { hour: 'numeric', minute: '2-digit' });
+  const dated = new Intl.DateTimeFormat(intlLocale, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -118,9 +120,10 @@ export function MobileLaterSheet({
     if (open) setCustom(defaultCustomValue(nowMs));
   }
   const presets = useMemo(() => buildSnoozePresets(nowMs), [nowMs]);
+  const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
   const formatPresetTime = useMemo(
-    () => presetTimeFormatter(i18n.language || undefined, nowMs),
-    [i18n.language, nowMs]
+    () => presetTimeFormatter(intlLocale, nowMs),
+    [intlLocale, nowMs]
   );
   const presetLabel = (id: SnoozePresetId) =>
     id === 'oneHour'
