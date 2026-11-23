@@ -39,6 +39,15 @@ id 由任务 id 加 `epoch` 推导且从不存储，重试或其他设备都不�
 对话的 Agent、实际权限模式、机器和项目；点名的 Role、Agent、机器或项目只覆盖对应部分，点名
 Agent 使用内置默认模式，绝不沿用另一个 Agent 的模式。
 
+**修改提议（2026-11-23，[#2626](https://github.com/LodyAI/Lody/issues/2626)）。** `propose_edit` 写入
+独立的 `schedule_edit_proposal` 通知，只携带提议的名称、prompt 或规则；点“应用”后走普通的编辑保存。
+没有在 `schedule_proposal` 上加字段：不认识它的客户端会给出“创建”，多建一个重复任务。通知保存
+`baseActivityId`，即时间线上最近一条 `created` 或 `edited` 活动；没有保存前后两份副本（Session 历史里
+会多存一份最长 32 KiB 的 prompt，还会形成 schema 循环依赖），也没有用 `updatedAt`（暂停和恢复会改它）。
+内容版本变化后“应用”直接拒绝，不做合并；保存使用活动 id `proposal-<proposalId>`，重复“应用”只写入
+结果。重复调用只比对任务 id 和改动，因为应用后实时任务已经变化。定时消息、目的地、Agent、机器和项目
+不支持提议。
+
 **编辑器（2026-09-24 修订）。** 编辑器直接复用 composer 的组件而非仿制：名称与提示词（以细线分隔）
 共用一个框，框底是 composer 自己的 Agent/模型/权限控件；框下是对话首页的机器、项目与 worktree
 胶囊；运行位置单独成卡片，放在时间规则上方。这取代了原来的四行属性。新建任务直接沿用对话首页上次的

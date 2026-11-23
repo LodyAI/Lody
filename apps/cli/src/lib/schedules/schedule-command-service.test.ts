@@ -638,3 +638,87 @@ it('keeps a cold metadata failure retryable without changing the Schedule', asyn
   await expect(executeScheduleCommand(h.context, command)).resolves.toMatchObject({ ok: true });
   expect((await h.repository.read('schedule'))?.definition.enabled).toBe(false);
 });
+
+describe('proposing a change to an existing schedule', () => {
+  const proposeEdit = (
+    h: Awaited<ReturnType<typeof fixture>>,
+    patch: Record<string, unknown> = { prompt: 'Revised prompt' },
+    scheduleId = 'schedule'
+  ) =>
+    executeScheduleCommand(h.context, {
+      action: 'propose_edit',
+      scheduleId,
+      requestId: 'revise',
+      patch,
+    } as ScheduleCommand);
+
+  it('writes one card against the revision it read and leaves the schedule alone', async () => {
+    const h = await fixture();
+    h.context.requesterSessionId = 'session' as never;
+    await expect(proposeEdit(h)).resolves.toMatchObject({ ok: true, pending: true });
+    await expect(proposeEdit(h)).resolves.toMatchObject({ ok: true, pending: true });
+    expect(h.history()).toHaveLength(1);
+    expect(h.history()[0]).toMatchObject({
+      id: 'schedule-edit-proposal-revise',
+      role: 'system',
+      items: [{ type: 'system_notice', name: 'schedule_edit_proposal' }],
+    });
+    expect(h.history()[0]?.items?.[0]?.meta).toEqual({
+      proposalId: 'revise',
+      scheduleId: 'schedule',
+      title: 'Daily',
+      patch: { prompt: 'Revised prompt' },
+      baseActivityId: 'create',
+      proposedBy: { kind: 'agent' },
+    });
+    expect((await h.repository.read('schedule'))?.prompt).toBe('Synthetic prompt');
+  });
+
+  it('reports the outcome after the person applied it, though the schedule has changed', async () => {
+    const h = await fixture();
+    h.context.requesterSessionId = 'session' as never;
+    await proposeEdit(h);
+    await h.repository.save({
+      scheduleId: 'schedule',
+      draft: { ...h.draft, prompt: 'Revised prompt' },
+      actorId: 'owner',
+      now: 2,
+      activationId: 'applied',
+      activityId: 'proposal-revise',
+    });
+    const session = await h.context.manager.getOrCreateSessionDoc('session' as never);
+    await session.updateHistory((history) =>
+      history.map((entry) => ({
+        ...entry,
+        items: [{ ...entry.items![0]!, meta: { ...entry.items![0]!.meta, outcome: 'applied' } }],
+      }))
+    );
+    await expect(proposeEdit(h)).resolves.toMatchObject({ pending: false, outcome: 'applied' });
+    await expect(proposeEdit(h, { title: 'Other' })).rejects.toThrow('Idempotency');
+  });
+
+  it('refuses what the owner could not apply, before writing anything', async () => {
+    const h = await fixture();
+    await expect(proposeEdit(h)).rejects.toThrow('invoking Session');
+    h.context.requesterSessionId = 'session' as never;
+    await expect(proposeEdit(h, {})).rejects.toThrow('Empty patch');
+    await expect(proposeEdit(h, { prompt: 'Synthetic prompt', title: 'Daily' })).rejects.toThrow(
+      'changes nothing'
+    );
+    await expect(
+      proposeEdit(h, { rule: { kind: 'weekly', weekdays: [], hour: 9, minute: 0 } })
+    ).rejects.toThrow();
+    await expect(proposeEdit(h, undefined, 'missing')).rejects.toThrow('Schedule not found');
+    await h.repository.save({
+      scheduleId: 'theirs',
+      draft: h.draft,
+      actorId: 'teammate',
+      now: 1,
+      activationId: 'theirs',
+      activityId: 'create-theirs',
+      create: true,
+    });
+    await expect(proposeEdit(h, undefined, 'theirs')).rejects.toThrow('Only the Schedule owner');
+    expect(h.history()).toEqual([]);
+  });
+});

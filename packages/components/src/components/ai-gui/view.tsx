@@ -279,6 +279,7 @@ import type {
   MachineId,
   MessageTextSpan,
   SessionFilePayload,
+  ScheduleEditProposalMeta,
   ScheduleProposalMeta,
 } from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
@@ -289,7 +290,10 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
-import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
+import {
+  ScheduleEditProposalNotice,
+  ScheduleProposalNotice,
+} from '@/components/schedules/schedule-proposal-notice';
 import { SessionLimitContinueAction } from '@/components/schedules/quota-continue-action';
 import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
@@ -2872,6 +2876,14 @@ const SystemMessageRowView = ({
           <ScheduleProposalNotice
             key={`schedule-proposal-${itemIndex}`}
             meta={item.meta as ScheduleProposalMeta}
+            sessionId={sessionId}
+            entryId={message.id}
+            itemIndex={itemIndex}
+          />
+        ) : item.type === 'system_notice' && item.name === 'schedule_edit_proposal' && item.meta ? (
+          <ScheduleEditProposalNotice
+            key={`schedule-edit-proposal-${itemIndex}`}
+            meta={item.meta as ScheduleEditProposalMeta}
             sessionId={sessionId}
             entryId={message.id}
             itemIndex={itemIndex}

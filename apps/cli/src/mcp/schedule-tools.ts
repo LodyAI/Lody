@@ -60,6 +60,15 @@ const proposeInputSchema = z
     target: ScheduleProposalTargetSchema.optional(),
   })
   .strict();
+const proposeEditInputSchema = z
+  .object({
+    scheduleId: id,
+    requestId: id,
+    title: proposeInputSchema.shape.title.optional(),
+    prompt: proposeInputSchema.shape.prompt.optional(),
+    rule: ScheduleProposalRuleSchema.optional(),
+  })
+  .strict();
 
 const scheduleCall =
   (deps: Dependencies) =>
@@ -131,6 +140,24 @@ export function registerScheduleTool(server: LodyToolServer, deps: Dependencies)
       inputSchema: proposeInputSchema,
       run: (args) => call({ action: 'propose', ...args }),
     }),
+    propose_edit: defineToolAction({
+      summary:
+        'Propose a change to an owned Schedule for user confirmation; it changes only when the user clicks Apply.',
+      description: [
+        'Propose a change to the title, prompt or rule of an existing Schedule owned by the',
+        'authenticated user. This writes a card into the current chat that shows the change; the',
+        'schedule changes only when the user presses Apply, so do not say it is changed until',
+        'they do. Read the Schedule first with lody_catalog action schedules, then give only the',
+        'fields to change; every other field keeps its value. `prompt` replaces the whole prompt,',
+        'so send the complete new text: when that read reports promptCharsOmitted above 0, ask',
+        'the user for the full prompt instead of rewriting a truncated one. `rule` takes the',
+        'shapes of propose. The card refuses to apply after someone edits the Schedule; read it',
+        'again and propose with a new requestId. Reuse requestId only when retrying the same call.',
+      ].join(' '),
+      inputSchema: proposeEditInputSchema,
+      run: ({ scheduleId, requestId, ...patch }) =>
+        call({ action: 'propose_edit', scheduleId, requestId, patch }),
+    }),
     pause: defineToolAction({
       summary: 'Pause future runs of one owned Schedule; already accepted Sessions continue.',
       description:
@@ -143,11 +170,11 @@ export function registerScheduleTool(server: LodyToolServer, deps: Dependencies)
     SCHEDULE_TOOL_NAME,
     {
       summary:
-        'Propose scheduled work for user confirmation, or pause an owned Schedule. Read Schedules with lody_catalog.',
+        'Propose scheduled work or a change to an owned Schedule for user confirmation, or pause an owned Schedule. Read Schedules with lody_catalog.',
       title: 'Change Lody Schedules',
       description:
-        'Actions: propose (writes a confirmation card; nothing is scheduled until the user clicks Create) and pause. Read Schedules with lody_catalog action schedules.',
-      inputSchema: actionToolInputSchema(actions, 'propose or pause.'),
+        'Actions: propose (writes a confirmation card; nothing is scheduled until the user clicks Create), propose_edit (writes a card with a change to an existing Schedule; nothing changes until the user clicks Apply) and pause. Read Schedules with lody_catalog action schedules.',
+      inputSchema: actionToolInputSchema(actions, 'propose, propose_edit or pause.'),
       actions,
     },
     (input) => runToolAction(actions, input)

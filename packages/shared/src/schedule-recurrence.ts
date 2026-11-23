@@ -1,7 +1,8 @@
-import type { ScheduleProposalRule } from './ai';
+import type { ScheduleEditProposalMeta, ScheduleProposalRule } from './ai';
 import { SCHEDULE_CUSTOM_STEP_MAX } from './message-schemas';
 import { validateScheduleTrigger } from './schedule-time';
-import type { ScheduleTrigger } from './schedule-types';
+import type { ScheduleDraft } from './schedule-repository';
+import type { ScheduleDocument, ScheduleTrigger } from './schedule-types';
 
 /**
  * The human-facing shape of a time rule.
@@ -475,6 +476,45 @@ export function scheduleProposalRuleToTrigger(
 ): ScheduleTrigger {
   const recurrence = scheduleProposalRuleToRecurrence(rule, deviceTimeZone);
   return recurrence ? recurrenceToTrigger(recurrence, now) : { kind: 'manual' };
+}
+
+/**
+ * Id of the latest activity that wrote the schedule's content. Pause, resume
+ * and manual runs keep it, so they do not make an edit proposal stale.
+ */
+export function scheduleContentRevision(document: Pick<ScheduleDocument, 'timeline'>): string {
+  const writes = document.timeline.filter((e) => e.kind === 'created' || e.kind === 'edited');
+  return writes[writes.length - 1]?.id ?? '';
+}
+
+/**
+ * The draft an edit proposal means for the schedule as it is now: the proposed
+ * fields over everything else unchanged. `null` when the schedule was edited
+ * after the agent read it, so a stale proposal never overwrites a newer edit.
+ */
+export function applyScheduleEditProposal(
+  proposal: Pick<ScheduleEditProposalMeta, 'patch' | 'baseActivityId'>,
+  document: ScheduleDocument,
+  now: number,
+  machineTimeZone: string
+): ScheduleDraft | null {
+  if (scheduleContentRevision(document) !== proposal.baseActivityId) return null;
+  const { patch } = proposal;
+  const current = document.definition;
+  return {
+    title: patch.title ?? current.title,
+    prompt: patch.prompt ?? document.prompt,
+    trigger: patch.rule
+      ? scheduleProposalRuleToTrigger(patch.rule, now, machineTimeZone)
+      : current.trigger,
+    machineId: current.machineId,
+    misfirePolicy: current.misfirePolicy,
+    overlapPolicy: current.overlapPolicy,
+    agent: current.agent,
+    ...(current.project ? { project: current.project } : {}),
+    destination: current.destination,
+    retryPolicy: current.retryPolicy,
+  };
 }
 
 /**

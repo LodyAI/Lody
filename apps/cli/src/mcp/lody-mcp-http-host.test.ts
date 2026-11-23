@@ -248,6 +248,18 @@ describe('MCP HTTP host wire behavior', () => {
           before: { sessionId: 'session-c' },
           after: { sessionId: 'session-c' },
         });
+        const edit = await callTool(version, 'session-c', 'lody_schedule', {
+          action: 'propose_edit',
+          arguments: { scheduleId: 'schedule-c', requestId: 'edit-c', prompt: 'Revised task' },
+        });
+        expect(JSON.parse((await edit.json()).result.content[0].text)).toMatchObject({
+          command: {
+            action: 'propose_edit',
+            scheduleId: 'schedule-c',
+            requestId: 'edit-c',
+            patch: { prompt: 'Revised task' },
+          },
+        });
       } finally {
         abort.abort();
         releaseA.resolve();
@@ -264,6 +276,17 @@ describe('MCP HTTP host wire behavior', () => {
         ['lody_catalog', { action: 'schedules', arguments: { limit: 0 } }],
         ['lody_catalog', { action: 'schedules', arguments: { scheduleId: 'bad/id' } }],
         ['lody_schedule', { action: 'pause', arguments: { scheduleId: 'valid', requestId: '' } }],
+        [
+          'lody_schedule',
+          {
+            action: 'propose_edit',
+            arguments: {
+              scheduleId: 'valid',
+              requestId: 'valid',
+              destination: { kind: 'own_session' },
+            },
+          },
+        ],
         [
           'lody_schedule',
           {
