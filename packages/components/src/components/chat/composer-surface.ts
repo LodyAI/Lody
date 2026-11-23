@@ -21,6 +21,7 @@ export const composerSurfaceStyles = stylex.create({
     boxShadow: 'none',
   },
   sessionSurface: {
+    position: 'relative',
     containerType: 'inline-size',
     containerName: 'composer-box',
     display: 'flex',
