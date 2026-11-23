@@ -94,6 +94,13 @@ impl HistoryPort for MemoryHistory {
         }
         Ok(())
     }
+    fn erase_workspace_turns(&self, ws: &WorkspaceId) -> PortResult<()> {
+        self.turns
+            .lock()
+            .expect("history lock")
+            .retain(|(k_ws, _), _| k_ws != ws);
+        Ok(())
+    }
 }
 
 struct NoopInbox;
@@ -365,6 +372,125 @@ async fn control_cancel_preempts_backlog_of_streamed_chunks_and_sibling_failure_
         panic!("unexpected response");
     };
     assert_eq!(broken_turns[0].outcome, Some(TurnTerminalOutcome::Failed));
+
+    runtime.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn detaching_and_erasing_one_workspace_preserves_sibling_workspace_and_rejects_encrypted_downgrade()
+ {
+    let runtime = build_test_runtime(Arc::new(AtomicUsize::new(0)));
+    let caller = VerifiedPrincipal::LocalHost {
+        caller_pid: Some(1),
+        account_id: None,
+    };
+    let ws_a = WorkspaceId("ws_encrypted_a".to_string());
+    let ws_b = WorkspaceId("ws_plaintext_b".to_string());
+
+    runtime
+        .execute_async(
+            &caller,
+            AppCommand::AttachWorkspace {
+                workspace_id: ws_a.clone(),
+                security_mode: Some(WorkspaceSecurityMode::Encrypted {
+                    genesis_hash: "gen_1".to_string(),
+                }),
+            },
+        )
+        .await
+        .expect("attach ws_a");
+
+    let downgrade_err = runtime
+        .execute_async(
+            &caller,
+            AppCommand::AttachWorkspace {
+                workspace_id: ws_a.clone(),
+                security_mode: Some(WorkspaceSecurityMode::Plaintext),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(downgrade_err.kind, PortErrorKind::Conflict);
+
+    for (ws, sid) in [(&ws_a, "s_a"), (&ws_b, "s_b")] {
+        let session_id = SessionId((*sid).to_string());
+        runtime
+            .execute_async(
+                &caller,
+                AppCommand::CreateSession {
+                    workspace_id: ws.clone(),
+                    session_id: session_id.clone(),
+                    turn_id: TurnId("t_1".to_string()),
+                    local_project_id: None,
+                    use_worktree: false,
+                    adapter_id: "ok".to_string(),
+                    custom_acp: None,
+                    prompt: "hello".to_string(),
+                },
+            )
+            .await
+            .expect("create session");
+        let h = runtime.session_handle(ws, &session_id).unwrap();
+        let _ = h.inspect_phase().await.unwrap();
+    }
+
+    let detach_resp = runtime
+        .execute_async(
+            &caller,
+            AppCommand::DetachWorkspace {
+                workspace_id: ws_a.clone(),
+                erase_local_state: true,
+            },
+        )
+        .await
+        .expect("detach ws_a");
+    assert_eq!(
+        detach_resp,
+        AppResponse::WorkspaceDetached {
+            workspace_id: ws_a.clone(),
+            drained_sessions: 1,
+        }
+    );
+    assert!(
+        runtime
+            .session_handle(&ws_a, &SessionId("s_a".to_string()))
+            .is_none()
+    );
+    assert!(
+        runtime
+            .session_handle(&ws_b, &SessionId("s_b".to_string()))
+            .is_some()
+    );
+
+    let AppResponse::SessionHistory { turns: turns_a } = runtime
+        .query_async(
+            &caller,
+            AppQuery::GetSessionHistory {
+                workspace_id: ws_a,
+                session_id: SessionId("s_a".to_string()),
+            },
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected history");
+    };
+    assert!(turns_a.is_empty());
+
+    let AppResponse::SessionHistory { turns: turns_b } = runtime
+        .query_async(
+            &caller,
+            AppQuery::GetSessionHistory {
+                workspace_id: ws_b,
+                session_id: SessionId("s_b".to_string()),
+            },
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected history");
+    };
+    assert_eq!(turns_b.len(), 1);
 
     runtime.shutdown().await;
 }

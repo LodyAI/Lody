@@ -5,7 +5,7 @@ pub use lody_ports::{
     HistoryTurnRecord, LocalProjectId, LocalProjectRecord, MachineId, PermissionDecision,
     PlatformCapability, PortError, PortErrorKind, PortResult, ProfileId, SessionId,
     SessionMetaSnapshot, SteerVerdict, StorageLeaseMode, TurnDiffSummary, TurnId,
-    TurnTerminalOutcome, UserId, VerifiedPrincipal, WorkspaceId,
+    TurnTerminalOutcome, UserId, VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -17,6 +17,14 @@ pub enum AppCommand {
         profile: Box<BackendProfile>,
     },
     ClearBackendProfile,
+    AttachWorkspace {
+        workspace_id: WorkspaceId,
+        security_mode: Option<WorkspaceSecurityMode>,
+    },
+    DetachWorkspace {
+        workspace_id: WorkspaceId,
+        erase_local_state: bool,
+    },
     RegisterProject {
         name: String,
         root_path: PathBuf,
@@ -71,7 +79,9 @@ pub enum AppCommand {
 impl AppCommand {
     pub fn target_workspace(&self) -> Option<&WorkspaceId> {
         match self {
-            Self::CreateSession { workspace_id, .. }
+            Self::AttachWorkspace { workspace_id, .. }
+            | Self::DetachWorkspace { workspace_id, .. }
+            | Self::CreateSession { workspace_id, .. }
             | Self::SendChat { workspace_id, .. }
             | Self::SteerTurn { workspace_id, .. }
             | Self::CancelSession { workspace_id, .. }
@@ -89,6 +99,8 @@ impl AppCommand {
             self,
             Self::ConfigureBackendProfile { .. }
                 | Self::ClearBackendProfile
+                | Self::AttachWorkspace { .. }
+                | Self::DetachWorkspace { .. }
                 | Self::RegisterProject { .. }
         )
     }
@@ -109,6 +121,7 @@ impl AppCommand {
 #[serde(tag = "query", rename_all = "snake_case")]
 pub enum AppQuery {
     DaemonStatus,
+    ListAttachedWorkspaces,
     ListProjects,
     ListSessions {
         workspace_id: WorkspaceId,
@@ -133,6 +146,13 @@ pub struct DaemonStatusView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachedWorkspaceView {
+    pub workspace_id: WorkspaceId,
+    pub security_mode: WorkspaceSecurityMode,
+    pub active_session_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AppResponse {
     DaemonStatus(DaemonStatusView),
@@ -140,6 +160,14 @@ pub enum AppResponse {
         profile_id: ProfileId,
     },
     ProfileCleared,
+    WorkspaceAttached(AttachedWorkspaceView),
+    WorkspaceDetached {
+        workspace_id: WorkspaceId,
+        drained_sessions: usize,
+    },
+    AttachedWorkspacesListed {
+        workspaces: Vec<AttachedWorkspaceView>,
+    },
     ProjectRegistered(LocalProjectRecord),
     ProjectsListed {
         projects: Vec<LocalProjectRecord>,
@@ -181,7 +209,7 @@ pub fn enforce_command_policy(
     if cmd.requires_local_host_authority() && caller.is_remote() {
         return Err(PortError::new(
             PortErrorKind::Forbidden,
-            "host configuration and local project registration require local host authority",
+            "host configuration, workspace mount control, and local project registration require local host authority",
         ));
     }
 

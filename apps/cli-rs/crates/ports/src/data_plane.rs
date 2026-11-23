@@ -133,4 +133,7 @@ pub trait HistoryPort: Send + Sync {
         session_id: &SessionId,
         record: &HistoryTurnRecord,
     ) -> PortResult<()>;
+    fn erase_workspace_turns(&self, _workspace_id: &WorkspaceId) -> PortResult<()> {
+        Ok(())
+    }
 }

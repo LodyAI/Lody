@@ -2,22 +2,24 @@
 #![deny(clippy::await_holding_lock)]
 
 pub mod actor;
+pub mod workspace;
 
 pub use actor::{ControlCommand, SessionHandle, SessionSpawnOptions, spawn_session_actor};
 use lody_app::{
-    AppCommand, AppQuery, AppResponse, ApplicationService, CapabilitySet, CustomCommandSpec,
-    DaemonStatusView, LocalProjectId, PortError, PortErrorKind, PortResult, ProfileId, SessionId,
-    StorageLeaseMode, VerifiedPrincipal, WorkspaceId, enforce_command_policy,
+    AppCommand, AppQuery, AppResponse, ApplicationService, AttachedWorkspaceView, CapabilitySet,
+    CustomCommandSpec, DaemonStatusView, LocalProjectId, PortError, PortErrorKind, PortResult,
+    ProfileId, SessionId, StorageLeaseMode, VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode,
+    enforce_command_policy,
 };
 use lody_kernel::{FrozenTurnInvocation, KernelEvent, TurnSourceKind};
 use lody_ports::{
     AcpLauncherPort, ArtifactRegistryPort, BackendPort, DiffStorePort, EnginePort, HistoryPort,
-    InboxStorePort, ProjectStorePort, WorkspaceSecurityMode, WorktreePort,
+    InboxStorePort, ProjectStorePort, WorktreePort,
 };
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::Semaphore;
+pub use workspace::{FleetWorkspaceTable, WorkspaceMount};
 
 const DEFAULT_SETTLING_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -37,7 +39,7 @@ pub struct DaemonDependencies {
 pub struct DaemonRuntime {
     deps: Arc<DaemonDependencies>,
     acp_start_semaphore: Arc<Semaphore>,
-    sessions: RwLock<HashMap<(WorkspaceId, SessionId), SessionHandle>>,
+    workspaces: RwLock<FleetWorkspaceTable>,
     settling_timeout: Duration,
     owned_tokio: Option<tokio::runtime::Runtime>,
 }
@@ -58,7 +60,7 @@ impl DaemonRuntime {
         Self {
             deps: Arc::new(deps),
             acp_start_semaphore: Arc::new(Semaphore::new(max_starts)),
-            sessions: RwLock::new(HashMap::new()),
+            workspaces: RwLock::new(FleetWorkspaceTable::default()),
             settling_timeout,
             owned_tokio,
         }
@@ -80,11 +82,58 @@ impl DaemonRuntime {
         workspace_id: &WorkspaceId,
         session_id: &SessionId,
     ) -> Option<SessionHandle> {
-        self.sessions
+        self.workspaces
             .read()
-            .expect("sessions lock")
-            .get(&(workspace_id.clone(), session_id.clone()))
-            .cloned()
+            .expect("workspaces lock")
+            .get_session(workspace_id, session_id)
+    }
+
+    pub fn attach_workspace(
+        &self,
+        workspace_id: &WorkspaceId,
+        explicit_mode: Option<WorkspaceSecurityMode>,
+    ) -> PortResult<AttachedWorkspaceView> {
+        let mode = match explicit_mode {
+            Some(m) => m,
+            None => self
+                .deps
+                .engine
+                .read_workspace_security_mode(workspace_id)?,
+        };
+        self.workspaces
+            .write()
+            .expect("workspaces lock")
+            .attach_or_update(workspace_id, mode)
+    }
+
+    pub async fn detach_workspace(
+        &self,
+        workspace_id: &WorkspaceId,
+        erase_local_state: bool,
+    ) -> PortResult<usize> {
+        let handles = self
+            .workspaces
+            .write()
+            .expect("workspaces lock")
+            .begin_detach(workspace_id)
+            .unwrap_or_default();
+
+        let drained = handles.len();
+        for handle in handles {
+            handle.shutdown().await;
+        }
+
+        self.workspaces
+            .write()
+            .expect("workspaces lock")
+            .finish_detach(workspace_id);
+
+        if erase_local_state {
+            self.deps.inbox.erase_workspace_inbox(workspace_id)?;
+            self.deps.history.erase_workspace_turns(workspace_id)?;
+        }
+
+        Ok(drained)
     }
 
     fn ensure_session_actor(
@@ -96,26 +145,27 @@ impl DaemonRuntime {
         use_worktree: bool,
         custom_acp: Option<CustomCommandSpec>,
     ) -> PortResult<SessionHandle> {
-        let key = (workspace_id.clone(), session_id.clone());
-        if let Some(existing) = self.sessions.read().expect("sessions lock").get(&key) {
-            return Ok(existing.clone());
+        if let Some(existing) = self.session_handle(workspace_id, session_id) {
+            return Ok(existing);
         }
 
-        let mode = self
+        let engine_mode = self
             .deps
             .engine
             .read_workspace_security_mode(workspace_id)?;
-        let workspace_encrypted = matches!(mode, WorkspaceSecurityMode::Encrypted { .. });
         let project_root = match &local_project_id {
             Some(pid) => self.deps.projects.get_project(pid)?.map(|r| r.root_path),
             None => None,
         };
 
-        let mut guard = self.sessions.write().expect("sessions lock");
-        if let Some(existing) = guard.get(&key) {
+        let mut guard = self.workspaces.write().expect("workspaces lock");
+        let mount = guard.get_or_insert_mount(workspace_id, engine_mode)?;
+        if let Some(existing) = mount.sessions.get(session_id) {
             return Ok(existing.clone());
         }
 
+        let workspace_encrypted =
+            matches!(mount.security_mode, WorkspaceSecurityMode::Encrypted { .. });
         let handle = spawn_session_actor(
             SessionSpawnOptions {
                 workspace_id: workspace_id.clone(),
@@ -131,7 +181,7 @@ impl DaemonRuntime {
             Arc::clone(&self.deps),
             Arc::clone(&self.acp_start_semaphore),
         );
-        guard.insert(key, handle.clone());
+        mount.sessions.insert(session_id.clone(), handle.clone());
         Ok(handle)
     }
 
@@ -179,6 +229,25 @@ impl DaemonRuntime {
                 profile_id: profile.profile_id,
             }),
             AppCommand::ClearBackendProfile => Ok(AppResponse::ProfileCleared),
+            AppCommand::AttachWorkspace {
+                workspace_id,
+                security_mode,
+            } => {
+                let view = self.attach_workspace(&workspace_id, security_mode)?;
+                Ok(AppResponse::WorkspaceAttached(view))
+            }
+            AppCommand::DetachWorkspace {
+                workspace_id,
+                erase_local_state,
+            } => {
+                let drained_sessions = self
+                    .detach_workspace(&workspace_id, erase_local_state)
+                    .await?;
+                Ok(AppResponse::WorkspaceDetached {
+                    workspace_id,
+                    drained_sessions,
+                })
+            }
             AppCommand::RegisterProject { name, root_path } => {
                 let rec = self.deps.projects.register_project(&name, &root_path)?;
                 Ok(AppResponse::ProjectRegistered(rec))
@@ -318,10 +387,10 @@ impl DaemonRuntime {
                 session_id,
             } => {
                 let removed = self
-                    .sessions
+                    .workspaces
                     .write()
-                    .expect("sessions lock")
-                    .remove(&(workspace_id, session_id.clone()));
+                    .expect("workspaces lock")
+                    .remove_session(&workspace_id, &session_id);
                 if let Some(handle) = removed {
                     handle.archive().await?;
                 }
@@ -339,10 +408,11 @@ impl DaemonRuntime {
     }
 
     pub async fn shutdown(&self) {
-        let handles: Vec<SessionHandle> = {
-            let mut guard = self.sessions.write().expect("sessions lock");
-            guard.drain().map(|(_, h)| h).collect()
-        };
+        let handles = self
+            .workspaces
+            .write()
+            .expect("workspaces lock")
+            .drain_all();
         for handle in handles {
             handle.shutdown().await;
         }
@@ -366,6 +436,14 @@ impl DaemonRuntime {
                     capabilities: self.capabilities(),
                 }))
             }
+            AppQuery::ListAttachedWorkspaces => {
+                let workspaces = self
+                    .workspaces
+                    .read()
+                    .expect("workspaces lock")
+                    .list_views();
+                Ok(AppResponse::AttachedWorkspacesListed { workspaces })
+            }
             AppQuery::ListProjects => {
                 let projects = self.deps.projects.list_projects()?;
                 Ok(AppResponse::ProjectsListed { projects })
@@ -380,15 +458,9 @@ impl DaemonRuntime {
                 let turns = if workspace_id.0.is_empty() || workspace_id.0 == "*" {
                     self.deps.history.read_turns_by_session_id(&session_id)?
                 } else {
-                    let exact = self
-                        .deps
+                    self.deps
                         .history
-                        .read_session_turns(&workspace_id, &session_id)?;
-                    if exact.is_empty() {
-                        self.deps.history.read_turns_by_session_id(&session_id)?
-                    } else {
-                        exact
-                    }
+                        .read_session_turns(&workspace_id, &session_id)?
                 };
                 Ok(AppResponse::SessionHistory { turns })
             }

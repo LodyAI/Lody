@@ -93,6 +93,9 @@ pub trait InboxStorePort: Send + Sync {
         session_id: &SessionId,
         paused: bool,
     ) -> PortResult<()>;
+    fn erase_workspace_inbox(&self, _workspace_id: &WorkspaceId) -> PortResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

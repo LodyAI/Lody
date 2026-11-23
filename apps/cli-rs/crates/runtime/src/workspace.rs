@@ -1,0 +1,137 @@
+use crate::actor::SessionHandle;
+use lody_app::AttachedWorkspaceView;
+use lody_ports::{
+    PortError, PortErrorKind, PortResult, SessionId, WorkspaceId, WorkspaceSecurityMode,
+};
+use std::collections::HashMap;
+
+pub struct WorkspaceMount {
+    pub workspace_id: WorkspaceId,
+    pub security_mode: WorkspaceSecurityMode,
+    pub draining: bool,
+    pub sessions: HashMap<SessionId, SessionHandle>,
+}
+
+impl WorkspaceMount {
+    pub fn new(workspace_id: WorkspaceId, security_mode: WorkspaceSecurityMode) -> Self {
+        Self {
+            workspace_id,
+            security_mode,
+            draining: false,
+            sessions: HashMap::new(),
+        }
+    }
+
+    pub fn view(&self) -> AttachedWorkspaceView {
+        AttachedWorkspaceView {
+            workspace_id: self.workspace_id.clone(),
+            security_mode: self.security_mode.clone(),
+            active_session_count: self.sessions.len(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct FleetWorkspaceTable {
+    mounts: HashMap<WorkspaceId, WorkspaceMount>,
+}
+
+impl FleetWorkspaceTable {
+    pub fn attach_or_update(
+        &mut self,
+        workspace_id: &WorkspaceId,
+        mode: WorkspaceSecurityMode,
+    ) -> PortResult<AttachedWorkspaceView> {
+        if let Some(existing) = self.mounts.get_mut(workspace_id) {
+            if existing.draining {
+                return Err(PortError::new(
+                    PortErrorKind::Unavailable,
+                    "workspace is currently detaching",
+                ));
+            }
+            existing
+                .security_mode
+                .validate_transition(&mode)
+                .map_err(|msg| PortError::new(PortErrorKind::Conflict, msg))?;
+            existing.security_mode = mode;
+            return Ok(existing.view());
+        }
+
+        let mount = WorkspaceMount::new(workspace_id.clone(), mode);
+        let view = mount.view();
+        self.mounts.insert(workspace_id.clone(), mount);
+        Ok(view)
+    }
+
+    pub fn begin_detach(&mut self, workspace_id: &WorkspaceId) -> Option<Vec<SessionHandle>> {
+        let mount = self.mounts.get_mut(workspace_id)?;
+        mount.draining = true;
+        Some(mount.sessions.drain().map(|(_, h)| h).collect())
+    }
+
+    pub fn finish_detach(&mut self, workspace_id: &WorkspaceId) {
+        self.mounts.remove(workspace_id);
+    }
+
+    pub fn drain_all(&mut self) -> Vec<SessionHandle> {
+        let mut all = Vec::new();
+        for (_, mut mount) in self.mounts.drain() {
+            all.extend(mount.sessions.drain().map(|(_, h)| h));
+        }
+        all
+    }
+
+    pub fn get_session(
+        &self,
+        workspace_id: &WorkspaceId,
+        session_id: &SessionId,
+    ) -> Option<SessionHandle> {
+        self.mounts.get(workspace_id).and_then(|m| {
+            (!m.draining)
+                .then(|| m.sessions.get(session_id).cloned())
+                .flatten()
+        })
+    }
+
+    pub fn remove_session(
+        &mut self,
+        workspace_id: &WorkspaceId,
+        session_id: &SessionId,
+    ) -> Option<SessionHandle> {
+        self.mounts
+            .get_mut(workspace_id)
+            .and_then(|m| m.sessions.remove(session_id))
+    }
+
+    pub fn list_views(&self) -> Vec<AttachedWorkspaceView> {
+        let mut out: Vec<AttachedWorkspaceView> = self
+            .mounts
+            .values()
+            .filter(|m| !m.draining)
+            .map(WorkspaceMount::view)
+            .collect();
+        out.sort_by(|a, b| a.workspace_id.cmp(&b.workspace_id));
+        out
+    }
+
+    pub fn get_or_insert_mount(
+        &mut self,
+        workspace_id: &WorkspaceId,
+        default_mode: WorkspaceSecurityMode,
+    ) -> PortResult<&mut WorkspaceMount> {
+        if !self.mounts.contains_key(workspace_id) {
+            self.mounts.insert(
+                workspace_id.clone(),
+                WorkspaceMount::new(workspace_id.clone(), default_mode),
+            );
+        }
+        let mount = self.mounts.get_mut(workspace_id).expect("mount inserted");
+        if mount.draining {
+            return Err(PortError::new(
+                PortErrorKind::Unavailable,
+                "workspace is currently detaching",
+            ));
+        }
+        Ok(mount)
+    }
+}

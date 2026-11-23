@@ -285,6 +285,29 @@ impl InboxStorePort for SqliteStore {
         .map_err(map_sql_err)?;
         Ok(())
     }
+
+    fn erase_workspace_inbox(&self, workspace_id: &WorkspaceId) -> PortResult<()> {
+        let mut conn = self.conn.lock().expect("sqlite lock");
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql_err)?;
+        tx.execute(
+            "DELETE FROM lody_inbox_turns WHERE workspace_id = ?1",
+            params![&workspace_id.0],
+        )
+        .map_err(map_sql_err)?;
+        tx.execute(
+            "DELETE FROM lody_inbox_session_flags WHERE workspace_id = ?1",
+            params![&workspace_id.0],
+        )
+        .map_err(map_sql_err)?;
+        tx.commit().map_err(map_sql_err)?;
+        let auto_db = self.layout.automation_workspace_db(&workspace_id.0);
+        if auto_db.exists() {
+            let _ = fs::remove_file(auto_db);
+        }
+        Ok(())
+    }
 }
 
 impl ProjectStorePort for SqliteStore {
@@ -455,6 +478,16 @@ impl HistoryPort for SqliteStore {
              VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(session_id, turn_id) DO UPDATE SET record_json = excluded.record_json",
             params![&workspace_id.0, &session_id.0, &record.turn_id.0, &json],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    fn erase_workspace_turns(&self, workspace_id: &WorkspaceId) -> PortResult<()> {
+        let conn = self.conn.lock().expect("sqlite lock");
+        conn.execute(
+            "DELETE FROM lody_session_turns WHERE workspace_id = ?1",
+            params![&workspace_id.0],
         )
         .map_err(map_sql_err)?;
         Ok(())
