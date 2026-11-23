@@ -273,6 +273,7 @@ flowchart TB
 0. **第一方与插件共用的类型化宿主命令注册表（`lodyCommands` + `lody.execute` / `useLodyCommand` / `ctx.lody.execute`）：**
    - Lody 不另建第二套仅供插件使用的命令系统，也不将原生业务变更锁死在内部 React Hook 中，而是将宿主全部业务写操作收敛为类型化 `LodyCommandDescriptor<S, TInput, TOutput>` 注册表 `lodyCommands`（完整覆盖会话执行 `sessionCreate` / `sessionSend` / `sessionRespondInteraction` / `sessionStop` / `sessionArchive` / `sessionRestore` / `sessionFork`、基于 [`status-view/command.ts`](../packages/shared/src/status-view/command.ts) `planStatusViewCommand` 与 [`use-session-actions.ts`](../packages/components/src/hooks/use-session-actions.ts) 的状态分流命令 `sessionSetPinned` / `sessionSnooze` / `sessionSettle` / `sessionMoveToFocus` / `sessionMoveOrder` / `sessionUpdateTitle` / `sessionMarkRead` / `sessionMarkUnread`、置顶分组 `pinSection*` 以及定时任务控制 `scheduleSetEnabled` / `scheduleRunNow`）。
    - 第一方 UI 与第三方插件通过客户端 `lody.execute(target, command, input)` / `useLodyCommand` 及机器侧 `ctx.lody.execute(target, command, input)` **共用同一套授权与执行管线**（同时保留 `sessions.{create, send, respondInteraction, requestStop, requestArchive}` 作为指向 `lodyCommands.session*` 的轻量语义别名）。
+   - **显式调用主体（`ActorContext`）与第一方 `prefer` / `manage` / `execute` 授权复用：** 每次 `lodyCommands` 调用均绑定宿主不可伪造的 `ActorContext`，绝不仅凭 `target` 放行，也绝不因插件运行在机器所有者的 Daemon 上就赋予替全体成员改偏好或点审批的越权能力：客户端绑定当前登录用户；机器侧 `plugin/query` 与 `plugin/mutate` 绑定发起 RPC 的已认证成员；`ToolExecutionContext` 与 `MachineEventContext` 绑定该会话/回合所属授权用户（`SessionMeta.userId` / 经核验的 `originTurn` 签名人）；`MachineStartupContext`（`onStart`）对执行与交互命令强制从经核验的 `originTurn` 提取签名主体，并对无明确用户主体的个人偏好写操作（如 `sessionMarkRead` / `sessionMarkUnread`）以 `forbidden` 拒绝。两端执行器均针对该 `ActorContext` 复用第一方现有的 `prefer` 与 `manage` 分级守卫（[`use-session-management-guard.ts`](../packages/components/src/hooks/use-session-management-guard.ts)、[`status-view/command.ts`](../packages/shared/src/status-view/command.ts)）及 E2EE `MachineSharing` / `e2eeIntent` 门禁。
 1. **原子化 `(requestId, businessKey)` `sessions.create` 幂等回执：**
    - 按 `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` 持久化。
    - 重放完全相同的归一化请求（即使目标 Session 后来已归档）始终返回原始 `SessionRef`；复用相同 `requestId` 但篡改参数时拒绝 `idempotency_conflict`。
@@ -313,9 +314,11 @@ flowchart TB
 
 ### 8.5 客户端插件实例生命周期与 `clientDigest` 幂等规则
 
-`ClientPluginHost` 严格分离 **安装实例身份（Installation Identity：`(workspace_id, source_key, plugin_id)`，其中机器侧插件 `source_key = "machine:<machine_id>"`，纯本地客户端安装为 `"local"`）** 与 **前端产物版本身份（Bundle Version Identity：`(plugin_id, clientDigest)`）**：
+`ClientPluginHost` 严格区分三层客户端身份，使多机工作区在共享不可变产物字节的同时彻底隔离模块级可变状态：
 
-- **安装实例身份（`(workspace_id, source_key, plugin_id)`）：** 决定该实例归属哪台来源机器、绑定哪份配置与 `query_cache` 以及默认连接哪个后端实例。同一工作区下两台机器即便安装了完全相同版本与相同 `clientDigest` 的同一插件，也各自持有独立的 `ClientPluginInstance` 而绝不串台；前端代码缓存与模块编译则按 `(plugin_id, clientDigest)` 共享去重。
+- **安装实例键（Installation Key：`(workspace_id, source_key, plugin_id)`，其中 `source_key` 为 `"machine:<machine_id>"` 或 `"local"`）：** 决定实例归属、来源机器 RPC 路由、绑定 `config`、`abort_controller`、事件订阅与 `query_cache`。
+- **不可变产物键（Bundle Key：`(plugin_id, clientDigest)`）：** 仅用于去重共享 `plugin/bundle-chunk` 网络下载、SHA-256 完整性校验、托管缓存落盘与不可变静态资源 `assets/*`。
+- **按安装实例隔离的模块求值（Per-Installation Module Evaluation：`(workspace_id, source_key, plugin_id, clientDigest)`）：** 每个 Installation 在**各自独立的 ES 模块求值实例**中执行 `client.js`（例如按安装实例分配并在卸载/HMR 时吊销的独立 Blob/Module URL，同时共享宿主外置的 `react` / `zod` / `@lody/ui` / `@lody/plugin-sdk/*` 单例），确保插件 `client.tsx` 顶层的模块级变量在两台机器的同名插件实例之间绝不串台。
 
 - 若 `clientDigest` 未变且处于 `Active`，调和过程 **MUST** 原地保留现有实例、事件监听与 `query_cache`。
 - 当 `clientDigest` 变化或执行 `disable` 时，**MUST** 先触发 `abort_controller.abort()`（摘除全部 `events.on` 与进行中查询）、执行 `cleanup_fn`、注销全部 UI/匹配器/主题贡献、移除 `<style>` 节点并清空 `query_cache`，随后才允许挂载新实例。
@@ -328,7 +331,7 @@ flowchart TB
 
 `PluginHost` 与 `machine` 子进程通过 `stdio: ['ignore', 'pipe', 'pipe', 'ipc']` 通信：
 
-- **Host -> Child：** `init`（`pluginId`、`instanceId`、`dataDir`、`config`）、`start`（`ready` 后派发一次以触发 `machine.onStart`）、`invoke`（`callId`、`kind`、`descriptorId`、`scope`、`target`、`input`）、`event`（`eventId`、`eventType`、`payload`、`rootUserTurnId?`）、`cancel`（`callId`）、`host_result`、`shutdown`（`graceMs`）。
+- **Host -> Child：** `init`（`pluginId`、`instanceId`、`dataDir`、`config`）、`start`（`ready` 后派发一次以触发 `machine.onStart`）、`invoke`（`callId`、`kind`、`descriptorId`、`scope`、`target`、`actorUserId`、`input`）、`event`（`eventId`、`eventType`、`payload`、`actorUserId?`、`rootUserTurnId?`）、`cancel`（`callId`）、`host_result`、`shutdown`（`graceMs`）。
 - **Child -> Host：** `ready`（`handlers`、`subscribedEvents`）、`result`（`callId`、`ok`、`data`/`error`）、`invalidate`、`host_call`（`op`: `"lody.read" | "lody.readSnapshot" | "lody.execute" | "sessions.create" | "sessions.send" | "sessions.respondInteraction" | "sessions.requestStop" | "sessions.requestArchive"`）。
 - `stdout` 与 `stderr` 仅作诊断日志写入 `logs_ring`；畸形 IPC 帧立即终止子进程并置为 `Faulted`。
 
