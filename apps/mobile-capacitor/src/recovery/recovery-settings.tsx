@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+// Keep this on the public package subpath: Vite/StyleX production builds resolve it through package.json exports.
 import { themeSpace } from '@lody/components/style/theme-scale.stylex';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
