@@ -238,7 +238,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
           for (const listener of listeners)
             listener({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER });
         } else {
-          if (current.link) current.forwardOffset = await current.link.position();
           await changes(current);
         }
       }
@@ -304,18 +303,20 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
             }),
           };
           if (meta.remoteId) {
-            const registry = new RemoteRegistry(lease.storage);
-            const remoteId = unhex(meta.remoteId);
-            const registered = await registry.get(remoteId);
-            if (registered) {
+            await network(replica, async () => {
+              const registry = new RemoteRegistry(lease.storage);
+              const remoteId = unhex(replica.meta.remoteId!);
+              if (!(await registry.get(remoteId))) return;
               const scope = await new Executor(lease.storage).scope(registry, remoteId, stream.id);
-              replica.forwardOffset = await Link.openPartial(
-                lease.storage,
-                stream,
-                scope,
-                linkLimitsForSync()
-              ).position();
-            }
+              const link = Link.openPartial(lease.storage, stream, scope, linkLimitsForSync());
+              const offset = await link.position();
+              if (offset === undefined) return;
+              // The SDK receipt can survive a crash before its frames were
+              // applied. Drain it locally before exposing an applied cursor.
+              await link.catchUpAt(offset);
+              await changes(replica);
+              replica.forwardOffset = offset;
+            });
           }
           return replica;
         } catch (error) {
