@@ -1095,9 +1095,9 @@ describe('LoroSidebar pinned section', () => {
     });
 
     const opsHeader = container?.querySelector<HTMLElement>(
-      '[data-pin-section="ops"] .section-header'
+      '[data-pin-section="ops"] [data-sidebar-section-header]'
     );
-    const opsMenuSlot = opsHeader?.querySelector('.section-menu');
+    const opsMenuSlot = opsHeader?.querySelector('[data-sidebar-section-menu]');
     const opsMenu = opsMenuSlot?.querySelector('button[aria-label="Section actions"]');
     const opsMark = opsMenuSlot?.querySelector('[data-sidebar-group-activity]');
     expect(opsMenu).not.toBeNull();
@@ -1110,9 +1110,9 @@ describe('LoroSidebar pinned section', () => {
     expect(onTogglePinSection).toHaveBeenCalledWith('ops');
 
     const defaultHeader = container?.querySelector<HTMLElement>(
-      '[data-pin-section="default"] .section-header'
+      '[data-pin-section="default"] [data-sidebar-section-header]'
     );
-    const defaultMenuSlot = defaultHeader?.querySelector('.section-menu');
+    const defaultMenuSlot = defaultHeader?.querySelector('[data-sidebar-section-menu]');
     const defaultMark = defaultMenuSlot?.querySelector('[data-sidebar-group-activity]');
     const filterButton = defaultHeader?.querySelector('button[aria-label="Filter sidebar"]');
     expect(defaultMark).not.toBeNull();

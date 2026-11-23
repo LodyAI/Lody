@@ -1,11 +1,8 @@
-import { shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
-import { colors as linkColors } from '@lody/ui/tokens/colors.stylex';
+import { colors, colors as linkColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
 import { popup as linkPopup } from '@lody/ui/popup/popup.tokens.stylex';
-import { control } from '@lody/ui/tokens/scales.stylex';
+import { control, radius as uiRadius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { toast } from '@/lib/toast';
 import {
   AlarmClock,
@@ -1672,12 +1669,12 @@ export function useScheduledTaskSignature(
 
 const themeStyles = stylex.create({
   layout: { display: { 'default': 'none', '@container (min-width: 420px)': 'inline' }, flexShrink: 0, fontVariantNumeric: 'tabular-nums' },
-  glyph: { height: 'calc(var(--spacing) * 3)', width: 'calc(var(--spacing) * 3)', flexShrink: 0 },
+  glyph: { height: themeSpace[3], width: themeSpace[3], flexShrink: 0 },
   panel: { width: 'max-content', maxWidth: 'min(20rem,90vw)', padding: 0, boxShadow: uiShadow.popover },
   panel2: { width: 'min(22rem,90vw)', padding: 0, boxShadow: uiShadow.popover },
 });
 
 const linkStyles = stylex.create({
- trigger: { display: 'flex', height: 'calc(var(--spacing) * 6)', flexShrink: 0, userSelect: 'none', alignItems: 'center', gap: 'calc(var(--spacing) * 1)', borderRadius: 'var(--radius-md)', paddingInline: 'calc(var(--spacing) * 1)', fontWeight: 500, color: linkColors.secondaryLabel, backgroundColor: { default: 'transparent', ':hover': linkPopup.highlight } },
+ trigger: { display: 'flex', height: 'calc(var(--spacing) * 6)', flexShrink: 0, userSelect: 'none', alignItems: 'center', gap: 'calc(var(--spacing) * 1)', borderRadius: uiRadius.small, paddingInline: 'calc(var(--spacing) * 1)', fontWeight: 500, color: linkColors.secondaryLabel, backgroundColor: { default: 'transparent', ':hover': linkPopup.highlight } },
  open: { backgroundColor: linkPopup.highlight },
 });

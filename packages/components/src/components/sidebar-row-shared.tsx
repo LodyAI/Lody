@@ -1,3 +1,6 @@
+import { text } from '@lody/ui/tokens/scales.stylex';
+import { sidebarSectionHeaderMarker, sidebarSectionMenuMarker } from './sidebar-section-markers.stylex';
+import { sidebar } from './sidebar.tokens.stylex';
 import {
   useId,
   useState,
@@ -42,7 +45,6 @@ import { formatFileSize } from '@/lib/session-file-presentation';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { Tooltip } from '@lody/ui/tooltip';
 import * as stylex from '@stylexjs/stylex';
-import { text } from '@lody/ui/tokens/scales.stylex';
 import { Badge } from '@lody/ui/badge';
 import { mergeableBadgeTheme } from './sidebar-mergeable-badge.stylex';
 import { ContextMenu } from '@lody/ui/context-menu';
@@ -76,8 +78,8 @@ const rowParts = stylex.create({
   sectionMenuWide: { width: themeSpace[6] },
   sectionActivity: { display: 'inline-flex', alignItems: 'center', transitionProperty: 'opacity', transitionDuration: themeDuration[100] },
   sectionActivityHide: {
-    opacity: { default: 1, ':is(:where(.section-header):hover *)': 0, ':is(:where(.section-menu):has(:focus-visible, [data-popup-open]) *)': 0 },
-    pointerEvents: { default: 'auto', ':is(:where(.section-header):hover *)': 'none', ':is(:where(.section-menu):has(:focus-visible, [data-popup-open]) *)': 'none' },
+    opacity: { default: 1, [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 0, [stylex.when.ancestor(':has(:focus-visible, [data-popup-open])', sidebarSectionMenuMarker)]: 0 },
+    pointerEvents: { default: 'auto', [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 'none', [stylex.when.ancestor(':has(:focus-visible, [data-popup-open])', sidebarSectionMenuMarker)]: 'none' },
   },
   sectionMenuOverlay: { position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' },
 
@@ -147,15 +149,15 @@ const rowParts = stylex.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  unsentTitle: { color: 'hsl(var(--sidebar-foreground-muted) / 1)' },
+  unsentTitle: { color: sidebar.mutedText },
   groupLabelInk: {
-    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+    color: sidebar.mutedText,
   },
   compactPr: { filter: 'saturate(0.55)' },
-  prOpen: { color: 'hsl(var(--github-open) / 1)' },
-  prClosed: { color: 'hsl(var(--github-closed) / 1)' },
-  prDraft: { color: 'hsl(var(--github-draft) / 1)' },
-  prMerged: { color: 'hsl(var(--github-merged))' },
+  prOpen: { color: themeColors.githubOpen },
+  prClosed: { color: themeColors.githubClosed },
+  prDraft: { color: themeColors.githubDraft },
+  prMerged: { color: themeColors.githubMerged },
   reveal: {
     opacity: { default: null, [GROUP_HOVER]: { '@media (hover: hover)': 1 }, [GROUP_OPEN]: 1 },
     pointerEvents: {
@@ -229,7 +231,7 @@ const rowParts = stylex.create({
   menuChevron: {
     transitionProperty: 'transform, translate, scale, rotate',
     transitionDuration: themeDuration[150],
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    transitionTimingFunction: themeEasing['in-out'],
   },
   expanded: { rotate: '0deg' },
   collapsed: { rotate: '-90deg' },
@@ -259,7 +261,7 @@ const rowParts = stylex.create({
   restFade: {
     transitionProperty: 'opacity',
     transitionDuration: themeDuration[100],
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    transitionTimingFunction: themeEasing['in-out'],
   },
   groupActivity: {
     position: 'relative',
@@ -291,7 +293,7 @@ const rowParts = stylex.create({
     transitionProperty:
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
-    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    transitionTimingFunction: themeEasing['in-out'],
     boxShadow: { default: null, ':focus-visible': 'none' },
   },
   clickable: { cursor: 'pointer' },
@@ -351,7 +353,7 @@ const rowParts = stylex.create({
     display: 'inline-flex',
     flexShrink: 0,
     alignItems: 'center',
-    color: 'hsl(var(--sidebar-foreground-muted) / 0.45)',
+    color: sidebar.faintText,
   },
   /** A clipped label. */
   clipped: {
@@ -1737,7 +1739,7 @@ export function SidebarSectionHeader({
     </div>
   );
   return (
-    <div {...withClassName(stylex.props(rowParts.treeRow, rowParts.treeFocus), 'group section-header')}>
+    <div data-sidebar-section-header="" {...withClassName(stylex.props(rowParts.treeRow, rowParts.treeFocus, sidebarSectionHeaderMarker), 'group')}>
       {wrapToggle ? wrapToggle(toggle) : toggle}
       {menu || trailingActivityMark || action ? (
         <div
@@ -1745,7 +1747,7 @@ export function SidebarSectionHeader({
         >
           {overlayMenuOnHover ? (
             <span
-              {...withClassName(stylex.props(rowParts.sectionMenu, Boolean(action) && rowParts.sectionMenuWide), 'section-menu')}
+              data-sidebar-section-menu="" {...stylex.props(rowParts.sectionMenu, Boolean(action) && rowParts.sectionMenuWide, sidebarSectionMenuMarker)}
             >
               {trailingActivityMark ? (
                 <span

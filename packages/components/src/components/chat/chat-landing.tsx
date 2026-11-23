@@ -1,3 +1,6 @@
+import { text } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { SessionLimitNotice } from './session-limit-notice';
 import { buildDaemonInstallCommands } from '@/lib/daemon-installation';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
@@ -87,8 +90,6 @@ import {
   X,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { field } from '@lody/ui/field/field.tokens.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { SidebarHistoryControls } from '../sidebar-history-controls';
@@ -263,7 +264,7 @@ const landingStyles = stylex.create({
     minWidth: 0,
     width: '100%',
     alignItems: 'center',
-    gap: 'calc(var(--spacing) * 2)',
+    gap: themeSpace[2],
     textAlign: 'start',
   },
   inlineIcon: { flexShrink: 0, color: colors.tertiaryLabel },
@@ -271,22 +272,22 @@ const landingStyles = stylex.create({
     minWidth: 0,
     flex: '1 1 0%',
     overflowWrap: 'anywhere',
-    fontSize: 'var(--text-sm)',
-    lineHeight: 'var(--text-sm--line-height)',
-    color: colors.label,
+    fontSize: field.text,
+    lineHeight: text.subheadlineLeading,
+    color: field.value,
   },
   inlineChevron: {
-    width: 'calc(var(--spacing) * 4)',
-    height: 'calc(var(--spacing) * 4)',
+    width: themeSpace[4],
+    height: themeSpace[4],
     flexShrink: 0,
     color: colors.tertiaryLabel,
   },
   inlineTrigger: {
-    minHeight: 'calc(var(--spacing) * 11)',
+    minHeight: themeSpace[11],
     borderRadius: field.radiusMedium,
     backgroundColor: field.background,
-    paddingInline: 'calc(var(--spacing) * 3)',
-    paddingBlock: 'calc(var(--spacing) * 2)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
     boxShadow: field.well,
   },
   inlinePanel: {
@@ -297,27 +298,27 @@ const landingStyles = stylex.create({
   inlineSummary: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 'calc(var(--spacing) * 2)',
-    paddingBlock: 'calc(var(--spacing) * 3)',
+    gap: themeSpace[2],
+    paddingBlock: themeSpace[3],
   },
   inlineBranchRow: {
     display: 'flex',
     minWidth: 0,
     alignItems: 'flex-start',
-    gap: 'calc(var(--spacing) * 2)',
-    paddingInline: 'calc(var(--spacing) * 1)',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[1],
   },
-  inlineWorktree: { paddingTop: 'calc(var(--spacing) * 1)' },
+  inlineWorktree: { paddingTop: themeSpace[1] },
   inlineBranchBody: { minWidth: 0, flex: '1 1 0%' },
   inlineBranchTrigger: {
-    height: 'calc(var(--spacing) * 8)',
+    height: themeSpace[8],
     borderRadius: field.radiusMedium,
     backgroundColor: { default: 'transparent', ':hover': 'transparent' },
-    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingInline: themeSpace[2],
   },
   inlineBranchGlyph: {
-    width: 'calc(var(--spacing) * 4)',
-    height: 'calc(var(--spacing) * 4)',
+    width: themeSpace[4],
+    height: themeSpace[4],
     flexShrink: 0,
     color: colors.tertiaryLabel,
   },
@@ -328,42 +329,21 @@ const landingStyles = stylex.create({
     whiteSpace: 'nowrap',
   },
   inlineBranchChevron: {
-    width: 'calc(var(--spacing) * 3.5)',
-    height: 'calc(var(--spacing) * 3.5)',
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
     flexShrink: 0,
     color: colors.tertiaryLabel,
   },
   inlineComposer: { display: 'flex', minHeight: 0, flexDirection: 'column' },
   inlineNotice: {
-    paddingInline: 'calc(var(--spacing) * 4)',
-    paddingTop: 'calc(var(--spacing) * 2)',
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[2],
   },
   embeddedPinTarget: { display: 'flex', minWidth: '4.5rem', flexShrink: 1 },
   minHeightZero: { minHeight: 0 },
-  branchTrigger: { minWidth: 'calc(var(--spacing) * 0)', maxWidth: '100%' },
+  branchTrigger: { minWidth: 0, maxWidth: '100%' },
   nonShrinking: { flexShrink: 0 },
-  usageTrigger: { height: 'calc(var(--spacing) * 8)', flexShrink: 0 },
-  mobileSend: {
-    height: 'calc(var(--spacing) * 8)',
-    width: 'calc(var(--spacing) * 8)',
-    borderRadius: 'calc(infinity * 1px)',
-    boxShadow: 'var(--shadow-xs)',
-    transitionProperty: 'all',
-    transitionDuration: 'var(--default-transition-duration)',
-    transitionTimingFunction: 'var(--default-transition-timing-function)',
-    backgroundColor: {
-      default: 'hsl(var(--foreground) / 1)',
-      '@media (hover: hover)': {
-        default: null,
-        ':hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)',
-      },
-    },
-    color: {
-      default: 'hsl(var(--background) / 1)',
-      '@media (hover: hover)': { default: null, ':hover': 'hsl(var(--background) / 1)' },
-    },
-    translate: { default: null, ':active': '0 1px' },
-  },
+  usageTrigger: { height: themeSpace[8], flexShrink: 0 },
   branchSlot: { display: 'inline-flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1] },
   topSelectorRow: {
     display: 'flex',
@@ -7253,7 +7233,7 @@ function WorkspaceChatLanding({
               <Button
                 type="button"
                 icon
-                variant="ghost"
+                variant="primary"
                 size="medium"
                 shape="pill"
                 onClick={() => {
@@ -7263,14 +7243,11 @@ function WorkspaceChatLanding({
                 disabled={submitDisabled}
                 data-testid="composer-send"
                 aria-label={submitDisabled ? t('chat.submitting') : t('chat.send')}
-                /* Match the in-session mobile composer send face: solid
-                   foreground disc + ArrowUp (not the old primary-tint chip). */
-                xstyle={landingStyles.mobileSend}
               >
                 {submitting ? (
-                  <Spinner diameter="calc(var(--spacing) * 5)" />
+                  <Spinner size="small" />
                 ) : (
-                  <ArrowUp {...stylex.props(landingStyles.glyph20)} />
+                  <ArrowUp {...stylex.props(landingStyles.glyph16)} />
                 )}
               </Button>
             }

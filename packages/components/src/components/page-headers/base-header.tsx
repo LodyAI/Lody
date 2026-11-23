@@ -161,5 +161,5 @@ export function BaseHeader({
 }
 
 const themeStyles = stylex.create({
-  layout: { marginLeft: 'calc(var(--spacing) * 2)', flexShrink: 0 },
+  layout: { marginLeft: themeSpace[2], flexShrink: 0 },
 });

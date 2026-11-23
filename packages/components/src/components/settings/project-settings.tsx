@@ -1,9 +1,8 @@
-import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { control, corner, duration, ease, radius, radius as sharedRadius, space, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { control, corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import type { TFunction } from 'i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
@@ -2474,7 +2473,7 @@ const win = stylex.create({
     flexShrink: 0,
     width: '6px',
     height: '6px',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: colors.tertiaryLabel,
   },
   statusDotOnline: { backgroundColor: colors.success },

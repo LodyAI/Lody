@@ -1,4 +1,5 @@
-import { control } from '@lody/ui/tokens/scales.stylex';
+import { control, radius as sharedRadius } from '@lody/ui/tokens/scales.stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { ReadOnlyHtmlPreview } from './read-only-html-preview';
 import { PagedFileViewer } from './paged-file-viewer';
 import * as stylex from '@stylexjs/stylex';
@@ -108,7 +109,6 @@ import {
 } from '@/hooks/use-code-collab-save-text';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
-import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { useCodeCollabLsp, type CodeCollabLspState } from '@/hooks/use-code-collab-lsp';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import {
@@ -341,7 +341,7 @@ const styles = stylex.create({
   },
   statusItem: { display: 'flex', minWidth: 0, flexShrink: 0, alignItems: 'center', gap: '4px' },
   statusSeparator: { marginInlineEnd: '2px', color: 'hsl(var(--muted-foreground) / 0.55)' },
-  statusDot: { width: '6px', height: '6px', flexShrink: 0, borderRadius: '9999px' },
+  statusDot: { width: '6px', height: '6px', flexShrink: 0, borderRadius: sharedRadius.full },
   statusPositiveDot: { backgroundColor: '#10b981' },
   statusMutedDot: { backgroundColor: 'hsl(var(--muted-foreground) / 0.5)' },
   statusWarningDot: { backgroundColor: '#f59e0b' },

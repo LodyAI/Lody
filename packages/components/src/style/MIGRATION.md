@@ -17,6 +17,25 @@ standard surfaces follow UI family roles; preserving a legacy alpha or border is
 not a design-system compliance rule. Keep its contract checks separate from
 Before/After pixel equivalence.
 
+## Token authoring after migration
+
+Follow the official [StyleX composition principles](https://stylexjs.com/docs/learn/thinking-in-stylex/)
+and [variable imports](https://stylexjs.com/docs/learn/theming/using-variables/).
+Atomic CSS is compiler output; a component still owns named, local styles for its parts and states.
+Do not introduce a global utility-object layer between the component and `stylex.create`.
+
+Use the primitive's variant and size before overriding its material. Product controls read their
+family tokens; app layout reads the existing layout scale. Import the owning `.stylex` module
+rather than repeating a CSS variable, spacing formula, palette value or shadow. A matching default
+value is not enough: the token must name the same role and preserve the required override scope.
+Keep fixed geometry, zero/reset values, media contrast and QR quiet zones explicit when they are
+not interface-theme roles. In particular, inherited aliases do not re-evaluate a descendant's raw
+CSS-variable override; retain the scoped owner described below when that contract is required.
+
+Themeable values use `defineVars` and `createTheme`; shared compile-time constants use
+`defineConsts`. Compose typed caller styles last in the owner's `stylex.props` call. For new
+ancestor/sibling interactions, use `defineMarker` and `stylex.when.*` rather than class-name strings.
+
 ## Ownership and composition
 
 | Concern                 | Owner                                             | Migration rule                                                                         |

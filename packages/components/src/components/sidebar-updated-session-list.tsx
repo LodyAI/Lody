@@ -2370,26 +2370,26 @@ function DraggablePinnedRowSlot({ id, drag, gutter, children }: PinnedRowSlotPro
 }
 
 const themeStyles = stylex.create({
-  row: { display: 'inline-flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1.5)' },
+  row: { display: 'inline-flex', alignItems: 'center', gap: themeSpace[1.5] },
   hint: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontWeight: 400, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
-  row2: { display: 'flex', minHeight: 'calc(var(--spacing) * 10)', alignItems: 'center', justifyContent: 'center', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: 'calc(var(--spacing) * 3)', paddingBlock: 'calc(var(--spacing) * 2)', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  glyph: { height: 'calc(var(--spacing) * 3)', width: 'calc(var(--spacing) * 3)', flexShrink: 0 },
-  glyph2: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)' },
+  row2: { display: 'flex', minHeight: themeSpace[10], alignItems: 'center', justifyContent: 'center', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: themeSpace[3], paddingBlock: themeSpace[2], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  glyph: { height: themeSpace[3], width: themeSpace[3], flexShrink: 0 },
+  glyph2: { height: themeSpace[3.5], width: themeSpace[3.5] },
   glyph3: { minWidth: '180px' },
   glyph4: { minWidth: '200px' },
-  row3: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 'calc(var(--spacing) * 4)' },
+  row3: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: themeSpace[4] },
   hint2: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
 });
 
 const bucketStyles = stylex.create({
- sectionGap: { paddingBottom: 'calc(var(--spacing) * 4)' },
-  group: { display: 'flex', flexDirection: 'column', gap: 'calc(var(--spacing) * 0.5)' },
-  folded: { marginBottom: { default: 'calc(var(--spacing) * 1)', ':last-child': 0 } },
+ sectionGap: { paddingBottom: themeSpace[4] },
+  group: { display: 'flex', flexDirection: 'column', gap: themeSpace[0.5] },
+  folded: { marginBottom: { default: themeSpace[1], ':last-child': 0 } },
   positioned: { position: 'relative' },
   slot: { display: 'flex', minWidth: 0, flexDirection: 'column', gap: '1px' },
   gutter: { position: 'relative', paddingBottom: '1px', marginBottom: '-1px' },
 });
 
 const previewStyles = stylex.create({
-  row: { display: 'inline-flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1)', borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: 'calc(var(--spacing) * 1.5)', paddingBlock: 'calc(var(--spacing) * 0.5)', fontSize: uiText.captionSize, lineHeight: 1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
+  row: { display: 'inline-flex', alignItems: 'center', gap: themeSpace[1], borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: themeSpace[1.5], paddingBlock: themeSpace[0.5], fontSize: uiText.captionSize, lineHeight: 1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
 });

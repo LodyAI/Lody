@@ -1,5 +1,7 @@
+import { corner as uiCorner, duration as uiMotion, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
-import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { sidebarSectionHeaderMarker } from './sidebar-section-markers.stylex';
+import { themeSpace as appSpace } from '../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
 import {
   Fragment,
@@ -409,7 +411,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
         from: { left: lifted.left, top: lifted.top, width: lifted.width, height: lifted.height },
         ghost: activeGhost,
         fromBackground: liftedBackground(),
-        fromShadow: PINNED_ROW_LIFT_SHADOW,
+        fromShadow: uiShadow.popover,
       };
       if (target.sectionId === FOCUS_SECTION_DND_KEY) {
         beginPinnedDropSettle(settle);
@@ -584,10 +586,10 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                             )}
                             // The row grid: px-2 padding + the 14px leading
                             // slot + gap-2 puts this line on the title edge.
-                            {...stylex.props(themeStyles.row)}
+                            {...stylex.props(sectionStyles.hiddenRowsHint)}
                           >
-                            <span {...stylex.props(themeStyles.glyph)} aria-hidden="true" />
-                            <span {...stylex.props(themeStyles.layout)}>
+                            <span {...stylex.props(sectionStyles.leadingSpacer)} aria-hidden="true" />
+                            <span {...stylex.props(sectionStyles.truncatedLabel)}>
                               {t('sidebar.pinSections.hiddenByScope', '{{count}} sessions hidden', {
                                 count: hiddenCount,
                               })}
@@ -668,7 +670,6 @@ function usePendingUntil<T>(
   }, [pending]);
   return [pending, setPending];
 }
-const PINNED_ROW_LIFT_SHADOW = '0 6px 16px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.12)';
 
 /** Sections meet sections; rows aim by pointer position (`pinnedPointerTargetAt`). */
 const pinnedCollisionDetection: CollisionDetection = (args) =>
@@ -728,8 +729,8 @@ function PinnedRowGhost({ source }: { source: HTMLElement | null }) {
     <div
       ref={bodyRef}
       data-pin-drag-overlay=""
-      {...stylex.props(themeStyles.panel)}
-      style={{ boxShadow: PINNED_ROW_LIFT_SHADOW, cursor: 'grabbing' }}
+      {...stylex.props(sectionStyles.dragSurface)}
+      style={{ boxShadow: uiShadow.popover, cursor: 'grabbing' }}
     />
   );
 }
@@ -872,12 +873,12 @@ function PinSectionHeaderMenu({
         <Menu.Trigger
           render={
             <Button type="button" variant="ghost" size="mini" icon aria-label={label}>
-              <MoreHorizontal {...stylex.props(themeStyles.glyph2)} strokeWidth={1.5} />
+              <MoreHorizontal {...stylex.props(sectionStyles.menuGlyph)} strokeWidth={1.5} />
             </Button>
           }
         />
       </span>
-      <Menu.Content align="end" xstyle={themeStyles.glyph3}>
+      <Menu.Content align="end" xstyle={sectionStyles.sectionMenu}>
         {onNewChat ? (
           <>
             <Menu.Item icon={SquarePen} onClick={onNewChat}>
@@ -913,7 +914,7 @@ function PinSectionHeaderMenu({
               <Menu.SubmenuTrigger icon={Eye}>
                 {t('sidebar.pinSections.visibleSections', 'Visible Sections')}
               </Menu.SubmenuTrigger>
-              <Menu.Content xstyle={themeStyles.glyph4}>
+              <Menu.Content xstyle={sectionStyles.visibilityMenu}>
                 {entries.map((entry) => (
                   <Menu.CheckboxItem
                     key={entry.key}
@@ -988,15 +989,15 @@ function PinSectionNameDialog({
         if (!open && !saving) onClose();
       }}
     >
-      <Dialog.Content xstyle={themeStyles.glyph5}>
-        <Dialog.Header xstyle={themeStyles.copy}>
+      <Dialog.Content xstyle={sectionStyles.nameDialog}>
+        <Dialog.Header xstyle={sectionStyles.nameDialogHeader}>
           <Dialog.Title>
             {target?.kind === 'rename'
               ? t('sidebar.pinSections.renameTitle', 'Rename Section')
               : t('sidebar.pinSections.createTitle', 'New Section')}
           </Dialog.Title>
         </Dialog.Header>
-        <div {...stylex.props(themeStyles.layout2)}>
+        <div {...stylex.props(sectionStyles.nameDialogBody)}>
           <Input
             autoFocus
             value={draft}
@@ -1013,7 +1014,7 @@ function PinSectionNameDialog({
             }}
           />
         </div>
-        <Dialog.Footer xstyle={themeStyles.panel2}>
+        <Dialog.Footer xstyle={sectionStyles.nameDialogFooter}>
           <Button variant="secondary" size="small" onClick={onClose} disabled={saving}>
             {t('common.cancel', 'Cancel')}
           </Button>
@@ -1026,28 +1027,28 @@ function PinSectionNameDialog({
   );
 }
 
-const themeStyles = stylex.create({
-  row: { display: 'flex', cursor: 'default', userSelect: 'none', alignItems: 'center', gap: 'calc(var(--spacing) * 2)', paddingInline: 'calc(var(--spacing) * 2)', paddingBottom: 'calc(var(--spacing) * 0.5)', paddingTop: 'calc(var(--spacing) * 1)', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  glyph: { width: 'calc(var(--spacing) * 3.5)', flexShrink: 0 },
-  layout: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  panel: { overflow: 'hidden', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground },
-  glyph2: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)' },
-  glyph3: { minWidth: '160px' },
-  glyph4: { minWidth: '200px' },
-  glyph5: { maxWidth: '24rem', gap: 0, overflow: 'hidden', padding: { 'default': 0, '@media (min-width: 640px)': 0 } },
-  copy: { paddingInline: { 'default': 'calc(var(--spacing) * 4)', '@media (min-width: 640px)': 'calc(var(--spacing) * 5)' }, paddingBlock: 'calc(var(--spacing) * 4)', paddingRight: { 'default': 'calc(var(--spacing) * 12)', '@media (min-width: 640px)': 'calc(var(--spacing) * 12)' }, textAlign: 'start' },
-  copy2: { fontSize: uiText.bodySize, lineHeight: uiText.bodyLeading },
-  layout2: { paddingInline: { 'default': 'calc(var(--spacing) * 4)', '@media (min-width: 640px)': 'calc(var(--spacing) * 5)' }, paddingBlock: 'calc(var(--spacing) * 4)' },
-  panel2: { backgroundColor: uiColors.secondaryBackground, paddingInline: { 'default': 'calc(var(--spacing) * 4)', '@media (min-width: 640px)': 'calc(var(--spacing) * 5)' }, paddingBlock: 'calc(var(--spacing) * 3)' },
+const sectionStyles = stylex.create({
+  hiddenRowsHint: { display: 'flex', cursor: 'default', userSelect: 'none', alignItems: 'center', gap: appSpace[2], paddingInline: appSpace[2], paddingBottom: appSpace[0.5], paddingTop: appSpace[1], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  leadingSpacer: { width: appSpace[3.5], flexShrink: 0 },
+  truncatedLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  dragSurface: { overflow: 'hidden', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground },
+  menuGlyph: { height: appSpace[3.5], width: appSpace[3.5] },
+  sectionMenu: { minWidth: '160px' },
+  visibilityMenu: { minWidth: '200px' },
+  nameDialog: { maxWidth: '24rem', gap: 0, overflow: 'hidden', padding: { 'default': 0, '@media (min-width: 640px)': 0 } },
+  nameDialogHeader: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4], paddingRight: { 'default': appSpace[12], '@media (min-width: 640px)': appSpace[12] }, textAlign: 'start' },
+  nameDialogTitle: { fontSize: uiText.bodySize, lineHeight: uiText.bodyLeading },
+  nameDialogBody: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4] },
+  nameDialogFooter: { backgroundColor: uiColors.secondaryBackground, paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[3] },
 });
 
 const pinStyles = stylex.create({
   menuHost: { display: 'inline-flex' },
   menuReveal: {
-    opacity: { default: 0, ':is(:where(.section-header):hover *)': 1, ':has(:focus-visible, [data-popup-open])': 1 },
-    pointerEvents: { default: 'none', ':is(:where(.section-header):hover *)': 'auto', ':has(:focus-visible, [data-popup-open])': 'auto' },
-    transitionProperty: 'opacity', transitionDuration: '100ms',
+    opacity: { default: 0, [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 1, ':has(:focus-visible, [data-popup-open])': 1 },
+    pointerEvents: { default: 'none', [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 'auto', ':has(:focus-visible, [data-popup-open])': 'auto' },
+    transitionProperty: 'opacity', transitionDuration: uiMotion.fast,
   },
-  foldedGap: { paddingBottom: 'calc(var(--spacing) * 1)' },
-  sectionGap: { paddingBottom: 'calc(var(--spacing) * 4)' },
+  foldedGap: { paddingBottom: appSpace[1] },
+  sectionGap: { paddingBottom: appSpace[4] },
 });

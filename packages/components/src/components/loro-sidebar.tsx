@@ -1,3 +1,6 @@
+import { duration as uiMotion, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { avatar as avatarTokens } from '@lody/ui/avatar/avatar.tokens.stylex';
 import { clsx } from 'clsx';
 import { EncryptedWorkspaceMark } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
@@ -45,8 +48,6 @@ import {
   themeEasing,
   themeShadow,
 } from '../style/theme-scale.stylex';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { SidebarBindingPill } from '@/components/sidebar-shortcut-pill';
 import { sidebarShortcutOverlayActiveAtom } from '@/atoms/sidebar-shortcuts';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -95,7 +96,6 @@ import {
 } from './sidebar-pinned-sections';
 import { SidebarFilterPopover, type SidebarFilterLabels } from './sidebar-filter-popover';
 import { WorkspaceAvatar } from './workspace-avatar';
-import { avatar as avatarTokens } from '@lody/ui/avatar/avatar.tokens.stylex';
 import { AuthRecoveryEntrySlot } from './auth-recovery-entry';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -2419,12 +2419,12 @@ LoroSidebar.displayName = 'LoroSidebar';
 const themeStyles = stylex.create({
   row: { display: 'inline-flex' },
   glyph: { maxWidth: '280px' },
-  row2: { display: 'flex', minWidth: 0, alignItems: 'center', gap: 'calc(var(--spacing) * 1.5)' },
+  row2: { display: 'flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1.5] },
   layout: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  glyph2: { height: 'calc(var(--spacing) * 4)', width: 'calc(var(--spacing) * 4)' },
+  glyph2: { height: themeSpace[4], width: themeSpace[4] },
 });
 
 const shortcutStyles = stylex.create({
- slot: { display: 'flex', marginLeft: 'auto', flexShrink: 0, alignItems: 'center', paddingLeft: 'calc(var(--spacing) * 2)', opacity: { default: 0, ':is(:where(.group):hover *)': 1, ':is(:where(.group):focus-visible *)': 1 }, transitionProperty: { default: 'opacity', '@media (prefers-reduced-motion: reduce)': 'none' }, transitionDuration: '150ms' },
+ slot: { display: 'flex', marginLeft: 'auto', flexShrink: 0, alignItems: 'center', paddingLeft: themeSpace[2], opacity: { default: 0, ':is(:where(.group):hover *)': 1, ':is(:where(.group):focus-visible *)': 1 }, transitionProperty: { default: 'opacity', '@media (prefers-reduced-motion: reduce)': 'none' }, transitionDuration: uiMotion.fast },
  held: { opacity: 1 },
 });

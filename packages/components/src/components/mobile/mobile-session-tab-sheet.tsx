@@ -1,3 +1,4 @@
+import { radius as sharedRadius } from '@lody/ui/tokens/scales.stylex';
 import { useState, type ReactNode } from 'react';
 import {
   ArchiveRestore,
@@ -273,7 +274,7 @@ const styles = stylex.create({
   unreadDot: {
     width: themeSpace[2],
     height: themeSpace[2],
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: themeColors.primary,
   },
   /** The hand that says a conversation needs permission. */
@@ -321,7 +322,7 @@ const styles = stylex.create({
     right: 'calc(var(--spacing) * -0.5)',
     width: themeSpace[2],
     height: themeSpace[2],
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: themeColors.primary,
     boxShadow: '0 0 0 2px hsl(var(--background))',
   },
@@ -335,14 +336,14 @@ const styles = stylex.create({
     height: themeSpace[3],
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: themeColors.background,
   },
   /** The breathing dot itself. */
   triggerPulse: {
     width: themeSpace[2],
     height: themeSpace[2],
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
   },
 });
 

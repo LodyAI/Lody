@@ -1,3 +1,5 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
+import { themeSpace as appSpace } from '../style/theme-scale.stylex';
 import { type ReactNode, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -5,7 +7,6 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Kbd } from '@lody/ui/kbd';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { control } from '@lody/ui/tokens/scales.stylex';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import { CuidaSidebarExpandOutline } from './icons/cuida-sidebar-expand-outline';
 import { sidebarSurface } from './sidebar-surface';
@@ -187,12 +188,12 @@ export function SidebarHistoryControls({
 }
 
 const themeStyles = stylex.create({
-  row: { display: 'flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1.5)' },
-  glyph: { height: 'calc(var(--spacing) * 4)', width: 'calc(var(--spacing) * 4)' },
+  row: { display: 'flex', alignItems: 'center', gap: appSpace[1.5] },
+  glyph: { height: appSpace[4], width: appSpace[4] },
 });
 
 const navStyles = stylex.create({
   button: { outline: 'none' },
   disabled: { pointerEvents: 'none', cursor: 'default', opacity: control.disabledOpacity },
-  row: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: 'calc(var(--spacing) * 0.5)' },
+  row: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: appSpace[0.5] },
 });

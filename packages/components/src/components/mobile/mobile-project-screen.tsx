@@ -1,6 +1,6 @@
-import * as stylex from '@stylexjs/stylex';
+import { radius as sharedRadius, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { text as textScale } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -133,7 +133,7 @@ const styles = stylex.create({
     width: themeSpace[2],
     height: themeSpace[2],
     flexShrink: 0,
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: themeColors.primary,
   },
 
@@ -487,7 +487,7 @@ const styles = stylex.create({
     right: themeSpace[1],
     width: themeSpace[1.5],
     height: themeSpace[1.5],
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: themeColors.primary,
   },
 

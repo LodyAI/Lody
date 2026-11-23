@@ -1,3 +1,4 @@
+import { control, radius as sharedRadius } from '@lody/ui/tokens/scales.stylex';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -22,7 +23,6 @@ import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-vi
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { sheetSurface } from './sheet-surface';
-import { control } from '@lody/ui/tokens/scales.stylex';
 import type { UnifiedProjectSelection } from '@/components/chat/unified-project-selector';
 import { filterMobileProjectOptions } from './mobile-new-chat-project-options';
 
@@ -519,7 +519,7 @@ const styles = stylex.create({
     width: '32px',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: {
       default: `color-mix(in oklab,${themeColors.muted} 60%,transparent)`,
       '@media (hover:hover)': { ':hover': themeColors.muted },

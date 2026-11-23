@@ -127,7 +127,8 @@ vi.mock('@/hooks/useStableSession', () => ({
 vi.mock('@/hooks/useOrganization', () => ({
   useOrganization: () => ({
     createOrganization: (name: string, slug: string) => fixture.createOrganization(name, slug),
-    deleteOrganization: async (id: string) => {
+    deleteOrganization: async (id: string, options?: { isEncrypted?: boolean }) => {
+      if (!options?.isEncrypted) throw new Error('encrypted workspace requires encrypted deletion');
       if (!fixture.serverWorkspaces.delete(id)) throw new Error('no such workspace');
     },
     organizations: fixture.organizations,

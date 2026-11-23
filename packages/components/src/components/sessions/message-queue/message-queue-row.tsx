@@ -1,4 +1,4 @@
-import { control } from '@lody/ui/tokens/scales.stylex';
+import { control, radius as sharedRadius, text as type } from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { clsx } from 'clsx';
 import {
@@ -28,7 +28,6 @@ import { normalizeSessionInputBlocks } from '@lody/shared';
 import { Menu } from '@lody/ui/menu';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Tooltip } from '@lody/ui/tooltip';
-import { text as type } from '@lody/ui/tokens/scales.stylex';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { QueuedImagePreview, type QueuedImageBlock } from './queued-image-preview';
 import { QUEUE_LINE, queuePreviewStyle, queueSurface } from './surface';
@@ -255,7 +254,7 @@ export const queueRowStyles = stylex.create({
     width: '22px',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: '5px',
+    borderRadius: sharedRadius.mini,
     // Same as the drag handle above: the old Tailwind `focus-visible:ring-*`
     // erased the base layer's inset focus ring, so the button showed NO focus
     // indicator. Keep it that way.

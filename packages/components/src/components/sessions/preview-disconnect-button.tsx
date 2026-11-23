@@ -1,3 +1,4 @@
+import { themeSpace as appSpace } from '../../style/theme-scale.stylex';
 import { ChevronDown, OctagonX, Power } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
@@ -205,6 +206,6 @@ export function PreviewDisconnectButton({
 }
 
 const themeStyles = stylex.create({
-  panel: { width: 'calc(var(--spacing) * 5)', flexShrink: 0, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, paddingInline: 0 },
+  panel: { width: appSpace[5], flexShrink: 0, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, paddingInline: 0 },
   panel2: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
 });

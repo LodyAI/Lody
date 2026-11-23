@@ -1,10 +1,10 @@
 import { popup } from '@lody/ui/popup/popup.tokens.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { duration, ease, space, text } from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Pin } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Checkbox } from '@lody/ui/checkbox';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { composerSurface } from '@/components/shared/composer-surface';
 import { useWorkspaceCatalog } from '@/hooks/use-workspace-catalog';
 
@@ -30,7 +30,8 @@ const styles = stylex.create({
     userSelect: 'none',
     cursor: 'pointer',
     transitionProperty: 'color, background-color',
-    transitionDuration: '150ms',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
   name: {
     minWidth: 0,

@@ -1,3 +1,4 @@
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
@@ -78,7 +79,6 @@ import {
 } from '@/components/sidebar-machine-card';
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
-import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeSpace,
@@ -4850,5 +4850,5 @@ export function LoroAppSidebar({
 }
 
 const themeStyles = stylex.create({
-  glyph: { marginBottom: 'calc(var(--spacing) * 2)', width: '100%', justifyContent: 'flex-start' },
+  glyph: { marginBottom: themeSpace[2], width: '100%', justifyContent: 'flex-start' },
 });

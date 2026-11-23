@@ -1,15 +1,6 @@
-import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import {
-  control,
-  corner,
-  duration,
-  ease,
-  focus,
-  radius,
-  space,
-  text,
-} from '@lody/ui/tokens/scales.stylex';
+import { control, corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { settingsMaterial as material } from './material.stylex';
 import { settingsType as type } from './type.stylex';
 
@@ -517,7 +508,7 @@ export const settingsCatalog = stylex.create({
     cornerShape: corner.shape,
     backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 5%)`,
     color: colors.secondaryLabel,
-    fontSize: '14px',
+    fontSize: text.bodySize,
     lineHeight: 1,
   },
   body: { display: 'flex', flexDirection: 'column', flexGrow: 1, gap: '2px', minWidth: 0 },
@@ -605,7 +596,7 @@ export const settingsCatalog = stylex.create({
     gap: space[4],
   },
   blockText: { minWidth: 0 },
-  blockTitle: { margin: 0, fontSize: '14px', lineHeight: 1.375, color: colors.label },
+  blockTitle: { margin: 0, fontSize: text.bodySize, lineHeight: 1.375, color: colors.label },
   blockHint: {
     margin: 0,
     marginTop: '2px',

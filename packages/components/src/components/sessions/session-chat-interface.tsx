@@ -1,5 +1,8 @@
-import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
-import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { radius as sharedRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { colors, colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
+import { tooltip, tooltip as searchTooltipTokens } from '@lody/ui/tooltip/tooltip.tokens.stylex';
+import { field as searchFieldTokens } from '@lody/ui/field/field.tokens.stylex';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
@@ -268,8 +271,6 @@ import {
   type PathLauncherOption,
 } from '@/lib/session-path-launchers';
 import { withClassName } from '@/lib/stylex';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import {
   messageActionButtonTheme,
   messageActionInkTheme,
@@ -279,7 +280,6 @@ import {
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import {
   SessionAccessControl,
@@ -293,8 +293,6 @@ import {
 import { Drawer } from '@lody/ui/drawer';
 import { Badge } from '@lody/ui/badge';
 import { Input } from '@lody/ui/input';
-import { field as searchFieldTokens } from '@lody/ui/field/field.tokens.stylex';
-import { tooltip as searchTooltipTokens } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { Separator } from '@lody/ui/separator';
 import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
@@ -576,7 +574,7 @@ const styles = stylex.create({
     width: 'calc(var(--spacing) * 2.5)',
     height: 'calc(var(--spacing) * 2.5)',
     marginTop: 'calc(var(--spacing) * 1)',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
   },
   statusDotInfo: { backgroundColor: colors.accent },
   statusDotWarning: { backgroundColor: colors.warning },
@@ -606,7 +604,7 @@ const styles = stylex.create({
   historySeparator: {
     width: 'var(--spacing)',
     height: 'var(--spacing)',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: colors.separator,
   },
   projectRoot: { minWidth: 0 },
@@ -8314,8 +8312,8 @@ export const SessionChatInterface = memo(
 SessionChatInterface.displayName = 'SessionChatInterface';
 
 const themeStyles = stylex.create({
-  glyph: { width: '290px', padding: 'calc(var(--spacing) * 3)' },
+  glyph: { width: '290px', padding: themeSpace[3] },
   glyph2: { minWidth: '200px' },
-  row: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 'calc(var(--spacing) * 4)' },
+  row: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: themeSpace[4] },
   hint: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
 });

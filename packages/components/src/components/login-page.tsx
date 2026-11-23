@@ -1,3 +1,6 @@
+import { control, corner, duration as sharedMotion, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import { clsx } from 'clsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
@@ -7,8 +10,6 @@ import { MajesticonsExternalLinkLine } from '@lody/ui';
 import * as stylex from '@stylexjs/stylex';
 import { Badge } from '@lody/ui/badge';
 import { Spinner } from '@lody/ui/spinner';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { control, corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeFontSize,
@@ -29,7 +30,6 @@ import {
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import { field } from '@lody/ui/field/field.tokens.stylex';
 import { PasswordInput } from '@lody/ui/password-input';
 import { isDevEmailPasswordLoginEnabled } from '@lody/shared/electron-ipc';
 import { setLoginHintCookie } from '@/lib/login-hint-cookie';
@@ -2119,7 +2119,7 @@ const styles = stylex.create({
       [NARROW]: 'height, opacity',
       [REDUCED_MOTION]: 'none',
     },
-    transitionDuration: '320ms',
+    transitionDuration: sharedMotion.slow,
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
   // Only a stacked layout folds; side by side there is room for both.
